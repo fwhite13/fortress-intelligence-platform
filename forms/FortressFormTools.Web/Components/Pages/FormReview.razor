@@ -1,0 +1,400 @@
+@page "/forms/{Id:int}/review"
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Review Form — FORMS</PageTitle>
+
+@if (_loading)
+{
+    <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="60px" Class="mb-4" />
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="800px" />
+    </MudContainer>
+}
+else if (_form == null)
+{
+    <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+        <MudAlert Severity="Severity.Error">Form not found.</MudAlert>
+    </MudContainer>
+}
+else
+{
+    <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+
+        @* ── Header ── *@
+        <MudPaper Elevation="1" Class="pa-3 mb-4">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+                <MudIconButton Icon="@Icons.Material.Filled.ArrowBack"
+                               Href="@(ProjectId.HasValue ? $"/projects/{ProjectId}" : "/forms")"
+                               Title="@(ProjectId.HasValue ? "Back to Project" : "Back to Form Library")" />
+                <MudText Typo="Typo.h5" Class="flex-grow-1">
+                    @_form.FormName
+                    <MudText Typo="Typo.body2" Inline="true" Class="ml-2" Style="opacity:0.7">
+                        — @_form.CarrierName
+                    </MudText>
+                </MudText>
+                <MudChip T="string" Color="@GetStatusColor(_form.Status)" Size="Size.Medium">
+                    @_form.Status
+                </MudChip>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.CheckCircle"
+                           OnClick="ApproveForm"
+                           Disabled="_approving">
+                    @(_approving ? "Approving…" : "Approve Form")
+                </MudButton>
+            </MudStack>
+        </MudPaper>
+
+        @* ── Body ── *@
+        <MudGrid Spacing="3">
+
+            @* Left: PDF Viewer *@
+            <MudItem xs="12" md="7">
+                <MudPaper Elevation="1" Class="pa-0" Style="overflow:hidden;">
+                    <object data="@($"/api/forms/{Id}/pdf")"
+                            type="application/pdf"
+                            width="100%"
+                            style="height:800px; display:block;">
+                        <MudAlert Severity="Severity.Warning" Class="ma-4">
+                            PDF preview is not available in your browser.
+                            <MudLink Href="@($"/api/forms/{Id}/pdf")" Target="_blank">Download PDF</MudLink>
+                        </MudAlert>
+                    </object>
+                </MudPaper>
+            </MudItem>
+
+            @* Right: Field Review Panel *@
+            <MudItem xs="12" md="5">
+                <MudPaper Elevation="1" Class="pa-4">
+
+                    @* Search + Section filter *@
+                    <MudStack Spacing="2" Class="mb-3">
+                        <MudTextField @bind-Value="_search"
+                                      Label="Search fields"
+                                      Adornment="Adornment.Start"
+                                      AdornmentIcon="@Icons.Material.Filled.Search"
+                                      Variant="Variant.Outlined"
+                                      Margin="Margin.Dense"
+                                      DebounceInterval="300"
+                                      OnDebounceIntervalElapsed="StateHasChanged" />
+                        <MudSelect T="string?" @bind-Value="_sectionFilter"
+                                   Label="Section"
+                                   Variant="Variant.Outlined"
+                                   Margin="Margin.Dense"
+                                   Clearable="true">
+                            <MudSelectItem T="string?" Value="@((string?)null)">All Sections</MudSelectItem>
+                            @foreach (var sectionName in _sections)
+                            {
+                                <MudSelectItem T="string?" Value="@sectionName">@sectionName</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudStack>
+
+                    @* Field expansion panels *@
+                    <MudExpansionPanels MultiExpansion="true" Elevation="0">
+                        @foreach (var field in FilteredFields)
+                        {
+                            <MudExpansionPanel>
+                                <TitleContent>
+                                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Style="flex-wrap:wrap; gap:4px;">
+                                        <MudText Style="font-weight:500; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px;"
+                                                 Title="@field.FieldLabel">
+                                            @field.FieldLabel
+                                        </MudText>
+                                        <MudSpacer />
+                                        @if (field.AiConfidence.HasValue)
+                                        {
+                                            <MudChip T="string"
+                                                     Size="Size.Small"
+                                                     Color="@GetConfidenceColor(field.AiConfidence.Value)">
+                                                @((field.AiConfidence.Value * 100).ToString("0"))%
+                                            </MudChip>
+                                        }
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                            @field.FieldType
+                                        </MudChip>
+                                        @if (field.IsRequired)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Secondary">Required</MudChip>
+                                        }
+                                    </MudStack>
+                                </TitleContent>
+                                <ChildContent>
+                                    <MudStack Spacing="2" Class="pt-2">
+                                        <MudTextField @bind-Value="field.FieldLabel"
+                                                      Label="Label"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense" />
+                                        <MudSelect @bind-Value="field.FieldType"
+                                                   Label="Field Type"
+                                                   Variant="Variant.Outlined"
+                                                   Margin="Margin.Dense">
+                                            <MudSelectItem Value="@("text")">Text</MudSelectItem>
+                                            <MudSelectItem Value="@("textarea")">Textarea</MudSelectItem>
+                                            <MudSelectItem Value="@("number")">Number</MudSelectItem>
+                                            <MudSelectItem Value="@("date")">Date</MudSelectItem>
+                                            <MudSelectItem Value="@("checkbox")">Checkbox</MudSelectItem>
+                                            <MudSelectItem Value="@("dropdown")">Dropdown</MudSelectItem>
+                                            <MudSelectItem Value="@("radio")">Radio</MudSelectItem>
+                                        </MudSelect>
+                                        <MudTextField @bind-Value="field.SectionName"
+                                                      Label="Section"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense" />
+                                        <MudAutocomplete T="DictionaryItem?"
+                                                         Label="Dictionary Field"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         Value="@GetDictionaryItem(field)"
+                                                         ValueChanged="@(item => OnDictionarySelected(field, item))"
+                                                         SearchFunc="SearchDictionary"
+                                                         ToStringFunc="@(item => item?.DisplayName ?? string.Empty)"
+                                                         ResetValueOnEmptyText="true"
+                                                         CoerceText="false"
+                                                         Clearable="true" />
+                                        <MudCheckBox @bind-Value="field.IsRequired"
+                                                     Label="Required"
+                                                     Color="Color.Primary" />
+                                    </MudStack>
+                                </ChildContent>
+                            </MudExpansionPanel>
+                        }
+                    </MudExpansionPanels>
+
+                    @if (!FilteredFields.Any())
+                    {
+                        <MudText Align="Align.Center" Class="pa-4" Style="opacity:0.6;">
+                            No fields match your filter.
+                        </MudText>
+                    }
+
+                    @* Save button *@
+                    <MudStack Row="true" JustifyContent="JustifyContent.FlexEnd" Class="mt-4">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   OnClick="SaveChanges"
+                                   Disabled="_saving">
+                            @(_saving ? "Saving…" : "Save Changes")
+                        </MudButton>
+                    </MudStack>
+                </MudPaper>
+            </MudItem>
+        </MudGrid>
+    </MudContainer>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    [SupplyParameterFromQuery]
+    public int? ProjectId { get; set; }
+
+    private FormDetailDto? _form;
+    private List<FieldEditModel> _fields = new();
+    private string _search = string.Empty;
+    private string? _sectionFilter;
+    private bool _saving;
+    private bool _loading = true;
+    private bool _approving;
+
+    private List<string> _sections = new();
+    private Dictionary<int, DictionaryItem> _dictionaryCache = new();
+
+    private IEnumerable<FieldEditModel> FilteredFields
+    {
+        get
+        {
+            var result = _fields.AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(_search))
+                result = result.Where(f => f.FieldLabel.Contains(_search, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(_sectionFilter))
+                result = result.Where(f => f.SectionName == _sectionFilter);
+            return result;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        try
+        {
+            _form = await Http.GetFromJsonAsync<FormDetailDto>($"api/forms/{Id}");
+            if (_form != null)
+            {
+                _fields = _form.Fields.Select(f => new FieldEditModel
+                {
+                    Id = f.Id,
+                    FieldLabel = f.FieldLabel,
+                    FieldType = f.FieldType,
+                    SectionName = f.SectionName,
+                    DictionaryFieldId = f.DictionaryFieldId,
+                    IsRequired = f.IsRequired,
+                    AiConfidence = f.AiConfidence,
+                    SortOrder = f.SortOrder
+                }).ToList();
+
+                _sections = _fields
+                    .Where(f => !string.IsNullOrWhiteSpace(f.SectionName))
+                    .Select(f => f.SectionName!)
+                    .Distinct()
+                    .OrderBy(s => s)
+                    .ToList();
+
+                // Pre-load dictionary items for fields that have one
+                var dictIds = _fields
+                    .Where(f => f.DictionaryFieldId.HasValue)
+                    .Select(f => f.DictionaryFieldId!.Value)
+                    .Distinct();
+
+                foreach (var dictId in dictIds)
+                {
+                    try
+                    {
+                        var item = await Http.GetFromJsonAsync<DictionaryItem>($"api/dictionary/{dictId}");
+                        if (item != null) _dictionaryCache[dictId] = item;
+                    }
+                    catch { /* ignore */ }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load form: {ex.Message}", Severity.Error);
+        }
+        _loading = false;
+    }
+
+    private async Task<IEnumerable<DictionaryItem?>> SearchDictionary(string value, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Enumerable.Empty<DictionaryItem?>();
+
+        try
+        {
+            var results = await Http.GetFromJsonAsync<List<DictionaryItem>>(
+                $"api/dictionary?q={Uri.EscapeDataString(value)}", ct);
+            return results ?? Enumerable.Empty<DictionaryItem?>();
+        }
+        catch
+        {
+            return Enumerable.Empty<DictionaryItem?>();
+        }
+    }
+
+    private DictionaryItem? GetDictionaryItem(FieldEditModel field)
+    {
+        if (!field.DictionaryFieldId.HasValue) return null;
+        _dictionaryCache.TryGetValue(field.DictionaryFieldId.Value, out var item);
+        return item;
+    }
+
+    private void OnDictionarySelected(FieldEditModel field, DictionaryItem? item)
+    {
+        field.DictionaryFieldId = item?.Id;
+        if (item != null) _dictionaryCache[item.Id] = item;
+    }
+
+    private async Task SaveChanges()
+    {
+        _saving = true;
+        try
+        {
+            var dtos = _fields.Select(f => new FormFieldDto
+            {
+                Id = f.Id,
+                FieldLabel = f.FieldLabel,
+                FieldType = f.FieldType,
+                SectionName = f.SectionName,
+                DictionaryFieldId = f.DictionaryFieldId,
+                IsRequired = f.IsRequired,
+                SortOrder = f.SortOrder
+            }).ToList();
+
+            var response = await Http.PutAsJsonAsync($"api/forms/{Id}/fields", dtos);
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Changes saved successfully.", Severity.Success);
+                // Rebuild sections after save
+                _sections = _fields
+                    .Where(f => !string.IsNullOrWhiteSpace(f.SectionName))
+                    .Select(f => f.SectionName!)
+                    .Distinct()
+                    .OrderBy(s => s)
+                    .ToList();
+            }
+            else
+            {
+                Snackbar.Add($"Save failed: {response.ReasonPhrase}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+        _saving = false;
+    }
+
+    private async Task ApproveForm()
+    {
+        _approving = true;
+        try
+        {
+            var response = await Http.PostAsync($"api/forms/{Id}/approve", null);
+            if (response.IsSuccessStatusCode)
+            {
+                if (_form != null) _form.Status = "Approved";
+                Snackbar.Add("Form approved.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add($"Approval failed: {response.ReasonPhrase}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Approval failed: {ex.Message}", Severity.Error);
+        }
+        _approving = false;
+    }
+
+    private static Color GetStatusColor(string status) => status switch
+    {
+        "Queued" => Color.Default,
+        "Processing" => Color.Warning,
+        "Draft" => Color.Info,
+        "Reviewed" => Color.Success,
+        "Approved" => Color.Primary,
+        "Error" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static Color GetConfidenceColor(decimal confidence) => confidence switch
+    {
+        >= 0.9m => Color.Success,
+        >= 0.7m => Color.Warning,
+        _ => Color.Error
+    };
+
+    private class FieldEditModel
+    {
+        public int Id { get; set; }
+        public string FieldLabel { get; set; } = string.Empty;
+        public string FieldType { get; set; } = string.Empty;
+        public string? SectionName { get; set; }
+        public int? DictionaryFieldId { get; set; }
+        public bool IsRequired { get; set; }
+        public decimal? AiConfidence { get; set; }
+        public string? Notes { get; set; }
+        public int? SortOrder { get; set; }
+    }
+
+    private class DictionaryItem
+    {
+        public int Id { get; set; }
+        public string DisplayName { get; set; } = string.Empty;
+        public string FieldCode { get; set; } = string.Empty;
+    }
+}

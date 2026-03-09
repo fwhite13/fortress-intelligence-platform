@@ -1,0 +1,704 @@
+You are implementing FORMS v2 Sprint 1 for a Blazor Server + MudBlazor + EF Core (MySQL) app.
+REPO: /home/fredw/.openclaw/workspace/fortress-form-tools/
+
+Read these files first to understand the codebase:
+- FortressFormTools.Data/Entities/FormLibrary.cs
+- FortressFormTools.Data/Entities/QuestionSet.cs
+- FortressFormTools.Data/AppDbContext.cs
+- FortressFormTools.Web/Program.cs
+- FortressFormTools.Web/Controllers/FormsController.cs
+- FortressFormTools.Web/Components/Layout/NavMenu.razor
+- FortressFormTools.Web/Components/Pages/Home.razor
+- FortressFormTools.Web/Components/_Imports.razor
+
+Then make ALL of the following changes:
+
+===== CHANGE 1: CREATE FortressFormTools.Data/Entities/FormProject.cs =====
+
+using System.ComponentModel.DataAnnotations;
+
+namespace FortressFormTools.Data.Entities;
+
+public class FormProject
+{
+    [Key]
+    public int Id { get; set; }
+
+    [Required, MaxLength(200)]
+    public string Name { get; set; } = string.Empty;
+
+    [MaxLength(50)]
+    public string Vertical { get; set; } = "general";
+
+    [MaxLength(500)]
+    public string? Description { get; set; }
+
+    [MaxLength(20)]
+    public string Status { get; set; } = "draft";
+
+    [MaxLength(100)]
+    public string? CreatedBy { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<FormLibrary> Documents { get; set; } = new List<FormLibrary>();
+    public ICollection<QuestionSet> QuestionSets { get; set; } = new List<QuestionSet>();
+}
+
+===== CHANGE 2: UPDATE FortressFormTools.Data/Entities/FormLibrary.cs =====
+
+Add these two properties to the FormLibrary class, after the existing navigation properties:
+    public int? ProjectId { get; set; }
+    public FormProject? Project { get; set; }
+
+===== CHANGE 3: UPDATE FortressFormTools.Data/Entities/QuestionSet.cs =====
+
+Add these two properties to the QuestionSet class, after the existing navigation properties:
+    public int? ProjectId { get; set; }
+    public FormProject? Project { get; set; }
+
+===== CHANGE 4: UPDATE FortressFormTools.Data/AppDbContext.cs =====
+
+a) Add this DbSet after the existing DbSets (after GeneratedSchemas line):
+    public DbSet<FormProject> FormProjects => Set<FormProject>();
+
+b) Add this block in OnModelCreating, BEFORE the "Seed dictionary fields" comment:
+
+        // ── FormProject ──
+        modelBuilder.Entity<FormProject>(entity =>
+        {
+            entity.ToTable("form_projects");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Vertical).HasMaxLength(50).HasDefaultValue("general");
+            entity.Property(e => e.Status).HasMaxLength(20).HasDefaultValue("draft");
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.CreatedAt);
+
+            entity.HasMany(p => p.Documents)
+                  .WithOne(f => f.Project)
+                  .HasForeignKey(f => f.ProjectId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasMany(p => p.QuestionSets)
+                  .WithOne(q => q.Project)
+                  .HasForeignKey(q => q.ProjectId)
+                  .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<FormLibrary>()
+            .HasIndex(f => f.ProjectId);
+
+        modelBuilder.Entity<QuestionSet>()
+            .HasIndex(q => q.ProjectId);
+
+===== CHANGE 5: UPDATE FortressFormTools.Web/Program.cs =====
+
+In the DB init Task.Run lambda, after the if/else block (after both Console.WriteLine lines for tables), add this block INSIDE the outer try block but AFTER the if/else:
+
+        // Add ProjectId columns to existing tables (idempotent)
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE form_libraries ADD COLUMN IF NOT EXISTS ProjectId INT NULL");
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE form_libraries ADD INDEX IF NOT EXISTS idx_form_libraries_project (ProjectId)");
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE question_sets ADD COLUMN IF NOT EXISTS ProjectId INT NULL");
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE question_sets ADD INDEX IF NOT EXISTS idx_question_sets_project (ProjectId)");
+            Console.WriteLine("ProjectId columns ensured.");
+        }
+        catch (Exception alterEx)
+        {
+            Console.WriteLine($"ALTER TABLE note: {alterEx.Message}");
+        }
+
+===== CHANGE 6: CREATE FortressFormTools.Web/Components/Pages/Projects.razor =====
+
+@page "/projects"
+@using Microsoft.EntityFrameworkCore
+@using FortressFormTools.Data
+@using FortressFormTools.Data.Entities
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Projects — FORMS</PageTitle>
+
+<div style="padding: var(--space-6);">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-6);">
+        <div style="display: flex; align-items: center; gap: var(--space-3);">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen"
+                     Style="width: 24px; height: 24px; color: var(--color-gold);" />
+            <div>
+                <MudText Typo="Typo.h5" Style="font-weight: var(--font-bold); color: var(--color-text-primary);">
+                    Form Analysis Projects
+                </MudText>
+                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-top: var(--space-1);">
+                    Organize carrier forms into projects for targeted analysis.
+                </MudText>
+            </div>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenNewProjectDialog">
+            New Project
+        </MudButton>
+    </div>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_projects.Count == 0)
+    {
+        <MudPaper Style="padding: var(--space-8); text-align: center; border: 1px dashed var(--color-border);">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Style="font-size: 48px; color: var(--color-text-secondary); margin-bottom: var(--space-3);" />
+            <MudText Typo="Typo.h6" Style="color: var(--color-text-secondary);">No projects yet.</MudText>
+            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-top: var(--space-2);">
+                Create your first form analysis project.
+            </MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Style="margin-top: var(--space-4);"
+                       OnClick="OpenNewProjectDialog">
+                Create Project
+            </MudButton>
+        </MudPaper>
+    }
+    else
+    {
+        <MudTable Items="@_projects" Hover="true" Striped="false"
+                  Style="border: 1px solid var(--color-border); border-radius: var(--radius-lg);">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Vertical</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Documents</MudTh>
+                <MudTh>Created</MudTh>
+                <MudTh>Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudLink Style="cursor: pointer; font-weight: 600;"
+                             OnClick="@(() => Nav.NavigateTo($"/projects/{context.Id}"))">
+                        @context.Name
+                    </MudLink>
+                </MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">
+                        @GetVerticalEmoji(context.Vertical) @context.Vertical
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)" Variant="Variant.Filled">
+                        @context.Status
+                    </MudChip>
+                </MudTd>
+                <MudTd>@context.Documents.Count</MudTd>
+                <MudTd>@context.CreatedAt.ToString("MMM d, yyyy")</MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                   OnClick="@(() => Nav.NavigateTo($"/projects/{context.Id}"))"
+                                   Title="View" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => DeleteProject(context))"
+                                   Title="Delete" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</div>
+
+@code {
+    private List<FormProject> _projects = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProjects();
+    }
+
+    private async Task LoadProjects()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _projects = await db.FormProjects
+                .Include(p => p.Documents)
+                .OrderByDescending(p => p.CreatedAt)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load projects: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OpenNewProjectDialog()
+    {
+        var dialog = await DialogService.ShowAsync<ProjectDialog>("New Project");
+        var result = await dialog.Result;
+        if (!result.Canceled && result.Data is ProjectDialogResult data)
+        {
+            await CreateProject(data);
+        }
+    }
+
+    private async Task CreateProject(ProjectDialogResult data)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var project = new FormProject
+            {
+                Name = data.Name,
+                Vertical = data.Vertical,
+                Description = data.Description,
+                Status = "draft",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.FormProjects.Add(project);
+            await db.SaveChangesAsync();
+            Snackbar.Add($"Project '{data.Name}' created!", Severity.Success);
+            await LoadProjects();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to create project: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteProject(FormProject project)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Delete Project",
+            $"Delete '{project.Name}'? This will unlink all associated documents.",
+            yesText: "Delete", noText: "Cancel");
+        if (confirm != true) return;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var p = await db.FormProjects.FindAsync(project.Id);
+            if (p != null)
+            {
+                db.FormProjects.Remove(p);
+                await db.SaveChangesAsync();
+                Snackbar.Add($"Project '{project.Name}' deleted.", Severity.Info);
+                await LoadProjects();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to delete: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private string GetVerticalEmoji(string vertical) => vertical switch
+    {
+        "aviation" => "✈️",
+        "auto" => "🚗",
+        "gl" => "🏢",
+        "wc" => "👷",
+        "property" => "🏠",
+        _ => "📋"
+    };
+
+    private Color GetStatusColor(string status) => status switch
+    {
+        "draft" => Color.Default,
+        "extracting" => Color.Warning,
+        "extracted" => Color.Info,
+        "building" => Color.Primary,
+        "complete" => Color.Success,
+        _ => Color.Default
+    };
+}
+
+===== CHANGE 7: CREATE FortressFormTools.Web/Components/Pages/ProjectDialog.razor =====
+
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">New Form Analysis Project</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="Name" Label="Project Name" Required="true"
+                      Placeholder="e.g., Cessna CPA Aviation Q2 2026" MaxLength="200"
+                      Immediate="true" Class="mb-3" Variant="Variant.Outlined" />
+        <MudSelect @bind-Value="Vertical" Label="Line of Business" Class="mb-3" Variant="Variant.Outlined" T="string">
+            <MudSelectItem T="string" Value="@("aviation")">✈️ Aviation</MudSelectItem>
+            <MudSelectItem T="string" Value="@("auto")">🚗 Commercial Auto</MudSelectItem>
+            <MudSelectItem T="string" Value="@("gl")">🏢 General Liability</MudSelectItem>
+            <MudSelectItem T="string" Value="@("wc")">👷 Workers Comp</MudSelectItem>
+            <MudSelectItem T="string" Value="@("property")">🏠 Property</MudSelectItem>
+            <MudSelectItem T="string" Value="@("general")">📋 General</MudSelectItem>
+        </MudSelect>
+        <MudTextField @bind-Value="Description" Label="Description (optional)" Lines="2" Variant="Variant.Outlined" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
+        <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@string.IsNullOrWhiteSpace(Name)">
+            Create Project
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string Vertical { get; set; } = "general";
+    [Parameter] public string Description { get; set; } = "";
+
+    private void Cancel() => MudDialog.Cancel();
+    private void Submit() => MudDialog.Close(DialogResult.Ok(new ProjectDialogResult(Name, Vertical, Description)));
+}
+
+===== CHANGE 8: CREATE FortressFormTools.Web/Components/Pages/ProjectDialogResult.cs =====
+
+namespace FortressFormTools.Web.Components.Pages;
+
+public record ProjectDialogResult(string Name, string Vertical, string? Description);
+
+===== CHANGE 9: CREATE FortressFormTools.Web/Components/Pages/ProjectDetail.razor =====
+
+@page "/projects/{ProjectId:int}"
+@using Microsoft.EntityFrameworkCore
+@using FortressFormTools.Data
+@using FortressFormTools.Data.Entities
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject HttpClient Http
+
+<PageTitle>@(_project?.Name ?? "Project") — FORMS</PageTitle>
+
+<div style="padding: var(--space-6);">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_project == null)
+    {
+        <MudText>Project not found.</MudText>
+        <MudButton OnClick="@(() => Nav.NavigateTo("/projects"))">Back to Projects</MudButton>
+    }
+    else
+    {
+        <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4);">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small"
+                           OnClick="@(() => Nav.NavigateTo("/projects"))" />
+            <div style="display: flex; align-items: center; gap: var(--space-2);">
+                <MudText Typo="Typo.h5" Style="font-weight: var(--font-bold);">@_project.Name</MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">
+                    @GetVerticalEmoji(_project.Vertical) @_project.Vertical
+                </MudChip>
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(_project.Status)" Variant="Variant.Filled">
+                    @_project.Status
+                </MudChip>
+            </div>
+        </div>
+
+        <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true">
+            <MudTabPanel Text="Documents" Icon="@Icons.Material.Filled.Description">
+                <div style="padding-top: var(--space-4);">
+                    <div style="margin-bottom: var(--space-4); display: flex; justify-content: space-between; align-items: center;">
+                        <MudText Typo="Typo.subtitle1">Project Documents</MudText>
+                        <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.AutoMode"
+                                   OnClick="ExtractAllPending"
+                                   Disabled="@(!_documents.Any(d => d.Status == "Queued"))">
+                            Extract All Pending
+                        </MudButton>
+                    </div>
+
+                    <MudPaper Style="border: 2px dashed var(--color-border); padding: var(--space-4); text-align: center; margin-bottom: var(--space-4); border-radius: var(--radius-lg);">
+                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Style="font-size: 32px; color: var(--color-text-secondary);" />
+                        <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-top: var(--space-2);">
+                            Upload PDF or DOCX forms to this project
+                        </MudText>
+                        <InputFile id="projectFileInput" OnChange="HandleFileUpload" multiple style="display:none;" accept=".pdf,.docx" />
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Style="margin-top: var(--space-3);"
+                                   HtmlTag="label" for="projectFileInput" StartIcon="@Icons.Material.Filled.AttachFile">
+                            Select Files
+                        </MudButton>
+                        @if (_uploading)
+                        {
+                            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Style="margin-top: var(--space-2);" />
+                        }
+                    </MudPaper>
+
+                    @if (_documents.Count == 0)
+                    {
+                        <MudPaper Style="padding: var(--space-6); text-align: center; border: 1px dashed var(--color-border);">
+                            <MudText Style="color: var(--color-text-secondary);">No documents yet. Upload PDFs to get started.</MudText>
+                        </MudPaper>
+                    }
+                    else
+                    {
+                        <MudTable Items="@_documents" Hover="true"
+                                  Style="border: 1px solid var(--color-border); border-radius: var(--radius-lg);">
+                            <HeaderContent>
+                                <MudTh>File Name</MudTh>
+                                <MudTh>Carrier</MudTh>
+                                <MudTh>Type</MudTh>
+                                <MudTh>Status</MudTh>
+                                <MudTh>Actions</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd>@context.FormName</MudTd>
+                                <MudTd>@context.CarrierName</MudTd>
+                                <MudTd>@context.FormType</MudTd>
+                                <MudTd>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetDocStatusColor(context.Status)" Variant="Variant.Filled">
+                                        @context.Status
+                                    </MudChip>
+                                </MudTd>
+                                <MudTd>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                                   OnClick="@(() => Nav.NavigateTo($"/forms/{context.Id}"))"
+                                                   Title="View" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
+                                                   OnClick="@(() => ReExtract(context.Id))"
+                                                   Title="Re-extract" />
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Question Sets" Icon="@Icons.Material.Filled.QuestionAnswer">
+                <div style="padding-top: var(--space-4);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+                        <MudText Typo="Typo.subtitle1">Project Question Sets</MudText>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="@(() => Nav.NavigateTo($"/question-sets?projectId={ProjectId}"))">
+                            New Question Set
+                        </MudButton>
+                    </div>
+
+                    @if (_questionSets.Count == 0)
+                    {
+                        <MudPaper Style="padding: var(--space-6); text-align: center; border: 1px dashed var(--color-border);">
+                            <MudText Style="color: var(--color-text-secondary);">No question sets yet. Create one to organize extracted fields.</MudText>
+                        </MudPaper>
+                    }
+                    else
+                    {
+                        <MudTable Items="@_questionSets" Hover="true"
+                                  Style="border: 1px solid var(--color-border); border-radius: var(--radius-lg);">
+                            <HeaderContent>
+                                <MudTh>Name</MudTh>
+                                <MudTh>Status</MudTh>
+                                <MudTh>Fields</MudTh>
+                                <MudTh>Actions</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd>@context.Name</MudTd>
+                                <MudTd>
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.Status</MudChip>
+                                </MudTd>
+                                <MudTd>@context.Fields.Count</MudTd>
+                                <MudTd>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                                   OnClick="@(() => Nav.NavigateTo($"/question-sets/{context.Id}"))"
+                                                   Title="View" />
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </div>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</div>
+
+@code {
+    [Parameter] public int ProjectId { get; set; }
+
+    private FormProject? _project;
+    private List<FormLibrary> _documents = new();
+    private List<QuestionSet> _questionSets = new();
+    private bool _loading = true;
+    private bool _uploading = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProject();
+    }
+
+    private async Task LoadProject()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _project = await db.FormProjects
+                .Include(p => p.Documents)
+                .Include(p => p.QuestionSets)
+                    .ThenInclude(q => q.Fields)
+                .FirstOrDefaultAsync(p => p.Id == ProjectId);
+
+            if (_project != null)
+            {
+                _documents = _project.Documents.OrderByDescending(d => d.CreatedAt).ToList();
+                _questionSets = _project.QuestionSets.OrderByDescending(q => q.CreatedAt).ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load project: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _uploading = true;
+        StateHasChanged();
+        try
+        {
+            var content = new MultipartFormDataContent();
+            foreach (var file in e.GetMultipleFiles(10))
+            {
+                var stream = file.OpenReadStream(50 * 1024 * 1024);
+                var sc = new StreamContent(stream);
+                sc.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+                content.Add(sc, "files", file.Name);
+            }
+            content.Add(new StringContent("Unknown"), "carrierName");
+            content.Add(new StringContent("Carrier"), "formType");
+            content.Add(new StringContent(ProjectId.ToString()), "projectId");
+
+            var response = await Http.PostAsync("/api/forms/upload", content);
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Files uploaded successfully!", Severity.Success);
+                await LoadProject();
+            }
+            else
+            {
+                Snackbar.Add("Upload failed.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _uploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExtractAllPending()
+    {
+        var pendingDocs = _documents.Where(d => d.Status == "Queued").ToList();
+        foreach (var doc in pendingDocs)
+        {
+            await Http.PostAsync($"/api/forms/{doc.Id}/resubmit", null);
+        }
+        Snackbar.Add($"Queued {pendingDocs.Count} document(s) for extraction.", Severity.Info);
+        await LoadProject();
+    }
+
+    private async Task ReExtract(int docId)
+    {
+        await Http.PostAsync($"/api/forms/{docId}/resubmit", null);
+        Snackbar.Add("Re-extraction queued.", Severity.Info);
+        await LoadProject();
+    }
+
+    private string GetVerticalEmoji(string vertical) => vertical switch
+    {
+        "aviation" => "✈️",
+        "auto" => "🚗",
+        "gl" => "🏢",
+        "wc" => "👷",
+        "property" => "🏠",
+        _ => "📋"
+    };
+
+    private Color GetStatusColor(string status) => status switch
+    {
+        "draft" => Color.Default,
+        "extracting" => Color.Warning,
+        "extracted" => Color.Info,
+        "building" => Color.Primary,
+        "complete" => Color.Success,
+        _ => Color.Default
+    };
+
+    private Color GetDocStatusColor(string status) => status switch
+    {
+        "Queued" => Color.Default,
+        "Processing" => Color.Warning,
+        "Draft" => Color.Info,
+        "Reviewed" => Color.Primary,
+        "Approved" => Color.Success,
+        "Error" => Color.Error,
+        _ => Color.Default
+    };
+}
+
+===== CHANGE 10: UPDATE FortressFormTools.Web/Components/Layout/NavMenu.razor =====
+
+Add a Projects nav link BEFORE the existing Form Library nav link. Insert this line before the Form Library MudNavLink:
+    <MudNavLink Href="/projects" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.FolderOpen">
+        Projects
+    </MudNavLink>
+
+===== CHANGE 11: UPDATE FortressFormTools.Web/Components/Pages/Home.razor =====
+
+Change the Upload & Extract card button from Href="/forms" to Href="/projects"
+Find: <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/forms">
+Replace with: <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/projects">
+
+===== CHANGE 12: UPDATE FortressFormTools.Web/Controllers/FormsController.cs =====
+
+In the UploadPdfs method, add an optional projectId parameter and apply it to uploaded forms:
+
+Find the method signature:
+    public async Task<IActionResult> UploadPdfs(
+        [FromForm] List<IFormFile> files,
+        [FromForm] string? carrierName = null,
+        [FromForm] string? formType = null)
+
+Replace with:
+    public async Task<IActionResult> UploadPdfs(
+        [FromForm] List<IFormFile> files,
+        [FromForm] string? carrierName = null,
+        [FromForm] string? formType = null,
+        [FromForm] int? projectId = null)
+
+And in the FormLibrary object initializer, after the line:
+                FormType = formType ?? "Carrier",
+
+Add:
+                ProjectId = projectId,
+
+===== FINAL STEP =====
+
+After making ALL changes above, run:
+  cd /home/fredw/.openclaw/workspace/fortress-form-tools && dotnet build
+
+If there are compilation errors, fix them. Common issues to watch for:
+- MudChip requires T="string" type parameter in newer MudBlazor versions
+- DialogResult.Ok() type inference issues
+- Any missing using statements
+
+The build MUST succeed with 0 errors before you finish.

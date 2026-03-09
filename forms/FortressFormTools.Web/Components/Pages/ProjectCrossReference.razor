@@ -1,0 +1,338 @@
+@page "/projects/{ProjectId:int}/cross-reference"
+@using Microsoft.EntityFrameworkCore
+@using FortressFormTools.Data
+@using FortressFormTools.Data.Entities
+@using FortressFormTools.Web.Services
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject CrossReferenceService CrossRefSvc
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Cross-Reference — FORMS</PageTitle>
+
+<div style="padding: var(--space-6);">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_project == null)
+    {
+        <MudText>Project not found.</MudText>
+        <MudButton OnClick="@(() => Nav.NavigateTo("/projects"))">Back to Projects</MudButton>
+    }
+    else
+    {
+        @* Header *@
+        <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4);">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small"
+                           OnClick="@(() => Nav.NavigateTo($"/projects/{ProjectId}"))" />
+            <MudIcon Icon="@Icons.Material.Filled.CompareArrows"
+                     Style="color: var(--fortress-gold, #d4af37); font-size: 28px;" />
+            <MudText Typo="Typo.h5" Style="font-weight: var(--font-bold);">
+                Cross-Reference Analysis — @_project.Name
+            </MudText>
+            <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">
+                @GetVerticalEmoji(_project.Vertical) @_project.Vertical
+            </MudChip>
+        </div>
+
+        @* Status alert *@
+        @if (_approvedDocs.Count == 0)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Text" Class="mb-4">
+                No approved documents found for this project.
+                <MudLink Href="@($"/projects/{ProjectId}")">Approve documents</MudLink> before running cross-reference analysis.
+            </MudAlert>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Text" Class="mb-4">
+                <b>@_approvedDocs.Count</b> approved document(s) ready for analysis:
+                @string.Join(", ", _approvedDocs.Select(d => d.CarrierName))
+            </MudAlert>
+        }
+
+        @* Action bar *@
+        <MudPaper Elevation="1" Class="pa-4 mb-4">
+            <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="3">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Secondary"
+                           StartIcon="@Icons.Material.Filled.Analytics"
+                           Disabled="@(_approvedDocs.Count == 0 || _running)"
+                           OnClick="RunCrossReference"
+                           Size="Size.Large">
+                    @if (_running)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        @:Analyzing...
+                    }
+                    else
+                    {
+                        @:Run Cross-Reference
+                    }
+                </MudButton>
+
+                @if (_result != null && string.IsNullOrEmpty(_result.ErrorMessage))
+                {
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Success"
+                               StartIcon="@Icons.Material.Filled.Save"
+                               OnClick="NavigateToQuestionSet"
+                               Size="Size.Large">
+                        View Question Set →
+                    </MudButton>
+                }
+
+                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                    Analysis uses AI (Claude Sonnet) to identify unified fields across all approved forms.
+                </MudText>
+            </MudStack>
+        </MudPaper>
+
+        @* Progress indicator *@
+        @if (_running)
+        {
+            <MudPaper Elevation="1" Class="pa-4 mb-4" Style="text-align: center;">
+                <MudProgressLinear Color="Color.Secondary" Indeterminate="true" Class="mb-3" />
+                <MudText Typo="Typo.body1" Style="font-weight: 500;">
+                    Analyzing @_approvedDocs.Count form(s) with Bedrock AI...
+                </MudText>
+                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-top: 8px;">
+                    This may take 15–45 seconds depending on form complexity.
+                </MudText>
+            </MudPaper>
+        }
+
+        @* Error result *@
+        @if (_result != null && !string.IsNullOrEmpty(_result.ErrorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">
+                <b>Analysis failed:</b> @_result.ErrorMessage
+            </MudAlert>
+        }
+
+        @* Success results *@
+        @if (_result != null && string.IsNullOrEmpty(_result.ErrorMessage) && _fieldCodes.Any())
+        {
+            @* Summary chips *@
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2" Class="mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+                    <MudText Typo="Typo.h6">Analysis Complete</MudText>
+                </MudStack>
+
+                <MudStack Row="true" Spacing="2" Wrap="Wrap.Wrap">
+                    <MudChip T="string" Color="Color.Primary" Variant="Variant.Filled" Icon="@Icons.Material.Filled.List">
+                        @_result.FieldsFound total fields
+                    </MudChip>
+                    <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Icon="@Icons.Material.Filled.Share">
+                        @_result.SharedFields shared across carriers
+                    </MudChip>
+                    <MudChip T="string" Color="Color.Info" Variant="Variant.Filled" Icon="@Icons.Material.Filled.Star">
+                        @_result.CarrierSpecificFields carrier-specific
+                    </MudChip>
+                    @if (_result.PanelsDetected.Any())
+                    {
+                        <MudChip T="string" Color="Color.Warning" Variant="Variant.Filled" Icon="@Icons.Material.Filled.ViewList">
+                            Panels: @string.Join(", ", _result.PanelsDetected)
+                        </MudChip>
+                    }
+                </MudStack>
+            </MudPaper>
+
+            @* Fields table *@
+            <MudPaper Elevation="1" Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.TableChart" Class="mr-2" />
+                    Unified Field Codes
+                </MudText>
+
+                <MudTable Items="@_fieldCodes" Dense="true" Hover="true" Striped="true"
+                          Style="border: 1px solid var(--color-border); border-radius: var(--radius-lg);">
+                    <HeaderContent>
+                        <MudTh>Field Code</MudTh>
+                        <MudTh>Label</MudTh>
+                        <MudTh>Type</MudTh>
+                        <MudTh>Shared</MudTh>
+                        <MudTh>Section</MudTh>
+                        <MudTh>Carriers</MudTh>
+                        <MudTh>Flags</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>
+                            <MudText Typo="Typo.caption"
+                                     Style="font-family: monospace; font-weight: 600; color: var(--fortress-gold, #d4af37);">
+                                @context.FieldCode
+                            </MudText>
+                        </MudTd>
+                        <MudTd>
+                            <MudText Typo="Typo.body2" Style="font-weight: 500;">@context.FieldLabel</MudText>
+                        </MudTd>
+                        <MudTd>
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.FieldType</MudChip>
+                        </MudTd>
+                        <MudTd>
+                            @if (context.IsShared)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">Shared</MudChip>
+                            }
+                            else
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">Unique</MudChip>
+                            }
+                        </MudTd>
+                        <MudTd>
+                            <MudText Typo="Typo.caption">@(context.SectionName ?? "—")</MudText>
+                        </MudTd>
+                        <MudTd>
+                            <MudText Typo="Typo.caption" Style="max-width: 200px; white-space: normal;">
+                                @GetCarrierSourcesDisplay(context.CarrierSources)
+                            </MudText>
+                        </MudTd>
+                        <MudTd>
+                            @if (context.IsSensitive)
+                            {
+                                <MudTooltip Text="Sensitive data">
+                                    <MudIcon Icon="@Icons.Material.Filled.Security" Size="Size.Small" Color="Color.Warning" />
+                                </MudTooltip>
+                            }
+                            @if (context.IsRequired)
+                            {
+                                <MudTooltip Text="Required">
+                                    <MudIcon Icon="@Icons.Material.Filled.Star" Size="Size.Small" Color="Color.Error" />
+                                </MudTooltip>
+                            }
+                            @if (context.PanelId != null)
+                            {
+                                <MudTooltip Text="@($"Panel: {context.PanelId}")">
+                                    <MudIcon Icon="@Icons.Material.Filled.ViewList" Size="Size.Small" Color="Color.Info" />
+                                </MudTooltip>
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            </MudPaper>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int ProjectId { get; set; }
+
+    private FormProject? _project;
+    private List<FortressFormTools.Data.Entities.FormLibrary> _approvedDocs = new();
+    private bool _loading = true;
+    private bool _running = false;
+    private CrossReferenceResult? _result;
+    private List<FormFieldCode> _fieldCodes = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProject();
+    }
+
+    private async Task LoadProject()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _project = await db.FormProjects
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == ProjectId);
+
+            if (_project != null)
+            {
+                _approvedDocs = await db.FormLibraries
+                    .AsNoTracking()
+                    .Where(f => f.ProjectId == ProjectId && (f.Status == "Approved" || f.ApprovedAt != null))
+                    .ToListAsync();
+
+                // Load any existing field codes from a prior run
+                _fieldCodes = await db.FormFieldCodes
+                    .AsNoTracking()
+                    .Where(f => f.ProjectId == ProjectId)
+                    .OrderBy(f => f.SortOrder)
+                    .ToListAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load project: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task RunCrossReference()
+    {
+        _running = true;
+        _result = null;
+        StateHasChanged();
+
+        try
+        {
+            _result = await CrossRefSvc.CrossReferenceProjectAsync(ProjectId);
+
+            if (string.IsNullOrEmpty(_result.ErrorMessage))
+            {
+                Snackbar.Add(
+                    $"Analysis complete: {_result.FieldsFound} fields found ({_result.SharedFields} shared)",
+                    Severity.Success);
+
+                // Reload field codes from DB
+                await using var db = await DbFactory.CreateDbContextAsync();
+                _fieldCodes = await db.FormFieldCodes
+                    .AsNoTracking()
+                    .Where(f => f.ProjectId == ProjectId)
+                    .OrderBy(f => f.SortOrder)
+                    .ToListAsync();
+            }
+            else
+            {
+                Snackbar.Add($"Analysis failed: {_result.ErrorMessage}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _running = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task NavigateToQuestionSet()
+    {
+        Nav.NavigateTo($"/projects/{ProjectId}/question-set");
+        return Task.CompletedTask;
+    }
+
+    private static string GetCarrierSourcesDisplay(string? carrierSourcesJson)
+    {
+        if (string.IsNullOrWhiteSpace(carrierSourcesJson)) return "—";
+        try
+        {
+            var sources = System.Text.Json.JsonSerializer.Deserialize<List<string>>(carrierSourcesJson);
+            return sources != null ? string.Join(", ", sources) : "—";
+        }
+        catch
+        {
+            return carrierSourcesJson;
+        }
+    }
+
+    private static string GetVerticalEmoji(string vertical) => vertical switch
+    {
+        "aviation" => "✈️",
+        "auto" => "🚗",
+        "gl" => "🏢",
+        "wc" => "👷",
+        "property" => "🏠",
+        _ => "📋"
+    };
+}

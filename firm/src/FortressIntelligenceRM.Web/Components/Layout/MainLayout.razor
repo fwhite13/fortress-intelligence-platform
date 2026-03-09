@@ -1,0 +1,67 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+
+<MudThemeProvider Theme="_theme" />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    @if (_isAuthenticated)
+    {
+        <MudAppBar Elevation="0" Style="background-color: #1a2332; border-bottom: 1px solid #2a3545;">
+            <MudText Typo="Typo.h6" Style="color: #d4af37; font-weight: 600; font-family: 'Inter', sans-serif;">
+                FIRM
+            </MudText>
+            <MudText Typo="Typo.body2" Class="ml-2" Style="color: #8899aa;">
+                Fortress Intelligence Recording & Minutes
+            </MudText>
+            <MudSpacer />
+            <MudText Typo="Typo.body2" Style="color: #ccd6e0;" Class="mr-3">@_displayName</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Default"
+                           Style="color: #8899aa;" Href="/auth/logout" />
+        </MudAppBar>
+        <MudMainContent Style="background-color: #0f1923; min-height: 100vh; padding-top: 64px;">
+            @Body
+        </MudMainContent>
+    }
+    else
+    {
+        <MudMainContent Style="background-color: #0f1923; min-height: 100vh;">
+            @Body
+        </MudMainContent>
+    }
+</MudLayout>
+
+@code {
+    private bool _isAuthenticated;
+    private string _displayName = "";
+
+    private readonly MudTheme _theme = new MudTheme
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#1a2332",
+            Secondary = "#d4af37",
+            Background = "#0f1923",
+            Surface = "#1a2332",
+            AppbarBackground = "#1a2332",
+            DrawerBackground = "#1a2332",
+            TextPrimary = "#e8edf2",
+            TextSecondary = "#8899aa"
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAuthenticated = authState.User.Identity?.IsAuthenticated ?? false;
+        if (_isAuthenticated)
+        {
+            _displayName = authState.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+                ?? authState.User.FindFirst("name")?.Value
+                ?? authState.User.FindFirst("preferred_username")?.Value
+                ?? "User";
+        }
+    }
+}

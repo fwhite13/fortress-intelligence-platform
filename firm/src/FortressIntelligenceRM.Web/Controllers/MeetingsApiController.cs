@@ -1,0 +1,341 @@
+using FortressIntelligenceRM.Web.Data;
+using FortressIntelligenceRM.Web.Models;
+using FortressIntelligenceRM.Web.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
+
+namespace FortressIntelligenceRM.Web.Controllers;
+
+[ApiController]
+public class MeetingsApiController : ControllerBase
+{
+    private readonly MeetingService _meetingService;
+    private readonly VpBotService _vpBotService;
+    private readonly S3Service _s3Service;
+    private readonly IDbContextFactory<FirmDbContext> _dbFactory;
+    private readonly IConfiguration _config;
+    private readonly ILogger<MeetingsApiController> _logger;
+
+    public MeetingsApiController(
+        MeetingService meetingService,
+        VpBotService vpBotService,
+        S3Service s3Service,
+        IDbContextFactory<FirmDbContext> dbFactory,
+        IConfiguration config,
+        ILogger<MeetingsApiController> logger)
+    {
+        _meetingService = meetingService;
+        _vpBotService = vpBotService;
+        _s3Service = s3Service;
+        _dbFactory = dbFactory;
+        _config = config;
+        _logger = logger;
+    }
+
+    private Guid? GetCurrentUserId()
+    {
+        var oidClaim = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (oidClaim == null) return null;
+        // Try to find the user by entra OID
+        return null; // Will be resolved via MeetingService
+    }
+
+    [HttpPost("/api/meetings/join")]
+    [Authorize]
+    public async Task<IActionResult> JoinMeeting([FromBody] JoinRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.MeetingUrl))
+            return BadRequest(new { error = "MeetingUrl is required" });
+
+        // Get Entra OID from claims
+        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var email = User.FindFirst(ClaimTypes.Email)?.Value
+            ?? User.FindFirst("preferred_username")?.Value ?? "";
+        var displayName = User.FindFirst(ClaimTypes.Name)?.Value
+            ?? User.FindFirst("name")?.Value ?? email;
+
+        if (string.IsNullOrEmpty(entraOid))
+            return Unauthorized();
+
+        var firmUser = await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+        if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
+
+        var meeting = await _meetingService.CreateMeetingAsync(firmUser.Id, request.MeetingUrl, request.Title);
+
+        // Trigger bot (fire and forget — don't fail the response if ECS isn't configured)
+        _ = _vpBotService.TriggerBotAsync(meeting.Id, request.MeetingUrl);
+
+        return Ok(new { meetingId = meeting.Id });
+    }
+
+    [HttpPost("/api/vp/callback")]
+    public async Task<IActionResult> VpCallback([FromBody] VpCallbackPayload payload)
+    {
+        // Validate shared secret — fail-closed: missing config blocks all requests
+        var expectedSecret = _config["Firm:BotCallbackSecret"];
+        var providedSecret = Request.Headers["X-Bot-Secret"].FirstOrDefault();
+        if (string.IsNullOrEmpty(expectedSecret) || providedSecret != expectedSecret)
+        {
+            _logger.LogWarning("FIRM: VP callback rejected — invalid or missing X-Bot-Secret");
+            return Unauthorized();
+        }
+
+        _logger.LogInformation("FIRM: VP callback received for meeting {Id}, status {Status}",
+            payload.MeetingId, payload.Status);
+
+        var statusMap = new Dictionary<string, MeetingStatus>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["recording"] = MeetingStatus.Recording,
+            ["recording_complete"] = MeetingStatus.Transcribing,
+            ["transcription_complete"] = MeetingStatus.Summarizing,
+            ["summary_complete"] = MeetingStatus.Complete,
+            ["failed"] = MeetingStatus.Failed,
+            ["recording_failed"] = MeetingStatus.Failed
+        };
+
+        if (!statusMap.TryGetValue(payload.Status, out var meetingStatus))
+        {
+            _logger.LogWarning("FIRM: Unknown callback status: {Status}", payload.Status);
+            return Ok();
+        }
+
+        await _meetingService.UpdateStatusAsync(payload.MeetingId, meetingStatus, payload.Error);
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        // Update S3 keys if provided
+        var meeting = await db.Meetings.FindAsync(payload.MeetingId);
+        if (meeting != null)
+        {
+            if (!string.IsNullOrEmpty(payload.AudioS3Key)) meeting.AudioS3Key = payload.AudioS3Key;
+            if (!string.IsNullOrEmpty(payload.TranscriptS3Key)) meeting.TranscriptS3Key = payload.TranscriptS3Key;
+            meeting.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+
+        // Write participants on recording status
+        if (meetingStatus == MeetingStatus.Recording && payload.Participants != null)
+        {
+            // Remove old participants for this meeting
+            var existing = db.Participants.Where(p => p.MeetingId == payload.MeetingId);
+            db.Participants.RemoveRange(existing);
+            foreach (var p in payload.Participants)
+            {
+                db.Participants.Add(new FirmMeetingParticipant
+                {
+                    MeetingId = payload.MeetingId,
+                    DisplayName = p.DisplayName ?? "Unknown",
+                    Email = p.Email,
+                    JoinedAt = p.JoinedAt
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        // Write transcript on transcription_complete
+        if (meetingStatus == MeetingStatus.Summarizing && payload.Segments != null)
+        {
+            foreach (var seg in payload.Segments)
+            {
+                db.Transcripts.Add(new FirmMeetingTranscript
+                {
+                    MeetingId = payload.MeetingId,
+                    SpeakerLabel = seg.SpeakerLabel,
+                    SpeakerName = seg.SpeakerName,
+                    Text = seg.Text ?? "",
+                    StartTimeMs = seg.StartTimeMs,
+                    EndTimeMs = seg.EndTimeMs,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        // Write summary on summary_complete
+        if (meetingStatus == MeetingStatus.Complete && payload.Summary != null)
+        {
+            var existingSummary = await db.Summaries.FirstOrDefaultAsync(s => s.MeetingId == payload.MeetingId);
+            if (existingSummary == null)
+            {
+                db.Summaries.Add(new FirmMeetingSummary
+                {
+                    MeetingId = payload.MeetingId,
+                    SummaryText = payload.Summary.SummaryText,
+                    ActionItemsJson = payload.Summary.ActionItemsJson,
+                    KeyDecisionsJson = payload.Summary.KeyDecisionsJson,
+                    FollowUpsJson = payload.Summary.FollowUpsJson,
+                    ModelUsed = payload.Summary.ModelUsed,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                existingSummary.SummaryText = payload.Summary.SummaryText;
+                existingSummary.ActionItemsJson = payload.Summary.ActionItemsJson;
+                existingSummary.KeyDecisionsJson = payload.Summary.KeyDecisionsJson;
+                existingSummary.FollowUpsJson = payload.Summary.FollowUpsJson;
+                existingSummary.ModelUsed = payload.Summary.ModelUsed;
+            }
+            await db.SaveChangesAsync();
+        }
+
+        return Ok();
+    }
+
+    [HttpGet("/api/meetings/{id}/transcript/download")]
+    [Authorize]
+    public async Task<IActionResult> DownloadTranscript(long id)
+    {
+        var (meeting, error) = await ResolveOwnedMeeting(id);
+        if (error != null) return error;
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        // Try S3 key first, fall back to DB rows
+        if (!string.IsNullOrEmpty(meeting!.TranscriptS3Key))
+        {
+            var text = await _s3Service.GetTranscriptTextAsync(meeting.TranscriptS3Key);
+            if (!string.IsNullOrEmpty(text))
+                return File(Encoding.UTF8.GetBytes(text), "text/plain", $"transcript-{id}.txt");
+        }
+
+        var segments = await db.Transcripts
+            .Where(t => t.MeetingId == id)
+            .OrderBy(t => t.StartTimeMs)
+            .ToListAsync();
+
+        var sb = new StringBuilder();
+        foreach (var seg in segments)
+        {
+            var speaker = seg.SpeakerName ?? seg.SpeakerLabel ?? "Unknown";
+            var ts = seg.StartTimeMs.HasValue ? TimeSpan.FromMilliseconds(seg.StartTimeMs.Value).ToString(@"hh\:mm\:ss") : "00:00:00";
+            sb.AppendLine($"[{ts}] {speaker}: {seg.Text}");
+        }
+        return File(Encoding.UTF8.GetBytes(sb.ToString()), "text/plain", $"transcript-{id}.txt");
+    }
+
+    [HttpGet("/api/meetings/{id}/summary/download")]
+    [Authorize]
+    public async Task<IActionResult> DownloadSummary(long id)
+    {
+        var (meeting, error) = await ResolveOwnedMeeting(id);
+        if (error != null) return error;
+
+        if (!string.IsNullOrEmpty(meeting!.TranscriptS3Key))
+        {
+            // Try S3 summary key (same prefix, different filename)
+            var summaryKey = meeting.TranscriptS3Key.Replace("transcript.json", "summary.md");
+            var text = await _s3Service.GetSummaryTextAsync(summaryKey);
+            if (!string.IsNullOrEmpty(text))
+                return File(Encoding.UTF8.GetBytes(text), "text/plain", $"summary-{id}.txt");
+        }
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var summary = await db.Summaries.FirstOrDefaultAsync(s => s.MeetingId == id);
+        if (summary == null) return NotFound(new { error = "Summary not available" });
+
+        var sb = new StringBuilder();
+        if (!string.IsNullOrEmpty(summary.SummaryText)) sb.AppendLine(summary.SummaryText).AppendLine();
+        if (!string.IsNullOrEmpty(summary.KeyDecisionsJson))
+        {
+            sb.AppendLine("KEY DECISIONS:");
+            var decisions = JsonSerializer.Deserialize<List<string>>(summary.KeyDecisionsJson);
+            decisions?.ForEach(d => sb.AppendLine($"  - {d}"));
+            sb.AppendLine();
+        }
+        if (!string.IsNullOrEmpty(summary.ActionItemsJson))
+        {
+            sb.AppendLine("ACTION ITEMS:");
+            var items = JsonSerializer.Deserialize<List<ActionItem>>(summary.ActionItemsJson);
+            items?.ForEach(i => sb.AppendLine($"  - [{i.Owner}] {i.Description}"));
+            sb.AppendLine();
+        }
+        if (!string.IsNullOrEmpty(summary.FollowUpsJson))
+        {
+            sb.AppendLine("FOLLOW-UPS:");
+            var followUps = JsonSerializer.Deserialize<List<string>>(summary.FollowUpsJson);
+            followUps?.ForEach(f => sb.AppendLine($"  - {f}"));
+        }
+        return File(Encoding.UTF8.GetBytes(sb.ToString()), "text/plain", $"summary-{id}.txt");
+    }
+
+    [HttpGet("/api/meetings/{id}/audio")]
+    [Authorize]
+    public async Task<IActionResult> GetAudio(long id)
+    {
+        var (meeting, error) = await ResolveOwnedMeeting(id);
+        if (error != null) return error;
+        if (string.IsNullOrEmpty(meeting!.AudioS3Key))
+            return NotFound(new { error = "Audio not available" });
+
+        var url = await _s3Service.GeneratePresignedUrlAsync(meeting.AudioS3Key, expiryHours: 1);
+        return Ok(new { url });
+    }
+
+    private async Task<(FirmMeeting? meeting, IActionResult? error)> ResolveOwnedMeeting(long id)
+    {
+        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(entraOid)) return (null, Unauthorized());
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
+        if (user == null) return (null, Unauthorized());
+
+        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == user.Id);
+        if (meeting == null) return (null, NotFound(new { error = "Meeting not found" }));
+
+        return (meeting, null);
+    }
+
+    public record JoinRequest(string MeetingUrl, string? Title);
+}
+
+public class VpCallbackPayload
+{
+    public long MeetingId { get; set; }
+    public string Status { get; set; } = "";
+    public List<ParticipantPayload>? Participants { get; set; }
+    public string? AudioS3Key { get; set; }
+    public string? TranscriptS3Key { get; set; }
+    public string? Error { get; set; }
+    public List<TranscriptSegmentPayload>? Segments { get; set; }
+    public SummaryPayload? Summary { get; set; }
+}
+
+public class ParticipantPayload
+{
+    public string? DisplayName { get; set; }
+    public string? Email { get; set; }
+    public DateTime? JoinedAt { get; set; }
+}
+
+public class TranscriptSegmentPayload
+{
+    public string? SpeakerLabel { get; set; }
+    public string? SpeakerName { get; set; }
+    public string? Text { get; set; }
+    public long? StartTimeMs { get; set; }
+    public long? EndTimeMs { get; set; }
+}
+
+public class SummaryPayload
+{
+    public string? SummaryText { get; set; }
+    public string? ActionItemsJson { get; set; }
+    public string? KeyDecisionsJson { get; set; }
+    public string? FollowUpsJson { get; set; }
+    public string? ModelUsed { get; set; }
+}
+
+public class ActionItem
+{
+    public string? Description { get; set; }
+    public string? Owner { get; set; }
+}

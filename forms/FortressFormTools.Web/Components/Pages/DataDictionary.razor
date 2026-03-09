@@ -1,0 +1,297 @@
+@page "/dictionary"
+@using System.Net.Http.Json
+@using FortressFormTools.Data.Entities
+@using FortressFormTools.Web.Components.Pages
+@inject HttpClient Http
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>Data Dictionary — FORMS</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+
+    <MudGrid Class="mb-4">
+        <MudItem xs="8">
+            <MudText Typo="Typo.h4" GutterBottom="true">
+                <MudIcon Icon="@Icons.Material.Filled.MenuBook" Class="mr-2" />
+                Data Dictionary
+            </MudText>
+        </MudItem>
+        <MudItem xs="4" Class="d-flex justify-end align-center">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="OpenAddDialog">
+                + Add Field
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+
+    <MudAlert Severity="Severity.Info" Dense="true"
+              Style="background: var(--color-info-bg); border-left: 4px solid var(--color-info); border-radius: var(--radius-md); color: var(--color-text-primary); margin-bottom: var(--space-4);">
+        Field codes follow Len's naming conventions: <span style="color: var(--color-gold); font-family: monospace;">UPPER_SNAKE_CASE</span> for structured data (<span style="color: var(--color-gold); font-family: monospace;">BIZ_NAME</span>, <span style="color: var(--color-gold); font-family: monospace;">VEHICLE_MAKE</span>),
+        <span style="color: var(--color-btn-primary-bg); font-family: monospace;">lower_snake_case</span> for underwriting questions (<span style="color: var(--color-btn-primary-bg); font-family: monospace;">uw_bankruptcy_5yr</span>), and <span style="color: var(--color-text-secondary); font-family: monospace;">PascalCase</span> for legacy fields (<span style="color: var(--color-text-secondary); font-family: monospace;">PhysicalAddress</span>).
+        When adding new fields, match the convention for that data category.
+    </MudAlert>
+
+    @* ── Search / Filter ── *@
+    <MudPaper Elevation="0" Class="mb-3">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_searchText" Placeholder="Search field code or name..."
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              DebounceInterval="300" OnDebounceIntervalElapsed="LoadFields" />
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudSelect T="string?" Value="_categoryFilter" Label="Category" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Clearable="true"
+                           ValueChanged="OnCategoryChanged">
+                    <MudSelectItem T="string?" Value="@((string?)null)">All</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("General")">General</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Coverage")">Coverage</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Financial")">Financial</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Property")">Property</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Liability")">Liability</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Location")">Location</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Classification")">Classification</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Other")">Other</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="3" Class="d-flex align-center">
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Refresh"
+                           OnClick="LoadFields">Refresh</MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @* ── Table ── *@
+    @if (_loading)
+    {
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="400px" />
+    }
+    else
+    {
+        <MudTable Items="_fields" Hover="true" Striped="true" Dense="true" Elevation="1">
+            <HeaderContent>
+                <MudTh>Field Code</MudTh>
+                <MudTh>Display Name</MudTh>
+                <MudTh>Category</MudTh>
+                <MudTh>Type</MudTh>
+                <MudTh>Synonyms</MudTh>
+                <MudTh Style="text-align:center">Sensitive</MudTh>
+                <MudTh Style="text-align:center">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Field Code">
+                    <MudText Typo="Typo.body2" Style="font-family: monospace;">@context.FieldCode</MudText>
+                </MudTd>
+                <MudTd DataLabel="Display Name">@context.DisplayName</MudTd>
+                <MudTd DataLabel="Category">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@FormatCategory(context.Category)</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Type">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info">@context.FieldType</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Synonyms">
+                    @{
+                        var synonyms = (context.Synonyms ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        var displaySynonyms = synonyms.Take(3);
+                        var remaining = synonyms.Length - 3;
+                    }
+                    @foreach (var syn in displaySynonyms)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">@syn</MudChip>
+                    }
+                    @if (remaining > 0)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Secondary">+@remaining more</MudChip>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Sensitive" Style="text-align:center">
+                    @if (context.IsSensitive)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Error" />
+                    }
+                </MudTd>
+                <MudTd DataLabel="Actions" Style="text-align:center">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                   OnClick="@(() => OpenEditDialog(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => DeleteField(context))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Align="Align.Center" Class="pa-8">
+                    No dictionary fields found. Add some using the button above.
+                </MudText>
+            </NoRecordsContent>
+        </MudTable>
+
+        <MudText Typo="Typo.caption" Class="mt-2 ml-2" Color="Color.Default">
+            @_fields.Count field(s)
+        </MudText>
+    }
+</MudContainer>
+
+@code {
+    private List<DictionaryField> _fields = new();
+    private bool _loading = true;
+    private string? _searchText;
+    private string? _categoryFilter;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadFields();
+    }
+
+    private async Task OnCategoryChanged(string? value)
+    {
+        _categoryFilter = value;
+        await LoadFields();
+    }
+
+    private async Task LoadFields()
+    {
+        _loading = true;
+        try
+        {
+            var qs = "api/dictionary";
+            var sep = '?';
+            if (!string.IsNullOrWhiteSpace(_searchText))
+            {
+                qs += $"{sep}q={Uri.EscapeDataString(_searchText)}";
+                sep = '&';
+            }
+            if (!string.IsNullOrWhiteSpace(_categoryFilter))
+            {
+                qs += $"{sep}category={Uri.EscapeDataString(_categoryFilter)}";
+            }
+
+            _fields = await Http.GetFromJsonAsync<List<DictionaryField>>(qs) ?? new();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load dictionary: {ex.Message}", Severity.Error);
+        }
+        _loading = false;
+    }
+
+    private async Task OpenAddDialog()
+    {
+        var model = new DictionaryFieldDialog.DictionaryFieldModel();
+        var parameters = new DialogParameters<DictionaryFieldDialog>
+        {
+            { x => x.Model, model },
+            { x => x.IsEdit, false }
+        };
+
+        var dialog = await DialogService.ShowAsync<DictionaryFieldDialog>("Add Field", parameters);
+        var result = await dialog.Result;
+
+        if (result != null && !result.Canceled && result.Data is DictionaryFieldDialog.DictionaryFieldModel saved)
+        {
+            try
+            {
+                var response = await Http.PostAsJsonAsync("api/dictionary", new
+                {
+                    fieldCode = saved.FieldCode,
+                    displayName = saved.DisplayName,
+                    category = saved.Category,
+                    fieldType = saved.FieldType,
+                    description = saved.Description,
+                    synonyms = saved.Synonyms,
+                    isSensitive = saved.IsSensitive
+                });
+                response.EnsureSuccessStatusCode();
+                Snackbar.Add("Field created", Severity.Success);
+                await LoadFields();
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Failed to create: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private async Task OpenEditDialog(DictionaryField field)
+    {
+        var model = new DictionaryFieldDialog.DictionaryFieldModel
+        {
+            Id = field.Id,
+            FieldCode = field.FieldCode,
+            DisplayName = field.DisplayName,
+            Category = field.Category,
+            FieldType = field.FieldType,
+            Description = field.Description,
+            Synonyms = field.Synonyms,
+            IsSensitive = field.IsSensitive
+        };
+        var parameters = new DialogParameters<DictionaryFieldDialog>
+        {
+            { x => x.Model, model },
+            { x => x.IsEdit, true }
+        };
+
+        var dialog = await DialogService.ShowAsync<DictionaryFieldDialog>("Edit Field", parameters);
+        var result = await dialog.Result;
+
+        if (result != null && !result.Canceled && result.Data is DictionaryFieldDialog.DictionaryFieldModel saved)
+        {
+            try
+            {
+                var response = await Http.PutAsJsonAsync($"api/dictionary/{saved.Id}", new
+                {
+                    fieldCode = saved.FieldCode,
+                    displayName = saved.DisplayName,
+                    category = saved.Category,
+                    fieldType = saved.FieldType,
+                    description = saved.Description,
+                    synonyms = saved.Synonyms,
+                    isSensitive = saved.IsSensitive
+                });
+                response.EnsureSuccessStatusCode();
+                Snackbar.Add("Field updated", Severity.Success);
+                await LoadFields();
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Failed to update: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private async Task DeleteField(DictionaryField field)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Confirm Delete",
+            $"Delete field '{field.DisplayName}' ({field.FieldCode})? This cannot be undone.",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            try
+            {
+                var response = await Http.DeleteAsync($"api/dictionary/{field.Id}");
+                response.EnsureSuccessStatusCode();
+                Snackbar.Add("Field deleted", Severity.Success);
+                await LoadFields();
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Failed to delete: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private static string FormatCategory(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "Uncategorized";
+        var words = raw.Split('_', '-', ' ')
+                       .Where(w => !string.IsNullOrWhiteSpace(w))
+                       .Select(w => char.ToUpper(w[0]) + w.Substring(1).ToLower())
+                       .ToList();
+        return words.Any() ? string.Join(" ", words) : "Uncategorized";
+    }
+}

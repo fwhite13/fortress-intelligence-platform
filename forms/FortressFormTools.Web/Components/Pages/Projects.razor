@@ -1,0 +1,258 @@
+@page "/projects"
+@using Microsoft.EntityFrameworkCore
+@using FortressFormTools.Data
+@using FortressFormTools.Data.Entities
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+<PageTitle>Projects — FORMS</PageTitle>
+
+<div style="padding: var(--space-6);">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-6);">
+        <div style="display: flex; align-items: center; gap: var(--space-3);">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen"
+                     Style="width: 24px; height: 24px; color: var(--color-gold);" />
+            <div>
+                <MudText Typo="Typo.h5" Style="font-weight: var(--font-bold); color: var(--color-text-primary);">
+                    Form Analysis Projects
+                </MudText>
+                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-top: var(--space-1);">
+                    Organize carrier forms into projects for targeted analysis.
+                </MudText>
+            </div>
+        </div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenNewProjectDialog">
+            New Project
+        </MudButton>
+    </div>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_projects.Count == 0)
+    {
+        <MudPaper Style="padding: var(--space-8); text-align: center; border: 1px dashed var(--color-border);">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Style="font-size: 48px; color: var(--color-text-secondary); margin-bottom: var(--space-3);" />
+            <MudText Typo="Typo.h6" Style="color: var(--color-text-secondary);">No projects yet.</MudText>
+            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-top: var(--space-2);">
+                Create your first form analysis project.
+            </MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Style="margin-top: var(--space-4);"
+                       OnClick="OpenNewProjectDialog">
+                Create Project
+            </MudButton>
+        </MudPaper>
+    }
+    else
+    {
+        <MudTable Items="@_projects" Hover="true" Striped="false"
+                  Style="border: 1px solid var(--color-border); border-radius: var(--radius-lg);">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Vertical</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Progress</MudTh>
+                <MudTh>Documents</MudTh>
+                <MudTh>Created</MudTh>
+                <MudTh>Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudLink Style="cursor: pointer; font-weight: 600;"
+                             OnClick="@(() => Nav.NavigateTo($"/projects/{context.Id}"))">
+                        @context.Name
+                    </MudLink>
+                </MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">
+                        @GetVerticalEmoji(context.Vertical) @context.Vertical
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)" Variant="Variant.Filled">
+                        @context.Status
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    @if (_projectStatuses.TryGetValue(context.Id, out var ps))
+                    {
+                        <MudStack Row="true" Spacing="1" Wrap="Wrap.Wrap">
+                            @if (ps.HasApprovedDocs)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled" Icon="@Icons.Material.Filled.CheckCircle">Docs ✓</MudChip>
+                            }
+                            @if (ps.HasFieldCodes)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled" Icon="@Icons.Material.Filled.CompareArrows">Cross-Referenced ✓</MudChip>
+                            }
+                            @if (ps.HasApprovedQS)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled" Icon="@Icons.Material.Filled.QuestionAnswer">QS Approved ✓</MudChip>
+                            }
+                        </MudStack>
+                    }
+                </MudTd>
+                <MudTd>@context.Documents.Count</MudTd>
+                <MudTd>@context.CreatedAt.ToString("MMM d, yyyy")</MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                   OnClick="@(() => Nav.NavigateTo($"/projects/{context.Id}"))"
+                                   Title="View" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => DeleteProject(context))"
+                                   Title="Delete" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</div>
+
+@code {
+    private record ProjectStatus(bool HasApprovedDocs, bool HasFieldCodes, bool HasApprovedQS);
+
+    private List<FormProject> _projects = new();
+    private Dictionary<int, ProjectStatus> _projectStatuses = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProjects();
+    }
+
+    private async Task LoadProjects()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _projects = await db.FormProjects
+                .Include(p => p.Documents)
+                .OrderByDescending(p => p.CreatedAt)
+                .ToListAsync();
+
+            // Load workflow progress for each project
+            _projectStatuses = new Dictionary<int, ProjectStatus>();
+            var projectIds = _projects.Select(p => p.Id).ToList();
+
+            var approvedDocCounts = await db.FormLibraries
+                .Where(f => projectIds.Contains(f.ProjectId ?? 0) && f.ApprovedAt != null)
+                .GroupBy(f => f.ProjectId)
+                .Select(g => new { ProjectId = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var fieldCodeCounts = await db.FormFieldCodes
+                .Where(f => projectIds.Contains(f.ProjectId))
+                .GroupBy(f => f.ProjectId)
+                .Select(g => new { ProjectId = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var approvedQsCounts = await db.QuestionSets
+                .Where(q => q.ProjectId != null && projectIds.Contains(q.ProjectId.Value) && q.Status == "Approved")
+                .GroupBy(q => q.ProjectId)
+                .Select(g => new { ProjectId = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            foreach (var p in _projects)
+            {
+                _projectStatuses[p.Id] = new ProjectStatus(
+                    HasApprovedDocs: approvedDocCounts.Any(x => x.ProjectId == p.Id && x.Count > 0),
+                    HasFieldCodes: fieldCodeCounts.Any(x => x.ProjectId == p.Id && x.Count > 0),
+                    HasApprovedQS: approvedQsCounts.Any(x => x.ProjectId == p.Id && x.Count > 0)
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load projects: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OpenNewProjectDialog()
+    {
+        var dialog = await DialogService.ShowAsync<ProjectDialog>("New Project");
+        var result = await dialog.Result;
+        if (!result.Canceled && result.Data is ProjectDialogResult data)
+        {
+            await CreateProject(data);
+        }
+    }
+
+    private async Task CreateProject(ProjectDialogResult data)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var project = new FormProject
+            {
+                Name = data.Name,
+                Vertical = data.Vertical,
+                Description = data.Description,
+                Status = "draft",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.FormProjects.Add(project);
+            await db.SaveChangesAsync();
+            Snackbar.Add($"Project '{data.Name}' created!", Severity.Success);
+            await LoadProjects();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to create project: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteProject(FormProject project)
+    {
+        var confirm = await DialogService.ShowMessageBox(
+            "Delete Project",
+            $"Delete '{project.Name}'? This will unlink all associated documents.",
+            yesText: "Delete", noText: "Cancel");
+        if (confirm != true) return;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var p = await db.FormProjects.FindAsync(project.Id);
+            if (p != null)
+            {
+                db.FormProjects.Remove(p);
+                await db.SaveChangesAsync();
+                Snackbar.Add($"Project '{project.Name}' deleted.", Severity.Info);
+                await LoadProjects();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to delete: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private string GetVerticalEmoji(string vertical) => vertical switch
+    {
+        "aviation" => "✈️",
+        "auto" => "🚗",
+        "gl" => "🏢",
+        "wc" => "👷",
+        "property" => "🏠",
+        _ => "📋"
+    };
+
+    private Color GetStatusColor(string status) => status switch
+    {
+        "draft" => Color.Default,
+        "extracting" => Color.Warning,
+        "extracted" => Color.Info,
+        "building" => Color.Primary,
+        "complete" => Color.Success,
+        _ => Color.Default
+    };
+}

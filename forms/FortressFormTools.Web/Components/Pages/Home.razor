@@ -1,0 +1,74 @@
+@page "/"
+
+<PageTitle>Home — FORMS</PageTitle>
+
+<div style="padding: var(--space-6);">
+    <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: var(--space-6);">
+        <div style="display: flex; align-items: center; gap: var(--space-3);">
+            <MudIcon Icon="@Icons.Material.Filled.AutoAwesome"
+                     Style="width: 24px; height: 24px; color: var(--color-gold);" />
+            <div>
+                <MudText Typo="Typo.h5" Style="font-weight: var(--font-bold); color: var(--color-text-primary);">
+                    Form Intelligence
+                </MudText>
+                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-top: var(--space-1);">
+                    Upload carrier PDFs, extract fields, cross-reference, and generate SurveyJS-compliant JSON.
+                </MudText>
+            </div>
+        </div>
+    </div>
+
+    <MudGrid Spacing="4">
+        <MudItem xs="12" sm="4">
+            <MudCard Style="border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); height: 100%;">
+                <MudCardContent Style="padding: var(--space-6);">
+                    <MudIcon Icon="@Icons.Material.Filled.Upload"
+                             Style="color: var(--color-gold); font-size: 32px; margin-bottom: var(--space-3);" />
+                    <MudText Typo="Typo.h6" Style="font-weight: var(--font-semibold); margin-bottom: var(--space-2);">
+                        Upload &amp; Extract
+                    </MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-bottom: var(--space-4);">
+                        Upload carrier PDF forms and extract fields, questions, and inputs automatically.
+                    </MudText>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/projects">
+                        Go →
+                    </MudButton>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudCard Style="border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); height: 100%;">
+                <MudCardContent Style="padding: var(--space-6);">
+                    <MudIcon Icon="@Icons.Material.Filled.CompareArrows"
+                             Style="color: var(--color-gold); font-size: 32px; margin-bottom: var(--space-3);" />
+                    <MudText Typo="Typo.h6" Style="font-weight: var(--font-semibold); margin-bottom: var(--space-2);">
+                        Cross-Reference
+                    </MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-bottom: var(--space-4);">
+                        Map carrier fields to your master question set and identify gaps and alignments.
+                    </MudText>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/projects">
+                        Go →
+                    </MudButton>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudCard Style="border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); height: 100%;">
+                <MudCardContent Style="padding: var(--space-6);">
+                    <MudIcon Icon="@Icons.Material.Filled.Code"
+                             Style="color: var(--color-gold); font-size: 32px; margin-bottom: var(--space-3);" />
+                    <MudText Typo="Typo.h6" Style="font-weight: var(--font-semibold); margin-bottom: var(--space-2);">
+                        Generate JSON
+                    </MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-bottom: var(--space-4);">
+                        Generate SurveyJS-compliant JSON output from your question sets and extractions.
+                    </MudText>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/projects">
+                        Go →
+                    </MudButton>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+</div>

@@ -1,0 +1,772 @@
+@page "/projects/{ProjectId:int}/question-set"
+@using Microsoft.EntityFrameworkCore
+@using FortressFormTools.Data
+@using FortressFormTools.Data.Entities
+@using System.Text.Json
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Question Set — @_projectName</PageTitle>
+
+<div style="padding: var(--space-6);">
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        @* Header *@
+        <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2);">
+            <MudLink Href="@($"/projects/{ProjectId}")" Style="color: var(--color-text-secondary); font-size: 0.875rem;">
+                ← Back to Project
+            </MudLink>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4);">
+            <MudText Typo="Typo.h5" Style="font-weight: 600;">@_projectName</MudText>
+            <MudText Typo="Typo.h6" Style="color: var(--color-text-secondary);">/ Question Set: @_questionSetName</MudText>
+            @if (_questionSetStatus == "Approved")
+            {
+                <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled">Approved</MudChip>
+            }
+            else
+            {
+                <MudChip T="string" Color="Color.Warning" Size="Size.Small" Variant="Variant.Filled">Draft</MudChip>
+            }
+        </div>
+
+        @* Toolbar *@
+        <MudPaper Elevation="1" Class="pa-3 mb-4">
+            <MudStack Row="true" Spacing="2">
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="SaveAllChanges">
+                    Save Changes
+                </MudButton>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Success"
+                           StartIcon="@Icons.Material.Filled.CheckCircle"
+                           OnClick="ApproveQuestionSet"
+                           Disabled="@(_questionSetStatus == "Approved")">
+                    Approve Question Set
+                </MudButton>
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Secondary"
+                           StartIcon="@Icons.Material.Filled.Download"
+                           OnClick="ExportJson">
+                    Export JSON
+                </MudButton>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Info"
+                           StartIcon="@Icons.Material.Filled.PlayArrow"
+                           OnClick="@(() => Nav.NavigateTo($"/projects/{ProjectId}/survey-preview"))"
+                           Disabled="@(_questionSetStatus != "Approved")">
+                    Generate Survey →
+                </MudButton>
+            </MudStack>
+        </MudPaper>
+
+        @* Two-panel layout *@
+        <MudGrid>
+
+            @* Left panel: Section list *@
+            <MudItem xs="12" md="4">
+                <MudPaper Elevation="2" Style="min-height: 500px;">
+                    <div style="padding: var(--space-3); border-bottom: 1px solid var(--color-border);">
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Sections</MudText>
+                    </div>
+
+                    <MudList T="string" Dense="true">
+                        @foreach (var section in _sections)
+                        {
+                            var sectionName = section;
+                            var fieldCount = _fields.Count(f => (f.SectionName ?? "Uncategorized") == sectionName);
+                            var isSelected = _selectedSection == sectionName;
+
+                            <MudListItem T="string"
+                                         Style="@(isSelected ? "background: var(--mud-palette-primary-lighten); font-weight: 600;" : "")"
+                                         OnClick="@(() => SelectSection(sectionName))">
+                                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                                    <div style="display: flex; align-items: center; gap: var(--space-2);">
+                                        <MudText Style="@(isSelected ? "font-weight: 600;" : "")">@sectionName</MudText>
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@fieldCount</MudChip>
+                                    </div>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                   Size="Size.Small"
+                                                   Color="Color.Error"
+                                                   OnClick="@(async () => await DeleteSection(sectionName))"
+                                                   Title="Delete section" />
+                                </div>
+                            </MudListItem>
+                        }
+                    </MudList>
+
+                    @* Add Section *@
+                    <div style="padding: var(--space-3); border-top: 1px solid var(--color-border);">
+                        @if (_addingSection)
+                        {
+                            <MudStack Spacing="2">
+                                <MudTextField @bind-Value="_newSectionName"
+                                              Label="Section Name"
+                                              Variant="Variant.Outlined"
+                                              Margin="Margin.Dense"
+                                              Adornment="Adornment.None" />
+                                <MudStack Row="true" Spacing="1">
+                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="ConfirmAddSection">Add</MudButton>
+                                    <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => { _addingSection = false; _newSectionName = string.Empty; })">Cancel</MudButton>
+                                </MudStack>
+                            </MudStack>
+                        }
+                        else
+                        {
+                            <MudButton Variant="Variant.Text"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Add"
+                                       Size="Size.Small"
+                                       FullWidth="true"
+                                       OnClick="@(() => _addingSection = true)">
+                                Add Section
+                            </MudButton>
+                        }
+                    </div>
+                </MudPaper>
+            </MudItem>
+
+            @* Right panel: Fields *@
+            <MudItem xs="12" md="8">
+                <MudPaper Elevation="2" Style="min-height: 500px;">
+                    <div style="padding: var(--space-3); border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center;">
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">
+                            @(_selectedSection ?? "Select a Section") — @_sectionFields.Count field(s)
+                        </MudText>
+                        @if (_selectedSection != null)
+                        {
+                            <MudButton Variant="Variant.Outlined"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Add"
+                                       Size="Size.Small"
+                                       OnClick="@(() => { _addingField = true; _newFieldCode = string.Empty; _newFieldLabel = string.Empty; _newFieldType = "text"; })">
+                                Add Field
+                            </MudButton>
+                        }
+                    </div>
+
+                    @if (_selectedSection == null)
+                    {
+                        <div style="padding: var(--space-6); text-align: center; color: var(--color-text-secondary);">
+                            <MudText>Select a section on the left to view and edit its fields.</MudText>
+                        </div>
+                    }
+                    else
+                    {
+                        <div style="padding: var(--space-2);">
+                            @foreach (var field in _sectionFields)
+                            {
+                                var isExpanded = _expandedFieldId == field.Id;
+                                <MudPaper Elevation="0" Style="border: 1px solid var(--color-border); border-radius: var(--radius-md); margin-bottom: var(--space-2);">
+                                    @* Field row *@
+                                    <div style="padding: var(--space-2) var(--space-3); display: flex; align-items: center; gap: var(--space-2); cursor: pointer;"
+                                         @onclick="@(() => ToggleFieldExpand(field))">
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                                 Style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                                            @field.FieldCode
+                                        </MudChip>
+                                        <MudText Style="flex: 1; font-weight: 500;">@field.FieldLabel</MudText>
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@field.FieldType</MudChip>
+                                        @if (field.IsShared)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled">Shared</MudChip>
+                                        }
+                                        @if (field.IsSensitive)
+                                        {
+                                            <MudIcon Icon="@Icons.Material.Filled.Lock" Size="Size.Small" Color="Color.Warning" Title="Sensitive" />
+                                        }
+                                        @if (field.IsRequired)
+                                        {
+                                            <span style="color: var(--mud-palette-error); font-weight: bold; font-size: 1rem;" title="Required">*</span>
+                                        }
+                                        <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => ToggleFieldExpand(field))" />
+                                    </div>
+
+                                    @* Inline field editor *@
+                                    @if (isExpanded && _editingField != null)
+                                    {
+                                        <div style="padding: var(--space-4); border-top: 1px solid var(--color-border); background: var(--mud-palette-background-grey);">
+                                            <MudGrid Spacing="2">
+                                                <MudItem xs="12">
+                                                    <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">Field Code</MudText>
+                                                    <MudText Style="font-family: 'JetBrains Mono', monospace; font-weight: 600;">@_editingField.FieldCode</MudText>
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudTextField @bind-Value="_editingField.FieldLabel"
+                                                                  Label="Field Label"
+                                                                  Variant="Variant.Outlined"
+                                                                  Margin="Margin.Dense" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudSelect @bind-Value="_editingField.FieldType"
+                                                               Label="Field Type"
+                                                               Variant="Variant.Outlined"
+                                                               Margin="Margin.Dense">
+                                                        <MudSelectItem Value="@("text")">Text</MudSelectItem>
+                                                        <MudSelectItem Value="@("number")">Number</MudSelectItem>
+                                                        <MudSelectItem Value="@("currency")">Currency</MudSelectItem>
+                                                        <MudSelectItem Value="@("date")">Date</MudSelectItem>
+                                                        <MudSelectItem Value="@("yes_no")">Yes / No</MudSelectItem>
+                                                        <MudSelectItem Value="@("checkbox")">Checkbox</MudSelectItem>
+                                                        <MudSelectItem Value="@("select")">Select</MudSelectItem>
+                                                        <MudSelectItem Value="@("textarea")">Textarea</MudSelectItem>
+                                                    </MudSelect>
+                                                </MudItem>
+                                                <MudItem xs="12" sm="4">
+                                                    <MudSwitch @bind-Value="_editingField.IsRequired" Label="Required" Color="Color.Primary" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="4">
+                                                    <MudSwitch @bind-Value="_editingField.IsSensitive" Label="Sensitive" Color="Color.Warning" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="4">
+                                                    <MudSwitch @bind-Value="_editingField.IsShared" Label="Shared" Color="Color.Info" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudTextField @bind-Value="_editingField.PanelId"
+                                                                  Label="Panel ID (optional)"
+                                                                  Variant="Variant.Outlined"
+                                                                  Margin="Margin.Dense"
+                                                                  HelperText="Panel name for repeating entities" />
+                                                </MudItem>
+                                                <MudItem xs="12" sm="6">
+                                                    <MudSelect @bind-Value="_editingField.SectionName"
+                                                               Label="Section"
+                                                               Variant="Variant.Outlined"
+                                                               Margin="Margin.Dense">
+                                                        @foreach (var sec in _sections)
+                                                        {
+                                                            <MudSelectItem Value="@sec">@sec</MudSelectItem>
+                                                        }
+                                                    </MudSelect>
+                                                </MudItem>
+                                                @{
+                                                    var carriers = GetCarrierList(_editingField.CarrierSources);
+                                                }
+                                                @if (carriers.Length > 0)
+                                                {
+                                                    <MudItem xs="12">
+                                                        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">Carrier Sources</MudText>
+                                                        <div style="display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1);">
+                                                            @foreach (var carrier in carriers)
+                                                            {
+                                                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@carrier</MudChip>
+                                                            }
+                                                        </div>
+                                                    </MudItem>
+                                                }
+                                                <MudItem xs="12">
+                                                    <MudStack Row="true" Spacing="2">
+                                                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                                                   StartIcon="@Icons.Material.Filled.Save"
+                                                                   OnClick="SaveField">
+                                                            Save Field
+                                                        </MudButton>
+                                                        <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                                                                   StartIcon="@Icons.Material.Filled.Delete"
+                                                                   OnClick="@(async () => await DeleteField(_editingField.Id))">
+                                                            Delete Field
+                                                        </MudButton>
+                                                    </MudStack>
+                                                </MudItem>
+                                            </MudGrid>
+                                        </div>
+                                    }
+                                </MudPaper>
+                            }
+
+                            @* Empty state *@
+                            @if (_sectionFields.Count == 0 && !_addingField)
+                            {
+                                <MudAlert Severity="Severity.Info" Variant="Variant.Text" Class="ma-2">
+                                    No fields in this section. Add fields using the "Add Field" button above, or run
+                                    <MudLink Href="@($"/projects/{ProjectId}/cross-reference")">Cross-Reference</MudLink>
+                                    to auto-populate from your approved documents.
+                                </MudAlert>
+                            }
+
+                            @* Add Field inline form *@
+                            @if (_addingField)
+                            {
+                                <MudPaper Elevation="0" Style="border: 2px dashed var(--color-primary); border-radius: var(--radius-md); padding: var(--space-4); margin-top: var(--space-2);">
+                                    <MudText Typo="Typo.subtitle2" Style="margin-bottom: var(--space-3);">New Field</MudText>
+                                    <MudGrid Spacing="2">
+                                        <MudItem xs="12" sm="4">
+                                            <MudTextField @bind-Value="_newFieldCode"
+                                                          Label="Field Code"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          HelperText="UPPER_SNAKE_CASE or lowercase_snake_case" />
+                                        </MudItem>
+                                        <MudItem xs="12" sm="5">
+                                            <MudTextField @bind-Value="_newFieldLabel"
+                                                          Label="Field Label"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense" />
+                                        </MudItem>
+                                        <MudItem xs="12" sm="3">
+                                            <MudSelect @bind-Value="_newFieldType"
+                                                       Label="Field Type"
+                                                       Variant="Variant.Outlined"
+                                                       Margin="Margin.Dense">
+                                                <MudSelectItem Value="@("text")">Text</MudSelectItem>
+                                                <MudSelectItem Value="@("number")">Number</MudSelectItem>
+                                                <MudSelectItem Value="@("currency")">Currency</MudSelectItem>
+                                                <MudSelectItem Value="@("date")">Date</MudSelectItem>
+                                                <MudSelectItem Value="@("yes_no")">Yes / No</MudSelectItem>
+                                                <MudSelectItem Value="@("checkbox")">Checkbox</MudSelectItem>
+                                                <MudSelectItem Value="@("select")">Select</MudSelectItem>
+                                                <MudSelectItem Value="@("textarea")">Textarea</MudSelectItem>
+                                            </MudSelect>
+                                        </MudItem>
+                                        <MudItem xs="12">
+                                            <MudStack Row="true" Spacing="2">
+                                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                                           StartIcon="@Icons.Material.Filled.Add"
+                                                           OnClick="AddField">
+                                                    Add Field
+                                                </MudButton>
+                                                <MudButton Variant="Variant.Text" Size="Size.Small"
+                                                           OnClick="@(() => _addingField = false)">
+                                                    Cancel
+                                                </MudButton>
+                                            </MudStack>
+                                        </MudItem>
+                                    </MudGrid>
+                                </MudPaper>
+                            }
+                        </div>
+                    }
+                </MudPaper>
+            </MudItem>
+
+        </MudGrid>
+    }
+</div>
+
+@code {
+    [Parameter] public int ProjectId { get; set; }
+
+    // State
+    private bool _loading = true;
+    private string _projectName = string.Empty;
+    private string _questionSetName = "Unnamed";
+    private string _questionSetStatus = "Draft";
+    private int? _questionSetId;
+
+    private List<FormFieldCode> _fields = new();
+    private List<string> _sections = new();
+    private string? _selectedSection;
+    private List<FormFieldCode> _sectionFields = new();
+
+    private int? _expandedFieldId;
+    private FormFieldCode? _editingField;
+
+    private bool _addingField;
+    private string _newFieldCode = string.Empty;
+    private string _newFieldLabel = string.Empty;
+    private string _newFieldType = "text";
+
+    private bool _addingSection;
+    private string _newSectionName = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var project = await db.FormProjects
+                .AsNoTracking()
+                .Where(p => p.Id == ProjectId)
+                .FirstOrDefaultAsync();
+            _projectName = project?.Name ?? "Unknown Project";
+
+            var questionSet = await db.QuestionSets
+                .Where(q => q.ProjectId == ProjectId)
+                .OrderByDescending(q => q.UpdatedAt)
+                .FirstOrDefaultAsync();
+            if (questionSet == null)
+            {
+                // Auto-create a Draft QuestionSet so Approve works even before cross-reference runs
+                questionSet = new QuestionSet
+                {
+                    ProjectId = ProjectId,
+                    Name = (project?.Name ?? "Project") + " — Question Set",
+                    Status = "Draft",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                db.QuestionSets.Add(questionSet);
+                await db.SaveChangesAsync();
+            }
+            _questionSetName = questionSet.Name;
+            _questionSetStatus = questionSet.Status;
+            _questionSetId = questionSet.Id;
+
+            _fields = await db.FormFieldCodes
+                .AsNoTracking()
+                .Where(f => f.ProjectId == ProjectId)
+                .OrderBy(f => f.SortOrder)
+                .ThenBy(f => f.FieldLabel)
+                .ToListAsync();
+
+            RebuildSections();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void RebuildSections()
+    {
+        _sections = _fields
+            .Select(f => string.IsNullOrWhiteSpace(f.SectionName) ? "Uncategorized" : f.SectionName)
+            .Distinct()
+            .OrderBy(s => s == "Uncategorized" ? "zzz" : s)
+            .ToList();
+
+        // Ensure Uncategorized is always available
+        if (!_sections.Contains("Uncategorized"))
+            _sections.Add("Uncategorized");
+
+        if (_selectedSection != null && !_sections.Contains(_selectedSection))
+            _selectedSection = null;
+
+        UpdateSectionFields();
+    }
+
+    private void SelectSection(string section)
+    {
+        _selectedSection = section;
+        _expandedFieldId = null;
+        _editingField = null;
+        _addingField = false;
+        UpdateSectionFields();
+        StateHasChanged();
+    }
+
+    private void UpdateSectionFields()
+    {
+        if (_selectedSection == null)
+        {
+            _sectionFields = new List<FormFieldCode>();
+            return;
+        }
+        _sectionFields = _fields
+            .Where(f => (string.IsNullOrWhiteSpace(f.SectionName) ? "Uncategorized" : f.SectionName) == _selectedSection)
+            .OrderBy(f => f.SortOrder)
+            .ThenBy(f => f.FieldLabel)
+            .ToList();
+    }
+
+    private void ToggleFieldExpand(FormFieldCode field)
+    {
+        if (_expandedFieldId == field.Id)
+        {
+            _expandedFieldId = null;
+            _editingField = null;
+        }
+        else
+        {
+            _expandedFieldId = field.Id;
+            // Create a mutable copy for editing
+            _editingField = new FormFieldCode
+            {
+                Id = field.Id,
+                ProjectId = field.ProjectId,
+                FieldCode = field.FieldCode,
+                FieldLabel = field.FieldLabel,
+                FieldType = field.FieldType,
+                IsSensitive = field.IsSensitive,
+                IsShared = field.IsShared,
+                IsRequired = field.IsRequired,
+                SectionName = field.SectionName,
+                PanelId = field.PanelId,
+                SortOrder = field.SortOrder,
+                CarrierSources = field.CarrierSources,
+                CreatedAt = field.CreatedAt
+            };
+        }
+        StateHasChanged();
+    }
+
+    private async Task SaveField()
+    {
+        if (_editingField == null) return;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var entity = await db.FormFieldCodes.FindAsync(_editingField.Id);
+            if (entity == null)
+            {
+                Snackbar.Add("Field not found.", Severity.Error);
+                return;
+            }
+            entity.FieldLabel = _editingField.FieldLabel;
+            entity.FieldType = _editingField.FieldType;
+            entity.IsRequired = _editingField.IsRequired;
+            entity.IsSensitive = _editingField.IsSensitive;
+            entity.IsShared = _editingField.IsShared;
+            entity.PanelId = _editingField.PanelId;
+            entity.SectionName = _editingField.SectionName;
+            await db.SaveChangesAsync();
+
+            Snackbar.Add($"Field '{entity.FieldCode}' saved.", Severity.Success);
+            _expandedFieldId = null;
+            _editingField = null;
+            await LoadData();
+            if (_selectedSection != null)
+            {
+                UpdateSectionFields();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error saving field: {ex.Message}", Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private async Task DeleteField(int fieldId)
+    {
+        var field = _fields.FirstOrDefault(f => f.Id == fieldId);
+        var confirmed = await DialogService.ShowMessageBox(
+            "Confirm Delete",
+            $"Delete field '{field?.FieldCode}'? This cannot be undone.",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            try
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                var entity = await db.FormFieldCodes.FindAsync(fieldId);
+                if (entity != null)
+                {
+                    db.FormFieldCodes.Remove(entity);
+                    await db.SaveChangesAsync();
+                }
+                _expandedFieldId = null;
+                _editingField = null;
+                Snackbar.Add("Field deleted.", Severity.Success);
+                await LoadData();
+                UpdateSectionFields();
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error deleting field: {ex.Message}", Severity.Error);
+            }
+        }
+        StateHasChanged();
+    }
+
+    private async Task AddField()
+    {
+        if (string.IsNullOrWhiteSpace(_newFieldCode) || string.IsNullOrWhiteSpace(_newFieldLabel))
+        {
+            Snackbar.Add("Field Code and Label are required.", Severity.Warning);
+            return;
+        }
+        if (_selectedSection == null)
+        {
+            Snackbar.Add("Please select a section first.", Severity.Warning);
+            return;
+        }
+
+        if (_fields.Any(f => string.Equals(f.FieldCode, _newFieldCode.Trim(), StringComparison.OrdinalIgnoreCase)))
+        {
+            Snackbar.Add($"A field with code '{_newFieldCode.Trim()}' already exists in this project.", Severity.Warning);
+            return;
+        }
+
+        var nextSortOrder = _sectionFields.Count > 0 ? _sectionFields.Max(f => f.SortOrder) + 1 : 0;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var newField = new FormFieldCode
+            {
+                ProjectId = ProjectId,
+                FieldCode = _newFieldCode.Trim(),
+                FieldLabel = _newFieldLabel.Trim(),
+                FieldType = _newFieldType,
+                SectionName = _selectedSection == "Uncategorized" ? null : _selectedSection,
+                SortOrder = nextSortOrder,
+                CreatedAt = DateTime.UtcNow
+            };
+            db.FormFieldCodes.Add(newField);
+            await db.SaveChangesAsync();
+
+            _addingField = false;
+            _newFieldCode = string.Empty;
+            _newFieldLabel = string.Empty;
+            _newFieldType = "text";
+            Snackbar.Add($"Field '{newField.FieldCode}' added.", Severity.Success);
+            await LoadData();
+            UpdateSectionFields();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error adding field: {ex.Message}", Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private async Task DeleteSection(string sectionName)
+    {
+        var fieldCount = _fields.Count(f => (f.SectionName ?? "Uncategorized") == sectionName);
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete Section",
+            $"Delete section '{sectionName}'? {(fieldCount > 0 ? $"{fieldCount} field(s) will be moved to 'Uncategorized'." : "No fields will be affected.")}",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            try
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                var fieldsToMove = await db.FormFieldCodes
+                    .Where(f => f.ProjectId == ProjectId && (f.SectionName == sectionName || (f.SectionName == null && sectionName == "Uncategorized")))
+                    .ToListAsync();
+                foreach (var f in fieldsToMove)
+                {
+                    f.SectionName = null; // null = Uncategorized
+                }
+                await db.SaveChangesAsync();
+
+                if (_selectedSection == sectionName)
+                {
+                    _selectedSection = null;
+                    _expandedFieldId = null;
+                    _editingField = null;
+                }
+                Snackbar.Add($"Section '{sectionName}' deleted.", Severity.Success);
+                await LoadData();
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error deleting section: {ex.Message}", Severity.Error);
+            }
+        }
+        StateHasChanged();
+    }
+
+    private void ConfirmAddSection()
+    {
+        if (string.IsNullOrWhiteSpace(_newSectionName))
+        {
+            Snackbar.Add("Section name cannot be empty.", Severity.Warning);
+            return;
+        }
+        if (_sections.Contains(_newSectionName.Trim()))
+        {
+            Snackbar.Add("A section with that name already exists.", Severity.Warning);
+            return;
+        }
+        // Sections are derived from field data; adding an empty section is a UI-only concept
+        // We add it to the list visually and select it — fields added to it will persist the name
+        var name = _newSectionName.Trim();
+        _sections.Add(name);
+        _sections = _sections.OrderBy(s => s == "Uncategorized" ? "zzz" : s).ToList();
+        _addingSection = false;
+        _newSectionName = string.Empty;
+        SelectSection(name);
+        StateHasChanged();
+    }
+
+    private async Task ApproveQuestionSet()
+    {
+        if (_questionSetId == null)
+        {
+            Snackbar.Add("No question set found for this project.", Severity.Warning);
+            return;
+        }
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var qs = await db.QuestionSets.FindAsync(_questionSetId);
+            if (qs == null)
+            {
+                Snackbar.Add("Question set not found.", Severity.Error);
+                return;
+            }
+            qs.Status = "Approved";
+            qs.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            _questionSetStatus = "Approved";
+            Snackbar.Add("Question set approved — ready for SurveyJS generation", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error approving: {ex.Message}", Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private async Task ExportJson()
+    {
+        try
+        {
+            var exportData = _fields.Select(f => new
+            {
+                fieldCode = f.FieldCode,
+                fieldLabel = f.FieldLabel,
+                fieldType = f.FieldType,
+                isRequired = f.IsRequired,
+                isSensitive = f.IsSensitive,
+                sectionName = string.IsNullOrWhiteSpace(f.SectionName) ? "Uncategorized" : f.SectionName,
+                panelId = f.PanelId,
+                isShared = f.IsShared,
+                carrierSources = GetCarrierList(f.CarrierSources)
+            }).ToList();
+
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            var json = JsonSerializer.Serialize(exportData, options);
+            await JS.InvokeVoidAsync("downloadFile", "question-set.json", json);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Export error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void SaveAllChanges()
+    {
+        Snackbar.Add("Fields are saved automatically on edit.", Severity.Info);
+    }
+
+    private string[] GetCarrierList(string? carrierSourcesJson)
+    {
+        if (string.IsNullOrWhiteSpace(carrierSourcesJson)) return Array.Empty<string>();
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(carrierSourcesJson) ?? Array.Empty<string>();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+}

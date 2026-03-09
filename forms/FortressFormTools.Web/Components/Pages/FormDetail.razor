@@ -1,0 +1,512 @@
+@page "/forms/{Id:int}"
+@using System.Net.Http.Json
+@using FortressFormTools.Web.Models
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@implements IDisposable
+
+<PageTitle>@(_form?.FormName ?? "Form Detail") — FORMS</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+
+    @if (_loading)
+    {
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="48px" Class="mb-4" />
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="80px" Class="mb-4" />
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="400px" />
+    }
+    else if (_form == null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-4">Form not found.</MudAlert>
+        <MudButton Variant="Variant.Text" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.ArrowBack"
+                   Href="@(ProjectId.HasValue ? $"/projects/{ProjectId}" : "/forms")">@(ProjectId.HasValue ? "Back to Project" : "Back to Library")</MudButton>
+    }
+    else
+    {
+        @* ── Top Bar ── *@
+        <div class="d-flex align-center mb-4">
+            <MudButton Variant="Variant.Text" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.ArrowBack"
+                       Href="@(ProjectId.HasValue ? $"/projects/{ProjectId}" : "/forms")" Class="mr-3">
+                @(ProjectId.HasValue ? "Back to Project" : "Back to Library")
+            </MudButton>
+            <MudText Typo="Typo.h5" Style="flex: 1;">
+                <MudIcon Icon="@Icons.Material.Filled.Description" Class="mr-2" />
+                @_form.FormName
+            </MudText>
+            <MudChip T="string" Size="Size.Medium" Color="@GetStatusColor(_form.Status)" Class="mr-2">
+                @GetStatusIcon(_form.Status) @_form.Status
+            </MudChip>
+            @if (_form.Status == "Error")
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Warning"
+                           StartIcon="@Icons.Material.Filled.Refresh"
+                           OnClick="RetryExtraction"
+                           Disabled="_retrying" Class="mr-2">
+                    @(_retrying ? "Retrying..." : "Retry")
+                </MudButton>
+            }
+            <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                       StartIcon="@Icons.Material.Filled.Delete"
+                       OnClick="DeleteForm"
+                       Disabled="_deleting" Class="mr-2">
+                @(_deleting ? "Deleting..." : "Delete")
+            </MudButton>
+            @if (_form.Status is "Draft" or "Reviewed" or "Approved")
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary"
+                           StartIcon="@Icons.Material.Filled.CheckCircle"
+                           OnClick="ApproveForm"
+                           Disabled="_approving">
+                    @(_approving ? "Approving..." : "Approve Form")
+                </MudButton>
+            }
+        </div>
+
+        @* ── Metadata Row ── *@
+        <MudPaper Elevation="1" Class="pa-4 mb-4">
+            <MudGrid>
+                <MudItem xs="12" md="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Carrier</MudText>
+                    <MudText Typo="Typo.body1" Style="font-weight: 600;">@_form.CarrierName</MudText>
+                </MudItem>
+                <MudItem xs="6" md="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Form Type</MudText>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@_form.FormType</MudChip>
+                </MudItem>
+                <MudItem xs="6" md="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Status</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(_form.Status)">
+                        @GetStatusIcon(_form.Status) @_form.Status
+                    </MudChip>
+                </MudItem>
+                <MudItem xs="6" md="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Pages</MudText>
+                    <MudText Typo="Typo.body1">@(_form.PageCount?.ToString() ?? "—")</MudText>
+                </MudItem>
+                <MudItem xs="6" md="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Fields</MudText>
+                    <MudText Typo="Typo.body1">@_form.Fields.Count</MudText>
+                </MudItem>
+                <MudItem xs="12" md="2">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Uploaded</MudText>
+                    <MudText Typo="Typo.body1">@_form.CreatedAt.ToLocalTime().ToString("MMM dd, yyyy")</MudText>
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+
+        @* ── Status-specific content ── *@
+        @if (_form.Status == "Processing")
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-4">
+                Extraction in progress... This page will update automatically.
+            </MudAlert>
+            <MudProgressLinear Color="Color.Info" Indeterminate="true" Class="mb-4" />
+        }
+        else if (_form.Status == "Error")
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">
+                Extraction failed. @(_form.ErrorMessage ?? "Please re-upload.")
+            </MudAlert>
+        }
+        else if (_form.Status == "Queued")
+        {
+            <MudAlert Severity="Severity.Warning" Class="mb-4">
+                Queued for extraction. Processing will begin shortly.
+            </MudAlert>
+        }
+        else
+        {
+            @* ── Side-by-side Review Layout (Draft / Reviewed / Approved) ── *@
+            <div class="review-layout">
+
+                @* ── LEFT: PDF Viewer ── *@
+                <MudPaper Elevation="1" Class="review-pdf-pane" Style="flex: 0 0 55%; overflow: hidden;">
+                    <object data="/api/forms/@Id/pdf" type="application/pdf" width="100%" style="height:calc(100vh - 130px)">
+                        <MudAlert Severity="Severity.Warning" Class="ma-4">
+                            Unable to display PDF inline.
+                            <MudLink Href="@($"/api/forms/{Id}/pdf")" Target="_blank">Download PDF</MudLink>
+                        </MudAlert>
+                    </object>
+                </MudPaper>
+
+                @* ── RIGHT: Editable Fields ── *@
+                <MudPaper Elevation="1" Class="review-fields-pane pa-4" Style="flex: 0 0 45%; overflow-y: auto; height: calc(100vh - 130px);">
+
+                    @* ── Search + Section Filter ── *@
+                    <MudTextField T="string" @bind-Value="_searchText"
+                                  Label="Search fields"
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Search"
+                                  Immediate="true"
+                                  Class="mb-3" />
+
+                    <MudSelect T="string" @bind-Value="_sectionFilter"
+                               Label="Filter by section"
+                               Clearable="true"
+                               Class="mb-4">
+                        @foreach (var sec in _sections)
+                        {
+                            <MudSelectItem T="string" Value="@sec">@sec</MudSelectItem>
+                        }
+                    </MudSelect>
+
+                    @* ── Field Expansion Panels ── *@
+                    @if (_filteredEditModels.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-4" Style="text-align: center;">
+                            No fields match the current filter.
+                        </MudText>
+                    }
+                    else
+                    {
+                        <MudExpansionPanels MultiExpansion="true">
+                            @foreach (var field in _filteredEditModels)
+                            {
+                                <MudExpansionPanel>
+                                    <TitleContent>
+                                        <div class="d-flex align-center" style="width: 100%; gap: 8px;">
+                                            <MudText Style="flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                                @field.FieldLabel
+                                            </MudText>
+                                            @if (field.AiConfidence.HasValue)
+                                            {
+                                                var pct = (int)(field.AiConfidence.Value * 100);
+                                                var cls = pct >= 90 ? "confidence-high" : pct >= 70 ? "confidence-medium" : "confidence-low";
+                                                <span class="@cls">@pct%</span>
+                                            }
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@field.FieldType</MudChip>
+                                        </div>
+                                    </TitleContent>
+                                    <ChildContent>
+                                        <MudGrid Class="pt-2">
+                                            <MudItem xs="12">
+                                                <MudTextField T="string" @bind-Value="field.FieldLabel"
+                                                              Label="Label"
+                                                              Variant="Variant.Outlined"
+                                                              Dense="true" />
+                                            </MudItem>
+                                            <MudItem xs="12" sm="6">
+                                                <MudSelect T="string" @bind-Value="field.FieldType"
+                                                           Label="Field Type"
+                                                           Variant="Variant.Outlined"
+                                                           Dense="true">
+                                                    @foreach (var ft in _fieldTypes)
+                                                    {
+                                                        <MudSelectItem T="string" Value="@ft">@ft</MudSelectItem>
+                                                    }
+                                                </MudSelect>
+                                            </MudItem>
+                                            <MudItem xs="12" sm="6">
+                                                <MudTextField T="string" @bind-Value="field.SectionName"
+                                                              Label="Section"
+                                                              Variant="Variant.Outlined"
+                                                              Dense="true" />
+                                            </MudItem>
+                                            <MudItem xs="12" sm="6">
+                                                <MudCheckBox T="bool" @bind-Value="field.IsRequired"
+                                                             Label="Required" />
+                                            </MudItem>
+                                            <MudItem xs="12">
+                                                <MudTextField T="string" @bind-Value="field.Notes"
+                                                              Label="Notes"
+                                                              Variant="Variant.Outlined"
+                                                              Lines="2"
+                                                              Multiline="true"
+                                                              Dense="true" />
+                                            </MudItem>
+                                        </MudGrid>
+                                    </ChildContent>
+                                </MudExpansionPanel>
+                            }
+                        </MudExpansionPanels>
+                    }
+
+                    @* ── Save Button ── *@
+                    <div class="d-flex justify-end mt-4">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   OnClick="SaveChanges"
+                                   Disabled="_saving">
+                            @(_saving ? "Saving..." : "Save Changes")
+                        </MudButton>
+                    </div>
+
+                </MudPaper>
+
+            </div>
+        }
+    }
+</MudContainer>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    [SupplyParameterFromQuery]
+    public int? ProjectId { get; set; }
+
+    private FormDetailDto? _form;
+    private bool _loading = true;
+    private bool _saving = false;
+    private bool _approving = false;
+    private bool _deleting = false;
+    private bool _retrying = false;
+    private Timer? _pollTimer;
+    private List<EditModel> _editModels = new();
+    private string _searchText = string.Empty;
+    private string? _sectionFilter;
+
+    private static readonly string[] _fieldTypes =
+    [
+        "text", "number", "date", "checkbox", "dropdown",
+        "radio", "textarea", "currency", "phone", "email", "address"
+    ];
+
+    private List<string> _sections =>
+        _editModels
+            .Where(f => !string.IsNullOrWhiteSpace(f.SectionName))
+            .Select(f => f.SectionName!)
+            .Distinct()
+            .OrderBy(s => s)
+            .ToList();
+
+    private List<EditModel> _filteredEditModels =>
+        _editModels
+            .Where(f =>
+                (string.IsNullOrWhiteSpace(_searchText) ||
+                 f.FieldLabel.Contains(_searchText, StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(_sectionFilter) ||
+                 f.SectionName == _sectionFilter))
+            .OrderBy(f => f.SectionName ?? string.Empty)
+            .ThenBy(f => f.FieldLabel)
+            .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadForm();
+    }
+
+    private async Task LoadForm()
+    {
+        _loading = true;
+        try
+        {
+            var response = await Http.GetAsync($"api/forms/{Id}");
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Snackbar.Add("Form not found", Severity.Error);
+                _form = null;
+            }
+            else
+            {
+                response.EnsureSuccessStatusCode();
+                _form = await response.Content.ReadFromJsonAsync<FormDetailDto>();
+                BuildEditModels();
+            }
+
+            if (_form?.Status is "Queued" or "Processing")
+            {
+                StartPolling();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load form: {ex.Message}", Severity.Error);
+        }
+        _loading = false;
+    }
+
+    private void BuildEditModels()
+    {
+        if (_form == null) return;
+        _editModels = _form.Fields.Select(f => new EditModel
+        {
+            Id = f.Id,
+            FieldLabel = f.FieldLabel,
+            FieldType = f.FieldType,
+            SectionName = f.SectionName,
+            IsRequired = f.IsRequired,
+            AiConfidence = f.AiConfidence,
+            Notes = string.Empty
+        }).ToList();
+    }
+
+    private async Task SaveChanges()
+    {
+        _saving = true;
+        try
+        {
+            var payload = _editModels.Select(m => new FormFieldDto
+            {
+                Id = m.Id,
+                FieldLabel = m.FieldLabel,
+                FieldType = m.FieldType,
+                SectionName = m.SectionName,
+                IsRequired = m.IsRequired,
+                AiConfidence = m.AiConfidence
+            }).ToList();
+
+            var response = await Http.PutAsJsonAsync($"api/forms/{Id}/fields", payload);
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Changes saved successfully.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("Failed to save changes.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error saving: {ex.Message}", Severity.Error);
+        }
+        _saving = false;
+    }
+
+    private async Task ApproveForm()
+    {
+        _approving = true;
+        try
+        {
+            var response = await Http.PostAsync($"api/forms/{Id}/approve", null);
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Form approved.", Severity.Success);
+                await LoadForm();
+            }
+            else
+            {
+                Snackbar.Add("Failed to approve form.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error approving: {ex.Message}", Severity.Error);
+        }
+        _approving = false;
+    }
+
+    private void StartPolling()
+    {
+        _pollTimer?.Dispose();
+        _pollTimer = new Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                try
+                {
+                    var detail = await Http.GetFromJsonAsync<FormDetailDto>($"api/forms/{Id}");
+                    if (detail != null)
+                    {
+                        _form = detail;
+                        BuildEditModels();
+                        if (detail.Status is not "Queued" and not "Processing")
+                        {
+                            _pollTimer?.Dispose();
+                            _pollTimer = null;
+                        }
+                        StateHasChanged();
+                    }
+                }
+                catch { /* ignore polling errors */ }
+            });
+        }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+    }
+
+    private static Color GetStatusColor(string status) => status switch
+    {
+        "Queued" => Color.Default,
+        "Processing" => Color.Warning,
+        "Draft" => Color.Info,
+        "Reviewed" => Color.Success,
+        "Approved" => Color.Primary,
+        "Error" => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string GetStatusIcon(string status) => status switch
+    {
+        "Queued" => "⏳",
+        "Processing" => "🔄",
+        "Draft" => "📝",
+        "Reviewed" => "✅",
+        "Approved" => "✅",
+        "Error" => "❌",
+        _ => "•"
+    };
+
+    public void Dispose()
+    {
+        _pollTimer?.Dispose();
+    }
+
+    private async Task DeleteForm()
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Confirm Delete",
+            $"Delete '{_form?.FormName}'? This cannot be undone.",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            _deleting = true;
+            try
+            {
+                var response = await Http.DeleteAsync($"api/forms/{Id}");
+                if (response.IsSuccessStatusCode)
+                {
+                    Snackbar.Add("Form deleted", Severity.Success);
+                    Nav.NavigateTo(ProjectId.HasValue ? $"/projects/{ProjectId}" : "/forms");
+                }
+                else
+                {
+                    Snackbar.Add("Failed to delete form", Severity.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error deleting: {ex.Message}", Severity.Error);
+            }
+            _deleting = false;
+        }
+    }
+
+    private async Task RetryExtraction()
+    {
+        _retrying = true;
+        try
+        {
+            var response = await Http.PostAsync($"api/forms/{Id}/resubmit", null);
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Form resubmitted for extraction", Severity.Success);
+                await LoadForm();
+            }
+            else
+            {
+                Snackbar.Add("Failed to resubmit", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        _retrying = false;
+    }
+
+    private class EditModel
+    {
+        public int Id { get; set; }
+        public string FieldLabel { get; set; } = string.Empty;
+        public string FieldType { get; set; } = string.Empty;
+        public string? SectionName { get; set; }
+        public bool IsRequired { get; set; }
+        public decimal? AiConfidence { get; set; }
+        public string Notes { get; set; } = string.Empty;
+    }
+}

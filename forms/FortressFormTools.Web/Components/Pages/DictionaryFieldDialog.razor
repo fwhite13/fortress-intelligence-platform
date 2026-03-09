@@ -1,0 +1,76 @@
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent>
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <MudText Typo="Typo.h6">@(IsEdit ? "Edit Field" : "Add Field")</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="Cancel" />
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="Model.FieldCode" Label="Field Code" Variant="Variant.Outlined"
+                      Required="true" RequiredError="Field code is required" Class="mb-3" />
+        <MudTextField @bind-Value="Model.DisplayName" Label="Display Name" Variant="Variant.Outlined"
+                      Required="true" RequiredError="Display name is required" Class="mb-3" />
+        <MudSelect @bind-Value="Model.Category" Label="Category" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem Value="@("General")">General</MudSelectItem>
+            <MudSelectItem Value="@("Coverage")">Coverage</MudSelectItem>
+            <MudSelectItem Value="@("Financial")">Financial</MudSelectItem>
+            <MudSelectItem Value="@("Property")">Property</MudSelectItem>
+            <MudSelectItem Value="@("Liability")">Liability</MudSelectItem>
+            <MudSelectItem Value="@("Location")">Location</MudSelectItem>
+            <MudSelectItem Value="@("Classification")">Classification</MudSelectItem>
+            <MudSelectItem Value="@("Other")">Other</MudSelectItem>
+        </MudSelect>
+        <MudSelect @bind-Value="Model.FieldType" Label="Field Type" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem Value="@("text")">text</MudSelectItem>
+            <MudSelectItem Value="@("number")">number</MudSelectItem>
+            <MudSelectItem Value="@("date")">date</MudSelectItem>
+            <MudSelectItem Value="@("checkbox")">checkbox</MudSelectItem>
+            <MudSelectItem Value="@("dropdown")">dropdown</MudSelectItem>
+            <MudSelectItem Value="@("radio")">radio</MudSelectItem>
+            <MudSelectItem Value="@("textarea")">textarea</MudSelectItem>
+            <MudSelectItem Value="@("currency")">currency</MudSelectItem>
+            <MudSelectItem Value="@("phone")">phone</MudSelectItem>
+            <MudSelectItem Value="@("email")">email</MudSelectItem>
+            <MudSelectItem Value="@("address")">address</MudSelectItem>
+        </MudSelect>
+        <MudTextField @bind-Value="Model.Description" Label="Description" Variant="Variant.Outlined"
+                      Lines="3" Class="mb-3" />
+        <MudTextField @bind-Value="Model.Synonyms" Label="Synonyms" Variant="Variant.Outlined"
+                      HelperText="Enter synonyms separated by commas" Class="mb-3" />
+        <MudSwitch @bind-Value="Model.IsSensitive" Label="Sensitive Data (PII/PHI)" Color="Color.Error" Class="mb-3" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Outlined">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit">
+            @(IsEdit ? "Save" : "Create")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private MudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public DictionaryFieldModel Model { get; set; } = new();
+
+    [Parameter]
+    public bool IsEdit { get; set; }
+
+    public class DictionaryFieldModel
+    {
+        public int Id { get; set; }
+        public string FieldCode { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string? Category { get; set; } = "General";
+        public string? FieldType { get; set; } = "text";
+        public string? Description { get; set; }
+        public string? Synonyms { get; set; }
+        public bool IsSensitive { get; set; }
+    }
+
+    private void Submit() => MudDialog.Close(DialogResult.Ok(Model));
+    private void Cancel() => MudDialog.Cancel();
+}

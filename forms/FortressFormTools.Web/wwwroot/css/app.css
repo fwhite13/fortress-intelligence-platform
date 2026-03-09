@@ -1,0 +1,174 @@
+/* ============================================
+   Fortress Form Tools — App Styles
+   Exact Fortress Design Spec
+   ============================================ */
+
+html, body, #app {
+    font-family: 'Inter', system-ui, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f8f9fa;
+    color: #1a2332;
+}
+
+code, pre, .mud-code {
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+}
+
+.mud-main-content {
+    min-height: calc(100vh - 64px);
+}
+
+/* ── Drawer / Nav ── */
+.mud-navmenu .mud-nav-link {
+    color: #d0d5dd !important;
+    border-radius: 4px;
+    margin: 2px 8px;
+}
+
+.mud-navmenu .mud-nav-link:hover {
+    background-color: rgba(212, 175, 55, 0.12) !important;
+    color: #ffffff !important;
+}
+
+.mud-navmenu .mud-nav-link.active {
+    background-color: rgba(212, 175, 55, 0.18) !important;
+    color: #d4af37 !important;
+}
+
+.mud-navmenu .mud-nav-link.active .mud-nav-link-icon {
+    color: #d4af37 !important;
+}
+
+.mud-navmenu .mud-nav-link-icon {
+    color: #8899aa !important;
+}
+
+.mud-navmenu .mud-nav-link:hover .mud-nav-link-icon {
+    color: #ffffff !important;
+}
+
+/* ── Upload zone ── */
+.fortress-upload-zone {
+    border: 2px dashed #d4af37;
+    border-radius: 8px;
+    background: #FFFEF5;
+    padding: 32px;
+    text-align: center;
+}
+
+.fortress-upload-zone:hover {
+    border-color: #e8c84a;
+    background: #fff9e6;
+}
+
+/* ── Upload queue ── */
+.upload-queue-panel {
+    border-left: 4px solid #d4af37;
+}
+
+.upload-queue-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+.upload-queue-filename {
+    min-width: 250px;
+    font-weight: 500;
+}
+
+.upload-queue-progress {
+    flex: 1;
+}
+
+/* ── Confidence indicators ── */
+.confidence-high {
+    background: #dcfce7;
+    color: #059669;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.confidence-medium {
+    background: #fef9c3;
+    color: #d97706;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.confidence-low {
+    background: #fee2e2;
+    color: #dc2626;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+/* ── Field codes (monospace badge) ── */
+.field-code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    background: #f3f4f6;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+/* ── Review layout (PDF + fields split pane) ── */
+.review-layout {
+    display: flex;
+    gap: 16px;
+    height: calc(100vh - 120px);
+}
+
+.review-pdf-pane {
+    flex: 0 0 60%;
+    background: #f3f4f6;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.review-fields-pane {
+    flex: 1;
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* ── Tables ── */
+.mud-table .mud-table-head .mud-table-cell {
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6b7280;
+}
+
+/* Standard modal/dialog styles — FIP R2 */
+.mud-dialog {
+    border-radius: var(--radius-xl) !important;
+    max-width: 480px !important;
+}
+.mud-dialog-content {
+    padding: var(--space-6) !important;
+}
+.mud-dialog-title {
+    font-size: var(--text-xl) !important;
+    font-weight: var(--font-semibold) !important;
+    padding-bottom: var(--space-4) !important;
+    border-bottom: 1px solid var(--color-border) !important;
+}
+.mud-dialog-actions {
+    padding-top: var(--space-4) !important;
+    border-top: 1px solid var(--color-border) !important;
+    justify-content: flex-end !important;
+    gap: var(--space-3) !important;
+}

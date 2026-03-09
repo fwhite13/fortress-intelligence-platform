@@ -1,0 +1,24 @@
+FROM debian:bookworm-slim AS base
+WORKDIR /app
+EXPOSE 8080
+
+# Install .NET 8 ASP.NET Core Runtime dependencies + curl for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libicu72 \
+    libssl3 \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install .NET 8 ASP.NET Core Runtime via dotnet-install.sh (avoids MCR CDN issue on WSL2)
+ENV DOTNET_ROOT=/usr/local/lib/dotnet
+ENV PATH="$PATH:/usr/local/lib/dotnet"
+RUN curl -sSL https://dot.net/v1/dotnet-install.sh \
+    | bash -s -- --channel 8.0 --runtime aspnetcore --install-dir /usr/local/lib/dotnet \
+    && dotnet --info
+
+FROM base AS final
+WORKDIR /app
+COPY ./publish .
+ENTRYPOINT ["dotnet", "FortressFormTools.Web.dll"]

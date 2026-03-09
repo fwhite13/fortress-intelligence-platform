@@ -1,0 +1,558 @@
+@page "/forms"
+@using System.Net.Http.Json
+@using Microsoft.EntityFrameworkCore
+@using FortressFormTools.Data
+@using FortressFormTools.Web.Models
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FortressFormTools.Web.Services.ExtractionBackgroundService ExtractionQueue
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@implements IDisposable
+
+<PageTitle>Form Library — FORMS</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+
+    <MudText Typo="Typo.h4" GutterBottom="true">
+        <MudIcon Icon="@Icons.Material.Filled.Description" Class="mr-2" />
+        Form Library
+    </MudText>
+
+    @* ── Upload Zone ── *@
+    <MudPaper Elevation="1" Class="pa-4 mb-4">
+        <MudGrid>
+            <MudItem xs="12" md="4">
+                <MudTextField @bind-Value="_carrierName" Label="Carrier Name" Variant="Variant.Outlined"
+                              Placeholder="e.g., AmTrust, Markel" />
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudSelect @bind-Value="_formType" Label="Form Type" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("Carrier")">Carrier</MudSelectItem>
+                    <MudSelectItem Value="@("ACORD")">ACORD</MudSelectItem>
+                    <MudSelectItem Value="@("Supplemental")">Supplemental</MudSelectItem>
+                    <MudSelectItem Value="@("State")">State</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="5">
+                <MudFileUpload T="IReadOnlyList<IBrowserFile>"
+                               FilesChanged="OnFilesSelected"
+                               Accept=".pdf"
+                               MaximumFileCount="20"
+                               Class="mt-0">
+                    <ActivatorContent>
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.CloudUpload"
+                                   Disabled="_isUploading">
+                            @(_isUploading ? "Uploading..." : "Upload PDFs")
+                        </MudButton>
+                    </ActivatorContent>
+                </MudFileUpload>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @* ── Upload Queue Panel ── *@
+    @if (_uploadQueue.Count > 0)
+    {
+        var completedCount = _uploadQueue.Count(q => q.DisplayStatus == "Completed");
+        var errorCount = _uploadQueue.Count(q => q.DisplayStatus == "Error");
+        var totalCount = _uploadQueue.Count;
+        var doneCount = completedCount + errorCount;
+        var progressValue = totalCount > 0 ? (double)doneCount / totalCount * 100 : 0;
+        var hasDone = doneCount > 0;
+        var hasActive = doneCount < totalCount;
+
+        <MudPaper Elevation="2" Class="upload-queue-panel pa-4 mb-4">
+
+            @* Header *@
+            <div class="d-flex align-center justify-space-between mb-2">
+                <MudText Typo="Typo.h6">
+                    <MudIcon Icon="@Icons.Material.Filled.QueuePlayNext" Class="mr-1" />
+                    Upload Queue
+                </MudText>
+                <div class="d-flex align-center gap-2">
+                    @if (hasActive)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">
+                            @(totalCount - doneCount) remaining
+                        </MudChip>
+                    }
+                    @if (hasDone)
+                    {
+                        <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small"
+                                   OnClick="ClearDoneItems"
+                                   StartIcon="@Icons.Material.Filled.CleaningServices">
+                            Clear Completed
+                        </MudButton>
+                    }
+                </div>
+            </div>
+
+            @* Summary progress bar *@
+            <div class="d-flex align-center gap-2 mb-3">
+                <MudProgressLinear Color="@(errorCount > 0 && completedCount == 0 ? Color.Error : Color.Success)"
+                                   Value="progressValue" Size="Size.Small" Class="flex-grow-1" />
+                <MudText Typo="Typo.caption" Style="white-space:nowrap">
+                    @completedCount of @totalCount completed@(errorCount > 0 ? $" · {errorCount} error(s)" : "")
+                </MudText>
+            </div>
+
+            @* Queue rows *@
+            @foreach (var item in _uploadQueue)
+            {
+                <div class="upload-queue-item">
+                    <MudIcon Icon="@Icons.Material.Filled.PictureAsPdf" Size="Size.Small" />
+                    <div class="upload-queue-filename">
+                        @if (item.FormId > 0 && item.FormName != null)
+                        {
+                            <MudLink Href="@($"/forms/{item.FormId}")">@item.FormName</MudLink>
+                        }
+                        else
+                        {
+                            @item.FileName
+                        }
+                    </div>
+                    <div class="upload-queue-progress">
+                        @switch (item.Status)
+                        {
+                            case "Uploading":
+                                <MudProgressLinear Color="Color.Info" Indeterminate="true" Size="Size.Medium" />
+                                break;
+                            case "Queued":
+                                <MudProgressLinear Color="Color.Default" Value="0" Size="Size.Medium" />
+                                break;
+                            case "Processing":
+                                <MudProgressLinear Color="Color.Warning" Value="50" Size="Size.Medium" Striped="true" />
+                                break;
+                            case "Draft":
+                            case "Reviewed":
+                            case "Approved":
+                            case "Completed":
+                                <MudProgressLinear Color="Color.Success" Value="100" Size="Size.Medium" />
+                                break;
+                            case "Error":
+                                <MudProgressLinear Color="Color.Error" Value="100" Size="Size.Medium" />
+                                break;
+                        }
+                    </div>
+                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(item.DisplayStatus)">
+                        @GetStatusIcon(item.DisplayStatus) @item.DisplayStatus
+                    </MudChip>
+                    @if (item.FieldCount.HasValue)
+                    {
+                        <MudText Typo="Typo.caption" Style="white-space:nowrap;opacity:0.7">
+                            @item.FieldCount fields
+                        </MudText>
+                    }
+                    <MudText Typo="Typo.caption" Style="white-space:nowrap;opacity:0.7">
+                        @item.ElapsedDisplay
+                    </MudText>
+                </div>
+            }
+
+        </MudPaper>
+    }
+
+    @* ── Search/Filter Bar ── *@
+    <MudPaper Elevation="0" Class="mb-3">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_searchText" Placeholder="Search carrier or form name..."
+                              Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                              Variant="Variant.Outlined" Margin="Margin.Dense"
+                              DebounceInterval="300" OnDebounceIntervalElapsed="LoadForms" />
+            </MudItem>
+            <MudItem xs="12" md="3">
+                <MudSelect T="string?" Value="_filterStatus" Label="Status" Variant="Variant.Outlined"
+                           Margin="Margin.Dense" Clearable="true"
+                           ValueChanged="OnStatusFilterChanged">
+                    <MudSelectItem T="string?" Value="@((string?)null)">All</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Queued")">Queued</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Processing")">Processing</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Draft")">Draft</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Reviewed")">Reviewed</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Approved")">Approved</MudSelectItem>
+                    <MudSelectItem T="string?" Value="@("Error")">Error</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="3" Class="d-flex align-center">
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Refresh"
+                           OnClick="LoadForms">Refresh</MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @* ── Forms Table ── *@
+    @if (_loading)
+    {
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="400px" />
+    }
+    else
+    {
+        <MudTable Items="_forms" Hover="true" Striped="true" Dense="true" Elevation="1">
+            <HeaderContent>
+                <MudTh>Carrier</MudTh>
+                <MudTh>Form Name</MudTh>
+                <MudTh>Type</MudTh>
+                <MudTh Style="text-align:center">Pages</MudTh>
+                <MudTh Style="text-align:center">Fields</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh>Uploaded</MudTh>
+                <MudTh Style="text-align:center">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Carrier">@context.CarrierName</MudTd>
+                <MudTd DataLabel="Form Name">
+                    <MudLink Href="@($"/forms/{context.Id}")">@context.FormName</MudLink>
+                </MudTd>
+                <MudTd DataLabel="Type">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.FormType</MudChip>
+                </MudTd>
+                <MudTd DataLabel="Pages" Style="text-align:center">@(context.PageCount?.ToString() ?? "—")</MudTd>
+                <MudTd DataLabel="Fields" Style="text-align:center">@context.FieldCount</MudTd>
+                <MudTd DataLabel="Status">
+                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(context.Status)">
+                        @GetStatusIcon(context.Status) @context.Status
+                    </MudChip>
+                </MudTd>
+                <MudTd DataLabel="Uploaded">@context.CreatedAt.ToLocalTime().ToString("MMM dd, yyyy h:mm tt")</MudTd>
+                <MudTd DataLabel="Actions" Style="text-align:center; white-space:nowrap;">
+                    @if (context.Status == "Error")
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Color="Color.Warning"
+                                       Title="Retry extraction"
+                                       OnClick="@(() => ResubmitForm(context))" />
+                    }
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   Title="Delete form"
+                                   OnClick="@(() => DeleteForm(context))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Align="Align.Center" Class="pa-8">
+                    No forms uploaded yet. Use the upload button above to get started.
+                </MudText>
+            </NoRecordsContent>
+        </MudTable>
+    }
+</MudContainer>
+
+@code {
+    // ── State ──
+    private List<FormListItem> _forms = new();
+    private List<UploadQueueItem> _uploadQueue = new();
+    private bool _loading = true;
+    private bool _isUploading;
+    private string _carrierName = string.Empty;
+    private string _formType = "Carrier";
+    private string? _searchText;
+    private string? _filterStatus;
+    private Timer? _pollTimer;
+
+    // ── Upload queue item ──
+    private class UploadQueueItem
+    {
+        public int FormId { get; set; }
+        public string FileName { get; set; } = string.Empty;
+        public string? FormName { get; set; }
+        public string Status { get; set; } = "Uploading";
+        public int? FieldCount { get; set; }
+        public DateTime StartTime { get; set; } = DateTime.UtcNow;
+
+        // "Draft", "Reviewed", "Approved" all surface as "Completed" in the queue panel
+        public string DisplayStatus => Status is "Draft" or "Reviewed" or "Approved" ? "Completed" : Status;
+
+        public bool IsTerminal => DisplayStatus is "Completed" or "Error";
+
+        public string ElapsedDisplay
+        {
+            get
+            {
+                var elapsed = DateTime.UtcNow - StartTime;
+                if (elapsed.TotalSeconds < 60)
+                    return $"{(int)elapsed.TotalSeconds}s";
+                return $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s";
+            }
+        }
+    }
+
+    private async Task OnStatusFilterChanged(string? value)
+    {
+        _filterStatus = value;
+        await LoadForms();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadForms();
+    }
+
+    private async Task LoadForms()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var query = db.FormLibraries.AsNoTracking().AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(_searchText))
+                query = query.Where(f => f.CarrierName.Contains(_searchText) || f.FormName.Contains(_searchText));
+            if (!string.IsNullOrWhiteSpace(_filterStatus))
+                query = query.Where(f => f.Status == _filterStatus);
+
+            _forms = await query
+                .OrderByDescending(f => f.CreatedAt)
+                .Take(50)
+                .Select(f => new FormListItem
+                {
+                    Id = f.Id,
+                    CarrierName = f.CarrierName,
+                    FormName = f.FormName,
+                    FormType = f.FormType,
+                    PageCount = f.PageCount,
+                    FieldCount = f.Fields.Count(),
+                    Status = f.Status,
+                    ErrorMessage = f.ErrorMessage,
+                    CreatedAt = f.CreatedAt
+                })
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load forms: {ex.Message}", Severity.Error);
+        }
+        _loading = false;
+    }
+
+    private async Task OnFilesSelected(IReadOnlyList<IBrowserFile> files)
+    {
+        if (files == null || files.Count == 0) return;
+
+        _isUploading = true;
+
+        try
+        {
+            using var content = new MultipartFormDataContent();
+
+            // Add metadata
+            content.Add(new StringContent(_carrierName), "carrierName");
+            content.Add(new StringContent(_formType), "formType");
+
+            // Build queue items and attach file streams
+            var queueItems = new List<UploadQueueItem>();
+            foreach (var file in files)
+            {
+                var stream = file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+                var streamContent = new StreamContent(stream);
+                streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+                content.Add(streamContent, "files", file.Name);
+
+                var queueItem = new UploadQueueItem { FileName = file.Name, Status = "Uploading" };
+                queueItems.Add(queueItem);
+                _uploadQueue.Add(queueItem);
+            }
+
+            StateHasChanged();
+
+            // POST upload
+            var response = await Http.PostAsync("api/forms/upload", content);
+            response.EnsureSuccessStatusCode();
+
+            var uploadResults = await response.Content.ReadFromJsonAsync<List<FormUploadResponse>>();
+
+            // Map results back to queue items
+            if (uploadResults != null)
+            {
+                for (int i = 0; i < uploadResults.Count && i < queueItems.Count; i++)
+                {
+                    queueItems[i].FormId = uploadResults[i].Id;
+                    queueItems[i].Status = uploadResults[i].Status;
+                }
+            }
+
+            Snackbar.Add($"{files.Count} file(s) uploaded successfully", Severity.Success);
+
+            // Start polling for status updates
+            StartStatusPolling();
+
+            // Refresh main table
+            await LoadForms();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload failed: {ex.Message}", Severity.Error);
+            foreach (var item in _uploadQueue.Where(q => q.Status == "Uploading"))
+                item.Status = "Error";
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void StartStatusPolling()
+    {
+        _pollTimer?.Dispose();
+        _pollTimer = new Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                var pendingItems = _uploadQueue
+                    .Where(q => q.FormId > 0 && q.Status is "Queued" or "Processing")
+                    .ToList();
+
+                if (pendingItems.Count == 0)
+                {
+                    _pollTimer?.Dispose();
+                    _pollTimer = null;
+                    await LoadForms(); // Final refresh
+                    StateHasChanged();
+                    return;
+                }
+
+                foreach (var item in pendingItems)
+                {
+                    try
+                    {
+                        var detail = await Http.GetFromJsonAsync<FormDetailDto>($"api/forms/{item.FormId}");
+                        if (detail != null)
+                        {
+                            item.Status = detail.Status;
+                            item.FormName = string.IsNullOrWhiteSpace(detail.FormName) ? null : detail.FormName;
+                            // Capture field count when processing finishes
+                            if (detail.Status is "Draft" or "Reviewed" or "Approved")
+                                item.FieldCount = detail.Fields.Count;
+                        }
+                    }
+                    catch { /* ignore polling errors */ }
+                }
+
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+    }
+
+    // Removes only terminal (completed/error) items; leaves in-progress items alone
+    private void ClearDoneItems()
+    {
+        _uploadQueue.RemoveAll(q => q.IsTerminal);
+        if (_uploadQueue.Count == 0)
+        {
+            _pollTimer?.Dispose();
+            _pollTimer = null;
+        }
+    }
+
+    private static Color GetStatusColor(string status) => status switch
+    {
+        "Queued"     => Color.Default,
+        "Processing" => Color.Warning,
+        "Draft"      => Color.Info,
+        "Reviewed"   => Color.Success,
+        "Approved"   => Color.Primary,
+        "Completed"  => Color.Success,
+        "Error"      => Color.Error,
+        _            => Color.Default
+    };
+
+    private static string GetStatusIcon(string status) => status switch
+    {
+        "Queued"     => "⏳",
+        "Processing" => "🔄",
+        "Draft"      => "📝",
+        "Reviewed"   => "✅",
+        "Approved"   => "✅",
+        "Completed"  => "✅",
+        "Error"      => "❌",
+        _            => "•"
+    };
+
+    public void Dispose()
+    {
+        _pollTimer?.Dispose();
+    }
+
+    private async Task DeleteForm(FormListItem form)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Confirm Delete",
+            $"Delete '{form.FormName}'? This cannot be undone.",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            try
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                var entity = await db.FormLibraries.FindAsync(form.Id);
+                if (entity != null)
+                {
+                    db.FormLibraries.Remove(entity);
+                    await db.SaveChangesAsync();
+                    _forms.Remove(form);
+                    Snackbar.Add($"'{form.FormName}' deleted", Severity.Success);
+                    StateHasChanged();
+                }
+                else
+                {
+                    Snackbar.Add("Form not found", Severity.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error deleting: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private async Task ResubmitForm(FormListItem form)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var entity = await db.FormLibraries
+                .Include(f => f.Fields)
+                .FirstOrDefaultAsync(f => f.Id == form.Id);
+
+            if (entity == null)
+            {
+                Snackbar.Add("Form not found", Severity.Warning);
+                return;
+            }
+
+            if (entity.Status == "Processing")
+            {
+                Snackbar.Add("Form is already processing", Severity.Warning);
+                return;
+            }
+
+            // Clear existing fields and reset status (mirrors FormsController.ResubmitForm)
+            if (entity.Fields.Any())
+                db.FormFields.RemoveRange(entity.Fields);
+
+            entity.Status = "Processing";
+            entity.ErrorMessage = null;
+            entity.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+
+            // Enqueue for background extraction
+            ExtractionQueue.Enqueue(entity.Id);
+
+            form.Status = "Processing";
+            form.ErrorMessage = null;
+            Snackbar.Add($"'{form.FormName}' resubmitted for extraction", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error resubmitting: {ex.Message}", Severity.Error);
+        }
+    }
+
+}

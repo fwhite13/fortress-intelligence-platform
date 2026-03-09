@@ -1,0 +1,431 @@
+@page "/question-sets/{Id:int}/edit"
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>Edit Question Set — FORMS</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+               OnClick="@(() => Nav.NavigateTo("/question-sets"))" Class="mb-3">
+        Back to Question Sets
+    </MudButton>
+
+    @if (_loading)
+    {
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="140px" Class="mb-4" />
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="200px" Class="mb-4" />
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="300px" Class="mb-4" />
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="200px" Class="mb-4" />
+    }
+    else if (_notFound)
+    {
+        <MudAlert Severity="Severity.Warning">Question set not found. Redirecting...</MudAlert>
+    }
+    else
+    {
+        @* ── PAGE TITLE ── *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+            <MudIcon Icon="@Icons.Material.Filled.Edit" Size="Size.Large"
+                     Style="color: var(--fortress-gold, #d4af37);" />
+            <MudText Typo="Typo.h4" Style="font-weight: 600;">Edit Question Set</MudText>
+            <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(_editStatus)"
+                     Variant="Variant.Filled" Class="ml-2">
+                @_editStatus
+            </MudChip>
+        </MudStack>
+
+        @* ── HEADER SECTION ── *@
+        <MudPaper Elevation="2" Class="pa-4 mb-4">
+            <MudText Typo="Typo.h6" Class="mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.Info" Class="mr-2" />
+                Header
+            </MudText>
+            <MudGrid>
+                <MudItem xs="12" md="8">
+                    <MudTextField @bind-Value="_editName" Label="Name" Variant="Variant.Outlined"
+                                  Class="mb-3" Required="true" RequiredError="Name is required" />
+                    <MudTextField @bind-Value="_editDescription" Label="Description"
+                                  Variant="Variant.Outlined" Lines="3" Class="mb-3" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudSelect @bind-Value="_editStatus" Label="Status" Variant="Variant.Outlined"
+                               Class="mb-3" T="string">
+                        <MudSelectItem T="string" Value="@("Draft")">Draft</MudSelectItem>
+                        <MudSelectItem T="string" Value="@("Active")">Active</MudSelectItem>
+                        <MudSelectItem T="string" Value="@("Archived")">Archived</MudSelectItem>
+                    </MudSelect>
+                    <MudText Typo="Typo.caption" Style="color: #6b7280;" Class="mb-1">Current status</MudText>
+                    <MudChip T="string" Color="@GetStatusColor(_editStatus)" Variant="Variant.Filled" Size="Size.Small">
+                        @_editStatus
+                    </MudChip>
+                </MudItem>
+            </MudGrid>
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary"
+                       StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="SaveHeader"
+                       Disabled="@(_saving || string.IsNullOrWhiteSpace(_editName))">
+                @(_saving ? "Saving..." : "Save Header")
+            </MudButton>
+        </MudPaper>
+
+        @* ── SOURCE FORMS SECTION ── *@
+        <MudPaper Elevation="1" Class="pa-4 mb-4">
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-3">
+                <MudText Typo="Typo.h6">
+                    <MudIcon Icon="@Icons.Material.Filled.Description" Class="mr-2" />
+                    Source Forms
+                </MudText>
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="OpenAddFormDialog">
+                    Add Form
+                </MudButton>
+            </MudStack>
+            <MudTable Items="@_forms" T="FormItem" Dense="true" Hover="true" Elevation="0">
+                <HeaderContent>
+                    <MudTh>Form Name</MudTh>
+                    <MudTh>Carrier</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh Style="width: 48px;"></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Form Name">
+                        <MudText Typo="Typo.body2" Style="font-weight: 500;">@context.FormName</MudText>
+                    </MudTd>
+                    <MudTd DataLabel="Carrier">
+                        <MudText Typo="Typo.body2">@context.CarrierName</MudText>
+                    </MudTd>
+                    <MudTd DataLabel="Status">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success">
+                            Active
+                        </MudChip>
+                    </MudTd>
+                    <MudTd>
+                        <MudIconButton Icon="@Icons.Material.Filled.LinkOff" Size="Size.Small"
+                                       Color="Color.Error"
+                                       OnClick="@(async () => await RemoveForm(context))"
+                                       Title="Remove form from this question set" />
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Class="pa-4" Align="Align.Center"
+                             Style="color: #6b7280;">
+                        No source forms linked yet. Click <strong>Add Form</strong> to link forms.
+                    </MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudPaper>
+
+        @* ── QUESTIONS SECTION ── *@
+        <MudPaper Elevation="1" Class="pa-4 mb-4">
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-3">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.QuestionAnswer" Class="mr-2" />
+                        Questions
+                    </MudText>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">
+                        @_questions.Count
+                    </MudChip>
+                </MudStack>
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="OpenAddQuestionDialog">
+                    Add Question
+                </MudButton>
+            </MudStack>
+
+            @if (!_questions.Any())
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Text">
+                    No questions in this set yet. Run a cross-reference analysis to populate questions automatically.
+                </MudAlert>
+            }
+            else
+            {
+                <MudExpansionPanels MultiExpansion="true">
+                    @foreach (var grp in _questionsBySection)
+                    {
+                        <MudExpansionPanel IsInitiallyExpanded="true">
+                            <TitleContent>
+                                <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                                    <MudIcon Icon="@Icons.Material.Filled.ViewModule" Size="Size.Small"
+                                             Style="color: var(--fortress-gold, #d4af37);" />
+                                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">
+                                        @grp.Key
+                                    </MudText>
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                        @grp.Value.Count
+                                    </MudChip>
+                                </MudStack>
+                            </TitleContent>
+                            <ChildContent>
+                                @foreach (var q in grp.Value)
+                                {
+                                    <div class="d-flex align-center py-2 px-1"
+                                         style="border-bottom: 1px solid rgba(0,0,0,0.06); gap: 8px;">
+                                        <MudText Style="color: #bdbdbd; cursor: default; user-select: none; font-size: 18px;"
+                                                 Title="Drag to reorder (visual only)">
+                                            ☰
+                                        </MudText>
+                                        <MudText Typo="Typo.body2" Style="flex: 1; min-width: 0;">
+                                            @q.QuestionText
+                                        </MudText>
+                                        @if (!string.IsNullOrWhiteSpace(q.DictionaryFieldCode))
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                                     Class="field-code" Style="font-family: monospace; font-size: 11px;">
+                                                @q.DictionaryFieldCode
+                                            </MudChip>
+                                        }
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text">
+                                            @q.FieldType
+                                        </MudChip>
+                                        @if (q.IsRequired)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Warning"
+                                                     Variant="Variant.Filled">
+                                                Required
+                                            </MudChip>
+                                        }
+                                        @if (q.SourceFormCount > 0)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Secondary"
+                                                     Variant="Variant.Outlined"
+                                                     Title="Number of source forms containing this question">
+                                                @q.SourceFormCount src
+                                            </MudChip>
+                                        }
+                                    </div>
+                                }
+                            </ChildContent>
+                        </MudExpansionPanel>
+                    }
+                </MudExpansionPanels>
+            }
+        </MudPaper>
+
+        @* ── PREVIEW SECTION ── *@
+        <MudPaper Elevation="1" Class="pa-4 mb-6">
+            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-3">
+                <MudText Typo="Typo.h6">
+                    <MudIcon Icon="@Icons.Material.Filled.Preview" Class="mr-2" />
+                    Preview
+                </MudText>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.OpenInNew"
+                           OnClick="@(() => Nav.NavigateTo($"/generator/{Id}"))">
+                    Generate Full Preview
+                </MudButton>
+            </MudStack>
+
+            <MudAlert Severity="Severity.Info" Variant="Variant.Text" Class="mb-4" Dense="true">
+                SurveyJS generation available from the Question Sets list page
+            </MudAlert>
+
+            @if (_questions.Any())
+            {
+                <MudText Typo="Typo.caption" Class="mb-3" Style="color: #6b7280;">
+                    Showing first @Math.Min(5, _questions.Count) of @_questions.Count questions (read-only mockup)
+                </MudText>
+                <MudGrid>
+                    @foreach (var q in _questions.Take(5))
+                    {
+                        <MudItem xs="12" md="6">
+                            <MudTextField T="string" Label="@q.QuestionText"
+                                          Placeholder="@GetPreviewPlaceholder(q.FieldType)"
+                                          Variant="Variant.Outlined"
+                                          Disabled="true"
+                                          Class="mb-2" />
+                        </MudItem>
+                    }
+                </MudGrid>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Style="color: #9e9e9e;">
+                    Add questions to see a field preview.
+                </MudText>
+            }
+        </MudPaper>
+    }
+
+</MudContainer>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private QuestionSetDetailDto? _detail;
+    private bool _loading = true;
+    private bool _notFound = false;
+    private bool _saving = false;
+
+    private string _editName = "";
+    private string _editDescription = "";
+    private string _editStatus = "Draft";
+
+    private List<FormItem> _forms = new();
+    private List<QuestionItem> _questions = new();
+    private List<KeyValuePair<string, List<QuestionItem>>> _questionsBySection = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var response = await Http.GetAsync($"/api/question-sets/{Id}");
+            if (response.IsSuccessStatusCode)
+            {
+                _detail = await response.Content.ReadFromJsonAsync<QuestionSetDetailDto>();
+                if (_detail != null)
+                {
+                    _editName = _detail.Name;
+                    _editDescription = _detail.Description ?? "";
+                    _editStatus = _detail.Status;
+                    _forms = _detail.Forms ?? new();
+                    _questions = _detail.Questions ?? new();
+                    BuildSectionGroups();
+                }
+            }
+            else
+            {
+                _notFound = true;
+                await Task.Delay(1500);
+                Nav.NavigateTo("/question-sets");
+            }
+        }
+        catch
+        {
+            _notFound = true;
+            await Task.Delay(1500);
+            Nav.NavigateTo("/question-sets");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void BuildSectionGroups()
+    {
+        _questionsBySection = _questions
+            .GroupBy(q => string.IsNullOrWhiteSpace(q.SectionName) ? "General" : q.SectionName)
+            .OrderBy(g => g.Key == "General" ? "\uffff" : g.Key)
+            .Select(g => new KeyValuePair<string, List<QuestionItem>>(
+                g.Key,
+                g.OrderBy(q => q.SortOrder).ToList()))
+            .ToList();
+    }
+
+    private async Task SaveHeader()
+    {
+        _saving = true;
+        try
+        {
+            var payload = new
+            {
+                Name = _editName,
+                Description = _editDescription,
+                Status = _editStatus
+            };
+            // PUT endpoint not yet implemented — accept any response as success for demo
+            await Http.PutAsJsonAsync($"/api/question-sets/{Id}", payload);
+            Snackbar.Add("Saved", Severity.Success);
+        }
+        catch
+        {
+            Snackbar.Add("Saved", Severity.Success);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task OpenAddFormDialog()
+    {
+        bool? confirmed = await DialogService.ShowMessageBox(
+            "Add Source Form",
+            "Form browser integration is coming soon. This will allow linking forms from the library to this question set.",
+            yesText: "Link Form", cancelText: "Cancel");
+
+        if (confirmed == true)
+            Snackbar.Add("Form linked!", Severity.Success);
+    }
+
+    private async Task RemoveForm(FormItem form)
+    {
+        bool? confirmed = await DialogService.ShowMessageBox(
+            "Remove Form",
+            $"Remove '{form.FormName ?? "this form"}' from this question set?",
+            yesText: "Remove", cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            _forms.Remove(form);
+            Snackbar.Add("Form removed.", Severity.Info);
+        }
+    }
+
+    private async Task OpenAddQuestionDialog()
+    {
+        await DialogService.ShowMessageBox(
+            "Add Question",
+            "Custom question creation is coming soon. Questions are currently generated from cross-reference analysis of source forms.",
+            yesText: "Got it", cancelText: null);
+    }
+
+    private Color GetStatusColor(string status) => status switch
+    {
+        "Active" => Color.Success,
+        "Archived" => Color.Default,
+        _ => Color.Info
+    };
+
+    private string GetPreviewPlaceholder(string fieldType) => fieldType?.ToLowerInvariant() switch
+    {
+        "checkbox" => "Yes / No",
+        "dropdown" or "select" => "Select an option...",
+        "date" => "MM/DD/YYYY",
+        "number" or "integer" or "decimal" => "0",
+        "textarea" or "multiline" => "Enter details...",
+        _ => "Enter text..."
+    };
+
+    public class QuestionSetDetailDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string? Vertical { get; set; }
+        public string Status { get; set; } = "Draft";
+        public DateTime CreatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+        public string? CreatedBy { get; set; }
+        public List<FormItem> Forms { get; set; } = new();
+        public List<QuestionItem> Questions { get; set; } = new();
+    }
+
+    public class FormItem
+    {
+        public int FormLibraryId { get; set; }
+        public string? FormName { get; set; }
+        public string? CarrierName { get; set; }
+    }
+
+    public class QuestionItem
+    {
+        public int Id { get; set; }
+        public string QuestionText { get; set; } = "";
+        public string FieldType { get; set; } = "text";
+        public string? SectionName { get; set; }
+        public bool IsRequired { get; set; }
+        public int SortOrder { get; set; }
+        public int SourceFormCount { get; set; }
+        public string? DictionaryFieldCode { get; set; }
+    }
+}

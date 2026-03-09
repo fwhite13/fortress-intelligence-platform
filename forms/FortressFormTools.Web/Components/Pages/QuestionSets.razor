@@ -1,0 +1,177 @@
+@page "/question-sets"
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageTitle>Question Sets — FORMS</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+        <MudIcon Icon="@Icons.Material.Filled.QuestionAnswer" Size="Size.Large"
+                 Style="color: var(--fortress-gold, #d4af37);" />
+        <MudText Typo="Typo.h4" Style="font-weight: 600;">Question Sets</MudText>
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled" Color="Color.Secondary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenCreateDialog">
+            Create New
+        </MudButton>
+    </MudStack>
+
+    <MudText Typo="Typo.body1" Class="mb-4" Style="color: var(--color-text-secondary, #6b7280);">
+        Unified question sets built from cross-referencing multiple carrier forms.
+    </MudText>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Color="Color.Secondary" Indeterminate="true" Class="mb-4" />
+    }
+
+    <MudTable Items="@_questionSets" Dense="true" Hover="true" Striped="true" Elevation="1"
+              Loading="@_loading" RowClass="cursor-pointer"
+              T="QuestionSetListItem"
+              OnRowClick="@(args => NavigateToDetail(args.Item!))">
+        <HeaderContent>
+            <MudTh>Name</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh Style="text-align:center">Forms</MudTh>
+            <MudTh Style="text-align:center">Questions</MudTh>
+            <MudTh>Created</MudTh>
+            <MudTh Style="text-align:right">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Name">
+                <MudText Typo="Typo.body1" Style="font-weight: 500;">@context.Name</MudText>
+                @if (!string.IsNullOrWhiteSpace(context.Description))
+                {
+                    <MudText Typo="Typo.caption" Style="color: #6b7280;">@Truncate(context.Description, 80)</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="Status">
+                <MudChip T="string" Size="Size.Small"
+                         Color="@GetStatusColor(context.Status)"
+                         Variant="Variant.Filled">
+                    @context.Status
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="Forms" Style="text-align:center">@context.FormCount</MudTd>
+            <MudTd DataLabel="Questions" Style="text-align:center">@context.QuestionCount</MudTd>
+            <MudTd DataLabel="Created">@context.CreatedAt.ToString("MMM d, yyyy")</MudTd>
+            <MudTd DataLabel="Actions" Style="text-align:right">
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                               Color="Color.Error"
+                               OnClick="@(async () => await DeleteQuestionSet(context))" />
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--space-12) var(--space-6); text-align: center;">
+                <MudIcon Icon="@Icons.Material.Filled.LibraryBooks"
+                         Style="font-size: 48px; color: var(--color-text-tertiary); margin-bottom: var(--space-4);" />
+                <MudText Typo="Typo.h6" Style="font-weight: var(--font-semibold); margin-bottom: var(--space-2);">
+                    No question sets yet
+                </MudText>
+                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-bottom: var(--space-4);">
+                    Create your first question set to start mapping carrier fields.
+                </MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenCreateDialog">
+                    + Create New
+                </MudButton>
+            </div>
+        </NoRecordsContent>
+    </MudTable>
+</MudContainer>
+
+@code {
+    private List<QuestionSetListItem> _questionSets = new();
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadQuestionSets();
+    }
+
+    private async Task LoadQuestionSets()
+    {
+        _loading = true;
+        try
+        {
+            var response = await Http.GetAsync("/api/question-sets");
+            if (response.IsSuccessStatusCode)
+            {
+                _questionSets = await response.Content.ReadFromJsonAsync<List<QuestionSetListItem>>() ?? new();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load question sets: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void NavigateToDetail(QuestionSetListItem item)
+    {
+        Nav.NavigateTo($"/question-sets/{item.Id}");
+    }
+
+    private async Task OpenCreateDialog()
+    {
+        var parameters = new DialogParameters<CreateQuestionSetDialog>();
+        var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<CreateQuestionSetDialog>("Create Question Set", parameters, options);
+        var result = await dialog.Result;
+
+        if (result != null && !result.Canceled)
+        {
+            await LoadQuestionSets();
+            Snackbar.Add("Question set created!", Severity.Success);
+        }
+    }
+
+    private async Task DeleteQuestionSet(QuestionSetListItem item)
+    {
+        bool? confirm = await DialogService.ShowMessageBox(
+            "Confirm Delete",
+            $"Are you sure you want to delete '{item.Name}'?",
+            yesText: "Delete", cancelText: "Cancel");
+
+        if (confirm == true)
+        {
+            try
+            {
+                await Http.DeleteAsync($"/api/question-sets/{item.Id}");
+                await LoadQuestionSets();
+                Snackbar.Add("Question set deleted.", Severity.Info);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Delete failed: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private Color GetStatusColor(string status) => status switch
+    {
+        "Active" => Color.Success,
+        "Archived" => Color.Default,
+        _ => Color.Info
+    };
+
+    private string Truncate(string text, int max) =>
+        text.Length > max ? text[..max] + "…" : text;
+
+    public class QuestionSetListItem
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string Status { get; set; } = "Draft";
+        public int FormCount { get; set; }
+        public int QuestionCount { get; set; }
+        public DateTime CreatedAt { get; set; }
+    }
+}

@@ -1,0 +1,193 @@
+@page "/question-sets/{Id:int}"
+@using System.Net.Http.Json
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+<PageTitle>Question Set Detail — FORMS</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+               OnClick="@(() => Nav.NavigateTo("/question-sets"))" Class="mb-3">
+        Back to Question Sets
+    </MudButton>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Color="Color.Secondary" Indeterminate="true" Class="mb-4" />
+    }
+    else if (_notFound)
+    {
+        <MudAlert Severity="Severity.Warning">Question set not found.</MudAlert>
+    }
+    else
+    {
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.QuestionAnswer" Size="Size.Large"
+                     Style="color: var(--fortress-gold, #d4af37);" />
+            <MudText Typo="Typo.h4" Style="font-weight: 600;">@_detail?.Name</MudText>
+            <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(_detail?.Status ?? "")"
+                     Variant="Variant.Filled" Class="ml-2">
+                @_detail?.Status
+            </MudChip>
+        </MudStack>
+
+        @if (!string.IsNullOrWhiteSpace(_detail?.Description))
+        {
+            <MudText Typo="Typo.body1" Class="mb-4" Style="color: #6b7280;">@_detail.Description</MudText>
+        }
+
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudCard Elevation="1" Class="pa-4">
+                    <MudCardHeader>
+                        <MudText Typo="Typo.h6">
+                            <MudIcon Icon="@Icons.Material.Filled.Description" Class="mr-2" />
+                            Source Forms
+                        </MudText>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        @if (_detail?.Forms?.Any() == true)
+                        {
+                            <MudList T="string" Dense="true">
+                                @foreach (var f in _detail.Forms)
+                                {
+                                    <MudListItem T="string">
+                                        @f.FormName (@f.CarrierName)
+                                    </MudListItem>
+                                }
+                            </MudList>
+                        }
+                        else
+                        {
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Text" Dense="true">
+                                <MudText Typo="Typo.body2">No source forms linked yet. Coming in Sprint 4.</MudText>
+                            </MudAlert>
+                        }
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudCard Elevation="1" Class="pa-4">
+                    <MudCardHeader>
+                        <MudText Typo="Typo.h6">
+                            <MudIcon Icon="@Icons.Material.Filled.List" Class="mr-2" />
+                            Questions
+                        </MudText>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        @if (_detail?.Questions?.Any() == true)
+                        {
+                            <MudSimpleTable Dense="true" Striped="true">
+                                <thead>
+                                    <tr>
+                                        <th>Question</th>
+                                        <th>Type</th>
+                                        <th>Required</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var q in _detail.Questions)
+                                    {
+                                        <tr>
+                                            <td>@q.QuestionText</td>
+                                            <td>@q.FieldType</td>
+                                            <td>@(q.IsRequired ? "Yes" : "No")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </MudSimpleTable>
+                        }
+                        else
+                        {
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Text" Dense="true">
+                                <MudText Typo="Typo.body2">No questions yet. Coming in Sprint 4.</MudText>
+                            </MudAlert>
+                        }
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        </MudGrid>
+
+        <MudStack Row="true" Class="mt-6 mb-4" Spacing="3">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+                       StartIcon="@Icons.Material.Filled.Edit"
+                       OnClick="@(() => Nav.NavigateTo($"/question-sets/{Id}/edit"))">
+                Edit Question Set
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary"
+                       StartIcon="@Icons.Material.Filled.CompareArrows"
+                       OnClick="@(() => Nav.NavigateTo($"/question-sets/{Id}/cross-reference"))">
+                Run Cross-Reference Analysis
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.AutoAwesome"
+                       Disabled="@(_detail?.Questions?.Any() != true)"
+                       OnClick="@(() => Nav.NavigateTo($"/generator/{Id}"))">
+                Generate SurveyJS
+            </MudButton>
+        </MudStack>
+    }
+</MudContainer>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private QuestionSetDetailDto? _detail;
+    private bool _loading = true;
+    private bool _notFound = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var response = await Http.GetAsync($"/api/question-sets/{Id}");
+            if (response.IsSuccessStatusCode)
+                _detail = await response.Content.ReadFromJsonAsync<QuestionSetDetailDto>();
+            else
+                _notFound = true;
+        }
+        catch
+        {
+            _notFound = true;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Color GetStatusColor(string status) => status switch
+    {
+        "Active" => Color.Success,
+        "Archived" => Color.Default,
+        _ => Color.Info
+    };
+
+    public class QuestionSetDetailDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime CreatedAt { get; set; }
+        public List<FormItem> Forms { get; set; } = new();
+        public List<QuestionItem> Questions { get; set; } = new();
+    }
+
+    public class FormItem
+    {
+        public int FormLibraryId { get; set; }
+        public string? FormName { get; set; }
+        public string? CarrierName { get; set; }
+    }
+
+    public class QuestionItem
+    {
+        public int Id { get; set; }
+        public string QuestionText { get; set; } = "";
+        public string FieldType { get; set; } = "";
+        public bool IsRequired { get; set; }
+    }
+}

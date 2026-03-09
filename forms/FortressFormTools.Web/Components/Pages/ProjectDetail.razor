@@ -1,0 +1,445 @@
+@page "/projects/{ProjectId:int}"
+@using Microsoft.EntityFrameworkCore
+@using FortressFormTools.Data
+@using FortressFormTools.Data.Entities
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject HttpClient Http
+
+<PageTitle>@(_project?.Name ?? "Project") — FORMS</PageTitle>
+
+<div style="padding: var(--space-6);">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_project == null)
+    {
+        <MudText>Project not found.</MudText>
+        <MudButton OnClick="@(() => Nav.NavigateTo("/projects"))">Back to Projects</MudButton>
+    }
+    else
+    {
+        <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4);">
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small"
+                           OnClick="@(() => Nav.NavigateTo("/projects"))" />
+            <div style="display: flex; align-items: center; gap: var(--space-2);">
+                <MudText Typo="Typo.h5" Style="font-weight: var(--font-bold);">@_project.Name</MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">
+                    @GetVerticalEmoji(_project.Vertical) @_project.Vertical
+                </MudChip>
+                <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(_project.Status)" Variant="Variant.Filled">
+                    @_project.Status
+                </MudChip>
+            </div>
+        </div>
+
+        <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true">
+            <MudTabPanel Text="Documents" Icon="@Icons.Material.Filled.Description">
+                <div style="padding-top: var(--space-4);">
+                    <div style="margin-bottom: var(--space-4); display: flex; justify-content: space-between; align-items: center;">
+                        <MudText Typo="Typo.subtitle1">Project Documents</MudText>
+                        <MudStack Row="true" Spacing="2">
+                            @if (_documents.Any(d => d.ApprovedAt != null))
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.CompareArrows"
+                                           Href="@($"/projects/{ProjectId}/cross-reference")">
+                                    Run Cross-Reference →
+                                </MudButton>
+                            }
+                            <MudButton Variant="Variant.Filled" Color="Color.Warning" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.AutoMode"
+                                       OnClick="ExtractAllPending"
+                                       Disabled="@(!_documents.Any(d => d.Status == "Queued"))">
+                                Extract All Pending
+                            </MudButton>
+                        </MudStack>
+                    </div>
+
+                    <MudPaper Style="border: 2px dashed var(--color-border); padding: var(--space-4); text-align: center; margin-bottom: var(--space-4); border-radius: var(--radius-lg);">
+                        <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Style="font-size: 32px; color: var(--color-text-secondary);" />
+                        <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-top: var(--space-2);">
+                            Upload PDF or DOCX forms to this project
+                        </MudText>
+                        <div style="margin-top: var(--space-2);">
+                            <MudSelect T="string?" @bind-Value="_uploadDocumentType"
+                                       Label="Document Type (optional)"
+                                       Variant="Variant.Outlined"
+                                       Clearable="true"
+                                       Style="max-width: 220px; margin: 0 auto;">
+                                <MudSelectItem T="string?" Value="@("application")">Application</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@("supplement")">Supplement</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@("pilot_form")">Pilot Form</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@("driver_schedule")">Driver Schedule</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@("vehicle_schedule")">Vehicle Schedule</MudSelectItem>
+                                <MudSelectItem T="string?" Value="@("other")">Other</MudSelectItem>
+                            </MudSelect>
+                        </div>
+                        <InputFile id="projectFileInput" OnChange="HandleFileUpload" multiple style="display:none;" accept=".pdf,.docx" />
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Style="margin-top: var(--space-3);"
+                                   HtmlTag="label" for="projectFileInput" StartIcon="@Icons.Material.Filled.AttachFile">
+                            Select Files
+                        </MudButton>
+                        @if (_uploading)
+                        {
+                            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Style="margin-top: var(--space-2);" />
+                        }
+                    </MudPaper>
+
+                    @if (_documents.Count == 0)
+                    {
+                        <MudPaper Style="padding: var(--space-6); text-align: center; border: 1px dashed var(--color-border);">
+                            <MudText Style="color: var(--color-text-secondary);">No documents yet. Upload PDFs to get started.</MudText>
+                        </MudPaper>
+                    }
+                    else
+                    {
+                        <MudTable Items="@_documents" Hover="true"
+                                  Style="border: 1px solid var(--color-border); border-radius: var(--radius-lg);">
+                            <HeaderContent>
+                                <MudTh>File Name</MudTh>
+                                <MudTh>Carrier</MudTh>
+                                <MudTh>Document Type</MudTh>
+                                <MudTh>Extraction Status</MudTh>
+                                <MudTh>Approved</MudTh>
+                                <MudTh>Actions</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd>
+                                    <MudLink Href="@($"/forms/{context.Id}?projectId={ProjectId}")">@context.FormName</MudLink>
+                                </MudTd>
+                                <MudTd>@context.CarrierName</MudTd>
+                                <MudTd>
+                                    <MudSelect T="string?" Value="@context.DocumentType"
+                                               ValueChanged="@(val => SaveDocumentType(context, val))"
+                                               Placeholder="Select type"
+                                               Variant="Variant.Text"
+                                               Margin="Margin.Dense"
+                                               Style="min-width: 140px;">
+                                        <MudSelectItem T="string?" Value="@("application")">Application</MudSelectItem>
+                                        <MudSelectItem T="string?" Value="@("supplement")">Supplement</MudSelectItem>
+                                        <MudSelectItem T="string?" Value="@("pilot_form")">Pilot Form</MudSelectItem>
+                                        <MudSelectItem T="string?" Value="@("driver_schedule")">Driver Schedule</MudSelectItem>
+                                        <MudSelectItem T="string?" Value="@("vehicle_schedule")">Vehicle Schedule</MudSelectItem>
+                                        <MudSelectItem T="string?" Value="@("other")">Other</MudSelectItem>
+                                    </MudSelect>
+                                </MudTd>
+                                <MudTd>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetDocStatusColor(context.Status)" Variant="Variant.Filled">
+                                        @context.Status
+                                    </MudChip>
+                                </MudTd>
+                                <MudTd>
+                                    @if (context.ApprovedAt != null)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle">
+                                            Approved
+                                        </MudChip>
+                                    }
+                                </MudTd>
+                                <MudTd>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                                   Href="@($"/forms/{context.Id}?projectId={ProjectId}")"
+                                                   Title="View" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.RateReview" Size="Size.Small"
+                                                   Href="@($"/forms/{context.Id}/review?projectId={ProjectId}")"
+                                                   Title="Review" />
+                                    @if (context.ApprovedAt == null && context.Status is "Draft" or "Reviewed" or "Approved")
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Small"
+                                                       Color="Color.Success"
+                                                       OnClick="@(() => ApproveDocument(context))"
+                                                       Title="Approve" />
+                                    }
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                                   Color="Color.Error"
+                                                   OnClick="@(() => DeleteDocument(context.Id))"
+                                                   Title="Delete" />
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Question Sets" Icon="@Icons.Material.Filled.QuestionAnswer">
+                <div style="padding-top: var(--space-4);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+                        <MudText Typo="Typo.subtitle1">Project Question Sets</MudText>
+                        <MudStack Row="true" Spacing="2">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.Assignment"
+                                       OnClick="@(() => Nav.NavigateTo($"/projects/{ProjectId}/question-set"))">
+                                Question Set →
+                            </MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.Add"
+                                       OnClick="@(() => Nav.NavigateTo($"/question-sets?projectId={ProjectId}"))">
+                                New Question Set
+                            </MudButton>
+                        </MudStack>
+                    </div>
+
+                    @if (_questionSets.Count == 0)
+                    {
+                        <MudPaper Style="padding: var(--space-6); text-align: center; border: 1px dashed var(--color-border);">
+                            <MudText Style="color: var(--color-text-secondary);">No question sets yet. Create one to organize extracted fields.</MudText>
+                        </MudPaper>
+                    }
+                    else
+                    {
+                        <MudTable Items="@_questionSets" Hover="true"
+                                  Style="border: 1px solid var(--color-border); border-radius: var(--radius-lg);">
+                            <HeaderContent>
+                                <MudTh>Name</MudTh>
+                                <MudTh>Status</MudTh>
+                                <MudTh>Fields</MudTh>
+                                <MudTh>Actions</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd>@context.Name</MudTd>
+                                <MudTd>
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.Status</MudChip>
+                                </MudTd>
+                                <MudTd>@context.Fields.Count</MudTd>
+                                <MudTd>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                                   OnClick="@(() => Nav.NavigateTo($"/projects/{ProjectId}/question-set"))"
+                                                   Title="View" />
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </div>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</div>
+
+@code {
+    [Parameter] public int ProjectId { get; set; }
+
+    private FormProject? _project;
+    private List<FortressFormTools.Data.Entities.FormLibrary> _documents = new();
+    private List<QuestionSet> _questionSets = new();
+    private bool _loading = true;
+    private bool _uploading = false;
+    private string? _uploadDocumentType;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProject();
+    }
+
+    private async Task LoadProject()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _project = await db.FormProjects
+                .Include(p => p.Documents)
+                .Include(p => p.QuestionSets)
+                    .ThenInclude(q => q.Fields)
+                .FirstOrDefaultAsync(p => p.Id == ProjectId);
+
+            if (_project != null)
+            {
+                _documents = _project.Documents.OrderByDescending(d => d.CreatedAt).ToList();
+                _questionSets = _project.QuestionSets.OrderByDescending(q => q.CreatedAt).ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load project: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _uploading = true;
+        StateHasChanged();
+        try
+        {
+            var content = new MultipartFormDataContent();
+            foreach (var file in e.GetMultipleFiles(10))
+            {
+                var stream = file.OpenReadStream(50 * 1024 * 1024);
+                var sc = new StreamContent(stream);
+                sc.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+                content.Add(sc, "files", file.Name);
+            }
+            content.Add(new StringContent("Unknown"), "carrierName");
+            content.Add(new StringContent("Carrier"), "formType");
+            content.Add(new StringContent(ProjectId.ToString()), "projectId");
+            if (!string.IsNullOrEmpty(_uploadDocumentType))
+                content.Add(new StringContent(_uploadDocumentType), "documentType");
+
+            var response = await Http.PostAsync("/api/forms/upload", content);
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Files uploaded successfully!", Severity.Success);
+                await LoadProject();
+            }
+            else
+            {
+                Snackbar.Add("Upload failed.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _uploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExtractAllPending()
+    {
+        var pendingDocs = _documents.Where(d => d.Status == "Queued").ToList();
+        foreach (var doc in pendingDocs)
+        {
+            await Http.PostAsync($"/api/forms/{doc.Id}/resubmit", null);
+        }
+        Snackbar.Add($"Queued {pendingDocs.Count} document(s) for extraction.", Severity.Info);
+        await LoadProject();
+    }
+
+    private async Task ReExtract(int docId)
+    {
+        await Http.PostAsync($"/api/forms/{docId}/resubmit", null);
+        Snackbar.Add("Re-extraction queued.", Severity.Info);
+        await LoadProject();
+    }
+
+    private async Task SaveDocumentType(FortressFormTools.Data.Entities.FormLibrary doc, string? docType)
+    {
+        doc.DocumentType = docType;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var entity = await db.FormLibraries.FindAsync(doc.Id);
+            if (entity != null)
+            {
+                entity.DocumentType = docType;
+                entity.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to save document type: {ex.Message}", Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private async Task ApproveDocument(FortressFormTools.Data.Entities.FormLibrary doc)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var entity = await db.FormLibraries.FindAsync(doc.Id);
+            if (entity != null)
+            {
+                entity.ApprovedAt = DateTime.UtcNow;
+                entity.Status = "Approved";
+                entity.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+            }
+
+            doc.ApprovedAt = DateTime.UtcNow;
+            doc.Status = "Approved";
+            Snackbar.Add($"'{doc.FormName}' approved.", Severity.Success);
+
+            // Auto-update project status if all documents approved
+            if (_documents.All(d => d.ApprovedAt != null))
+            {
+                await using var db2 = await DbFactory.CreateDbContextAsync();
+                var project = await db2.FormProjects.FindAsync(ProjectId);
+                if (project != null)
+                {
+                    project.Status = "extracted";
+                    await db2.SaveChangesAsync();
+                    if (_project != null) _project.Status = "extracted";
+                    Snackbar.Add("All documents approved — project marked as extracted.", Severity.Info);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to approve document: {ex.Message}", Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private async Task DeleteDocument(int docId)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Confirm Delete",
+            "Delete this document? This cannot be undone.",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            try
+            {
+                var response = await Http.DeleteAsync($"/api/forms/{docId}");
+                if (response.IsSuccessStatusCode)
+                {
+                    Snackbar.Add("Document deleted.", Severity.Success);
+                    await LoadProject();
+                }
+                else
+                {
+                    Snackbar.Add("Failed to delete document.", Severity.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error deleting: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private string GetVerticalEmoji(string vertical) => vertical switch
+    {
+        "aviation" => "✈️",
+        "auto" => "🚗",
+        "gl" => "🏢",
+        "wc" => "👷",
+        "property" => "🏠",
+        _ => "📋"
+    };
+
+    private Color GetStatusColor(string status) => status switch
+    {
+        "draft" => Color.Default,
+        "extracting" => Color.Warning,
+        "extracted" => Color.Info,
+        "building" => Color.Primary,
+        "complete" => Color.Success,
+        _ => Color.Default
+    };
+
+    private Color GetDocStatusColor(string status) => status switch
+    {
+        "Queued" => Color.Default,
+        "Processing" => Color.Warning,
+        "Draft" => Color.Info,
+        "Reviewed" => Color.Primary,
+        "Approved" => Color.Success,
+        "Error" => Color.Error,
+        _ => Color.Default
+    };
+}

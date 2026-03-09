@@ -1,0 +1,44 @@
+@page "/"
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IConfiguration Config
+
+@if (!_checked)
+{
+    <div style="background: #0f1923; min-height: 100vh;"></div>
+}
+else
+{
+    <div style="background: #0f1923; min-height: 100vh; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif;">
+        <div style="text-align: center; max-width: 420px; padding: 40px;">
+            <div style="margin-bottom: 32px;">
+                <div style="font-size: 48px; margin-bottom: 16px;">🏰</div>
+                <h1 style="color: #d4af37; font-size: 28px; font-weight: 700; margin: 0 0 8px 0;">FIRM</h1>
+                <p style="color: #8899aa; font-size: 15px; margin: 0;">Fortress Intelligence Recording &amp; Minutes</p>
+            </div>
+            <a href="@_faitLoginUrl"
+               style="display: inline-block; background: #d4af37; color: #0f1923; padding: 14px 32px;
+                      border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px;
+                      transition: background 0.2s;">
+                Sign in with Fortress AI
+            </a>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _checked = false;
+    private string _faitLoginUrl = "https://fait.dev.fortressam.ai/";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _faitLoginUrl = Config["FIP:LoginUrl"] ?? "https://fait.dev.fortressam.ai/";
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (authState.User.Identity?.IsAuthenticated == true)
+        {
+            Navigation.NavigateTo("/meetings", forceLoad: false);
+            return;
+        }
+        _checked = true;
+    }
+}

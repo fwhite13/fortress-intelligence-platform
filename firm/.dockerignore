@@ -1,0 +1,12 @@
+**/.git
+**/.gitignore
+**/.vs
+**/bin
+**/obj
+**/publish
+**/*.user
+**/*.suo
+.dockerignore
+Dockerfile*
+README.md
+pipeline/

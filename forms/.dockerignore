@@ -1,0 +1,7 @@
+**/.git
+**/.vs
+**/obj
+**/bin
+**/*.user
+**/uploads
+pipeline/

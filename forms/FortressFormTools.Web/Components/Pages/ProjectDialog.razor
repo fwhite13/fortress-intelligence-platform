@@ -1,0 +1,35 @@
+<MudDialog>
+    <TitleContent><MudText Typo="Typo.h6">New Form Analysis Project</MudText></TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="Name" Label="Project Name" Required="true"
+                      Placeholder="e.g., Cessna CPA Aviation Q2 2026" MaxLength="200"
+                      Immediate="true" Class="mb-3" Variant="Variant.Outlined" />
+        <MudSelect @bind-Value="Vertical" Label="Line of Business" Class="mb-3" Variant="Variant.Outlined" T="string">
+            <MudSelectItem T="string" Value="@("aviation")">✈️ Aviation</MudSelectItem>
+            <MudSelectItem T="string" Value="@("auto")">🚗 Commercial Auto</MudSelectItem>
+            <MudSelectItem T="string" Value="@("gl")">🏢 General Liability</MudSelectItem>
+            <MudSelectItem T="string" Value="@("wc")">👷 Workers Comp</MudSelectItem>
+            <MudSelectItem T="string" Value="@("property")">🏠 Property</MudSelectItem>
+            <MudSelectItem T="string" Value="@("general")">📋 General</MudSelectItem>
+        </MudSelect>
+        <MudTextField @bind-Value="Description" Label="Description (optional)" Lines="2" Variant="Variant.Outlined" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
+        <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@string.IsNullOrWhiteSpace(Name)">
+            Create Project
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string Vertical { get; set; } = "general";
+    [Parameter] public string Description { get; set; } = "";
+
+    private void Cancel() => MudDialog.Cancel();
+    private void Submit() => MudDialog.Close(DialogResult.Ok(new ProjectDialogResult(Name, Vertical, Description)));
+}

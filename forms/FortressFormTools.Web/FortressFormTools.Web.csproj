@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.*" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="8.0.*" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.*" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="3.*" />
+    <PackageReference Include="AWSSDK.S3" Version="3.*" />
+    <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="8.0.*" />
+    <PackageReference Include="UglyToad.PdfPig" Version="0.1.9-alpha-20250103-ff5e8" />
+    <PackageReference Include="MudBlazor" Version="7.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FortressFormTools.Data\FortressFormTools.Data.csproj" />
+  </ItemGroup>
+</Project>

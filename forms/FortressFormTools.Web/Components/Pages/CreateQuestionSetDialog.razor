@@ -1,0 +1,90 @@
+@using System.Net.Http.Json
+@inject HttpClient Http
+
+<MudDialog>
+    <TitleContent>
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <MudText Typo="Typo.h6">Create Question Set</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="Cancel" />
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Required="true" RequiredError="Name is required"
+                      Variant="Variant.Outlined" Class="mb-3" />
+        <MudTextField @bind-Value="_description" Label="Description" Lines="3"
+                      Variant="Variant.Outlined" Class="mb-3" />
+        <MudSelect @bind-Value="_toneTemplateId" Label="Tone Template" Variant="Variant.Outlined"
+                   Class="mb-3" Clearable="true" T="int?">
+            @foreach (var t in _toneTemplates)
+            {
+                <MudSelectItem T="int?" Value="@((int?)t.Id)">@t.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect @bind-Value="_status" Label="Status" Variant="Variant.Outlined" T="string">
+            <MudSelectItem T="string" Value="@("Draft")">Draft</MudSelectItem>
+            <MudSelectItem T="string" Value="@("Active")">Active</MudSelectItem>
+            <MudSelectItem T="string" Value="@("Archived")">Archived</MudSelectItem>
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Outlined">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit"
+                   Disabled="@string.IsNullOrWhiteSpace(_name)">
+            Create
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private MudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _name = "";
+    private string _description = "";
+    private string _status = "Draft";
+    private int? _toneTemplateId;
+    private List<ToneTemplateItem> _toneTemplates = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var response = await Http.GetAsync("/api/tone-templates");
+            if (response.IsSuccessStatusCode)
+                _toneTemplates = await response.Content.ReadFromJsonAsync<List<ToneTemplateItem>>() ?? new();
+        }
+        catch { /* tone templates are optional */ }
+    }
+
+    private async Task Submit()
+    {
+        try
+        {
+            var response = await Http.PostAsJsonAsync("/api/question-sets", new
+            {
+                Name = _name,
+                Description = _description,
+                Status = _status,
+                ToneTemplateId = _toneTemplateId
+            });
+
+            if (response.IsSuccessStatusCode)
+                MudDialog?.Close(DialogResult.Ok(true));
+            else
+                MudDialog?.Close(DialogResult.Cancel());
+        }
+        catch
+        {
+            MudDialog?.Close(DialogResult.Cancel());
+        }
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+
+    public class ToneTemplateItem
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+    }
+}

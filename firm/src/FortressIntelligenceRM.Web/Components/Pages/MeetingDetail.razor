@@ -1,0 +1,287 @@
+@page "/meetings/{Id:long}"
+@attribute [Authorize]
+@inject MeetingService MeetingService
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+@using FortressIntelligenceRM.Web.Models
+@using FortressIntelligenceRM.Web.Services
+@using System.Security.Claims
+@using System.Text.Json
+
+<PageTitle>@(_meeting?.Title ?? "Meeting") — FIRM</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-6">
+    <MudButton StartIcon="@Icons.Material.Filled.ArrowBack"
+               Href="/meetings" Style="color: #8899aa;" Class="mb-4">
+        Back to Meetings
+    </MudButton>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Color="Color.Warning" Indeterminate />
+    }
+    else if (_meeting == null)
+    {
+        <MudAlert Severity="Severity.Error" Style="background: #2a1a1a; color: #ff6b6b;">
+            Meeting not found or you don't have permission to view it.
+        </MudAlert>
+    }
+    else
+    {
+        <MudPaper Style="background: #1a2332; padding: 24px; margin-bottom: 24px;" Elevation="0">
+            <MudStack Row AlignItems="AlignItems.Center" Class="mb-2">
+                <MudText Typo="Typo.h5" Style="color: #e8edf2; font-weight: 600;">
+                    @(_meeting.Title ?? $"Meeting — {_meeting.CreatedAt:yyyy-MM-dd}")
+                </MudText>
+                <MudSpacer />
+                @StatusBadge(_meeting.Status)
+            </MudStack>
+            <MudStack Row Class="mb-4" Style="gap: 24px; flex-wrap: wrap;">
+                <MudText Typo="Typo.body2" Style="color: #8899aa;">
+                    @_meeting.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
+                </MudText>
+                @if (_meeting.DurationSeconds.HasValue)
+                {
+                    <MudText Typo="Typo.body2" Style="color: #8899aa;">
+                        @FormatDuration(_meeting.DurationSeconds)
+                    </MudText>
+                }
+                <MudText Typo="Typo.body2" Style="color: #8899aa;">Teams</MudText>
+                @if (_meeting.Participants.Any())
+                {
+                    <MudText Typo="Typo.body2" Style="color: #8899aa;">
+                        @string.Join(", ", _meeting.Participants.Select(p => p.DisplayName))
+                    </MudText>
+                }
+            </MudStack>
+
+            @if (_meeting.Status == MeetingStatus.Failed && !string.IsNullOrEmpty(_meeting.ErrorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Style="background: #2a1a1a; color: #ff6b6b;" Class="mb-3">
+                    @_meeting.ErrorMessage
+                </MudAlert>
+            }
+
+            @if (_meeting.Status == MeetingStatus.Complete)
+            {
+                <MudStack Row Style="gap: 12px; flex-wrap: wrap;">
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
+                               Style="border-color: #d4af37; color: #d4af37;"
+                               Href="@($"/api/meetings/{_meeting.Id}/transcript/download")">
+                        Transcript
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
+                               Style="border-color: #d4af37; color: #d4af37;"
+                               Href="@($"/api/meetings/{_meeting.Id}/summary/download")">
+                        Summary
+                    </MudButton>
+                    @if (!string.IsNullOrEmpty(_meeting.AudioS3Key))
+                    {
+                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AudioFile"
+                                   Style="border-color: #5a6a7a; color: #8899aa;"
+                                   OnClick="DownloadAudio">
+                            Audio
+                        </MudButton>
+                    }
+                </MudStack>
+            }
+        </MudPaper>
+
+        <MudTabs Elevation="0" Style="background: transparent;">
+            <MudTabPanel Text="Summary" Style="color: #e8edf2;">
+                <MudPaper Style="background: #1a2332; padding: 24px; margin-top: 8px;" Elevation="0">
+                    @if (_meeting.Summary == null)
+                    {
+                        <MudText Style="color: #8899aa; text-align: center; padding: 40px 0;">
+                            @if (_meeting.Status is MeetingStatus.Summarizing or MeetingStatus.Transcribing
+                                or MeetingStatus.Recording or MeetingStatus.Joining)
+                            {
+                                <span>Summary will be available when the meeting completes.</span>
+                            }
+                            else
+                            {
+                                <span>No summary available.</span>
+                            }
+                        </MudText>
+                    }
+                    else
+                    {
+                        @if (!string.IsNullOrEmpty(_meeting.Summary.SummaryText))
+                        {
+                            <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-2">Overview</MudText>
+                            <MudText Style="color: #e8edf2; line-height: 1.7;" Class="mb-6">
+                                @_meeting.Summary.SummaryText
+                            </MudText>
+                        }
+                        @if (!string.IsNullOrEmpty(_meeting.Summary.KeyDecisionsJson))
+                        {
+                            var decisions = TryDeserializeStringList(_meeting.Summary.KeyDecisionsJson);
+                            @if (decisions.Any())
+                            {
+                                <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-2">Key Decisions</MudText>
+                                <MudList T="string" Style="margin-bottom: 24px;">
+                                    @foreach (var d in decisions)
+                                    {
+                                        <MudListItem T="string" Style="color: #e8edf2;">
+                                            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" Class="mr-2" />@d
+                                        </MudListItem>
+                                    }
+                                </MudList>
+                            }
+                        }
+                        @if (!string.IsNullOrEmpty(_meeting.Summary.ActionItemsJson))
+                        {
+                            var items = TryDeserializeActionItems(_meeting.Summary.ActionItemsJson);
+                            @if (items.Any())
+                            {
+                                <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-2">Action Items</MudText>
+                                <MudList T="string" Style="margin-bottom: 24px;">
+                                    @foreach (var item in items)
+                                    {
+                                        <MudListItem T="string" Style="color: #e8edf2;">
+                                            <MudIcon Icon="@Icons.Material.Filled.AssignmentTurnedIn" Color="Color.Warning" Size="Size.Small" Class="mr-2" />
+                                            @if (!string.IsNullOrEmpty(item.Owner))
+                                            {
+                                                <strong style="color: #d4af37;">[@item.Owner]</strong>
+                                                <span> @item.Description</span>
+                                            }
+                                            else { @item.Description }
+                                        </MudListItem>
+                                    }
+                                </MudList>
+                            }
+                        }
+                        @if (!string.IsNullOrEmpty(_meeting.Summary.FollowUpsJson))
+                        {
+                            var followUps = TryDeserializeStringList(_meeting.Summary.FollowUpsJson);
+                            @if (followUps.Any())
+                            {
+                                <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-2">Follow-ups</MudText>
+                                <MudList T="string">
+                                    @foreach (var f in followUps)
+                                    {
+                                        <MudListItem T="string" Style="color: #e8edf2;">
+                                            <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" Class="mr-2" />@f
+                                        </MudListItem>
+                                    }
+                                </MudList>
+                            }
+                        }
+                    }
+                </MudPaper>
+            </MudTabPanel>
+
+            <MudTabPanel Text="Transcript" Style="color: #e8edf2;">
+                <MudPaper Style="background: #1a2332; padding: 24px; margin-top: 8px;" Elevation="0">
+                    @if (!_meeting.Transcripts.Any())
+                    {
+                        <MudText Style="color: #8899aa; text-align: center; padding: 40px 0;">
+                            No transcript available yet.
+                        </MudText>
+                    }
+                    else
+                    {
+                        <MudTable Items="_meeting.Transcripts" Style="background: transparent;" Elevation="0"
+                                  FixedHeader Height="500px">
+                            <HeaderContent>
+                                <MudTh Style="color: #8899aa; width: 100px;">Time</MudTh>
+                                <MudTh Style="color: #8899aa; width: 160px;">Speaker</MudTh>
+                                <MudTh Style="color: #8899aa;">Text</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd Style="color: #5a7a8a; font-size: 12px; font-family: monospace;">
+                                    @FormatTimestamp(context.StartTimeMs)
+                                </MudTd>
+                                <MudTd Style="color: #d4af37; font-size: 13px; font-weight: 500;">
+                                    @(context.SpeakerName ?? context.SpeakerLabel ?? "Unknown")
+                                </MudTd>
+                                <MudTd Style="color: #e8edf2; font-size: 14px; line-height: 1.5;">
+                                    @context.Text
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudPaper>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudContainer>
+
+@code {
+    [Parameter] public long Id { get; set; }
+    private FirmMeeting? _meeting;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var entraOid = authState.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? authState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(entraOid)) { Navigation.NavigateTo("/"); return; }
+
+        var email = authState.User.FindFirst(ClaimTypes.Email)?.Value
+            ?? authState.User.FindFirst("preferred_username")?.Value ?? "";
+        var displayName = authState.User.FindFirst(ClaimTypes.Name)?.Value
+            ?? authState.User.FindFirst("name")?.Value ?? email;
+        var user = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+        if (user == null) { Navigation.NavigateTo("/meetings"); return; }
+
+        _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
+        _loading = false;
+    }
+
+    private void DownloadAudio()
+    {
+        if (_meeting == null) return;
+        Navigation.NavigateTo($"/api/meetings/{_meeting.Id}/audio", forceLoad: true);
+    }
+
+    private static string FormatDuration(int? seconds)
+    {
+        if (!seconds.HasValue) return "";
+        var ts = TimeSpan.FromSeconds(seconds.Value);
+        return ts.TotalHours >= 1 ? $"{(int)ts.TotalHours}h {ts.Minutes}m" : $"{ts.Minutes} min";
+    }
+
+    private static string FormatTimestamp(long? ms)
+    {
+        if (!ms.HasValue) return "00:00:00";
+        return TimeSpan.FromMilliseconds(ms.Value).ToString(@"hh\:mm\:ss");
+    }
+
+    private static List<string> TryDeserializeStringList(string json)
+    {
+        try { return JsonSerializer.Deserialize<List<string>>(json) ?? new(); }
+        catch { return new(); }
+    }
+
+    private static List<ActionItemDisplay> TryDeserializeActionItems(string json)
+    {
+        try { return JsonSerializer.Deserialize<List<ActionItemDisplay>>(json) ?? new(); }
+        catch { return new(); }
+    }
+
+    private record ActionItemDisplay(string? Description, string? Owner);
+
+    private RenderFragment StatusBadge(MeetingStatus status) => builder =>
+    {
+        var (color, label) = status switch
+        {
+            MeetingStatus.Joining => ("#2196f3", "Joining"),
+            MeetingStatus.Recording => ("#ff9800", "Recording"),
+            MeetingStatus.Transcribing => ("#9c27b0", "Transcribing"),
+            MeetingStatus.Summarizing => ("#00bcd4", "Summarizing"),
+            MeetingStatus.Complete => ("#4caf50", "Complete"),
+            MeetingStatus.Failed => ("#f44336", "Failed"),
+            MeetingStatus.Scheduled => ("#607d8b", "Scheduled"),
+            _ => ("#607d8b", status.ToString())
+        };
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "style",
+            $"background: {color}22; color: {color}; border: 1px solid {color}44; " +
+            "padding: 4px 14px; border-radius: 12px; font-size: 13px; font-weight: 500;");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+}

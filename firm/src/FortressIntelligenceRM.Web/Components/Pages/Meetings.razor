@@ -1,0 +1,253 @@
+@page "/meetings"
+@attribute [Authorize]
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+@inject MeetingService MeetingService
+@inject ISnackbar Snackbar
+@implements IDisposable
+@using FortressIntelligenceRM.Web.Models
+@using FortressIntelligenceRM.Web.Services
+@using System.Security.Claims
+@using System.Net.Http.Json
+
+<PageTitle>Meetings — FIRM</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-6">
+    <MudStack Row AlignItems="AlignItems.Center" Class="mb-6">
+        <MudText Typo="Typo.h5" Style="color: #e8edf2; font-weight: 600;">My Meetings</MudText>
+        <MudSpacer />
+        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;" OnClick="OpenJoinDialog">
+            Join a Meeting
+        </MudButton>
+    </MudStack>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Color="Color.Warning" Indeterminate />
+    }
+    else if (!_meetings.Any())
+    {
+        <MudPaper Style="background: #1a2332; padding: 60px; text-align: center;" Elevation="0">
+            <MudIcon Icon="@Icons.Material.Filled.VideoCall" Style="color: #3a4a5a; font-size: 64px;" />
+            <MudText Typo="Typo.h6" Class="mt-4" Style="color: #8899aa;">No meetings yet.</MudText>
+            <MudText Typo="Typo.body2" Style="color: #5a6a7a;" Class="mt-2">
+                Click "Join a Meeting" to get started.
+            </MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <MudTable Items="@(_meetings.Skip((_page - 1) * _pageSize).Take(_pageSize).ToList())"
+                  Style="background: #1a2332;" Elevation="0" T="FirmMeeting">
+            <HeaderContent>
+                <MudTh Style="color: #8899aa;">Title</MudTh>
+                <MudTh Style="color: #8899aa;">Date</MudTh>
+                <MudTh Style="color: #8899aa;">Duration</MudTh>
+                <MudTh Style="color: #8899aa;">Status</MudTh>
+                <MudTh Style="color: #8899aa;">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Title">
+                    <MudText Style="color: #e8edf2;">@(context.Title ?? $"Meeting — {context.CreatedAt:yyyy-MM-dd}")</MudText>
+                </MudTd>
+                <MudTd DataLabel="Date">
+                    <MudText Style="color: #8899aa;">@context.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</MudText>
+                </MudTd>
+                <MudTd DataLabel="Duration">
+                    <MudText Style="color: #8899aa;">@FormatDuration(context.DurationSeconds)</MudText>
+                </MudTd>
+                <MudTd DataLabel="Status">
+                    @StatusBadge(context.Status)
+                </MudTd>
+                <MudTd DataLabel="Actions">
+                    <MudStack Row>
+                        <MudIconButton Icon="@Icons.Material.Filled.Visibility"
+                                       Style="color: #d4af37;" Size="Size.Small"
+                                       OnClick="@(() => Navigation.NavigateTo($"/meetings/{context.Id}"))" />
+                        @if (context.Status == MeetingStatus.Complete)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Download"
+                                           Style="color: #8899aa;" Size="Size.Small"
+                                           Href="@($"/api/meetings/{context.Id}/transcript/download")" />
+                        }
+                    </MudStack>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+
+        @if (_meetings.Count > _pageSize)
+        {
+            <MudPagination Count="@((_meetings.Count + _pageSize - 1) / _pageSize)"
+                           @bind-Selected="_page" Class="mt-4" />
+        }
+    }
+</MudContainer>
+
+<!-- Join Meeting Dialog -->
+<MudDialog Visible="_joinDialogOpen" VisibleChanged="@((v) => _joinDialogOpen = v)" Options="_dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="color: #e8edf2;">Join a Meeting</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_joinUrl" Label="Teams Meeting URL"
+                      Style="color: #e8edf2;" Variant="Variant.Outlined"
+                      Placeholder="https://teams.microsoft.com/l/meetup-join/..."
+                      Required Class="mb-3" />
+        <MudTextField @bind-Value="_joinTitle" Label="Meeting Title (optional)"
+                      Style="color: #e8edf2;" Variant="Variant.Outlined" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _joinDialogOpen = false)" Style="color: #8899aa;">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                   OnClick="JoinMeeting" Disabled="_joining">
+            @if (_joining)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate />
+            }
+            else
+            {
+                <span>Join Now</span>
+            }
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<FirmMeeting> _meetings = new();
+    private bool _loading = true;
+    private bool _joinDialogOpen = false;
+    private bool _joining = false;
+    private string _joinUrl = "";
+    private string? _joinTitle;
+    private int _page = 1;
+    private const int _pageSize = 20;
+    private Guid? _userId;
+    private System.Threading.Timer? _pollTimer;
+
+    private DialogOptions _dialogOptions = new DialogOptions
+    {
+        CloseOnEscapeKey = true,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var entraOid = authState.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? authState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (entraOid != null)
+        {
+            var email = authState.User.FindFirst(ClaimTypes.Email)?.Value
+                ?? authState.User.FindFirst("preferred_username")?.Value ?? "";
+            var displayName = authState.User.FindFirst(ClaimTypes.Name)?.Value
+                ?? authState.User.FindFirst("name")?.Value ?? email;
+            var user = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+            _userId = user?.Id;
+        }
+        await LoadMeetings();
+        StartPolling();
+    }
+
+    private async Task LoadMeetings()
+    {
+        if (_userId == null) return;
+        _loading = true;
+        try
+        {
+            _meetings = await MeetingService.GetMeetingsAsync(_userId.Value);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load meetings: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void StartPolling()
+    {
+        _pollTimer = new System.Threading.Timer(async _ =>
+        {
+            var hasActive = _meetings.Any(m =>
+                m.Status is MeetingStatus.Joining or MeetingStatus.Recording
+                    or MeetingStatus.Transcribing or MeetingStatus.Summarizing);
+            if (hasActive)
+            {
+                await LoadMeetings();
+                await InvokeAsync(StateHasChanged);
+            }
+        }, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+    }
+
+    private void OpenJoinDialog()
+    {
+        _joinUrl = "";
+        _joinTitle = null;
+        _joinDialogOpen = true;
+    }
+
+    private async Task JoinMeeting()
+    {
+        if (string.IsNullOrWhiteSpace(_joinUrl)) return;
+        _joining = true;
+        try
+        {
+            var response = await Http.PostAsJsonAsync("/api/meetings/join",
+                new { meetingUrl = _joinUrl, title = _joinTitle });
+            if (response.IsSuccessStatusCode)
+            {
+                _joinDialogOpen = false;
+                Snackbar.Add("Bot is joining the meeting!", Severity.Success);
+                await LoadMeetings();
+            }
+            else
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                Snackbar.Add($"Failed to join: {err}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _joining = false;
+        }
+    }
+
+    private static string FormatDuration(int? seconds)
+    {
+        if (!seconds.HasValue) return "—";
+        var ts = TimeSpan.FromSeconds(seconds.Value);
+        return ts.TotalHours >= 1 ? $"{(int)ts.TotalHours}h {ts.Minutes}m" : $"{ts.Minutes} min";
+    }
+
+    private RenderFragment StatusBadge(MeetingStatus status) => builder =>
+    {
+        var (color, label) = status switch
+        {
+            MeetingStatus.Joining => ("#2196f3", "Joining"),
+            MeetingStatus.Recording => ("#ff9800", "Recording"),
+            MeetingStatus.Transcribing => ("#9c27b0", "Transcribing"),
+            MeetingStatus.Summarizing => ("#00bcd4", "Summarizing"),
+            MeetingStatus.Complete => ("#4caf50", "Complete"),
+            MeetingStatus.Failed => ("#f44336", "Failed"),
+            MeetingStatus.Scheduled => ("#607d8b", "Scheduled"),
+            _ => ("#607d8b", status.ToString())
+        };
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "style",
+            $"background: {color}22; color: {color}; border: 1px solid {color}44; " +
+            "padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500;");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+
+    public void Dispose() => _pollTimer?.Dispose();
+}

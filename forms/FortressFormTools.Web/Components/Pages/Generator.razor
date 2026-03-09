@@ -1,0 +1,320 @@
+@page "/generator/{QuestionSetId:int}"
+@using System.Net.Http.Json
+@using System.Text.Json
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<PageTitle>SurveyJS Generator — FORMS</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+               OnClick="@(() => Nav.NavigateTo($"/question-sets/{QuestionSetId}"))" Class="mb-3">
+        Back to Question Set
+    </MudButton>
+
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+        <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Large"
+                 Style="color: var(--fortress-gold, #d4af37);" />
+        <MudText Typo="Typo.h4" Style="font-weight: 600;">Generate Survey: @_questionSetName</MudText>
+    </MudStack>
+
+    <MudGrid>
+        @* Left panel: Settings *@
+        <MudItem xs="12" md="4">
+            <MudPaper Elevation="1" Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.Settings" Class="mr-2" />
+                    Settings
+                </MudText>
+
+                <MudSelect T="int" Label="Tone Template" @bind-Value="_toneTemplateId"
+                           Variant="Variant.Outlined" Class="mb-3">
+                    @foreach (var tone in _toneTemplates)
+                    {
+                        <MudSelectItem T="int" Value="tone.Id">@tone.Name</MudSelectItem>
+                    }
+                </MudSelect>
+
+                <MudSwitch T="bool" @bind-Value="_showProgressBar" Label="Show Progress Bar"
+                           Color="Color.Secondary" Class="mb-3" />
+
+                <MudSelect T="string" Label="Required Field Mark" @bind-Value="_requiredMark"
+                           Variant="Variant.Outlined" Class="mb-3">
+                    <MudSelectItem T="string" Value="@("*")">* (asterisk)</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("(required)")">(required)</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("!")">! (exclamation)</MudSelectItem>
+                </MudSelect>
+
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" FullWidth="true"
+                           StartIcon="@Icons.Material.Filled.AutoAwesome"
+                           Disabled="_generating" OnClick="GenerateSurvey" Class="mb-3">
+                    @if (_generating)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        @:Generating...
+                    }
+                    else
+                    {
+                        @:Generate JSON
+                    }
+                </MudButton>
+
+                @if (_generating)
+                {
+                    <MudProgressLinear Color="Color.Secondary" Indeterminate="true" Class="mb-2" />
+                    <MudText Typo="Typo.caption" Align="Align.Center" Style="color:#6b7280;">
+                        AI is generating your survey... This may take 10–30 seconds.
+                    </MudText>
+                }
+            </MudPaper>
+
+            @* Previous generations *@
+            @if (_previousSchemas.Any())
+            {
+                <MudPaper Elevation="1" Class="pa-4 mt-4">
+                    <MudText Typo="Typo.h6" Class="mb-2">
+                        <MudIcon Icon="@Icons.Material.Filled.History" Class="mr-2" />
+                        Previous Generations
+                    </MudText>
+                    <MudList T="SchemaListItem" Dense="true" Clickable="true">
+                        @foreach (var schema in _previousSchemas)
+                        {
+                            <MudListItem T="SchemaListItem" OnClick="@(() => LoadSchema(schema.Id))">
+                                <MudStack Row="true" AlignItems="AlignItems.Center">
+                                    <MudText Typo="Typo.body2">v@(schema.Version)</MudText>
+                                    <MudText Typo="Typo.caption" Style="color:#6b7280;">
+                                        @schema.CreatedAt.ToString("MMM dd, HH:mm")
+                                    </MudText>
+                                </MudStack>
+                            </MudListItem>
+                        }
+                    </MudList>
+                </MudPaper>
+            }
+        </MudItem>
+
+        @* Right panel: Preview + JSON *@
+        <MudItem xs="12" md="8">
+            @if (!string.IsNullOrEmpty(_schemaJson))
+            {
+                <MudPaper Elevation="1" Class="pa-4">
+                    <MudTabs Elevation="0" ApplyEffectsToContainer="true" PanelClass="pa-3">
+                        <MudTabPanel Text="Preview" Icon="@Icons.Material.Filled.Preview">
+                            <div id="survey-preview" style="min-height:400px; border:1px solid #e5e7eb; border-radius:4px; padding:16px;">
+                                <MudText Typo="Typo.body2" Style="color:#6b7280;">
+                                    SurveyJS preview renders here. If the preview doesn't load, check the JSON tab for the generated schema.
+                                </MudText>
+                            </div>
+                        </MudTabPanel>
+                        <MudTabPanel Text="JSON" Icon="@Icons.Material.Filled.Code">
+                            <MudStack Row="true" Justify="Justify.FlexEnd" Class="mb-2">
+                                <MudSwitch T="bool" @bind-Value="_editMode" Label="Edit Mode"
+                                           Color="Color.Warning" />
+                                <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                                               OnClick="CopyToClipboard"
+                                               Title="Copy to Clipboard" />
+                            </MudStack>
+                            <textarea @bind="_schemaJson" readonly="@(!_editMode)"
+                                      style="width:100%; min-height:500px; font-family:'JetBrains Mono',monospace;
+                                             font-size:13px; border:1px solid #e5e7eb; border-radius:4px;
+                                             padding:12px; resize:vertical; line-height:1.5;
+                                             background:@(_editMode ? "#fff" : "#f9fafb");
+                                             color:#1f2937; white-space:pre-wrap; word-wrap:break-word;" />
+                        </MudTabPanel>
+                    </MudTabs>
+                </MudPaper>
+            }
+            else
+            {
+                <MudPaper Elevation="1" Class="pa-6" Style="min-height:400px; display:flex; align-items:center; justify-content:center;">
+                    <MudStack AlignItems="AlignItems.Center" Spacing="3">
+                        <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Size="Size.Large"
+                                 Style="color:#d1d5db;" />
+                        <MudText Typo="Typo.h6" Style="color:#9ca3af;">
+                            Configure settings and click "Generate JSON" to create a SurveyJS survey.
+                        </MudText>
+                    </MudStack>
+                </MudPaper>
+            }
+        </MudItem>
+    </MudGrid>
+</MudContainer>
+
+@code {
+    [Parameter]
+    public int QuestionSetId { get; set; }
+
+    private string? _questionSetName;
+    private int _toneTemplateId = 1;
+    private bool _showProgressBar = true;
+    private string _requiredMark = "*";
+    private bool _generating = false;
+    private bool _editMode = false;
+    private string _schemaJson = "";
+
+    private List<ToneTemplateDto> _toneTemplates = new();
+    private List<SchemaListItem> _previousSchemas = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Load question set info
+            var qsResponse = await Http.GetAsync($"/api/question-sets/{QuestionSetId}");
+            if (qsResponse.IsSuccessStatusCode)
+            {
+                var qs = await qsResponse.Content.ReadFromJsonAsync<JsonElement>();
+                _questionSetName = qs.GetProperty("name").GetString();
+            }
+
+            // Load tone templates
+            var toneResponse = await Http.GetAsync("/api/generator/tone-templates");
+            if (toneResponse.IsSuccessStatusCode)
+            {
+                _toneTemplates = await toneResponse.Content.ReadFromJsonAsync<List<ToneTemplateDto>>() ?? new();
+                if (_toneTemplates.Any())
+                    _toneTemplateId = _toneTemplates.First().Id;
+            }
+
+            // Load previous schemas
+            await LoadPreviousSchemas();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task LoadPreviousSchemas()
+    {
+        try
+        {
+            var response = await Http.GetAsync($"/api/generator/{QuestionSetId}/schemas");
+            if (response.IsSuccessStatusCode)
+            {
+                _previousSchemas = await response.Content.ReadFromJsonAsync<List<SchemaListItem>>() ?? new();
+            }
+        }
+        catch { }
+    }
+
+    private async Task GenerateSurvey()
+    {
+        _generating = true;
+        StateHasChanged();
+
+        try
+        {
+            var request = new
+            {
+                toneTemplateId = _toneTemplateId,
+                settings = new
+                {
+                    showProgressBar = _showProgressBar,
+                    requiredMark = _requiredMark
+                }
+            };
+
+            var response = await Http.PostAsJsonAsync($"/api/generator/{QuestionSetId}", request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+                _schemaJson = FormatJson(result.GetProperty("schemaJson").GetString() ?? "{}");
+                Snackbar.Add("Survey JSON generated successfully!", Severity.Success);
+                await LoadPreviousSchemas();
+                await RenderPreview();
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                Snackbar.Add($"Generation failed: {error}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Generation error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _generating = false;
+        }
+    }
+
+    private async Task LoadSchema(int schemaId)
+    {
+        try
+        {
+            var response = await Http.GetAsync($"/api/generator/schemas/{schemaId}");
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+                _schemaJson = FormatJson(result.GetProperty("schemaJson").GetString() ?? "{}");
+                await RenderPreview();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading schema: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RenderPreview()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("initSurveyPreview", "survey-preview", _schemaJson);
+        }
+        catch
+        {
+            // SurveyJS CDN might not be loaded, preview will be blank but JSON tab works
+        }
+    }
+
+    private async Task CopyToClipboard()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _schemaJson);
+            Snackbar.Add("Copied to clipboard!", Severity.Info);
+        }
+        catch
+        {
+            Snackbar.Add("Copy failed — use Ctrl+A, Ctrl+C in the JSON tab", Severity.Warning);
+        }
+    }
+
+    private static string FormatJson(string json)
+    {
+        try
+        {
+            var doc = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    public class ToneTemplateDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public bool IsSystem { get; set; }
+    }
+
+    public class SchemaListItem
+    {
+        public int Id { get; set; }
+        public int QuestionSetId { get; set; }
+        public int? ToneTemplateId { get; set; }
+        public int Version { get; set; }
+        public string Status { get; set; } = "";
+        public DateTime CreatedAt { get; set; }
+        public int JsonLength { get; set; }
+    }
+}

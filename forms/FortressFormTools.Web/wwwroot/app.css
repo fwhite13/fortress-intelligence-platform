@@ -1,0 +1,181 @@
+html, body, #app {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    /* === FIP DESIGN SYSTEM TOKENS v1.0 === */
+    /* Brand Chrome */
+    --color-header-bg:         #1E293B;
+    --color-sidebar-bg:        #1A2035;
+    --color-sidebar-hover:     #252D45;
+    --color-sidebar-active:    #2A3454;
+    /* Gold Accent */
+    --color-gold:              #C9A84C;
+    --color-gold-muted:        rgba(201, 168, 76, 0.15);
+    --color-gold-dim:          #A08035;
+    /* Content Backgrounds */
+    --color-bg-page:           #F8FAFC;
+    --color-bg-card:           #FFFFFF;
+    --color-bg-input:          #FFFFFF;
+    --color-bg-table-alt:      #F8FAFC;
+    /* Text */
+    --color-text-primary:      #0F172A;
+    --color-text-secondary:    #64748B;
+    --color-text-tertiary:     #94A3B8;
+    --color-text-inverse:      #F8FAFC;
+    --color-text-link:         #3B82F6;
+    --color-text-gold:         #C9A84C;
+    /* Borders */
+    --color-border:            #E2E8F0;
+    --color-border-focus:      #C9A84C;
+    /* Status */
+    --color-success:           #10B981;
+    --color-success-bg:        rgba(16, 185, 129, 0.10);
+    --color-warning:           #F59E0B;
+    --color-warning-bg:        rgba(245, 158, 11, 0.10);
+    --color-error:             #EF4444;
+    --color-error-bg:          rgba(239, 68, 68, 0.10);
+    --color-info:              #3B82F6;
+    --color-info-bg:           rgba(59, 130, 246, 0.10);
+    /* Interactive */
+    --color-btn-primary-bg:    #0F766E;
+    --color-btn-primary-text:  #FFFFFF;
+    --color-btn-primary-hover: #0D6962;
+    --color-btn-gold-bg:       #C9A84C;
+    --color-btn-gold-text:     #FFFFFF;
+    --color-btn-gold-hover:    #A08035;
+    --color-btn-secondary-bg:  #FFFFFF;
+    --color-btn-secondary-border: #E2E8F0;
+    --color-btn-secondary-text:   #0F172A;
+    --color-btn-danger-bg:     #EF4444;
+    --color-btn-danger-text:   #FFFFFF;
+    /* Typography */
+    --text-xs: 11px; --text-sm: 13px; --text-base: 14px; --text-md: 15px;
+    --text-lg: 16px; --text-xl: 20px; --text-2xl: 24px; --text-3xl: 30px;
+    --font-regular: 400; --font-medium: 500; --font-semibold: 600; --font-bold: 700;
+    --tracking-tight: -0.01em; --tracking-normal: 0em; --tracking-wide: 0.06em; --tracking-wider: 0.08em;
+    /* Spacing */
+    --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+    --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px; --space-12: 48px;
+    /* Shape */
+    --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px; --radius-full: 9999px;
+    /* Elevation */
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.06);
+    --shadow-lg: 0 10px 15px rgba(0,0,0,0.10), 0 4px 6px rgba(0,0,0,0.05);
+}
+
+.mud-main-content {
+    min-height: calc(100vh - 48px);
+}
+
+/* Upload queue styling */
+.upload-queue-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+.upload-queue-filename {
+    min-width: 250px;
+    font-weight: 500;
+}
+
+.upload-queue-progress {
+    flex: 1;
+}
+
+/* === FIP Drawer Footer === */
+.fip-drawer-footer {
+    padding: 12px 16px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.5);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+}
+
+/* === FIP Sidebar Nav Overrides === */
+.mud-nav-link {
+    padding: 10px 16px !important;
+    height: 40px !important;
+    color: rgba(248, 250, 252, 0.85) !important;
+    font-size: var(--text-sm) !important;
+    font-weight: var(--font-medium) !important;
+}
+.mud-nav-link:hover {
+    background: var(--color-sidebar-hover) !important;
+}
+.mud-nav-link.active {
+    background: var(--color-sidebar-active) !important;
+    border-left: 3px solid var(--color-gold) !important;
+    color: var(--color-text-inverse) !important;
+}
+.mud-nav-link.active .mud-icon-root {
+    color: var(--color-gold) !important;
+}
+.mud-drawer {
+    background: var(--color-sidebar-bg) !important;
+}
+
+/* === FIP Button Overrides === */
+.mud-button-root.mud-button-filled-primary,
+.mud-button.mud-button-filled-primary {
+    background-color: var(--color-btn-primary-bg) !important;
+    color: var(--color-btn-primary-text) !important;
+    border-radius: var(--radius-md) !important;
+    height: 36px !important;
+    font-size: var(--text-sm) !important;
+    font-weight: var(--font-medium) !important;
+}
+.mud-button-root.mud-button-filled-primary:hover {
+    background-color: var(--color-btn-primary-hover) !important;
+}
+.mud-button-root.mud-button-filled-error {
+    background-color: var(--color-btn-danger-bg) !important;
+    border-radius: var(--radius-md) !important;
+}
+.mud-button-root.mud-button-outlined {
+    border-color: var(--color-border) !important;
+    color: var(--color-btn-secondary-text) !important;
+    border-radius: var(--radius-md) !important;
+    height: 36px !important;
+}
+
+/* === FIP Status Chips === */
+.mud-chip.mud-chip-color-success {
+    background-color: var(--color-success-bg) !important;
+    color: var(--color-success) !important;
+    border-radius: var(--radius-full) !important;
+    font-size: var(--text-xs) !important;
+    font-weight: var(--font-medium) !important;
+}
+.mud-chip.mud-chip-color-warning {
+    background-color: var(--color-warning-bg) !important;
+    color: var(--color-warning) !important;
+    border-radius: var(--radius-full) !important;
+    font-size: var(--text-xs) !important;
+    font-weight: var(--font-medium) !important;
+}
+.mud-chip.mud-chip-color-error {
+    background-color: var(--color-error-bg) !important;
+    color: var(--color-error) !important;
+    border-radius: var(--radius-full) !important;
+    font-size: var(--text-xs) !important;
+}
+.mud-chip.mud-chip-color-info {
+    background-color: var(--color-info-bg) !important;
+    color: var(--color-info) !important;
+    border-radius: var(--radius-full) !important;
+    font-size: var(--text-xs) !important;
+}
+
+/* === FIP Popover Styling === */
+.mud-popover-paper {
+    border: 1px solid var(--color-border) !important;
+    box-shadow: var(--shadow-lg) !important;
+    border-radius: var(--radius-lg) !important;
+    background: var(--color-bg-card) !important;
+}

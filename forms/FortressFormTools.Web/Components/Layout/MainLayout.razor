@@ -1,0 +1,131 @@
+@inherits LayoutComponentBase
+@using FortressFormTools.Web.Theme
+@using System.Security.Claims
+
+<MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1" Style="background: var(--color-header-bg); height: 48px; padding: 0;">
+        <div style="display: flex; align-items: center; gap: var(--space-3); padding-left: var(--space-1);">
+            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
+                               OnClick="@ToggleDrawer" />
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="color: var(--color-text-inverse);">
+              <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor" opacity="0.9"/>
+              <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <MudText Style="font-size: var(--text-md); font-weight: var(--font-semibold); color: var(--color-text-inverse);">
+                <span class="d-none d-sm-inline">Form Intelligence</span>
+                <span class="d-inline d-sm-none">FORMS</span>
+            </MudText>
+        </div>
+
+        <MudSpacer />
+
+        <div style="display: flex; align-items: center; gap: var(--space-2); padding-right: var(--space-1);">
+            <MudMenu Icon="@Icons.Material.Filled.Apps" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                <MudMenuItem Href="https://fait.dev.fortressam.ai" Icon="@Icons.Material.Filled.Chat">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>FAIT — AI Toolkit</span>
+                    </div>
+                </MudMenuItem>
+                <MudMenuItem Href="/" Icon="@Icons.Material.Filled.Description">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>FORMS — Form Intelligence</span>
+                        <span style="color: var(--color-gold);">●</span>
+                    </div>
+                </MudMenuItem>
+                <MudMenuItem Href="https://firm.dev.fortressam.ai" Icon="@Icons.Material.Filled.Groups">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>FIRM — Meeting Assistant</span>
+                    </div>
+                </MudMenuItem>
+            </MudMenu>
+
+            <MudMenu Dense="true" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+            <ActivatorContent>
+                <MudAvatar Style="background: var(--color-gold); width: 28px; height: 28px; font-size: 13px; cursor: pointer;">@_userInitial</MudAvatar>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem Disabled="true">
+                    <MudText Typo="Typo.body2"><strong>@_userName</strong></MudText>
+                    <MudText Typo="Typo.caption" Style="color: #6b7280;">@_userEmail</MudText>
+                </MudMenuItem>
+                <MudDivider />
+                <MudMenuItem Icon="@Icons.Material.Filled.Logout" Href="/auth/logout">Sign Out</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+        </div>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
+        <div style="display: flex; flex-direction: column; height: 100%;">
+            <MudDrawerHeader Style="padding: 12px 16px; background: var(--color-sidebar-bg);">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="color: var(--color-gold)">
+                      <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor" opacity="0.9"/>
+                      <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <span style="color: rgba(248,250,252,0.8); font-size: 14px; font-weight: 500;">Fortress</span>
+                </div>
+                <div style="color: var(--color-gold); font-size: var(--text-lg); font-weight: var(--font-bold); margin-top: 2px;">
+                    FORMS
+                </div>
+            </MudDrawerHeader>
+            <div style="flex: 1; overflow-y: auto;">
+                <NavMenu />
+            </div>
+            <div class="fip-drawer-footer">
+                <MudText Typo="Typo.caption">Fortress Intelligence Platform</MudText>
+            </div>
+        </div>
+    </MudDrawer>
+
+    <MudMainContent Class="pa-4" Style="padding-top: 80px !important;">
+        @Body
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+    private string _userInitial = "F";
+    private string _userName = "";
+    private string _userEmail = "";
+
+    private MudTheme _theme = FipTheme.Create();
+
+    [Inject] private IServiceProvider ServiceProvider { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authProvider = ServiceProvider.GetService<AuthenticationStateProvider>();
+        if (authProvider != null)
+        {
+            try
+            {
+                var auth = await authProvider.GetAuthenticationStateAsync();
+                var name = auth.User?.Identity?.Name
+                           ?? auth.User?.FindFirst("name")?.Value
+                           ?? auth.User?.FindFirst(ClaimTypes.Name)?.Value
+                           ?? "";
+                var email = auth.User?.FindFirst("email")?.Value
+                            ?? auth.User?.FindFirst(ClaimTypes.Email)?.Value
+                            ?? "";
+                _userName = string.IsNullOrEmpty(name) ? "User" : name;
+                _userEmail = email;
+                _userInitial = name.Length > 0 ? name[0].ToString().ToUpper() : "F";
+            }
+            catch
+            {
+                _userInitial = "F";
+            }
+        }
+    }
+
+    private void ToggleDrawer()
+    {
+        _drawerOpen = !_drawerOpen;
+    }
+}

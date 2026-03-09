@@ -1,0 +1,183 @@
+@page "/projects/{ProjectId:int}/survey-preview"
+@using FortressFormTools.Data
+@using FortressFormTools.Data.Entities
+@using Microsoft.EntityFrameworkCore
+@using System.Text.Json
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FortressFormTools.Web.Services.GeneratorService GeneratorService
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+
+<PageTitle>Survey Preview — @_projectName</PageTitle>
+
+<HeadContent>
+    <script src="https://unpkg.com/survey-core/survey.core.min.js"></script>
+    <script src="https://unpkg.com/survey-js-ui/survey-js-ui.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/survey-core/defaultV2.min.css">
+</HeadContent>
+
+<div style="padding: var(--space-6);">
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else
+    {
+        @* Header *@
+        <div style="display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2);">
+            <MudLink Href="@($"/projects/{ProjectId}/question-set")"
+                     Style="color: var(--color-text-secondary); font-size: 0.875rem;">
+                ← Back to Question Set
+            </MudLink>
+        </div>
+
+        <div style="margin-bottom: var(--space-4);">
+            <MudText Typo="Typo.h5" Style="font-weight: 600;">Survey Preview — @_projectName</MudText>
+        </div>
+
+        @* Controls *@
+        <MudPaper Elevation="1" Class="pa-3 mb-4">
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                <MudSelect @bind-Value="_tone"
+                           Label="Tone"
+                           Variant="Variant.Outlined"
+                           Margin="Margin.Dense"
+                           Style="width: 200px;">
+                    <MudSelectItem Value="@("professional")">Professional</MudSelectItem>
+                    <MudSelectItem Value="@("conversational")">Conversational</MudSelectItem>
+                    <MudSelectItem Value="@("formal")">Formal</MudSelectItem>
+                    <MudSelectItem Value="@("simple")">Simple</MudSelectItem>
+                </MudSelect>
+
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.AutoAwesome"
+                           OnClick="GenerateSurveyAsync"
+                           Disabled="@_generating">
+                    Generate Survey
+                </MudButton>
+
+                @if (_surveyJson != null)
+                {
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Secondary"
+                               StartIcon="@Icons.Material.Filled.Download"
+                               OnClick="ExportJson">
+                        Export JSON
+                    </MudButton>
+                }
+            </MudStack>
+        </MudPaper>
+
+        @* Progress *@
+        @if (_generating)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+        }
+
+        @* Error *@
+        @if (_errorMessage != null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4">@_errorMessage</MudAlert>
+        }
+
+        @* Results *@
+        @if (_surveyJson != null)
+        {
+            <MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="2" Rounded="true" ApplyEffectsToContainer="true">
+                <MudTabPanel Text="Preview">
+                    <div style="padding: 16px;">
+                        <div id="survey-container" style="min-height: 200px;"></div>
+                    </div>
+                </MudTabPanel>
+                <MudTabPanel Text="JSON">
+                    <div style="padding: 16px;">
+                        <div style="margin-bottom: 8px;">
+                            <MudButton Variant="Variant.Outlined"
+                                       Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.ContentCopy"
+                                       OnClick="CopyJson">
+                                Copy
+                            </MudButton>
+                        </div>
+                        <pre style="background: #f8f9fa; padding: 16px; overflow: auto; max-height: 600px; font-size: 0.8rem; border-radius: 4px; border: 1px solid #e0e0e0;">@_surveyJson</pre>
+                    </div>
+                </MudTabPanel>
+            </MudTabs>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int ProjectId { get; set; }
+
+    private string _projectName = "";
+    private string _tone = "professional";
+    private string? _surveyJson = null;
+    private string? _errorMessage = null;
+    private bool _generating = false;
+    private bool _loading = true;
+    private int _activeTab = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var project = await db.FormProjects
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == ProjectId);
+
+        _projectName = project?.Name ?? $"Project {ProjectId}";
+        _loading = false;
+    }
+
+    private async Task GenerateSurveyAsync()
+    {
+        if (!string.IsNullOrEmpty(_surveyJson))
+        {
+            var confirm = await DialogService.ShowMessageBox(
+                "Regenerate Survey?",
+                "This will replace the current survey. Continue?",
+                yesText: "Regenerate", cancelText: "Cancel");
+            if (confirm != true) return;
+        }
+
+        _generating = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            _surveyJson = await GeneratorService.GenerateSurveyJsonAsync(ProjectId, _tone);
+            _activeTab = 0;
+            StateHasChanged();
+
+            // Brief delay to ensure DOM is updated before injecting SurveyJS
+            await Task.Delay(150);
+            await JS.InvokeVoidAsync("renderSurvey", "survey-container", _surveyJson);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Generation failed: {ex.Message}";
+        }
+        finally
+        {
+            _generating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExportJson()
+    {
+        if (_surveyJson == null) return;
+        var filename = $"{_projectName.Replace(" ", "-").ToLowerInvariant()}-survey.json";
+        await JS.InvokeVoidAsync("downloadFile", filename, _surveyJson);
+    }
+
+    private async Task CopyJson()
+    {
+        if (_surveyJson == null) return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", _surveyJson);
+    }
+}
