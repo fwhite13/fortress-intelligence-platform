@@ -1,0 +1,149 @@
+@inject UserSessionService Session
+@inject DocumentService DocumentSvc
+@inject IJSRuntime JS
+
+<div class="document-panel">
+    <h3><MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Small" /> Documents</h3>
+    <p class="panel-hint">Upload documents to include as context in conversations.</p>
+
+    <div class="document-upload-area">
+        <InputFile OnChange="HandleFileUpload" multiple
+                   accept=".pdf,.txt,.md,.docx,.rtf,.csv,.json,.xml,.yaml,.yml,.xlsx,.cs,.js,.ts,.tsx,.jsx,.py,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.swift,.kt,.html,.css,.log,.sql,.sh,.bash,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.tiff,.tif" />
+        <div class="upload-label">
+            <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" />
+            <span>Drop files or click to upload</span>
+            <small>PDF, DOCX, XLSX, TXT, MD, CSV, JSON, RTF, code files, images</small>
+        </div>
+    </div>
+
+    @if (isUploading)
+    {
+        <div class="upload-progress">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" /> Uploading @uploadingFilename...
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="alert alert-error alert-sm">@error</div>
+    }
+
+    @if (!string.IsNullOrEmpty(uploadWarning))
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2 mb-2">@uploadWarning</MudAlert>
+    }
+
+    @if (Documents.Any())
+    {
+        <div class="document-list">
+            @foreach (var doc in Documents)
+            {
+                <div class="document-item">
+                    <div class="document-info">
+                        <i class="fas @GetFileIcon(doc.Filename)"></i>
+                        <div>
+                            <span class="document-name">@doc.Filename</span>
+                            <span class="document-size">@FormatSize(doc.FileSize)</span>
+                            @if (string.IsNullOrEmpty(doc.Content))
+                            {
+                                <span class="document-warning">No text extracted</span>
+                            }
+                        </div>
+                    </div>
+                    <button class="btn-icon btn-danger-icon"
+                            @onclick="@(() => DeleteDocument(doc.Id))" title="Remove">
+                        <MudIcon Icon="@Icons.Material.Filled.Close" Size="Size.Small" />
+                    </button>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="empty-state-sm">
+            <p>No documents uploaded yet.</p>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid ProjectId { get; set; }
+    [Parameter] public List<ProjectDocument> Documents { get; set; } = new();
+    [Parameter] public EventCallback OnDocumentChanged { get; set; }
+
+    private bool isUploading = false;
+    private string? uploadingFilename;
+    private string? error;
+    private string? uploadWarning;
+
+    private const long MaxFileSize = 10 * 1024 * 1024; // 10MB
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        error = null;
+        uploadWarning = null;
+
+        foreach (var file in e.GetMultipleFiles(10))
+        {
+            if (file.Size > MaxFileSize)
+            {
+                error = $"{file.Name} is too large (max 10MB).";
+                continue;
+            }
+
+            isUploading = true;
+            uploadingFilename = file.Name;
+            StateHasChanged();
+
+            try
+            {
+                using var stream = file.OpenReadStream(MaxFileSize);
+                var uploadedDoc = await DocumentSvc.UploadDocumentAsync(
+                    ProjectId, Session.UserId,
+                    file.Name, file.ContentType, stream, file.Size);
+
+                if (uploadedDoc?.UploadWarning != null)
+                    uploadWarning = uploadedDoc.UploadWarning;
+
+                await OnDocumentChanged.InvokeAsync();
+            }
+            catch (Exception ex)
+            {
+                error = $"Failed to upload {file.Name}: {ex.Message}";
+            }
+        }
+
+        isUploading = false;
+        uploadingFilename = null;
+    }
+
+    private async Task DeleteDocument(Guid docId)
+    {
+        await DocumentSvc.DeleteDocumentAsync(docId, Session.UserId);
+        await OnDocumentChanged.InvokeAsync();
+    }
+
+    private string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
+    }
+
+    private string GetFileIcon(string filename)
+    {
+        var ext = Path.GetExtension(filename).ToLower();
+        return ext switch
+        {
+            ".pdf" => "fa-file-pdf",
+            ".txt" or ".md" or ".log" => "fa-file-lines",
+            ".csv" => "fa-file-csv",
+            ".docx" or ".rtf" => "fa-file-word",
+            ".xlsx" => "fa-file-excel",
+            ".json" or ".xml" or ".yaml" or ".yml" => "fa-file-code",
+            ".cs" or ".js" or ".ts" or ".tsx" or ".jsx" or ".py" or ".java" or ".cpp" or ".c" or ".h" or ".go" or ".rs" or ".rb" or ".php" or ".swift" or ".kt" or ".html" or ".css" or ".sql" or ".sh" or ".bash" => "fa-file-code",
+            ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".svg" or ".bmp" or ".tiff" or ".tif" => "fa-file-image",
+            _ => "fa-file"
+        };
+    }
+}

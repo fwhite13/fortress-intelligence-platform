@@ -1,0 +1,68 @@
+@using FortressAI.Web.Services
+@using MudBlazor
+@inject IUserManagementService UserMgmt
+@inject ISnackbar Snackbar
+@inject UserSessionService Session
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.PersonAdd" Class="mr-2" />
+            Invite User
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm @ref="_form" @bind-IsValid="_isValid">
+            <MudTextField @bind-Value="_email"
+                          Label="Email Address"
+                          Required="true"
+                          RequiredError="Email is required"
+                          InputType="InputType.Email"
+                          Validation="@_emailValidation"
+                          HelperText="The user will receive an email to complete registration"
+                          Class="mb-4" />
+        </MudForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit" Disabled="@(_submitting || !_isValid)">
+            @(_submitting ? "Inviting..." : "Send Invite")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = null!;
+
+    private MudForm _form = null!;
+    private bool _isValid;
+    private string _email = string.Empty;
+    private bool _submitting;
+
+    private readonly Func<string, string?> _emailValidation =
+        v => string.IsNullOrWhiteSpace(v) || v.Contains('@') ? null : "Invalid email";
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Submit()
+    {
+        await _form.Validate();
+        if (!_isValid) return;
+
+        _submitting = true;
+        try
+        {
+            await UserMgmt.InviteUserAsync(_email.Trim(), null, Session.UserId);
+            Snackbar.Add($"Invitation sent to {_email}", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Invite failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+}

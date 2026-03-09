@@ -1,0 +1,345 @@
+@page "/admin/mcp-servers"
+@using FortressAI.Shared.Models
+@using FortressAI.Web.Services
+@using FortressAI.Web.Services.Mcp
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "admin")]
+@inject IMcpRegistryService McpRegistry
+@inject ISnackbar Snackbar
+@inject UserSessionService Session
+@inject NavigationManager Nav
+
+<PageTitle>MCP Servers — FAIT Admin</PageTitle>
+
+<MudText Typo="Typo.h5" GutterBottom="true" Style="font-weight: 600;">MCP Servers</MudText>
+<MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-bottom: 24px;">
+    Manage the MCP server registry. Servers listed here are available as tools in chat conversations.
+</MudText>
+
+@if (_showForm)
+{
+    <MudPaper Elevation="2" Class="pa-4 mb-4">
+        <MudText Typo="Typo.h6" GutterBottom="true">@(_editingServer == null ? "Add MCP Server" : "Edit MCP Server")</MudText>
+        <MudGrid>
+            <MudItem xs="12" sm="8">
+                <MudTextField @bind-Value="_form.Name" Label="Display Name" Required="true"
+                              HelperText="Human-readable name, e.g. 'Brave Web Search'" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_form.Slug" Label="Slug" Required="true"
+                              HelperText="Short identifier, e.g. 'brave'"
+                              Disabled="@(_editingServer != null)" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_form.Description" Label="Description" Lines="2" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_form.EndpointUrl" Label="Endpoint URL"
+                              HelperText="MCP server HTTP endpoint URL" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect @bind-Value="_form.AuthType" Label="Auth Type">
+                    <MudSelectItem Value="@("none")">None</MudSelectItem>
+                    <MudSelectItem Value="@("api_key")">API Key</MudSelectItem>
+                    <MudSelectItem Value="@("oauth2")">OAuth2 (Phase 2)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSwitch @bind-Value="_form.RequiresUserAuth" Label="Requires User Auth"
+                           Color="Color.Primary" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudNumericField @bind-Value="_form.RateLimitPerMinute" Label="Rate limit (calls/minute)"
+                                 Min="1" Max="1000"
+                                 HelperText="Max tool calls per user per minute (default 30)" />
+            </MudItem>
+            @if (_form.AuthType == "api_key")
+            {
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_form.SystemApiKey"
+                                  Label="System API Key"
+                                  InputType="InputType.Password"
+                                  HelperText="@(_editingServer != null ? "Leave blank to keep existing key" : "API key for system-level access")" />
+                </MudItem>
+            }
+        </MudGrid>
+
+        @if (_editingServer != null && (_editingServer.Tools?.Count ?? 0) > 0)
+        {
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.subtitle2" GutterBottom="true">Tools (@(_editingServer.Tools!.Count))</MudText>
+            @foreach (var tool in _editingServer.Tools!)
+            {
+                <MudExpansionPanels Dense="true" Class="mb-1">
+                    <MudExpansionPanel Text="@($"{_editingServer.Slug}__{tool.Name}")">
+                        <MudText Typo="Typo.body2">@tool.Description</MudText>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            }
+        }
+
+        <div style="display:flex; gap:8px; margin-top:16px;">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveServer"
+                       Disabled="@_saving">
+                @(_saving ? "Saving..." : "Save")
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="CancelForm">Cancel</MudButton>
+        </div>
+    </MudPaper>
+}
+
+<MudPaper Elevation="1" Class="pa-0">
+    <MudToolBar Dense="true" Style="background: var(--color-surface); border-bottom: 1px solid var(--color-border);">
+        <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Registered Servers</MudText>
+        <MudSpacer />
+        @if (!_showForm)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                       Size="Size.Small" OnClick="OpenAddForm">
+                Add Server
+            </MudButton>
+        }
+    </MudToolBar>
+
+    @if (_loading)
+    {
+        <div style="padding: 48px; text-align: center;">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Medium" />
+        </div>
+    }
+    else if (!_servers.Any())
+    {
+        <div style="padding: 48px; text-align: center; color: var(--color-text-secondary);">
+            <MudIcon Icon="@Icons.Material.Filled.Extension" Style="font-size: 48px; opacity: 0.3; display: block; margin: 0 auto 16px;" />
+            <MudText>No MCP servers configured.</MudText>
+            <MudText Typo="Typo.body2">Click "Add Server" to register your first MCP server.</MudText>
+        </div>
+    }
+    else
+    {
+        <MudTable Items="_servers" Hover="true" Dense="true">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Slug</MudTh>
+                <MudTh>Auth Type</MudTh>
+                <MudTh>Tools</MudTh>
+                <MudTh>Status</MudTh>
+                <MudTh Style="text-align:right;">Actions</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Extension" Size="Size.Small" Style="color: var(--color-gold);" />
+                        <span style="font-weight:500;">@context.Name</span>
+                    </div>
+                </MudTd>
+                <MudTd>
+                    <code style="font-size:0.8rem; background: var(--color-surface); padding: 2px 6px; border-radius: 4px;">@context.Slug</code>
+                </MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@GetAuthColor(context.AuthType)">
+                        @context.AuthType
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    @{
+                        var toolCount = context.Tools?.Count ?? 0;
+                    }
+                    <span style="color: var(--color-text-secondary);">@toolCount tool@(toolCount == 1 ? "" : "s")</span>
+                </MudTd>
+                <MudTd>
+                    @if (context.IsActive)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">Active</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">Inactive</MudChip>
+                    }
+                </MudTd>
+                <MudTd Style="text-align:right;">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Title="Edit"
+                                   OnClick="@(() => OpenEditForm(context))" />
+                    <MudIconButton Icon="@(context.IsActive ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                                   Size="Size.Small"
+                                   Title="@(context.IsActive ? "Disable" : "Enable")"
+                                   OnClick="@(() => ToggleActive(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Title="Refresh tool manifest"
+                                   OnClick="@(() => RefreshManifest(context))" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private bool _loading = true;
+    private bool _saving = false;
+    private bool _showForm = false;
+    private List<McpServer> _servers = new();
+    private McpServer? _editingServer;
+    private McpServerFormModel _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Session.IsAuthenticated || !Session.IsAdmin)
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+        await LoadServers();
+    }
+
+    private async Task LoadServers()
+    {
+        _loading = true;
+        try
+        {
+            _servers = await McpRegistry.GetActiveServersAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load servers: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OpenAddForm()
+    {
+        _editingServer = null;
+        _form = new McpServerFormModel();
+        _showForm = true;
+    }
+
+    private void OpenEditForm(McpServer server)
+    {
+        _editingServer = server;
+        _form = new McpServerFormModel
+        {
+            Name = server.Name,
+            Slug = server.Slug,
+            Description = server.Description,
+            EndpointUrl = server.EndpointUrl,
+            AuthType = server.AuthType,
+            RequiresUserAuth = server.RequiresUserAuth,
+            RateLimitPerMinute = server.RateLimitPerMinute,
+            SystemApiKey = ""  // Never pre-fill the key — replace-only
+        };
+        _showForm = true;
+    }
+
+    private void CancelForm()
+    {
+        _showForm = false;
+        _editingServer = null;
+    }
+
+    private async Task SaveServer()
+    {
+        if (string.IsNullOrWhiteSpace(_form.Name) || string.IsNullOrWhiteSpace(_form.Slug))
+        {
+            Snackbar.Add("Name and Slug are required.", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            if (_editingServer == null)
+            {
+                var created = await McpRegistry.CreateServerAsync(new CreateMcpServerRequest
+                {
+                    Name = _form.Name,
+                    Slug = _form.Slug.Trim().ToLower(),
+                    Description = _form.Description,
+                    EndpointUrl = _form.EndpointUrl,
+                    TransportType = "http",
+                    AuthType = _form.AuthType,
+                    RequiresUserAuth = _form.RequiresUserAuth,
+                    RateLimitPerMinute = _form.RateLimitPerMinute,
+                    SystemApiKey = _form.SystemApiKey
+                });
+                await McpRegistry.RefreshToolManifestAsync(created.Id);
+                Snackbar.Add($"Server '{_form.Name}' created.", Severity.Success);
+            }
+            else
+            {
+                await McpRegistry.UpdateServerAsync(_editingServer.Id, new UpdateMcpServerRequest
+                {
+                    Name = _form.Name,
+                    Description = _form.Description,
+                    EndpointUrl = _form.EndpointUrl,
+                    AuthType = _form.AuthType,
+                    RequiresUserAuth = _form.RequiresUserAuth,
+                    RateLimitPerMinute = _form.RateLimitPerMinute,
+                    SystemApiKey = string.IsNullOrEmpty(_form.SystemApiKey) ? null : _form.SystemApiKey
+                });
+                await McpRegistry.RefreshToolManifestAsync(_editingServer.Id);
+                Snackbar.Add($"Server '{_form.Name}' updated.", Severity.Success);
+            }
+
+            _showForm = false;
+            _editingServer = null;
+            await LoadServers();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task ToggleActive(McpServer server)
+    {
+        try
+        {
+            await McpRegistry.SetServerActiveAsync(server.Id, !server.IsActive);
+            server.IsActive = !server.IsActive;
+            Snackbar.Add($"Server '{server.Name}' {(server.IsActive ? "enabled" : "disabled")}.", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RefreshManifest(McpServer server)
+    {
+        try
+        {
+            var tools = await McpRegistry.RefreshToolManifestAsync(server.Id);
+            Snackbar.Add($"Refreshed: {tools.Count} tool(s) loaded for '{server.Name}'.", Severity.Success);
+            await LoadServers();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Refresh failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private Color GetAuthColor(string authType)
+    {
+        if (authType == "oauth2") return Color.Info;
+        if (authType == "api_key") return Color.Warning;
+        return Color.Default;
+    }
+
+    private class McpServerFormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Slug { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string? EndpointUrl { get; set; }
+        public string AuthType { get; set; } = "none";
+        public bool RequiresUserAuth { get; set; }
+        public string? SystemApiKey { get; set; }
+        public int RateLimitPerMinute { get; set; } = 30;
+    }
+}

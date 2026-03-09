@@ -1,0 +1,72 @@
+@inject HelpService HelpSvc
+@using Markdig
+
+<MudDrawer @bind-Open="_open" Anchor="Anchor.Right" Variant="DrawerVariant.Temporary"
+           Elevation="4"
+           Width="@(_expanded ? "100%" : "60%")"
+           Style="background: var(--color-sidebar-bg, #1A2035);">
+    <div style="display: flex; flex-direction: column; height: 100%; font-family: var(--font-primary);">
+        <!-- Header -->
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <MudIcon Icon="@Icons.Material.Filled.Help" Style="color: var(--color-gold, #d4af37); font-size: 20px;" />
+                <span style="color: #f8fafc; font-size: 16px; font-weight: 600;">Help & Guide</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 4px;">
+                <MudIconButton Icon="@(_expanded ? Icons.Material.Filled.FullscreenExit : Icons.Material.Filled.Fullscreen)"
+                               Color="Color.Inherit"
+                               Class="help-drawer-expand-btn"
+                               Style="color: rgba(248,250,252,0.6);"
+                               title="@(_expanded ? "Collapse" : "Expand")"
+                               OnClick="ToggleExpand" />
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Inherit"
+                               Style="color: rgba(248,250,252,0.95);" OnClick="Close" />
+            </div>
+        </div>
+
+        <!-- Content -->
+        <div style="flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px;">
+            @if (_loading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+            }
+            else
+            {
+                <div class="help-content" style="color: rgba(248,250,252,0.87);">
+                    @((MarkupString)_htmlContent)
+                </div>
+            }
+        </div>
+    </div>
+</MudDrawer>
+
+@code {
+    private bool _open = false;
+    private bool _loading = false;
+    private bool _expanded = false;
+    private string _htmlContent = "";
+
+    private void ToggleExpand()
+    {
+        _expanded = !_expanded;
+        StateHasChanged();
+    }
+
+    public async Task OpenAsync()
+    {
+        _open = true;
+        await LoadContentAsync();
+    }
+
+    public void Close() => _open = false;
+
+    private async Task LoadContentAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        var markdown = await HelpSvc.GetHelpContentAsync("app-guide.md");
+        _htmlContent = Markdig.Markdown.ToHtml(markdown);
+        _loading = false;
+        StateHasChanged();
+    }
+}

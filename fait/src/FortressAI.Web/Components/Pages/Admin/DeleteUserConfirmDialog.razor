@@ -1,0 +1,57 @@
+@using FortressAI.Web.Services
+@using MudBlazor
+@inject IUserManagementService UserMgmt
+@inject UserSessionService Session
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="color: var(--mud-palette-error);">
+            <MudIcon Icon="@Icons.Material.Filled.DeleteForever" Class="mr-2" />
+            Delete User
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.subtitle1" GutterBottom="true">
+            ⚠️ Delete @(TargetUser.User.DisplayName ?? TargetUser.User.Email) (@TargetUser.User.Email)?
+        </MudText>
+        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+            This will permanently delete this user and all their data. This cannot be undone.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="Confirm" Disabled="@_deleting">
+            @(_deleting ? "Deleting..." : "Delete Permanently")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public UserWithPermissions TargetUser { get; set; } = null!;
+
+    private bool _deleting;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Confirm()
+    {
+        _deleting = true;
+        try
+        {
+            await UserMgmt.DeleteUserAsync(TargetUser.User.Id, Session.UserId);
+            Snackbar.Add($"{TargetUser.User.DisplayName ?? TargetUser.User.Email} has been deleted.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Delete failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _deleting = false;
+        }
+    }
+}

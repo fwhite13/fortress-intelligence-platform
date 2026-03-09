@@ -1,0 +1,19 @@
+<div class="model-selector">
+    <select class="model-dropdown" value="@CurrentModel" @onchange="HandleChange">
+        @foreach (var model in ModelInfo.AvailableModels)
+        {
+            <option value="@model.Id">@model.DisplayName</option>
+        }
+    </select>
+</div>
+
+@code {
+    [Parameter] public string CurrentModel { get; set; } = "claude-sonnet-4-6";
+    [Parameter] public EventCallback<string> OnModelChanged { get; set; }
+
+    private async Task HandleChange(ChangeEventArgs e)
+    {
+        var newModel = e.Value?.ToString() ?? "claude-sonnet-4-6";
+        await OnModelChanged.InvokeAsync(newModel);
+    }
+}

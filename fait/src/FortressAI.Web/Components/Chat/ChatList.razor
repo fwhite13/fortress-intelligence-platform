@@ -1,0 +1,197 @@
+@page "/chats"
+<PageTitle>All Chats — FAIT</PageTitle>
+@implements IDisposable
+@inject UserSessionService Session
+@inject ChatService ChatSvc
+@inject NavigationManager Nav
+
+<div class="chat-list-page">
+    <div class="chat-list-header">
+        <h2>All Conversations</h2>
+        <button class="btn btn-primary" @onclick="StartNewChat">
+            <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" /> New Chat
+        </button>
+    </div>
+
+    <div class="chat-list-search">
+        <div class="search-input-wrapper">
+            <MudIcon Icon="@Icons.Material.Filled.Search" Size="Size.Small" />
+            <input type="text" class="form-input" placeholder="Search conversations..."
+                   value="@searchQuery" @oninput="OnSearchInput" />
+        </div>
+    </div>
+
+    @if (isSearching)
+    {
+        <div class="chat-list-loading" style="padding: 4px 16px;">
+            <div style="height: 4px; background: var(--color-primary, #1976d2); border-radius: 2px; animation: indeterminate 1.5s infinite linear; width: 40%;"></div>
+        </div>
+    }
+
+    @if (conversations == null)
+    {
+        <div class="chat-list-loading">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" /> Loading...
+        </div>
+    }
+    else if (!DisplayedConversations.Any())
+    {
+        <div class="chat-list-empty">
+            <MudIcon Icon="@Icons.Material.Filled.Forum" Size="Size.Small" />
+            <p>@(string.IsNullOrEmpty(searchQuery) ? "No conversations yet. Start a new chat!" : "No conversations match your search.")</p>
+        </div>
+    }
+    else
+    {
+        @foreach (var group in GroupedConversations)
+        {
+            <div class="chat-list-group">
+                <div class="chat-list-group-header">@group.Key</div>
+                @foreach (var chat in group.Value)
+                {
+                    <div class="chat-list-item" @onclick="@(() => NavigateToChat(chat.Id))">
+                        <div class="chat-list-item-content">
+                            <div class="chat-list-item-title">
+                                <MudIcon Icon="@Icons.Material.Filled.ChatBubble" Size="Size.Small" />
+                                <span>@(chat.Title ?? "New conversation")</span>
+                                @if (chat.Project != null)
+                                {
+                                    <span class="chat-list-project-badge">
+                                        <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" /> @chat.Project.Name
+                                    </span>
+                                }
+                            </div>
+                            <div class="chat-list-item-meta">
+                                <span class="chat-list-item-model">@ModelInfo.GetModel(chat.Model).DisplayName</span>
+                                <span class="chat-list-item-date">@FormatDate(chat.UpdatedAt)</span>
+                            </div>
+                        </div>
+                        <button class="btn-icon btn-danger-hover" @onclick="@(() => DeleteChat(chat.Id))" @onclick:stopPropagation="true" title="Delete">
+                            <MudIcon Icon="@Icons.Material.Filled.Delete" Size="Size.Small" />
+                        </button>
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+<style>
+    @@keyframes indeterminate {
+        0% { margin-left: 0; }
+        50% { margin-left: 60%; }
+        100% { margin-left: 0; }
+    }
+</style>
+
+@code {
+    private List<Conversation>? conversations;
+    private string searchQuery = "";
+    private bool isSearching = false;
+    private System.Threading.Timer? _debounceTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        conversations = await ChatSvc.GetUserConversationsAsync(Session.UserId, 200);
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        searchQuery = e.Value?.ToString() ?? "";
+        isSearching = true;
+
+        // Reset debounce timer
+        _debounceTimer?.Dispose();
+        _debounceTimer = new System.Threading.Timer(
+            async _ => await ExecuteSearch(),
+            null,
+            300,
+            Timeout.Infinite);
+    }
+
+    private async Task ExecuteSearch()
+    {
+        var querySnapshot = searchQuery; // capture before async gap
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(searchQuery))
+            {
+                conversations = await ChatSvc.GetUserConversationsAsync(Session.UserId, 200);
+            }
+            else
+            {
+                var results = await ChatSvc.SearchConversationsAsync(Session.UserId, searchQuery.Trim());
+                if (searchQuery != querySnapshot) return; // stale — discard
+                conversations = results;
+            }
+        }
+        catch
+        {
+            // On error, fall back to showing existing list
+        }
+        finally
+        {
+            isSearching = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private IEnumerable<Conversation> DisplayedConversations =>
+        conversations ?? Enumerable.Empty<Conversation>();
+
+    private Dictionary<string, List<Conversation>> GroupedConversations
+    {
+        get
+        {
+            var now = DateTime.UtcNow;
+            var today = now.Date;
+            var yesterday = today.AddDays(-1);
+            var weekAgo = today.AddDays(-7);
+
+            var groups = new Dictionary<string, List<Conversation>>();
+
+            var todayChats = DisplayedConversations.Where(c => c.UpdatedAt.Date == today).ToList();
+            var yesterdayChats = DisplayedConversations.Where(c => c.UpdatedAt.Date == yesterday).ToList();
+            var thisWeekChats = DisplayedConversations.Where(c => c.UpdatedAt.Date < yesterday && c.UpdatedAt.Date >= weekAgo).ToList();
+            var olderChats = DisplayedConversations.Where(c => c.UpdatedAt.Date < weekAgo).ToList();
+
+            if (todayChats.Any()) groups["Today"] = todayChats;
+            if (yesterdayChats.Any()) groups["Yesterday"] = yesterdayChats;
+            if (thisWeekChats.Any()) groups["This Week"] = thisWeekChats;
+            if (olderChats.Any()) groups["Older"] = olderChats;
+
+            return groups;
+        }
+    }
+
+    private void NavigateToChat(Guid id) => Nav.NavigateTo($"/chat/{id}");
+
+    private async Task StartNewChat()
+    {
+        var conv = await ChatSvc.CreateConversationAsync(Session.UserId, null);
+        Nav.NavigateTo($"/chat/{conv.Id}");
+    }
+
+    private async Task DeleteChat(Guid id)
+    {
+        await ChatSvc.DeleteConversationAsync(id, Session.UserId);
+        if (string.IsNullOrWhiteSpace(searchQuery))
+            conversations = await ChatSvc.GetUserConversationsAsync(Session.UserId, 200);
+        else
+            conversations = await ChatSvc.SearchConversationsAsync(Session.UserId, searchQuery.Trim());
+    }
+
+    private string FormatDate(DateTime dt)
+    {
+        var local = dt.ToLocalTime();
+        if (local.Date == DateTime.Now.Date) return local.ToString("h:mm tt");
+        if (local.Date == DateTime.Now.Date.AddDays(-1)) return "Yesterday " + local.ToString("h:mm tt");
+        return local.ToString("MMM d, yyyy");
+    }
+
+    public void Dispose()
+    {
+        _debounceTimer?.Dispose();
+    }
+}

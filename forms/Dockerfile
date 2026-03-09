@@ -4,10 +4,10 @@ EXPOSE 8080
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["FortressFormTools.Web/FortressFormTools.Web.csproj", "FortressFormTools.Web/"]
-COPY ["FortressFormTools.Data/FortressFormTools.Data.csproj", "FortressFormTools.Data/"]
+COPY ["src/FortressFormTools.Web/FortressFormTools.Web.csproj", "FortressFormTools.Web/"]
+COPY ["src/FortressFormTools.Data/FortressFormTools.Data.csproj", "FortressFormTools.Data/"]
 RUN dotnet restore "FortressFormTools.Web/FortressFormTools.Web.csproj"
-COPY . .
+COPY src/ .
 WORKDIR "/src/FortressFormTools.Web"
 RUN dotnet build "FortressFormTools.Web.csproj" -c Release -o /app/build
 

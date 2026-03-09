@@ -1,0 +1,410 @@
+@page "/dashboard"
+@rendermode InteractiveServer
+<PageTitle>Dashboard — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject AssistantConfigService ConfigSvc
+@inject BriefingService BriefingSvc
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject BriefingGenerationService BriefingGen
+@inject PreMeetingBriefService PreMeetingSvc
+@inject PostMeetingService PostMeetingSvc
+@inject WeeklyRollupService WeeklyRollupSvc
+@implements IAsyncDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+@using FortressAI.Shared.Models
+@using FortressAI.Web.Components.Meetings
+@using FortressAI.Web.Components.Dashboard
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else
+    {
+        <MudText Typo="Typo.h4" Class="mb-2" Style="font-weight: 700;">
+            <MudIcon Icon="@Icons.Material.Filled.Shield" Style="color: var(--color-gold); vertical-align: middle; margin-right: 8px;" />
+            @_assistantName Dashboard
+        </MudText>
+        <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--color-text-secondary);">
+            Welcome back. Here's your overview.
+        </MudText>
+
+        <MudGrid>
+            @* Pre-Meeting Briefs — shown for meetings starting in next 60 min *@
+            @foreach (var meeting in _upcomingMeetings.Where(m => !_dismissedMeetings.Contains(m.EventId)))
+            {
+                <MudItem xs="12">
+                    <PreMeetingBriefCard
+                        Meeting="meeting"
+                        Context="@(_meetingContexts.TryGetValue(meeting.EventId, out var ctx) ? ctx : string.Empty)"
+                        IsLoading="@(_meetingContextLoading.TryGetValue(meeting.EventId, out var ldr) && ldr)"
+                        OnDismiss="@(() => DismissMeeting(meeting.EventId))" />
+                </MudItem>
+            }
+
+            @* Post-Meeting Prompts — shown for meetings that ended in the last 30 min *@
+            @foreach (var meeting in _recentlyEndedMeetings.Where(m => !_dismissedPostMeeting.Contains(m.EventId)))
+            {
+                <MudItem xs="12">
+                    <PostMeetingPromptCard
+                        Meeting="meeting"
+                        UserId="Session.UserId"
+                        PostMeetingSvc="PostMeetingSvc"
+                        OnSaved="@(_ => DismissPostMeeting(meeting.EventId))"
+                        OnDismiss="@(() => DismissPostMeeting(meeting.EventId))" />
+                </MudItem>
+            }
+
+            @* Email Alerts Section *@
+            <MudItem xs="12">
+                <EmailAlertsPanel @ref="_emailAlertsPanel" UserId="Session.UserId" />
+            </MudItem>
+
+            @* Weekly Rollup Card — shown below email alerts *@
+            @if (!_rollupDismissed)
+            {
+                <MudItem xs="12">
+                    <WeeklyRollupCard @ref="_weeklyRollupCard"
+                                      RollupSvc="WeeklyRollupSvc"
+                                      UserId="Session.UserId" />
+                </MudItem>
+            }
+
+            @* Task Digest Widget *@
+            <MudItem xs="12">
+                <TaskDigestWidget UserId="Session.UserId" />
+            </MudItem>
+
+            @* Morning Briefing Card — Main Content *@
+            <MudItem xs="12" md="8">
+                <MudCard Elevation="2" Style="min-height: 300px;">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">
+                                <MudIcon Icon="@Icons.Material.Filled.WbSunny" Class="mr-2" Style="vertical-align: middle; color: #d97706;" />
+                                Morning Briefing
+                            </MudText>
+                            @if (_briefing != null)
+                            {
+                                <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+                                    @_briefing.BriefingDate.ToString("MMMM d, yyyy") · @_briefing.CreatedAt.ToString("h:mm tt")
+                                </MudText>
+                            }
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            <MudTooltip Text="Generate new briefing">
+                                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary"
+                                               OnClick="RefreshBriefing" Disabled="_refreshing" />
+                            </MudTooltip>
+                            @if (_briefing != null)
+                            {
+                                <MudIconButton Icon="@(_briefingExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                               OnClick="@(() => _briefingExpanded = !_briefingExpanded)" />
+                            }
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        @if (_refreshing)
+                        {
+                            <div style="text-align: center; padding: 40px 0;">
+                                <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Large" />
+                                <MudText Typo="Typo.body2" Class="mt-3" Style="color: var(--color-text-secondary);">
+                                    Generating your briefing...
+                                </MudText>
+                            </div>
+                        }
+                        else if (_briefing != null)
+                        {
+                            <MudCollapse Expanded="_briefingExpanded">
+                                <div style="white-space: pre-wrap; line-height: 1.7; font-size: 0.95rem;">
+                                    @_briefing.Content
+                                </div>
+                            </MudCollapse>
+                        }
+                        else
+                        {
+                            <div style="text-align: center; padding: 40px 0;">
+                                <MudIcon Icon="@Icons.Material.Filled.WbSunny" Style="font-size: 48px; color: #e5e7eb;" />
+                                <MudText Typo="Typo.body1" Class="mt-3" Style="color: var(--color-text-secondary);">
+                                    No briefing yet today.
+                                </MudText>
+                                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                                    Click <strong>Refresh</strong> to generate one, or configure delivery in Settings.
+                                </MudText>
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-3"
+                                           OnClick="RefreshBriefing" StartIcon="@Icons.Material.Filled.AutoAwesome">
+                                    Generate Briefing
+                                </MudButton>
+                            </div>
+                        }
+                    </MudCardContent>
+                </MudCard>
+
+                @* Briefing History Link *@
+                @if (_briefing != null)
+                {
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Href="/briefing-history" Class="mt-2"
+                               StartIcon="@Icons.Material.Filled.History" Size="Size.Small">
+                        View Briefing History
+                    </MudButton>
+                }
+            </MudItem>
+
+            @* Quick Actions Sidebar *@
+            <MudItem xs="12" md="4">
+                <MudStack Spacing="3">
+                    <MudCard Elevation="1" Class="pa-3" Style="cursor: pointer;" @onclick='() => Nav.NavigateTo("/chat")'>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <MudAvatar Style="background: #2563eb; width: 40px; height: 40px;">
+                                <MudIcon Icon="@Icons.Material.Filled.Chat" Style="font-size: 20px;" />
+                            </MudAvatar>
+                            <div>
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Chat</MudText>
+                                <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">Ask @_assistantName anything</MudText>
+                            </div>
+                        </div>
+                    </MudCard>
+
+                    <MudCard Elevation="1" Class="pa-3" Style="cursor: pointer;" @onclick='() => Nav.NavigateTo("/knowledge-base")'>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <MudAvatar Style="background: #059669; width: 40px; height: 40px;">
+                                <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Style="font-size: 20px;" />
+                            </MudAvatar>
+                            <div>
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">FORGE KB</MudText>
+                                <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">Manage knowledge base</MudText>
+                            </div>
+                        </div>
+                    </MudCard>
+
+                    <MudCard Elevation="1" Class="pa-3" Style="cursor: pointer;" @onclick='() => Nav.NavigateTo("/settings")'>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <MudAvatar Style="background: #d97706; width: 40px; height: 40px;">
+                                <MudIcon Icon="@Icons.Material.Filled.Settings" Style="font-size: 20px;" />
+                            </MudAvatar>
+                            <div>
+                                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Settings</MudText>
+                                <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">Configure @_assistantName</MudText>
+                            </div>
+                        </div>
+                    </MudCard>
+
+                    @* Connection Status *@
+                    <MudAlert Severity="@(_msConnected ? Severity.Success : Severity.Warning)" Dense="true" Variant="Variant.Outlined">
+                        @if (_msConnected)
+                        {
+                            <span>Microsoft 365 connected</span>
+                        }
+                        else
+                        {
+                            <span>Microsoft 365 not connected — <MudLink Href="/settings">Connect</MudLink></span>
+                        }
+                    </MudAlert>
+                </MudStack>
+            </MudItem>
+        </MudGrid>
+    }
+</MudContainer>
+
+@code {
+    private bool _loading = true;
+    private bool _refreshing = false;
+    private bool _briefingExpanded = true;
+    private string _assistantName = "Assistant";
+    private BriefingHistory? _briefing;
+    private bool _msConnected = false;
+    private HubConnection? _hubConnection;
+    private EmailAlertsPanel? _emailAlertsPanel;
+
+    // Weekly rollup state
+    private WeeklyRollupCard? _weeklyRollupCard;
+    private bool _rollupDismissed = false;
+
+    // Pre-meeting brief state
+    private List<CalendarEvent> _upcomingMeetings = new();
+    private HashSet<string> _dismissedMeetings = new();
+    private Dictionary<string, string> _meetingContexts = new();
+    private Dictionary<string, bool> _meetingContextLoading = new();
+    private System.Threading.Timer? _meetingCheckTimer;
+
+    // Post-meeting prompt state
+    private List<CalendarEvent> _recentlyEndedMeetings = new();
+    private HashSet<string> _dismissedPostMeeting = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+
+        var config = await ConfigSvc.GetOrCreateConfigAsync(Session.UserId);
+        _assistantName = config.AssistantName;
+        _briefing = await BriefingSvc.GetTodaysBriefingAsync(Session.UserId);
+
+        // SignalR connection for real-time briefing push
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(Nav.ToAbsoluteUri("/hubs/dashboard"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<string>("ReceiveBriefing", async (content) =>
+        {
+            // Reload the briefing from DB when notified
+            _briefing = await BriefingSvc.GetTodaysBriefingAsync(Session.UserId);
+            _refreshing = false;
+            _briefingExpanded = true;
+            await InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<object>("ReceiveEmailAlert", async (alertData) =>
+        {
+            // Reload alerts from server
+            if (_emailAlertsPanel != null)
+            {
+                await _emailAlertsPanel.LoadAlerts();
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+            await _hubConnection.InvokeAsync("JoinUserGroup", Session.UserId.ToString());
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"SignalR connection failed: {ex.Message}");
+        }
+
+        _loading = false;
+    }
+
+    private async Task RefreshBriefing()
+    {
+        _refreshing = true;
+        StateHasChanged();
+
+        try
+        {
+            // Call BriefingGenerationService directly — avoids HttpClient auth cookie issue in Blazor Server
+            var (success, briefing, error) = await BriefingGen.GenerateBriefingAsync(Session.UserId);
+
+            if (success && briefing != null)
+            {
+                _briefing = briefing;
+                _briefingExpanded = true;
+                Snackbar.Add("Briefing generated!", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add($"Failed to generate briefing: {error ?? "Unknown error"}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error generating briefing: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _refreshing = false;
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await CheckUpcomingMeetingsAsync();
+        await CheckRecentlyEndedMeetingsAsync();
+        if (_weeklyRollupCard is not null)
+            await _weeklyRollupCard.LoadRollupAsync();
+        _meetingCheckTimer = new System.Threading.Timer(
+            async _ =>
+            {
+                await CheckUpcomingMeetingsAsync();
+                await CheckRecentlyEndedMeetingsAsync();
+            },
+            null,
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromMinutes(5));
+    }
+
+    private async Task CheckUpcomingMeetingsAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+        try
+        {
+            var config = await ConfigSvc.GetOrCreateConfigAsync(Session.UserId);
+            var meetings = await PreMeetingSvc.GetUpcomingMeetingsAsync(Session.UserId);
+            _upcomingMeetings = meetings.Where(m => !_dismissedMeetings.Contains(m.EventId)).ToList();
+            await InvokeAsync(StateHasChanged);
+
+            // Generate context for any new meetings not yet processed
+            foreach (var meeting in _upcomingMeetings.Where(m => !_meetingContexts.ContainsKey(m.EventId)))
+            {
+                _meetingContextLoading[meeting.EventId] = true;
+                await InvokeAsync(StateHasChanged);
+
+                try
+                {
+                    var context = await PreMeetingSvc.GenerateMeetingContextAsync(meeting, config.AssistantName);
+                    _meetingContexts[meeting.EventId] = context;
+                }
+                catch (Exception ex)
+                {
+                    _meetingContexts[meeting.EventId] = $"Context unavailable: {ex.Message}";
+                }
+                finally
+                {
+                    _meetingContextLoading[meeting.EventId] = false;
+                }
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PreMeeting] Check failed: {ex.Message}");
+        }
+    }
+
+    private void DismissMeeting(string eventId)
+    {
+        _dismissedMeetings.Add(eventId);
+        StateHasChanged();
+    }
+
+    private void DismissPostMeeting(string eventId)
+    {
+        _dismissedPostMeeting.Add(eventId);
+        StateHasChanged();
+    }
+
+    private async Task CheckRecentlyEndedMeetingsAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+        try
+        {
+            var meetings = await PostMeetingSvc.GetRecentlyEndedMeetingsAsync(Session.UserId);
+            _recentlyEndedMeetings = meetings.Where(m => !_dismissedPostMeeting.Contains(m.EventId)).ToList();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PostMeeting] Check failed: {ex.Message}");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _meetingCheckTimer?.Dispose();
+        if (_hubConnection is not null)
+        {
+            try
+            {
+                await _hubConnection.InvokeAsync("LeaveUserGroup", Session.UserId.ToString());
+            }
+            catch { }
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}

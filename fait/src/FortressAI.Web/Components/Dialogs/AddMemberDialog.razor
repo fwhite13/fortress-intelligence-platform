@@ -1,0 +1,55 @@
+@using FortressAI.Shared.Models
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add Member</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudAutocomplete T="AppUser"
+                         Label="Search users"
+                         @bind-Value="_selectedUser"
+                         SearchFunc="SearchUsers"
+                         ToStringFunc="@(u => u == null ? "" : (u.DisplayName ?? u.Email))"
+                         MinCharacters="1"
+                         Clearable="true"
+                         Variant="Variant.Outlined"
+                         Class="mb-2" />
+        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+            Search by name or email address.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
+        <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@(_selectedUser == null)">
+            Add Member
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = null!;
+    [Parameter] public List<AppUser> AvailableUsers { get; set; } = new();
+
+    private AppUser? _selectedUser;
+
+    private Task<IEnumerable<AppUser>> SearchUsers(string value, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Task.FromResult(AvailableUsers.Take(10).AsEnumerable());
+
+        var q = value.Trim().ToLowerInvariant();
+        var results = AvailableUsers
+            .Where(u => (u.DisplayName?.ToLowerInvariant().Contains(q) ?? false)
+                     || u.Email.ToLowerInvariant().Contains(q))
+            .Take(10);
+        return Task.FromResult(results);
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit()
+    {
+        if (_selectedUser != null)
+            MudDialog.Close(DialogResult.Ok(_selectedUser.Id));
+    }
+}

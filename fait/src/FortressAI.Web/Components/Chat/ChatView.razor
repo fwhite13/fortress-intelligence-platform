@@ -1,0 +1,879 @@
+@page "/chat"
+@page "/chat/{ConversationId:guid}"
+<PageTitle>Chat — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject ChatService ChatSvc
+@inject ProjectService ProjectSvc
+@inject BedrockService BedrockSvc
+@inject KnowledgeBaseService KbSvc
+@inject KbQueryService KbQuerySvc
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject AssistantConfigService ConfigSvc
+@inject ForgeQueryService ForgeQuery
+@inject ForgeService ForgeSvc
+@inject DocumentService DocumentSvc
+@inject IMcpToolService McpToolSvc
+@inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
+@inject IServiceScopeFactory ScopeFactory
+@implements IAsyncDisposable
+@using FortressAI.Web.Services
+@using FortressAI.Web.Services.Mcp
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.DependencyInjection
+@using FortressAI.Shared.Models
+
+<div class="chat-container">
+    <div class="chat-header">
+        @if (conversation?.Project != null)
+        {
+            <div class="chat-project-badge" @onclick="NavigateToProject">
+                <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" /> @conversation.Project.Name
+            </div>
+        }
+    </div>
+
+    <div class="chat-messages-wrapper">
+        <div class="chat-messages" id="chat-messages">
+            @if (conversation == null || !messages.Any())
+            {
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 65%; padding-top: 10%;">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" style="color: var(--color-gold); margin-bottom: var(--space-4);">
+                        <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor" opacity="0.9"/>
+                        <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <MudText Typo="Typo.h4" Style="font-weight: var(--font-bold); color: var(--color-text-primary); margin-bottom: var(--space-2); text-align: center;">
+                        @GetWelcomeTitle()
+                    </MudText>
+                    <MudText Typo="Typo.body1" Style="color: var(--color-text-secondary); text-align: center;">
+                        @GetWelcomeSubtitle()
+                    </MudText>
+                </div>
+            }
+            else
+            {
+                @if (wasSummarized)
+                {
+                    <div class="context-summary-indicator">
+                        <MudIcon Icon="@Icons.Material.Filled.CloseFullscreen" Size="Size.Small" />
+                        <span>Earlier messages were summarized to stay within context limits</span>
+                    </div>
+                }
+
+                @foreach (var msg in messages)
+                {
+                    <MessageBubble Message="msg" />
+                }
+                @if (messages.Any(m => m.Role == "assistant") && _lastKbResult != null)
+                {
+                    <KbIndicator Result="_lastKbResult" />
+                }
+            }
+
+            @if (_toolCallInProgress)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="my-1" Style="max-width: 600px; margin: 8px auto;">
+                    🔍 @(_currentToolName ?? "Calling tool")...
+                </MudAlert>
+            }
+            @if (isStreaming)
+            {
+                <MessageBubble Message="@streamingMessage" IsStreaming="true" />
+            }
+        </div>
+
+        <button id="jump-to-bottom-pill" class="jump-to-bottom" @onclick="JumpToBottom">
+            <MudIcon Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small" /> Jump to latest
+        </button>
+    </div>
+
+    <!-- Sticky input bar -->
+    <div style="position: sticky; bottom: 0; background: var(--color-bg-page); box-shadow: 0 -1px 0 var(--color-border); padding: var(--space-3) var(--space-4);">
+        <!-- Top row: KB toggles (left) + Model selector (right) -->
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); padding-bottom: var(--space-2); border-bottom: 1px solid var(--color-border);">
+            <!-- KB Toggles -->
+            <div style="display: flex; gap: var(--space-2);">
+                <!-- Fortress KB toggle — show always, disable when no conversation -->
+                <button @onclick="ToggleFortressKb"
+                        title="Search Fortress knowledge base"
+                        style="@GetFortressKbStyle()">
+                    <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Style="width: 16px; height: 16px;" />
+                    <span style="font-size: var(--text-sm); font-weight: var(--font-medium); margin-left: 4px;">Fortress KB</span>
+                </button>
+                <button @onclick="TogglePersonalKb"
+                        title="My personal knowledge base"
+                        style="@GetPersonalKbStyle()">
+                    <MudIcon Icon="@Icons.Material.Filled.Person" Style="width: 16px; height: 16px;" />
+                    <span style="font-size: var(--text-sm); font-weight: var(--font-medium); margin-left: 4px;">My KB</span>
+                </button>
+                @if (_teamKbPopoverOpen)
+                {
+                    <div style="position: fixed; inset: 0; z-index: 999;"
+                         @onclick="() => _teamKbPopoverOpen = false"></div>
+                }
+                @if (_userTeams.Any())
+                {
+                    <div style="position: relative; display: inline-block;">
+                        <button @onclick="ToggleTeamKbPopover"
+                                title="@(_selectedTeamIds.Any() ? "Team KBs active — click to modify" : "Select team knowledge bases")"
+                                style="@GetTeamKbToggleStyle()">
+                            <MudIcon Icon="@Icons.Material.Filled.Groups" Style="width: 16px; height: 16px;" />
+                            <span style="font-size: var(--text-sm); font-weight: var(--font-medium); margin-left: 4px;">Team KB</span>
+                            @if (_selectedTeamIds.Any())
+                            {
+                                <span style="margin-left: 4px; font-size: var(--text-xs); opacity: 0.8;">(@_selectedTeamIds.Count)</span>
+                            }
+                        </button>
+                        @if (_teamKbPopoverOpen)
+                        {
+                            <div style="position: absolute; top: 32px; left: 0; z-index: 1000; background: var(--color-surface-elevated, #1e1e2e); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 8px; min-width: 200px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);"
+                                 @onclick:stopPropagation="true">
+                                <div style="font-size: var(--text-xs); color: var(--color-text-tertiary); padding: 4px 8px 8px 8px; font-weight: var(--font-medium); text-transform: uppercase; letter-spacing: 0.05em;">
+                                    Team Knowledge Bases
+                                </div>
+                                @foreach (var team in _userTeams)
+                                {
+                                    var t = team;
+                                    var isSelected = _selectedTeamIds.Contains(t.Id);
+                                    <div style="display: flex; align-items: center; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; @(isSelected ? "background: var(--color-gold-muted);" : "")"
+                                         @onclick="() => ToggleTeamKbAndClose(t.Id)">
+                                        <MudIcon Icon="@(isSelected ? Icons.Material.Filled.CheckBox : Icons.Material.Filled.CheckBoxOutlineBlank)"
+                                                 Style="@($"width: 16px; height: 16px; margin-right: 8px; color: {(isSelected ? "var(--color-gold)" : "var(--color-text-tertiary)")}")"/>
+                                        <span style="font-size: var(--text-sm); color: @(isSelected ? "var(--color-gold)" : "var(--color-text-secondary);");">@t.Name</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                <!-- MCP tool availability indicator (muted, non-interactive) -->
+                @if (_availableToolServers.Any())
+                {
+                    <span style="display: inline-flex; align-items: center; gap: 4px; color: var(--color-text-tertiary); font-size: var(--text-xs); user-select: none; margin-left: var(--space-1);">
+                        @foreach (var server in _availableToolServers)
+                        {
+                            <span title="@server.Name tools available">🔍 @server.Name available</span>
+                        }
+                    </span>
+                }
+            </div>
+            <!-- Model selector -->
+            <ModelSelector CurrentModel="@currentModel" OnModelChanged="HandleModelChanged" />
+        </div>
+        <!-- Input row -->
+        <div class="chat-input-wrapper">
+            <textarea class="chat-input"
+                      @bind="_userInput"
+                      @bind:event="oninput"
+                      @onkeydown="HandleInputKeyDown"
+                      placeholder="Type a message..."
+                      rows="1"
+                      disabled="@isStreaming"
+                      id="chat-input-field"></textarea>
+            <MudIconButton Icon="@Icons.Material.Filled.Send"
+                Disabled="@(isStreaming || string.IsNullOrWhiteSpace(_userInput))"
+                OnClick="HandleSendFromInput"
+                Style="@GetSendButtonStyle()"
+                Size="Size.Medium" />
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid? ConversationId { get; set; }
+
+    [CascadingParameter(Name = "DrawerOpen")]
+    private bool DrawerOpen { get; set; }
+
+    private Conversation? conversation;
+    private List<ChatMessage> messages = new();
+    private string currentModel = "claude-sonnet-4-6";
+    private bool isStreaming = false;
+    private bool wasSummarized = false;
+    private ChatMessage streamingMessage = new() { Role = "assistant", Content = "" };
+    private CancellationTokenSource? streamingCts;
+    private Guid? _lastConversationId;
+    private bool _needsScroll = false;
+    private bool _scrollListenerInitialized = false;
+    private DotNetObjectReference<ChatView>? _dotNetRef;
+    private string _userInput = "";
+    private UserAssistantConfig? _assistantConfig;
+    private List<KbTeam> _userTeams = new();
+    private HashSet<int> _selectedTeamIds = new();
+    // Local KB toggle state — works before conversation exists, synced to DB on first message send
+    private bool _fortressKbEnabled = false;
+    private bool _personalKbEnabled = false; // default: personal KB OFF
+    private bool _teamKbPopoverOpen = false;
+    private bool _hasPendingMigration = false;
+    private List<McpServer> _availableToolServers = new();
+    private List<ToolCallAccumulator> _activeToolCalls = new();
+    private string? _currentToolName;
+    private bool _toolCallInProgress = false;
+    // KB retrieval result for UI indicator (set per-message)
+    private KbRetrievalResult? _lastKbResult;
+    protected override async Task OnParametersSetAsync()
+    {
+        _teamKbPopoverOpen = false;
+        if (ConversationId.HasValue)
+        {
+            conversation = await ChatSvc.GetConversationAsync(ConversationId.Value, Session.UserId);
+            if (conversation != null)
+            {
+                messages = conversation.Messages.OrderBy(m => m.CreatedAt).ToList();
+                currentModel = conversation.Model;
+                _selectedTeamIds = conversation.TeamKbs.Select(t => t.TeamId).ToHashSet();
+                _fortressKbEnabled = conversation.EnableFortressKb;
+                _personalKbEnabled = conversation.EnablePersonalKb;
+            }
+        }
+        else if (conversation == null)
+        {
+            // Lazy creation — conversation created on first message send, not on page load
+            messages = new List<ChatMessage>();
+            wasSummarized = false;
+            _selectedTeamIds = new HashSet<int>();
+            _fortressKbEnabled = false;
+            _personalKbEnabled = false;
+        }
+
+        // Load assistant config for personality injection
+        if (Session.IsAuthenticated && _assistantConfig == null)
+        {
+            _assistantConfig = await ConfigSvc.GetOrCreateConfigAsync(Session.UserId);
+        }
+
+        // Load user's team memberships for Team KB toggle
+        if (Session.IsAuthenticated && !_userTeams.Any())
+        {
+            try { _userTeams = await ForgeSvc.GetUserTeamsAsync(Session.UserId); }
+            catch { /* silent fail */ }
+        }
+
+        // Load available MCP servers for tool toggles
+        if (Session.IsAuthenticated && conversation != null)
+        {
+            try { _availableToolServers = await McpToolSvc.GetActiveServersForUserAsync(Session.UserId); }
+            catch { /* silent fail */ }
+        }
+
+        // Track conversation changes — scroll to bottom when switching chats
+        if (ConversationId != _lastConversationId)
+        {
+            _lastConversationId = ConversationId;
+            _needsScroll = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            try
+            {
+                await JS.InvokeVoidAsync("fortressChat.initScrollListener", _dotNetRef);
+                _scrollListenerInitialized = true;
+            }
+            catch { /* JS interop can fail during prerender */ }
+        }
+
+        if (_needsScroll)
+        {
+            _needsScroll = false;
+            await ScrollToBottom();
+        }
+    }
+
+    private void NavigateToProject()
+    {
+        if (conversation?.Project != null)
+            Nav.NavigateTo($"/projects/{conversation.Project.Id}");
+    }
+
+    private async Task HandleSend(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || isStreaming) return;
+        _lastKbResult = null;  // Clear stale result before new send
+
+        // Lazy conversation creation — only when user actually sends their first message
+        if (conversation == null && Session.IsAuthenticated)
+        {
+            conversation = await ChatSvc.CreateConversationAsync(Session.UserId, null, currentModel);
+            // Sync local KB toggle state to the new conversation
+            await ChatSvc.UpdateConversationKbAsync(conversation.Id, _fortressKbEnabled, _personalKbEnabled, _selectedTeamIds.ToList());
+            Nav.NavigateTo($"/chat/{conversation.Id}", replace: true);
+        }
+
+        if (conversation == null) return;
+
+        // Add user message
+        var userMsg = await ChatSvc.AddMessageAsync(conversation.Id, "user", text.Trim());
+        messages.Add(userMsg);
+
+        // Start streaming
+        isStreaming = true;
+        streamingMessage = new ChatMessage { Role = "assistant", Content = "", Model = currentModel };
+        StateHasChanged();
+        await ScrollToBottom();
+
+        try
+        {
+            streamingCts = new CancellationTokenSource();
+
+            // Load project once for system prompt + KB
+            FortressAI.Shared.Models.Project? project = null;
+            if (conversation?.ProjectId != null)
+            {
+                project = await ProjectSvc.GetProjectAsync(conversation.ProjectId.Value, Session.UserId);
+
+                // Background migration for pre-RAG docs (Content but no S3Key)
+                if (project != null)
+                {
+                    var docsNeedingMigration = project.Documents
+                        .Where(d => !string.IsNullOrEmpty(d.Content) && string.IsNullOrEmpty(d.S3Key))
+                        .ToList();
+                    if (docsNeedingMigration.Any())
+                    {
+                        _hasPendingMigration = true;
+                        var userId = Session.UserId;
+                        var docsSnapshot = docsNeedingMigration.Select(d => d.Id).ToList();
+                        _ = Task.Run(async () =>
+                        {
+                            using var scope = ScopeFactory.CreateScope();
+                            var docSvc = scope.ServiceProvider.GetRequiredService<DocumentService>();
+                            var kbDocSvc = scope.ServiceProvider.GetRequiredService<KbDocumentService>();
+                            foreach (var docId in docsSnapshot)
+                            {
+                                try { await docSvc.MigrateDocumentToS3ByIdAsync(docId, userId); }
+                                catch (Exception ex) { Console.WriteLine($"[MIGRATE] Doc {docId} failed: {ex.Message}"); }
+                            }
+                            try { await kbDocSvc.StartIngestionAsync(); }
+                            catch { }
+                        });
+                    }
+                    else
+                    {
+                        _hasPendingMigration = false;
+                    }
+                }
+            }
+
+            // Build system prompt from project context
+            string? systemPrompt = BuildSystemPromptFromProject(project, _hasPendingMigration);
+
+            // Inject personality prefix from assistant config
+            if (_assistantConfig != null)
+            {
+                var personalityPrefix = ConfigSvc.GetPersonalitySystemPrompt(_assistantConfig, Session.CurrentUser?.DisplayName);
+                systemPrompt = string.IsNullOrEmpty(systemPrompt)
+                    ? personalityPrefix
+                    : personalityPrefix + "\n\n" + systemPrompt;
+            }
+
+            // ============================================================
+            // KB RETRIEVAL DECISION MATRIX
+            // ============================================================
+            // This block executes when ANY of these conditions is true:
+            //   - Fortress Corp KB toggle ON (_fortressKbEnabled)
+            //   - Personal KB toggle ON (_personalKbEnabled)
+            //   - Team KB(s) selected (_selectedTeamIds.Any())
+            //   - Conversation has an active project with KB docs (conversation.ProjectId.HasValue)
+            //
+            // Layer 1 — KnowledgeBaseService (Corp + Personal Bedrock KB):
+            //   Fires when: _fortressKbEnabled OR _personalKbEnabled
+            //   Searches: Fortress Corp KB if fortressKbEnabled; Personal KB if personalKbEnabled
+            //   Both can be true simultaneously (both searched in parallel)
+            //
+            // Layer 2 — ForgeQueryService (Personal/Team/Project KB):
+            //   Fires when: _personalKbEnabled OR _selectedTeamIds.Any() OR conversation.ProjectId.HasValue
+            //   Searches:
+            //     - Personal FORGE KB: when _personalKbEnabled (always passes userId; ForgeQueryService always searches personal)
+            //     - Team KB(s): when _selectedTeamIds.Any() — one query per selected team, parallel
+            //     - Project KB: when conversation.ProjectId.HasValue — always searched if project active
+            //
+            // Query Generation (KbQueryService):
+            //   Fires when: anyKbActive (before both layers)
+            //   Model: Claude Haiku 4.5 (us.anthropic.claude-haiku-4-5-20251001-v1:0)
+            //   Timeout: 5s, falls back to raw user text on any failure
+            //
+            // Result Deduplication: SHA256 content hash, first 16 hex chars
+            // Score Threshold: 0.35 (configurable via KnowledgeBase:MinRelevanceScore)
+            // ============================================================
+            var kbResult = new KbRetrievalResult();
+            var effectiveSystemPrompt = systemPrompt;
+
+            // Determine what KB sources are active for this message
+            bool hasCorpKb = _fortressKbEnabled;
+            bool hasPersonalKb = _personalKbEnabled;
+            bool hasTeamKb = _selectedTeamIds?.Any() == true;
+            bool hasProjectKb = conversation?.ProjectId.HasValue == true;
+            bool anyKbActive = hasCorpKb || hasPersonalKb || hasTeamKb || hasProjectKb;
+            Console.WriteLine($"[KB] Toggle state — Corp:{hasCorpKb} Personal:{hasPersonalKb} Team:{hasTeamKb} Project:{hasProjectKb} anyActive:{anyKbActive}");
+
+            if (anyKbActive)
+            {
+                kbResult.WasSearched = true;
+
+                // Step 1: Generate optimized queries via Haiku (falls back to raw text on any failure)
+                var messagesToPass = messages.TakeLast(5).Select(m => new MessageDto { Role = m.Role, Content = m.Content }).ToList();
+                var searchQueries = await KbQuerySvc.GenerateSearchQueriesAsync(text.Trim(), messagesToPass);
+                kbResult.QueriesUsed = searchQueries;
+
+                // Step 2: Layer 1 — Corp/Personal KB (parallel multi-query)
+                if (hasCorpKb || hasPersonalKb)
+                {
+                    try
+                    {
+                        // Layer 1 = Fortress Corp KB ONLY — personal KB is handled exclusively by Layer 2 (ForgeQuery)
+                        var corpChunks = await KbSvc.RetrieveMultiQueryAsync(
+                            searchQueries,
+                            useFortressKb: _fortressKbEnabled,
+                            usePersonalKb: false,  // never search personal KB in Layer 1
+                            userId: null,
+                            minScore: 0.35);
+
+                        if (corpChunks.Any())
+                        {
+                            kbResult.InjectedChunks.AddRange(corpChunks);
+                            foreach (var grp in corpChunks.GroupBy(c => c.KbType))
+                            {
+                                kbResult.SourceStats.Add(new KbSourceStat
+                                {
+                                    KbName = grp.Key switch
+                                    {
+                                        "Fortress" => "Fortress Corp KB",
+                                        "Personal" => "Personal KB (Layer 1)",
+                                        _ => grp.Key
+                                    },
+                                    ResultCount = grp.Count(),
+                                    SourceDocuments = grp
+                                        .Select(c => System.IO.Path.GetFileNameWithoutExtension(c.Source.Split('/').Last()))
+                                        .Distinct().ToList()
+                                });
+                            }
+                        }
+
+                        var kbContext = KbSvc.FormatKbContext(corpChunks);
+                        if (!string.IsNullOrEmpty(kbContext))
+                        {
+                            var kbInstruction = "## Knowledge Base Context\nThe following information was retrieved from the organization's knowledge base and is relevant to the user's query. Use this information to inform your response. If the information answers the user's question, reference it directly.\n\n";
+                            effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
+                                ? kbInstruction + kbContext
+                                : effectiveSystemPrompt + "\n\n" + kbInstruction + kbContext;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[KB] Smart retrieval failed silently: {ex.Message}");
+                    }
+                }
+
+                // Step 3: Layer 2 — FORGE v2 Personal/Team/Project KB (parallel multi-query)
+                // Only fires when the user has personal KB, team KBs selected, or an active project
+                if (hasPersonalKb || hasTeamKb || hasProjectKb)
+                {
+                    try
+                    {
+                        var (forgeContext, forgeChunks, forgeFiltered) = await ForgeQuery.GetKbContextMultiQueryAsync(
+                            Session.UserId,
+                            searchQueries,
+                            personalKbEnabled: hasPersonalKb,
+                            teamKbIds: _selectedTeamIds.Any() ? _selectedTeamIds.ToList() : null,
+                            projectId: conversation?.ProjectId,
+                            minScore: 0.35);
+
+                        kbResult.FilteredOutCount += forgeFiltered;
+
+                        if (forgeChunks.Any())
+                        {
+                            kbResult.InjectedChunks.AddRange(forgeChunks);
+                            // Group by KB type for source stats
+                            foreach (var grp in forgeChunks.GroupBy(c => c.KbType))
+                            {
+                                kbResult.SourceStats.Add(new KbSourceStat
+                                {
+                                    KbName = grp.Key switch
+                                    {
+                                        "Personal" => "Personal KB",
+                                        "Project"  => "Project KB",
+                                        var t when t.StartsWith("Team:") => "Team KB",
+                                        _          => grp.Key
+                                    },
+                                    ResultCount = grp.Count(),
+                                    SourceDocuments = grp
+                                        .Select(c => System.IO.Path.GetFileNameWithoutExtension(c.Source.Split('/').Last()))
+                                        .Distinct()
+                                        .ToList()
+                                });
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(forgeContext))
+                        {
+                            var forgeInstruction = "## Personal/Team Knowledge Base Context\nThe following information was retrieved from the user's personal or team knowledge base. Use this information to inform your response.\n\n";
+                            effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
+                                ? forgeInstruction + forgeContext
+                                : effectiveSystemPrompt + "\n\n" + forgeInstruction + forgeContext;
+                            Console.WriteLine($"[FORGE] Injected {forgeContext.Length} chars of KB context into system prompt");
+                        }
+                        else
+                        {
+                            Console.WriteLine("[FORGE] No KB context retrieved");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[FORGE] Smart context injection failed silently: {ex.Message}");
+                    }
+                }
+
+                _lastKbResult = kbResult;
+            }
+
+            // Apply sliding window context management
+            var (chatHistory, summarized) = await ChatSvc.PrepareMessagesWithSlidingWindowAsync(messages, effectiveSystemPrompt);
+            wasSummarized = summarized;
+
+            // Check if any MCP tools are available
+            List<AvailableTool> availableTools = new();
+            try
+            {
+                availableTools = await McpToolSvc.GetConversationToolsAsync(conversation.Id, Session.UserId);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[MCP] Failed to load tools (non-fatal): {ex.Message}");
+            }
+
+            var fullResponse = new System.Text.StringBuilder();
+            int inputTokens = 0, outputTokens = 0;
+
+            if (availableTools.Any())
+            {
+                // Tool-enabled streaming with agentic loop
+                var bedrockTools = availableTools.Select(t => new BedrockToolSpec
+                {
+                    Name = t.FullName,
+                    Description = t.Description ?? "",
+                    InputSchemaJson = t.InputSchema.GetRawText()
+                }).ToList();
+
+                var historyForLoop = new List<MessageDto>(chatHistory);
+                const int maxIterations = 5;
+                int iteration = 0;
+
+                while (iteration++ < maxIterations)
+                {
+                    _activeToolCalls.Clear();
+                    var toolCalls = new List<ToolCallAccumulator>();
+                    string? stopReason = null;
+                    var iterationText = new System.Text.StringBuilder();
+
+                    await foreach (var chunk in BedrockSvc.StreamChatWithToolsAsync(historyForLoop, effectiveSystemPrompt, currentModel, bedrockTools, ct: streamingCts!.Token))
+                    {
+                        if (streamingCts.IsCancellationRequested) break;
+
+                        if (chunk.Type == "text")
+                        {
+                            iterationText.Append(chunk.Text);
+                            fullResponse.Append(chunk.Text);
+                            streamingMessage.Content = fullResponse.ToString();
+                            StateHasChanged();
+                            await ScrollToBottom();
+                        }
+                        else if (chunk.Type == "tool_use_start")
+                        {
+                            var acc = new ToolCallAccumulator(chunk.ToolUseId!, chunk.ToolName!);
+                            toolCalls.Add(acc);
+                            _currentToolName = chunk.ToolName;
+                            _toolCallInProgress = true;
+                            StateHasChanged();
+                        }
+                        else if (chunk.Type == "tool_input_delta")
+                        {
+                            toolCalls.LastOrDefault()?.AppendInput(chunk.Text ?? "");
+                        }
+                        else if (chunk.Type == "done")
+                        {
+                            stopReason = chunk.StopReason;
+                            inputTokens += chunk.InputTokens;   // accumulate across tool iterations
+                            outputTokens += chunk.OutputTokens; // accumulate across tool iterations
+                        }
+                        else if (chunk.Type == "error")
+                        {
+                            fullResponse.Append($"\n\n⚠️ {chunk.Text}");
+                            streamingMessage.Content = fullResponse.ToString();
+                            StateHasChanged();
+                        }
+                    }
+
+                    // If no tool calls or stop reason is end_turn, we're done
+                    if (!toolCalls.Any() || stopReason != "tool_use")
+                    {
+                        _toolCallInProgress = false;
+                        _currentToolName = null;
+                        StateHasChanged();
+                        break;
+                    }
+
+                    // Build assistant turn with text + tool_use blocks
+                    var assistantContentParts = new System.Text.StringBuilder("[");
+                    if (iterationText.Length > 0)
+                    {
+                        assistantContentParts.Append($"{{\"type\":\"text\",\"text\":{System.Text.Json.JsonSerializer.Serialize(iterationText.ToString())}}},");
+                    }
+                    foreach (var tc in toolCalls)
+                    {
+                        assistantContentParts.Append($"{{\"type\":\"tool_use\",\"id\":{System.Text.Json.JsonSerializer.Serialize(tc.ToolUseId)},\"name\":{System.Text.Json.JsonSerializer.Serialize(tc.ToolName)},\"input\":{tc.GetInputJson()}}},");
+                    }
+                    var assistantJson = assistantContentParts.ToString().TrimEnd(',') + "]";
+                    historyForLoop.Add(new MessageDto { Role = "assistant", Content = assistantJson });
+
+                    // Execute tool calls
+                    var toolResultParts = new System.Text.StringBuilder("[");
+                    foreach (var tc in toolCalls)
+                    {
+                        _currentToolName = tc.ToolName;
+                        StateHasChanged();
+                        var toolResult = await McpToolSvc.ExecuteToolAsync(
+                            Session.UserId, conversation.Id, tc.ToolName, tc.GetInputElement(), streamingCts!.Token);
+                        var resultContent = toolResult.Success ? (toolResult.Content ?? "") : $"Tool error: {toolResult.ErrorMessage}";
+                        toolResultParts.Append($"{{\"type\":\"tool_result\",\"tool_use_id\":{System.Text.Json.JsonSerializer.Serialize(tc.ToolUseId)},\"content\":{System.Text.Json.JsonSerializer.Serialize(resultContent)}}},");
+                    }
+                    var toolResultJson = toolResultParts.ToString().TrimEnd(',') + "]";
+                    historyForLoop.Add(new MessageDto { Role = "user", Content = toolResultJson });
+                }
+
+                // Guard: hit max iterations
+                if (iteration >= maxIterations)
+                {
+                    fullResponse.Append("\n\n⚠️ *Tool call limit reached for this response.*");
+                    streamingMessage.Content = fullResponse.ToString();
+                    StateHasChanged();
+                }
+
+                _toolCallInProgress = false;
+                _currentToolName = null;
+            }
+            else
+            {
+                // No tools — use existing streaming
+                await foreach (var chunk in BedrockSvc.StreamChatAsync(chatHistory, effectiveSystemPrompt, currentModel))
+                {
+                    if (streamingCts!.IsCancellationRequested) break;
+
+                    if (chunk.Type == "text")
+                    {
+                        fullResponse.Append(chunk.Text);
+                        streamingMessage.Content = fullResponse.ToString();
+                        StateHasChanged();
+                        await ScrollToBottom();
+                    }
+                    else if (chunk.Type == "done")
+                    {
+                        inputTokens = chunk.InputTokens;
+                        outputTokens = chunk.OutputTokens;
+                    }
+                    else if (chunk.Type == "error")
+                    {
+                        fullResponse.Append($"\n\n⚠️ {chunk.Text}");
+                        streamingMessage.Content = fullResponse.ToString();
+                        StateHasChanged();
+                    }
+                }
+            }
+
+            // Save assistant message
+            var assistantMsg = await ChatSvc.AddMessageAsync(
+                conversation.Id, "assistant", fullResponse.ToString(),
+                currentModel, inputTokens, outputTokens);
+            messages.Add(assistantMsg);
+
+            // Generate contextual title after first exchange (fire and forget)
+            if (messages.Count == 2)  // first user + first assistant
+            {
+                var convId = conversation.Id;
+                var userText = text;
+                var assistantText = fullResponse.ToString();
+                _ = Task.Run(async () =>
+                {
+                    await ChatSvc.GenerateConversationTitleAsync(convId, userText, assistantText);
+                    await InvokeAsync(StateHasChanged);
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            streamingMessage.Content += $"\n\n⚠️ Error: {ex.Message}";
+        }
+        finally
+        {
+            isStreaming = false;
+            streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
+            StateHasChanged();
+        }
+    }
+
+    private string? BuildSystemPromptFromProject(FortressAI.Shared.Models.Project? project, bool hasPendingMigration = false)
+    {
+        if (project == null) return null;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## Project: {project.Name}");
+        sb.AppendLine();
+
+        if (!string.IsNullOrEmpty(project.CustomInstructions))
+        {
+            sb.AppendLine(project.CustomInstructions);
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("(Project documents are retrieved via knowledge base search and will be included below.)");
+
+        if (hasPendingMigration)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Note: Some project documents are being indexed and may not be available in this conversation yet.");
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    private async Task HandleModelChanged(string model)
+    {
+        currentModel = model;
+        if (conversation != null)
+        {
+            await ChatSvc.UpdateConversationModelAsync(conversation.Id, model);
+        }
+    }
+
+    private async Task ToggleFortressKb()
+    {
+        _fortressKbEnabled = !_fortressKbEnabled;
+        if (conversation != null)
+        {
+            conversation.EnableFortressKb = _fortressKbEnabled;
+            await ChatSvc.UpdateConversationKbAsync(conversation.Id, _fortressKbEnabled, _personalKbEnabled, _selectedTeamIds.ToList());
+        }
+        StateHasChanged();
+    }
+
+    private async Task TogglePersonalKb()
+    {
+        _personalKbEnabled = !_personalKbEnabled;
+        if (conversation != null)
+        {
+            conversation.EnablePersonalKb = _personalKbEnabled;
+            await ChatSvc.UpdateConversationKbAsync(conversation.Id, _fortressKbEnabled, _personalKbEnabled, _selectedTeamIds.ToList());
+        }
+        StateHasChanged();
+    }
+
+    private string GetPersonalKbStyle()
+    {
+        var active = _personalKbEnabled;
+        return active
+            ? "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-gold); background: var(--color-gold-muted); color: var(--color-gold); cursor: pointer;"
+            : "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); cursor: pointer;";
+    }
+
+    private async Task ToggleTeamKb(int teamId)
+    {
+        if (_selectedTeamIds.Contains(teamId))
+            _selectedTeamIds.Remove(teamId);
+        else
+            _selectedTeamIds.Add(teamId);
+
+        if (conversation != null)
+        {
+            await ChatSvc.UpdateConversationKbAsync(
+                conversation.Id,
+                _fortressKbEnabled,
+                _personalKbEnabled,
+                _selectedTeamIds.ToList());
+        }
+        StateHasChanged();
+    }
+
+    private void ToggleTeamKbPopover() => _teamKbPopoverOpen = !_teamKbPopoverOpen;
+
+    private string GetTeamKbToggleStyle()
+    {
+        var active = _selectedTeamIds.Any();
+        return active
+            ? "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-gold); background: var(--color-gold-muted); color: var(--color-gold); cursor: pointer;"
+            : "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); cursor: pointer;";
+    }
+
+    private async Task ToggleTeamKbAndClose(int teamId)
+    {
+        await ToggleTeamKb(teamId);
+        // Keep popover open so user can multi-select; close only on outside click
+    }
+
+    private string GetFortressKbStyle()
+    {
+        var active = _fortressKbEnabled;
+        return active
+            ? "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-gold); background: var(--color-gold-muted); color: var(--color-gold); cursor: pointer;"
+            : "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); cursor: pointer;";
+    }
+
+    private string GetSendButtonStyle() =>
+        (isStreaming || string.IsNullOrWhiteSpace(_userInput))
+            ? "background: var(--color-border); color: var(--color-text-tertiary); cursor: not-allowed; border-radius: var(--radius-md); width: 36px; height: 36px;"
+            : "background: var(--color-btn-primary-bg); color: white; cursor: pointer; border-radius: var(--radius-md); width: 36px; height: 36px;";
+
+    private async Task HandleInputKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await HandleSendFromInput();
+        }
+    }
+
+    private async Task HandleSendFromInput()
+    {
+        if (string.IsNullOrWhiteSpace(_userInput) || isStreaming) return;
+        var text = _userInput;
+        _userInput = "";
+        await HandleSend(text);
+    }
+
+    private async Task ScrollToBottom()
+    {
+        try { await JS.InvokeVoidAsync("fortressChat.scrollToBottom"); }
+        catch { /* JS interop can fail during dispose */ }
+    }
+
+    private async Task JumpToBottom()
+    {
+        try { await JS.InvokeVoidAsync("fortressChat.jumpToBottom"); }
+        catch { }
+    }
+
+    private string GetWelcomeTitle() =>
+        conversation?.Project != null
+            ? $"How can I help with {conversation.Project.Name}?"
+            : "How can I help you today?";
+
+    private string GetWelcomeSubtitle() =>
+        conversation?.Project != null
+            ? "This conversation includes your project context and documents."
+            : DrawerOpen
+                ? "Start a conversation or select a project from the sidebar."
+                : "Start a conversation below.";
+
+    public async ValueTask DisposeAsync()
+    {
+        streamingCts?.Cancel();
+        streamingCts?.Dispose();
+        if (_scrollListenerInitialized)
+        {
+            try { await JS.InvokeVoidAsync("fortressChat.removeScrollListener"); }
+            catch { }
+        }
+        _dotNetRef?.Dispose();
+    }
+}

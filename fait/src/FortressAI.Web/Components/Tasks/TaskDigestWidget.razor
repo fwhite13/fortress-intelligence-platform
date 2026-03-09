@@ -1,0 +1,277 @@
+@inject GraphTaskService TaskService
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@implements IAsyncDisposable
+
+<MudCard Elevation="2">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.h6">
+                <MudIcon Icon="@Icons.Material.Filled.Task" Class="mr-2"
+                         Style="vertical-align: middle; color: #d4af37;" />
+                Task Digest
+            </MudText>
+        </CardHeaderContent>
+        <CardHeaderActions>
+            <MudButtonGroup Size="Size.Small" Variant="Variant.Outlined">
+                <MudButton OnClick="@(() => SetFilter("all"))"
+                           Color="@(_filter == "all" ? Color.Primary : Color.Default)">
+                    All@(CountBadge(_allTasks.Count))
+                </MudButton>
+                <MudButton OnClick="@(() => SetFilter("today"))"
+                           Color="@(_filter == "today" ? Color.Primary : Color.Default)">
+                    Today@(CountBadge(GetTodayCount()))
+                </MudButton>
+                <MudButton OnClick="@(() => SetFilter("week"))"
+                           Color="@(_filter == "week" ? Color.Primary : Color.Default)">
+                    This Week@(CountBadge(GetWeekCount()))
+                </MudButton>
+                <MudButton OnClick="@(() => SetFilter("overdue"))"
+                           Color="@(_filter == "overdue" ? Color.Primary : Color.Default)">
+                    Overdue@(CountBadge(GetOverdueCount()))
+                </MudButton>
+            </MudButtonGroup>
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                           OnClick="RefreshTasks" Disabled="_loading" Size="Size.Small" />
+        </CardHeaderActions>
+    </MudCardHeader>
+    <MudCardContent>
+        @if (_loading)
+        {
+            <div style="text-align: center; padding: 40px 0;">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Large" />
+                <MudText Typo="Typo.body2" Class="mt-3" Style="color: var(--color-text-secondary);">
+                    Loading tasks...
+                </MudText>
+            </div>
+        }
+        else if (_error)
+        {
+            <div style="text-align: center; padding: 40px 0;">
+                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline"
+                         Style="font-size: 48px; color: #dc2626;" />
+                <MudText Typo="Typo.body1" Class="mt-3" Style="color: var(--color-text-secondary);">
+                    Failed to load tasks. Try again.
+                </MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-3"
+                           OnClick="RefreshTasks" StartIcon="@Icons.Material.Filled.Refresh">
+                    Retry
+                </MudButton>
+            </div>
+        }
+        else if (!FilteredTasks.Any())
+        {
+            <div style="text-align: center; padding: 40px 0;">
+                <MudText Typo="Typo.h5">🎉</MudText>
+                <MudText Typo="Typo.body1" Class="mt-2" Style="color: var(--color-text-secondary);">
+                    No tasks to show. You're all caught up!
+                </MudText>
+            </div>
+        }
+        else
+        {
+            <MudGrid>
+                @foreach (var task in FilteredTasks)
+                {
+                    <MudItem xs="12" sm="6" md="4">
+                        <MudTooltip Placement="Placement.Top" Arrow="true">
+                            <ChildContent>
+                                <MudCard Elevation="1" Class="pa-0"
+                                         Style="@(GetCardStyle(task))"
+                                         @onclick="() => OpenTask(task)">
+                                    <MudCardContent Class="pa-3">
+                                        <div style="display: flex; align-items: flex-start; gap: 8px;">
+                                            <MudIcon Icon="@GetPriorityIcon(task.Priority)"
+                                                     Style="@(GetPriorityIconStyle(task.Priority))"
+                                                     Size="Size.Small" />
+                                            <div style="flex: 1; min-width: 0;">
+                                                <MudText Typo="Typo.subtitle1"
+                                                         Style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                                    @task.Title
+                                                </MudText>
+                                                <MudText Typo="Typo.caption"
+                                                         Style="color: var(--color-text-secondary);">
+                                                    @(task.PlanTitle ?? "—") · @(task.BucketName ?? "—")
+                                                </MudText>
+                                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                                                    <MudText Typo="Typo.caption"
+                                                             Style="@(GetDueDateStyle(task))">
+                                                        @FormatDueDate(task.DueDate)
+                                                    </MudText>
+                                                    <MudText Typo="Typo.caption"
+                                                             Style="color: var(--color-text-secondary);">
+                                                        @(task.PercentComplete)%
+                                                    </MudText>
+                                                </div>
+                                                <MudProgressLinear Value="@task.PercentComplete"
+                                                                   Color="@GetProgressColor(task)"
+                                                                   Size="Size.Small" Class="mt-1"
+                                                                   Rounded="true" />
+                                            </div>
+                                        </div>
+                                    </MudCardContent>
+                                </MudCard>
+                            </ChildContent>
+                            <TooltipContent>
+                                <div style="max-width: 280px;">
+                                    <MudText Typo="Typo.subtitle2" Style="font-weight: 600;">@task.Title</MudText>
+                                    <MudText Typo="Typo.caption">Plan: @(task.PlanTitle ?? "N/A")</MudText>
+                                    <MudText Typo="Typo.caption">Bucket: @(task.BucketName ?? "N/A")</MudText>
+                                    <MudText Typo="Typo.caption">Due: @(task.DueDate?.ToString("MMM d, yyyy") ?? "No due date")</MudText>
+                                    <MudText Typo="Typo.caption">Progress: @(task.PercentComplete)%</MudText>
+                                    <MudText Typo="Typo.caption">Priority: @GetPriorityLabel(task.Priority)</MudText>
+                                </div>
+                            </TooltipContent>
+                        </MudTooltip>
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+    </MudCardContent>
+</MudCard>
+
+@code {
+    [Parameter]
+    public Guid UserId { get; set; }
+
+    private List<TaskItem> _allTasks = new();
+    private bool _loading = true;
+    private bool _error = false;
+    private string _filter = "today";
+
+    private IEnumerable<TaskItem> FilteredTasks => _filter switch
+    {
+        "today" => _allTasks.Where(t => IsDueToday(t)),
+        "week" => _allTasks.Where(t => IsDueThisWeek(t)),
+        "overdue" => _allTasks.Where(t => IsOverdue(t)),
+        _ => _allTasks
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTasksAsync();
+    }
+
+    private async Task LoadTasksAsync()
+    {
+        _loading = true;
+        _error = false;
+        StateHasChanged();
+
+        try
+        {
+            _allTasks = await TaskService.GetUserTasksAsync(UserId);
+        }
+        catch (Exception ex)
+        {
+            _error = true;
+            Snackbar.Add("Failed to load tasks.", Severity.Error);
+            Console.WriteLine($"TaskDigestWidget error: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefreshTasks()
+    {
+        await LoadTasksAsync();
+        if (!_error)
+        {
+            Snackbar.Add("Tasks refreshed.", Severity.Success);
+        }
+    }
+
+    private void SetFilter(string filter)
+    {
+        _filter = filter;
+    }
+
+    private static bool IsOverdue(TaskItem task) =>
+        task.DueDate.HasValue && task.DueDate.Value.Date < DateTime.UtcNow.Date && task.PercentComplete < 100;
+
+    private static bool IsDueToday(TaskItem task) =>
+        task.DueDate.HasValue && task.DueDate.Value.Date == DateTime.UtcNow.Date;
+
+    private static bool IsDueThisWeek(TaskItem task)
+    {
+        if (!task.DueDate.HasValue) return false;
+        var today = DateTime.UtcNow.Date;
+        var endOfWeek = today.AddDays(7 - (int)today.DayOfWeek);
+        return task.DueDate.Value.Date >= today && task.DueDate.Value.Date <= endOfWeek;
+    }
+
+    private int GetTodayCount() => _allTasks.Count(t => IsDueToday(t));
+    private int GetWeekCount() => _allTasks.Count(t => IsDueThisWeek(t));
+    private int GetOverdueCount() => _allTasks.Count(t => IsOverdue(t));
+    private static string CountBadge(int count) => count > 0 ? $" ({count})" : "";
+
+    private static string GetCardStyle(TaskItem task)
+    {
+        var borderColor = IsOverdue(task) ? "#dc2626"
+            : IsDueToday(task) ? "#f59e0b"
+            : "transparent";
+        return $"border-left: 4px solid {borderColor}; cursor: pointer;";
+    }
+
+    private static string GetDueDateStyle(TaskItem task)
+    {
+        if (IsOverdue(task)) return "color: #dc2626; font-weight: 600;";
+        if (IsDueToday(task)) return "color: #f59e0b; font-weight: 600;";
+        return "color: var(--color-text-secondary);";
+    }
+
+    private static Color GetProgressColor(TaskItem task)
+    {
+        if (IsOverdue(task)) return Color.Error;
+        if (IsDueToday(task)) return Color.Warning;
+        return Color.Primary;
+    }
+
+    private static string FormatDueDate(DateTime? dueDate)
+    {
+        if (!dueDate.HasValue) return "No due date";
+        var diff = (dueDate.Value.Date - DateTime.UtcNow.Date).Days;
+        if (diff < -1) return $"Overdue by {Math.Abs(diff)} days";
+        if (diff == -1) return "Overdue by 1 day";
+        if (diff == 0) return "Due today";
+        if (diff == 1) return "Due tomorrow";
+        return $"Due {dueDate.Value:MMM d}";
+    }
+
+    private static string GetPriorityIcon(int priority) => priority switch
+    {
+        1 => Icons.Material.Filled.PriorityHigh,
+        3 => Icons.Material.Filled.Flag,
+        _ => Icons.Material.Filled.FlagCircle
+    };
+
+    private static string GetPriorityIconStyle(int priority) => priority switch
+    {
+        1 => "color: #dc2626; margin-top: 2px;",
+        3 => "color: #f59e0b; margin-top: 2px;",
+        _ => "color: #9ca3af; margin-top: 2px;"
+    };
+
+    private static string GetPriorityLabel(int priority) => priority switch
+    {
+        1 => "Urgent",
+        3 => "Important",
+        5 => "Medium",
+        7 => "Low",
+        _ => "Normal"
+    };
+
+    private async Task OpenTask(TaskItem task)
+    {
+        var url = "https://tasks.office.com/";
+        await JS.InvokeVoidAsync("open", url, "_blank");
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        return ValueTask.CompletedTask;
+    }
+}

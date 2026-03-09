@@ -1,0 +1,142 @@
+@using FortressAI.Web.Services
+
+@* Weekly Rollup Card — shows aggregated stats + Bedrock narrative summary for the past 7 days *@
+
+@if (!_dismissed)
+{
+    <MudCard Elevation="3" Class="mb-3" Style="border-left: 4px solid #7c3aed; border-radius: 8px;">
+        <MudCardHeader>
+            <CardHeaderContent>
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <MudIcon Icon="@Icons.Material.Filled.BarChart" Style="color: #7c3aed; font-size: 20px;" />
+                    <MudText Typo="Typo.h6" Style="font-weight: 700; flex: 1; min-width: 120px;">
+                        📊 Weekly Rollup
+                        @if (_rollup != null)
+                        {
+                            <span style="font-weight: 400; font-size: 0.85rem; color: var(--color-text-secondary); margin-left: 8px;">
+                                @_rollup.WeekStart.ToString("MMM d") – @_rollup.WeekEnd.ToString("MMM d")
+                            </span>
+                        }
+                    </MudText>
+                </div>
+            </CardHeaderContent>
+            <CardHeaderActions>
+                <MudTooltip Text="Dismiss weekly rollup">
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                   Color="Color.Default" OnClick="@(() => _dismissed = true)" />
+                </MudTooltip>
+            </CardHeaderActions>
+        </MudCardHeader>
+
+        <MudCardContent Class="pt-0">
+            @if (_loading)
+            {
+                @* Skeleton loader while generating *@
+                <MudSkeleton SkeletonType="SkeletonType.Text" Width="60%" Class="mb-2" />
+                <MudSkeleton SkeletonType="SkeletonType.Text" Width="80%" Class="mb-2" />
+                <MudSkeleton SkeletonType="SkeletonType.Text" Width="50%" Class="mb-2" />
+                <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="20px" Width="100%" />
+            }
+            else if (_rollup != null)
+            {
+                @* Stats chips row *@
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
+                    <MudChip T="string" Icon="@Icons.Material.Filled.WbSunny"
+                             Size="Size.Small" Variant="Variant.Outlined"
+                             Style="color: #d97706; border-color: #d97706;">
+                        @_rollup.Stats.BriefingsDelivered briefing@(_rollup.Stats.BriefingsDelivered == 1 ? "" : "s")
+                    </MudChip>
+                    <MudChip T="string" Icon="@Icons.Material.Filled.Email"
+                             Size="Size.Small" Variant="Variant.Outlined"
+                             Style="color: #2563eb; border-color: #2563eb;">
+                        @_rollup.Stats.EmailAlertsTriaged email@(_rollup.Stats.EmailAlertsTriaged == 1 ? "" : "s") triaged
+                        @if (_rollup.Stats.HighPriorityEmails > 0)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled"
+                                     Style="margin-left: 4px; height: 18px; font-size: 0.7rem;">
+                                @_rollup.Stats.HighPriorityEmails high
+                            </MudChip>
+                        }
+                    </MudChip>
+                    <MudChip T="string" Icon="@Icons.Material.Filled.Event"
+                             Size="Size.Small" Variant="Variant.Outlined"
+                             Style="color: #059669; border-color: #059669;">
+                        @_rollup.Stats.MeetingNotesCaptures meeting@(_rollup.Stats.MeetingNotesCaptures == 1 ? "" : "s") noted
+                    </MudChip>
+                    <MudChip T="string" Icon="@Icons.Material.Filled.AccountBalance"
+                             Size="Size.Small" Variant="Variant.Outlined"
+                             Style="color: #7c3aed; border-color: #7c3aed;">
+                        @_rollup.Stats.KbEntriesAdded KB entr@(_rollup.Stats.KbEntriesAdded == 1 ? "y" : "ies")
+                    </MudChip>
+                </div>
+
+                @* Expandable narrative summary *@
+                @if (_expanded && !string.IsNullOrWhiteSpace(_rollup.Narrative))
+                {
+                    <MudDivider Class="mb-3" />
+                    <div style="white-space: pre-wrap; font-size: 0.9rem; line-height: 1.7; color: var(--mud-palette-text-primary);">
+                        @_rollup.Narrative
+                    </div>
+                }
+
+                @* Action buttons *@
+                <div style="display: flex; gap: 8px; margin-top: 12px;">
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                               StartIcon="@(_expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                               OnClick="@(() => _expanded = !_expanded)">
+                        @(_expanded ? "Hide Summary" : "View Summary")
+                    </MudButton>
+                </div>
+            }
+            else if (_error != null)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Variant="Variant.Text">
+                    Could not generate weekly rollup: @_error
+                </MudAlert>
+            }
+        </MudCardContent>
+    </MudCard>
+}
+
+@code {
+    /// <summary>The WeeklyRollupService (injected by parent).</summary>
+    [Parameter, EditorRequired]
+    public WeeklyRollupService RollupSvc { get; set; } = null!;
+
+    /// <summary>The user ID to generate rollup for.</summary>
+    [Parameter, EditorRequired]
+    public Guid UserId { get; set; }
+
+    private WeeklyRollup? _rollup;
+    private bool _loading = false;
+    private bool _dismissed = false;
+    private bool _expanded = false;
+    private string? _error;
+
+    /// <summary>
+    /// Called by the parent after first render to lazily load the rollup.
+    /// Caches the result so it's not regenerated on re-renders.
+    /// </summary>
+    public async Task LoadRollupAsync()
+    {
+        if (_rollup != null || _loading) return; // already loaded or in progress
+
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            _rollup = await RollupSvc.GenerateRollupAsync(UserId);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+
+        StateHasChanged();
+    }
+}

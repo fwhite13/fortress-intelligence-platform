@@ -1,0 +1,278 @@
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Configuration
+@inherits LayoutComponentBase
+@inject UserSessionService Session
+@inject NavigationManager Nav
+@inject IConfiguration Configuration
+@inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> ContextFactory
+@inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider AuthStateProvider
+@inject IDialogService DialogService
+@implements IDisposable
+
+@if (!Session.IsAuthenticated)
+{
+    <MudThemeProvider Theme="_theme" />
+    <MudPopoverProvider />
+    <MudDialogProvider />
+    <MudSnackbarProvider />
+    <Login />
+}
+else
+{
+    <MudThemeProvider Theme="_theme" />
+    <MudPopoverProvider />
+    <MudDialogProvider />
+    <MudSnackbarProvider />
+
+    <MudLayout>
+        <MudAppBar Elevation="1" Style="background: var(--color-header-bg); height: 48px; padding: 0;">
+            <div style="display: flex; align-items: center; gap: var(--space-3); padding-left: var(--space-1);">
+            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
+                               OnClick="@ToggleDrawer" />
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="color: var(--color-text-inverse);">
+              <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor" opacity="0.9"/>
+              <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <MudText Style="font-size: var(--text-md); font-weight: var(--font-semibold); color: var(--color-text-inverse);">
+                <span class="d-none d-sm-inline">AI Toolkit</span>
+                <span class="d-inline d-sm-none">FAIT</span>
+            </MudText>
+        </div>
+
+            <MudSpacer />
+
+        <div style="display: flex; align-items: center; gap: var(--space-2); padding-right: var(--space-1);">
+            <MudIconButton Icon="@Icons.Material.Filled.HelpOutline"
+                           Color="Color.Inherit"
+                           title="Help & User Guide"
+                           OnClick="@(async () => { if (_helpDrawer != null) await _helpDrawer.OpenAsync(); })" />
+            <MudMenu Icon="@Icons.Material.Filled.Apps" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                <MudMenuItem Href="/" Icon="@Icons.Material.Filled.Chat">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>FAIT — AI Toolkit</span>
+                        <span style="color: var(--color-gold);">●</span>
+                    </div>
+                </MudMenuItem>
+                <MudMenuItem Href="https://forms.dev.fortressam.ai" Icon="@Icons.Material.Filled.Description">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>FORMS — Form Intelligence</span>
+                    </div>
+                </MudMenuItem>
+                <MudMenuItem Href="https://firm.dev.fortressam.ai" Icon="@Icons.Material.Filled.Groups">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>FIRM — Meeting Assistant</span>
+                    </div>
+                </MudMenuItem>
+            </MudMenu>
+
+            <MudMenu Dense="true" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                <ActivatorContent>
+                    <MudAvatar Style="background: var(--color-gold); width: 28px; height: 28px; font-size: 13px; cursor: pointer;">
+                        @(Session.CurrentUser?.DisplayName?.FirstOrDefault() ?? Session.CurrentUser?.Email?.FirstOrDefault() ?? '?')
+                    </MudAvatar>
+                </ActivatorContent>
+                <ChildContent>
+                    <MudMenuItem Disabled="true">
+                        <MudText Typo="Typo.body2"><strong>@(Session.CurrentUser?.DisplayName ?? "User")</strong></MudText>
+                        <MudText Typo="Typo.caption" Style="color: #6b7280;">@Session.CurrentUser?.Email</MudText>
+                    </MudMenuItem>
+                    <MudDivider />
+                    <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="Logout">Sign Out</MudMenuItem>
+                </ChildContent>
+            </MudMenu>
+        </div>
+        </MudAppBar>
+
+        <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
+            <div style="display: flex; flex-direction: column; height: 100%;">
+                <MudDrawerHeader Style="padding: 12px 16px; background: var(--color-sidebar-bg);">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="color: var(--color-gold)">
+                          <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor" opacity="0.9"/>
+                          <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span style="color: rgba(248,250,252,0.8); font-size: 14px; font-weight: 500;">Fortress</span>
+                    </div>
+                    <div style="color: var(--color-gold); font-size: var(--text-lg); font-weight: var(--font-bold); margin-top: 2px;">
+                        FAIT
+                    </div>
+                </MudDrawerHeader>
+                <div style="flex: 1; overflow-y: auto;">
+                    <MudNavMenu>
+                        @* Briefing History hidden — feature not yet live *@
+                        @* <MudNavLink Href="/briefing-history" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.History">Briefing History</MudNavLink> *@
+                        <MudNavLink Href="/chat" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Chat">Chat</MudNavLink>
+                        <MudNavLink Href="/projects" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Folder">Projects</MudNavLink>
+                        <MudNavLink Href="/knowledge-base" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.LibraryBooks">Knowledge Base</MudNavLink>
+                        <MudNavLink Href="/chats" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.History">All Chats</MudNavLink>
+                        <MudNavLink Href="/settings" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Settings">Settings</MudNavLink>
+                        @if (Session.IsAdmin)
+                        {
+                            <MudNavLink Href="/admin" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Settings">Admin</MudNavLink>
+                        }
+                    </MudNavMenu>
+
+                    <SidebarContent />
+                </div>
+                <div class="fip-drawer-footer">
+                    <MudText Typo="Typo.caption">Fortress Intelligence Platform</MudText>
+                </div>
+            </div>
+        </MudDrawer>
+
+        <MudMainContent Class="pa-4" Style="padding-top: 80px !important;">
+            <CascadingValue Value="_drawerOpen" Name="DrawerOpen">
+                @Body
+            </CascadingValue>
+        </MudMainContent>
+        <HelpDrawer @ref="_helpDrawer" />
+    </MudLayout>
+}
+
+@code {
+    private bool _drawerOpen = true;
+    private HelpDrawer? _helpDrawer;
+    private bool _nameNagShown = false;
+
+    private MudTheme _theme = new MudTheme
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#1a2332",
+            PrimaryContrastText = "#ffffff",
+            Secondary = "#d4af37",
+            SecondaryContrastText = "#1a2332",
+            Background = "#f8f9fa",
+            Surface = "#ffffff",
+            AppbarBackground = "#1a2332",
+            AppbarText = "#ffffff",
+            DrawerBackground = "#1a2332",
+            DrawerText = "#f0f0f0",
+            DrawerIcon = "#d4af37",
+            TextPrimary = "#1a2332",
+            TextSecondary = "#6b7280",
+            TextDisabled = "rgba(0,0,0,0.38)",
+            ActionDefault = "#6b7280",
+            Success = "#059669",
+            Warning = "#d97706",
+            Error = "#dc2626",
+            Info = "#2563eb",
+            TableLines = "#e5e7eb",
+            TableHover = "#f3f4f6"
+        },
+        Typography = new Typography
+        {
+            Default = new Default
+            {
+                FontFamily = new[] { "Inter", "system-ui", "-apple-system", "sans-serif" },
+                FontSize = "0.9375rem",
+                LineHeight = 1.6
+            },
+            H4 = new H4 { FontWeight = 700 },
+            H5 = new H5 { FontWeight = 600 },
+            H6 = new H6 { FontWeight = 600 },
+            Button = new Button
+            {
+                FontFamily = new[] { "Inter", "sans-serif" },
+                FontWeight = 500,
+                TextTransform = "none",
+                FontSize = "0.9rem"
+            },
+            Caption = new Caption { FontSize = "0.75rem" }
+        },
+        LayoutProperties = new LayoutProperties
+        {
+            AppbarHeight = "48px",
+            DrawerWidthLeft = "264px"
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Bridge HTTP auth (StubAuth or Cognito OIDC) into the Blazor circuit scoped session
+        if (!Session.IsAuthenticated)
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            if (authState.User.Identity?.IsAuthenticated == true)
+            {
+                var email = authState.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+                if (!string.IsNullOrEmpty(email))
+                {
+                    await using var db = await ContextFactory.CreateDbContextAsync();
+                    var appUser = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
+                    if (appUser == null)
+                    {
+                        // Auto-provision user from Cognito claims on first login
+                        var displayName = authState.User.FindFirst("name")?.Value
+                            ?? authState.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+                            ?? email.Split('@')[0];
+                        appUser = new FortressAI.Shared.Models.AppUser
+                        {
+                            Id = Guid.NewGuid(),
+                            Email = email,
+                            DisplayName = displayName,
+                            IsEntraUser = true,
+                            PasswordHash = string.Empty,
+                            Role = "user",
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        db.Users.Add(appUser);
+                        await db.SaveChangesAsync();
+                    }
+                    else if (!appUser.IsEntraUser &&
+                             authState.User.Identity?.AuthenticationType == "OpenIdConnect")
+                    {
+                        // Pre-invited user signing in via Entra for the first time — flip the flag
+                        appUser.IsEntraUser = true;
+                        await db.SaveChangesAsync();
+                    }
+                    Session.SetUser(appUser);
+                }
+            }
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Session.OnAuthStateChanged += StateHasChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Session.IsAuthenticated && !_nameNagShown
+            && string.IsNullOrWhiteSpace(Session.CurrentUser?.DisplayName))
+        {
+            _nameNagShown = true;
+            var dialog = await DialogService.ShowAsync<SetDisplayNameDialog>("Welcome to FAIT!");
+            var result = await dialog.Result;
+            if (result is not null && !result.Canceled && result.Data is string name && !string.IsNullOrWhiteSpace(name))
+            {
+                await using var db = await ContextFactory.CreateDbContextAsync();
+                var user = await db.Users.FindAsync(Session.UserId);
+                if (user != null)
+                {
+                    user.DisplayName = name;
+                    await db.SaveChangesAsync();
+                    Session.CurrentUser!.DisplayName = name;
+                }
+            }
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private void ToggleDrawer()
+    {
+        _drawerOpen = !_drawerOpen;
+    }
+
+    private void Logout()
+    {
+        Session.Logout();
+        Nav.NavigateTo("/auth/logout", forceLoad: true);
+    }
+
+    public void Dispose()
+    {
+        Session.OnAuthStateChanged -= StateHasChanged;
+    }
+}

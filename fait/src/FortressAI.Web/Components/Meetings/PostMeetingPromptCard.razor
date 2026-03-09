@@ -1,0 +1,270 @@
+@using System.Text.Json
+@* Post-Meeting Prompt Card — shown on Dashboard for meetings that ended in the last 30 minutes *@
+
+<MudCard Elevation="3" Class="mb-3" Style="border-left: 4px solid #2563eb; border-radius: 8px;">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <MudIcon Icon="@Icons.Material.Filled.AssignmentTurnedIn" Style="color: #2563eb; font-size: 20px;" />
+                <MudText Typo="Typo.h6" Style="font-weight: 700; flex: 1; min-width: 120px;">
+                    @Meeting.Subject
+                </MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled"
+                         Style="font-weight: 600;">
+                    Ended @_minutesAgo min ago
+                </MudChip>
+            </div>
+            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); margin-left: 30px;">
+                @_durationMin min meeting &middot; ended @Meeting.EndTime.ToLocalTime().ToString("h:mm tt")
+                @if (!string.IsNullOrWhiteSpace(Meeting.Location))
+                {
+                    <span> &middot; @Meeting.Location</span>
+                }
+            </MudText>
+        </CardHeaderContent>
+        <CardHeaderActions>
+            <MudTooltip Text="Dismiss without saving">
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               Color="Color.Default" OnClick="HandleDismiss" Disabled="_saving" />
+            </MudTooltip>
+        </CardHeaderActions>
+    </MudCardHeader>
+
+    <MudCardContent Class="pt-0">
+        @* Attendees *@
+        @if (_attendeeDisplay.Count > 0)
+        {
+            <div class="mb-3">
+                <MudText Typo="Typo.caption"
+                         Style="font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">
+                    Attendees
+                </MudText>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+                    @foreach (var name in _attendeeDisplay)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                 Style="font-size: 0.75rem;">@name</MudChip>
+                    }
+                    @if (_extraAttendees > 0)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                 Color="Color.Secondary" Style="font-size: 0.75rem;">
+                            +@_extraAttendees more
+                        </MudChip>
+                    }
+                </div>
+            </div>
+        }
+
+        @* Notes textarea *@
+        <MudTextField @bind-Value="_notes"
+                      Label="Capture meeting notes, decisions, and action items..."
+                      Lines="4"
+                      FullWidth="true"
+                      Variant="Variant.Outlined"
+                      Disabled="_saving"
+                      Style="margin-bottom: 12px;" />
+
+        @* Action buttons *@
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="HandleSaveNotes"
+                       Disabled="_saving || string.IsNullOrWhiteSpace(_notes)">
+                Save Notes
+            </MudButton>
+
+            <MudButton Variant="Variant.Filled" Color="Color.Secondary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.AutoAwesome"
+                       OnClick="HandleSaveAndSummarize"
+                       Disabled="_saving || string.IsNullOrWhiteSpace(_notes)">
+                @if (_saving && _summarizing)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                    <span>Summarizing…</span>
+                }
+                else
+                {
+                    <span>Save + Summarize</span>
+                }
+            </MudButton>
+
+            <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small"
+                       OnClick="HandleDismiss"
+                       Disabled="_saving">
+                Dismiss
+            </MudButton>
+        </div>
+
+        @* Generated summary *@
+        @if (!string.IsNullOrWhiteSpace(_summary))
+        {
+            <MudDivider Class="my-3" />
+            <div>
+                <MudText Typo="Typo.caption"
+                         Style="font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 6px;">
+                    <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Style="font-size: 14px; vertical-align: middle; margin-right: 4px; color: #7c3aed;" />
+                    AI Summary
+                </MudText>
+                <div style="white-space: pre-wrap; font-size: 0.875rem; line-height: 1.65;
+                            background: rgba(124,58,237,0.06); border-radius: 6px; padding: 12px;
+                            border-left: 3px solid #7c3aed;">
+                    @_summary
+                </div>
+            </div>
+        }
+
+        @* Save confirmation *@
+        @if (_saved && !_saving)
+        {
+            <MudAlert Severity="Severity.Success" Dense="true" Class="mt-3" Variant="Variant.Outlined">
+                Notes saved successfully.
+            </MudAlert>
+        }
+    </MudCardContent>
+</MudCard>
+
+@code {
+    /// <summary>The calendar event that recently ended.</summary>
+    [Parameter, EditorRequired]
+    public CalendarEvent Meeting { get; set; } = null!;
+
+    /// <summary>Called when user saves notes (with or without summary).</summary>
+    [Parameter]
+    public EventCallback<(string Notes, string? Summary)> OnSaved { get; set; }
+
+    /// <summary>Called when user dismisses without saving.</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+
+    /// <summary>Service for saving notes and generating summary.</summary>
+    [Parameter, EditorRequired]
+    public PostMeetingService PostMeetingSvc { get; set; } = null!;
+
+    /// <summary>User ID for DB operations.</summary>
+    [Parameter, EditorRequired]
+    public Guid UserId { get; set; }
+
+    private string _notes = string.Empty;
+    private string? _summary;
+    private bool _saving = false;
+    private bool _summarizing = false;
+    private bool _saved = false;
+
+    private int _minutesAgo;
+    private int _durationMin;
+    private List<string> _attendeeDisplay = new();
+    private int _extraAttendees;
+
+    protected override void OnParametersSet()
+    {
+        _minutesAgo = Math.Max(0, (int)(DateTime.UtcNow - Meeting.EndTime).TotalMinutes);
+        _durationMin = (int)(Meeting.EndTime - Meeting.StartTime).TotalMinutes;
+
+        var all = ParseAttendees();
+        _attendeeDisplay = all.Take(5).ToList();
+        _extraAttendees = Math.Max(0, all.Count - 5);
+    }
+
+    private async Task HandleSaveNotes()
+    {
+        if (string.IsNullOrWhiteSpace(_notes)) return;
+
+        _saving = true;
+        _saved = false;
+        StateHasChanged();
+
+        try
+        {
+            await PostMeetingSvc.SavePostMeetingNoteAsync(
+                UserId,
+                Meeting.EventId,
+                Meeting.Subject,
+                Meeting.EndTime,
+                _notes.Trim());
+
+            _saved = true;
+            await OnSaved.InvokeAsync((_notes, null));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PostMeeting] Save failed: {ex.Message}");
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleSaveAndSummarize()
+    {
+        if (string.IsNullOrWhiteSpace(_notes)) return;
+
+        _saving = true;
+        _summarizing = true;
+        _saved = false;
+        StateHasChanged();
+
+        try
+        {
+            // Save note first
+            var note = await PostMeetingSvc.SavePostMeetingNoteAsync(
+                UserId,
+                Meeting.EventId,
+                Meeting.Subject,
+                Meeting.EndTime,
+                _notes.Trim());
+
+            // Generate summary
+            _summary = await PostMeetingSvc.GenerateMeetingSummaryAsync(Meeting, _notes.Trim());
+
+            // Persist summary back
+            await PostMeetingSvc.UpdateSummaryAsync(note.Id, _summary);
+
+            _saved = true;
+            await OnSaved.InvokeAsync((_notes, _summary));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PostMeeting] Save+Summarize failed: {ex.Message}");
+            _summary = $"Summary generation failed: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+            _summarizing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleDismiss() => await OnDismiss.InvokeAsync();
+
+    private List<string> ParseAttendees()
+    {
+        if (string.IsNullOrWhiteSpace(Meeting.AttendeesJson))
+            return [];
+
+        try
+        {
+            var items = JsonSerializer.Deserialize<List<JsonElement>>(Meeting.AttendeesJson) ?? [];
+            return items
+                .Select(a =>
+                {
+                    if (a.TryGetProperty("name", out var n)
+                        && n.ValueKind != JsonValueKind.Null
+                        && !string.IsNullOrWhiteSpace(n.GetString()))
+                        return n.GetString()!;
+                    return a.TryGetProperty("address", out var addr)
+                        ? addr.GetString() ?? string.Empty
+                        : string.Empty;
+                })
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+}

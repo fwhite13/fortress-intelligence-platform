@@ -1,0 +1,87 @@
+using Microsoft.EntityFrameworkCore;
+using FortressAI.Shared.Models;
+using FortressAI.Web.Data;
+
+namespace FortressAI.Web.Services;
+
+public class AssistantConfigService
+{
+    private readonly IDbContextFactory<AppDbContext> _dbFactory;
+    private readonly ILogger<AssistantConfigService> _logger;
+
+    public AssistantConfigService(IDbContextFactory<AppDbContext> dbFactory, ILogger<AssistantConfigService> logger)
+    {
+        _dbFactory = dbFactory;
+        _logger = logger;
+    }
+
+    public async Task<UserAssistantConfig> GetOrCreateConfigAsync(Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var config = await db.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == userId);
+        if (config == null)
+        {
+            config = new UserAssistantConfig { UserId = userId };
+            db.UserAssistantConfigs.Add(config);
+            await db.SaveChangesAsync();
+        }
+        return config;
+    }
+
+    public async Task<UserAssistantConfig> SaveConfigAsync(Guid userId, string assistantName, string avatarId, string colorHex, string personalityPreset)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var config = await db.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == userId);
+        if (config == null)
+        {
+            config = new UserAssistantConfig { UserId = userId };
+            db.UserAssistantConfigs.Add(config);
+        }
+        config.AssistantName = assistantName;
+        config.AvatarId = avatarId;
+        config.ColorHex = colorHex;
+        config.PersonalityPreset = personalityPreset;
+        config.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        _logger.LogInformation("Saved assistant config for user {UserId}: name={Name}, preset={Preset}", userId, assistantName, personalityPreset);
+        return config;
+    }
+
+    public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null)
+    {
+        var prefix = config.PersonalityPreset switch
+        {
+            "formal" => $"You are a formal, professional assistant named {config.AssistantName}. Maintain a polished, respectful tone. Be thorough and precise.",
+            "concise" => $"You are a concise, efficient assistant named {config.AssistantName}. Keep responses brief and actionable. No filler.",
+            _ => $"You are a friendly, helpful assistant named {config.AssistantName}. Be warm and approachable while remaining professional."
+        };
+
+        if (!string.IsNullOrWhiteSpace(userDisplayName))
+            prefix += $" The user's name is {userDisplayName}. Address them by name occasionally to personalize responses.";
+
+        return prefix;
+    }
+
+    // Briefing schedule methods
+    public async Task<UserBriefingSchedule?> GetBriefingScheduleAsync(Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.UserBriefingSchedules.FirstOrDefaultAsync(s => s.UserId == userId);
+    }
+
+    public async Task<UserBriefingSchedule> SaveBriefingScheduleAsync(Guid userId, TimeOnly deliveryTimeUtc, bool emailDigestEnabled)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var schedule = await db.UserBriefingSchedules.FirstOrDefaultAsync(s => s.UserId == userId);
+        if (schedule == null)
+        {
+            schedule = new UserBriefingSchedule { UserId = userId };
+            db.UserBriefingSchedules.Add(schedule);
+        }
+        schedule.DeliveryTimeUtc = deliveryTimeUtc;
+        schedule.EmailDigestEnabled = emailDigestEnabled;
+        await db.SaveChangesAsync();
+        _logger.LogInformation("Saved briefing schedule for user {UserId}: time={Time}UTC, email={Email}", userId, deliveryTimeUtc, emailDigestEnabled);
+        return schedule;
+    }
+}

@@ -1,0 +1,117 @@
+@page "/briefing-history"
+@rendermode InteractiveServer
+<PageTitle>Briefing History — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject BriefingService BriefingSvc
+@inject NavigationManager Nav
+@using FortressAI.Shared.Models
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
+    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Href="/" Class="mb-2">
+        Back to Dashboard
+    </MudButton>
+
+    <MudText Typo="Typo.h4" Class="mb-4" Style="font-weight: 700;">
+        <MudIcon Icon="@Icons.Material.Filled.History" Style="vertical-align: middle; margin-right: 8px;" />
+        Briefing History
+    </MudText>
+
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (_briefings.Count == 0)
+    {
+        <MudCard Elevation="1" Class="pa-6" Style="text-align: center;">
+            <MudIcon Icon="@Icons.Material.Filled.WbSunny" Style="font-size: 64px; color: #e5e7eb;" />
+            <MudText Typo="Typo.h6" Class="mt-3" Style="color: var(--color-text-secondary);">No briefings yet</MudText>
+            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                Generate your first briefing from the Dashboard.
+            </MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/" Class="mt-3"
+                       StartIcon="@Icons.Material.Filled.Dashboard">
+                Go to Dashboard
+            </MudButton>
+        </MudCard>
+    }
+    else
+    {
+        <MudStack Spacing="3">
+            @foreach (var briefing in _briefings)
+            {
+                <MudCard Elevation="1">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">
+                                @briefing.BriefingDate.ToString("dddd, MMMM d, yyyy")
+                            </MudText>
+                            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+                                Generated at @briefing.CreatedAt.ToString("h:mm tt")
+                            </MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            <MudIconButton Icon="@(_expandedIds.Contains(briefing.Id) ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                           OnClick="@(() => ToggleExpand(briefing.Id))" />
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCollapse Expanded="_expandedIds.Contains(briefing.Id)">
+                        <MudCardContent>
+                            <div style="white-space: pre-wrap; line-height: 1.7; font-size: 0.95rem;">
+                                @briefing.Content
+                            </div>
+                        </MudCardContent>
+                    </MudCollapse>
+                </MudCard>
+            }
+        </MudStack>
+
+        @if (_briefings.Count >= _pageSize)
+        {
+            <div style="text-align: center; margin-top: 16px;">
+                <MudButton Variant="Variant.Outlined" OnClick="LoadMore" Disabled="_loadingMore">
+                    @if (_loadingMore) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+                    Load More
+                </MudButton>
+            </div>
+        }
+    }
+</MudContainer>
+
+@code {
+    private bool _loading = true;
+    private bool _loadingMore = false;
+    private List<BriefingHistory> _briefings = new();
+    private HashSet<int> _expandedIds = new();
+    private int _pageSize = 10;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+
+        _briefings = await BriefingSvc.GetRecentBriefingsAsync(Session.UserId, _pageSize);
+
+        // Auto-expand the most recent one
+        if (_briefings.Count > 0)
+        {
+            _expandedIds.Add(_briefings[0].Id);
+        }
+
+        _loading = false;
+    }
+
+    private void ToggleExpand(int id)
+    {
+        if (!_expandedIds.Remove(id))
+        {
+            _expandedIds.Add(id);
+        }
+    }
+
+    private async Task LoadMore()
+    {
+        _loadingMore = true;
+        var more = await BriefingSvc.GetRecentBriefingsAsync(Session.UserId, _pageSize + _briefings.Count);
+        _briefings = more;
+        _loadingMore = false;
+    }
+}

@@ -1,0 +1,123 @@
+@page "/projects/{ProjectId:guid}"
+<PageTitle>Project — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject ProjectService ProjectSvc
+@inject ChatService ChatSvc
+@inject NavigationManager Nav
+
+<div class="page-container">
+    @if (project == null)
+    {
+        <div class="loading-state">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" /> Loading project...
+        </div>
+    }
+    else
+    {
+        <div class="page-header">
+            <div>
+                <h1><MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" /> @project.Name</h1>
+                @if (!string.IsNullOrEmpty(project.Description))
+                {
+                    <p class="page-subtitle">@project.Description</p>
+                }
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-accent" @onclick="NewProjectChat">
+                    <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" /> New Chat
+                </button>
+                <button class="btn btn-secondary" @onclick="ToggleSettings">
+                    <MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Small" /> Settings
+                </button>
+            </div>
+        </div>
+
+        @if (showSettings)
+        {
+            <ProjectSettings Project="project" OnSaved="HandleProjectSaved" OnDeleted="HandleProjectDeleted" />
+        }
+
+        <div class="project-layout">
+            <div class="project-main">
+                <h2>Conversations</h2>
+                @if (project.Conversations.Any())
+                {
+                    <div class="conversation-list">
+                        @foreach (var conv in project.Conversations)
+                        {
+                            <div class="conversation-item" @onclick="@(() => GoToChat(conv.Id))">
+                                <div class="conversation-info">
+                                    <MudIcon Icon="@Icons.Material.Filled.ChatBubble" Size="Size.Small" />
+                                    <div>
+                                        <span class="conversation-title">@(conv.Title ?? "New conversation")</span>
+                                        <span class="conversation-date">@conv.UpdatedAt.ToString("MMM d, yyyy h:mm tt")</span>
+                                    </div>
+                                </div>
+                                <button class="btn-icon btn-danger-icon" @onclick:stopPropagation @onclick="@(() => DeleteConversation(conv.Id))">
+                                    <MudIcon Icon="@Icons.Material.Filled.Delete" Size="Size.Small" />
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="empty-state-sm">
+                        <p>No conversations yet. Start chatting!</p>
+                        <button class="btn btn-accent btn-sm" @onclick="NewProjectChat">
+                            <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" /> Start a conversation
+                        </button>
+                    </div>
+                }
+            </div>
+
+            <div class="project-sidebar">
+                <DocumentUpload ProjectId="project.Id" Documents="project.Documents" OnDocumentChanged="ReloadProject" />
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid ProjectId { get; set; }
+
+    private Project? project;
+    private bool showSettings = false;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await ReloadProject();
+    }
+
+    private async Task ReloadProject()
+    {
+        project = await ProjectSvc.GetProjectAsync(ProjectId, Session.UserId);
+        StateHasChanged();
+    }
+
+    private async Task NewProjectChat()
+    {
+        var conv = await ChatSvc.CreateConversationAsync(Session.UserId, ProjectId, project?.Model ?? "claude-sonnet-4-6");
+        Nav.NavigateTo($"/chat/{conv.Id}");
+    }
+
+    private void ToggleSettings() => showSettings = !showSettings;
+    private void GoToChat(Guid id) => Nav.NavigateTo($"/chat/{id}");
+
+    private async Task DeleteConversation(Guid convId)
+    {
+        await ChatSvc.DeleteConversationAsync(convId, Session.UserId);
+        await ReloadProject();
+    }
+
+    private async Task HandleProjectSaved()
+    {
+        showSettings = false;
+        await ReloadProject();
+    }
+
+    private void HandleProjectDeleted()
+    {
+        Nav.NavigateTo("/projects");
+    }
+}

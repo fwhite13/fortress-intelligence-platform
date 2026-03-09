@@ -1,0 +1,104 @@
+@* KbIndicator.razor — KB retrieval indicator chip for assistant messages *@
+@using FortressAI.Web.Services
+@inject IJSRuntime JS
+
+@if (Result == null || !Result.WasSearched)
+{
+    @* KB not enabled — render nothing *@
+    return;
+}
+
+<div class="kb-indicator-wrapper">
+    @if (Result.HasResults)
+    {
+        <MudChip T="string"
+                 Size="Size.Small"
+                 Variant="Variant.Outlined"
+                 Color="Color.Default"
+                 Class="kb-indicator-chip"
+                 OnClick="ToggleExpanded"
+                 Icon="@Icons.Material.Filled.MenuBook">
+            📚 KB consulted (@Result.UniqueSourceCount source@(Result.UniqueSourceCount == 1 ? "" : "s"))
+        </MudChip>
+    }
+    else
+    {
+        <MudChip T="string"
+                 Size="Size.Small"
+                 Variant="Variant.Outlined"
+                 Color="Color.Default"
+                 Class="kb-indicator-chip kb-indicator-empty">
+            📚 KB searched — no relevant results
+        </MudChip>
+    }
+
+    @if (_expanded && Result.HasResults)
+    {
+        <div @ref="_panelRef">
+        <MudPaper Class="kb-indicator-panel mud-elevation-2" Outlined="true">
+            <MudText Typo="Typo.caption" Class="kb-panel-header">
+                <strong>Knowledge Base Search</strong>
+            </MudText>
+
+            @if (Result.QueriesUsed.Any())
+            {
+                <MudText Typo="Typo.caption" Class="kb-panel-subheader">
+                    Queries used:
+                </MudText>
+                <ul class="kb-query-list">
+                    @foreach (var q in Result.QueriesUsed)
+                    {
+                        <li><MudText Typo="Typo.caption" Class="kb-query-item">@q</MudText></li>
+                    }
+                </ul>
+            }
+
+            @foreach (var stat in Result.SourceStats)
+            {
+                <div class="kb-source-stat">
+                    <MudText Typo="Typo.caption">
+                        <strong>@stat.KbName</strong> — @stat.ResultCount result@(stat.ResultCount == 1 ? "" : "s")
+                    </MudText>
+                    @if (stat.SourceDocuments.Any())
+                    {
+                        <ul class="kb-source-docs">
+                            @foreach (var doc in stat.SourceDocuments.Take(5))
+                            {
+                                <li><MudText Typo="Typo.caption" Class="kb-doc-name">@doc</MudText></li>
+                            }
+                        </ul>
+                    }
+                </div>
+            }
+
+            @if (Result.FilteredOutCount > 0)
+            {
+                <MudText Typo="Typo.caption" Class="kb-filtered-note">
+                    @Result.FilteredOutCount chunk@(Result.FilteredOutCount == 1 ? "" : "s") below relevance threshold and excluded.
+                </MudText>
+            }
+        </MudPaper>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public KbRetrievalResult? Result { get; set; }
+
+    private bool _expanded = false;
+    private ElementReference _panelRef;
+
+    private async Task ToggleExpanded()
+    {
+        if (Result?.HasResults == true)
+        {
+            _expanded = !_expanded;
+            if (_expanded)
+            {
+                await Task.Delay(50); // allow DOM to render the panel
+                try { await JS.InvokeVoidAsync("scrollElementIntoView", _panelRef); }
+                catch { /* ignore interop errors */ }
+            }
+        }
+    }
+}

@@ -1,0 +1,136 @@
+@using FortressAI.Shared.Models
+@using FortressAI.Web.Services
+@using MudBlazor
+@inject IUserManagementService UserMgmt
+@inject ISnackbar Snackbar
+@inject UserSessionService Session
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Security" Class="mr-2" />
+            Permissions — @(User?.DisplayName ?? User?.Email ?? "User")
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <div style="display: flex; justify-content: center; padding: 32px;">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            </div>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--mud-palette-text-secondary);">
+                Toggle module access for this user. Changes take effect immediately on save.
+            </MudText>
+            @foreach (var module in _modules)
+            {
+                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">@module</MudText>
+                <MudPaper Elevation="0" Class="pa-3 mb-4" Style="border: 1px solid var(--mud-palette-divider); border-radius: 8px;">
+                    @foreach (var perm in _permissions)
+                    {
+                        var key = $"{module}:{perm}";
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0;">
+                            <div>
+                                <MudText Typo="Typo.body1">@perm</MudText>
+                                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                                    @GetPermissionDescription(module, perm)
+                                </MudText>
+                            </div>
+                            <MudSwitch Value="@GetPermValue(key)"
+                                       ValueChanged="@((bool v) => SetPermValue(key, v))"
+                                       Color="Color.Primary" />
+                        </div>
+                    }
+                </MudPaper>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(_saving || _loading)">
+            @(_saving ? "Saving..." : "Save Permissions")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public AppUser? User { get; set; }
+    [Parameter] public Guid UserId { get; set; }
+
+    private static readonly string[] _modules = { "fait", "forms", "firm" };
+    private static readonly string[] _permissions = { "access", "admin" };
+
+    private bool _loading = true;
+    private bool _saving;
+    private Dictionary<string, bool> _permState = new();
+    private Dictionary<string, bool> _originalState = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var perms = await UserMgmt.GetUserPermissionsAsync(UserId);
+            _permState = new Dictionary<string, bool>();
+            foreach (var module in _modules)
+                foreach (var perm in _permissions)
+                    _permState[$"{module}:{perm}"] = perms.Any(p => p.Module == module && p.Permission == perm && p.Granted);
+
+            _originalState = new Dictionary<string, bool>(_permState);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load permissions: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private bool GetPermValue(string key) => _permState.TryGetValue(key, out var v) && v;
+
+    private void SetPermValue(string key, bool value)
+    {
+        _permState[key] = value;
+        StateHasChanged();
+    }
+
+    private string GetPermissionDescription(string module, string perm) => (module, perm) switch
+    {
+        (_, "access") => $"Can access the {module.ToUpper()} module",
+        (_, "admin")  => $"Admin rights within {module.ToUpper()}",
+        _               => string.Empty
+    };
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Save()
+    {
+        _saving = true;
+        try
+        {
+            foreach (var (key, granted) in _permState)
+            {
+                if (!_originalState.TryGetValue(key, out var original) || original != granted)
+                {
+                    var parts = key.Split(':');
+                    await UserMgmt.SetModulePermissionAsync(UserId, parts[0], parts[1], granted, Session.UserId);
+                }
+            }
+            Snackbar.Add("Permissions saved.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

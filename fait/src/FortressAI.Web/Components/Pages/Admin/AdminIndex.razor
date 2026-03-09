@@ -1,0 +1,751 @@
+@page "/admin"
+@using FortressAI.Shared.Models
+@using FortressAI.Web.Services
+@using FortressAI.Web.Services.Mcp
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@* [Authorize] ensures only authenticated users reach this page.
+   Admin enforcement is via Session.IsAdmin check in OnInitializedAsync
+   (Blazor Server role claims require Cognito group mapping which is prod-only). *@
+@attribute [Authorize]
+@rendermode InteractiveServer
+@inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> ContextFactory
+@inject ForgeService Forge
+@inject IMcpRegistryService McpRegistry
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject UserSessionService Session
+@inject NavigationManager Nav
+@inject IUserManagementService UserMgmt
+
+<PageTitle>Admin — FAIT</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+        <div style="background: var(--color-gold); color: #1a2332; font-weight: 700; font-size: 12px; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.05em;">
+            ADMIN
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <MudText Typo="Typo.h5" Style="font-weight: 600;">Administration</MudText>
+            <PageHelpButton HelpFile="admin-guide.md" PageTitle="Admin Help" />
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div style="display: flex; justify-content: center; padding: 48px 0;">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        </div>
+    }
+    else
+    {
+        <MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+
+            <!-- ══ CORPORATE KB TAB ══════════════════════════════════════════ -->
+            <MudTabPanel Text="Corporate KB" Icon="@Icons.Material.Filled.Business">
+                <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+                    <MudTextField @bind-Value="_corporateSearch"
+                                  Placeholder="Search corporate entries..."
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Search"
+                                  Variant="Variant.Outlined"
+                                  Clearable="true"
+                                  Style="max-width: 400px;"
+                                  Immediate="true" />
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="OpenNewCorporateEntry">
+                        + New Note
+                    </MudButton>
+                </div>
+
+                @{
+                    var filteredCorporate = FilterEntries(_corporateEntries, _corporateSearch);
+                }
+
+                @if (_loadingCorp)
+                {
+                    <div style="display: flex; justify-content: center; padding: 24px 0;">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                    </div>
+                }
+                else if (!filteredCorporate.Any())
+                {
+                    <div style="text-align: center; padding: 48px 0; color: var(--color-text-secondary);">
+                        <MudIcon Icon="@Icons.Material.Filled.Business" Style="font-size: 48px; opacity: 0.4;" />
+                        <MudText Typo="Typo.body1" Class="mt-3">
+                            @(string.IsNullOrWhiteSpace(_corporateSearch)
+                                ? "No corporate KB entries yet."
+                                : "No entries match your search.")
+                        </MudText>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var entry in filteredCorporate)
+                    {
+                        <MudCard Elevation="1" Class="mb-3">
+                            <MudCardContent>
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                    <div style="flex: 1; min-width: 0;">
+                                        <MudText Typo="Typo.h6" Style="font-weight: 600;">@entry.Title</MudText>
+                                        <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin: 4px 0 8px; overflow-wrap: break-word;">
+                                            @(entry.Content.Length > 100 ? entry.Content[..100] + "…" : entry.Content)
+                                        </MudText>
+                                        <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                                            @if (!string.IsNullOrWhiteSpace(entry.Tags))
+                                            {
+                                                @foreach (var tag in entry.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@tag</MudChip>
+                                                }
+                                            }
+                                            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); margin-left: 8px;">
+                                                @entry.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")
+                                            </MudText>
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; gap: 4px; margin-left: 12px;">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                                       Size="Size.Small"
+                                                       aria-label="Edit"
+                                                       OnClick="() => OpenEditCorporateEntry(entry)" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Size="Size.Small"
+                                                       Color="Color.Error"
+                                                       aria-label="Delete"
+                                                       OnClick="() => DeleteCorporateEntry(entry)" />
+                                    </div>
+                                </div>
+                            </MudCardContent>
+                        </MudCard>
+                    }
+                }
+            </MudTabPanel>
+
+            <!-- ══ MCP SERVERS TAB ═══════════════════════════════════════════ -->
+            <MudTabPanel Text="MCP Servers" Icon="@Icons.Material.Filled.Extension">
+
+                @if (_showMcpForm)
+                {
+                    <MudPaper Elevation="2" Class="pa-4 mb-4">
+                        <MudText Typo="Typo.h6" GutterBottom="true">@(_editingServer == null ? "Add MCP Server" : "Edit MCP Server")</MudText>
+                        <MudGrid>
+                            <MudItem xs="12" sm="8">
+                                <MudTextField @bind-Value="_mcpForm.Name" Label="Display Name" Required="true"
+                                              HelperText="Human-readable name, e.g. 'Brave Web Search'" />
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudTextField @bind-Value="_mcpForm.Slug" Label="Slug" Required="true"
+                                              HelperText="Short identifier, e.g. 'brave'"
+                                              Disabled="@(_editingServer != null)" />
+                            </MudItem>
+                            <MudItem xs="12">
+                                <MudTextField @bind-Value="_mcpForm.Description" Label="Description" Lines="2" />
+                            </MudItem>
+                            <MudItem xs="12">
+                                <MudTextField @bind-Value="_mcpForm.EndpointUrl" Label="Endpoint URL"
+                                              HelperText="MCP server HTTP endpoint URL" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudSelect @bind-Value="_mcpForm.AuthType" Label="Auth Type">
+                                    <MudSelectItem Value="@("none")">None</MudSelectItem>
+                                    <MudSelectItem Value="@("api_key")">API Key</MudSelectItem>
+                                    <MudSelectItem Value="@("oauth2")">OAuth2 (Phase 2)</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudSwitch @bind-Value="_mcpForm.RequiresUserAuth" Label="Requires User Auth"
+                                           Color="Color.Primary" />
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudNumericField @bind-Value="_mcpForm.RateLimitPerMinute" Label="Rate limit (calls/minute)"
+                                                 Min="1" Max="1000"
+                                                 HelperText="Max tool calls per user per minute (default 30)" />
+                            </MudItem>
+                            @if (_mcpForm.AuthType == "api_key")
+                            {
+                                <MudItem xs="12">
+                                    <MudTextField @bind-Value="_mcpForm.SystemApiKey"
+                                                  Label="System API Key"
+                                                  InputType="InputType.Password"
+                                                  HelperText="@(_editingServer != null ? "Leave blank to keep existing key" : "API key for system-level access")" />
+                                </MudItem>
+                            }
+                        </MudGrid>
+
+                        @if (_editingServer != null && (_editingServer.Tools?.Count ?? 0) > 0)
+                        {
+                            <MudDivider Class="my-4" />
+                            <MudText Typo="Typo.subtitle2" GutterBottom="true">Tools (@(_editingServer.Tools!.Count))</MudText>
+                            @foreach (var tool in _editingServer.Tools!)
+                            {
+                                <MudExpansionPanels Dense="true" Class="mb-1">
+                                    <MudExpansionPanel Text="@($"{_editingServer.Slug}__{tool.Name}")">
+                                        <MudText Typo="Typo.body2">@tool.Description</MudText>
+                                    </MudExpansionPanel>
+                                </MudExpansionPanels>
+                            }
+                        }
+
+                        <div style="display:flex; gap:8px; margin-top:16px;">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveMcpServer"
+                                       Disabled="@_mcpSaving">
+                                @(_mcpSaving ? "Saving..." : "Save")
+                            </MudButton>
+                            <MudButton Variant="Variant.Outlined" OnClick="CancelMcpForm">Cancel</MudButton>
+                        </div>
+                    </MudPaper>
+                }
+
+                <MudPaper Elevation="1" Class="pa-0">
+                    <MudToolBar Dense="true" Style="background: var(--color-surface); border-bottom: 1px solid var(--color-border);">
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Registered Servers</MudText>
+                        <MudSpacer />
+                        @if (!_showMcpForm)
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                                       Size="Size.Small" OnClick="OpenAddMcpForm">
+                                Add Server
+                            </MudButton>
+                        }
+                    </MudToolBar>
+
+                    @if (_loadingMcp)
+                    {
+                        <div style="padding: 48px; text-align: center;">
+                            <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Medium" />
+                        </div>
+                    }
+                    else if (!_servers.Any())
+                    {
+                        <div style="padding: 48px; text-align: center; color: var(--color-text-secondary);">
+                            <MudIcon Icon="@Icons.Material.Filled.Extension" Style="font-size: 48px; opacity: 0.3; display: block; margin: 0 auto 16px;" />
+                            <MudText>No MCP servers configured.</MudText>
+                            <MudText Typo="Typo.body2">Click "Add Server" to register your first MCP server.</MudText>
+                        </div>
+                    }
+                    else
+                    {
+                        <MudTable Items="_servers" Hover="true" Dense="true">
+                            <HeaderContent>
+                                <MudTh>Name</MudTh>
+                                <MudTh>Slug</MudTh>
+                                <MudTh>Auth Type</MudTh>
+                                <MudTh>Tools</MudTh>
+                                <MudTh>Status</MudTh>
+                                <MudTh Style="text-align:right;">Actions</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <MudIcon Icon="@Icons.Material.Filled.Extension" Size="Size.Small" Style="color: var(--color-gold);" />
+                                        <span style="font-weight:500;">@context.Name</span>
+                                    </div>
+                                </MudTd>
+                                <MudTd>
+                                    <code style="font-size:0.8rem; background: var(--color-surface); padding: 2px 6px; border-radius: 4px;">@context.Slug</code>
+                                </MudTd>
+                                <MudTd>
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@GetAuthColor(context.AuthType)">
+                                        @context.AuthType
+                                    </MudChip>
+                                </MudTd>
+                                <MudTd>
+                                    @{
+                                        var toolCount = context.Tools?.Count ?? 0;
+                                    }
+                                    <span style="color: var(--color-text-secondary);">@toolCount tool@(toolCount == 1 ? "" : "s")</span>
+                                </MudTd>
+                                <MudTd>
+                                    @if (context.IsActive)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">Active</MudChip>
+                                    }
+                                    else
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">Inactive</MudChip>
+                                    }
+                                </MudTd>
+                                <MudTd Style="text-align:right;">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Title="Edit"
+                                                   OnClick="@(() => OpenEditMcpForm(context))" />
+                                    <MudIconButton Icon="@(context.IsActive ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                                                   Size="Size.Small"
+                                                   Title="@(context.IsActive ? "Disable" : "Enable")"
+                                                   OnClick="@(() => ToggleMcpActive(context))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Title="Refresh tool manifest"
+                                                   OnClick="@(() => RefreshMcpManifest(context))" />
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudPaper>
+            </MudTabPanel>
+
+        <!-- ══ USERS TAB ══════════════════════════════════════════════════════ -->
+        <MudTabPanel Text="Users" Icon="@Icons.Material.Filled.PeopleAlt">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">User Management</MudText>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.PersonAdd"
+                           OnClick="OpenInviteDialog">
+                    Invite User
+                </MudButton>
+            </div>
+
+            @if (_loadingUsers)
+            {
+                <div style="display: flex; justify-content: center; padding: 48px;">
+                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                </div>
+            }
+            else if (!_users.Any())
+            {
+                <div style="text-align: center; padding: 48px 0; color: var(--color-text-secondary);">
+                    <MudIcon Icon="@Icons.Material.Filled.PeopleAlt" Style="font-size: 48px; opacity: 0.4;" />
+                    <MudText Typo="Typo.body1" Class="mt-3">No users found.</MudText>
+                </div>
+            }
+            else
+            {
+                <MudTable Items="_users" Hover="true" Dense="true">
+                    <HeaderContent>
+                        <MudTh>Name / Email</MudTh>
+                        <MudTh>System Role</MudTh>
+                        <MudTh>Module Access</MudTh>
+                        <MudTh>Status</MudTh>
+                        <MudTh Style="text-align:right;">Actions</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>
+                            <div>
+                                <span style="font-weight: 500;">@(context.User.DisplayName ?? context.User.Email)</span>
+                                @if (context.User.DisplayName != null)
+                                {
+                                    <div style="font-size: 0.75rem; color: var(--color-text-secondary);">@context.User.Email</div>
+                                }
+                            </div>
+                        </MudTd>
+                        <MudTd>
+                            <MudSelect Value="@context.User.Role"
+                                       ValueChanged="@((string r) => ChangeUserRole(context.User.Id, r))"
+                                       Dense="true"
+                                       Variant="Variant.Text"
+                                       Style="min-width: 100px;">
+                                <MudSelectItem Value="@("user")">user</MudSelectItem>
+                                <MudSelectItem Value="@("admin")">admin</MudSelectItem>
+                            </MudSelect>
+                        </MudTd>
+                        <MudTd>
+                            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                                @foreach (var p in context.Permissions.Where(p => p.Granted))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">
+                                        @($"{p.Module}: {p.Permission}")
+                                    </MudChip>
+                                }
+                                @if (!context.Permissions.Any(p => p.Granted))
+                                {
+                                    <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">None</MudText>
+                                }
+                            </div>
+                        </MudTd>
+                        <MudTd>
+                            @if (context.User.IsActive && context.CognitoEnabled)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">Active</MudChip>
+                            }
+                            else
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">Disabled</MudChip>
+                            }
+                        </MudTd>
+                        <MudTd Style="text-align:right;">
+                            <MudIconButton Icon="@Icons.Material.Filled.ManageAccounts"
+                                           Size="Size.Small"
+                                           Title="Edit Permissions"
+                                           OnClick="@(() => OpenPermissionsDialog(context))" />
+                            @if (context.User.IsActive && context.User.Id != Session.UserId)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.PersonOff"
+                                               Size="Size.Small"
+                                               Color="Color.Warning"
+                                               Title="Disable User"
+                                               OnClick="@(() => DisableUser(context.User.Id))" />
+                            }
+                            else if (!context.User.IsActive)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.PersonAdd"
+                                               Size="Size.Small"
+                                               Color="Color.Success"
+                                               Title="Enable User"
+                                               OnClick="@(() => EnableUser(context.User.Id))" />
+                            }
+                            @if (context.User.Id != Session.UserId)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Size="Size.Small"
+                                               Color="Color.Error"
+                                               Title="Delete User"
+                                               OnClick="@(() => OpenDeleteUserDialog(context))" />
+                            }
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudTabPanel>
+
+        </MudTabs>
+    }
+</MudContainer>
+
+@code {
+    // ── State ─────────────────────────────────────────────────────────────────
+
+    private bool _loading = true;
+
+    // Corporate KB
+    private List<KbEntry> _corporateEntries = new();
+    private string _corporateSearch = "";
+    private bool _loadingCorp = false;
+
+    // MCP Servers
+    private List<McpServer> _servers = new();
+    private bool _loadingMcp = false;
+
+    // Users
+    private List<UserWithPermissions> _users = new();
+    private bool _loadingUsers = false;
+    private bool _mcpSaving = false;
+    private bool _showMcpForm = false;
+    private McpServer? _editingServer;
+    private McpServerFormModel _mcpForm = new();
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Session.IsAuthenticated || !Session.IsAdmin)
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        try
+        {
+            var corpTask = Forge.GetCorporateEntriesAsync();
+            var mcpTask  = McpRegistry.GetActiveServersAsync();
+            await Task.WhenAll(corpTask, mcpTask);
+            _corporateEntries = corpTask.Result;
+            _servers          = mcpTask.Result;
+
+            try { _users = await UserMgmt.GetAllUsersAsync(); }
+            catch (Exception ex) { Snackbar.Add($"Could not load users: {ex.Message}", Severity.Warning); }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading admin data: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static List<KbEntry> FilterEntries(List<KbEntry> entries, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return entries;
+        var q = query.Trim().ToLowerInvariant();
+        return entries
+            .Where(e => e.Title.ToLowerInvariant().Contains(q) || e.Content.ToLowerInvariant().Contains(q))
+            .ToList();
+    }
+
+    private Color GetAuthColor(string authType) => authType switch
+    {
+        "oauth2"  => Color.Info,
+        "api_key" => Color.Warning,
+        _         => Color.Default
+    };
+
+    // ── Corporate KB actions ──────────────────────────────────────────────────
+
+    private async Task OpenNewCorporateEntry()
+    {
+        var parameters = new DialogParameters<EntryDialog>();
+        var dialog = await DialogService.ShowAsync<EntryDialog>("New Corporate Entry", parameters);
+        var result = await dialog.Result;
+        if (!result.Canceled && result.Data is EntryDialogResult r)
+        {
+            try
+            {
+                var tags = string.IsNullOrWhiteSpace(r.Tags) ? null : r.Tags.Trim();
+                await Forge.CreateEntryAsync(Session.UserId, KbTier.Corporate, r.Title, r.Content, tags, null);
+                Snackbar.Add("Corporate entry created.", Severity.Success);
+                _corporateEntries = await Forge.GetCorporateEntriesAsync();
+                StateHasChanged();
+            }
+            catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        }
+    }
+
+    private async Task OpenEditCorporateEntry(KbEntry entry)
+    {
+        var parameters = new DialogParameters<EntryDialog>
+        {
+            { x => x.IsEdit, true },
+            { x => x.Title, entry.Title },
+            { x => x.Content, entry.Content },
+            { x => x.Tags, entry.Tags ?? "" }
+        };
+        var dialog = await DialogService.ShowAsync<EntryDialog>("Edit Corporate Entry", parameters);
+        var result = await dialog.Result;
+        if (!result.Canceled && result.Data is EntryDialogResult r)
+        {
+            try
+            {
+                var tags = string.IsNullOrWhiteSpace(r.Tags) ? null : r.Tags.Trim();
+                await Forge.UpdateEntryAsync(Session.UserId, entry.Id, r.Title, r.Content, tags);
+                Snackbar.Add("Entry updated.", Severity.Success);
+                _corporateEntries = await Forge.GetCorporateEntriesAsync();
+                StateHasChanged();
+            }
+            catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        }
+    }
+
+    private async Task DeleteCorporateEntry(KbEntry entry)
+    {
+        try
+        {
+            await Forge.DeleteEntryAsync(Session.UserId, entry.Id);
+            Snackbar.Add("Entry deleted.", Severity.Success);
+            _corporateEntries = await Forge.GetCorporateEntriesAsync();
+            StateHasChanged();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    // ── MCP Server actions ────────────────────────────────────────────────────
+
+    private async Task LoadMcpServers()
+    {
+        _loadingMcp = true;
+        try { _servers = await McpRegistry.GetActiveServersAsync(); }
+        catch (Exception ex) { Snackbar.Add($"Failed to load servers: {ex.Message}", Severity.Error); }
+        finally { _loadingMcp = false; }
+    }
+
+    private void OpenAddMcpForm()
+    {
+        _editingServer = null;
+        _mcpForm = new McpServerFormModel();
+        _showMcpForm = true;
+    }
+
+    private void OpenEditMcpForm(McpServer server)
+    {
+        _editingServer = server;
+        _mcpForm = new McpServerFormModel
+        {
+            Name               = server.Name,
+            Slug               = server.Slug,
+            Description        = server.Description,
+            EndpointUrl        = server.EndpointUrl,
+            AuthType           = server.AuthType,
+            RequiresUserAuth   = server.RequiresUserAuth,
+            RateLimitPerMinute = server.RateLimitPerMinute,
+            SystemApiKey       = ""   // Never pre-fill — replace-only
+        };
+        _showMcpForm = true;
+    }
+
+    private void CancelMcpForm()
+    {
+        _showMcpForm   = false;
+        _editingServer = null;
+    }
+
+    private async Task SaveMcpServer()
+    {
+        if (string.IsNullOrWhiteSpace(_mcpForm.Name) || string.IsNullOrWhiteSpace(_mcpForm.Slug))
+        {
+            Snackbar.Add("Name and Slug are required.", Severity.Warning);
+            return;
+        }
+
+        _mcpSaving = true;
+        try
+        {
+            if (_editingServer == null)
+            {
+                var created = await McpRegistry.CreateServerAsync(new CreateMcpServerRequest
+                {
+                    Name               = _mcpForm.Name,
+                    Slug               = _mcpForm.Slug.Trim().ToLower(),
+                    Description        = _mcpForm.Description,
+                    EndpointUrl        = _mcpForm.EndpointUrl,
+                    TransportType      = "http",
+                    AuthType           = _mcpForm.AuthType,
+                    RequiresUserAuth   = _mcpForm.RequiresUserAuth,
+                    RateLimitPerMinute = _mcpForm.RateLimitPerMinute,
+                    SystemApiKey       = _mcpForm.SystemApiKey
+                });
+                await McpRegistry.RefreshToolManifestAsync(created.Id);
+                Snackbar.Add($"Server '{_mcpForm.Name}' created.", Severity.Success);
+            }
+            else
+            {
+                await McpRegistry.UpdateServerAsync(_editingServer.Id, new UpdateMcpServerRequest
+                {
+                    Name               = _mcpForm.Name,
+                    Description        = _mcpForm.Description,
+                    EndpointUrl        = _mcpForm.EndpointUrl,
+                    AuthType           = _mcpForm.AuthType,
+                    RequiresUserAuth   = _mcpForm.RequiresUserAuth,
+                    RateLimitPerMinute = _mcpForm.RateLimitPerMinute,
+                    SystemApiKey       = string.IsNullOrEmpty(_mcpForm.SystemApiKey) ? null : _mcpForm.SystemApiKey
+                });
+                await McpRegistry.RefreshToolManifestAsync(_editingServer.Id);
+                Snackbar.Add($"Server '{_mcpForm.Name}' updated.", Severity.Success);
+            }
+
+            _showMcpForm   = false;
+            _editingServer = null;
+            await LoadMcpServers();
+        }
+        catch (Exception ex) { Snackbar.Add($"Save failed: {ex.Message}", Severity.Error); }
+        finally { _mcpSaving = false; }
+    }
+
+    private async Task ToggleMcpActive(McpServer server)
+    {
+        try
+        {
+            await McpRegistry.SetServerActiveAsync(server.Id, !server.IsActive);
+            server.IsActive = !server.IsActive;
+            Snackbar.Add($"Server '{server.Name}' {(server.IsActive ? "enabled" : "disabled")}.", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex) { Snackbar.Add($"Failed: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task RefreshMcpManifest(McpServer server)
+    {
+        try
+        {
+            var tools = await McpRegistry.RefreshToolManifestAsync(server.Id);
+            Snackbar.Add($"Refreshed: {tools.Count} tool(s) loaded for '{server.Name}'.", Severity.Success);
+            await LoadMcpServers();
+        }
+        catch (Exception ex) { Snackbar.Add($"Refresh failed: {ex.Message}", Severity.Error); }
+    }
+
+    // ── User Management actions ───────────────────────────────────────────────
+
+    private async Task OpenInviteDialog()
+    {
+        var dialog = await DialogService.ShowAsync<InviteUserDialog>("Invite User");
+        var result = await dialog.Result;
+        if (!result.Canceled)
+        {
+            _loadingUsers = true;
+            StateHasChanged();
+            try { _users = await UserMgmt.GetAllUsersAsync(); }
+            catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+            finally { _loadingUsers = false; StateHasChanged(); }
+        }
+    }
+
+    private async Task OpenPermissionsDialog(UserWithPermissions uwp)
+    {
+        var parameters = new DialogParameters<UserPermissionsDialog>
+        {
+            { x => x.User, uwp.User },
+            { x => x.UserId, uwp.User.Id }
+        };
+        var dialog = await DialogService.ShowAsync<UserPermissionsDialog>("Edit Permissions", parameters);
+        var result = await dialog.Result;
+        if (!result.Canceled)
+        {
+            _loadingUsers = true;
+            StateHasChanged();
+            try { _users = await UserMgmt.GetAllUsersAsync(); }
+            catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+            finally { _loadingUsers = false; StateHasChanged(); }
+        }
+    }
+
+    private async Task ChangeUserRole(Guid userId, string newRole)
+    {
+        try
+        {
+            await UserMgmt.SetSystemRoleAsync(userId, newRole, Session.UserId);
+            var user = _users.FirstOrDefault(u => u.User.Id == userId);
+            if (user != null) user.User.Role = newRole;
+            Snackbar.Add($"Role updated to '{newRole}'.", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex) { Snackbar.Add($"Role change failed: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task DisableUser(Guid userId)
+    {
+        try
+        {
+            await UserMgmt.DisableUserAsync(userId, Session.UserId);
+            var user = _users.FirstOrDefault(u => u.User.Id == userId);
+            if (user != null) { user.User.IsActive = false; user.CognitoEnabled = false; }
+            Snackbar.Add("User disabled.", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex) { Snackbar.Add($"Disable failed: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task EnableUser(Guid userId)
+    {
+        try
+        {
+            await UserMgmt.EnableUserAsync(userId);
+            var user = _users.FirstOrDefault(u => u.User.Id == userId);
+            if (user != null) { user.User.IsActive = true; user.CognitoEnabled = true; }
+            Snackbar.Add("User enabled.", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex) { Snackbar.Add($"Enable failed: {ex.Message}", Severity.Error); }
+    }
+
+    private async Task OpenDeleteUserDialog(UserWithPermissions uwp)
+    {
+        var parameters = new DialogParameters<DeleteUserConfirmDialog>
+        {
+            { x => x.TargetUser, uwp }
+        };
+        var dialog = await DialogService.ShowAsync<DeleteUserConfirmDialog>("Delete User", parameters);
+        var result = await dialog.Result;
+        if (!result.Canceled)
+        {
+            _users.RemoveAll(u => u.User.Id == uwp.User.Id);
+            StateHasChanged();
+        }
+    }
+
+    // ── Form model ────────────────────────────────────────────────────────────
+
+    private class McpServerFormModel
+    {
+        public string  Name               { get; set; } = string.Empty;
+        public string  Slug               { get; set; } = string.Empty;
+        public string? Description        { get; set; }
+        public string? EndpointUrl        { get; set; }
+        public string  AuthType           { get; set; } = "none";
+        public bool    RequiresUserAuth   { get; set; }
+        public string? SystemApiKey       { get; set; }
+        public int     RateLimitPerMinute { get; set; } = 30;
+    }
+}

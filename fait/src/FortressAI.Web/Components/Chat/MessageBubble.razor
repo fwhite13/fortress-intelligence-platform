@@ -1,0 +1,75 @@
+@inject IJSRuntime JS
+@using Markdig
+
+<div class="message @(Message.Role == "user" ? "message-user" : "message-assistant") @(IsStreaming ? "streaming" : "")">
+    <div class="message-avatar">
+        @if (Message.Role == "user")
+        {
+            <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" />
+        }
+        else
+        {
+            <MudIcon Icon="@Icons.Material.Filled.Shield" Size="Size.Small" />
+        }
+    </div>
+    <div class="message-body">
+        <div class="message-content">
+            @if (Message.Role == "assistant")
+            {
+                @((MarkupString)RenderMarkdown(Message.Content))
+                @if (IsStreaming)
+                {
+                    <span class="cursor-blink">▊</span>
+                }
+            }
+            else
+            {
+                <p>@Message.Content</p>
+            }
+        </div>
+        @if (!IsStreaming && Message.Role == "assistant" && (Message.TokensIn > 0 || Message.TokensOut > 0))
+        {
+            <div class="message-meta">
+                <span class="token-count">
+                    <MudIcon Icon="@Icons.Material.Filled.Memory" Size="Size.Small" />
+                    @(Message.TokensIn?.ToString("N0") ?? "?")→@(Message.TokensOut?.ToString("N0") ?? "?") tokens
+                </span>
+                @if (!string.IsNullOrEmpty(Message.Model))
+                {
+                    <span class="model-badge">@ModelInfo.GetModel(Message.Model).DisplayName</span>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public ChatMessage Message { get; set; } = new();
+    [Parameter] public bool IsStreaming { get; set; } = false;
+
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
+    private string RenderMarkdown(string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return "";
+        try
+        {
+            return Markdown.ToHtml(content, Pipeline);
+        }
+        catch
+        {
+            return System.Net.WebUtility.HtmlEncode(content);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("fortressChat.highlightCode");
+        }
+        catch { }
+    }
+}

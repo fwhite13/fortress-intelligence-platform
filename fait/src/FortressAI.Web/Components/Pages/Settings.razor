@@ -1,0 +1,379 @@
+@page "/settings"
+@using FortressAI.Web.Services.Mcp
+@using Microsoft.EntityFrameworkCore
+<PageTitle>Settings — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject AssistantConfigService ConfigSvc
+@inject MicrosoftTokenService MsTokenSvc
+@inject IMcpRegistryService McpRegistrySvc
+@inject IMcpConnectionService McpConnSvc
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> ContextFactory
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="py-4">
+    <MudText Typo="Typo.h4" Class="mb-4">Settings</MudText>
+
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else
+    {
+        <!-- Your Profile -->
+        <MudCard Class="mb-4" Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.Person" Class="mr-2" Style="vertical-align: middle;" />
+                        Your Profile
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTextField @bind-Value="_displayName" Label="What should FAIT call you?"
+                              Variant="Variant.Outlined" MaxLength="50" Class="mb-2"
+                              HelperText="This name is used by FAIT in your conversations" />
+                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                    @Session.CurrentUser?.Email
+                </MudText>
+            </MudCardContent>
+        </MudCard>
+
+        <!-- Tool Connections (MCP) -->
+        <MudCard Class="mb-4" Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.Extension" Class="mr-2" Style="vertical-align: middle;" />
+                        Tool Connections
+                    </MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                        Connect external tools to use them in your conversations.
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                @if (_mcpConnections.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">No tool integrations configured.</MudText>
+                }
+                else
+                {
+                    @foreach (var status in _mcpConnections)
+                    {
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--color-border);">
+                            <MudText Style="flex: 1; font-weight: 500;">@status.Server.Name</MudText>
+                            @if (!status.Server.RequiresUserAuth)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Available automatically</MudChip>
+                            }
+                            else if (status.IsConnected)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">
+                                    Connected as @(status.ConnectedAs ?? "unknown")
+                                </MudChip>
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error"
+                                           OnClick="@(() => DisconnectMcp(status.Server))">
+                                    Disconnect
+                                </MudButton>
+                            }
+                            else
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Not Connected</MudChip>
+                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                           OnClick="@(() => Nav.NavigateTo($"/mcp/oauth/connect/{status.Server.Slug}", forceLoad: true))">
+                                    Connect →
+                                </MudButton>
+                            }
+                        </div>
+                    }
+                }
+            </MudCardContent>
+        </MudCard>
+
+        <!-- Microsoft 365 Connection (Priority #1) -->
+        <MudCard Class="mb-4" Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.Cloud" Class="mr-2" Style="vertical-align: middle;" />
+                        Microsoft 365 Connection
+                    </MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                        Connect your Microsoft 365 account to enable email and calendar briefings.
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                @if (_msConnected)
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-3">
+                        <strong>Connected</strong> as @(_msEmail ?? "Microsoft 365 user")
+                    </MudAlert>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DisconnectMicrosoft"
+                               StartIcon="@Icons.Material.Filled.LinkOff" Size="Size.Small">
+                        Disconnect
+                    </MudButton>
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
+                        Not connected. Morning briefings require Microsoft 365 access.
+                    </MudAlert>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConnectMicrosoft"
+                               StartIcon="@Icons.Material.Filled.Link" Size="Size.Large">
+                        Connect Microsoft 365
+                    </MudButton>
+                    <MudText Typo="Typo.caption" Class="mt-2" Style="color: var(--color-text-tertiary);">
+                        Grants read access to your email and calendar. No emails will be sent on your behalf.
+                    </MudText>
+                }
+            </MudCardContent>
+        </MudCard>
+
+        <!-- Assistant Identity -->
+        <MudCard Class="mb-4" Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.SmartToy" Class="mr-2" Style="vertical-align: middle;" />
+                        Assistant Identity
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTextField @bind-Value="_assistantName" Label="Assistant Name" Variant="Variant.Outlined" MaxLength="30" Class="mb-3" />
+
+                <MudText Typo="Typo.subtitle2" Class="mb-2">Avatar</MudText>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">
+                    @foreach (var (id, icon) in _avatarOptions)
+                    {
+                        <MudAvatar Style="@($"width: 44px; height: 44px; cursor: pointer; border: 2px solid {(_avatarId == id ? _colorHex : "transparent")}; background: {(_avatarId == id ? _colorHex + "22" : "#f3f4f6")}")"
+                                   @onclick="() => _avatarId = id">
+                            <MudIcon Icon="@icon" Style="@($"color: {(_avatarId == id ? _colorHex : "#6b7280")}")" />
+                        </MudAvatar>
+                    }
+                </div>
+
+                <MudColorPicker @bind-Value="_accentColor" Label="Accent Color" Variant="Variant.Outlined"
+                                Class="mb-3" Style="max-width: 300px;" />
+
+                <MudSelect @bind-Value="_personalityPreset" Label="Personality" Variant="Variant.Outlined" Class="mb-3">
+                    <MudSelectItem Value="@("formal")">Formal — Professional, thorough, precise</MudSelectItem>
+                    <MudSelectItem Value="@("friendly")">Friendly — Warm, approachable, conversational</MudSelectItem>
+                    <MudSelectItem Value="@("concise")">Concise — Brief, efficient, no filler</MudSelectItem>
+                </MudSelect>
+            </MudCardContent>
+        </MudCard>
+
+        <!-- Morning Briefing -->
+        <MudCard Class="mb-4" Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.WbSunny" Class="mr-2" Style="vertical-align: middle;" />
+                        Morning Briefing
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTimePicker @bind-Time="_deliveryTime" Label="Delivery Time (EST)" Variant="Variant.Outlined" Class="mb-3" Style="max-width: 300px;" />
+
+                <MudTooltip Text="Email digest delivery is coming in Phase 2">
+                    <MudCheckBox @bind-Value="_emailDigestEnabled" Label="Send email digest (Phase 2)" Disabled="true" />
+                </MudTooltip>
+
+                <MudAlert Severity="Severity.Info" Class="mt-3" Dense="true" Variant="Variant.Outlined">
+                    Your briefing includes email summary (last 24h) and today's calendar.
+                    @if (!_msConnected)
+                    {
+                        <br /><strong>Connect Microsoft 365 above to enable briefings.</strong>
+                    }
+                </MudAlert>
+            </MudCardContent>
+        </MudCard>
+
+        <!-- Save -->
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSettings" Disabled="_saving"
+                   StartIcon="@Icons.Material.Filled.Save" Size="Size.Large">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Save Settings
+        </MudButton>
+    }
+</MudContainer>
+
+@code {
+    [Parameter, SupplyParameterFromQuery(Name = "mcp_connected")]
+    public string? McpConnected { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "mcp_error")]
+    public string? McpError { get; set; }
+
+    private bool _loading = true;
+    private bool _saving = false;
+    private bool _feedbackShown = false;
+
+    // Display name
+    private string _displayName = string.Empty;
+
+    // Assistant config
+    private string _assistantName = "Assistant";
+    private string _personalityPreset = "friendly";
+    private string _avatarId = "shield";
+    private string _colorHex = "#d4af37";
+    private MudColor _accentColor = new MudColor("#d4af37");
+
+    // Briefing schedule
+    private TimeSpan? _deliveryTime = new TimeSpan(8, 0, 0);
+    private bool _emailDigestEnabled = false;
+
+    // Microsoft 365 connection
+    private bool _msConnected = false;
+    private string? _msEmail;
+
+    // MCP Tool connections
+    private List<McpServerConnectionStatus> _mcpConnections = new();
+
+    private readonly (string id, string icon)[] _avatarOptions = new[]
+    {
+        ("shield", Icons.Material.Filled.Shield),
+        ("robot", Icons.Material.Filled.SmartToy),
+        ("star", Icons.Material.Filled.Star),
+        ("bolt", Icons.Material.Filled.Bolt),
+        ("diamond", Icons.Material.Filled.Diamond),
+        ("rocket", Icons.Material.Filled.RocketLaunch),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+
+        _displayName = Session.CurrentUser?.DisplayName ?? string.Empty;
+
+        var config = await ConfigSvc.GetOrCreateConfigAsync(Session.UserId);
+        _assistantName = config.AssistantName;
+        _personalityPreset = config.PersonalityPreset;
+        _avatarId = config.AvatarId;
+        _colorHex = config.ColorHex;
+        _accentColor = new MudColor(_colorHex);
+
+        var schedule = await ConfigSvc.GetBriefingScheduleAsync(Session.UserId);
+        if (schedule != null)
+        {
+            var utcTime = schedule.DeliveryTimeUtc.ToTimeSpan();
+            var estOffset = TimeSpan.FromHours(-5);
+            _deliveryTime = utcTime.Add(estOffset);
+            if (_deliveryTime < TimeSpan.Zero) _deliveryTime = _deliveryTime.Value.Add(TimeSpan.FromHours(24));
+            _emailDigestEnabled = schedule.EmailDigestEnabled;
+        }
+
+        // Check Microsoft 365 connection
+        var (connected, email, _) = await MsTokenSvc.GetConnectionStatusAsync(Session.UserId);
+        _msConnected = connected;
+        _msEmail = email;
+
+        // Load MCP tool connections
+        _mcpConnections = await McpConnSvc.GetUserConnectionsAsync(Session.UserId);
+
+        _loading = false;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await base.OnParametersSetAsync();
+        if (!_feedbackShown)
+        {
+            if (!string.IsNullOrEmpty(McpConnected))
+            {
+                Snackbar.Add($"✅ Connected to {McpConnected}!", Severity.Success);
+                _feedbackShown = true;
+                if (Session.IsAuthenticated)
+                    _mcpConnections = await McpConnSvc.GetUserConnectionsAsync(Session.UserId);
+            }
+            if (!string.IsNullOrEmpty(McpError))
+            {
+                Snackbar.Add($"Connection failed: {McpError}", Severity.Error);
+                _feedbackShown = true;
+            }
+        }
+    }
+
+    private void ConnectMicrosoft()
+    {
+        // Build OAuth URL and redirect
+        var state = $"{Session.UserId}:{Guid.NewGuid():N}";
+        var baseUrl = Nav.BaseUri.TrimEnd('/');
+        var redirectUri = $"{baseUrl}/auth/microsoft-callback";
+        var authUrl = MsTokenSvc.GetAuthorizationUrl(redirectUri, state);
+        Nav.NavigateTo(authUrl, forceLoad: true);
+    }
+
+    private async Task DisconnectMcp(McpServer server)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Disconnect Tool",
+            $"Disconnect {server.Name}? This will disable it in all your conversations.",
+            yesText: "Disconnect",
+            cancelText: "Cancel");
+        if (confirmed != true) return;
+
+        await McpConnSvc.DisconnectAsync(Session.UserId, server.Id);
+        _mcpConnections = await McpConnSvc.GetUserConnectionsAsync(Session.UserId);
+        Snackbar.Add($"{server.Name} disconnected.", Severity.Info);
+        StateHasChanged();
+    }
+
+    private async Task DisconnectMicrosoft()
+    {
+        await MsTokenSvc.DisconnectAsync(Session.UserId);
+        _msConnected = false;
+        _msEmail = null;
+        Snackbar.Add("Microsoft 365 disconnected.", Severity.Info);
+    }
+
+    private async Task SaveSettings()
+    {
+        _saving = true;
+        try
+        {
+            _colorHex = _accentColor.ToString(MudColorOutputFormats.Hex);
+            await ConfigSvc.SaveConfigAsync(Session.UserId, _assistantName, _avatarId, _colorHex, _personalityPreset);
+
+            if (_deliveryTime.HasValue)
+            {
+                var estOffset = TimeSpan.FromHours(-5);
+                var utcTime = _deliveryTime.Value.Subtract(estOffset);
+                if (utcTime >= TimeSpan.FromHours(24)) utcTime = utcTime.Subtract(TimeSpan.FromHours(24));
+                if (utcTime < TimeSpan.Zero) utcTime = utcTime.Add(TimeSpan.FromHours(24));
+                var deliveryTimeUtc = TimeOnly.FromTimeSpan(utcTime);
+                await ConfigSvc.SaveBriefingScheduleAsync(Session.UserId, deliveryTimeUtc, _emailDigestEnabled);
+            }
+
+            // Save display name
+            if (Session.CurrentUser != null)
+            {
+                using var db = await ContextFactory.CreateDbContextAsync();
+                var user = await db.Users.FindAsync(Session.CurrentUser.Id);
+                if (user != null)
+                {
+                    user.DisplayName = string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim();
+                    await db.SaveChangesAsync();
+                    // Update session
+                    Session.CurrentUser.DisplayName = user.DisplayName;
+                }
+            }
+
+            Snackbar.Add($"{_assistantName}'s settings saved!", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error saving: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

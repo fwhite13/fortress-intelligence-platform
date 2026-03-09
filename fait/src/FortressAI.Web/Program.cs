@@ -1,0 +1,435 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.AspNetCore.DataProtection;
+using MySqlConnector;
+using Amazon.BedrockAgentRuntime;
+using Amazon.CognitoIdentityProvider;
+using MudBlazor.Services;
+using FortressAI.Web.Data;
+using FortressAI.Web.Services;
+using FortressAI.Web.Hubs;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.SignalR;
+using FortressAI.Web.Auth;
+using System.Security.Claims;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+// Database — prefer env vars (ECS/Aurora) over appsettings
+var dbHost = builder.Configuration["FORTRESS_DB_HOST"];
+var dbPort = builder.Configuration["FORTRESS_DB_PORT"] ?? "3306";
+var dbUser = builder.Configuration["FORTRESS_DB_USER"] ?? "fortress_mysql";
+var dbPass = builder.Configuration["FORTRESS_DB_PASS"] ?? "dev";
+var dbName = builder.Configuration["FRED_DB_NAME"] ?? "fred_dev";
+string fredConnectionString;
+if (!string.IsNullOrEmpty(dbHost))
+{
+    // Use MySqlConnectionStringBuilder to safely handle special chars in password
+    var csb = new MySqlConnectionStringBuilder
+    {
+        Server = dbHost,
+        Port = uint.Parse(dbPort),
+        Database = dbName,
+        UserID = dbUser,
+        Password = dbPass,
+        ConnectionTimeout = 10
+    };
+    fredConnectionString = csb.ConnectionString;
+    Console.WriteLine($"Using Aurora MySQL: {dbHost}/{dbName}");
+}
+else
+{
+    fredConnectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? "Server=localhost;Database=fred_dev;User=root;Password=dev;";
+    Console.WriteLine("Using local connection string.");
+}
+var fredServerVersion = new MySqlServerVersion(new Version(8, 0, 28));
+builder.Services.AddDbContextFactory<AppDbContext>(options =>
+    options.UseMySql(fredConnectionString, fredServerVersion,
+        mysqlOptions => mysqlOptions.EnableRetryOnFailure(3)));
+
+// Application services
+builder.Services.AddScoped<UserSessionService>();
+builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<ProjectService>();
+builder.Services.AddScoped<HelpService>();
+builder.Services.AddScoped<ChatService>();
+builder.Services.AddScoped<DocumentService>();
+builder.Services.AddSingleton<BedrockService>();
+builder.Services.AddScoped<AssistantConfigService>();
+builder.Services.AddScoped<BriefingService>();
+builder.Services.AddScoped<BriefingGenerationService>();
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<MicrosoftTokenService>();
+builder.Services.AddScoped<GraphTaskService>();
+builder.Services.AddScoped<GraphCalendarService>();
+builder.Services.AddScoped<PreMeetingBriefService>();
+builder.Services.AddScoped<PostMeetingService>();
+
+// Knowledge Base
+builder.Services.AddSingleton<IAmazonBedrockAgentRuntime>(sp =>
+    new AmazonBedrockAgentRuntimeClient(
+        Amazon.RegionEndpoint.GetBySystemName(
+            builder.Configuration["AWS:Region"] ?? "us-east-1")));
+
+// KB Document upload (S3) and ingestion trigger (BedrockAgent admin)
+builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(sp =>
+    new Amazon.S3.AmazonS3Client(
+        Amazon.RegionEndpoint.GetBySystemName(
+            builder.Configuration["AWS:Region"] ?? "us-east-1")));
+builder.Services.AddSingleton<Amazon.BedrockAgent.IAmazonBedrockAgent>(sp =>
+    new Amazon.BedrockAgent.AmazonBedrockAgentClient(
+        Amazon.RegionEndpoint.GetBySystemName(
+            builder.Configuration["AWS:Region"] ?? "us-east-1")));
+
+builder.Services.AddScoped<KnowledgeBaseService>();
+builder.Services.AddScoped<KbDocumentService>();
+builder.Services.AddSingleton<KbSyncRetryService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<KbSyncRetryService>());
+builder.Services.AddScoped<ForgeService>();
+builder.Services.AddScoped<ForgeQueryService>();
+builder.Services.AddSingleton<KbQueryService>();
+
+// Phase 2: Email Intelligence services
+builder.Services.AddScoped<GraphWebhookService>();
+builder.Services.AddScoped<EmailAlertService>();
+builder.Services.AddSingleton<EmailClassifierService>();
+
+// Phase 5: Weekly Rollup
+builder.Services.AddScoped<WeeklyRollupService>();
+
+// SQS client (optional — only used if AWS:SQS:EmailEventsQueue is configured)
+var sqsQueue = builder.Configuration["AWS:SQS:EmailEventsQueue"];
+if (!string.IsNullOrEmpty(sqsQueue))
+{
+    builder.Services.AddSingleton<Amazon.SQS.IAmazonSQS>(sp =>
+        new Amazon.SQS.AmazonSQSClient(
+            Amazon.RegionEndpoint.GetBySystemName(
+                builder.Configuration["AWS:Region"] ?? "us-east-1")));
+}
+
+// Add controllers for API endpoints (webhooks, email)
+builder.Services.AddControllers();
+
+builder.Services.AddSignalR();
+builder.Services.AddMudServices();
+
+// Entra OIDC configuration (read here so routes can reference entraConfigured)
+var entraAuthority = builder.Configuration["Auth:EntraAuthority"];
+var entraClientId = builder.Configuration["Auth:EntraClientId"];
+var entraClientSecret = builder.Configuration["Auth:EntraClientSecret"];
+var entraConfigured = !string.IsNullOrEmpty(entraAuthority)
+    && !string.IsNullOrEmpty(entraClientId)
+    && !string.IsNullOrEmpty(entraClientSecret);
+
+// Stub authentication for dev (toggle via UseStubAuth config)
+var useStubAuth = builder.Configuration.GetValue<bool>("UseStubAuth", false);
+if (useStubAuth)
+{
+    builder.Services.AddAuthentication("StubAuth")
+        .AddScheme<AuthenticationSchemeOptions, StubAuthHandler>("StubAuth", _ => { });
+    Console.WriteLine("⚠️  STUB AUTH ENABLED — auto-authenticating as Fred White (dev only)");
+}
+else
+{
+    // Production: Entra OIDC with graceful degradation to email/password only
+    var authBuilder = builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultScheme = Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = entraConfigured
+            ? Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme
+            : Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme;
+    })
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/";
+        options.AccessDeniedPath = "/access-denied";
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.SlidingExpiration = true;
+    });
+
+    if (entraConfigured)
+    {
+        authBuilder.AddOpenIdConnect(options =>
+        {
+            options.Authority = entraAuthority;
+            options.ClientId = entraClientId;
+            options.ClientSecret = entraClientSecret;
+            options.ResponseType = "code";
+            options.SaveTokens = true;
+            options.GetClaimsFromUserInfoEndpoint = true;
+            options.CallbackPath = "/signin-oidc";
+            options.SignedOutCallbackPath = "/signout-callback-oidc";
+            options.Scope.Add("openid");
+            options.Scope.Add("profile");
+            options.Scope.Add("email");
+            options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+            {
+                RoleClaimType = "roles",
+                NameClaimType = "preferred_username"
+            };
+            options.Events = new Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectEvents
+            {
+                OnRedirectToIdentityProvider = ctx =>
+                {
+                    if (ctx.ProtocolMessage.RedirectUri?.StartsWith("http://") == true)
+                        ctx.ProtocolMessage.RedirectUri = ctx.ProtocolMessage.RedirectUri.Replace("http://", "https://");
+                    return Task.CompletedTask;
+                },
+                OnTokenValidated = ctx =>
+                {
+                    // Map Entra "roles" claims to ClaimTypes.Role
+                    var roles = ctx.Principal?.FindAll("roles").Select(c => c.Value) ?? Enumerable.Empty<string>();
+                    var identity = ctx.Principal?.Identity as System.Security.Claims.ClaimsIdentity;
+                    if (identity != null)
+                        foreach (var role in roles)
+                            identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, role));
+                    return Task.CompletedTask;
+                },
+                OnRedirectToIdentityProviderForSignOut = ctx =>
+                {
+                    // Ensure Entra redirects back to FAIT's root after sign-out
+                    ctx.ProtocolMessage.PostLogoutRedirectUri =
+                        ctx.Request.Scheme + "://" + ctx.Request.Host + "/";
+                    return Task.CompletedTask;
+                }
+            };
+        });
+        Console.WriteLine("Production authentication configured (Entra OIDC)");
+    }
+    else
+    {
+        Console.WriteLine("⚠️  Entra OIDC not configured — SSO disabled, email/password only");
+    }
+}
+builder.Services.AddAuthorization();
+builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddHttpContextAccessor();
+
+builder.Services.AddSingleton<IAmazonCognitoIdentityProvider>(sp =>
+    new AmazonCognitoIdentityProviderClient(
+        Amazon.RegionEndpoint.GetBySystemName(
+            builder.Configuration["AWS:Region"] ?? "us-east-1")));
+builder.Services.AddScoped<IUserManagementService, UserManagementService>();
+
+builder.Services.AddHostedService<DatabaseInitializationService>();
+
+// MCP services
+builder.Services.AddScoped<IMcpRegistryService, McpRegistryService>();
+builder.Services.AddScoped<McpTokenRefreshService>();
+builder.Services.AddScoped<IMcpConnectionService, McpConnectionService>();
+builder.Services.AddScoped<IMcpToolService, McpToolService>();
+builder.Services.AddSingleton<McpHttpTransport>();
+builder.Services.AddSingleton<BraveSearchClient>();
+builder.Services.AddHostedService<ManifestRefreshService>();
+builder.Services.AddMemoryCache();
+
+// Named HttpClient for MCP transport with 30s timeout
+builder.Services.AddHttpClient("mcp-transport", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+// DataProtection: persist keys to DB (survives ECS container restarts)
+builder.Services.AddDataProtection()
+    .PersistKeysToDbContext<AppDbContext>()
+    .SetApplicationName("FortressAI");
+
+var app = builder.Build();
+
+// Health endpoint (must be before other middleware)
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }));
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+
+app.UseStaticFiles();
+app.UseAntiforgery();
+app.UseAuthentication();
+app.UseAuthorization();
+if (useStubAuth) { app.UseMiddleware<FortressAI.Web.Middleware.StubAuthUserInitializationMiddleware>(); }
+
+// Microsoft OAuth callback endpoint
+app.MapGet("/auth/microsoft-callback", async (HttpContext ctx, IDbContextFactory<AppDbContext> dbFactory, IHttpClientFactory httpFactory, IConfiguration config) =>
+{
+    var code = ctx.Request.Query["code"].ToString();
+    var state = ctx.Request.Query["state"].ToString();
+    var error = ctx.Request.Query["error"].ToString();
+
+    if (!string.IsNullOrEmpty(error))
+    {
+        var errorDesc = ctx.Request.Query["error_description"].ToString();
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#dc2626;'>Authentication Failed</h1>" +
+            $"<p>{error}: {errorDesc}</p>" +
+            "<p><a href='/settings'>Back to Settings</a></p>" +
+            "</body></html>", "text/html");
+    }
+
+    if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state))
+    {
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#dc2626;'>Invalid Response</h1>" +
+            "<p>No authorization code received.</p>" +
+            "<p><a href='/settings'>Back to Settings</a></p>" +
+            "</body></html>", "text/html");
+    }
+
+    // Parse state: "userId:random"
+    var stateParts = state.Split(':');
+    if (stateParts.Length < 2 || !Guid.TryParse(stateParts[0], out var userId))
+    {
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#dc2626;'>Invalid State</h1>" +
+            "<p><a href='/settings'>Back to Settings</a></p>" +
+            "</body></html>", "text/html");
+    }
+
+    try
+    {
+        // Create a MicrosoftTokenService instance
+        var logger = ctx.RequestServices.GetRequiredService<ILogger<MicrosoftTokenService>>();
+        var tokenService = new MicrosoftTokenService(dbFactory, logger, config, httpFactory);
+        var redirectUri = $"{ctx.Request.Scheme}://{ctx.Request.Host}/auth/microsoft-callback";
+        var token = await tokenService.ExchangeCodeAsync(userId, code, redirectUri);
+
+        var email = token.MicrosoftEmail ?? "user";
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#059669;'>&#x2705; Microsoft 365 Connected!</h1>" +
+            $"<p>Successfully connected as <strong>{email}</strong></p>" +
+            "<p>Redirecting to Settings...</p>" +
+            "<script>setTimeout(function(){ window.location.href = '/settings'; }, 2000);</script>" +
+            "</body></html>", "text/html");
+    }
+    catch (Exception ex)
+    {
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#dc2626;'>Connection Failed</h1>" +
+            $"<p>{ex.Message}</p>" +
+            "<p><a href='/settings'>Back to Settings</a></p>" +
+            "</body></html>", "text/html");
+    }
+});
+
+// API endpoint for Lambda to get user access token
+app.MapGet("/api/tokens/{userId}", async (HttpContext context, string userId, IDbContextFactory<AppDbContext> dbFactory, IHttpClientFactory httpFactory, IConfiguration config) =>
+{
+    if (!(context.User.Identity?.IsAuthenticated ?? false)) return Results.Unauthorized();
+    var claimUserId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    if (claimUserId != userId) return Results.Forbid();
+
+    if (!Guid.TryParse(userId, out var userGuid))
+        return Results.BadRequest("Invalid user ID");
+
+    var logger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger<MicrosoftTokenService>();
+    var tokenService = new MicrosoftTokenService(dbFactory, logger, config, httpFactory);
+    var accessToken = await tokenService.GetValidAccessTokenAsync(userGuid);
+
+    if (accessToken == null)
+        return Results.NotFound(new { error = "No valid token. User must re-authenticate." });
+
+    return Results.Ok(new { accessToken });
+}).RequireAuthorization();
+
+// Manual briefing generation trigger — invokes briefing-builder Lambda
+app.MapPost("/api/briefing/generate", async (HttpContext ctx, BriefingGenerationService briefingGen, IHubContext<DashboardHub> hubContext) =>
+{
+    // Authentication check
+    if (!(ctx.User.Identity?.IsAuthenticated ?? false))
+        return Results.Unauthorized();
+
+    var userIdStr = ctx.Request.Query["userId"].ToString();
+
+    // Authorization check - can only generate own briefing
+    var claimUserId = ctx.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    if (claimUserId != userIdStr)
+        return Results.Forbid();
+
+    if (!Guid.TryParse(userIdStr, out var userId))
+        return Results.BadRequest("Invalid userId");
+
+    var (success, briefing, error) = await briefingGen.GenerateBriefingAsync(userId);
+
+    if (!success)
+        return Results.Problem($"Briefing generation failed: {error}");
+
+    // Push via SignalR so connected dashboard tabs update immediately
+    if (briefing != null)
+    {
+        await hubContext.Clients.Group($"user-{userId}").SendAsync("ReceiveBriefing", briefing.Content);
+    }
+
+    return Results.Ok(new { message = "Briefing generated", briefingId = briefing?.Id });
+}).RequireAuthorization();
+
+// Auth endpoints
+app.MapGet("/auth/login", async ctx =>
+{
+    if (!entraConfigured)
+    {
+        ctx.Response.Redirect("/");
+        return;
+    }
+    await ctx.ChallengeAsync(
+        Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme,
+        new Microsoft.AspNetCore.Authentication.AuthenticationProperties { RedirectUri = "/chat" });
+});
+
+app.MapGet("/auth/login-entra", async ctx =>
+{
+    if (!entraConfigured)
+    {
+        ctx.Response.Redirect("/");
+        return;
+    }
+    await ctx.ChallengeAsync(
+        Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme,
+        new Microsoft.AspNetCore.Authentication.AuthenticationProperties { RedirectUri = "/chat" });
+});
+
+app.MapGet("/auth/logout", async ctx =>
+{
+    // Always clear the cookie session
+    await ctx.SignOutAsync(
+        Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+
+    // Only attempt OIDC sign-out if the scheme is registered (not registered when entraConfigured=false)
+    try
+    {
+        var schemes = ctx.RequestServices.GetRequiredService<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>();
+        var oidcScheme = await schemes.GetSchemeAsync(
+            Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme);
+        if (oidcScheme != null)
+        {
+            await ctx.SignOutAsync(
+                Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme,
+                new Microsoft.AspNetCore.Authentication.AuthenticationProperties { RedirectUri = "/" });
+            return;
+        }
+    }
+    catch
+    {
+        // OIDC sign-out failed (unreachable authority, placeholder config) — fall through
+    }
+
+    ctx.Response.Redirect("/");
+});
+
+app.MapControllers();
+app.MapRazorComponents<FortressAI.Web.Components.App>()
+    .AddInteractiveServerRenderMode();
+app.MapHub<DashboardHub>("/hubs/dashboard");
+
+app.Run();

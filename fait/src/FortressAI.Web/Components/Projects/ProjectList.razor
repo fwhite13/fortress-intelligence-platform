@@ -1,0 +1,73 @@
+@page "/projects"
+<PageTitle>Projects — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject ProjectService ProjectSvc
+@inject NavigationManager Nav
+
+<div class="page-container">
+    <div class="page-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <h1>Projects</h1>
+            <PageHelpButton HelpFile="projects-guide.md" PageTitle="Projects Help" />
+        </div>
+        <button class="btn btn-accent" @onclick="GoToNew">
+            <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" /> New Project
+        </button>
+    </div>
+
+    @if (projects == null)
+    {
+        <div class="loading-state">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" /> Loading projects...
+        </div>
+    }
+    else if (!projects.Any())
+    {
+        <div class="empty-state">
+            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Small" />
+            <h3>No projects yet</h3>
+            <p>Create a project to organize your conversations with custom instructions and documents.</p>
+            <button class="btn btn-accent" @onclick="GoToNew">
+                <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" /> Create Your First Project
+            </button>
+        </div>
+    }
+    else
+    {
+        <div class="projects-grid">
+            @foreach (var project in projects)
+            {
+                <div class="project-card" @onclick="@(() => GoToProject(project.Id))">
+                    <div class="project-card-header">
+                        <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" />
+                        <h3>@project.Name</h3>
+                    </div>
+                    @if (!string.IsNullOrEmpty(project.Description))
+                    {
+                        <p class="project-description">@project.Description</p>
+                    }
+                    <div class="project-card-meta">
+                        <span><MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Small" /> @project.Documents.Count docs</span>
+                        <span><MudIcon Icon="@Icons.Material.Filled.Forum" Size="Size.Small" /> @project.Conversations.Count chats</span>
+                        <span class="model-badge-sm">@ModelInfo.GetModel(project.Model).DisplayName</span>
+                    </div>
+                    <div class="project-card-date">
+                        Updated @project.UpdatedAt.ToString("MMM d, yyyy")
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<Project>? projects;
+
+    protected override async Task OnInitializedAsync()
+    {
+        projects = await ProjectSvc.GetUserProjectsAsync(Session.UserId);
+    }
+
+    private void GoToNew() => Nav.NavigateTo("/projects/new");
+    private void GoToProject(Guid id) => Nav.NavigateTo($"/projects/{id}");
+}

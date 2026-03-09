@@ -1,0 +1,52 @@
+@inject HelpService HelpSvc
+
+<MudIconButton Icon="@Icons.Material.Filled.HelpOutline" Size="Size.Small"
+               Color="Color.Default" Style="color: var(--color-text-secondary);"
+               title="@($"Help: {PageTitle}")"
+               OnClick="ToggleHelp" />
+
+@if (_showHelp)
+{
+    <MudPaper Elevation="4" Style="position: fixed; right: 20px; top: 60px; width: 380px; max-height: 70vh; overflow-y: auto; overflow-x: hidden; z-index: 1500; background: var(--color-sidebar-bg, #1A2035); border-radius: 8px; padding: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <span style="color: var(--color-gold); font-weight: 600; font-size: 15px;">@PageTitle</span>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Medium" Color="Color.Inherit"
+                           Style="color: rgba(248,250,252,0.9); background: rgba(255,255,255,0.1); border-radius: 4px;"
+                           OnClick="@(() => _showHelp = false)" />
+        </div>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Warning" />
+        }
+        else
+        {
+            <div class="help-content">@((MarkupString)_htmlContent)</div>
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public string HelpFile { get; set; } = "app-guide.md";
+    [Parameter] public string PageTitle { get; set; } = "Help";
+
+    private bool _showHelp = false;
+    private bool _loading = false;
+    private string _htmlContent = "";
+
+    private async Task ToggleHelp()
+    {
+        _showHelp = !_showHelp;
+        if (_showHelp && string.IsNullOrEmpty(_htmlContent))
+            await LoadContent();
+    }
+
+    private async Task LoadContent()
+    {
+        _loading = true;
+        StateHasChanged();
+        var md = await HelpSvc.GetHelpContentAsync(HelpFile);
+        _htmlContent = Markdig.Markdown.ToHtml(md);
+        _loading = false;
+        StateHasChanged();
+    }
+}

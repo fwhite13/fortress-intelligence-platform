@@ -1,0 +1,384 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
+using FortressAI.Shared.Models;
+
+namespace FortressAI.Web.Data;
+
+public class AppDbContext : DbContext, IDataProtectionKeyContext
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+
+    // DataProtection key persistence (prevents antiforgery token failures after container restart)
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+
+    public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectDocument> ProjectDocuments => Set<ProjectDocument>();
+    public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<ChatMessage> Messages => Set<ChatMessage>();
+    public DbSet<UserAssistantConfig> UserAssistantConfigs => Set<UserAssistantConfig>();
+    public DbSet<BriefingHistory> BriefingHistories => Set<BriefingHistory>();
+    public DbSet<UserBriefingSchedule> UserBriefingSchedules => Set<UserBriefingSchedule>();
+    public DbSet<UserMicrosoftToken> UserMicrosoftTokens => Set<UserMicrosoftToken>();
+    public DbSet<GraphSubscription> GraphSubscriptions => Set<GraphSubscription>();
+    public DbSet<EmailAlert> EmailAlerts => Set<EmailAlert>();
+    public DbSet<EmailLog> EmailLogs => Set<EmailLog>();
+    public DbSet<TaskItem> TaskCache => Set<TaskItem>();
+    public DbSet<CalendarEvent> CalendarCache => Set<CalendarEvent>();
+    public DbSet<PostMeetingNote> PostMeetingNotes => Set<PostMeetingNote>();
+    public DbSet<KbEntry> KbEntries => Set<KbEntry>();
+    public DbSet<KbTeam> KbTeams => Set<KbTeam>();
+    public DbSet<KbTeamMember> KbTeamMembers => Set<KbTeamMember>();
+    public DbSet<McpServer> McpServers => Set<McpServer>();
+    public DbSet<UserMcpToken> UserMcpTokens => Set<UserMcpToken>();
+    public DbSet<ConversationMcpServer> ConversationMcpServers => Set<ConversationMcpServer>();
+    public DbSet<McpToolCallLog> McpToolCallLogs => Set<McpToolCallLog>();
+    public DbSet<ConversationTeamKb> ConversationTeamKbs { get; set; } = null!;
+    public DbSet<UserModulePermission> UserModulePermissions { get; set; } = null!;
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<AppUser>(entity =>
+        {
+            entity.ToTable("users");
+            entity.HasKey(e => e.Id);
+            // EF Core generates Guid client-side (Guid.NewGuid()) — no server-side default needed
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(e => e.Email).IsUnique();
+            entity.Property(e => e.Email).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.PasswordHash).IsRequired();
+            entity.Property(e => e.DisplayName).HasMaxLength(100);
+            entity.Property(e => e.Role).HasMaxLength(20).HasDefaultValue("user");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+            entity.Property(e => e.IsEntraUser).HasColumnName("is_entra_user").HasDefaultValue(false);
+        });
+
+        modelBuilder.Entity<Project>(entity =>
+        {
+            entity.ToTable("projects");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Model).HasMaxLength(100).HasDefaultValue("claude-sonnet-4-6");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithMany(u => u.Projects).HasForeignKey(e => e.UserId);
+        });
+
+        modelBuilder.Entity<ProjectDocument>(entity =>
+        {
+            entity.ToTable("project_documents");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Filename).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.ContentType).HasMaxLength(100);
+            entity.Property(e => e.UploadedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.Project).WithMany(p => p.Documents).HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Conversation>(entity =>
+        {
+            entity.ToTable("conversations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Title).HasMaxLength(500);
+            entity.Property(e => e.Model).HasMaxLength(100).HasDefaultValue("claude-sonnet-4-6");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithMany(u => u.Conversations).HasForeignKey(e => e.UserId);
+            entity.HasOne(e => e.Project).WithMany(p => p.Conversations).HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ChatMessage>(entity =>
+        {
+            entity.ToTable("messages");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Role).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.Content).IsRequired();
+            entity.Property(e => e.Model).HasMaxLength(100);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.TokensIn).HasColumnName("TokensIn");
+            entity.Property(e => e.TokensOut).HasColumnName("TokensOut");
+            entity.HasOne(e => e.Conversation).WithMany(c => c.Messages).HasForeignKey(e => e.ConversationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserAssistantConfig>(entity =>
+        {
+            entity.ToTable("user_assistant_config");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(e => e.UserId).IsUnique();
+            entity.Property(e => e.AssistantName).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.AvatarId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ColorHex).HasMaxLength(10).IsRequired();
+            entity.Property(e => e.PersonalityPreset).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithOne(u => u.AssistantConfig).HasForeignKey<UserAssistantConfig>(e => e.UserId);
+        });
+
+        modelBuilder.Entity<BriefingHistory>(entity =>
+        {
+            entity.ToTable("briefing_history");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(e => new { e.UserId, e.BriefingDate });
+            entity.Property(e => e.Content).IsRequired();
+            entity.Property(e => e.CalendarEventsJson).HasColumnName("calendar_events");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        });
+
+        modelBuilder.Entity<UserBriefingSchedule>(entity =>
+        {
+            entity.ToTable("user_briefing_schedule");
+            entity.HasKey(e => e.UserId);
+            entity.Property(e => e.UserId).ValueGeneratedNever();
+            entity.Property(e => e.DeliveryTimeUtc).IsRequired();
+            entity.HasOne(e => e.User).WithOne(u => u.BriefingSchedule).HasForeignKey<UserBriefingSchedule>(e => e.UserId);
+        });
+
+        modelBuilder.Entity<UserMicrosoftToken>(entity =>
+        {
+            entity.ToTable("user_microsoft_tokens");
+            entity.HasKey(e => e.UserId);
+            entity.Property(e => e.UserId).ValueGeneratedNever();
+            entity.Property(e => e.AccessToken).IsRequired();
+            entity.Property(e => e.RefreshToken).IsRequired();
+            entity.Property(e => e.MicrosoftEmail).HasMaxLength(255);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithOne().HasForeignKey<UserMicrosoftToken>(e => e.UserId);
+        });
+
+        modelBuilder.Entity<GraphSubscription>(entity =>
+        {
+            entity.ToTable("graph_subscriptions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.ExpiresAt);
+            entity.Property(e => e.SubscriptionId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.ClientState).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        });
+
+        modelBuilder.Entity<EmailAlert>(entity =>
+        {
+            entity.ToTable("email_alerts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.Dismissed);
+            entity.Property(e => e.MessageId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.SenderEmail).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Importance).HasMaxLength(10).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        });
+
+        modelBuilder.Entity<EmailLog>(entity =>
+        {
+            entity.ToTable("email_log");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(e => e.UserId);
+            entity.Property(e => e.MessageId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.SenderEmail).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Importance).HasMaxLength(10).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        });
+
+        modelBuilder.Entity<TaskItem>(entity =>
+        {
+            entity.ToTable("task_cache");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(e => new { e.UserId, e.DueDate });
+            entity.HasIndex(e => new { e.UserId, e.TaskId }).IsUnique();
+            entity.Property(e => e.TaskId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.PlanTitle).HasMaxLength(255);
+            entity.Property(e => e.BucketName).HasMaxLength(255);
+            entity.Property(e => e.LastFetchedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        });
+
+        modelBuilder.Entity<CalendarEvent>(entity =>
+        {
+            entity.ToTable("calendar_cache");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(e => new { e.UserId, e.StartTime });
+            entity.HasIndex(e => new { e.UserId, e.EventId }).IsUnique();
+            entity.Property(e => e.EventId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Subject).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Location).HasMaxLength(500);
+            entity.Property(e => e.Category).HasMaxLength(100);
+            entity.Property(e => e.LastFetchedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        });
+
+        modelBuilder.Entity<PostMeetingNote>(entity =>
+        {
+            entity.ToTable("post_meeting_notes");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(e => new { e.UserId, e.EventId });
+            entity.HasIndex(e => e.UserId);
+            entity.Property(e => e.EventId).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.EventSubject).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Notes).IsRequired();
+            entity.Property(e => e.Summary).IsRequired(false);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
+        });
+
+        // KbEntry
+        modelBuilder.Entity<KbEntry>(e => {
+            e.ToTable("kb_entries");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.Title).HasMaxLength(500).IsRequired();
+            e.Property(x => x.Content).HasColumnType("TEXT").IsRequired();
+            e.Property(x => x.Tags).HasMaxLength(500);
+            e.Property(x => x.SourceUrl).HasMaxLength(1000);
+            e.HasIndex(x => x.UserId);
+            e.HasIndex(x => new { x.UserId, x.Tier });
+        });
+
+        // KbTeam
+        modelBuilder.Entity<KbTeam>(e => {
+            e.ToTable("kb_teams");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Description).HasMaxLength(1000);
+            e.HasMany(x => x.Members).WithOne(m => m.Team).HasForeignKey(m => m.TeamId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Entries).WithOne().HasForeignKey(entry => entry.TeamId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // KbTeamMember
+        modelBuilder.Entity<KbTeamMember>(e => {
+            e.ToTable("kb_team_members");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).ValueGeneratedOnAdd();
+            e.HasIndex(x => new { x.TeamId, x.UserId }).IsUnique();
+            e.HasIndex(x => x.UserId);
+        });
+
+        modelBuilder.Entity<McpServer>(entity =>
+        {
+            entity.ToTable("mcp_servers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Slug).HasMaxLength(50).IsRequired();
+            entity.HasIndex(e => e.Slug).IsUnique();
+            entity.Property(e => e.TransportType).HasMaxLength(20).HasDefaultValue("http").HasColumnName("transport_type");
+            entity.Property(e => e.EndpointUrl).HasMaxLength(500).HasColumnName("endpoint_url");
+            entity.Property(e => e.AuthType).HasMaxLength(20).HasDefaultValue("none").HasColumnName("auth_type");
+            entity.Property(e => e.AuthConfigJson).HasColumnName("auth_config").HasColumnType("JSON");
+            entity.Property(e => e.ToolManifestJson).HasColumnName("tool_manifest").HasColumnType("JSON");
+            entity.Property(e => e.IsActive).HasColumnName("is_active");
+            entity.Property(e => e.RequiresUserAuth).HasColumnName("requires_user_auth");
+            entity.Property(e => e.SystemApiKey).HasColumnType("TEXT").HasColumnName("system_api_key");
+            entity.Property(e => e.OAuthClientSecret).HasColumnType("TEXT").HasColumnName("oauth_client_secret");
+            entity.Property(e => e.RateLimitPerMinute).HasColumnName("rate_limit_per_minute").HasDefaultValue(30);
+            entity.Property(e => e.IconUrl).HasMaxLength(500).HasColumnName("icon_url");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)").HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)").HasColumnName("updated_at");
+            entity.Ignore(e => e.AuthConfig);
+            entity.Ignore(e => e.Tools);
+        });
+
+        modelBuilder.Entity<UserMcpToken>(entity =>
+        {
+            entity.ToTable("user_mcp_tokens");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.ServerId).HasColumnName("server_id");
+            entity.HasIndex(e => new { e.UserId, e.ServerId }).IsUnique();
+            entity.Property(e => e.AccessToken).HasColumnType("TEXT").IsRequired().HasColumnName("access_token");
+            entity.Property(e => e.RefreshToken).HasColumnType("TEXT").HasColumnName("refresh_token");
+            entity.Property(e => e.TokenExpiresAt).HasColumnName("token_expires_at");
+            entity.Property(e => e.Scopes).HasMaxLength(1000);
+            entity.Property(e => e.ExternalUserId).HasMaxLength(255).HasColumnName("external_user_id");
+            entity.Property(e => e.ExternalEmail).HasMaxLength(255).HasColumnName("external_email");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)").HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)").HasColumnName("updated_at");
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Server).WithMany(s => s.UserTokens).HasForeignKey(e => e.ServerId).OnDelete(DeleteBehavior.Cascade);
+            entity.Ignore(e => e.IsExpired);
+        });
+
+        modelBuilder.Entity<ConversationMcpServer>(entity =>
+        {
+            entity.ToTable("conversation_mcp_servers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.ConversationId).HasColumnName("conversation_id");
+            entity.Property(e => e.ServerId).HasColumnName("server_id");
+            entity.HasIndex(e => new { e.ConversationId, e.ServerId }).IsUnique();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)").HasColumnName("created_at");
+            entity.HasOne(e => e.Conversation).WithMany().HasForeignKey(e => e.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Server).WithMany().HasForeignKey(e => e.ServerId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<McpToolCallLog>(entity =>
+        {
+            entity.ToTable("mcp_tool_call_log");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.ConversationId).HasColumnName("conversation_id");
+            entity.Property(e => e.MessageId).HasColumnName("message_id");
+            entity.Property(e => e.ServerId).HasColumnName("server_id");
+            entity.Property(e => e.ToolName).HasMaxLength(100).IsRequired().HasColumnName("tool_name");
+            entity.Property(e => e.InputJson).HasColumnType("LONGTEXT").HasColumnName("input_json");
+            entity.Property(e => e.OutputJson).HasColumnType("LONGTEXT").HasColumnName("output_json");
+            entity.Property(e => e.Status).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ErrorMessage).HasColumnName("error_message");
+            entity.Property(e => e.LatencyMs).HasColumnName("latency_ms");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)").HasColumnName("created_at");
+            entity.HasIndex(e => new { e.UserId, e.CreatedAt });
+            entity.HasIndex(e => e.ConversationId);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<McpServer>().WithMany().HasForeignKey(e => e.ServerId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ConversationTeamKb>(entity =>
+        {
+            entity.ToTable("conversation_team_kbs");
+            entity.HasKey(e => new { e.ConversationId, e.TeamId });
+            entity.Property(e => e.ConversationId).HasColumnName("conversation_id");
+            entity.Property(e => e.TeamId).HasColumnName("team_id");
+            entity.Property(e => e.EnabledAt).HasColumnName("enabled_at");
+            entity.HasOne(e => e.Conversation).WithMany(c => c.TeamKbs).HasForeignKey(e => e.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Team).WithMany().HasForeignKey(e => e.TeamId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserModulePermission>(entity =>
+        {
+            entity.ToTable("user_module_permissions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Module).HasColumnName("module").HasMaxLength(50);
+            entity.Property(e => e.Permission).HasColumnName("permission").HasMaxLength(50);
+            entity.Property(e => e.Granted).HasColumnName("granted").HasDefaultValue(true);
+            entity.Property(e => e.GrantedAt).HasColumnName("granted_at").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.GrantedByUserId).HasColumnName("granted_by_user_id");
+            entity.HasIndex(e => new { e.UserId, e.Module, e.Permission }).IsUnique();
+        });
+
+    }
+}

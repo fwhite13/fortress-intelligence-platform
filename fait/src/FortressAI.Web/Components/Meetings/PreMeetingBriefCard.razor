@@ -1,0 +1,143 @@
+@using FortressAI.Shared.Models
+@using System.Text.Json
+
+@* Pre-Meeting Brief Card — shown on Dashboard for meetings starting within the next 60 minutes *@
+
+<MudCard Elevation="3" Class="mb-3" Style="border-left: 4px solid #d97706; border-radius: 8px;">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <MudIcon Icon="@Icons.Material.Filled.Event" Style="color: #d97706; font-size: 20px;" />
+                <MudText Typo="Typo.h6" Style="font-weight: 700; flex: 1; min-width: 120px;">
+                    @Meeting.Subject
+                </MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled"
+                         Style="font-weight: 600;">
+                    In @_minutesUntil min
+                </MudChip>
+            </div>
+            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); margin-left: 30px;">
+                @_durationMin min meeting &middot; @Meeting.StartTime.ToLocalTime().ToString("h:mm tt")
+                @if (!string.IsNullOrWhiteSpace(Meeting.Location))
+                {
+                    <span> &middot; @Meeting.Location</span>
+                }
+            </MudText>
+        </CardHeaderContent>
+        <CardHeaderActions>
+            <MudTooltip Text="Dismiss this briefing">
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               Color="Color.Default" OnClick="HandleDismiss" />
+            </MudTooltip>
+        </CardHeaderActions>
+    </MudCardHeader>
+
+    <MudCardContent Class="pt-0">
+        @if (IsLoading)
+        {
+            @* Skeleton loader while context is generating *@
+            <MudSkeleton SkeletonType="SkeletonType.Text" Width="70%" Class="mb-1" />
+            <MudSkeleton SkeletonType="SkeletonType.Text" Width="50%" Class="mb-1" />
+            <MudSkeleton SkeletonType="SkeletonType.Text" Width="80%" />
+        }
+        else
+        {
+            @* Attendees *@
+            @if (_attendeeDisplay.Count > 0)
+            {
+                <div Class="mb-3">
+                    <MudText Typo="Typo.caption"
+                             Style="font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">
+                        Attendees
+                    </MudText>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+                        @foreach (var name in _attendeeDisplay)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Style="font-size: 0.75rem;">@name</MudChip>
+                        }
+                        @if (_extraAttendees > 0)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Color="Color.Secondary" Style="font-size: 0.75rem;">
+                                +@_extraAttendees more
+                            </MudChip>
+                        }
+                    </div>
+                </div>
+            }
+
+            @* AI-generated context *@
+            @if (!string.IsNullOrWhiteSpace(Context))
+            {
+                <MudDivider Class="mb-2" />
+                <div style="white-space: pre-wrap; font-size: 0.875rem; line-height: 1.65; color: var(--mud-palette-text-primary);">
+                    @Context
+                </div>
+            }
+        }
+    </MudCardContent>
+</MudCard>
+
+@code {
+    /// <summary>The calendar event to display a brief for.</summary>
+    [Parameter, EditorRequired]
+    public CalendarEvent Meeting { get; set; } = null!;
+
+    /// <summary>AI-generated context markdown string.</summary>
+    [Parameter]
+    public string Context { get; set; } = string.Empty;
+
+    /// <summary>True while the context is being generated — shows skeleton loader.</summary>
+    [Parameter]
+    public bool IsLoading { get; set; }
+
+    /// <summary>Called when the user clicks Dismiss. Parent should remove the card from its list.</summary>
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+
+    private int _minutesUntil;
+    private int _durationMin;
+    private List<string> _attendeeDisplay = new();
+    private int _extraAttendees;
+
+    protected override void OnParametersSet()
+    {
+        _minutesUntil = Math.Max(0, (int)(Meeting.StartTime - DateTime.UtcNow).TotalMinutes);
+        _durationMin = (int)(Meeting.EndTime - Meeting.StartTime).TotalMinutes;
+
+        var all = ParseAttendees();
+        _attendeeDisplay = all.Take(5).ToList();
+        _extraAttendees = Math.Max(0, all.Count - 5);
+    }
+
+    private List<string> ParseAttendees()
+    {
+        if (string.IsNullOrWhiteSpace(Meeting.AttendeesJson))
+            return [];
+
+        try
+        {
+            var items = JsonSerializer.Deserialize<List<JsonElement>>(Meeting.AttendeesJson) ?? [];
+            return items
+                .Select(a =>
+                {
+                    if (a.TryGetProperty("name", out var n)
+                        && n.ValueKind != JsonValueKind.Null
+                        && !string.IsNullOrWhiteSpace(n.GetString()))
+                        return n.GetString()!;
+                    return a.TryGetProperty("address", out var addr)
+                        ? addr.GetString() ?? string.Empty
+                        : string.Empty;
+                })
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private async Task HandleDismiss() => await OnDismiss.InvokeAsync();
+}

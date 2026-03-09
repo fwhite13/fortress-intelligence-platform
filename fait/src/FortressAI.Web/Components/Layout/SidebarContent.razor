@@ -1,0 +1,72 @@
+@inject UserSessionService Session
+@inject ProjectService ProjectSvc
+@inject ChatService ChatSvc
+@inject NavigationManager Nav
+@implements IDisposable
+
+<MudNavMenu>
+    @if (projects != null && projects.Any())
+    {
+        <MudText Typo="Typo.caption" Class="px-4 pt-3 pb-1" Style="color: var(--color-gold); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">
+            Projects
+        </MudText>
+        @foreach (var project in projects.Take(10))
+        {
+            <MudNavLink Href="@($"/projects/{project.Id}")" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Folder">
+                @project.Name
+            </MudNavLink>
+        }
+        <MudNavLink Href="/projects/new" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Add" Style="font-size: 0.85rem;">
+            New Project
+        </MudNavLink>
+    }
+
+    @if (recentChats != null && recentChats.Any())
+    {
+        <MudText Typo="Typo.caption" Class="px-4 pt-3 pb-1" Style="color: var(--color-gold); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;">
+            Recent Chats
+        </MudText>
+        @foreach (var chat in recentChats.Where(c => !string.IsNullOrWhiteSpace(c.Title)).Take(15))
+        {
+            <MudNavLink Href="@($"/chat/{chat.Id}")" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.ChatBubbleOutline" Style="overflow: hidden;">
+                <span title="@chat.Title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; min-width: 0;">@(chat.Title ?? "New conversation")</span>
+            </MudNavLink>
+        }
+        <MudNavLink Href="/chats" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.List" Style="font-size: 0.85rem;">
+            View All Chats
+        </MudNavLink>
+    }
+</MudNavMenu>
+
+@code {
+    private List<Project>? projects;
+    private List<Conversation>? recentChats;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private async void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        try
+        {
+            await LoadData();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception) { /* component may have been disposed */ }
+    }
+
+    private async Task LoadData()
+    {
+        if (!Session.IsAuthenticated) return;
+        projects = await ProjectSvc.GetUserProjectsAsync(Session.UserId);
+        recentChats = await ChatSvc.GetUserConversationsAsync(Session.UserId, 15);
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

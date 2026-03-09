@@ -1,0 +1,146 @@
+@page "/projects/new"
+<PageTitle>Project Settings — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject ProjectService ProjectSvc
+@inject NavigationManager Nav
+
+<div class="settings-panel">
+    <h2>@(isNew ? "New Project" : "Project Settings")</h2>
+
+    <div class="form-group">
+        <label>Name <span class="required">*</span></label>
+        <input type="text" class="form-input" @bind="name" placeholder="Project name" />
+    </div>
+
+    <div class="form-group">
+        <label>Description</label>
+        <input type="text" class="form-input" @bind="description" placeholder="Brief description" />
+    </div>
+
+    <div class="form-group">
+        <label>Custom Instructions</label>
+        <textarea class="form-input form-textarea" @bind="instructions" rows="6"
+                  placeholder="These instructions will be included as system prompt for every conversation in this project..."></textarea>
+        <small class="form-hint">Think of this as a system prompt — tell the AI about this project's context, style, and rules.</small>
+    </div>
+
+    <div class="form-group">
+        <label>Default Model</label>
+        <select class="form-input" @bind="model">
+            @foreach (var m in ModelInfo.AvailableModels)
+            {
+                <option value="@m.Id">@m.DisplayName — @m.Description</option>
+            }
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label>Knowledge Base</label>
+        <div style="margin-top: 0.5rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" @bind="enableFortressKb" />
+                <span>Fortress Knowledge Base</span>
+            </label>
+        </div>
+        <div style="margin-top: 0.25rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: not-allowed; opacity: 0.5;" title="Coming soon — personal document search">
+                <input type="checkbox" disabled />
+                <span>Personal Knowledge Base (coming soon)</span>
+            </label>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="alert alert-error">@error</div>
+    }
+
+    <div class="form-actions">
+        <button class="btn btn-accent" @onclick="Save" disabled="@saving">
+            @if (saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
+            @(isNew ? "Create Project" : "Save Changes")
+        </button>
+        @if (!isNew)
+        {
+            <button class="btn btn-danger" @onclick="Delete">
+                <MudIcon Icon="@Icons.Material.Filled.Delete" Size="Size.Small" /> Delete Project
+            </button>
+        }
+        @if (isNew)
+        {
+            <button class="btn btn-secondary" @onclick="Cancel">Cancel</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public Project? Project { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+    [Parameter] public EventCallback OnDeleted { get; set; }
+
+    private string name = "";
+    private string description = "";
+    private string instructions = "";
+    private string model = "claude-sonnet-4-6";
+    private bool enableFortressKb = false;
+    private string? error;
+    private bool saving = false;
+
+    private bool isNew => Project == null;
+
+    protected override void OnParametersSet()
+    {
+        if (Project != null)
+        {
+            name = Project.Name;
+            description = Project.Description ?? "";
+            instructions = Project.CustomInstructions ?? "";
+            model = Project.Model;
+            enableFortressKb = Project.EnableFortressKb;
+        }
+    }
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            error = "Project name is required.";
+            return;
+        }
+
+        saving = true;
+        error = null;
+
+        try
+        {
+            if (isNew)
+            {
+                var project = await ProjectSvc.CreateProjectAsync(
+                    Session.UserId, name, description, instructions, model);
+                Nav.NavigateTo($"/projects/{project.Id}");
+            }
+            else
+            {
+                await ProjectSvc.UpdateProjectAsync(Project!.Id, Session.UserId, name, description, instructions, model, enableFortressKb: enableFortressKb);
+                await OnSaved.InvokeAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task Delete()
+    {
+        if (Project == null) return;
+        await ProjectSvc.DeleteProjectAsync(Project.Id, Session.UserId);
+        await OnDeleted.InvokeAsync();
+    }
+
+    private void Cancel() => Nav.NavigateTo("/projects");
+}
