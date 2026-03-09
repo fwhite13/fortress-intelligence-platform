@@ -1,0 +1,16 @@
+# .NET build artifacts
+**/bin/
+**/obj/
+**/publish/
+
+# IDE
+.vs/
+.idea/
+*.user
+
+# Keys
+**/keys/
+
+# OS
+.DS_Store
+Thumbs.db
