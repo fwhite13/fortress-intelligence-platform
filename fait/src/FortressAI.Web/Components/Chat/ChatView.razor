@@ -191,6 +191,12 @@
                 @_interimTranscript
             </div>
         }
+        @if (!string.IsNullOrEmpty(_micError))
+        {
+            <div style="font-size: var(--text-xs); color: #dc2626; padding: 4px 0;">
+                @_micError
+            </div>
+        }
     </div>
 </div>
 
@@ -215,6 +221,7 @@
     private bool _isDictating = false;
     private bool _speechSupported = false;
     private string _interimTranscript = "";
+    private string? _micError = null;
     private UserAssistantConfig? _assistantConfig;
     private List<KbTeam> _userTeams = new();
     private HashSet<int> _selectedTeamIds = new();
@@ -847,6 +854,7 @@
         }
         else
         {
+            _micError = null; // clear previous error on new attempt
             var started = await JS.InvokeAsync<bool>("fortressChat.startDictation", _dotNetRef);
             _isDictating = started;
         }
@@ -879,6 +887,9 @@
     {
         _isDictating = false;
         _interimTranscript = "";
+        _micError = error == "not-allowed"
+            ? "Microphone access denied. Check your browser permissions."
+            : $"Microphone error: {error}";
         InvokeAsync(StateHasChanged);
     }
 

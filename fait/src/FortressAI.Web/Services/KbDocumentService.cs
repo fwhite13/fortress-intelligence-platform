@@ -310,7 +310,7 @@ public class KbDocumentService
             foreach (var doc in docs)
             {
                 if (statusMap.TryGetValue(doc.S3Key, out var status))
-                    doc.IngestionStatus = status ?? "pending";
+                    doc.IngestionStatus = string.IsNullOrEmpty(status) ? "pending" : status;
             }
         }
 
