@@ -344,7 +344,7 @@
 
             try
             {
-                await JS.InvokeVoidAsync("window.fortressChat.setupDragDrop", "chat-input-drop-zone", DotNetObjectReference.Create(this));
+                await JS.InvokeVoidAsync("window.fortressChat.setupDragDrop", "chat-input-drop-zone", _dotNetRef);
             }
             catch { /* JS interop can fail during prerender */ }
         }
