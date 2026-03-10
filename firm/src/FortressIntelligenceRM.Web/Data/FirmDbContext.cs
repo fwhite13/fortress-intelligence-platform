@@ -36,6 +36,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.LastLoginAt).HasColumnName("last_login_at");
+            entity.Property(e => e.FaitUserId).HasColumnName("fait_user_id").HasMaxLength(36);
         });
 
         modelBuilder.Entity<FirmMeeting>(entity =>
@@ -61,6 +62,8 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasColumnType("char(36)");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.TranscriptKbPushed).HasColumnName("transcript_kb_pushed").HasDefaultValue(false);
+            entity.Property(e => e.SummaryKbPushed).HasColumnName("summary_kb_pushed").HasDefaultValue(false);
             entity.HasOne(e => e.CreatedByUser)
                 .WithMany(u => u.Meetings)
                 .HasForeignKey(e => e.CreatedBy)

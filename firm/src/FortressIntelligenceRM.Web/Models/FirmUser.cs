@@ -15,5 +15,6 @@ public class FirmUser
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime? LastLoginAt { get; set; }
+    public string? FaitUserId { get; set; }
     public ICollection<FirmMeeting> Meetings { get; set; } = new List<FirmMeeting>();
 }

@@ -84,6 +84,20 @@
                             Audio
                         </MudButton>
                     }
+                    <MudButton Variant="Variant.Outlined"
+                               StartIcon="@(_meeting.TranscriptKbPushed ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.LibraryAdd)"
+                               Style="@(_meeting.TranscriptKbPushed ? "border-color: #4caf50; color: #4caf50;" : "border-color: #5a6a7a; color: #8899aa;")"
+                               OnClick="PushTranscriptToKb"
+                               Disabled="_pushingTranscript || _meeting.TranscriptKbPushed">
+                        @(_meeting.TranscriptKbPushed ? "In My KB" : "Add Transcript to KB")
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined"
+                               StartIcon="@(_meeting.SummaryKbPushed ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.LibraryAdd)"
+                               Style="@(_meeting.SummaryKbPushed ? "border-color: #4caf50; color: #4caf50;" : "border-color: #5a6a7a; color: #8899aa;")"
+                               OnClick="PushSummaryToKb"
+                               Disabled="_pushingSummary || _meeting.SummaryKbPushed">
+                        @(_meeting.SummaryKbPushed ? "In My KB" : "Add Summary to KB")
+                    </MudButton>
                 </MudStack>
             }
         </MudPaper>
@@ -212,6 +226,8 @@
     [Parameter] public long Id { get; set; }
     private FirmMeeting? _meeting;
     private bool _loading = true;
+    private bool _pushingTranscript = false;
+    private bool _pushingSummary = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -235,6 +251,66 @@
     {
         if (_meeting == null) return;
         Navigation.NavigateTo($"/api/meetings/{_meeting.Id}/audio", forceLoad: true);
+    }
+
+    private async Task PushTranscriptToKb()
+    {
+        if (_meeting == null || _pushingTranscript) return;
+        _pushingTranscript = true;
+        try
+        {
+            var http = new HttpClient();
+            var resp = await http.PostAsync($"/api/meetings/{_meeting.Id}/push-transcript-to-kb", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                _meeting.TranscriptKbPushed = true;
+                Snackbar.Add("Transcript added to your KB!", Severity.Success);
+            }
+            else
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"Failed to push transcript: {body}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _pushingTranscript = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task PushSummaryToKb()
+    {
+        if (_meeting == null || _pushingSummary) return;
+        _pushingSummary = true;
+        try
+        {
+            var http = new HttpClient();
+            var resp = await http.PostAsync($"/api/meetings/{_meeting.Id}/push-summary-to-kb", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                _meeting.SummaryKbPushed = true;
+                Snackbar.Add("Summary added to your KB!", Severity.Success);
+            }
+            else
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"Failed to push summary: {body}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _pushingSummary = false;
+            StateHasChanged();
+        }
     }
 
     private static string FormatDuration(int? seconds)

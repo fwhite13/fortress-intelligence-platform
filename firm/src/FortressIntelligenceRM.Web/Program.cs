@@ -50,11 +50,13 @@ builder.Services.AddDbContextFactory<FirmDbContext>(options =>
 builder.Services.AddScoped<MeetingService>();
 builder.Services.AddScoped<VpBotService>();
 builder.Services.AddScoped<S3Service>();
+builder.Services.AddScoped<FirmKbService>();
 builder.Services.AddHttpClient();
 
 // AWS SDK services
 builder.Services.AddAWSService<IAmazonECS>();
 builder.Services.AddAWSService<IAmazonS3>();
+builder.Services.AddAWSService<Amazon.BedrockAgent.IAmazonBedrockAgent>();
 
 // Controllers for API endpoints
 builder.Services.AddControllers();

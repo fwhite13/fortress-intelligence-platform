@@ -30,4 +30,6 @@ public class FirmMeeting
     public ICollection<FirmMeetingParticipant> Participants { get; set; } = new List<FirmMeetingParticipant>();
     public ICollection<FirmMeetingTranscript> Transcripts { get; set; } = new List<FirmMeetingTranscript>();
     public FirmMeetingSummary? Summary { get; set; }
+    public bool TranscriptKbPushed { get; set; }
+    public bool SummaryKbPushed { get; set; }
 }

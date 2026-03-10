@@ -131,6 +131,31 @@ public class DatabaseInitializationService : IHostedService
                 }
             }
 
+            // Schema column additions — idempotent ALTER TABLE statements
+            var alterStatements = new[]
+            {
+                "ALTER TABLE firm_users ADD COLUMN fait_user_id CHAR(36) NULL",
+                "ALTER TABLE firm_meetings ADD COLUMN transcript_kb_pushed TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE firm_meetings ADD COLUMN summary_kb_pushed TINYINT(1) NOT NULL DEFAULT 0"
+            };
+
+            foreach (var alterSql in alterStatements)
+            {
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
+                    _logger.LogInformation("FIRM: Schema migration applied: {Sql}", alterSql);
+                }
+                catch (MySqlException ex) when (ex.Number == 1060 || ex.Number == 1061 || ex.Number == 1091)
+                {
+                    _logger.LogInformation("FIRM: Schema migration already applied (idempotent): {Sql}", alterSql);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("FIRM: Schema migration failed (non-fatal): {Message}", ex.Message);
+                }
+            }
+
             _logger.LogInformation("FIRM: Database initialization complete.");
         }
         catch (Exception ex)

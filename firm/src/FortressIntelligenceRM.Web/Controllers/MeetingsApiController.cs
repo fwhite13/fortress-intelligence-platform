@@ -16,23 +16,29 @@ public class MeetingsApiController : ControllerBase
     private readonly MeetingService _meetingService;
     private readonly VpBotService _vpBotService;
     private readonly S3Service _s3Service;
+    private readonly FirmKbService _firmKbService;
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly IConfiguration _config;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MeetingsApiController> _logger;
 
     public MeetingsApiController(
         MeetingService meetingService,
         VpBotService vpBotService,
         S3Service s3Service,
+        FirmKbService firmKbService,
         IDbContextFactory<FirmDbContext> dbFactory,
         IConfiguration config,
+        IHttpClientFactory httpClientFactory,
         ILogger<MeetingsApiController> logger)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
         _s3Service = s3Service;
+        _firmKbService = firmKbService;
         _dbFactory = dbFactory;
         _config = config;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -185,6 +191,65 @@ public class MeetingsApiController : ControllerBase
             await db.SaveChangesAsync();
         }
 
+        // Fire-and-forget: notify FAIT so users with auto-add enabled get content pushed to KB
+        if (meetingStatus == MeetingStatus.Complete)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    // Resolve the entra OID from the meeting's creator
+                    await using var notifyDb = await _dbFactory.CreateDbContextAsync();
+                    var completedMeeting = await notifyDb.Meetings
+                        .Include(m => m.CreatedByUser)
+                        .FirstOrDefaultAsync(m => m.Id == payload.MeetingId);
+                    if (completedMeeting?.CreatedByUser == null) return;
+
+                    var faitApiUrl = _config["FIP:FaitApiUrl"] ?? "https://fait.dev.fortressam.ai";
+                    var sharedSecret = _config["Firm:SharedSecret"] ?? "";
+
+                    // Assemble transcript text
+                    var segments = await notifyDb.Transcripts
+                        .Where(t => t.MeetingId == payload.MeetingId)
+                        .OrderBy(t => t.StartTimeMs)
+                        .ToListAsync();
+                    var transcriptSb = new StringBuilder();
+                    foreach (var seg in segments)
+                    {
+                        var speaker = seg.SpeakerName ?? seg.SpeakerLabel ?? "Unknown";
+                        var ts = seg.StartTimeMs.HasValue
+                            ? TimeSpan.FromMilliseconds(seg.StartTimeMs.Value).ToString(@"hh\:mm\:ss")
+                            : "00:00:00";
+                        transcriptSb.AppendLine($"[{ts}] {speaker}: {seg.Text}");
+                    }
+
+                    // Assemble summary text
+                    var summaryRecord = await notifyDb.Summaries.FirstOrDefaultAsync(s => s.MeetingId == payload.MeetingId);
+                    var summaryText = summaryRecord?.SummaryText ?? "";
+
+                    var notifyBody = JsonSerializer.Serialize(new
+                    {
+                        entraOid = completedMeeting.CreatedByUser.EntraOid,
+                        meetingId = payload.MeetingId,
+                        transcriptText = transcriptSb.ToString(),
+                        summaryText = summaryText
+                    });
+
+                    var httpClient = _httpClientFactory.CreateClient();
+                    var req = new HttpRequestMessage(HttpMethod.Post, $"{faitApiUrl}/api/firm/meeting-complete");
+                    req.Content = new StringContent(notifyBody, System.Text.Encoding.UTF8, "application/json");
+                    if (!string.IsNullOrEmpty(sharedSecret))
+                        req.Headers.Add("X-Firm-Secret", sharedSecret);
+                    var response = await httpClient.SendAsync(req);
+                    _logger.LogInformation("FIRM: FAIT meeting-complete notification sent, status: {Status}", response.StatusCode);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "FIRM: Failed to notify FAIT of meeting completion (non-fatal)");
+                }
+            });
+        }
+
         return Ok();
     }
 
@@ -276,6 +341,72 @@ public class MeetingsApiController : ControllerBase
 
         var url = await _s3Service.GeneratePresignedUrlAsync(meeting.AudioS3Key, expiryHours: 1);
         return Ok(new { url });
+    }
+
+    [HttpPost("/api/meetings/{id}/push-transcript-to-kb")]
+    [Authorize]
+    public async Task<IActionResult> PushTranscriptToKb(long id)
+    {
+        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
+        if (user == null) return Unauthorized();
+
+        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == user.Id);
+        if (meeting == null) return NotFound(new { error = "Meeting not found" });
+
+        if (meeting.Status != MeetingStatus.Complete)
+            return BadRequest(new { error = "Meeting is not complete" });
+
+        if (string.IsNullOrEmpty(user.FaitUserId))
+            return BadRequest(new { error = "FAIT user ID not linked. Please log out and back in." });
+
+        try
+        {
+            await _firmKbService.PushTranscriptAsync(id, user.Id, user.FaitUserId);
+            return Ok(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Failed to push transcript for meeting {Id}", id);
+            return StatusCode(500, new { error = "Failed to push transcript to KB" });
+        }
+    }
+
+    [HttpPost("/api/meetings/{id}/push-summary-to-kb")]
+    [Authorize]
+    public async Task<IActionResult> PushSummaryToKb(long id)
+    {
+        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
+        if (user == null) return Unauthorized();
+
+        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == user.Id);
+        if (meeting == null) return NotFound(new { error = "Meeting not found" });
+
+        if (meeting.Status != MeetingStatus.Complete)
+            return BadRequest(new { error = "Meeting is not complete" });
+
+        if (string.IsNullOrEmpty(user.FaitUserId))
+            return BadRequest(new { error = "FAIT user ID not linked. Please log out and back in." });
+
+        try
+        {
+            await _firmKbService.PushSummaryAsync(id, user.Id, user.FaitUserId);
+            return Ok(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Failed to push summary for meeting {Id}", id);
+            return StatusCode(500, new { error = "Failed to push summary to KB" });
+        }
     }
 
     private async Task<(FirmMeeting? meeting, IActionResult? error)> ResolveOwnedMeeting(long id)
