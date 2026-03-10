@@ -12,6 +12,7 @@ public class MicrosoftTokenService
     private readonly ILogger<MicrosoftTokenService> _logger;
     private readonly HttpClient _httpClient;
 
+    public bool IsConfigured { get; }
     private readonly string _clientId;
     private readonly string _clientSecret;
     private readonly string _tenantId;
@@ -32,10 +33,13 @@ public class MicrosoftTokenService
         _logger = logger;
         _httpClient = httpClientFactory.CreateClient();
 
-        _clientId = configuration["Azure:ClientId"] ?? throw new InvalidOperationException("Azure:ClientId is required");
-        _tenantId = configuration["Azure:TenantId"] ?? throw new InvalidOperationException("Azure:TenantId is required");
-        _clientSecret = configuration["Azure:ClientSecret"] ?? throw new InvalidOperationException("Azure:ClientSecret is required");
+        _clientId = configuration["Azure:ClientId"] ?? "";
+        _tenantId = configuration["Azure:TenantId"] ?? "";
+        _clientSecret = configuration["Azure:ClientSecret"] ?? "";
         _useStubAuth = configuration.GetValue<bool>("UseStubAuth", false);
+        IsConfigured = !string.IsNullOrEmpty(_clientId) && !string.IsNullOrEmpty(_tenantId) && !string.IsNullOrEmpty(_clientSecret);
+        if (!IsConfigured)
+            _logger.LogWarning("Azure:ClientId/TenantId/ClientSecret not configured — Microsoft 365 features disabled");
     }
 
     public string GetAuthorizationUrl(string redirectUri, string state)

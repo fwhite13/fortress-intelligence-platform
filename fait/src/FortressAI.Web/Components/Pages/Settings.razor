@@ -270,9 +270,12 @@
         }
 
         // Check Microsoft 365 connection
-        var (connected, email, _) = await MsTokenSvc.GetConnectionStatusAsync(Session.UserId);
-        _msConnected = connected;
-        _msEmail = email;
+        if (MsTokenSvc.IsConfigured)
+        {
+            var (connected, email, _) = await MsTokenSvc.GetConnectionStatusAsync(Session.UserId);
+            _msConnected = connected;
+            _msEmail = email;
+        }
 
         // Load MCP tool connections
         _mcpConnections = await McpConnSvc.GetUserConnectionsAsync(Session.UserId);
