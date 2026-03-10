@@ -9,10 +9,8 @@ phases:
   build:
     commands:
       - echo Build started on `date`
-      - echo Verifying dotnet build...
-      - dotnet build src/FortressIntelligenceRM.Web/FortressIntelligenceRM.Web.csproj -c Release
       - echo Building Docker image...
-      - docker build -f Dockerfile.debian -t firm-web:$IMAGE_TAG .
+      - docker build -f firm/Dockerfile.debian -t firm-web:$IMAGE_TAG firm/
       - docker tag firm-web:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/firm-web:latest
       - docker tag firm-web:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/firm-web:$IMAGE_TAG
   post_build:
