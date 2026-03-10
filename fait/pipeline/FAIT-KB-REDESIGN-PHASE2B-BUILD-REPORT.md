@@ -158,3 +158,28 @@ These env vars need to be set in the ECS task definition before deploying:
 - `KbSyncRetryService` calls `PollIngestionJobAsync(jobId)` (the overload defaulting to Personal KB) — this is correct for now since the retry service currently only queues personal/team uploads. A TODO comment is in the convenience overload for future multi-KB polling support.
 - `KbQueryService.cs` had no stale references (confirmed via grep before changes).
 - `appsettings.json` keeps `PersonalDataSourceId` — it's a new key in the 4-DataSource structure, not a stale old key.
+
+---
+
+## Review Cycle 2 Fixes
+
+**Date:** 2026-03-09
+**Commit:** `b5f9b50`
+**Build Result:** ✅ 0 Errors, 27 Warnings (all pre-existing, unrelated)
+
+All 5 issues from the review report resolved:
+
+| ID | File | Fix | Status |
+|----|------|-----|--------|
+| I1 | `KnowledgeBaseManagement.razor` | Team ingestion calls now pass `KbTier.Team` — both upload (line 687) and delete (line 710) paths fixed | ✅ |
+| I2 | `DocumentService.cs` | Project upload (line 85) and delete (line 230) paths now call `StartProjectIngestionAsync()` instead of `StartIngestionAsync()` | ✅ |
+| I3 | `DatabaseInitializationService.cs` | "Project clean slate" migration block (line 558) now calls `StartProjectIngestionAsync()` | ✅ |
+| I4 | `ChatView.razor` | Layer 1 guard (line 418) corrected to `if (hasCorpKb)` — Personal KB routes exclusively through Layer 2 (ForgeQuery) | ✅ |
+| I5 | `KbDocumentService.cs` | S3 key builder updated to switch expression with explicit `KbTier.Corporate => kb-docs/fortress/` case; metadata write wrapped in `if (tier != KbTier.Corporate)` guard (structural isolation — no per-doc filter needed for Corp KB) | ✅ |
+
+**Verification:**
+```
+grep results confirmed correct routing in all 3 ingestion files.
+ChatView.razor line 418: if (hasCorpKb)  ✓
+Build: 0 errors ✓
+```
