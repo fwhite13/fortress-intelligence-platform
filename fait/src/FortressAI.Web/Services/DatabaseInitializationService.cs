@@ -482,7 +482,8 @@ public class DatabaseInitializationService : IHostedService
             {
                 const string migrationName = "project-clean-slate-v1";
                 // Use ADO.NET directly — EF Core SqlQueryRaw<int> wraps in subquery which breaks MySQL (t.Value)
-                using var conn = db.Database.GetDbConnection();
+                // NOTE: do NOT wrap in `using` — EF Core owns the connection lifecycle
+                var conn = db.Database.GetDbConnection();
                 if (conn.State != System.Data.ConnectionState.Open)
                     await conn.OpenAsync(cancellationToken);
                 int alreadyRan;
@@ -578,7 +579,8 @@ public class DatabaseInitializationService : IHostedService
             try
             {
                 const string kbRenameMigration = "kb-team-rename-v1";
-                using var conn2 = db.Database.GetDbConnection();
+                // NOTE: do NOT wrap in `using` — EF Core owns the connection lifecycle
+                var conn2 = db.Database.GetDbConnection();
                 if (conn2.State != System.Data.ConnectionState.Open)
                     await conn2.OpenAsync(cancellationToken);
                 int kbRenameAlreadyRan;
