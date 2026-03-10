@@ -292,6 +292,21 @@ public class DatabaseInitializationService : IHostedService
     PRIMARY KEY (id),
     UNIQUE KEY uq_user_module_permission (user_id, module, permission)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                ,("chat_attachments", @"CREATE TABLE IF NOT EXISTS chat_attachments (
+    Id CHAR(36) PRIMARY KEY,
+    ConversationId CHAR(36) NOT NULL,
+    MessageId CHAR(36) NOT NULL,
+    UserId CHAR(36) NOT NULL,
+    Filename VARCHAR(255) NOT NULL,
+    ContentType VARCHAR(100) NOT NULL,
+    S3Key VARCHAR(500) NOT NULL,
+    SizeBytes BIGINT NOT NULL,
+    TokenEstimate INT NULL,
+    CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_chat_attachments_conv (ConversationId),
+    CONSTRAINT FK_chat_attachments_conversations_ConversationId
+        FOREIGN KEY (ConversationId) REFERENCES conversations(Id) ON DELETE CASCADE
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 
             foreach (var (name, sql) in extraTables)

@@ -61,6 +61,8 @@ public class AssistantConfigService
 
         prefix += " When asked to create, write, or generate a document or file, output the content directly in your chat response as formatted markdown — do not attempt to use tools to save it. If tool calls are needed but keep failing, explain what you tried and provide the output directly in your response.";
 
+        prefix += "\n\nWhen you create, rewrite, or generate a document, code file, or structured content, wrap it in an artifact tag:\n<artifact type=\"markdown\" title=\"Document Title\">\n...content...\n</artifact>\nFor code, use: <artifact type=\"code\" language=\"python\" title=\"Script Name\">\nFor plain text, use: <artifact type=\"text\" title=\"Note Title\">\nYou cannot save files to disk or modify the Knowledge Base. Artifacts are the correct output format for any document you produce.";
+
         return prefix;
     }
 

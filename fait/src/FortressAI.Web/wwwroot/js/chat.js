@@ -121,6 +121,37 @@ window.fortressChat = {
         this._isRecording = false;
     },
 
+    downloadTextFile: function(filename, content) {
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    },
+
+    copyToClipboard: function(text) {
+        return navigator.clipboard.writeText(text);
+    },
+
+    readFileAsBase64: function(fileIndex) {
+        return new Promise((resolve, reject) => {
+            const input = document.getElementById('attachment-input');
+            if (!input || !input.files[fileIndex]) { resolve(''); return; }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const dataUrl = e.target.result;
+                const base64 = dataUrl.split(',')[1];
+                resolve(base64);
+            };
+            reader.onerror = () => resolve('');
+            reader.readAsDataURL(input.files[fileIndex]);
+        });
+    },
+
     isSpeechRecognitionSupported: function() {
         return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
     },
