@@ -358,7 +358,9 @@ public class DatabaseInitializationService : IHostedService
                 // Project document RAG / S3 ingestion tracking
                 "ALTER TABLE project_documents ADD COLUMN S3Key VARCHAR(512) NULL",
                 "ALTER TABLE project_documents ADD COLUMN IngestionStatus VARCHAR(20) NOT NULL DEFAULT 'none'",
-                "ALTER TABLE project_documents ADD COLUMN IngestedAt DATETIME(6) NULL"
+                "ALTER TABLE project_documents ADD COLUMN IngestedAt DATETIME(6) NULL",
+                "ALTER TABLE user_assistant_config ADD COLUMN firm_auto_transcript TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE user_assistant_config ADD COLUMN firm_auto_summary TINYINT(1) NOT NULL DEFAULT 0"
             };
 
             foreach (var alterSql in alterStatements)

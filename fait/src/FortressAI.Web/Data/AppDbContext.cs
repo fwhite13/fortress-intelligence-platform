@@ -118,6 +118,8 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.PersonalityPreset).HasMaxLength(20).IsRequired();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.FirmAutoTranscript).HasColumnName("firm_auto_transcript").HasDefaultValue(false);
+            entity.Property(e => e.FirmAutoSummary).HasColumnName("firm_auto_summary").HasDefaultValue(false);
             entity.HasOne(e => e.User).WithOne(u => u.AssistantConfig).HasForeignKey<UserAssistantConfig>(e => e.UserId);
         });
 

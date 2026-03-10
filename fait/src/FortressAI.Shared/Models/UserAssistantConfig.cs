@@ -8,6 +8,8 @@ public class UserAssistantConfig
     public string AvatarId { get; set; } = "shield";
     public string ColorHex { get; set; } = "#d4af37";
     public string PersonalityPreset { get; set; } = "friendly";
+    public bool FirmAutoTranscript { get; set; } = false;
+    public bool FirmAutoSummary { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public AppUser? User { get; set; }

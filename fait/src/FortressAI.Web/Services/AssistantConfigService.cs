@@ -47,6 +47,29 @@ public class AssistantConfigService
         return config;
     }
 
+    /// <summary>Save full assistant config including FIRM integration toggles.</summary>
+    public async Task<UserAssistantConfig> SaveConfigAsync(Guid userId, string assistantName, string avatarId, string colorHex, string personalityPreset, bool firmAutoTranscript, bool firmAutoSummary)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var config = await db.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == userId);
+        if (config == null)
+        {
+            config = new UserAssistantConfig { UserId = userId };
+            db.UserAssistantConfigs.Add(config);
+        }
+        config.AssistantName = assistantName;
+        config.AvatarId = avatarId;
+        config.ColorHex = colorHex;
+        config.PersonalityPreset = personalityPreset;
+        config.FirmAutoTranscript = firmAutoTranscript;
+        config.FirmAutoSummary = firmAutoSummary;
+        config.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        _logger.LogInformation("Saved assistant config for user {UserId}: name={Name}, preset={Preset}, firmAutoTranscript={AutoTranscript}, firmAutoSummary={AutoSummary}",
+            userId, assistantName, personalityPreset, firmAutoTranscript, firmAutoSummary);
+        return config;
+    }
+
     public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null)
     {
         var prefix = config.PersonalityPreset switch

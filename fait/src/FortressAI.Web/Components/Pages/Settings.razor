@@ -195,6 +195,28 @@
             </MudCardContent>
         </MudCard>
 
+        <!-- Meeting Intelligence (FIRM) -->
+        <MudCard Class="mb-4" Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.VideoCall" Class="mr-2" Style="vertical-align: middle;" />
+                        Meeting Intelligence (FIRM)
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-3">Meeting Intelligence (FIRM)</MudText>
+                <MudSwitch @bind-Value="_firmAutoTranscript" Label="Auto-add meeting transcripts to My KB"
+                           Color="Color.Warning" LabelStyle="color: #e8edf2;" />
+                <MudSwitch @bind-Value="_firmAutoSummary" Label="Auto-add meeting summaries to My KB"
+                           Color="Color.Warning" LabelStyle="color: #e8edf2;" Class="mt-2" />
+                <MudText Typo="Typo.body2" Style="color: #5a6a7a;" Class="mt-1">
+                    When enabled, completed meeting transcripts/summaries are automatically added to your personal knowledge base.
+                </MudText>
+            </MudCardContent>
+        </MudCard>
+
         <!-- Save -->
         <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSettings" Disabled="_saving"
                    StartIcon="@Icons.Material.Filled.Save" Size="Size.Large">
@@ -229,6 +251,10 @@
     private TimeSpan? _deliveryTime = new TimeSpan(8, 0, 0);
     private bool _emailDigestEnabled = false;
 
+    // FIRM integration toggles
+    private bool _firmAutoTranscript = false;
+    private bool _firmAutoSummary = false;
+
     // Microsoft 365 connection
     private bool _msConnected = false;
     private string? _msEmail;
@@ -258,6 +284,8 @@
         _avatarId = config.AvatarId;
         _colorHex = config.ColorHex;
         _accentColor = new MudColor(_colorHex);
+        _firmAutoTranscript = config.FirmAutoTranscript;
+        _firmAutoSummary = config.FirmAutoSummary;
 
         var schedule = await ConfigSvc.GetBriefingScheduleAsync(Session.UserId);
         if (schedule != null)
@@ -342,7 +370,7 @@
         try
         {
             _colorHex = _accentColor.ToString(MudColorOutputFormats.Hex);
-            await ConfigSvc.SaveConfigAsync(Session.UserId, _assistantName, _avatarId, _colorHex, _personalityPreset);
+            await ConfigSvc.SaveConfigAsync(Session.UserId, _assistantName, _avatarId, _colorHex, _personalityPreset, _firmAutoTranscript, _firmAutoSummary);
 
             if (_deliveryTime.HasValue)
             {
