@@ -394,10 +394,79 @@ public class BedrockService : IDisposable
     {
         var bedrockModelId = ModelInfo.GetModel(modelId).BedrockModelId;
 
+        // Extract PDF and image data URIs from system prompt before building request (mirrors StreamChatAsync)
+        var pdfBase64List = new List<string>();
+        var imageList = new List<(string mediaType, string base64Data)>();
+        var cleanedSystemPrompt = systemPrompt;
+        if (!string.IsNullOrEmpty(systemPrompt))
+        {
+            (cleanedSystemPrompt, pdfBase64List, imageList) = ExtractMediaDataUris(systemPrompt);
+            if (pdfBase64List.Count > 0 || imageList.Count > 0)
+            {
+                _logger.LogInformation("[BEDROCK_API] (tools) Extracted {PdfCount} PDF(s) and {ImageCount} image(s) from system prompt for user message injection",
+                    pdfBase64List.Count, imageList.Count);
+            }
+        }
+
+        // Build messages and inject image/PDF blocks into the last user message
+        var converseMessages = BuildConverseMessages(messages);
+        if (pdfBase64List.Count > 0 || imageList.Count > 0)
+        {
+            // Find the last user message and prepend image/PDF content blocks
+            var lastUserMsg = converseMessages.LastOrDefault(m => m.Role == Amazon.BedrockRuntime.ConversationRole.User);
+            if (lastUserMsg != null)
+            {
+                var extraBlocks = new List<ContentBlock>();
+
+                foreach (var pdfBase64 in pdfBase64List)
+                {
+                    var pdfBytes = Convert.FromBase64String(pdfBase64);
+                    extraBlocks.Add(new ContentBlock
+                    {
+                        Document = new DocumentBlock
+                        {
+                            Format = Amazon.BedrockRuntime.DocumentFormat.Pdf,
+                            Name = "attachment",
+                            Source = new DocumentSource
+                            {
+                                Bytes = new MemoryStream(pdfBytes)
+                            }
+                        }
+                    });
+                }
+
+                int imgIdx = 1;
+                foreach (var (mediaType, base64Data) in imageList)
+                {
+                    var imgBytes = Convert.FromBase64String(base64Data);
+                    // mediaType is e.g. "image/png" — extract the sub-type for ImageFormat
+                    var formatStr = mediaType.Contains('/') ? mediaType.Split('/')[1] : mediaType;
+                    var imageFormat = Amazon.BedrockRuntime.ImageFormat.FindValue(formatStr)
+                        ?? Amazon.BedrockRuntime.ImageFormat.Png;
+                    extraBlocks.Add(new ContentBlock
+                    {
+                        Image = new ImageBlock
+                        {
+                            Format = imageFormat,
+                            Source = new ImageSource
+                            {
+                                Bytes = new MemoryStream(imgBytes)
+                            }
+                        }
+                    });
+                    _logger.LogInformation("[BEDROCK_API] (tools) Added image block {Index}: mediaType={MediaType}", imgIdx++, mediaType);
+                }
+
+                // Prepend extra blocks; existing text block(s) remain at end
+                var existing = lastUserMsg.Content ?? new List<ContentBlock>();
+                lastUserMsg.Content = extraBlocks.Concat(existing).ToList();
+            }
+        }
+
         var request = new ConverseStreamRequest
         {
             ModelId = bedrockModelId,
-            Messages = BuildConverseMessages(messages),
+            Messages = converseMessages,
             InferenceConfig = new InferenceConfiguration
             {
                 MaxTokens = maxTokens,
@@ -405,11 +474,11 @@ public class BedrockService : IDisposable
             }
         };
 
-        if (!string.IsNullOrEmpty(systemPrompt))
+        if (!string.IsNullOrEmpty(cleanedSystemPrompt))
         {
             request.System = new List<SystemContentBlock>
             {
-                new SystemContentBlock { Text = systemPrompt }
+                new SystemContentBlock { Text = cleanedSystemPrompt }
             };
         }
 

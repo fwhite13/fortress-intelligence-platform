@@ -199,6 +199,27 @@ window.fortressChat = {
             contentEl.style.display = isHidden ? 'block' : 'none';
             if (btn) btn.innerHTML = isHidden ? '&#x25B2;' : '&#x25BC;';
         }
+    },
+
+    setupDragDrop: function(elementId, dotNetRef) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        el.addEventListener('dragover', (e) => { e.preventDefault(); dotNetRef.invokeMethodAsync('OnDragOver'); });
+        el.addEventListener('dragleave', () => dotNetRef.invokeMethodAsync('OnDragLeave'));
+        el.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            const files = Array.from(e.dataTransfer.files);
+            const result = await Promise.all(files.map(f => new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve({
+                    name: f.name,
+                    contentType: f.type || 'application/octet-stream',
+                    base64: reader.result.split(',')[1]
+                });
+                reader.readAsDataURL(f);
+            })));
+            dotNetRef.invokeMethodAsync('HandleDroppedFiles', result);
+        });
     }
 };
 

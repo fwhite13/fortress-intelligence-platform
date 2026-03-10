@@ -2085,7 +2085,7 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     display: flex;
     align-items: center;
     gap: 4px;
-    background: var(--color-surface-raised);
+    background: var(--color-surface-raised, #f5f5f5);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
     padding: 4px 8px;

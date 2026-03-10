@@ -184,7 +184,7 @@
             </div>
         }
         <!-- Input row -->
-        <div class="chat-input-wrapper" @ondragover:preventDefault @ondragover="HandleDragOver" @ondrop:preventDefault @ondrop="HandleDrop">
+        <div class="chat-input-wrapper @(_isDragOver ? "drag-over" : "")" id="chat-input-drop-zone">
             <!-- Hidden file input -->
             <InputFile id="chat-file-input" OnChange="HandleFileSelected" multiple accept=".txt,.md,.csv,.json,.xml,.html,.py,.cs,.js,.ts,.yaml,.yml,.png,.jpg,.jpeg,.gif,.pdf" style="display:none;" />
             <MudIconButton Icon="@Icons.Material.Filled.AttachFile"
@@ -341,6 +341,12 @@
                 StateHasChanged();
             }
             catch { /* Speech API check can fail during prerender */ }
+
+            try
+            {
+                await JS.InvokeVoidAsync("window.fortressChat.setupDragDrop", "chat-input-drop-zone", DotNetObjectReference.Create(this));
+            }
+            catch { /* JS interop can fail during prerender */ }
         }
 
         if (_needsScroll)
@@ -1029,14 +1035,48 @@
         await ProcessFiles(e.GetMultipleFiles(10));
     }
 
-    private void HandleDragOver(DragEventArgs e)
-    {
-        _isDragOver = true;
-    }
+    [JSInvokable]
+    public void OnDragOver() { _isDragOver = true; StateHasChanged(); }
 
-    private async Task HandleDrop(DragEventArgs e)
+    [JSInvokable]
+    public void OnDragLeave() { _isDragOver = false; StateHasChanged(); }
+
+    [JSInvokable]
+    public async Task HandleDroppedFiles(List<DroppedFileInfo> files)
     {
-        _isDragOver = false;
+        if (conversation == null && Session.IsAuthenticated)
+        {
+            conversation = await ChatSvc.CreateConversationAsync(Session.UserId, null, currentModel);
+            await ChatSvc.UpdateConversationKbAsync(conversation.Id, _fortressKbEnabled, _personalKbEnabled, _selectedTeamIds.ToList());
+            Nav.NavigateTo($"/chat/{conversation.Id}", replace: true);
+        }
+        if (conversation == null) return;
+
+        foreach (var file in files)
+        {
+            if (!ChatAttachmentService.IsSupportedFile(file.Name)) continue;
+            // Rough size check: base64 encodes 3 bytes per 4 chars
+            if ((long)(file.Base64.Length * 3L / 4) > 10 * 1024 * 1024) continue;
+
+            try
+            {
+                var bytes = Convert.FromBase64String(file.Base64);
+                using var stream = new MemoryStream(bytes);
+                var attachment = await AttachmentSvc.UploadAttachmentAsync(
+                    conversation.Id,
+                    Session.UserId,
+                    file.Name,
+                    file.ContentType,
+                    stream,
+                    bytes.Length);
+                _pendingAttachments.Add(attachment);
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ATTACH] Failed to upload dropped file {file.Name}: {ex.Message}");
+            }
+        }
     }
 
     private async Task ProcessFiles(IReadOnlyList<IBrowserFile> files)
@@ -1127,5 +1167,13 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
             catch { }
         }
         _dotNetRef?.Dispose();
+    }
+
+    /// <summary>DTO for files received via JS drag-drop interop.</summary>
+    public class DroppedFileInfo
+    {
+        public string Name { get; set; } = "";
+        public string ContentType { get; set; } = "";
+        public string Base64 { get; set; } = "";
     }
 }
