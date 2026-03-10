@@ -75,7 +75,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.Filename).HasMaxLength(500).IsRequired();
             entity.Property(e => e.ContentType).HasMaxLength(100);
             entity.Property(e => e.UploadedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
-            entity.HasOne(e => e.Project).WithMany(p => p.Documents).HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Project).WithMany(p => p.Documents).HasForeignKey(e => e.ProjectId).IsRequired(false).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Conversation>(entity =>

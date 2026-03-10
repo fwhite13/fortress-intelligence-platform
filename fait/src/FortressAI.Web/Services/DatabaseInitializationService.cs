@@ -649,6 +649,44 @@ public class DatabaseInitializationService : IHostedService
                 _logger.LogWarning(ex, "KB team rename migration failed (non-fatal)");
             }
 
+            // Migration: make project_documents.ProjectId nullable for personal/team KB tracking
+            try
+            {
+                const string migName = "kb-documents-nullable-projectid-v1";
+                var conn3 = db.Database.GetDbConnection();
+                if (conn3.State != System.Data.ConnectionState.Open)
+                    await conn3.OpenAsync(cancellationToken);
+                int alreadyRan;
+                using (var cmd = conn3.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT COUNT(*) FROM applied_migrations WHERE name = @name";
+                    var p = cmd.CreateParameter(); p.ParameterName = "@name"; p.Value = migName;
+                    cmd.Parameters.Add(p);
+                    alreadyRan = Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken));
+                }
+                if (alreadyRan == 0)
+                {
+                    // Make ProjectId nullable — safe because FK still enforced when non-null
+                    try { await db.Database.ExecuteSqlRawAsync(
+                        "ALTER TABLE project_documents MODIFY COLUMN ProjectId char(36) NULL", cancellationToken); }
+                    catch (MySqlConnector.MySqlException ex) when (ex.Number == 1060 || ex.Number == 1091)
+                    { /* already nullable */ }
+
+                    using (var cmd = conn3.CreateCommand())
+                    {
+                        cmd.CommandText = "INSERT INTO applied_migrations (name, applied_at) VALUES (@name, NOW())";
+                        var p = cmd.CreateParameter(); p.ParameterName = "@name"; p.Value = migName;
+                        cmd.Parameters.Add(p);
+                        await cmd.ExecuteNonQueryAsync(cancellationToken);
+                    }
+                    _logger.LogInformation("kb-documents-nullable-projectid-v1 migration complete");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "kb-documents-nullable-projectid-v1 migration failed (non-fatal)");
+            }
+
             // Note: RepairPersonalKbMetadataAsync removed — structural isolation in Phase 2b
             // eliminates the need for metadata repair (each KB type now in its own dedicated Bedrock KB).
 

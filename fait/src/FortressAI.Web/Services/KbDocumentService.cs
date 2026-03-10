@@ -84,6 +84,28 @@ public class KbDocumentService
             });
         }
 
+        // Track upload in DB for ingestion status monitoring
+        // ProjectId = null for personal/team/corp uploads (project uploads tracked by DocumentService)
+        try
+        {
+            await using var trackDb = await _dbContextFactory.CreateDbContextAsync();
+            trackDb.ProjectDocuments.Add(new FortressAI.Shared.Models.ProjectDocument
+            {
+                Id = Guid.NewGuid(),
+                ProjectId = null,   // not a project document
+                Filename = safeFilename,
+                S3Key = key,
+                FileSize = 0,       // not tracked for KB uploads — size not available at this point
+                IngestionStatus = "pending",
+                UploadedAt = DateTime.UtcNow
+            });
+            await trackDb.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to create KB document tracking row for {Key} — non-fatal", key);
+        }
+
         return key;
     }
 

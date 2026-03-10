@@ -148,7 +148,7 @@ public class DocumentService
             using var stream = new MemoryStream(contentBytes);
 
             var s3Key = await _kbDocumentService.UploadProjectDocumentAsync(
-                stream, uploadFilename, "text/plain", dbDoc.ProjectId, userId);
+                stream, uploadFilename, "text/plain", dbDoc.ProjectId!.Value, userId);
 
             dbDoc.S3Key = s3Key;
             dbDoc.IngestionStatus = "pending";
@@ -198,7 +198,7 @@ public class DocumentService
             var contentBytes = System.Text.Encoding.UTF8.GetBytes(doc.Content);
             using var stream = new MemoryStream(contentBytes);
             var s3Key = await _kbDocumentService.UploadProjectDocumentAsync(
-                stream, uploadFilename, "text/plain", doc.ProjectId, userId);
+                stream, uploadFilename, "text/plain", doc.ProjectId!.Value, userId);
 
             doc.S3Key = s3Key;
             doc.IngestionStatus = "pending";

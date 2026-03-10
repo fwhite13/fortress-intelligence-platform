@@ -3,7 +3,7 @@ namespace FortressAI.Shared.Models;
 public class ProjectDocument
 {
     public Guid Id { get; set; }
-    public Guid ProjectId { get; set; }
+    public Guid? ProjectId { get; set; }  // null for personal/team/corp KB uploads
     public string Filename { get; set; } = string.Empty;
     public string? ContentType { get; set; }
     public string? Content { get; set; }

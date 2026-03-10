@@ -824,7 +824,7 @@ namespace FortressAI.Web.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("varchar(500)");
 
-                    b.Property<Guid>("TeamId")
+                    b.Property<Guid?>("ProjectId")
                         .HasColumnType("char(36)");
 
                     b.Property<DateTime>("UploadedAt")
@@ -834,7 +834,7 @@ namespace FortressAI.Web.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TeamId");
+                    b.HasIndex("ProjectId");
 
                     b.ToTable("project_documents", (string)null);
                 });
@@ -1261,9 +1261,8 @@ namespace FortressAI.Web.Migrations
                 {
                     b.HasOne("FortressAI.Shared.Models.Project", "Project")
                         .WithMany("Documents")
-                        .HasForeignKey("TeamId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.Navigation("Project");
                 });
