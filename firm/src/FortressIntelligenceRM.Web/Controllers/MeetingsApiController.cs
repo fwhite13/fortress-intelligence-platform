@@ -347,21 +347,13 @@ public class MeetingsApiController : ControllerBase
     [Authorize]
     public async Task<IActionResult> PushTranscriptToKb(long id)
     {
-        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
+        var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
+        if (error != null) return error;
 
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
-        if (user == null) return Unauthorized();
-
-        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == user.Id);
-        if (meeting == null) return NotFound(new { error = "Meeting not found" });
-
-        if (meeting.Status != MeetingStatus.Complete)
+        if (meeting!.Status != MeetingStatus.Complete)
             return BadRequest(new { error = "Meeting is not complete" });
 
-        if (string.IsNullOrEmpty(user.FaitUserId))
+        if (string.IsNullOrEmpty(user!.FaitUserId))
             return BadRequest(new { error = "FAIT user ID not linked. Please log out and back in." });
 
         try
@@ -380,21 +372,13 @@ public class MeetingsApiController : ControllerBase
     [Authorize]
     public async Task<IActionResult> PushSummaryToKb(long id)
     {
-        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
+        var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
+        if (error != null) return error;
 
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
-        if (user == null) return Unauthorized();
-
-        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == user.Id);
-        if (meeting == null) return NotFound(new { error = "Meeting not found" });
-
-        if (meeting.Status != MeetingStatus.Complete)
+        if (meeting!.Status != MeetingStatus.Complete)
             return BadRequest(new { error = "Meeting is not complete" });
 
-        if (string.IsNullOrEmpty(user.FaitUserId))
+        if (string.IsNullOrEmpty(user!.FaitUserId))
             return BadRequest(new { error = "FAIT user ID not linked. Please log out and back in." });
 
         try
@@ -411,18 +395,24 @@ public class MeetingsApiController : ControllerBase
 
     private async Task<(FirmMeeting? meeting, IActionResult? error)> ResolveOwnedMeeting(long id)
     {
+        var (meeting, _, error) = await ResolveOwnedMeetingWithUser(id);
+        return (meeting, error);
+    }
+
+    private async Task<(FirmMeeting? meeting, FirmUser? user, IActionResult? error)> ResolveOwnedMeetingWithUser(long id)
+    {
         var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
             ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(entraOid)) return (null, Unauthorized());
+        if (string.IsNullOrEmpty(entraOid)) return (null, null, Unauthorized());
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
-        if (user == null) return (null, Unauthorized());
+        if (user == null) return (null, null, Unauthorized());
 
         var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == user.Id);
-        if (meeting == null) return (null, NotFound(new { error = "Meeting not found" }));
+        if (meeting == null) return (null, null, NotFound(new { error = "Meeting not found" }));
 
-        return (meeting, null);
+        return (meeting, user, null);
     }
 
     public record JoinRequest(string MeetingUrl, string? Title);

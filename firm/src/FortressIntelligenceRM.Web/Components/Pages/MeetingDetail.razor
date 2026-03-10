@@ -4,6 +4,7 @@
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ISnackbar Snackbar
+@inject IHttpClientFactory HttpClientFactory
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
@@ -259,7 +260,7 @@
         _pushingTranscript = true;
         try
         {
-            var http = new HttpClient();
+            var http = HttpClientFactory.CreateClient();
             var resp = await http.PostAsync($"/api/meetings/{_meeting.Id}/push-transcript-to-kb", null);
             if (resp.IsSuccessStatusCode)
             {
@@ -289,7 +290,7 @@
         _pushingSummary = true;
         try
         {
-            var http = new HttpClient();
+            var http = HttpClientFactory.CreateClient();
             var resp = await http.PostAsync($"/api/meetings/{_meeting.Id}/push-summary-to-kb", null);
             if (resp.IsSuccessStatusCode)
             {

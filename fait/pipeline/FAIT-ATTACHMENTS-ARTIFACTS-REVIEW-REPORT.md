@@ -218,3 +218,131 @@ Spec: `chat-attachments/{conversationId}/{filename}`. Actual: `chat-attachments/
 ---
 
 _Hawkeye — Review complete. Back to Tony Stark for fixes._
+
+---
+
+## Review Cycle 2 — Fix Verification Report
+
+**Reviewer:** Hawkeye  
+**Commit:** `9fc51e1`  
+**Review Cycle:** 2 of 2  
+**Date:** 2026-03-10  
+
+---
+
+## Verdict: NEEDS-CHANGES
+
+All critical and important fixes land correctly. One new bug introduced in the fix commit: `DotNetObjectReference` leak in the drag-drop interop setup — a disposable is allocated but never stored or freed. Minor but real.
+
+---
+
+## Checklist Results
+
+### C1 — Image/Bedrock fix
+
+| # | Check | Result |
+|---|---|---|
+| 1 | `ExtractMediaDataUris(ref systemPrompt)` called before Bedrock request in `StreamChatWithToolsAsync`? | ✅ Called at lines 400–411. `cleanedSystemPrompt` used throughout. |
+| 2 | Image blocks built with `ContentBlock.Image` + `ImageBlock` + `ImageSource.Bytes` (binary `MemoryStream`, NOT base64 string)? | ✅ Lines 445–455: `Convert.FromBase64String(base64Data)` → `MemoryStream(imgBytes)` → `ImageSource { Bytes = ... }`. Correct. |
+| 3 | Image blocks prepended to last user message content list? | ✅ Lines 458–461: `extraBlocks.Concat(existing).ToList()` — extra blocks first, existing text blocks appended. |
+| 4 | No regression to no-tools path in `StreamChatAsync`? | ✅ `StreamChatAsync` unchanged. Still calls `ExtractMediaDataUris` at line 47, same as before. |
+
+**C1 verdict: FIXED ✅**  
+The fix mirrors `StreamChatAsync` logic exactly. Binary bytes path is correct — `Convert.FromBase64String` to `MemoryStream` satisfies Bedrock Converse API requirements. PDF blocks are also handled correctly with `DocumentBlock` / `DocumentSource.Bytes`.
+
+---
+
+### I1 — Dead component removed
+
+| # | Check | Result |
+|---|---|---|
+| 5 | `ArtifactPanel.razor` no longer exists in repo? | ✅ `find . -name "ArtifactPanel.razor"` returns nothing. |
+| 6 | No compile errors from removal? | ✅ `grep -rn "ArtifactPanel" src/` returns nothing. No references remain. |
+
+**I1 verdict: FIXED ✅**
+
+---
+
+### I2 — Drag-drop JS interop
+
+| # | Check | Result |
+|---|---|---|
+| 7 | `chat.js` has `setupDragDrop(elementId, dotNetRef)` inside `window.fortressChat`? | ✅ Lines 204–223 of `chat.js`. |
+| 8 | `setupDragDrop` handles `dragover` (preventDefault), `dragleave`, `drop` with `dataTransfer.files` → base64 → `HandleDroppedFiles`? | ✅ All three events wired. `FileReader.readAsDataURL` + `.split(',')[1]` extracts base64. `HandleDroppedFiles` invoked with array of `{name, contentType, base64}`. |
+| 9 | `ChatView.razor` calls `setupDragDrop` in `OnAfterRenderAsync(firstRender)`? | ✅ Line 347, inside `if (firstRender)` block. |
+| 10 | `HandleDroppedFiles([JSInvokable])` processes files same way as `HandleFileSelected`? | ✅ Same pipeline: `IsSupportedFile` check → size guard → `UploadAttachmentAsync` → `_pendingAttachments.Add` → `StateHasChanged`. File type/name/contentType all passed through. Logic is functionally equivalent to `ProcessFiles`. |
+| 11 | `OnDragOver`/`OnDragLeave` are `[JSInvokable]` and call `StateHasChanged()`? | ✅ Lines 1038–1042. Both attributed `[JSInvokable]`, both call `StateHasChanged()`. |
+| 12 | `_isDragOver` bound to `drag-over` CSS class on drop zone div? | ✅ Line 187: `class="chat-input-wrapper @(_isDragOver ? "drag-over" : "")"`. |
+
+**I2 verdict: FIXED ✅ — with one new bug (see C2 below)**
+
+---
+
+### N1 — CSS fallback
+
+| # | Check | Result |
+|---|---|---|
+| 13 | `.attachment-chip` background has `var(--color-surface-raised, #f5f5f5)`? | ✅ `fortress.css` line 2088: `background: var(--color-surface-raised, #f5f5f5);` |
+
+**N1 verdict: FIXED ✅**
+
+---
+
+### Scope
+
+| # | Check | Result |
+|---|---|---|
+| 14 | No unrelated changes beyond the 5 stated files? | ✅ Commit touches exactly: `ArtifactPanel.razor` (deleted), `ChatView.razor`, `BedrockService.cs`, `fortress.css`, `chat.js` + the pipeline report doc. No unrelated files. |
+
+---
+
+## New Issue Found in Fix Commit
+
+### C2: `DotNetObjectReference` leak — drag-drop creates an untracked disposable
+
+**File:** `src/FortressAI.Web/Components/Chat/ChatView.razor` (line 347)  
+**Category:** Correctness / Resource leak  
+**Severity:** Important (downgraded from Critical — no crash, no data loss, but memory leak on every page load)
+
+**Issue:**  
+`setupDragDrop` is called with `DotNetObjectReference.Create(this)` — a *new, anonymous* reference that is never stored in a field and never disposed. `DisposeAsync` only disposes `_dotNetRef` (line 1169). The drag-drop reference leaks for the lifetime of the page/session.
+
+The existing pattern in this file already has the fix: `_dotNetRef` is created on line 330 and passed to `initScrollListener` and `startDictation`. The drag-drop setup should reuse the same reference.
+
+**Evidence:**
+```csharp
+// Line 330 — existing reference, properly disposed in DisposeAsync
+_dotNetRef = DotNetObjectReference.Create(this);
+
+// ...
+
+// Line 347 — NEW anonymous reference, NOT stored, NOT disposed → leak
+await JS.InvokeVoidAsync("window.fortressChat.setupDragDrop", "chat-input-drop-zone", DotNetObjectReference.Create(this));
+```
+
+**Fix:**
+```diff
+- await JS.InvokeVoidAsync("window.fortressChat.setupDragDrop", "chat-input-drop-zone", DotNetObjectReference.Create(this));
++ await JS.InvokeVoidAsync("window.fortressChat.setupDragDrop", "chat-input-drop-zone", _dotNetRef);
+```
+
+`_dotNetRef` is guaranteed non-null at this point (assigned on line 330, same `firstRender` block, earlier in execution).
+
+---
+
+## Acceptance Criteria Re-verification (Cycle 2)
+
+- [x] **C1** — `StreamChatWithToolsAsync` now calls `ExtractMediaDataUris`, builds proper binary image/PDF blocks, prepends to last user message. ✅
+- [x] **I1** — `ArtifactPanel.razor` deleted, no dangling references. ✅
+- [x] **I2** — Drag-drop fully wired via JS interop. ✅ (pending C2 fix)
+- [x] **N1** — CSS fallback added. ✅
+
+---
+
+## Required Fix Before PASS
+
+**C2** — Replace `DotNetObjectReference.Create(this)` on line 347 with `_dotNetRef`. One-line fix.
+
+---
+
+_Hawkeye — Cycle 2 complete. One new fix required. All original issues resolved._

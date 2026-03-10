@@ -169,9 +169,17 @@ public class FirmIntegrationController : ControllerBase
 
         if (tasks.Any())
         {
-            await Task.WhenAll(tasks);
-            // Trigger ingestion once after all uploads
-            await StartPersonalIngestionAsync(user.Id);
+            try
+            {
+                await Task.WhenAll(tasks);
+                // Trigger ingestion once after all uploads
+                await StartPersonalIngestionAsync(user.Id);
+            }
+            catch (Exception ex)
+            {
+                // KB push is best-effort — log but always return 200 so FIRM's callback isn't blocked
+                _logger.LogError(ex, "FirmIntegration: KB push failed for meeting {MeetingId} — non-fatal", payload.MeetingId);
+            }
         }
         else
         {
