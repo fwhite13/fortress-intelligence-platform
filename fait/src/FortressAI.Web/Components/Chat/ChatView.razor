@@ -658,6 +658,22 @@
 
             if (availableTools.Any())
             {
+                // Inject tool-use guidance into system prompt so the model is judicious about tool calls
+                var hasSearchTool = availableTools.Any(t => t.FullName.Contains("search", StringComparison.OrdinalIgnoreCase));
+                if (hasSearchTool)
+                {
+                    var toolGuidance = @"
+## Tool Usage Guidelines
+You have access to tools including web search. Use them wisely:
+- **Do NOT use web search** for tasks you can handle from your own knowledge — creative writing, code generation, general knowledge questions, math, analysis, summarization, or conversation.
+- **DO use web search** only when the user is asking for current/real-time information you genuinely do not have (recent news, live prices, current events, specific URLs, up-to-date statistics, or when they explicitly ask you to search).
+- When in doubt, answer directly first. If the user wants you to search, they will ask.
+- Never use web search as a stalling tactic or to appear more thorough — it slows down the response and adds no value when you already know the answer.";
+                    effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
+                        ? toolGuidance
+                        : effectiveSystemPrompt + "\n\n" + toolGuidance;
+                }
+
                 // Tool-enabled streaming with agentic loop
                 var bedrockTools = availableTools.Select(t => new BedrockToolSpec
                 {
