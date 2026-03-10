@@ -1096,14 +1096,23 @@
 
             try
             {
-                using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+                // Read all bytes immediately — IBrowserFile stream closes after SignalR circuit
+                // reads it; any await after OpenReadStream risks the stream being disposed.
+                byte[] fileBytes;
+                using (var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024))
+                {
+                    using var buf = new System.IO.MemoryStream();
+                    await stream.CopyToAsync(buf);
+                    fileBytes = buf.ToArray();
+                }
+                using var uploadStream = new System.IO.MemoryStream(fileBytes);
                 var attachment = await AttachmentSvc.UploadAttachmentAsync(
                     conversation.Id,
                     Session.UserId,
                     file.Name,
                     file.ContentType,
-                    stream,
-                    file.Size);
+                    uploadStream,
+                    fileBytes.Length);
                 _pendingAttachments.Add(attachment);
                 StateHasChanged();
             }
