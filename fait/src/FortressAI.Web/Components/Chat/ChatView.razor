@@ -1081,6 +1081,31 @@
 
     private async Task ProcessFiles(IReadOnlyList<IBrowserFile> files)
     {
+        // IMPORTANT: Read ALL file bytes FIRST before any async operation (conversation creation,
+        // navigation, S3 upload). IBrowserFile streams are backed by a Blazor SignalR pipe that
+        // closes as soon as the component re-renders or navigation occurs. Any await before
+        // CopyToAsync will invalidate file IDs ("There is no file with ID N").
+        var stagedFiles = new List<(string Name, string ContentType, byte[] Bytes)>();
+        foreach (var file in files)
+        {
+            if (!ChatAttachmentService.IsSupportedFile(file.Name)) continue;
+            if (file.Size > 10 * 1024 * 1024) continue;
+            try
+            {
+                using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+                using var buf = new System.IO.MemoryStream();
+                await stream.CopyToAsync(buf);
+                stagedFiles.Add((file.Name, file.ContentType, buf.ToArray()));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ATTACH] Failed to read {file.Name}: {ex.Message}");
+            }
+        }
+
+        if (stagedFiles.Count == 0) return;
+
+        // Now safe to do async work (conversation creation, navigation, S3 upload)
         if (conversation == null && Session.IsAuthenticated)
         {
             conversation = await ChatSvc.CreateConversationAsync(Session.UserId, null, currentModel);
@@ -1089,28 +1114,16 @@
         }
         if (conversation == null) return;
 
-        foreach (var file in files)
+        foreach (var (name, contentType, fileBytes) in stagedFiles)
         {
-            if (!ChatAttachmentService.IsSupportedFile(file.Name)) continue;
-            if (file.Size > 10 * 1024 * 1024) continue;
-
             try
             {
-                // Read all bytes immediately — IBrowserFile stream closes after SignalR circuit
-                // reads it; any await after OpenReadStream risks the stream being disposed.
-                byte[] fileBytes;
-                using (var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024))
-                {
-                    using var buf = new System.IO.MemoryStream();
-                    await stream.CopyToAsync(buf);
-                    fileBytes = buf.ToArray();
-                }
                 using var uploadStream = new System.IO.MemoryStream(fileBytes);
                 var attachment = await AttachmentSvc.UploadAttachmentAsync(
                     conversation.Id,
                     Session.UserId,
-                    file.Name,
-                    file.ContentType,
+                    name,
+                    contentType,
                     uploadStream,
                     fileBytes.Length);
                 _pendingAttachments.Add(attachment);
@@ -1118,7 +1131,7 @@
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ATTACH] Failed to upload {file.Name}: {ex.Message}");
+                Console.WriteLine($"[ATTACH] Failed to upload {name}: {ex.Message}");
             }
         }
     }
