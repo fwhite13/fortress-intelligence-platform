@@ -82,7 +82,7 @@ public class DocumentService
             await db.SaveChangesAsync();
 
             // Trigger Bedrock ingestion sync (fire-and-forget style — conflict handled internally)
-            await _kbDocumentService.StartIngestionAsync();
+            await _kbDocumentService.StartProjectIngestionAsync();
 
             _logger.LogInformation("[UPLOAD] Project doc {Filename} uploaded to S3 key {S3Key}, ingestion triggered", filename, s3Key);
         }
@@ -227,7 +227,7 @@ public class DocumentService
             {
                 await _kbDocumentService.DeleteDocumentAsync(doc.S3Key);
                 // Re-trigger ingestion to rebuild the KB index without this doc
-                await _kbDocumentService.StartIngestionAsync();
+                await _kbDocumentService.StartProjectIngestionAsync();
                 _logger.LogInformation("[DELETE] Removed S3 doc {S3Key} and triggered re-ingestion", doc.S3Key);
             }
             catch (Exception ex)

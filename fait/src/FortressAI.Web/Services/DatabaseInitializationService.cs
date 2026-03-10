@@ -555,7 +555,7 @@ public class DatabaseInitializationService : IHostedService
                     {
                         using var kbScope = _scopeFactory.CreateScope();
                         var kbDocumentService = kbScope.ServiceProvider.GetRequiredService<KbDocumentService>();
-                        await kbDocumentService.StartIngestionAsync();
+                        await kbDocumentService.StartProjectIngestionAsync();
                         _logger.LogInformation("Project clean slate: Bedrock KB re-ingestion triggered");
                     }
                     catch (Exception ex)

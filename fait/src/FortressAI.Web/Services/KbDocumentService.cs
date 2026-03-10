@@ -45,9 +45,12 @@ public class KbDocumentService
         if (string.IsNullOrEmpty(safeFilename))
             throw new ArgumentException("Invalid filename.", nameof(filename));
 
-        var key = tier == KbTier.Team
-            ? $"kb-docs/teams/{teamId}/{safeFilename}"
-            : $"kb-docs/personal/{userId}/{safeFilename}";
+        var key = tier switch
+        {
+            KbTier.Team      => $"kb-docs/teams/{teamId}/{safeFilename}",
+            KbTier.Corporate => $"kb-docs/fortress/{safeFilename}",
+            _                => $"kb-docs/personal/{userId}/{safeFilename}"
+        };
 
         // Upload document
         var putReq = new PutObjectRequest
@@ -60,22 +63,22 @@ public class KbDocumentService
         await _s3.PutObjectAsync(putReq);
         _logger.LogInformation("Uploaded KB document to s3://{Bucket}/{Key}", BucketName, key);
 
-        // Write metadata file — structural isolation: each KB type has its own dedicated Bedrock KB.
-        // Personal: only ownerId needed (no tier tag, no kbType — structural isolation removes the need).
-        // Team: only teamId needed (no tier, no ownerId — structural isolation).
-        var metadataDict = tier == KbTier.Team
-            ? new Dictionary<string, object> { ["teamId"] = teamId!.Value.ToString() }
-            : new Dictionary<string, object> { ["ownerId"] = userId.ToString() };
-        var metadata = new { metadataAttributes = metadataDict };
-        var metadataJson = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
-        var metaPutReq = new PutObjectRequest
+        // Write metadata companion file (not needed for Corp KB — structural isolation)
+        if (tier != KbTier.Corporate)
         {
-            BucketName = BucketName,
-            Key = $"{key}.metadata.json",
-            ContentBody = metadataJson,
-            ContentType = "application/json"
-        };
-        await _s3.PutObjectAsync(metaPutReq);
+            var metadataDict = tier == KbTier.Team
+                ? new Dictionary<string, object> { ["teamId"] = teamId!.Value.ToString() }
+                : new Dictionary<string, object> { ["ownerId"] = userId.ToString() };
+            var metadata = new { metadataAttributes = metadataDict };
+            var metadataJson = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
+            await _s3.PutObjectAsync(new PutObjectRequest
+            {
+                BucketName = BucketName,
+                Key = $"{key}.metadata.json",
+                ContentBody = metadataJson,
+                ContentType = "application/json"
+            });
+        }
 
         return key;
     }

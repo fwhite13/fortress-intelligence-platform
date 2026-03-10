@@ -414,8 +414,8 @@
                 var searchQueries = await KbQuerySvc.GenerateSearchQueriesAsync(text.Trim(), messagesToPass);
                 kbResult.QueriesUsed = searchQueries;
 
-                // Step 2: Layer 1 — Corp/Personal KB (parallel multi-query)
-                if (hasCorpKb || hasPersonalKb)
+                // Step 2: Layer 1 — Corp KB only (parallel multi-query)
+                if (hasCorpKb)
                 {
                     try
                     {

@@ -684,7 +684,7 @@
             const long maxSize = 10 * 1024 * 1024; // 10MB
             await using var stream = file.OpenReadStream(maxSize);
             await KbDocumentService.UploadDocumentAsync(stream, file.Name, file.ContentType, KbTier.Team, Session.UserId, _selectedTeam.Id);
-            await KbDocumentService.StartIngestionAsync();
+            await KbDocumentService.StartIngestionAsync(KbTier.Team);
             Snackbar.Add("Document uploaded. It will be searchable in 1–5 minutes as it's being processed.", Severity.Success);
             _teamDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Team, Session.UserId, _selectedTeam.Id);
         }
@@ -707,7 +707,7 @@
             await KbDocumentService.DeleteDocumentAsync(s3Key);
 
             // Fire ingestion — non-fatal if it fails
-            try { await KbDocumentService.StartIngestionAsync(); }
+            try { await KbDocumentService.StartIngestionAsync(KbTier.Team); }
             catch (Exception ex) { _logger.LogWarning(ex, "Ingestion trigger after delete failed (non-fatal)"); }
 
             Snackbar.Add("Document deleted. Vector store will sync in 1–5 minutes.", Severity.Success);
