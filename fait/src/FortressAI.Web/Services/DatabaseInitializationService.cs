@@ -294,7 +294,7 @@ public class DatabaseInitializationService : IHostedService
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
                 ,("chat_attachments", @"CREATE TABLE IF NOT EXISTS chat_attachments (
     Id CHAR(36) PRIMARY KEY,
-    ConversationId CHAR(36) NOT NULL,
+    ConversationId CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
     MessageId CHAR(36) NOT NULL,
     UserId CHAR(36) NOT NULL,
     Filename VARCHAR(255) NOT NULL,
