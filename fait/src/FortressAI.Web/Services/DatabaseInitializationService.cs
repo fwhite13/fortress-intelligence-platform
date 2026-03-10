@@ -666,11 +666,27 @@ public class DatabaseInitializationService : IHostedService
                 }
                 if (alreadyRan == 0)
                 {
-                    // Make ProjectId nullable — safe because FK still enforced when non-null
+                    // Make ProjectId nullable for personal/team/corp KB upload tracking.
+                    // Must drop FK first — Aurora won't MODIFY a column referenced by a FK.
+                    // Drop is idempotent (1091 = constraint doesn't exist).
+                    try { await db.Database.ExecuteSqlRawAsync(
+                        "ALTER TABLE project_documents DROP FOREIGN KEY FK_project_documents_projects_ProjectId",
+                        cancellationToken); }
+                    catch (MySqlConnector.MySqlException ex) when (ex.Number == 1091 || ex.Number == 1025)
+                    { /* FK already dropped or doesn't exist — idempotent */ }
+
+                    // MODIFY COLUMN to nullable (idempotent — succeeds silently if already nullable)
                     try { await db.Database.ExecuteSqlRawAsync(
                         "ALTER TABLE project_documents MODIFY COLUMN ProjectId char(36) NULL", cancellationToken); }
                     catch (MySqlConnector.MySqlException ex) when (ex.Number == 1060 || ex.Number == 1091)
                     { /* already nullable */ }
+
+                    // Recreate FK as nullable-compatible (ON DELETE SET NULL)
+                    try { await db.Database.ExecuteSqlRawAsync(
+                        "ALTER TABLE project_documents ADD CONSTRAINT FK_project_documents_projects_ProjectId " +
+                        "FOREIGN KEY (ProjectId) REFERENCES projects(Id) ON DELETE SET NULL", cancellationToken); }
+                    catch (MySqlConnector.MySqlException ex) when (ex.Number == 1826 || ex.Number == 1061)
+                    { /* FK already exists */ }
 
                     using (var cmd = conn3.CreateCommand())
                     {
