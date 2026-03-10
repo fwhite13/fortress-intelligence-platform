@@ -6,102 +6,85 @@ namespace FortressAI.Web.Services;
 public class KnowledgeBaseService
 {
     private readonly IAmazonBedrockAgentRuntime _client;
-    private readonly string _fortressKbId;
-    private readonly string _personalTeamKbId;
+    private readonly string _corpKbId;
+    private readonly string _personalKbId;
+    private readonly string _teamKbId;
+    private readonly string _projectKbId;
     private readonly ILogger<KnowledgeBaseService> _logger;
 
     public KnowledgeBaseService(IAmazonBedrockAgentRuntime client, IConfiguration config, ILogger<KnowledgeBaseService> logger)
     {
         _client = client;
-        _fortressKbId = config["KnowledgeBase:FortressKbId"] ?? "";
-        _personalTeamKbId = config["KnowledgeBase:PersonalTeamKbId"] ?? "";
+        _corpKbId    = config["KnowledgeBase:CorpKbId"] ?? "";
+        _personalKbId = config["KnowledgeBase:PersonalKbId"] ?? "";
+        _teamKbId    = config["KnowledgeBase:TeamKbId"] ?? "";
+        _projectKbId = config["KnowledgeBase:ProjectKbId"] ?? "";
         _logger = logger;
     }
 
-    public async Task<List<KbChunk>> RetrieveAsync(string query, bool useFortressKb, bool usePersonalKb, Guid? userId = null)
+    /// <summary>Retrieve from Corp KB. No filter — entire KB is Corp (structural isolation).</summary>
+    public async Task<List<KbChunk>> RetrieveCorpAsync(string query)
     {
-        if (!useFortressKb && !usePersonalKb) return new();
-        if (string.IsNullOrEmpty(_fortressKbId) && !usePersonalKb) return new();  // Not configured — silent no-op
-
-        var results = new List<KbChunk>();
-
-        if (useFortressKb && !string.IsNullOrEmpty(_fortressKbId))
-        {
-            try
-            {
-                var response = await _client.RetrieveAsync(new RetrieveRequest
-                {
-                    KnowledgeBaseId = _fortressKbId,
-                    RetrievalQuery = new KnowledgeBaseQuery { Text = query },
-                    RetrievalConfiguration = new KnowledgeBaseRetrievalConfiguration
-                    {
-                        VectorSearchConfiguration = new KnowledgeBaseVectorSearchConfiguration { NumberOfResults = 3 }
-                    }
-                });
-
-                results.AddRange(response.RetrievalResults
-                    .Where(r => r.Score > 0.3)  // Only include reasonably relevant results
-                    .Select(r => new KbChunk
-                    {
-                        Content = r.Content.Text,
-                        Source = r.Location?.S3Location?.Uri ?? "Fortress KB",
-                        Score = r.Score,
-                        KbType = "Fortress"
-                    }));
-                _logger.LogInformation("Fortress KB retrieval: raw={RawCount} results added, query='{Query}'",
-                    response.RetrievalResults.Count, query.Length > 50 ? query[..50] + "..." : query);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "KB retrieval failed — continuing without KB context");
-                // Fail silently — don't break chat
-            }
-        }
-
-        if (usePersonalKb && userId.HasValue && !string.IsNullOrEmpty(_personalTeamKbId))
-        {
-            try
-            {
-                var personalChunks = await RetrievePersonalAsync(query, userId.Value);
-                results.AddRange(personalChunks.Select(c => { c.KbType = "Personal"; return c; }));
-                _logger.LogInformation("[KB] Personal KB retrieval: {Count} results for user {UserId}", personalChunks.Count, userId.Value);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Personal KB retrieval failed in RetrieveAsync for user {UserId}", userId.Value);
-            }
-        }
-
-        return results.OrderByDescending(r => r.Score).Take(3).ToList();
-    }
-
-    /// <summary>Retrieve from personal KB using metadata filter on ownerId. Returns empty if not configured.</summary>
-    public async Task<List<KbChunk>> RetrievePersonalAsync(string query, Guid userId)
-    {
-        if (string.IsNullOrEmpty(_personalTeamKbId)) return new();
+        if (string.IsNullOrEmpty(_corpKbId)) return new();
 
         try
         {
             var response = await _client.RetrieveAsync(new RetrieveRequest
             {
-                KnowledgeBaseId = _personalTeamKbId,
+                KnowledgeBaseId = _corpKbId,
+                RetrievalQuery = new KnowledgeBaseQuery { Text = query },
+                RetrievalConfiguration = new KnowledgeBaseRetrievalConfiguration
+                {
+                    VectorSearchConfiguration = new KnowledgeBaseVectorSearchConfiguration { NumberOfResults = 3 }
+                }
+            });
+
+            _logger.LogInformation("Corp KB retrieval: raw={RawCount} results, query='{Query}'",
+                response.RetrievalResults.Count, query.Length > 50 ? query[..50] + "..." : query);
+
+            return response.RetrievalResults
+                .Where(r => r.Score > 0.3)
+                .Select(r => new KbChunk
+                {
+                    Content = r.Content.Text,
+                    Source = r.Location?.S3Location?.Uri ?? "Corp KB",
+                    Score = r.Score,
+                    KbType = "Fortress"
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Corp KB retrieval failed — continuing without KB context");
+            return new();
+        }
+    }
+
+    /// <summary>Retrieve from Personal KB using metadata filter on ownerId. Returns empty if not configured.</summary>
+    public async Task<List<KbChunk>> RetrievePersonalAsync(string query, Guid userId)
+    {
+        if (string.IsNullOrEmpty(_personalKbId)) return new();
+
+        try
+        {
+            var response = await _client.RetrieveAsync(new RetrieveRequest
+            {
+                KnowledgeBaseId = _personalKbId,
                 RetrievalQuery = new KnowledgeBaseQuery { Text = query },
                 RetrievalConfiguration = new KnowledgeBaseRetrievalConfiguration
                 {
                     VectorSearchConfiguration = new KnowledgeBaseVectorSearchConfiguration
                     {
                         NumberOfResults = 5,
-                        // Personal KB filter: match ownerId AND exclude project docs.
-                        // Project docs also have ownerId set to their creator — without the NOT clause,
-                        // personal KB retrieval would silently return the user's own project documents.
+                        // Personal KB: filter on ownerId only.
+                        // No compound AndAll filter needed — personal KB structurally contains ONLY personal docs.
+                        // No kbType != "project" exclusion needed — that was the old shared-KB hack.
                         Filter = new RetrievalFilter
                         {
-                            AndAll = new List<RetrievalFilter>
+                            Equals = new FilterAttribute
                             {
-                                new() { Equals = new FilterAttribute
-                                    { Key = "ownerId", Value = new Amazon.Runtime.Documents.Document(userId.ToString()) } },
-                                new() { NotEquals = new FilterAttribute
-                                    { Key = "kbType", Value = new Amazon.Runtime.Documents.Document("project") } }
+                                Key = "ownerId",
+                                Value = new Amazon.Runtime.Documents.Document(userId.ToString())
                             }
                         }
                     }
@@ -132,16 +115,16 @@ public class KnowledgeBaseService
         }
     }
 
-    /// <summary>Retrieve from team KB using metadata filter on teamId. Returns empty if not configured.</summary>
+    /// <summary>Retrieve from Team KB using metadata filter on teamId. Returns empty if not configured.</summary>
     public async Task<List<KbChunk>> RetrieveTeamAsync(string query, int teamId)
     {
-        if (string.IsNullOrEmpty(_personalTeamKbId)) return new();
+        if (string.IsNullOrEmpty(_teamKbId)) return new();
 
         try
         {
             var response = await _client.RetrieveAsync(new RetrieveRequest
             {
-                KnowledgeBaseId = _personalTeamKbId,
+                KnowledgeBaseId = _teamKbId,
                 RetrievalQuery = new KnowledgeBaseQuery { Text = query },
                 RetrievalConfiguration = new KnowledgeBaseRetrievalConfiguration
                 {
@@ -184,28 +167,30 @@ public class KnowledgeBaseService
         }
     }
 
-    /// <summary>Retrieve from project KB using kbType=project + projectId filter.</summary>
+    /// <summary>Retrieve from Project KB using metadata filter on projectId. Returns empty if not configured.</summary>
     public async Task<List<KbChunk>> RetrieveProjectAsync(string query, Guid projectId)
     {
-        if (string.IsNullOrEmpty(_personalTeamKbId)) return new();
+        if (string.IsNullOrEmpty(_projectKbId)) return new();
 
         try
         {
             var response = await _client.RetrieveAsync(new RetrieveRequest
             {
-                KnowledgeBaseId = _personalTeamKbId,
+                KnowledgeBaseId = _projectKbId,
                 RetrievalQuery = new KnowledgeBaseQuery { Text = query },
                 RetrievalConfiguration = new KnowledgeBaseRetrievalConfiguration
                 {
                     VectorSearchConfiguration = new KnowledgeBaseVectorSearchConfiguration
                     {
                         NumberOfResults = 8,
+                        // Project KB: filter on projectId only.
+                        // No kbType filter needed — Project KB structurally contains ONLY project docs.
                         Filter = new RetrievalFilter
                         {
-                            AndAll = new List<RetrievalFilter>
+                            Equals = new FilterAttribute
                             {
-                                new() { Equals = new FilterAttribute { Key = "kbType", Value = new Amazon.Runtime.Documents.Document("project") } },
-                                new() { Equals = new FilterAttribute { Key = "projectId", Value = new Amazon.Runtime.Documents.Document(projectId.ToString()) } }
+                                Key = "projectId",
+                                Value = new Amazon.Runtime.Documents.Document(projectId.ToString())
                             }
                         }
                     }
@@ -242,25 +227,19 @@ public class KnowledgeBaseService
     }
 
     /// <summary>
-    /// Multi-query parallel retrieval. Fans out all queries to Bedrock Retrieve
-    /// simultaneously, then merges + deduplicates results.
-    /// Falls back to empty list if queries list is empty or null.
+    /// Multi-query parallel retrieval scoped to Corp KB only.
+    /// Fans out all queries to Corp KB simultaneously, then merges + deduplicates results.
+    /// Called by ChatView.Layer1. Falls back to empty list if queries list is empty or null.
     /// </summary>
-    public async Task<List<KbChunk>> RetrieveMultiQueryAsync(
+    public async Task<List<KbChunk>> RetrieveCorpMultiQueryAsync(
         IEnumerable<string> queries,
-        bool useFortressKb,
-        bool usePersonalKb,
-        Guid? userId = null,
         double minScore = 0.35)
     {
         var queryList = queries?.Where(q => !string.IsNullOrWhiteSpace(q)).ToList() ?? new();
-        if (!queryList.Any()) return new();
-        if (!useFortressKb && !usePersonalKb) return new();
+        if (!queryList.Any() || string.IsNullOrEmpty(_corpKbId)) return new();
 
-        Console.WriteLine($"[KbSvc.RetrieveMultiQueryAsync] useFortressKb={useFortressKb} usePersonalKb={usePersonalKb} userId={userId} queries={queryList.Count}");
-
-        // Fan out all queries in parallel
-        var tasks = queryList.Select(q => RetrieveAsync(q, useFortressKb, usePersonalKb, userId));
+        // Fan out all queries in parallel to Corp KB
+        var tasks = queryList.Select(q => RetrieveCorpAsync(q));
         var resultSets = await Task.WhenAll(tasks);
 
         // Merge all chunks from all queries
@@ -272,15 +251,13 @@ public class KnowledgeBaseService
             .Where(chunk => seen.Add(ComputeContentHash(chunk.Content)))
             .ToList();
 
-        // Apply score threshold
-        var surviving = deduped.Where(c => c.Score >= minScore).ToList();
-
         _logger.LogInformation(
-            "[KbMultiQuery] queries={QCount} raw={Raw} deduped={Dedup} surviving={Surv} filtered={Filt}",
-            queryList.Count, allChunks.Count, deduped.Count, surviving.Count,
-            deduped.Count - surviving.Count);
+            "[KbCorpMultiQuery] queries={QCount} raw={Raw} deduped={Dedup} surviving={Surv}",
+            queryList.Count, allChunks.Count, deduped.Count,
+            deduped.Count(c => c.Score >= minScore));
 
-        return surviving.OrderByDescending(c => c.Score).Take(6).ToList();
+        return deduped.Where(c => c.Score >= minScore)
+            .OrderByDescending(c => c.Score).Take(6).ToList();
     }
 
     private static string ComputeContentHash(string content)

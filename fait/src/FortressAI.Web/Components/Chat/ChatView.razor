@@ -379,25 +379,20 @@
             //   - Team KB(s) selected (_selectedTeamIds.Any())
             //   - Conversation has an active project with KB docs (conversation.ProjectId.HasValue)
             //
-            // Layer 1 — KnowledgeBaseService (Corp + Personal Bedrock KB):
-            //   Fires when: _fortressKbEnabled OR _personalKbEnabled
-            //   Searches: Fortress Corp KB if fortressKbEnabled; Personal KB if personalKbEnabled
-            //   Both can be true simultaneously (both searched in parallel)
+            // Corp KB (KnowledgeBaseService.RetrieveCorpMultiQueryAsync):
+            //   Fires when: _fortressKbEnabled
+            //   Structural isolation — no filter needed (entire KB is Corp docs)
             //
-            // Layer 2 — ForgeQueryService (Personal/Team/Project KB):
+            // Personal/Team/Project KB (ForgeQueryService.GetKbContextMultiQueryAsync):
             //   Fires when: _personalKbEnabled OR _selectedTeamIds.Any() OR conversation.ProjectId.HasValue
-            //   Searches:
-            //     - Personal FORGE KB: when _personalKbEnabled (always passes userId; ForgeQueryService always searches personal)
-            //     - Team KB(s): when _selectedTeamIds.Any() — one query per selected team, parallel
-            //     - Project KB: when conversation.ProjectId.HasValue — always searched if project active
+            //   Each type queries its own dedicated Bedrock KB — no compound filters
             //
             // Query Generation (KbQueryService):
             //   Fires when: anyKbActive (before both layers)
             //   Model: Claude Haiku 4.5 (us.anthropic.claude-haiku-4-5-20251001-v1:0)
             //   Timeout: 5s, falls back to raw user text on any failure
             //
-            // Result Deduplication: SHA256 content hash, first 16 hex chars
-            // Score Threshold: 0.35 (configurable via KnowledgeBase:MinRelevanceScore)
+            // Query generation, deduplication, and score threshold unchanged.
             // ============================================================
             var kbResult = new KbRetrievalResult();
             var effectiveSystemPrompt = systemPrompt;
@@ -424,13 +419,8 @@
                 {
                     try
                     {
-                        // Layer 1 = Fortress Corp KB ONLY — personal KB is handled exclusively by Layer 2 (ForgeQuery)
-                        var corpChunks = await KbSvc.RetrieveMultiQueryAsync(
-                            searchQueries,
-                            useFortressKb: _fortressKbEnabled,
-                            usePersonalKb: false,  // never search personal KB in Layer 1
-                            userId: null,
-                            minScore: 0.35);
+                        // Corp KB — structural isolation, no filter needed
+                        var corpChunks = await KbSvc.RetrieveCorpMultiQueryAsync(searchQueries, minScore: 0.35);
 
                         if (corpChunks.Any())
                         {

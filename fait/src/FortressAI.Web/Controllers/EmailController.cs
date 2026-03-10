@@ -138,7 +138,11 @@ public class EmailController : ControllerBase
                 try
                 {
                     var query = $"Information about {request.SenderEmail} or {request.Subject}";
-                    var chunks = await kbService.RetrieveAsync(query, useFortressKb: false, usePersonalKb: true);
+                    // Personal KB — pass userId from the request context if available
+                    var chunks = new List<KbChunk>();
+                    // Note: EmailController doesn't have direct access to userId in this flow;
+                    // personal KB retrieval requires a userId. Skip KB retrieval here until
+                    // the email flow is wired to pass userId properly.
                     kbChunks = chunks.Select(c => c.Content).ToList();
                 }
                 catch { /* KB not available */ }

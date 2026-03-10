@@ -17,6 +17,18 @@ public class KbDocumentService
 
     private const string BucketName = "fortress-tools";
 
+    // Config keys read per KB type — KB IDs needed for polling ingestion job status
+    private string CorpKbId => _config["KnowledgeBase:CorpKbId"] ?? "";
+    private string PersonalKbId => _config["KnowledgeBase:PersonalKbId"] ?? "";
+    private string TeamKbId => _config["KnowledgeBase:TeamKbId"] ?? "";
+    private string ProjectKbId => _config["KnowledgeBase:ProjectKbId"] ?? "";
+
+    // Data source IDs per KB (Fred will provide these; empty = skip ingestion trigger)
+    private string PersonalDataSourceId => _config["KnowledgeBase:PersonalDataSourceId"] ?? "";
+    private string TeamDataSourceId => _config["KnowledgeBase:TeamDataSourceId"] ?? "";
+    private string ProjectDataSourceId => _config["KnowledgeBase:ProjectDataSourceId"] ?? "";
+    private string CorpDataSourceId => _config["KnowledgeBase:CorpDataSourceId"] ?? "";
+
     public KbDocumentService(IAmazonS3 s3, IAmazonBedrockAgent bedrockAgent, IConfiguration config, ILogger<KbDocumentService> logger, KbSyncRetryService syncRetryService)
     {
         _s3 = s3;
@@ -48,14 +60,12 @@ public class KbDocumentService
         await _s3.PutObjectAsync(putReq);
         _logger.LogInformation("Uploaded KB document to s3://{Bucket}/{Key}", BucketName, key);
 
-        // Write metadata file — omit teamId entirely for personal tier (empty string breaks Bedrock KB filtering)
-        var metadataDict = new Dictionary<string, object>
-        {
-            ["tier"] = tier == KbTier.Team ? "team" : "personal",
-            ["ownerId"] = userId.ToString()
-        };
-        if (teamId.HasValue)
-            metadataDict["teamId"] = teamId.Value.ToString();
+        // Write metadata file — structural isolation: each KB type has its own dedicated Bedrock KB.
+        // Personal: only ownerId needed (no tier tag, no kbType — structural isolation removes the need).
+        // Team: only teamId needed (no tier, no ownerId — structural isolation).
+        var metadataDict = tier == KbTier.Team
+            ? new Dictionary<string, object> { ["teamId"] = teamId!.Value.ToString() }
+            : new Dictionary<string, object> { ["ownerId"] = userId.ToString() };
         var metadata = new { metadataAttributes = metadataDict };
         var metadataJson = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
         var metaPutReq = new PutObjectRequest
@@ -89,14 +99,9 @@ public class KbDocumentService
 
         _logger.LogInformation("Uploaded project KB document to s3://{Bucket}/{Key}", BucketName, key);
 
-        // Write metadata — kbType=project + projectId for Bedrock filtering
-        var metadataDict = new Dictionary<string, object>
-        {
-            ["kbType"] = "project",
-            ["projectId"] = projectId.ToString(),
-            ["ownerId"] = userId.ToString()
-        };
-        var metadata = new { metadataAttributes = metadataDict };
+        // Write metadata — structural isolation: Project KB contains ONLY project docs.
+        // Only projectId needed for within-KB filtering. No kbType or ownerId needed.
+        var metadata = new { metadataAttributes = new Dictionary<string, object> { ["projectId"] = projectId.ToString() } };
         var metadataJson = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
 
         await _s3.PutObjectAsync(new PutObjectRequest
@@ -118,20 +123,30 @@ public class KbDocumentService
         _logger.LogInformation("Deleted KB document s3://{Bucket}/{Key}", BucketName, s3Key);
     }
 
-    /// <summary>Trigger Bedrock KB ingestion sync. Returns the ingestion job ID on success, null otherwise.</summary>
+    /// <summary>Trigger Bedrock KB ingestion sync for the specified KB tier. Returns the ingestion job ID on success, null otherwise.</summary>
+    /// <param name="tier">Which KB to trigger ingestion for. Defaults to Personal for backward compatibility.</param>
     /// <param name="throwOnConflict">
     /// When true, re-throws ConflictException instead of swallowing it.
     /// Used by KbSyncRetryService so the retry loop can detect a still-busy ingestion
     /// and keep _retryNeeded = true for the next cycle.
     /// </param>
-    public async Task<string?> StartIngestionAsync(bool throwOnConflict = false)
+    /// <remarks>
+    /// Note: Project KB uploads are triggered via UploadProjectDocumentAsync → StartProjectIngestionAsync.
+    /// KbTier enum only covers Personal/Team/Corporate — project docs have their own upload path.
+    /// </remarks>
+    public async Task<string?> StartIngestionAsync(KbTier tier = KbTier.Personal, bool throwOnConflict = false)
     {
-        var kbId = _config["KnowledgeBase:PersonalTeamKbId"];
-        var dsId = _config["KnowledgeBase:PersonalDataSourceId"];
+        var (kbId, dsId) = tier switch
+        {
+            KbTier.Personal   => (PersonalKbId, PersonalDataSourceId),
+            KbTier.Team       => (TeamKbId, TeamDataSourceId),
+            KbTier.Corporate  => (CorpKbId, CorpDataSourceId),
+            _                 => (PersonalKbId, PersonalDataSourceId)
+        };
 
         if (string.IsNullOrEmpty(kbId) || string.IsNullOrEmpty(dsId))
         {
-            _logger.LogDebug("PersonalTeamKbId or PersonalDataSourceId not configured — skipping ingestion trigger");
+            _logger.LogDebug("{Tier} KbId or DataSourceId not configured — skipping ingestion trigger", tier);
             return null;
         }
 
@@ -143,7 +158,7 @@ public class KbDocumentService
                 DataSourceId = dsId
             });
             var jobId = response.IngestionJob?.IngestionJobId;
-            _logger.LogInformation("Started KB ingestion job {JobId} for KB {KbId}", jobId, kbId);
+            _logger.LogInformation("Started {Tier} KB ingestion job {JobId} for KB {KbId}", tier, jobId, kbId);
             if (jobId != null)
                 _syncRetryService.EnqueueJobForPolling(jobId, DateTime.UtcNow);
             return jobId;
@@ -167,10 +182,8 @@ public class KbDocumentService
     }
 
     /// <summary>Poll the status of a Bedrock ingestion job. Returns Bedrock status string (COMPLETE, FAILED, IN_PROGRESS, etc.) or "UNKNOWN" on error.</summary>
-    public async Task<string> PollIngestionJobAsync(string jobId)
+    public async Task<string> PollIngestionJobAsync(string jobId, string kbId, string dsId)
     {
-        var kbId = _config["KnowledgeBase:PersonalTeamKbId"];
-        var dsId = _config["KnowledgeBase:PersonalDataSourceId"];
         try
         {
             var response = await _bedrockAgent.GetIngestionJobAsync(new GetIngestionJobRequest
@@ -188,54 +201,50 @@ public class KbDocumentService
         }
     }
 
-    /// <summary>
-    /// Scan personal KB metadata files and remove empty teamId attributes.
-    /// One-time repair for documents uploaded before the metadata fix.
-    /// </summary>
-    public async Task RepairPersonalKbMetadataAsync()
+    /// <summary>Convenience overload — defaults to Personal KB for backward compatibility with KbSyncRetryService.
+    /// TODO: Update KbSyncRetryService to store KB type alongside job ID for multi-KB ingestion polling support.</summary>
+    public async Task<string> PollIngestionJobAsync(string jobId)
+        => await PollIngestionJobAsync(jobId, PersonalKbId, PersonalDataSourceId);
+
+    /// <summary>Trigger ingestion for Project KB specifically. Called from UploadProjectDocumentAsync path.</summary>
+    public async Task<string?> StartProjectIngestionAsync(bool throwOnConflict = false)
     {
+        var kbId = ProjectKbId;
+        var dsId = ProjectDataSourceId;
+        if (string.IsNullOrEmpty(kbId) || string.IsNullOrEmpty(dsId))
+        {
+            _logger.LogDebug("ProjectKbId or ProjectDataSourceId not configured — skipping ingestion trigger");
+            return null;
+        }
+
         try
         {
-            var prefix = "kb-docs/personal/";
-            var listReq = new ListObjectsV2Request { BucketName = BucketName, Prefix = prefix };
-            ListObjectsV2Response listResp;
-            do
+            var response = await _bedrockAgent.StartIngestionJobAsync(new StartIngestionJobRequest
             {
-                listResp = await _s3.ListObjectsV2Async(listReq);
-                foreach (var obj in listResp.S3Objects.Where(o => o.Key.EndsWith(".metadata.json")))
-                {
-                    var getResp = await _s3.GetObjectAsync(new GetObjectRequest { BucketName = BucketName, Key = obj.Key });
-                    using var reader = new StreamReader(getResp.ResponseStream);
-                    var json = await reader.ReadToEndAsync();
-                    using var doc = JsonDocument.Parse(json);
-                    var attrs = doc.RootElement.GetProperty("metadataAttributes");
-                    if (attrs.TryGetProperty("teamId", out var teamIdProp) && teamIdProp.GetString() == "")
-                    {
-                        // Rebuild without empty teamId
-                        var newAttrs = new Dictionary<string, object>();
-                        foreach (var prop in attrs.EnumerateObject())
-                        {
-                            if (prop.Name == "teamId") continue;
-                            newAttrs[prop.Name] = prop.Value.GetString() ?? "";
-                        }
-                        var newMetadata = new { metadataAttributes = newAttrs };
-                        var newJson = JsonSerializer.Serialize(newMetadata, new JsonSerializerOptions { WriteIndented = true });
-                        await _s3.PutObjectAsync(new PutObjectRequest
-                        {
-                            BucketName = BucketName,
-                            Key = obj.Key,
-                            ContentBody = newJson,
-                            ContentType = "application/json"
-                        });
-                        _logger.LogInformation("Repaired metadata for {Key}", obj.Key);
-                    }
-                }
-                listReq.ContinuationToken = listResp.NextContinuationToken;
-            } while (listResp.IsTruncated);
+                KnowledgeBaseId = kbId,
+                DataSourceId = dsId
+            });
+            var jobId = response.IngestionJob?.IngestionJobId;
+            _logger.LogInformation("Started project KB ingestion job {JobId} for KB {KbId}", jobId, kbId);
+            if (jobId != null)
+                _syncRetryService.EnqueueJobForPolling(jobId, DateTime.UtcNow);
+            return jobId;
+        }
+        catch (Amazon.BedrockAgent.Model.ConflictException)
+        {
+            if (throwOnConflict)
+            {
+                _logger.LogInformation("Project ingestion already in progress (throwOnConflict=true) — re-throwing for retry loop");
+                throw;
+            }
+            _logger.LogInformation("Project ingestion already in progress — queued for automatic retry");
+            _syncRetryService.RequestRetry();
+            return null;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Metadata repair scan failed — non-fatal");
+            _logger.LogWarning(ex, "Failed to start project KB ingestion job — documents will sync on next scheduled ingestion");
+            return null;
         }
     }
 

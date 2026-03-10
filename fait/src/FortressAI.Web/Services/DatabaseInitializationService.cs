@@ -647,18 +647,8 @@ public class DatabaseInitializationService : IHostedService
                 _logger.LogWarning(ex, "KB team rename migration failed (non-fatal)");
             }
 
-            // One-time repair: fix KB metadata files with empty teamId (pre-fix uploads)
-            // Scope is created INSIDE Task.Run to ensure it is alive for the full async execution.
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    using var scope = _scopeFactory.CreateScope();
-                    var kbDocSvc = scope.ServiceProvider.GetRequiredService<KbDocumentService>();
-                    await kbDocSvc.RepairPersonalKbMetadataAsync();
-                }
-                catch (Exception ex) { _logger.LogWarning(ex, "KB metadata repair skipped"); }
-            });
+            // Note: RepairPersonalKbMetadataAsync removed — structural isolation in Phase 2b
+            // eliminates the need for metadata repair (each KB type now in its own dedicated Bedrock KB).
 
             _logger.LogInformation("Database initialization complete");
         }
