@@ -81,19 +81,19 @@ window.fortressChat = {
         this._recognition.interimResults = true;
         this._recognition.lang = 'en-US';
 
+        this._finalTranscript = '';
         this._recognition.onresult = (event) => {
             let interimText = '';
-            let finalText = '';
             for (let i = event.resultIndex; i < event.results.length; i++) {
                 const transcript = event.results[i][0].transcript;
                 if (event.results[i].isFinal) {
-                    finalText += transcript + ' ';
+                    this._finalTranscript += transcript + ' ';
                 } else {
                     interimText += transcript;
                 }
             }
             if (dotNetRef) {
-                dotNetRef.invokeMethodAsync('OnSpeechResult', finalText, interimText);
+                dotNetRef.invokeMethodAsync('OnSpeechResult', this._finalTranscript.trim(), interimText);
             }
         };
 

@@ -869,7 +869,7 @@
     public void OnSpeechResult(string finalText, string interimText)
     {
         if (!string.IsNullOrEmpty(finalText))
-            _userInput += finalText;
+            _userInput = finalText;  // Replace, don't append — JS accumulates the full final transcript
         _interimTranscript = interimText;
         InvokeAsync(StateHasChanged);
     }
