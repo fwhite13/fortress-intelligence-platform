@@ -59,6 +59,7 @@ builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<HelpService>();
 builder.Services.AddScoped<ChatService>();
 builder.Services.AddScoped<DocumentService>();
+builder.Services.AddScoped<ChatAttachmentService>();
 builder.Services.AddSingleton<BedrockService>();
 builder.Services.AddScoped<AssistantConfigService>();
 builder.Services.AddScoped<BriefingService>();

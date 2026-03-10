@@ -1,5 +1,7 @@
 @inject IJSRuntime JS
 @using Markdig
+@using FortressAI.Shared.Models
+@using System.Text.RegularExpressions
 
 <div class="message @(Message.Role == "user" ? "message-user" : "message-assistant") @(IsStreaming ? "streaming" : "")">
     <div class="message-avatar">
@@ -16,7 +18,7 @@
         <div class="message-content">
             @if (Message.Role == "assistant")
             {
-                @((MarkupString)RenderMarkdown(Message.Content))
+                @((MarkupString)RenderContent(Message.Content))
                 @if (IsStreaming)
                 {
                     <span class="cursor-blink">▊</span>
@@ -40,16 +42,139 @@
                 }
             </div>
         }
+        @if (Attachments.Any())
+        {
+            <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;">
+                @foreach (var att in Attachments)
+                {
+                    <div style="display: inline-flex; align-items: center; gap: 4px; background: var(--color-surface-elevated, #1e1e2e); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 3px 6px; font-size: var(--text-xs); color: var(--color-text-tertiary);">
+                        <MudIcon Icon="@Icons.Material.Filled.AttachFile" Style="width: 12px; height: 12px;" />
+                        <span>@att.Filename</span>
+                    </div>
+                }
+            </div>
+        }
     </div>
 </div>
 
 @code {
     [Parameter] public ChatMessage Message { get; set; } = new();
     [Parameter] public bool IsStreaming { get; set; } = false;
+    [Parameter] public List<ChatAttachment> Attachments { get; set; } = new();
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .Build();
+
+    // Regex to parse <artifact type="..." title="..." language="...">content</artifact>
+    private static readonly Regex ArtifactRegex = new Regex(
+        @"<artifact\s+([^>]*)>(.*?)</artifact>",
+        RegexOptions.Singleline | RegexOptions.Compiled);
+
+    private static readonly Regex AttrRegex = new Regex(
+        @"(\w+)=""([^""]*)""",
+        RegexOptions.Compiled);
+
+    private string RenderContent(string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return "";
+
+        // Check if there are any artifact tags
+        if (!content.Contains("<artifact"))
+            return RenderMarkdown(content);
+
+        // Split content around artifact tags and render each part
+        var sb = new System.Text.StringBuilder();
+        int lastIndex = 0;
+
+        foreach (Match match in ArtifactRegex.Matches(content))
+        {
+            // Render text before this artifact
+            if (match.Index > lastIndex)
+            {
+                var textBefore = content[lastIndex..match.Index];
+                if (!string.IsNullOrWhiteSpace(textBefore))
+                    sb.Append(RenderMarkdown(textBefore));
+            }
+
+            // Parse artifact attributes
+            var attrsStr = match.Groups[1].Value;
+            var artifactContent = match.Groups[2].Value.Trim();
+            var attrs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (Match attrMatch in AttrRegex.Matches(attrsStr))
+                attrs[attrMatch.Groups[1].Value] = attrMatch.Groups[2].Value;
+
+            var artifactType = attrs.GetValueOrDefault("type", "text");
+            var title = attrs.GetValueOrDefault("title", "Artifact");
+            var language = attrs.GetValueOrDefault("language", "");
+
+            sb.Append(RenderArtifact(artifactType, title, language, artifactContent));
+            lastIndex = match.Index + match.Length;
+        }
+
+        // Render any text after the last artifact
+        if (lastIndex < content.Length)
+        {
+            var remaining = content[lastIndex..];
+            if (!string.IsNullOrWhiteSpace(remaining))
+                sb.Append(RenderMarkdown(remaining));
+        }
+
+        return sb.ToString();
+    }
+
+    private string RenderArtifact(string type, string title, string language, string content)
+    {
+        var encodedContent = System.Net.WebUtility.HtmlEncode(content);
+        var encodedTitle = System.Net.WebUtility.HtmlEncode(title);
+        var artifactId = $"artifact-{Guid.NewGuid():N}";
+
+        var typeIcon = type switch
+        {
+            "markdown" => "&#x1F4C4;",
+            "code" => "&#x1F4BB;",
+            _ => "&#x1F4C3;"
+        };
+
+        string contentHtml;
+        if (type == "markdown")
+        {
+            contentHtml = $"<div class='artifact-markdown'>{RenderMarkdown(content)}</div>";
+        }
+        else if (type == "code")
+        {
+            var langClass = string.IsNullOrEmpty(language) ? "" : $" class=\"language-{System.Net.WebUtility.HtmlEncode(language)}\"";
+            contentHtml = $"<pre><code{langClass}>{encodedContent}</code></pre>";
+        }
+        else
+        {
+            contentHtml = $"<pre style='white-space:pre-wrap;'>{encodedContent}</pre>";
+        }
+
+        // Determine download extension
+        var downloadExt = type switch
+        {
+            "markdown" => "md",
+            "code" => string.IsNullOrEmpty(language) ? "txt" : language,
+            _ => "txt"
+        };
+
+        return $@"<div class='artifact-panel' id='{artifactId}'>
+  <div class='artifact-header'>
+    <span class='artifact-type-icon'>{typeIcon}</span>
+    <span class='artifact-title'>{encodedTitle}</span>
+    <div class='artifact-actions'>
+      <button class='artifact-btn' onclick=""fortressChat.copyArtifact('{artifactId}')"" title='Copy to clipboard'>Copy</button>
+      <button class='artifact-btn' onclick=""fortressChat.downloadArtifact('{artifactId}', '{System.Net.WebUtility.HtmlEncode(title)}', '{downloadExt}')"" title='Download'>Download</button>
+      <button class='artifact-btn' onclick=""fortressChat.toggleArtifact('{artifactId}')"" title='Collapse'>&#x25B2;</button>
+    </div>
+  </div>
+  <div class='artifact-content' id='{artifactId}-content'>
+    {contentHtml}
+  </div>
+  <div class='artifact-raw' id='{artifactId}-raw' style='display:none;'>{encodedContent}</div>
+</div>";
+    }
 
     private string RenderMarkdown(string? content)
     {

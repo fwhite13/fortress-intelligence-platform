@@ -1996,3 +1996,79 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
 }
+
+/* Artifact Panel Styles */
+.artifact-panel {
+    border: 1px solid var(--color-border, #333);
+    border-radius: var(--radius-md, 8px);
+    margin: 12px 0;
+    overflow: hidden;
+    background: var(--color-surface-elevated, #1a1a2e);
+}
+
+.artifact-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--color-surface, #111);
+    border-bottom: 1px solid var(--color-border, #333);
+}
+
+.artifact-type-icon {
+    font-size: 16px;
+}
+
+.artifact-title {
+    flex: 1;
+    font-size: var(--text-sm, 13px);
+    font-weight: var(--font-medium, 500);
+    color: var(--color-text-primary, #eee);
+}
+
+.artifact-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.artifact-btn {
+    background: transparent;
+    border: 1px solid var(--color-border, #333);
+    border-radius: var(--radius-sm, 4px);
+    padding: 2px 8px;
+    font-size: var(--text-xs, 11px);
+    color: var(--color-text-secondary, #aaa);
+    cursor: pointer;
+}
+
+.artifact-btn:hover {
+    background: var(--color-surface-elevated, #222);
+    color: var(--color-text-primary, #eee);
+}
+
+.artifact-content {
+    padding: 12px;
+    overflow-x: auto;
+}
+
+.artifact-markdown {
+    line-height: 1.6;
+}
+
+.artifact-markdown h1, .artifact-markdown h2, .artifact-markdown h3 {
+    margin-top: 12px;
+    margin-bottom: 6px;
+}
+
+.artifact-panel pre {
+    margin: 0;
+    padding: 0;
+}
+
+.artifact-panel .artifact-content pre code {
+    display: block;
+    padding: 12px;
+    overflow-x: auto;
+    background: var(--color-bg-code, #0d1117);
+    border-radius: var(--radius-sm, 4px);
+}

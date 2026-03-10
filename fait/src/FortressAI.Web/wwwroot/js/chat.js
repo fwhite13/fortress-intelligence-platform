@@ -83,15 +83,17 @@ window.fortressChat = {
 
         this._finalTranscript = '';
         this._recognition.onresult = (event) => {
+            let finalText = '';
             let interimText = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
+            for (let i = 0; i < event.results.length; i++) {
                 const transcript = event.results[i][0].transcript;
                 if (event.results[i].isFinal) {
-                    this._finalTranscript += transcript + ' ';
+                    finalText += transcript + ' ';
                 } else {
                     interimText += transcript;
                 }
             }
+            this._finalTranscript = finalText;
             if (dotNetRef) {
                 dotNetRef.invokeMethodAsync('OnSpeechResult', this._finalTranscript.trim(), interimText);
             }
@@ -121,6 +123,51 @@ window.fortressChat = {
 
     isSpeechRecognitionSupported: function() {
         return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    },
+
+    copyArtifact: function(artifactId) {
+        const rawEl = document.getElementById(artifactId + '-raw');
+        if (rawEl) {
+            navigator.clipboard.writeText(rawEl.textContent || '').then(() => {
+                const btn = document.querySelector(`#${artifactId} .artifact-btn`);
+                if (btn) {
+                    const orig = btn.textContent;
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => { btn.textContent = orig; }, 1500);
+                }
+            }).catch(() => {
+                const range = document.createRange();
+                range.selectNodeContents(rawEl);
+                const sel = window.getSelection();
+                if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+                document.execCommand('copy');
+            });
+        }
+    },
+
+    downloadArtifact: function(artifactId, title, ext) {
+        const rawEl = document.getElementById(artifactId + '-raw');
+        if (!rawEl) return;
+        const content = rawEl.textContent || '';
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = (title || 'artifact') + '.' + (ext || 'txt');
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    },
+
+    toggleArtifact: function(artifactId) {
+        const contentEl = document.getElementById(artifactId + '-content');
+        const btn = document.querySelector(`#${artifactId} .artifact-actions .artifact-btn:last-child`);
+        if (contentEl) {
+            const isHidden = contentEl.style.display === 'none';
+            contentEl.style.display = isHidden ? 'block' : 'none';
+            if (btn) btn.innerHTML = isHidden ? '&#x25B2;' : '&#x25BC;';
+        }
     }
 };
 

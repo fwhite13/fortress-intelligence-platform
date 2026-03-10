@@ -35,6 +35,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<McpToolCallLog> McpToolCallLogs => Set<McpToolCallLog>();
     public DbSet<ConversationTeamKb> ConversationTeamKbs { get; set; } = null!;
     public DbSet<UserModulePermission> UserModulePermissions { get; set; } = null!;
+    public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -378,6 +379,20 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.GrantedAt).HasColumnName("granted_at").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.Property(e => e.GrantedByUserId).HasColumnName("granted_by_user_id");
             entity.HasIndex(e => new { e.UserId, e.Module, e.Permission }).IsUnique();
+        });
+
+        modelBuilder.Entity<ChatAttachment>(entity =>
+        {
+            entity.ToTable("chat_attachments");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Filename).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.ContentType).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.S3Key).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.Conversation).WithMany().HasForeignKey(e => e.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.ConversationId);
+            entity.HasIndex(e => e.MessageId);
         });
 
     }

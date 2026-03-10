@@ -13,6 +13,7 @@
 @inject ForgeQueryService ForgeQuery
 @inject ForgeService ForgeSvc
 @inject DocumentService DocumentSvc
+@inject ChatAttachmentService AttachmentSvc
 @inject IMcpToolService McpToolSvc
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
 @inject IServiceScopeFactory ScopeFactory
@@ -160,8 +161,38 @@
             <!-- Model selector -->
             <ModelSelector CurrentModel="@currentModel" OnModelChanged="HandleModelChanged" />
         </div>
+        <!-- Attachment chips (shown when files are staged) -->
+        @if (_pendingAttachments.Any())
+        {
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--space-2);">
+                @foreach (var att in _pendingAttachments)
+                {
+                    var a = att;
+                    <div style="display: inline-flex; align-items: center; gap: 6px; background: var(--color-surface-elevated, #1e1e2e); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 4px 8px; font-size: var(--text-xs); color: var(--color-text-secondary);">
+                        <MudIcon Icon="@GetFileIcon(a.Filename)" Style="width: 14px; height: 14px;" />
+                        <span>@a.Filename</span>
+                        <span style="color: var(--color-text-tertiary);">(@ChatAttachmentService.FormatFileSize(a.SizeBytes))</span>
+                        @if (a.TokenEstimate.HasValue)
+                        {
+                            <span style="color: var(--color-text-tertiary);">~@a.TokenEstimate tokens</span>
+                        }
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                            Style="width: 16px; height: 16px; padding: 0; color: var(--color-text-tertiary);"
+                            OnClick="@(() => RemovePendingAttachment(a.Id))" />
+                    </div>
+                }
+            </div>
+        }
         <!-- Input row -->
-        <div class="chat-input-wrapper">
+        <div class="chat-input-wrapper" @ondragover:preventDefault @ondragover="HandleDragOver" @ondrop:preventDefault @ondrop="HandleDrop">
+            <!-- Hidden file input -->
+            <InputFile id="chat-file-input" OnChange="HandleFileSelected" multiple accept=".txt,.md,.csv,.json,.xml,.html,.py,.cs,.js,.ts,.yaml,.yml,.png,.jpg,.jpeg,.gif,.pdf" style="display:none;" />
+            <MudIconButton Icon="@Icons.Material.Filled.AttachFile"
+                Disabled="@isStreaming"
+                OnClick="TriggerFileInput"
+                Title="Attach file"
+                Style="background: transparent; color: var(--color-text-secondary); border-radius: var(--radius-md);"
+                Size="Size.Medium" />
             <textarea class="chat-input"
                       @bind="_userInput"
                       @bind:event="oninput"
@@ -180,7 +211,7 @@
                     Size="Size.Medium" />
             }
             <MudIconButton Icon="@Icons.Material.Filled.Send"
-                Disabled="@(isStreaming || string.IsNullOrWhiteSpace(_userInput))"
+                Disabled="@(isStreaming || (string.IsNullOrWhiteSpace(_userInput) && !_pendingAttachments.Any()))"
                 OnClick="HandleSendFromInput"
                 Style="@GetSendButtonStyle()"
                 Size="Size.Medium" />
@@ -234,6 +265,9 @@
     private List<ToolCallAccumulator> _activeToolCalls = new();
     private string? _currentToolName;
     private bool _toolCallInProgress = false;
+    // Attachment state
+    private List<ChatAttachment> _pendingAttachments = new();
+    private bool _isDragOver = false;
     // KB retrieval result for UI indicator (set per-message)
     private KbRetrievalResult? _lastKbResult;
     protected override async Task OnParametersSetAsync()
@@ -327,6 +361,10 @@
         if (string.IsNullOrWhiteSpace(text) || isStreaming) return;
         _lastKbResult = null;  // Clear stale result before new send
 
+        // Capture pending attachments before clearing
+        var attachmentsSnapshot = _pendingAttachments.ToList();
+        _pendingAttachments.Clear();
+
         // Lazy conversation creation — only when user actually sends their first message
         if (conversation == null && Session.IsAuthenticated)
         {
@@ -341,6 +379,12 @@
         // Add user message
         var userMsg = await ChatSvc.AddMessageAsync(conversation.Id, "user", text.Trim());
         messages.Add(userMsg);
+
+        // Link attachments to this message
+        foreach (var att in attachmentsSnapshot)
+        {
+            await AttachmentSvc.LinkAttachmentToMessageAsync(att.Id, userMsg.Id);
+        }
 
         // Start streaming
         isStreaming = true;
@@ -401,6 +445,12 @@
                     ? personalityPrefix
                     : personalityPrefix + "\n\n" + systemPrompt;
             }
+
+            // Inject artifact system prompt
+            var artifactPrompt = GetArtifactSystemPrompt();
+            systemPrompt = string.IsNullOrEmpty(systemPrompt)
+                ? artifactPrompt
+                : systemPrompt + "\n\n" + artifactPrompt;
 
             // ============================================================
             // KB RETRIEVAL DECISION MATRIX
@@ -550,6 +600,36 @@
                 }
 
                 _lastKbResult = kbResult;
+            }
+
+            // Inject attachment content into context
+            if (attachmentsSnapshot.Any())
+            {
+                var attachmentContextBuilder = new System.Text.StringBuilder();
+                attachmentContextBuilder.AppendLine("## Attached Files");
+                attachmentContextBuilder.AppendLine("The user has attached the following files to this message:");
+                attachmentContextBuilder.AppendLine();
+                foreach (var att in attachmentsSnapshot)
+                {
+                    try
+                    {
+                        var content = await AttachmentSvc.ExtractAttachmentContentAsync(att);
+                        if (content != null)
+                        {
+                            attachmentContextBuilder.AppendLine($"### {att.Filename} ({ChatAttachmentService.FormatFileSize(att.SizeBytes)})");
+                            attachmentContextBuilder.AppendLine(content);
+                            attachmentContextBuilder.AppendLine();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ATTACH] Failed to extract content from {att.Filename}: {ex.Message}");
+                    }
+                }
+                var attachmentContext = attachmentContextBuilder.ToString();
+                effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
+                    ? attachmentContext
+                    : attachmentContext + "\n\n" + effectiveSystemPrompt;
             }
 
             // Apply sliding window context management
@@ -894,7 +974,7 @@
     }
 
     private string GetSendButtonStyle() =>
-        (isStreaming || string.IsNullOrWhiteSpace(_userInput))
+        (isStreaming || (string.IsNullOrWhiteSpace(_userInput) && !_pendingAttachments.Any()))
             ? "background: var(--color-border); color: var(--color-text-tertiary); cursor: not-allowed; border-radius: var(--radius-md); width: 36px; height: 36px;"
             : "background: var(--color-btn-primary-bg); color: white; cursor: pointer; border-radius: var(--radius-md); width: 36px; height: 36px;";
 
@@ -908,10 +988,11 @@
 
     private async Task HandleSendFromInput()
     {
-        if (string.IsNullOrWhiteSpace(_userInput) || isStreaming) return;
+        if (string.IsNullOrWhiteSpace(_userInput) && !_pendingAttachments.Any()) return;
+        if (isStreaming) return;
         var text = _userInput;
         _userInput = "";
-        await HandleSend(text);
+        await HandleSend(string.IsNullOrWhiteSpace(text) ? "(see attached files)" : text);
     }
 
     private async Task ScrollToBottom()
@@ -937,6 +1018,104 @@
             : DrawerOpen
                 ? "Start a conversation or select a project from the sidebar."
                 : "Start a conversation below.";
+
+    private async Task TriggerFileInput()
+    {
+        await JS.InvokeVoidAsync("eval", "document.getElementById('chat-file-input').click()");
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        await ProcessFiles(e.GetMultipleFiles(10));
+    }
+
+    private void HandleDragOver(DragEventArgs e)
+    {
+        _isDragOver = true;
+    }
+
+    private async Task HandleDrop(DragEventArgs e)
+    {
+        _isDragOver = false;
+    }
+
+    private async Task ProcessFiles(IReadOnlyList<IBrowserFile> files)
+    {
+        if (conversation == null && Session.IsAuthenticated)
+        {
+            conversation = await ChatSvc.CreateConversationAsync(Session.UserId, null, currentModel);
+            await ChatSvc.UpdateConversationKbAsync(conversation.Id, _fortressKbEnabled, _personalKbEnabled, _selectedTeamIds.ToList());
+            Nav.NavigateTo($"/chat/{conversation.Id}", replace: true);
+        }
+        if (conversation == null) return;
+
+        foreach (var file in files)
+        {
+            if (!ChatAttachmentService.IsSupportedFile(file.Name)) continue;
+            if (file.Size > 10 * 1024 * 1024) continue;
+
+            try
+            {
+                using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+                var attachment = await AttachmentSvc.UploadAttachmentAsync(
+                    conversation.Id,
+                    Session.UserId,
+                    file.Name,
+                    file.ContentType,
+                    stream,
+                    file.Size);
+                _pendingAttachments.Add(attachment);
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ATTACH] Failed to upload {file.Name}: {ex.Message}");
+            }
+        }
+    }
+
+    private void RemovePendingAttachment(Guid attachmentId)
+    {
+        _pendingAttachments.RemoveAll(a => a.Id == attachmentId);
+        StateHasChanged();
+    }
+
+    private string GetFileIcon(string filename)
+    {
+        var ext = Path.GetExtension(filename).ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => Icons.Material.Filled.PictureAsPdf,
+            ".png" or ".jpg" or ".jpeg" or ".gif" => Icons.Material.Filled.Image,
+            ".py" or ".cs" or ".js" or ".ts" => Icons.Material.Filled.Code,
+            ".csv" => Icons.Material.Filled.TableChart,
+            ".json" or ".xml" or ".yaml" or ".yml" => Icons.Material.Filled.DataObject,
+            _ => Icons.Material.Filled.Description
+        };
+    }
+
+    private string GetArtifactSystemPrompt()
+    {
+        return @"When creating documents, code, or structured output that the user might want to save or reuse, wrap the content in artifact tags:
+
+<artifact type=""markdown"" title=""Document Title"">
+# Your Document
+Content here...
+</artifact>
+
+<artifact type=""code"" language=""python"" title=""Script Name"">
+# your code here
+</artifact>
+
+<artifact type=""text"" title=""Plain Text"">
+plain text content
+</artifact>
+
+Supported types: markdown, text, code (use language attribute for syntax highlighting)
+Use artifacts for: documents, guides, reports, substantial code blocks, templates, analysis outputs.
+Do NOT use artifacts for: short inline code snippets, conversational responses, quick answers.
+IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to create or modify a document, produce it as an artifact in your response.";
+    }
 
     public async ValueTask DisposeAsync()
     {
