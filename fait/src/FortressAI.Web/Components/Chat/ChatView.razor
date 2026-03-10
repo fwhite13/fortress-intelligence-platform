@@ -170,12 +170,27 @@
                       rows="1"
                       disabled="@isStreaming"
                       id="chat-input-field"></textarea>
+            @if (_speechSupported)
+            {
+                <MudIconButton Icon="@(_isDictating ? Icons.Material.Filled.MicNone : Icons.Material.Filled.Mic)"
+                    Disabled="@isStreaming"
+                    OnClick="ToggleDictation"
+                    Title="@(_isDictating ? "Stop recording" : "Dictate message")"
+                    Style="@GetMicButtonStyle()"
+                    Size="Size.Medium" />
+            }
             <MudIconButton Icon="@Icons.Material.Filled.Send"
                 Disabled="@(isStreaming || string.IsNullOrWhiteSpace(_userInput))"
                 OnClick="HandleSendFromInput"
                 Style="@GetSendButtonStyle()"
                 Size="Size.Medium" />
         </div>
+        @if (_isDictating && !string.IsNullOrEmpty(_interimTranscript))
+        {
+            <div style="font-size: var(--text-xs); color: var(--color-text-tertiary); padding: 4px 0; font-style: italic;">
+                @_interimTranscript
+            </div>
+        }
     </div>
 </div>
 
@@ -197,6 +212,9 @@
     private bool _scrollListenerInitialized = false;
     private DotNetObjectReference<ChatView>? _dotNetRef;
     private string _userInput = "";
+    private bool _isDictating = false;
+    private bool _speechSupported = false;
+    private string _interimTranscript = "";
     private UserAssistantConfig? _assistantConfig;
     private List<KbTeam> _userTeams = new();
     private HashSet<int> _selectedTeamIds = new();
@@ -275,6 +293,13 @@
                 _scrollListenerInitialized = true;
             }
             catch { /* JS interop can fail during prerender */ }
+
+            try
+            {
+                _speechSupported = await JS.InvokeAsync<bool>("fortressChat.isSpeechRecognitionSupported");
+                StateHasChanged();
+            }
+            catch { /* Speech API check can fail during prerender */ }
         }
 
         if (_needsScroll)
@@ -549,6 +574,9 @@
                 }).ToList();
 
                 var historyForLoop = new List<MessageDto>(chatHistory);
+                // maxIterations = 5: caps tool call loops to prevent runaway agentic cycles.
+                // Primary mitigation for tool-call-limit UX: the system prompt instructs the model
+                // to output content directly in the chat response rather than repeatedly calling tools.
                 const int maxIterations = 5;
                 int iteration = 0;
 
@@ -808,6 +836,50 @@
         return active
             ? "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-gold); background: var(--color-gold-muted); color: var(--color-gold); cursor: pointer;"
             : "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); cursor: pointer;";
+    }
+
+    private async Task ToggleDictation()
+    {
+        if (_isDictating)
+        {
+            await JS.InvokeVoidAsync("fortressChat.stopDictation");
+            _isDictating = false;
+        }
+        else
+        {
+            var started = await JS.InvokeAsync<bool>("fortressChat.startDictation", _dotNetRef);
+            _isDictating = started;
+        }
+    }
+
+    private string GetMicButtonStyle() =>
+        _isDictating
+            ? "background: transparent; color: #dc2626; animation: pulse 1.5s infinite; border-radius: var(--radius-md);"
+            : "background: transparent; color: var(--color-text-secondary); border-radius: var(--radius-md);";
+
+    [JSInvokable]
+    public void OnSpeechResult(string finalText, string interimText)
+    {
+        if (!string.IsNullOrEmpty(finalText))
+            _userInput += finalText;
+        _interimTranscript = interimText;
+        InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public void OnSpeechEnded()
+    {
+        _isDictating = false;
+        _interimTranscript = "";
+        InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public void OnSpeechError(string error)
+    {
+        _isDictating = false;
+        _interimTranscript = "";
+        InvokeAsync(StateHasChanged);
     }
 
     private string GetSendButtonStyle() =>

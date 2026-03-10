@@ -59,6 +59,8 @@ public class AssistantConfigService
         if (!string.IsNullOrWhiteSpace(userDisplayName))
             prefix += $" The user's name is {userDisplayName}. Address them by name occasionally to personalize responses.";
 
+        prefix += " When asked to create, write, or generate a document or file, output the content directly in your chat response as formatted markdown — do not attempt to use tools to save it. If tool calls are needed but keep failing, explain what you tried and provide the output directly in your response.";
+
         return prefix;
     }
 

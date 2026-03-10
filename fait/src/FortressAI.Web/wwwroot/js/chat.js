@@ -64,6 +64,63 @@ window.fortressChat = {
     autoResize: function (element) {
         element.style.height = 'auto';
         element.style.height = Math.min(element.scrollHeight, 200) + 'px';
+    },
+
+    // --- Dictation / Speech Recognition ---
+    _recognition: null,
+    _isRecording: false,
+    _dotNetRecordingRef: null,
+
+    startDictation: function(dotNetRef) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) return false;
+
+        this._dotNetRecordingRef = dotNetRef;
+        this._recognition = new SpeechRecognition();
+        this._recognition.continuous = true;
+        this._recognition.interimResults = true;
+        this._recognition.lang = 'en-US';
+
+        this._recognition.onresult = (event) => {
+            let interimText = '';
+            let finalText = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalText += transcript + ' ';
+                } else {
+                    interimText += transcript;
+                }
+            }
+            if (dotNetRef) {
+                dotNetRef.invokeMethodAsync('OnSpeechResult', finalText, interimText);
+            }
+        };
+
+        this._recognition.onerror = (event) => {
+            if (dotNetRef) dotNetRef.invokeMethodAsync('OnSpeechError', event.error);
+        };
+
+        this._recognition.onend = () => {
+            this._isRecording = false;
+            if (dotNetRef) dotNetRef.invokeMethodAsync('OnSpeechEnded');
+        };
+
+        this._recognition.start();
+        this._isRecording = true;
+        return true;
+    },
+
+    stopDictation: function() {
+        if (this._recognition) {
+            this._recognition.stop();
+            this._recognition = null;
+        }
+        this._isRecording = false;
+    },
+
+    isSpeechRecognitionSupported: function() {
+        return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
     }
 };
 

@@ -1991,3 +1991,8 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     font-style: italic;
     font-size: 0.68rem;
 }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}

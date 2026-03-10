@@ -257,3 +257,137 @@ The Phase 2b architecture is correct. All KB retrieval paths in `KnowledgeBaseSe
 ---
 
 _Reviewed by Hawkeye · 2026-03-09_
+
+---
+
+---
+
+## Review Report: FAIT-KB-REDESIGN-PHASE-2B — Cycle 2 (Fix Verification)
+
+**Reviewer:** Hawkeye  
+**Date:** 2026-03-09  
+**Commit:** `b5f9b50`  
+**Scope:** Targeted fix verification — 5 issues from Cycle 1
+
+### Verdict: ✅ PASS
+
+---
+
+### Fix Verification
+
+#### I1 — `KnowledgeBaseManagement.razor`: `StartIngestionAsync(KbTier.Team)` calls ✅
+
+Lines 687 and 710 now correctly call `StartIngestionAsync(KbTier.Team)` in `UploadTeamDocument` and `DeleteTeamDocument` respectively.
+
+Lines 645 and 667 were flagged as candidates during Cycle 1 — these are in `UploadPersonalDocument` and `DeletePersonalDocument`. They call `StartIngestionAsync()` with no argument, which is **correct**: `StartIngestionAsync` signature is `StartIngestionAsync(KbTier tier = KbTier.Personal, ...)` — the default is Personal. No-arg calls here are intentional and correct, not regressions.
+
+**No remaining no-arg calls in Team or Corporate upload/delete paths. ✅**
+
+---
+
+#### I2 — `DocumentService.cs`: Project paths use `StartProjectIngestionAsync()` ✅
+
+- Line 85 (upload path): `await _kbDocumentService.StartProjectIngestionAsync();` ✅
+- Line 230 (delete path): `await _kbDocumentService.StartProjectIngestionAsync();` ✅
+
+`grep -n "StartIngestionAsync"` returns only line 173 — a doc comment (`/// NOTE: StartIngestionAsync should be called once after all migrations complete`). No live call to `StartIngestionAsync()` remains in `DocumentService.cs`. Clean. ✅
+
+---
+
+#### I3 — `DatabaseInitializationService.cs`: Clean-slate block context ✅
+
+Line 558: `await kbDocumentService.StartProjectIngestionAsync();`
+
+Context verified: call is inside the "Project clean slate: Bedrock KB re-ingestion triggered" block, immediately after the S3 project doc deletion loop (`kb-docs/project/`). Log message on the line before confirms: `"Project clean slate: S3 objects deleted from kb-docs/project/"`. Context is correct — this is exactly the right place. ✅
+
+---
+
+#### I4 — `ChatView.razor`: Layer 1 guard is `if (hasCorpKb)` only ✅
+
+Line 418: `if (hasCorpKb)` — no `|| hasPersonalKb`, no regression. ✅
+
+Layer 2 guard at line 463: `if (hasPersonalKb || hasTeamKb || hasProjectKb)` — correct, unchanged. Personal KB still flows through Layer 2 (FORGE v2) as intended. No regressions in either layer. ✅
+
+---
+
+#### I5 — `KbDocumentService.UploadDocumentAsync`: Switch + metadata guard ✅
+
+**S3 key switch** (`KbDocumentService.cs` lines 48–52):
+```csharp
+var key = tier switch
+{
+    KbTier.Team      => $"kb-docs/teams/{teamId}/{safeFilename}",
+    KbTier.Corporate => $"kb-docs/fortress/{safeFilename}",
+    _                => $"kb-docs/personal/{userId}/{safeFilename}"
+};
+```
+All 3 tiers covered. Corporate maps to `kb-docs/fortress/`. Personal catch-all (`_`) is correct. ✅
+
+**Metadata guard** (line 67):
+```csharp
+if (tier != KbTier.Corporate)
+{
+    var metadataDict = tier == KbTier.Team
+        ? new Dictionary<string, object> { ["teamId"] = teamId!.Value.ToString() }
+        : new Dictionary<string, object> { ["ownerId"] = userId.ToString() };
+    // ... PutObjectAsync to {key}.metadata.json
+}
+```
+Corporate path exits the guard — **no `.metadata.json` is written for Corp uploads.** ✅  
+Personal and Team paths correctly write their respective metadata attributes. ✅
+
+---
+
+#### Build ✅
+
+`dotnet build` result: **0 errors, 27 warnings.**  
+All 27 warnings are pre-existing (CS8602 nullable dereferences in Admin pages, MUD0002 MudBlazor attribute warnings, one Bedrock model ID pattern warning). None introduced by `b5f9b50`. ✅
+
+---
+
+### Consistency Audit
+
+**Files cross-referenced:**
+- `KbDocumentService.cs` S3 key switch ↔ `StartIngestionAsync` KB/DS tier routing — ✅ Corp upload lands in `kb-docs/fortress/`; `StartIngestionAsync(KbTier.Corporate)` routes to `CorpKbId`/`CorpDataSourceId`. Consistent.
+- `ChatView.razor` Layer 1 guard (`if (hasCorpKb)`) ↔ Layer 2 guard (`if (hasPersonalKb || hasTeamKb || hasProjectKb)`) — ✅ No overlap, no gap. Corp is Layer 1 only; Personal/Team/Project are Layer 2 only.
+- `DocumentService.cs` `StartProjectIngestionAsync()` ↔ `DatabaseInitializationService.cs` `StartProjectIngestionAsync()` — ✅ Both now correctly target the Project KB ingestion path.
+- Personal no-arg `StartIngestionAsync()` calls in `KnowledgeBaseManagement.razor` ↔ `StartIngestionAsync(KbTier tier = KbTier.Personal)` default — ✅ No-arg is correct for Personal paths.
+
+**No undocumented regressions found.**
+
+---
+
+### Issues Found
+
+- **Critical:** 0  
+- **Important:** 0  
+- **Nitpick:** 0
+
+All 5 Cycle 1 issues resolved correctly. No new issues introduced.
+
+---
+
+### Acceptance Criteria Verification (Cycle 2 scope)
+
+| # | Criterion | Status |
+|---|---|---|
+| I1 | `StartIngestionAsync(KbTier.Team)` at both Team upload and delete paths | ✅ Verified — lines 687, 710 |
+| I1b | No remaining no-arg calls in non-Personal paths | ✅ Verified — lines 645/667 are Personal (correct) |
+| I2 | Both project ingestion calls in `DocumentService.cs` use `StartProjectIngestionAsync()` | ✅ Verified — lines 85, 230 |
+| I3 | `DatabaseInitializationService.cs` line 558 context is post-S3-project-delete | ✅ Verified |
+| I4 | `ChatView.razor` line 418 guard is exactly `if (hasCorpKb)` | ✅ Verified |
+| I5 | S3 key switch covers all 3 tiers with correct paths | ✅ Verified |
+| I5b | Corp upload produces no `.metadata.json` | ✅ Verified — guarded by `if (tier != KbTier.Corporate)` |
+| Build | 0 errors | ✅ Verified |
+
+---
+
+### Positive Observations
+
+- The no-arg Personal calls in `KnowledgeBaseManagement.razor` are a clean use of the default parameter — no need to add noise by writing `StartIngestionAsync(KbTier.Personal)` explicitly. Good call.
+- The metadata guard logic is tight: one `if` condition handles Corp exclusion; the inner ternary covers Team vs Personal. Minimal and correct.
+- Context around the DatabaseInitializationService fix is excellent — S3 deletion loop, log message, then re-ingestion trigger. Clear sequence.
+
+---
+
+_Reviewed by Hawkeye · 2026-03-09 · Cycle 2 of 2_

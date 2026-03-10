@@ -3,6 +3,8 @@ using Amazon.BedrockAgent.Model;
 using Amazon.S3;
 using Amazon.S3.Model;
 using FortressAI.Shared.Models;
+using FortressAI.Web.Data;
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
 namespace FortressAI.Web.Services;
@@ -14,6 +16,7 @@ public class KbDocumentService
     private readonly IConfiguration _config;
     private readonly ILogger<KbDocumentService> _logger;
     private readonly KbSyncRetryService _syncRetryService;
+    private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
 
     private const string BucketName = "fortress-tools";
 
@@ -29,13 +32,14 @@ public class KbDocumentService
     private string ProjectDataSourceId => _config["KnowledgeBase:ProjectDataSourceId"] ?? "";
     private string CorpDataSourceId => _config["KnowledgeBase:CorpDataSourceId"] ?? "";
 
-    public KbDocumentService(IAmazonS3 s3, IAmazonBedrockAgent bedrockAgent, IConfiguration config, ILogger<KbDocumentService> logger, KbSyncRetryService syncRetryService)
+    public KbDocumentService(IAmazonS3 s3, IAmazonBedrockAgent bedrockAgent, IConfiguration config, ILogger<KbDocumentService> logger, KbSyncRetryService syncRetryService, IDbContextFactory<AppDbContext> dbContextFactory)
     {
         _s3 = s3;
         _bedrockAgent = bedrockAgent;
         _config = config;
         _logger = logger;
         _syncRetryService = syncRetryService;
+        _dbContextFactory = dbContextFactory;
     }
 
     /// <summary>Upload document to S3 + write companion .metadata.json. Returns the S3 key.</summary>
@@ -291,6 +295,23 @@ public class KbDocumentService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to list KB documents from S3 prefix {Prefix}", prefix);
+        }
+
+        // Look up actual ingestion status from DB — the project_documents table is updated by
+        // KbSyncRetryService when Bedrock ingestion completes. S3 listing alone never returns
+        // the updated status; this join is the primary fix for the 'always Processing' chip bug.
+        if (docs.Any())
+        {
+            var s3Keys = docs.Select(d => d.S3Key).ToList();
+            await using var db = await _dbContextFactory.CreateDbContextAsync();
+            var statusMap = await db.ProjectDocuments
+                .Where(pd => pd.S3Key != null && s3Keys.Contains(pd.S3Key))
+                .ToDictionaryAsync(pd => pd.S3Key!, pd => pd.IngestionStatus);
+            foreach (var doc in docs)
+            {
+                if (statusMap.TryGetValue(doc.S3Key, out var status))
+                    doc.IngestionStatus = status ?? "pending";
+            }
         }
 
         return docs;
