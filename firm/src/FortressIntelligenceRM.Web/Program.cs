@@ -76,10 +76,13 @@ builder.Services.AddAuthentication(options =>
     options.AccessDeniedPath = "/access-denied";
     options.ExpireTimeSpan = TimeSpan.FromHours(8);
     options.SlidingExpiration = true;
-    // Must match FAIT cookie domain exactly for cross-subdomain sharing
-    var cookieDomain = builder.Configuration["Auth:CookieDomain"];
+    // Must match FAIT's cookie name and domain exactly for cross-subdomain cookie sharing
+    options.Cookie.Name = ".FortressAI.Session";
+    var cookieDomain = builder.Configuration["Auth:CookieDomain"] ?? "";
     if (!string.IsNullOrEmpty(cookieDomain))
         options.Cookie.Domain = cookieDomain;
+    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+    options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
 });
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
@@ -107,13 +110,103 @@ app.UseAntiforgery();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Redirect unauthenticated users to FAIT for login — FIRM has no auth flow of its own
+// Redirect unauthenticated users to FAIT for login — pass returnUrl so FAIT can redirect back
 app.MapGet("/auth/redirect-to-login", ctx =>
 {
     var faitLoginUrl = ctx.RequestServices.GetRequiredService<IConfiguration>()["FIP:LoginUrl"]
         ?? "https://fait.dev.fortressam.ai/";
-    ctx.Response.Redirect(faitLoginUrl);
+    // Pass returnUrl so FAIT can redirect back to FIRM after login
+    var firmCallbackUrl = ctx.RequestServices.GetRequiredService<IConfiguration>()["FIP:FirmCallbackUrl"]
+        ?? "https://meetings.dev.fortressam.ai/auth/firm-session";
+    var redirectUrl = $"{faitLoginUrl.TrimEnd('/')}/auth/firm-callback?returnUrl={Uri.EscapeDataString(firmCallbackUrl)}";
+    ctx.Response.Redirect(redirectUrl);
     return Task.CompletedTask;
+});
+
+// FIRM session endpoint — user arrives here from FAIT with a valid shared cookie
+// Resolves local user record and fait_user_id, then redirects to /meetings
+app.MapGet("/auth/firm-session", async ctx =>
+{
+    // If already authenticated via shared cookie, resolve user and go to meetings
+    var authResult = await ctx.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    if (!authResult.Succeeded)
+    {
+        // Cookie not valid — back to login page
+        ctx.Response.Redirect("/");
+        return;
+    }
+
+    // Try to resolve fait_user_id if not already set
+    var entraOid = authResult.Principal?.FindFirst("sub")?.Value
+        ?? authResult.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    var email = authResult.Principal?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+        ?? authResult.Principal?.FindFirst("email")?.Value
+        ?? authResult.Principal?.FindFirst("preferred_username")?.Value;
+    var displayName = authResult.Principal?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+        ?? authResult.Principal?.FindFirst("name")?.Value
+        ?? email ?? "Unknown";
+
+    if (!string.IsNullOrEmpty(email))
+    {
+        var dbFactory = ctx.RequestServices.GetRequiredService<IDbContextFactory<FirmDbContext>>();
+        var config = ctx.RequestServices.GetRequiredService<IConfiguration>();
+        var logger = ctx.RequestServices.GetRequiredService<ILogger<Program>>();
+        var httpClientFactory = ctx.RequestServices.GetRequiredService<IHttpClientFactory>();
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var firmUser = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
+        if (firmUser == null)
+        {
+            firmUser = new FortressIntelligenceRM.Web.Models.FirmUser
+            {
+                Id = Guid.NewGuid(),
+                EntraOid = entraOid ?? "",
+                Email = email,
+                DisplayName = displayName,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                LastLoginAt = DateTime.UtcNow
+            };
+            db.Users.Add(firmUser);
+        }
+        else
+        {
+            firmUser.LastLoginAt = DateTime.UtcNow;
+            firmUser.UpdatedAt = DateTime.UtcNow;
+        }
+
+        // Resolve FAIT user ID if not already stored
+        if (string.IsNullOrEmpty(firmUser.FaitUserId) && !string.IsNullOrEmpty(entraOid))
+        {
+            try
+            {
+                var faitApiUrl = config["FIP:FaitApiUrl"] ?? "https://fait.dev.fortressam.ai";
+                var sharedSecret = config["Firm:SharedSecret"] ?? "";
+                var httpClient = httpClientFactory.CreateClient();
+                httpClient.DefaultRequestHeaders.Add("X-Firm-Secret", sharedSecret);
+                var response = await httpClient.GetAsync($"{faitApiUrl}/api/firm/resolve-user?entraOid={Uri.EscapeDataString(entraOid)}");
+                if (response.IsSuccessStatusCode)
+                {
+                    var body = await response.Content.ReadAsStringAsync();
+                    var parsed = System.Text.Json.JsonDocument.Parse(body);
+                    if (parsed.RootElement.TryGetProperty("userId", out var userIdEl))
+                    {
+                        firmUser.FaitUserId = userIdEl.GetString();
+                        logger.LogInformation("FIRM: Resolved FAIT user ID {FaitUserId} for {Email}", firmUser.FaitUserId, email);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "FIRM: Failed to resolve FAIT user ID for {Email} — KB push will be unavailable", email);
+            }
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    ctx.Response.Redirect("/meetings");
 });
 
 // Logout: clear local cookie only (FAIT owns OIDC sign-out)

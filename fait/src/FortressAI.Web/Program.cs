@@ -151,6 +151,12 @@ else
         options.AccessDeniedPath = "/access-denied";
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
+        // Shared FIP cookie — must be accessible across all *.dev.fortressam.ai subdomains
+        options.Cookie.Name = ".FortressAI.Session";
+        options.Cookie.Domain = builder.Configuration["Auth:CookieDomain"] ?? "";
+        // SameSite=Lax required for cross-subdomain redirect flows
+        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
     });
 
     if (entraConfigured)
@@ -244,6 +250,26 @@ var app = builder.Build();
 
 // Health endpoint (must be before other middleware)
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }));
+
+// FIRM auth callback — after user logs into FAIT, redirect back to FIRM
+// Only redirects to *.fortressam.ai domains for safety
+app.MapGet("/auth/firm-callback", (HttpContext ctx, IConfiguration config) =>
+{
+    var returnUrl = ctx.Request.Query["returnUrl"].FirstOrDefault();
+    // Validate returnUrl — only allow redirects to fortressam.ai subdomains
+    if (!string.IsNullOrEmpty(returnUrl) &&
+        Uri.TryCreate(returnUrl, UriKind.Absolute, out var uri) &&
+        (uri.Host.EndsWith(".fortressam.ai", StringComparison.OrdinalIgnoreCase) ||
+         uri.Host.Equals("fortressam.ai", StringComparison.OrdinalIgnoreCase)))
+    {
+        ctx.Response.Redirect(returnUrl);
+    }
+    else
+    {
+        ctx.Response.Redirect("/");
+    }
+    return Task.CompletedTask;
+});
 
 if (!app.Environment.IsDevelopment())
 {

@@ -1,4 +1,3 @@
-using System.Net;
 using System.Text.Json;
 using Amazon.BedrockAgent;
 using Amazon.BedrockAgent.Model;
@@ -52,12 +51,14 @@ public class FirmIntegrationController : ControllerBase
     [HttpGet("resolve-user")]
     public async Task<IActionResult> ResolveUser([FromQuery] string entraOid)
     {
-        // Loopback-only: same as BraveSearchMcpAdapter pattern
-        var remoteIp = HttpContext.Connection.RemoteIpAddress;
-        if (remoteIp != null && remoteIp.IsIPv4MappedToIPv6)
-            remoteIp = remoteIp.MapToIPv4();
-        if (remoteIp is null || !IPAddress.IsLoopback(remoteIp))
-            return StatusCode(403, new { error = "Forbidden: internal endpoint" });
+        // Auth: X-Firm-Secret header (same pattern as meeting-complete)
+        var expectedSecret = _config["Firm:SharedSecret"] ?? "";
+        var providedSecret = Request.Headers["X-Firm-Secret"].FirstOrDefault() ?? "";
+        if (string.IsNullOrEmpty(expectedSecret) || providedSecret != expectedSecret)
+        {
+            _logger.LogWarning("FirmIntegration: resolve-user rejected — invalid X-Firm-Secret");
+            return Unauthorized(new { error = "Invalid or missing X-Firm-Secret" });
+        }
 
         if (string.IsNullOrWhiteSpace(entraOid))
             return BadRequest(new { error = "entraOid is required" });

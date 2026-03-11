@@ -32,7 +32,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        _faitLoginUrl = Config["FIP:LoginUrl"] ?? "https://fait.dev.fortressam.ai/";
+        var faitBaseUrl = Config["FIP:LoginUrl"] ?? "https://fait.dev.fortressam.ai/";
+        var firmCallbackUrl = Config["FIP:FirmCallbackUrl"] ?? "https://meetings.dev.fortressam.ai/auth/firm-session";
+        _faitLoginUrl = $"{faitBaseUrl.TrimEnd('/')}/auth/firm-callback?returnUrl={Uri.EscapeDataString(firmCallbackUrl)}";
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         if (authState.User.Identity?.IsAuthenticated == true)
         {
