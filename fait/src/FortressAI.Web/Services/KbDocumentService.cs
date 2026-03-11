@@ -384,7 +384,7 @@ public class KbDocumentService
             var psi = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = "libreoffice",
-                Arguments = $"--headless --convert-to pdf --outdir {tmpDir} {inputPath}",
+                Arguments = $"--headless --convert-to pdf --outdir \"{tmpDir}\" \"{inputPath}\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -393,12 +393,14 @@ public class KbDocumentService
 
             using var proc = System.Diagnostics.Process.Start(psi)
                 ?? throw new InvalidOperationException("Failed to start LibreOffice process");
+            // Read stderr concurrently to prevent deadlock on large error output
+            var stderrTask = proc.StandardError.ReadToEndAsync();
             await proc.WaitForExitAsync();
+            var stderr = await stderrTask;
 
             if (proc.ExitCode != 0)
             {
-                var err = await proc.StandardError.ReadToEndAsync();
-                logger.LogWarning("LibreOffice conversion failed (exit {Code}): {Err}", proc.ExitCode, err);
+                logger.LogWarning("LibreOffice conversion failed (exit {Code}): {Err}", proc.ExitCode, stderr);
                 return null;
             }
 
