@@ -259,6 +259,7 @@ app.MapGet("/auth/firm-callback", (HttpContext ctx, IConfiguration config) =>
     // Validate returnUrl — only allow redirects to fortressam.ai subdomains
     if (!string.IsNullOrEmpty(returnUrl) &&
         Uri.TryCreate(returnUrl, UriKind.Absolute, out var uri) &&
+        uri.Scheme == Uri.UriSchemeHttps &&
         (uri.Host.EndsWith(".fortressam.ai", StringComparison.OrdinalIgnoreCase) ||
          uri.Host.Equals("fortressam.ai", StringComparison.OrdinalIgnoreCase)))
     {

@@ -78,9 +78,7 @@ builder.Services.AddAuthentication(options =>
     options.SlidingExpiration = true;
     // Must match FAIT's cookie name and domain exactly for cross-subdomain cookie sharing
     options.Cookie.Name = ".FortressAI.Session";
-    var cookieDomain = builder.Configuration["Auth:CookieDomain"] ?? "";
-    if (!string.IsNullOrEmpty(cookieDomain))
-        options.Cookie.Domain = cookieDomain;
+    options.Cookie.Domain = builder.Configuration["Auth:CookieDomain"] ?? "";
     options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
     options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
 });

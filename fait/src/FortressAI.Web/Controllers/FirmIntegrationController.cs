@@ -12,7 +12,7 @@ namespace FortressAI.Web.Controllers;
 
 /// <summary>
 /// Internal FAIT endpoint for FIRM integration.
-/// GET  /api/firm/resolve-user?entraOid={oid}  — returns FAIT internal user GUID for a given Entra OID (loopback only)
+/// GET  /api/firm/resolve-user?entraOid={oid}  — returns FAIT internal user GUID for a given Entra OID (X-Firm-Secret auth)
 /// POST /api/firm/meeting-complete              — auto-pushes transcript/summary to personal KB if user has auto-add enabled
 /// </summary>
 [ApiController]
@@ -46,7 +46,7 @@ public class FirmIntegrationController : ControllerBase
     /// <summary>
     /// GET /api/firm/resolve-user?entraOid={oid}
     /// Returns FAIT internal user GUID for the given Entra OID.
-    /// Restricted to loopback — called by FIRM on the same host during user login to populate firm_users.fait_user_id.
+    /// Protected by X-Firm-Secret header — called by FIRM during user login to populate firm_users.fait_user_id.
     /// </summary>
     [HttpGet("resolve-user")]
     public async Task<IActionResult> ResolveUser([FromQuery] string entraOid)
