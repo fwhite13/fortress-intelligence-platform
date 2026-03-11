@@ -358,35 +358,42 @@ public class KbDocumentService
     /// <summary>Convert a PPTX stream to Markdown text (one ## Slide N section per slide).</summary>
     private static string ConvertPptxToMarkdown(Stream pptxStream)
     {
-        using var presentation = DocumentFormat.OpenXml.Packaging.PresentationDocument.Open(pptxStream, false);
-        var sb = new StringBuilder();
-        var pres = presentation.PresentationPart?.Presentation;
-        if (pres?.SlideIdList == null) return "[Empty presentation]";
-
-        int slideNum = 1;
-        foreach (var slideId in pres.SlideIdList.Elements<DocumentFormat.OpenXml.Presentation.SlideId>())
+        try
         {
-            var rId = slideId.RelationshipId?.Value;
-            if (rId == null) continue;
-            var slidePart = (DocumentFormat.OpenXml.Packaging.SlidePart)presentation.PresentationPart!.GetPartById(rId);
+            using var presentation = DocumentFormat.OpenXml.Packaging.PresentationDocument.Open(pptxStream, false);
+            var sb = new StringBuilder();
+            var pres = presentation.PresentationPart?.Presentation;
+            if (pres?.SlideIdList == null) return "[Empty presentation]";
 
-            sb.AppendLine($"## Slide {slideNum}");
+            int slideNum = 1;
+            foreach (var slideId in pres.SlideIdList.Elements<DocumentFormat.OpenXml.Presentation.SlideId>())
+            {
+                var rId = slideId.RelationshipId?.Value;
+                if (rId == null) continue;
+                var slidePart = (DocumentFormat.OpenXml.Packaging.SlidePart)presentation.PresentationPart!.GetPartById(rId);
 
-            // Extract text from all text shapes — deduplicate within slide
-            var texts = slidePart.Slide.Descendants<DocumentFormat.OpenXml.Drawing.Text>()
-                .Select(t => t.Text?.Trim())
-                .Where(t => !string.IsNullOrEmpty(t))
-                .Distinct()
-                .ToList();
+                sb.AppendLine($"## Slide {slideNum}");
 
-            foreach (var text in texts)
-                sb.AppendLine(text);
+                // Extract text from all text shapes — deduplicate within slide
+                var texts = slidePart.Slide.Descendants<DocumentFormat.OpenXml.Drawing.Text>()
+                    .Select(t => t.Text?.Trim())
+                    .Where(t => !string.IsNullOrEmpty(t))
+                    .Distinct()
+                    .ToList();
 
-            sb.AppendLine();
-            slideNum++;
+                foreach (var text in texts)
+                    sb.AppendLine(text);
+
+                sb.AppendLine();
+                slideNum++;
+            }
+
+            return sb.ToString();
         }
-
-        return sb.ToString();
+        catch (Exception)
+        {
+            return "[PPTX content could not be extracted — file may be corrupted or password-protected]";
+        }
     }
 }
 
