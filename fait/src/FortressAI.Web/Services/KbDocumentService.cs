@@ -5,6 +5,7 @@ using Amazon.S3.Model;
 using FortressAI.Shared.Models;
 using FortressAI.Web.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Text;
 using System.Text.Json;
 
 namespace FortressAI.Web.Services;
@@ -49,6 +50,18 @@ public class KbDocumentService
         if (string.IsNullOrEmpty(safeFilename))
             throw new ArgumentException("Invalid filename.", nameof(filename));
 
+        // Auto-convert PPTX — Bedrock KB does not support .pptx natively
+        Stream uploadStream = fileStream;
+        if (safeFilename.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation("PPTX detected — converting to Markdown for KB ingestion: {Filename}", safeFilename);
+            var markdown = ConvertPptxToMarkdown(fileStream);
+            var markdownBytes = Encoding.UTF8.GetBytes(markdown);
+            uploadStream = new MemoryStream(markdownBytes);
+            safeFilename = Path.ChangeExtension(safeFilename, ".md");
+            contentType = "text/markdown";
+        }
+
         var key = tier switch
         {
             KbTier.Team      => $"kb-docs/teams/{teamId}/{safeFilename}",
@@ -61,7 +74,7 @@ public class KbDocumentService
         {
             BucketName = BucketName,
             Key = key,
-            InputStream = fileStream,
+            InputStream = uploadStream,
             ContentType = contentType
         };
         await _s3.PutObjectAsync(putReq);
@@ -280,6 +293,9 @@ public class KbDocumentService
     /// <summary>List documents in S3 for a user or team (excludes .metadata.json files).</summary>
     public async Task<List<KbDocumentInfo>> ListDocumentsAsync(KbTier tier, Guid userId, int? teamId = null)
     {
+        // Guard: avoid pointless S3 call with empty userId for Personal tier
+        if (userId == Guid.Empty && tier == KbTier.Personal) return new();
+
         var prefix = tier == KbTier.Team
             ? $"kb-docs/teams/{teamId}/"
             : $"kb-docs/personal/{userId}/";
@@ -337,6 +353,40 @@ public class KbDocumentService
         }
 
         return docs;
+    }
+
+    /// <summary>Convert a PPTX stream to Markdown text (one ## Slide N section per slide).</summary>
+    private static string ConvertPptxToMarkdown(Stream pptxStream)
+    {
+        using var presentation = DocumentFormat.OpenXml.Packaging.PresentationDocument.Open(pptxStream, false);
+        var sb = new StringBuilder();
+        var pres = presentation.PresentationPart?.Presentation;
+        if (pres?.SlideIdList == null) return "[Empty presentation]";
+
+        int slideNum = 1;
+        foreach (var slideId in pres.SlideIdList.Elements<DocumentFormat.OpenXml.Presentation.SlideId>())
+        {
+            var rId = slideId.RelationshipId?.Value;
+            if (rId == null) continue;
+            var slidePart = (DocumentFormat.OpenXml.Packaging.SlidePart)presentation.PresentationPart!.GetPartById(rId);
+
+            sb.AppendLine($"## Slide {slideNum}");
+
+            // Extract text from all text shapes — deduplicate within slide
+            var texts = slidePart.Slide.Descendants<DocumentFormat.OpenXml.Drawing.Text>()
+                .Select(t => t.Text?.Trim())
+                .Where(t => !string.IsNullOrEmpty(t))
+                .Distinct()
+                .ToList();
+
+            foreach (var text in texts)
+                sb.AppendLine(text);
+
+            sb.AppendLine();
+            slideNum++;
+        }
+
+        return sb.ToString();
     }
 }
 
