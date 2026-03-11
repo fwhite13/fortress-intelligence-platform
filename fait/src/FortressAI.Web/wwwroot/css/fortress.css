@@ -2053,15 +2053,18 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
 
 .artifact-markdown {
     line-height: 1.6;
-    color: var(--color-text-primary, #eee);
+    color: #e2e8f0;
 }
 
-.artifact-markdown p, .artifact-markdown li, .artifact-markdown td, .artifact-markdown th {
-    color: var(--color-text-primary, #eee);
+.artifact-markdown p, .artifact-markdown li, .artifact-markdown td, .artifact-markdown th,
+.artifact-markdown h1, .artifact-markdown h2, .artifact-markdown h3,
+.artifact-markdown h4, .artifact-markdown h5, .artifact-markdown h6,
+.artifact-markdown strong, .artifact-markdown em, .artifact-markdown blockquote {
+    color: #e2e8f0;
 }
 
 .artifact-markdown a {
-    color: var(--color-link, #58a6ff);
+    color: #58a6ff;
 }
 
 .artifact-markdown h1, .artifact-markdown h2, .artifact-markdown h3 {
