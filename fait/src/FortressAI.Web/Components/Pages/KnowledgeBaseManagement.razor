@@ -86,7 +86,7 @@
                         </ActivatorContent>
                     </MudFileUpload>
                     <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); margin-top: 4px;">
-                        Supported: PDF, DOCX, TXT, MD, PPTX · Max 10 MB · PPTX auto-converted to Markdown · Ingestion takes 1–5 minutes
+                        Supported: PDF, DOCX, TXT, MD, PPTX · Max 10 MB · PPTX auto-converted to PDF · Ingestion takes 1–5 minutes
                     </MudText>
                 </div>
 
@@ -653,7 +653,7 @@
 
             // Show PPTX conversion notice before upload
             if (file.Name.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase))
-                Snackbar.Add("Converting PPTX to Markdown for KB compatibility...", Severity.Info);
+                Snackbar.Add("Converting PPTX to PDF for KB compatibility...", Severity.Info);
 
             await KbDocumentService.UploadDocumentAsync(safeStream, file.Name, file.ContentType, KbTier.Personal, Session.UserId);
             await KbDocumentService.StartIngestionAsync();
@@ -705,7 +705,7 @@
 
             // Show PPTX conversion notice before upload
             if (file.Name.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase))
-                Snackbar.Add("Converting PPTX to Markdown for KB compatibility...", Severity.Info);
+                Snackbar.Add("Converting PPTX to PDF for KB compatibility...", Severity.Info);
 
             await KbDocumentService.UploadDocumentAsync(safeStream, file.Name, file.ContentType, KbTier.Team, Session.UserId, _selectedTeam.Id);
             await KbDocumentService.StartIngestionAsync(KbTier.Team);

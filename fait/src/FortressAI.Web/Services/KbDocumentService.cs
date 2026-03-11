@@ -5,7 +5,6 @@ using Amazon.S3.Model;
 using FortressAI.Shared.Models;
 using FortressAI.Web.Data;
 using Microsoft.EntityFrameworkCore;
-using System.Text;
 using System.Text.Json;
 
 namespace FortressAI.Web.Services;
@@ -50,16 +49,26 @@ public class KbDocumentService
         if (string.IsNullOrEmpty(safeFilename))
             throw new ArgumentException("Invalid filename.", nameof(filename));
 
-        // Auto-convert PPTX — Bedrock KB does not support .pptx natively
+        // Auto-convert PPTX — Bedrock KB does not support .pptx natively; convert to PDF via LibreOffice headless
         Stream uploadStream = fileStream;
         if (safeFilename.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogInformation("PPTX detected — converting to Markdown for KB ingestion: {Filename}", safeFilename);
-            var markdown = ConvertPptxToMarkdown(fileStream);
-            var markdownBytes = Encoding.UTF8.GetBytes(markdown);
-            uploadStream = new MemoryStream(markdownBytes);
-            safeFilename = Path.ChangeExtension(safeFilename, ".md");
-            contentType = "text/markdown";
+            _logger.LogInformation("PPTX detected — converting to PDF via LibreOffice: {Filename}", safeFilename);
+            var pdfBytes = await ConvertPptxToPdfAsync(fileStream, safeFilename, _logger);
+
+            if (pdfBytes != null)
+            {
+                var convertedFilename = Path.ChangeExtension(safeFilename, ".pdf");
+                uploadStream = new MemoryStream(pdfBytes);
+                safeFilename = convertedFilename;
+                contentType = "application/pdf";
+                _logger.LogInformation("PPTX converted to PDF: {Filename} ({Bytes} bytes)", convertedFilename, pdfBytes.Length);
+            }
+            else
+            {
+                _logger.LogWarning("PPTX→PDF conversion failed — uploading original PPTX (Bedrock may not ingest it)");
+                // Fall through — upload original PPTX as-is; Bedrock will skip it but file is preserved in S3
+            }
         }
 
         var key = tier switch
@@ -329,6 +338,8 @@ public class KbDocumentService
                 }
                 listReq.ContinuationToken = response.NextContinuationToken;
             } while (response.IsTruncated);
+            _logger.LogInformation("ListDocumentsAsync: tier={Tier} userId={UserId} prefix={Prefix} → found {Count} objects",
+                tier, userId, prefix, docs.Count);
         }
         catch (Exception ex)
         {
@@ -355,44 +366,59 @@ public class KbDocumentService
         return docs;
     }
 
-    /// <summary>Convert a PPTX stream to Markdown text (one ## Slide N section per slide).</summary>
-    private static string ConvertPptxToMarkdown(Stream pptxStream)
+    /// <summary>Convert a PPTX stream to PDF bytes using LibreOffice headless.</summary>
+    private static async Task<byte[]?> ConvertPptxToPdfAsync(Stream pptxStream, string filename, ILogger logger)
     {
+        var tmpDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        var inputPath = Path.Combine(tmpDir, filename);
+        var pdfPath = Path.ChangeExtension(inputPath, ".pdf");
+
         try
         {
-            using var presentation = DocumentFormat.OpenXml.Packaging.PresentationDocument.Open(pptxStream, false);
-            var sb = new StringBuilder();
-            var pres = presentation.PresentationPart?.Presentation;
-            if (pres?.SlideIdList == null) return "[Empty presentation]";
+            // Write PPTX to temp file
+            await using (var fs = new FileStream(inputPath, FileMode.Create, FileAccess.Write))
+                await pptxStream.CopyToAsync(fs);
 
-            int slideNum = 1;
-            foreach (var slideId in pres.SlideIdList.Elements<DocumentFormat.OpenXml.Presentation.SlideId>())
+            // Run LibreOffice headless conversion
+            var psi = new System.Diagnostics.ProcessStartInfo
             {
-                var rId = slideId.RelationshipId?.Value;
-                if (rId == null) continue;
-                var slidePart = (DocumentFormat.OpenXml.Packaging.SlidePart)presentation.PresentationPart!.GetPartById(rId);
+                FileName = "libreoffice",
+                Arguments = $"--headless --convert-to pdf --outdir {tmpDir} {inputPath}",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
 
-                sb.AppendLine($"## Slide {slideNum}");
+            using var proc = System.Diagnostics.Process.Start(psi)
+                ?? throw new InvalidOperationException("Failed to start LibreOffice process");
+            await proc.WaitForExitAsync();
 
-                // Extract text from all text shapes — deduplicate within slide
-                var texts = slidePart.Slide.Descendants<DocumentFormat.OpenXml.Drawing.Text>()
-                    .Select(t => t.Text?.Trim())
-                    .Where(t => !string.IsNullOrEmpty(t))
-                    .Distinct()
-                    .ToList();
-
-                foreach (var text in texts)
-                    sb.AppendLine(text);
-
-                sb.AppendLine();
-                slideNum++;
+            if (proc.ExitCode != 0)
+            {
+                var err = await proc.StandardError.ReadToEndAsync();
+                logger.LogWarning("LibreOffice conversion failed (exit {Code}): {Err}", proc.ExitCode, err);
+                return null;
             }
 
-            return sb.ToString();
+            if (!File.Exists(pdfPath))
+            {
+                logger.LogWarning("LibreOffice did not produce expected output: {Path}", pdfPath);
+                return null;
+            }
+
+            return await File.ReadAllBytesAsync(pdfPath);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            return "[PPTX content could not be extracted — file may be corrupted or password-protected]";
+            logger.LogWarning(ex, "PPTX→PDF conversion failed — will skip upload");
+            return null;
+        }
+        finally
+        {
+            // Clean up temp directory
+            try { Directory.Delete(tmpDir, recursive: true); } catch { }
         }
     }
 }
@@ -403,5 +429,5 @@ public class KbDocumentInfo
     public string Filename { get; set; } = "";
     public long Size { get; set; }
     public DateTime LastModified { get; set; }
-    public string IngestionStatus { get; set; } = "pending";  // "pending" | "ingested" | "failed"
+    public string IngestionStatus { get; set; } = "ingested";  // default to ingested — no tracking row means it was uploaded before tracking was added
 }
