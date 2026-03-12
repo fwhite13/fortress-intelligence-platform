@@ -193,3 +193,69 @@ This is **correct and expected** — the Stub is dev-only and never runs in prod
 ---
 
 *Hawkeye out. One critical hit, one confirm needed. Fix item #22 and we're clear to deploy.*
+
+---
+
+# Review Report — Cycle 2 (Focused Re-check)
+
+**Reviewer:** Hawkeye (Clint Barton) — code-reviewer
+**Commit:** `8cdad00`
+**Review Cycle:** 2 of 2
+**Date:** 2026-03-12
+
+---
+
+## Verdict: ✅ PASS
+
+Both cycle 1 issues are correctly resolved. No regressions detected.
+
+---
+
+## Focused Checklist Results
+
+### Critical Fix — Item #22 (Cookie auth bypass)
+
+| # | Check | Result | Evidence |
+|---|-------|--------|----------|
+| 1 | `HandleRequirementAsync` calls `Succeed()` only when `AuthenticationType == "AppKeyAuth"` AND `IsAuthenticated == true` | ✅ PASS | `context.User.Identities.Any(i => i.AuthenticationType == "AppKeyAuth" && i.IsAuthenticated)` — both conditions required in a single `.Any()` predicate |
+| 2 | Cookie-only identity (no `x-api-key` header) would NOT get `Succeed()` called | ✅ PASS | A Cookie identity has `AuthenticationType == "Cookies"`, not `"AppKeyAuth"` — the `.Any()` predicate returns false, `Succeed()` is never called, request fails policy |
+| 3 | `HavenChatController` has `[Authorize(AuthenticationSchemes = "AppKeyAuth", Policy = "AppKeyOnly")]` — both scheme AND policy | ✅ PASS | Class-level attribute reads exactly `[Authorize(AuthenticationSchemes = "AppKeyAuth", Policy = "AppKeyOnly")]` |
+| 4 | `AppKeyAuthorizationHandler` registered as `IAuthorizationHandler` in DI | ✅ PASS | `builder.Services.AddSingleton<IAuthorizationHandler, AppKeyAuthorizationHandler>()` — singleton, which is correct for a stateless handler |
+| 5 | `"AppKeyOnly"` policy registered inside the **existing** `AddAuthorization()` call, not a second separate call | ✅ PASS | Single `builder.Services.AddAuthorization(options => { options.AddPolicy("AppKeyOnly", ...) })` call at line ~233 — no duplicate `AddAuthorization()` detected in the file |
+
+**Implementation note:** The handler does not call `context.Fail()` on the negative path — it simply does nothing, letting ASP.NET Core's authorization pipeline fail the requirement naturally. This is correct behavior per the framework's design; not calling `Succeed()` is sufficient to deny access when no other handler can satisfy the requirement.
+
+---
+
+### oid Finding — Item #6
+
+| # | Check | Result | Evidence |
+|---|-------|--------|----------|
+| 6 | FAIT never reads `oid` claim for user resolution — all lookups use `NameIdentifier`/email | ✅ CONFIRMED | Build Report investigation confirmed: `HavenChatController`, `TasksController`, `ChatAttachmentController`, `McpOAuthController`, and `Program.cs` all use `ClaimTypes.NameIdentifier` or email for user resolution. The `"oid"` claim is set in `AppKeyAuthHandler` and `StubAuthHandler` for Entra token shape consistency only — zero code paths consume it. No code change required. |
+
+**Additional verification:** `FirmIntegrationController` uses `entraOid` as a query parameter from FIRM (service-to-service call, not a claim lookup) and resolves users by `db.Users.Where(u => u.IsEntraUser && u.IsActive)` — not by reading an `oid` claim from `HttpContext.User`. Consistent with the finding.
+
+---
+
+## No Regressions
+
+Spot-checked the three modified files against cycle 1 passing items:
+- `AppKeyAuthHandler.cs` registration in `Program.cs` — unchanged, still in production `else` block ✅
+- `DefaultScheme` still Cookie — unchanged ✅
+- `[Authorize]` attribute on `HavenChatController` — correctly updated, old `AuthenticationSchemes`-only form replaced ✅
+- `AppKeyRequirement` is a clean empty `IAuthorizationRequirement` — no extraneous logic ✅
+
+---
+
+## Summary
+
+| Issue | Cycle 1 Status | Cycle 2 Status |
+|-------|---------------|----------------|
+| #22 — Cookie auth bypass | 🔴 CRITICAL | ✅ FIXED |
+| #6 — oid claim / user resolution | ⚠️ IMPORTANT (confirm needed) | ✅ CONFIRMED — no code change needed |
+
+**All cycle 1 required changes are implemented correctly. No new issues found. Pipeline may advance to SECURITY.**
+
+---
+
+*Hawkeye out. Target neutralized. Clear to advance.*

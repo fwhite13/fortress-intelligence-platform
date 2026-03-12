@@ -2,6 +2,7 @@ using System.Net;
 using Amazon.S3;
 using Amazon.S3.Model;
 using FortressAI.Web.Data;
+using FortressAI.Web.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,14 +19,17 @@ public class AdminKbController : ControllerBase
     private readonly IAmazonS3 _s3;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<AdminKbController> _logger;
+    private readonly KbDocumentService _kbDocumentService;
 
     private const string BucketName = "fortress-tools";
 
-    public AdminKbController(IAmazonS3 s3, IDbContextFactory<AppDbContext> dbFactory, ILogger<AdminKbController> logger)
+    public AdminKbController(IAmazonS3 s3, IDbContextFactory<AppDbContext> dbFactory,
+        ILogger<AdminKbController> logger, KbDocumentService kbDocumentService)
     {
         _s3 = s3;
         _dbFactory = dbFactory;
         _logger = logger;
+        _kbDocumentService = kbDocumentService;
     }
 
     /// <summary>
@@ -93,5 +97,43 @@ public class AdminKbController : ControllerBase
         _logger.LogInformation("BackfillKbTracking: created {Created} tracking rows", created);
 
         return Ok(new { backfilled = created, total = allObjects.Count });
+    }
+
+    /// <summary>
+    /// Trigger a Bedrock ingestion job for the Project KB (KB ID: A5U1GKN0TS).
+    /// Use after directly inserting project documents into S3/DB without going through the upload UI.
+    ///
+    /// POST /api/kb/admin/sync-project
+    /// Restricted: loopback only.
+    /// Returns: { jobId: "..." }
+    /// </summary>
+    [HttpPost("admin/sync-project")]
+    public async Task<IActionResult> SyncProjectKb()
+    {
+        var remoteIp = HttpContext.Connection.RemoteIpAddress;
+        if (remoteIp != null && remoteIp.IsIPv4MappedToIPv6)
+            remoteIp = remoteIp.MapToIPv4();
+        if (remoteIp is null || !IPAddress.IsLoopback(remoteIp))
+            return StatusCode(403, new { error = "Forbidden: internal endpoint" });
+
+        _logger.LogInformation("SyncProjectKb: triggering Bedrock ingestion for Project KB");
+
+        try
+        {
+            var jobId = await _kbDocumentService.StartProjectIngestionAsync(throwOnConflict: false);
+            if (jobId is null)
+            {
+                _logger.LogWarning("SyncProjectKb: StartProjectIngestionAsync returned null — KB or DS ID may not be configured");
+                return StatusCode(500, new { error = "Ingestion job not started — ProjectKbId or ProjectDataSourceId not configured" });
+            }
+
+            _logger.LogInformation("SyncProjectKb: ingestion job started, jobId={JobId}", jobId);
+            return Ok(new { jobId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SyncProjectKb: failed to start ingestion job");
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
 }
