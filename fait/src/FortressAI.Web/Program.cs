@@ -212,6 +212,12 @@ else
     {
         Console.WriteLine("⚠️  Entra OIDC not configured — SSO disabled, email/password only");
     }
+
+    // API key auth for machine-to-machine endpoints (Haven PWA → /api/haven/chat)
+    authBuilder.AddScheme<AppKeyAuthOptions, AppKeyAuthHandler>("AppKeyAuth", options =>
+    {
+        options.ApiKey = builder.Configuration["AppKeys:Haven"];
+    });
 }
 builder.Services.AddAuthorization();
 builder.Services.AddCascadingAuthenticationState();
