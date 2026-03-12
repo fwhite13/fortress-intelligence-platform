@@ -201,3 +201,48 @@ Both are one-line fixes. No architectural changes required. Resubmit for cycle 2
 ---
 
 *— Hawkeye*
+
+---
+
+# Code Review Report: FAIT Azure DevOps OAuth Integration — Cycle 2
+
+**Reviewer:** Hawkeye (Clint Barton) — Code Reviewer  
+**Commit:** `73c9c64`  
+**Review Cycle:** 2 of 2 (focused re-check)  
+**Date:** 2026-03-12  
+
+---
+
+## Verdict: PASS ✅
+
+All 5 issues from cycle 1 are confirmed fixed. No regressions detected. Ready to advance.
+
+---
+
+## Cycle 2 Checklist Results
+
+| # | Issue from Cycle 1 | Status | Evidence |
+|---|--------------------|--------|----------|
+| 1 | FK in `user_devops_tokens` DDL references `users` (not `AspNetUsers`) | ✅ **FIXED** | `DatabaseInitializationService.cs` line 113: `REFERENCES users (Id) ON DELETE CASCADE`. Matches `AppDbContext` mapping at line 46: `entity.ToTable("users")`. |
+| 2 | `redirectUri` uses `config["AzureDevOps:RedirectUri"]` as primary, `Request.Host` as fallback only | ✅ **FIXED** | `Program.cs` lines 401–402: `var redirectUri = config["AzureDevOps:RedirectUri"] ?? $"{ctx.Request.Scheme}://{ctx.Request.Host}/auth/devops-callback";` — config is primary source; host fallback only when null. |
+| 3 | `DevOpsTokenService` resolved via `ctx.RequestServices.GetRequiredService<DevOpsTokenService>()` | ✅ **FIXED** | `Program.cs` line 400: `var devOpsTokenService = ctx.RequestServices.GetRequiredService<DevOpsTokenService>();`. No `new DevOpsTokenService(...)` call present. |
+| 4 | Snackbar calls in `Settings.razor` are in `OnAfterRenderAsync` with `if (firstRender)` guard | ✅ **FIXED** | `Settings.razor` lines 378–407: DevOps snackbar calls (`DevOpsConnected`, `DevOpsError`) are inside `OnAfterRenderAsync(bool firstRender)` under `if (firstRender && !_feedbackShown)`. Not in `OnParametersSetAsync`. |
+| 5 | `error_description` decoded with `Uri.UnescapeDataString` before `Uri.EscapeDataString` | ✅ **FIXED** | `Program.cs` line 379: `var errorDesc = Uri.UnescapeDataString(ctx.Request.Query["error_description"].FirstOrDefault() ?? "unknown_error");` — decoded before being passed to `EscapeDataString` on line 380. |
+
+---
+
+## Notes
+
+- **No regressions** found in previously passing items (spot-checked auth URL construction, state validation, security logging).
+- The `_feedbackShown` flag in `Settings.razor` is a clean addition — prevents duplicate snackbars on re-render. Correct pattern.
+- Fix #5 also upgraded from `.ToString()` to `.FirstOrDefault() ?? "unknown_error"` — minor improvement, handles null header cleanly.
+
+---
+
+## Summary
+
+All cycle 1 blockers (issues #1 and #2) and nitpicks (N1, N2, N3) resolved cleanly and correctly. Implementation is consistent with the rest of the codebase patterns. Pipeline can advance.
+
+---
+
+*— Hawkeye*

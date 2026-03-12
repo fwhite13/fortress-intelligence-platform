@@ -20,7 +20,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<BriefingHistory> BriefingHistories => Set<BriefingHistory>();
     public DbSet<UserBriefingSchedule> UserBriefingSchedules => Set<UserBriefingSchedule>();
     public DbSet<UserMicrosoftToken> UserMicrosoftTokens => Set<UserMicrosoftToken>();
-    public DbSet<UserDevOpsToken> UserDevOpsTokens => Set<UserDevOpsToken>();
+    public DbSet<UserDevOpsConnection> UserDevOpsConnections => Set<UserDevOpsConnection>();
     public DbSet<GraphSubscription> GraphSubscriptions => Set<GraphSubscription>();
     public DbSet<EmailAlert> EmailAlerts => Set<EmailAlert>();
     public DbSet<EmailLog> EmailLogs => Set<EmailLog>();
@@ -158,18 +158,16 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.HasOne(e => e.User).WithOne().HasForeignKey<UserMicrosoftToken>(e => e.UserId);
         });
 
-        modelBuilder.Entity<UserDevOpsToken>(entity =>
+        modelBuilder.Entity<UserDevOpsConnection>(entity =>
         {
-            entity.ToTable("user_devops_tokens");
+            entity.ToTable("user_devops_connections");
             entity.HasKey(e => e.UserId);
-            entity.Property(e => e.UserId).HasColumnName("user_id");
-            entity.Property(e => e.AccessToken).HasColumnName("access_token");
-            entity.Property(e => e.RefreshToken).HasColumnName("refresh_token");
-            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
-            entity.Property(e => e.Email).HasColumnName("email");
-            entity.Property(e => e.DisplayName).HasColumnName("display_name");
-            entity.Property(e => e.ConnectedAt).HasColumnName("connected_at");
-            entity.HasOne(e => e.User).WithOne().HasForeignKey<UserDevOpsToken>(e => e.UserId);
+            entity.Property(e => e.UserId).HasColumnName("user_id").ValueGeneratedNever();
+            entity.Property(e => e.OrgUrl).HasColumnName("org_url").HasMaxLength(512).IsRequired();
+            entity.Property(e => e.PatEncrypted).HasColumnName("pat_encrypted").HasColumnType("LONGTEXT").IsRequired();
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithOne().HasForeignKey<UserDevOpsConnection>(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<GraphSubscription>(entity =>

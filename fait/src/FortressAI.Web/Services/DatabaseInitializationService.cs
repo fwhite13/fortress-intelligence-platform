@@ -101,16 +101,14 @@ public class DatabaseInitializationService : IHostedService
                     CreatedAt TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6),
                     UpdatedAt TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6)
                 )"),
-                ("user_devops_tokens", @"CREATE TABLE IF NOT EXISTS user_devops_tokens (
+                ("user_devops_connections", @"CREATE TABLE IF NOT EXISTS user_devops_connections (
                     user_id CHAR(36) NOT NULL,
-                    access_token LONGTEXT NOT NULL,
-                    refresh_token LONGTEXT NULL,
-                    expires_at DATETIME(6) NOT NULL,
-                    email VARCHAR(256) NULL,
-                    display_name VARCHAR(256) NULL,
-                    connected_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                    org_url VARCHAR(512) NOT NULL,
+                    pat_encrypted LONGTEXT NOT NULL,
+                    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
                     PRIMARY KEY (user_id),
-                    CONSTRAINT fk_devops_tokens_user FOREIGN KEY (user_id) REFERENCES users (Id) ON DELETE CASCADE
+                    CONSTRAINT fk_devops_conn_user FOREIGN KEY (user_id) REFERENCES users (Id) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"),
                 ("graph_subscriptions", @"CREATE TABLE IF NOT EXISTS graph_subscriptions (
                     Id INT PRIMARY KEY AUTO_INCREMENT,
@@ -469,60 +467,10 @@ public class DatabaseInitializationService : IHostedService
                 _logger.LogWarning(ex, "Brave Search seed (non-fatal): {Message}", ex.Message);
             }
 
-            // Seed Azure DevOps MCP server
-            try
-            {
-                var azdoId = "00000000-0000-0000-0000-000000000002";
-                var azdoCount = await db.McpServers
-                    .CountAsync(s => s.Id == Guid.Parse(azdoId), cancellationToken);
-                if (azdoCount == 0)
-                {
-                    var clientId = _configuration["AzureDevOps:ClientId"] ?? "";
-                    var clientSecret = _configuration["AzureDevOps:ClientSecret"] ?? "";
-                    var redirectUri = _configuration["AzureDevOps:RedirectUri"]
-                        ?? "https://fait.dev.fortressam.ai/mcp/oauth/callback";
-
-                    // Encrypt client secret if provided
-                    string? encryptedSecret = null;
-                    if (!string.IsNullOrEmpty(clientSecret))
-                    {
-                        var protector = _dataProtectionProvider.CreateProtector("McpAdmin.SystemKeys.v1");
-                        encryptedSecret = protector.Protect(clientSecret);
-                    }
-
-                    var authConfig = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        client_id = clientId,
-                        authorization_url = "https://app.vssps.visualstudio.com/oauth2/authorize",
-                        token_url = "https://app.vssps.visualstudio.com/oauth2/token",
-                        scopes = new[] { "vso.work_write", "vso.code_status", "vso.build_execute" },
-                        redirect_uri = redirectUri
-                    });
-
-                    // Placeholder manifest — ManifestRefreshService will populate at runtime
-                    var azdoManifest = System.Text.Json.JsonSerializer.Serialize(new object[] { });
-
-                    // Note: client_secret is stored in the separate oauth_client_secret column (encrypted),
-                    // NOT inside auth_config JSON. This deviates from the spec (Section 13.1) which
-                    // shows it in auth_config — the column approach is correct for security isolation.
-                    await db.Database.ExecuteSqlRawAsync(
-                        """
-                        INSERT INTO mcp_servers (id, name, slug, description, transport_type, endpoint_url,
-                            auth_type, requires_user_auth, auth_config, oauth_client_secret, is_active,
-                            tool_manifest, created_at, updated_at)
-                        VALUES ({0}, 'Azure DevOps', 'azdo',
-                            'Access Azure DevOps work items, PRs, pipelines, and repos',
-                            'http', 'https://mcp.azure.com/devops', 'oauth2', 1, {1}, {2}, 1, {3},
-                            NOW(6), NOW(6))
-                        """,
-                        azdoId, authConfig, (object?)encryptedSecret, azdoManifest);
-                    _logger.LogInformation("Seeded Azure DevOps MCP server.");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Azure DevOps seed (non-fatal): {Message}", ex.Message);
-            }
+            // Azure DevOps MCP server seed intentionally omitted.
+            // DevOps connection uses dedicated user_devops_connections table + PAT-based auth.
+            // MCP server row will be added in a follow-up task once the Microsoft-hosted
+            // endpoint URL is confirmed.
 
             // One-time cleanup: delete ghost conversations (created on page load with no messages)
             try
