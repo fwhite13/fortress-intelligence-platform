@@ -147,7 +147,14 @@
                     }
                 }
 
-                @if (_personalDocuments.Any())
+                @if (_personalDocumentsLoadError != null)
+                {
+                    <MudDivider Class="my-4" />
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+                        @_personalDocumentsLoadError
+                    </MudAlert>
+                }
+                else if (_personalDocuments.Any())
                 {
                     <MudDivider Class="my-4" />
                     <MudText Typo="Typo.subtitle1" Style="font-weight: 600; margin-bottom: 12px;">
@@ -450,6 +457,7 @@
     private List<KbDocumentInfo> _teamDocuments = new();
     private bool _uploadingPersonalDoc = false;
     private bool _uploadingTeamDoc = false;
+    private string? _personalDocumentsLoadError = null;
 
     // Status auto-refresh
     private Timer? _statusRefreshTimer;
@@ -476,10 +484,15 @@
             _teams         = teamsTask.Result;
 
             // Load personal documents
-            try { _personalDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Personal, Session.UserId); }
+            try
+            {
+                _personalDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Personal, Session.UserId);
+                _personalDocumentsLoadError = null;
+            }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to load personal KB documents");
+                _logger.LogError(ex, "Failed to load personal KB documents");
+                _personalDocumentsLoadError = "Failed to load your documents. Please refresh the page.";
                 Snackbar.Add("Could not load your KB documents — check connectivity or permissions.", Severity.Warning);
             }
         }

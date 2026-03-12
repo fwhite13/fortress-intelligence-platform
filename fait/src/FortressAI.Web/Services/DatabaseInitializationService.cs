@@ -382,6 +382,40 @@ public class DatabaseInitializationService : IHostedService
                 }
             }
 
+            // KB S3Key dedup + unique constraint — prevents duplicate S3Key rows in project_documents
+            // Step 1: clean up any existing duplicate rows (keep most recent per S3Key)
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(@"
+                    DELETE p1 FROM project_documents p1
+                    INNER JOIN project_documents p2
+                    WHERE p1.S3Key = p2.S3Key
+                    AND p1.UploadedAt < p2.UploadedAt
+                    AND p1.Id != p2.Id", cancellationToken);
+                _logger.LogInformation("KB S3Key dedup cleanup executed (idempotent)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "KB S3Key dedup cleanup failed (non-fatal) — unique constraint add may fail if duplicates remain");
+            }
+
+            // Step 2: add unique constraint on S3Key (idempotent — 1061 = constraint already exists)
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(@"
+                    ALTER TABLE project_documents
+                    ADD CONSTRAINT uq_project_documents_s3key UNIQUE (S3Key)", cancellationToken);
+                _logger.LogInformation("Added unique constraint uq_project_documents_s3key on project_documents.S3Key");
+            }
+            catch (MySqlConnector.MySqlException ex) when (ex.Number == 1061)
+            {
+                _logger.LogDebug("uq_project_documents_s3key constraint already exists (idempotent)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to add uq_project_documents_s3key unique constraint (non-fatal)");
+            }
+
             // Seed Brave Search MCP server
             try
             {

@@ -106,26 +106,41 @@ public class KbDocumentService
             });
         }
 
-        // Track upload in DB for ingestion status monitoring
+        // Track upload in DB for ingestion status monitoring (upsert — prevents duplicate S3Key on re-upload)
         // ProjectId = null for personal/team/corp uploads (project uploads tracked by DocumentService)
         try
         {
             await using var trackDb = await _dbContextFactory.CreateDbContextAsync();
-            trackDb.ProjectDocuments.Add(new FortressAI.Shared.Models.ProjectDocument
+            var existingRow = await trackDb.ProjectDocuments
+                .FirstOrDefaultAsync(pd => pd.S3Key == key);
+
+            if (existingRow != null)
             {
-                Id = Guid.NewGuid(),
-                ProjectId = null,   // not a project document
-                Filename = safeFilename,
-                S3Key = key,
-                FileSize = 0,       // not tracked for KB uploads — size not available at this point
-                IngestionStatus = "pending",
-                UploadedAt = DateTime.UtcNow
-            });
+                // Re-upload of same file — update existing row instead of inserting duplicate
+                existingRow.Filename = safeFilename;
+                existingRow.IngestionStatus = "pending";
+                existingRow.UploadedAt = DateTime.UtcNow;
+                trackDb.ProjectDocuments.Update(existingRow);
+                _logger.LogInformation("[KbDocumentService] Updated existing DB tracking row for re-upload S3Key={Key}", key);
+            }
+            else
+            {
+                trackDb.ProjectDocuments.Add(new FortressAI.Shared.Models.ProjectDocument
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = null,   // not a project document
+                    Filename = safeFilename,
+                    S3Key = key,
+                    FileSize = 0,       // not tracked for KB uploads — size not available at this point
+                    IngestionStatus = "pending",
+                    UploadedAt = DateTime.UtcNow
+                });
+            }
             await trackDb.SaveChangesAsync();
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to create KB document tracking row for {Key} — non-fatal", key);
+            _logger.LogWarning(ex, "Failed to upsert KB document tracking row for {Key} — non-fatal", key);
         }
 
         return key;
@@ -166,12 +181,32 @@ public class KbDocumentService
         return key;
     }
 
-    /// <summary>Delete a document from S3 (also deletes .metadata.json companion).</summary>
+    /// <summary>Delete a document from S3 (also deletes .metadata.json companion) and removes the DB tracking row.</summary>
     public async Task DeleteDocumentAsync(string s3Key)
     {
         await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = BucketName, Key = s3Key });
         await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = BucketName, Key = $"{s3Key}.metadata.json" });
         _logger.LogInformation("Deleted KB document s3://{Bucket}/{Key}", BucketName, s3Key);
+
+        // Remove DB tracking row(s) — prevents duplicate-S3Key bug on re-upload
+        // Delete ALL rows for this S3Key (handles any pre-existing duplicates too)
+        try
+        {
+            await using var db = await _dbContextFactory.CreateDbContextAsync();
+            var rows = await db.ProjectDocuments
+                .Where(pd => pd.S3Key == s3Key)
+                .ToListAsync();
+            if (rows.Any())
+            {
+                db.ProjectDocuments.RemoveRange(rows);
+                await db.SaveChangesAsync();
+                _logger.LogInformation("[KbDocumentService] Removed {Count} DB tracking row(s) for S3Key={S3Key}", rows.Count, s3Key);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[KbDocumentService] Failed to remove DB tracking row for S3Key={S3Key} — non-fatal, stale row may remain", s3Key);
+        }
     }
 
     /// <summary>Trigger Bedrock KB ingestion sync for the specified KB tier. Returns the ingestion job ID on success, null otherwise.</summary>
@@ -353,9 +388,22 @@ public class KbDocumentService
         {
             var s3Keys = docs.Select(d => d.S3Key).ToList();
             await using var db = await _dbContextFactory.CreateDbContextAsync();
-            var statusMap = await db.ProjectDocuments
+            // Build deduplicated status map — warn if duplicates detected (indicates stale rows from delete without DB cleanup)
+            var dbRows = await db.ProjectDocuments
                 .Where(pd => pd.S3Key != null && s3Keys.Contains(pd.S3Key))
-                .ToDictionaryAsync(pd => pd.S3Key!, pd => pd.IngestionStatus);
+                .ToListAsync();
+
+            var grouped = dbRows.GroupBy(r => r.S3Key!).ToList();
+            var duplicates = grouped.Where(g => g.Count() > 1).ToList();
+            if (duplicates.Any())
+            {
+                foreach (var dup in duplicates)
+                    _logger.LogWarning("[KbDocumentService] Duplicate S3Key detected: {S3Key} ({Count} rows) — keeping most recent to avoid Dictionary collision", dup.Key, dup.Count());
+            }
+
+            var statusMap = grouped
+                .Select(g => g.OrderByDescending(r => r.UploadedAt).First())
+                .ToDictionary(r => r.S3Key!, r => r.IngestionStatus);
             foreach (var doc in docs)
             {
                 if (statusMap.TryGetValue(doc.S3Key, out var status))
