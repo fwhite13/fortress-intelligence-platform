@@ -99,6 +99,48 @@ The Haven app receives a single JSON response containing the full answer and sou
 
 ---
 
+---
+
+## Review Cycle 2 Fixes (2026-03-12) — Commit `b4dace7`
+
+### Fix #1 (Critical): AppKeyOnly Policy — Cookie Auth Bypass Closed
+
+**Problem (Clint Item #22):** `[Authorize(AuthenticationSchemes = "AppKeyAuth")]` only controlled which scheme ran `HandleAuthenticateAsync`. When no `x-api-key` header was present, `AppKeyAuth` returned `NoResult()` and the framework fell back to the `DefaultScheme` (Cookie). A logged-in browser user with a valid `.FortressAI.Session` cookie could call `POST /api/haven/chat` without an API key.
+
+**Fix applied:**
+
+1. **Created** `src/FortressAI.Web/Auth/AppKeyRequirement.cs` — `AppKeyRequirement : IAuthorizationRequirement` + `AppKeyAuthorizationHandler` that only calls `Succeed()` when `identity.AuthenticationType == "AppKeyAuth"` and `IsAuthenticated`.
+
+2. **Modified** `Program.cs`:
+   - Added `using Microsoft.AspNetCore.Authorization;`
+   - Registered `builder.Services.AddSingleton<IAuthorizationHandler, AppKeyAuthorizationHandler>()`
+   - Added `"AppKeyOnly"` policy via `options.AddPolicy` inside the existing `AddAuthorization()` lambda
+
+3. **Modified** `HavenChatController.cs`:
+   - Changed `[Authorize(AuthenticationSchemes = "AppKeyAuth")]` → `[Authorize(AuthenticationSchemes = "AppKeyAuth", Policy = "AppKeyOnly")]`
+
+**Result:** Cookie-authenticated users are now hard-blocked by the `AppKeyOnly` policy. Only requests carrying a valid `x-api-key` header and authenticated by `AppKeyAuth` can reach `POST /api/haven/chat`.
+
+---
+
+### Finding: `oid` Claim — NameIdentifier is Sufficient
+
+**Clint's concern:** The `oid` claim value `08de7605-3f7d-427d-858a-637777b41018` in `AppKeyAuthHandler` is Fred's FAIT DB user ID, but `oid` in Entra tokens is the **Entra Directory Object ID**, which could be different.
+
+**Investigation:**
+
+Searched the entire `src/FortressAI.Web/` codebase for all usages of `oid`, `FindFirst`, and `NameIdentifier`.
+
+**Findings:**
+- `UserManagementService.cs` — resolves users exclusively by `Guid userId` passed as method parameter. No claim lookups.
+- `HavenChatController.cs` — uses `User.FindFirstValue(ClaimTypes.NameIdentifier)` for logging only.
+- `HavenChatController.cs`, `TasksController.cs`, `ChatAttachmentController.cs`, `McpOAuthController.cs`, `Program.cs` (two endpoints) — all use `ClaimTypes.NameIdentifier` or `email` for user resolution. **Zero code paths read the `"oid"` claim.**
+- The `oid` claim in both `AppKeyAuthHandler` and `StubAuthHandler` is set only for pattern consistency with real Entra tokens; it is never consumed by any FAIT service.
+
+**Conclusion:** The `oid` value doesn't matter for FAIT functionality. Setting `oid = NameIdentifier` (both `08de7605-3f7d-427d-858a-637777b41018`) is correct and consistent. **No code change required.** The existing value is already equal to `NameIdentifier`, so the pattern is consistent.
+
+---
+
 ## Limitations / Follow-up Items
 
 1. **SSE streaming not implemented in v1** — JSON response is sufficient for Haven. Add streaming in v2 if the app needs it.
