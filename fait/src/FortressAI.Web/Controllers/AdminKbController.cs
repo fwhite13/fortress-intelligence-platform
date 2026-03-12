@@ -104,17 +104,27 @@ public class AdminKbController : ControllerBase
     /// Use after directly inserting project documents into S3/DB without going through the upload UI.
     ///
     /// POST /api/kb/admin/sync-project
-    /// Restricted: loopback only.
+    /// Auth: loopback IP OR valid x-api-key header (AppKeys:Haven) — allows external callers (e.g. Jarvis)
     /// Returns: { jobId: "..." }
     /// </summary>
     [HttpPost("admin/sync-project")]
-    public async Task<IActionResult> SyncProjectKb()
+    public async Task<IActionResult> SyncProjectKb(
+        [FromServices] IConfiguration config)
     {
         var remoteIp = HttpContext.Connection.RemoteIpAddress;
         if (remoteIp != null && remoteIp.IsIPv4MappedToIPv6)
             remoteIp = remoteIp.MapToIPv4();
-        if (remoteIp is null || !IPAddress.IsLoopback(remoteIp))
-            return StatusCode(403, new { error = "Forbidden: internal endpoint" });
+        var isLoopback = remoteIp != null && IPAddress.IsLoopback(remoteIp);
+
+        // Accept loopback OR valid API key
+        var apiKey = HttpContext.Request.Headers["x-api-key"].FirstOrDefault();
+        var configuredKey = config["AppKeys:Haven"];
+        var isValidApiKey = !string.IsNullOrEmpty(apiKey) &&
+                            !string.IsNullOrEmpty(configuredKey) &&
+                            string.Equals(apiKey, configuredKey, StringComparison.Ordinal);
+
+        if (!isLoopback && !isValidApiKey)
+            return StatusCode(403, new { error = "Forbidden: loopback or valid API key required" });
 
         _logger.LogInformation("SyncProjectKb: triggering Bedrock ingestion for Project KB");
 
