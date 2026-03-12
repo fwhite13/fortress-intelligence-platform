@@ -101,6 +101,17 @@ public class DatabaseInitializationService : IHostedService
                     CreatedAt TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6),
                     UpdatedAt TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6)
                 )"),
+                ("user_devops_tokens", @"CREATE TABLE IF NOT EXISTS user_devops_tokens (
+                    user_id CHAR(36) NOT NULL,
+                    access_token LONGTEXT NOT NULL,
+                    refresh_token LONGTEXT NULL,
+                    expires_at DATETIME(6) NOT NULL,
+                    email VARCHAR(256) NULL,
+                    display_name VARCHAR(256) NULL,
+                    connected_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                    PRIMARY KEY (user_id),
+                    CONSTRAINT fk_devops_tokens_user FOREIGN KEY (user_id) REFERENCES AspNetUsers (Id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"),
                 ("graph_subscriptions", @"CREATE TABLE IF NOT EXISTS graph_subscriptions (
                     Id INT PRIMARY KEY AUTO_INCREMENT,
                     UserId CHAR(36) NOT NULL,

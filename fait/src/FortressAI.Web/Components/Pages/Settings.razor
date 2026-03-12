@@ -1,10 +1,13 @@
 @page "/settings"
 @using FortressAI.Web.Services.Mcp
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Caching.Memory
 <PageTitle>Settings — FAIT</PageTitle>
 @inject UserSessionService Session
 @inject AssistantConfigService ConfigSvc
 @inject MicrosoftTokenService MsTokenSvc
+@inject DevOpsTokenService DevOpsTokenSvc
+@inject IMemoryCache _cache
 @inject IMcpRegistryService McpRegistrySvc
 @inject IMcpConnectionService McpConnSvc
 @inject IDialogService DialogService
@@ -133,6 +136,49 @@
             </MudCardContent>
         </MudCard>
 
+        <!-- Azure DevOps Connection -->
+        <MudCard Class="mb-4" Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.Code" Class="mr-2" Style="vertical-align: middle;" />
+                        Azure DevOps
+                    </MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                        Connect Azure DevOps to enable work item queries, pipeline triggers, and repo browsing.
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                @if (!DevOpsTokenSvc.IsConfigured)
+                {
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                        Azure DevOps integration not configured.
+                    </MudAlert>
+                }
+                else if (_devOpsConnected)
+                {
+                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-3">
+                        <strong>Connected</strong> as @(_devOpsDisplayName ?? "Azure DevOps user")
+                    </MudAlert>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DisconnectDevOps"
+                               StartIcon="@Icons.Material.Filled.LinkOff" Size="Size.Small">
+                        Disconnect
+                    </MudButton>
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
+                        Not connected. Connect to enable work item queries and pipeline triggers.
+                    </MudAlert>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConnectDevOps"
+                               StartIcon="@Icons.Material.Filled.Link" Size="Size.Large">
+                        Connect Azure DevOps
+                    </MudButton>
+                }
+            </MudCardContent>
+        </MudCard>
+
         <!-- Assistant Identity -->
         <MudCard Class="mb-4" Elevation="2">
             <MudCardHeader>
@@ -233,6 +279,12 @@
     [Parameter, SupplyParameterFromQuery(Name = "mcp_error")]
     public string? McpError { get; set; }
 
+    [Parameter, SupplyParameterFromQuery(Name = "devops_connected")]
+    public string? DevOpsConnected { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "devops_error")]
+    public string? DevOpsError { get; set; }
+
     private bool _loading = true;
     private bool _saving = false;
     private bool _feedbackShown = false;
@@ -258,6 +310,10 @@
     // Microsoft 365 connection
     private bool _msConnected = false;
     private string? _msEmail;
+
+    // Azure DevOps connection
+    private bool _devOpsConnected = false;
+    private string? _devOpsDisplayName;
 
     // MCP Tool connections
     private List<McpServerConnectionStatus> _mcpConnections = new();
@@ -305,6 +361,14 @@
             _msEmail = email;
         }
 
+        // Check Azure DevOps connection
+        _devOpsConnected = await DevOpsTokenSvc.IsConnectedAsync(Session.UserId);
+        if (_devOpsConnected)
+        {
+            var devOpsTok = await DevOpsTokenSvc.GetTokenAsync(Session.UserId);
+            _devOpsDisplayName = devOpsTok?.DisplayName ?? devOpsTok?.Email;
+        }
+
         // Load MCP tool connections
         _mcpConnections = await McpConnSvc.GetUserConnectionsAsync(Session.UserId);
 
@@ -326,6 +390,16 @@
             if (!string.IsNullOrEmpty(McpError))
             {
                 Snackbar.Add($"Connection failed: {McpError}", Severity.Error);
+                _feedbackShown = true;
+            }
+            if (!string.IsNullOrEmpty(DevOpsConnected))
+            {
+                Snackbar.Add("✅ Azure DevOps connected!", Severity.Success);
+                _feedbackShown = true;
+            }
+            if (!string.IsNullOrEmpty(DevOpsError))
+            {
+                Snackbar.Add($"Azure DevOps connection failed: {DevOpsError}", Severity.Error);
                 _feedbackShown = true;
             }
         }
@@ -362,6 +436,24 @@
         _msConnected = false;
         _msEmail = null;
         Snackbar.Add("Microsoft 365 disconnected.", Severity.Info);
+    }
+
+    private void ConnectDevOps()
+    {
+        var state = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        _cache.Set($"devops_oauth_state:{state}", state, TimeSpan.FromMinutes(10));
+        var baseUrl = Nav.BaseUri.TrimEnd('/');
+        var redirectUri = $"{baseUrl}/auth/devops-callback";
+        var authUrl = DevOpsTokenSvc.GetAuthorizationUrl(redirectUri, state);
+        Nav.NavigateTo(authUrl, forceLoad: true);
+    }
+
+    private async Task DisconnectDevOps()
+    {
+        await DevOpsTokenSvc.DeleteTokenAsync(Session.UserId);
+        _devOpsConnected = false;
+        _devOpsDisplayName = null;
+        Snackbar.Add("Azure DevOps disconnected.", Severity.Info);
     }
 
     private async Task SaveSettings()

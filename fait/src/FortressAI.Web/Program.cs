@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Caching.Memory;
 using MySqlConnector;
 using Amazon.BedrockAgentRuntime;
 using Amazon.CognitoIdentityProvider;
@@ -67,6 +68,7 @@ builder.Services.AddScoped<BriefingService>();
 builder.Services.AddScoped<BriefingGenerationService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<MicrosoftTokenService>();
+builder.Services.AddScoped<DevOpsTokenService>();
 builder.Services.AddScoped<GraphTaskService>();
 builder.Services.AddScoped<GraphCalendarService>();
 builder.Services.AddScoped<PreMeetingBriefService>();
@@ -362,6 +364,50 @@ app.MapGet("/auth/microsoft-callback", async (HttpContext ctx, IDbContextFactory
             $"<p>{ex.Message}</p>" +
             "<p><a href='/settings'>Back to Settings</a></p>" +
             "</body></html>", "text/html");
+    }
+});
+
+// Azure DevOps OAuth callback endpoint
+app.MapGet("/auth/devops-callback", async (HttpContext ctx, IDbContextFactory<AppDbContext> dbFactory, IHttpClientFactory httpFactory, IConfiguration config, IMemoryCache memoryCache) =>
+{
+    var code = ctx.Request.Query["code"].ToString();
+    var state = ctx.Request.Query["state"].ToString();
+    var error = ctx.Request.Query["error"].ToString();
+
+    if (!string.IsNullOrEmpty(error))
+    {
+        var errorDesc = ctx.Request.Query["error_description"].ToString();
+        return Results.Redirect($"/settings?devops_error={Uri.EscapeDataString($"{error}: {errorDesc}")}");
+    }
+
+    if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state))
+        return Results.Redirect("/settings?devops_error=No+authorization+code+received");
+
+    // Validate state from IMemoryCache
+    var cacheKey = $"devops_oauth_state:{state}";
+    if (!memoryCache.TryGetValue(cacheKey, out _))
+        return Results.Redirect("/settings?devops_error=Invalid+or+expired+state");
+
+    memoryCache.Remove(cacheKey);
+
+    // Get current user from cookie claims
+    var userIdClaim = ctx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        return Results.Redirect("/settings?devops_error=Not+authenticated");
+
+    try
+    {
+        var logger = ctx.RequestServices.GetRequiredService<ILogger<DevOpsTokenService>>();
+        var devOpsTokenService = new DevOpsTokenService(dbFactory, logger, config, httpFactory);
+        var redirectUri = $"{ctx.Request.Scheme}://{ctx.Request.Host}/auth/devops-callback";
+        await devOpsTokenService.ExchangeCodeAsync(userId, code, redirectUri);
+        return Results.Redirect("/settings?devops_connected=true");
+    }
+    catch (Exception ex)
+    {
+        var logger = ctx.RequestServices.GetRequiredService<ILogger<DevOpsTokenService>>();
+        logger.LogError(ex, "DevOps OAuth callback failed for user {UserId}", userId);
+        return Results.Redirect($"/settings?devops_error={Uri.EscapeDataString(ex.Message)}");
     }
 });
 

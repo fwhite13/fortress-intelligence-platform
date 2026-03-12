@@ -20,6 +20,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<BriefingHistory> BriefingHistories => Set<BriefingHistory>();
     public DbSet<UserBriefingSchedule> UserBriefingSchedules => Set<UserBriefingSchedule>();
     public DbSet<UserMicrosoftToken> UserMicrosoftTokens => Set<UserMicrosoftToken>();
+    public DbSet<UserDevOpsToken> UserDevOpsTokens => Set<UserDevOpsToken>();
     public DbSet<GraphSubscription> GraphSubscriptions => Set<GraphSubscription>();
     public DbSet<EmailAlert> EmailAlerts => Set<EmailAlert>();
     public DbSet<EmailLog> EmailLogs => Set<EmailLog>();
@@ -155,6 +156,20 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.HasOne(e => e.User).WithOne().HasForeignKey<UserMicrosoftToken>(e => e.UserId);
+        });
+
+        modelBuilder.Entity<UserDevOpsToken>(entity =>
+        {
+            entity.ToTable("user_devops_tokens");
+            entity.HasKey(e => e.UserId);
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.AccessToken).HasColumnName("access_token");
+            entity.Property(e => e.RefreshToken).HasColumnName("refresh_token");
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
+            entity.Property(e => e.Email).HasColumnName("email");
+            entity.Property(e => e.DisplayName).HasColumnName("display_name");
+            entity.Property(e => e.ConnectedAt).HasColumnName("connected_at");
+            entity.HasOne(e => e.User).WithOne().HasForeignKey<UserDevOpsToken>(e => e.UserId);
         });
 
         modelBuilder.Entity<GraphSubscription>(entity =>
