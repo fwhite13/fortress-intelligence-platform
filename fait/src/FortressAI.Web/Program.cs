@@ -9,6 +9,7 @@ using FortressAI.Web.Data;
 using FortressAI.Web.Services;
 using FortressAI.Web.Hubs;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using FortressAI.Web.Auth;
 using System.Security.Claims;
@@ -219,7 +220,14 @@ else
         options.ApiKey = builder.Configuration["AppKeys:Haven"];
     });
 }
-builder.Services.AddAuthorization();
+// Register AppKey authorization handler
+builder.Services.AddSingleton<IAuthorizationHandler, AppKeyAuthorizationHandler>();
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("AppKeyOnly", policy =>
+        policy.AddRequirements(new AppKeyRequirement()));
+});
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 
