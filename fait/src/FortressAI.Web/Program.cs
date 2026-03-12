@@ -251,6 +251,12 @@ builder.Services.AddSingleton<BraveSearchClient>();
 builder.Services.AddHostedService<ManifestRefreshService>();
 builder.Services.AddMemoryCache();
 
+// Named HttpClient for DevOps test connection — short timeout so bad org URL fails fast
+builder.Services.AddHttpClient("devops-test", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+
 // Named HttpClient for MCP transport with 30s timeout
 builder.Services.AddHttpClient("mcp-transport", client =>
 {
