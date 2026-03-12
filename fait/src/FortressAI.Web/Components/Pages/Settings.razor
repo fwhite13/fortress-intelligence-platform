@@ -375,10 +375,10 @@
         _loading = false;
     }
 
-    protected override async Task OnParametersSetAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        await base.OnParametersSetAsync();
-        if (!_feedbackShown)
+        await base.OnAfterRenderAsync(firstRender);
+        if (firstRender && !_feedbackShown)
         {
             if (!string.IsNullOrEmpty(McpConnected))
             {

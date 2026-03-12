@@ -376,7 +376,7 @@ app.MapGet("/auth/devops-callback", async (HttpContext ctx, IDbContextFactory<Ap
 
     if (!string.IsNullOrEmpty(error))
     {
-        var errorDesc = ctx.Request.Query["error_description"].ToString();
+        var errorDesc = Uri.UnescapeDataString(ctx.Request.Query["error_description"].FirstOrDefault() ?? "unknown_error");
         return Results.Redirect($"/settings?devops_error={Uri.EscapeDataString($"{error}: {errorDesc}")}");
     }
 
@@ -397,9 +397,9 @@ app.MapGet("/auth/devops-callback", async (HttpContext ctx, IDbContextFactory<Ap
 
     try
     {
-        var logger = ctx.RequestServices.GetRequiredService<ILogger<DevOpsTokenService>>();
-        var devOpsTokenService = new DevOpsTokenService(dbFactory, logger, config, httpFactory);
-        var redirectUri = $"{ctx.Request.Scheme}://{ctx.Request.Host}/auth/devops-callback";
+        var devOpsTokenService = ctx.RequestServices.GetRequiredService<DevOpsTokenService>();
+        var redirectUri = config["AzureDevOps:RedirectUri"]
+            ?? $"{ctx.Request.Scheme}://{ctx.Request.Host}/auth/devops-callback";
         await devOpsTokenService.ExchangeCodeAsync(userId, code, redirectUri);
         return Results.Redirect("/settings?devops_connected=true");
     }

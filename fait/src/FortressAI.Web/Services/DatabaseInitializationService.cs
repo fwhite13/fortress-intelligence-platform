@@ -110,7 +110,7 @@ public class DatabaseInitializationService : IHostedService
                     display_name VARCHAR(256) NULL,
                     connected_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
                     PRIMARY KEY (user_id),
-                    CONSTRAINT fk_devops_tokens_user FOREIGN KEY (user_id) REFERENCES AspNetUsers (Id) ON DELETE CASCADE
+                    CONSTRAINT fk_devops_tokens_user FOREIGN KEY (user_id) REFERENCES users (Id) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"),
                 ("graph_subscriptions", @"CREATE TABLE IF NOT EXISTS graph_subscriptions (
                     Id INT PRIMARY KEY AUTO_INCREMENT,
