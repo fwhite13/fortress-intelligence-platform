@@ -24,6 +24,8 @@ public class VpBotService
     {
         var taskDef = _config["Firm:VpBotTaskDefinition"];
         var cluster = _config["Firm:EcsCluster"];
+        var subnetId = _config["Firm:VpBotSubnetId"];
+        var securityGroupId = _config["Firm:VpBotSecurityGroupId"];
         var firmApiUrl = _config["Firm:ApiUrl"] ?? "";
         var botSecret = _config["Firm:BotCallbackSecret"] ?? "";
 
@@ -41,6 +43,15 @@ public class VpBotService
                 TaskDefinition = taskDef,
                 LaunchType = LaunchType.FARGATE,
                 Count = 1,
+                NetworkConfiguration = new NetworkConfiguration
+                {
+                    AwsvpcConfiguration = new AwsVpcConfiguration
+                    {
+                        Subnets = new List<string> { subnetId ?? "subnet-08e1d4f1b5530f39e" },
+                        SecurityGroups = new List<string> { securityGroupId ?? "sg-0fb53615b1eb4a175" },
+                        AssignPublicIp = AssignPublicIp.ENABLED
+                    }
+                },
                 Overrides = new TaskOverride
                 {
                     ContainerOverrides = new List<ContainerOverride>

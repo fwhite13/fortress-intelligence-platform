@@ -24,4 +24,3 @@ phases:
 env:
   variables:
     AWS_DEFAULT_REGION: us-east-1
-    AWS_ACCOUNT_ID: 742932328420
