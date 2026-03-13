@@ -357,7 +357,9 @@ app.MapGet("/auth/microsoft-callback", async (HttpContext ctx, IDbContextFactory
         // Create a MicrosoftTokenService instance
         var logger = ctx.RequestServices.GetRequiredService<ILogger<MicrosoftTokenService>>();
         var tokenService = new MicrosoftTokenService(dbFactory, logger, config, httpFactory);
-        var redirectUri = $"{ctx.Request.Scheme}://{ctx.Request.Host}/auth/microsoft-callback";
+        // Use configured redirect URI — must match exactly what's registered in Azure app registration
+        var redirectUri = config["MicrosoftGraph:RedirectUri"]
+            ?? $"{ctx.Request.Scheme}://{ctx.Request.Host}/auth/microsoft-callback";
         var token = await tokenService.ExchangeCodeAsync(userId, code, redirectUri);
 
         var email = token.MicrosoftEmail ?? "user";

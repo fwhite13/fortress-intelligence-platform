@@ -6,6 +6,7 @@
 @inject UserSessionService Session
 @inject AssistantConfigService ConfigSvc
 @inject MicrosoftTokenService MsTokenSvc
+@inject IConfiguration AppConfig
 @inject DevOpsConnectionService DevOpsConnSvc
 @inject IMcpRegistryService McpRegistrySvc
 @inject IMcpConnectionService McpConnSvc
@@ -417,7 +418,9 @@
         // Build OAuth URL and redirect
         var state = $"{Session.UserId}:{Guid.NewGuid():N}";
         var baseUrl = Nav.BaseUri.TrimEnd('/');
-        var redirectUri = $"{baseUrl}/auth/microsoft-callback";
+        // Use configured redirect URI — must match what's registered in Azure app registration
+        var redirectUri = AppConfig["MicrosoftGraph:RedirectUri"]
+            ?? $"{baseUrl}/auth/microsoft-callback";
         var authUrl = MsTokenSvc.GetAuthorizationUrl(redirectUri, state);
         Nav.NavigateTo(authUrl, forceLoad: true);
     }
