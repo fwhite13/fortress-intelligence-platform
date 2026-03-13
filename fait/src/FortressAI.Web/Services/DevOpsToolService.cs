@@ -374,6 +374,337 @@ public class DevOpsToolService
     }
 
     // ─────────────────────────────────────────────────────────────────
+    // Tool: create_work_item
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Creates a new work item in Azure DevOps.
+    /// PATCH {orgUrl}/{project}/_apis/wit/workitems/${type}?api-version=7.1
+    /// Content-Type: application/json-patch+json
+    /// </summary>
+    public async Task<string?> CreateWorkItemAsync(
+        Guid userId,
+        string project,
+        string type,
+        string title,
+        string? description = null,
+        string? assignedTo = null,
+        string? areaPath = null,
+        string? iterationPath = null,
+        string? tags = null)
+    {
+        var creds = await GetCredentialsAsync(userId);
+        if (creds is null) return null;
+        var (orgUrl, pat) = creds.Value;
+
+        try
+        {
+            var url = $"{orgUrl}/{Uri.EscapeDataString(project)}/_apis/wit/workitems/${Uri.EscapeDataString(type)}?api-version=7.1";
+
+            var ops = new List<object>
+            {
+                new { op = "add", path = "/fields/System.Title", value = title }
+            };
+            if (!string.IsNullOrEmpty(description))
+                ops.Add(new { op = "add", path = "/fields/System.Description", value = description });
+            if (!string.IsNullOrEmpty(assignedTo))
+                ops.Add(new { op = "add", path = "/fields/System.AssignedTo", value = assignedTo });
+            if (!string.IsNullOrEmpty(areaPath))
+                ops.Add(new { op = "add", path = "/fields/System.AreaPath", value = areaPath });
+            if (!string.IsNullOrEmpty(iterationPath))
+                ops.Add(new { op = "add", path = "/fields/System.IterationPath", value = iterationPath });
+            if (!string.IsNullOrEmpty(tags))
+                ops.Add(new { op = "add", path = "/fields/System.Tags", value = tags });
+
+            using var req = BuildRequest(new HttpMethod("PATCH"), url, pat);
+            req.Content = new StringContent(JsonSerializer.Serialize(ops), Encoding.UTF8, "application/json-patch+json");
+
+            var http = _httpClientFactory.CreateClient("azure-devops");
+            using var resp = await http.SendAsync(req);
+            resp.EnsureSuccessStatusCode();
+
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var id = doc.RootElement.TryGetProperty("id", out var idEl) ? idEl.GetInt32().ToString() : "?";
+            return $"Work item created successfully.\nID: {id}\nType: {type}\nTitle: {title}\nProject: {project}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DevOps] CreateWorkItemAsync(project={Project}, type={Type}) failed for user {UserId}", project, type, userId);
+            return null;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Tool: update_work_item
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Updates fields on an existing work item by ID.
+    /// PATCH {orgUrl}/_apis/wit/workitems/{id}?api-version=7.1
+    /// Content-Type: application/json-patch+json
+    /// </summary>
+    public async Task<string?> UpdateWorkItemAsync(
+        Guid userId,
+        int id,
+        string? state = null,
+        string? title = null,
+        string? description = null,
+        string? assignedTo = null,
+        int? priority = null,
+        string? tags = null)
+    {
+        var creds = await GetCredentialsAsync(userId);
+        if (creds is null) return null;
+        var (orgUrl, pat) = creds.Value;
+
+        try
+        {
+            var url = $"{orgUrl}/_apis/wit/workitems/{id}?api-version=7.1";
+
+            var ops = new List<object>();
+            if (!string.IsNullOrEmpty(state))
+                ops.Add(new { op = "add", path = "/fields/System.State", value = state });
+            if (!string.IsNullOrEmpty(title))
+                ops.Add(new { op = "add", path = "/fields/System.Title", value = title });
+            if (!string.IsNullOrEmpty(description))
+                ops.Add(new { op = "add", path = "/fields/System.Description", value = description });
+            if (!string.IsNullOrEmpty(assignedTo))
+                ops.Add(new { op = "add", path = "/fields/System.AssignedTo", value = assignedTo });
+            if (priority.HasValue)
+                ops.Add(new { op = "add", path = "/fields/Microsoft.VSTS.Common.Priority", value = (object)priority.Value });
+            if (!string.IsNullOrEmpty(tags))
+                ops.Add(new { op = "add", path = "/fields/System.Tags", value = tags });
+
+            if (!ops.Any())
+                return "No fields to update were specified.";
+
+            using var req = BuildRequest(new HttpMethod("PATCH"), url, pat);
+            req.Content = new StringContent(JsonSerializer.Serialize(ops), Encoding.UTF8, "application/json-patch+json");
+
+            var http = _httpClientFactory.CreateClient("azure-devops");
+            using var resp = await http.SendAsync(req);
+            resp.EnsureSuccessStatusCode();
+
+            return $"Work item #{id} updated successfully.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DevOps] UpdateWorkItemAsync(id={Id}) failed for user {UserId}", id, userId);
+            return null;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Tool: add_work_item_comment
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Adds a comment to a work item.
+    /// POST {orgUrl}/{project}/_apis/wit/workItems/{id}/comments?api-version=7.1-preview.3
+    /// </summary>
+    public async Task<string?> AddWorkItemCommentAsync(Guid userId, string project, int id, string comment)
+    {
+        var creds = await GetCredentialsAsync(userId);
+        if (creds is null) return null;
+        var (orgUrl, pat) = creds.Value;
+
+        try
+        {
+            var url = $"{orgUrl}/{Uri.EscapeDataString(project)}/_apis/wit/workItems/{id}/comments?api-version=7.1-preview.3";
+
+            using var req = BuildRequest(HttpMethod.Post, url, pat);
+            req.Content = new StringContent(JsonSerializer.Serialize(new { text = comment }), Encoding.UTF8, "application/json");
+
+            var http = _httpClientFactory.CreateClient("azure-devops");
+            using var resp = await http.SendAsync(req);
+            resp.EnsureSuccessStatusCode();
+
+            return $"Comment added to work item #{id} in project '{project}'.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DevOps] AddWorkItemCommentAsync(project={Project}, id={Id}) failed for user {UserId}", project, id, userId);
+            return null;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Tool: create_branch
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Creates a new branch from a base ref in a repository.
+    /// Step 1: GET refs to resolve base SHA
+    /// Step 2: POST refs to create the new branch
+    /// </summary>
+    public async Task<string?> CreateBranchAsync(Guid userId, string project, string repo, string branchName, string baseBranch = "main")
+    {
+        var creds = await GetCredentialsAsync(userId);
+        if (creds is null) return null;
+        var (orgUrl, pat) = creds.Value;
+
+        try
+        {
+            var http = _httpClientFactory.CreateClient("azure-devops");
+
+            // Step 1: Resolve base branch SHA
+            var refsUrl = $"{orgUrl}/{Uri.EscapeDataString(project)}/_apis/git/repositories/{Uri.EscapeDataString(repo)}/refs?filter=heads/{Uri.EscapeDataString(baseBranch)}&api-version=7.1";
+            using var getReq = BuildRequest(HttpMethod.Get, refsUrl, pat);
+            using var getResp = await http.SendAsync(getReq);
+            getResp.EnsureSuccessStatusCode();
+
+            using var refsDoc = JsonDocument.Parse(await getResp.Content.ReadAsStringAsync());
+            string? baseSha = null;
+            if (refsDoc.RootElement.TryGetProperty("value", out var refValues))
+            {
+                foreach (var refItem in refValues.EnumerateArray())
+                {
+                    if (refItem.TryGetProperty("objectId", out var oid))
+                    {
+                        baseSha = oid.GetString();
+                        break;
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(baseSha))
+                return $"Could not resolve base branch '{baseBranch}' in repository '{repo}'.";
+
+            // Step 2: Create the branch
+            var createRefsUrl = $"{orgUrl}/{Uri.EscapeDataString(project)}/_apis/git/repositories/{Uri.EscapeDataString(repo)}/refs?api-version=7.1";
+            var createBody = new[]
+            {
+                new
+                {
+                    name = $"refs/heads/{branchName}",
+                    newObjectId = baseSha,
+                    oldObjectId = "0000000000000000000000000000000000000000"
+                }
+            };
+
+            using var postReq = BuildRequest(HttpMethod.Post, createRefsUrl, pat);
+            postReq.Content = new StringContent(JsonSerializer.Serialize(createBody), Encoding.UTF8, "application/json");
+
+            using var postResp = await http.SendAsync(postReq);
+            postResp.EnsureSuccessStatusCode();
+
+            return $"Branch '{branchName}' created successfully from '{baseBranch}' in repository '{repo}' (project: {project}).";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DevOps] CreateBranchAsync(project={Project}, repo={Repo}, branch={Branch}) failed for user {UserId}", project, repo, branchName, userId);
+            return null;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Tool: create_pull_request
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Creates a pull request in Azure DevOps.
+    /// POST {orgUrl}/{project}/_apis/git/repositories/{repo}/pullrequests?api-version=7.1
+    /// </summary>
+    public async Task<string?> CreatePullRequestAsync(
+        Guid userId,
+        string project,
+        string repo,
+        string title,
+        string sourceBranch,
+        string targetBranch,
+        string? description = null,
+        List<string>? reviewers = null)
+    {
+        var creds = await GetCredentialsAsync(userId);
+        if (creds is null) return null;
+        var (orgUrl, pat) = creds.Value;
+
+        try
+        {
+            var url = $"{orgUrl}/{Uri.EscapeDataString(project)}/_apis/git/repositories/{Uri.EscapeDataString(repo)}/pullrequests?api-version=7.1";
+
+            var body = new Dictionary<string, object>
+            {
+                ["title"] = title,
+                ["sourceRefName"] = $"refs/heads/{sourceBranch}",
+                ["targetRefName"] = $"refs/heads/{targetBranch}"
+            };
+            if (!string.IsNullOrEmpty(description))
+                body["description"] = description;
+            if (reviewers?.Any() == true)
+                body["reviewers"] = reviewers.Select(r => new { id = r }).ToArray();
+
+            using var req = BuildRequest(HttpMethod.Post, url, pat);
+            req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+
+            var http = _httpClientFactory.CreateClient("azure-devops");
+            using var resp = await http.SendAsync(req);
+            resp.EnsureSuccessStatusCode();
+
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var prId = doc.RootElement.TryGetProperty("pullRequestId", out var prEl) ? prEl.GetInt32().ToString() : "?";
+            return $"Pull request created successfully.\nPR ID: {prId}\nTitle: {title}\nSource: {sourceBranch} → Target: {targetBranch}\nRepository: {repo} (project: {project})";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DevOps] CreatePullRequestAsync(project={Project}, repo={Repo}) failed for user {UserId}", project, repo, userId);
+            return null;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Tool: update_pull_request
+    // ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Updates a pull request — complete, abandon, add reviewers, or update description.
+    /// PATCH {orgUrl}/{project}/_apis/git/repositories/{repo}/pullrequests/{pullRequestId}?api-version=7.1
+    /// </summary>
+    public async Task<string?> UpdatePullRequestAsync(
+        Guid userId,
+        string project,
+        string repo,
+        int pullRequestId,
+        string? status = null,
+        string? description = null,
+        List<string>? reviewers = null)
+    {
+        var creds = await GetCredentialsAsync(userId);
+        if (creds is null) return null;
+        var (orgUrl, pat) = creds.Value;
+
+        try
+        {
+            var url = $"{orgUrl}/{Uri.EscapeDataString(project)}/_apis/git/repositories/{Uri.EscapeDataString(repo)}/pullrequests/{pullRequestId}?api-version=7.1";
+
+            var body = new Dictionary<string, object>();
+            if (!string.IsNullOrEmpty(status))
+                body["status"] = status;
+            if (!string.IsNullOrEmpty(description))
+                body["description"] = description;
+            if (reviewers?.Any() == true)
+                body["reviewers"] = reviewers.Select(r => new { id = r }).ToArray();
+
+            if (!body.Any())
+                return "No fields to update were specified.";
+
+            using var req = BuildRequest(new HttpMethod("PATCH"), url, pat);
+            req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+
+            var http = _httpClientFactory.CreateClient("azure-devops");
+            using var resp = await http.SendAsync(req);
+            resp.EnsureSuccessStatusCode();
+
+            return $"Pull request #{pullRequestId} updated successfully in repository '{repo}' (project: {project}).";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[DevOps] UpdatePullRequestAsync(project={Project}, repo={Repo}, prId={PrId}) failed for user {UserId}", project, repo, pullRequestId, userId);
+            return null;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     // Internal helpers
     // ─────────────────────────────────────────────────────────────────
 
