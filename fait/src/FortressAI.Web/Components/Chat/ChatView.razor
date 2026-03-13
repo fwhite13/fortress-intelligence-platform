@@ -17,6 +17,7 @@
 @inject IMcpToolService McpToolSvc
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
 @inject IServiceScopeFactory ScopeFactory
+@inject ILogger<ChatView> Logger
 @implements IAsyncDisposable
 @using FortressAI.Web.Services
 @using FortressAI.Web.Services.Mcp
@@ -647,10 +648,14 @@
             try
             {
                 availableTools = await McpToolSvc.GetConversationToolsAsync(conversation.Id, Session.UserId);
+                Logger.LogInformation("[MCP] Loaded {Count} tools for user {UserId}: {Tools}",
+                    availableTools.Count,
+                    Session.UserId,
+                    string.Join(", ", availableTools.Select(t => t.FullName)));
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[MCP] Failed to load tools (non-fatal): {ex.Message}");
+                Logger.LogError(ex, "[MCP] Failed to load tools for conversation {ConvId}", conversation.Id);
             }
 
             var fullResponse = new System.Text.StringBuilder();
