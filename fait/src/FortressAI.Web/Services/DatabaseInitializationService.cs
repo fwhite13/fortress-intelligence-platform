@@ -102,7 +102,7 @@ public class DatabaseInitializationService : IHostedService
                     UpdatedAt TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6)
                 )"),
                 ("user_devops_connections", @"CREATE TABLE IF NOT EXISTS user_devops_connections (
-                    user_id CHAR(36) NOT NULL,
+                    user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
                     org_url VARCHAR(512) NOT NULL,
                     pat_encrypted LONGTEXT NOT NULL,
                     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
