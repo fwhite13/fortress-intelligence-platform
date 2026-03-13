@@ -577,7 +577,7 @@ public class BedrockService : IDisposable
     /// Converts MessageDto list to Bedrock Converse API Message list.
     /// Handles plain text, tool_result (user turn), and tool_use (assistant turn) messages.
     /// </summary>
-    private static List<Message> BuildConverseMessages(List<MessageDto> messages)
+    private List<Message> BuildConverseMessages(List<MessageDto> messages)
     {
         var result = new List<Message>();
         foreach (var msg in messages)
@@ -622,6 +622,43 @@ public class BedrockService : IDisposable
                             contentBlocks.Add(new ContentBlock { Text = text });
                         }
                     }
+                    if (contentBlocks.Any(cb => cb.ToolResult != null))
+                    {
+                        // Guard against orphaned tool_result blocks (no matching tool_use in preceding assistant turn).
+                        // This can happen when: old DB conversations stored intermediate turns differently, or when
+                        // the sliding window / summarization drops a tool_use turn while keeping the tool_result.
+                        var prevMsg = result.LastOrDefault();
+                        if (prevMsg == null || prevMsg.Role != Amazon.BedrockRuntime.ConversationRole.Assistant)
+                        {
+                            _logger.LogWarning("Dropping orphaned tool_result message (no preceding assistant turn).");
+                            continue;
+                        }
+
+                        var toolUseIds = prevMsg.Content
+                            .Where(cb => cb.ToolUse != null)
+                            .Select(cb => cb.ToolUse!.ToolUseId)
+                            .ToHashSet();
+
+                        if (!toolUseIds.Any())
+                        {
+                            _logger.LogWarning("Dropping orphaned tool_result message (preceding assistant turn has no tool_use blocks).");
+                            continue;
+                        }
+
+                        // Filter to only tool_result blocks with a matching tool_use_id
+                        var validBlocks = contentBlocks
+                            .Where(cb => cb.ToolResult == null || toolUseIds.Contains(cb.ToolResult.ToolUseId))
+                            .ToList();
+
+                        if (!validBlocks.Any(cb => cb.ToolResult != null))
+                        {
+                            _logger.LogWarning("Dropping tool_result message: no matching tool_use_id in preceding assistant turn.");
+                            continue;
+                        }
+
+                        contentBlocks = validBlocks;
+                    }
+
                     if (contentBlocks.Count > 0)
                     {
                         result.Add(new Message { Role = role, Content = contentBlocks });
