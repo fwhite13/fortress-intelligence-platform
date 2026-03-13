@@ -688,6 +688,24 @@ You have access to the user's Azure DevOps organization. Use these tools when th
                         : effectiveSystemPrompt + "\n\n" + devOpsGuidance;
                 }
 
+                var hasM365Tools = availableTools.Any(t => t.FullName.StartsWith("m365__", StringComparison.OrdinalIgnoreCase));
+                if (hasM365Tools)
+                {
+                    var m365Guidance = @"
+## Microsoft 365 Tools Available
+You have access to the user's Microsoft 365 account via Graph API tools:
+- `m365__list_emails` — list recent inbox emails (supports top/filter params)
+- `m365__get_email` — get full email content by ID
+- `m365__send_email` — send an email (to, subject, body)
+- `m365__list_calendar_events` — list calendar events in a date range
+- `m365__create_calendar_event` — create a new calendar event
+
+Use these tools proactively when the user asks about their email, inbox, calendar, meetings, or scheduling. Always confirm before sending emails or creating events.";
+                    effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
+                        ? m365Guidance
+                        : effectiveSystemPrompt + "\n\n" + m365Guidance;
+                }
+
                 if (hasSearchTool)
                 {
                     var toolGuidance = @"

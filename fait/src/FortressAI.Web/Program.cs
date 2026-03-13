@@ -270,6 +270,13 @@ builder.Services.AddHttpClient("mcp-transport", client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
+// Named HttpClient for Microsoft Graph API calls (M365McpAdapter)
+builder.Services.AddHttpClient("graph", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+
 // DataProtection: persist keys to DB (survives ECS container restarts)
 builder.Services.AddDataProtection()
     .PersistKeysToDbContext<AppDbContext>()

@@ -507,6 +507,45 @@ public class DatabaseInitializationService : IHostedService
                 _logger.LogWarning(ex, "Azure DevOps seed (non-fatal): {Message}", ex.Message);
             }
 
+            // Seed Microsoft 365 MCP server
+            // Auth type: "m365_token" — McpToolService passes userId as X-API-Key;
+            // M365McpAdapter resolves the user's Graph access token from MicrosoftTokenService.
+            // requires_user_auth = 0 (auto-available) but GetConversationToolsAsync
+            // gates on UserMicrosoftTokens token existence so only connected users see it.
+            try
+            {
+                var m365Id = "00000000-0000-0000-0000-000000000003";
+                var m365EndpointUrl = "http://localhost:8080/internal/mcp/m365";
+                var m365Manifest = System.Text.Json.JsonSerializer.Serialize(new[]
+                {
+                    new { Name = "list_emails",           Description = "List recent emails from inbox",                                                        InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""top"":{""type"":""integer"",""default"":10},""filter"":{""type"":""string""}}}").RootElement },
+                    new { Name = "get_email",             Description = "Get full content of a specific email by ID",                                           InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""messageId"":{""type"":""string""}},""required"":[""messageId""]}").RootElement },
+                    new { Name = "send_email",            Description = "Send an email",                                                                        InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""to"":{""type"":""string""},""subject"":{""type"":""string""},""body"":{""type"":""string""}},""required"":[""to"",""subject"",""body""]}").RootElement },
+                    new { Name = "list_calendar_events",  Description = "List upcoming calendar events",                                                        InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""top"":{""type"":""integer"",""default"":10},""startDateTime"":{""type"":""string""},""endDateTime"":{""type"":""string""}}}").RootElement },
+                    new { Name = "create_calendar_event", Description = "Create a calendar event",                                                              InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""subject"":{""type"":""string""},""start"":{""type"":""string""},""end"":{""type"":""string""},""body"":{""type"":""string""},""attendees"":{""type"":""array"",""items"":{""type"":""string""}}},""required"":[""subject"",""start"",""end""]}").RootElement }
+                });
+                await db.Database.ExecuteSqlRawAsync(
+                    """
+                    INSERT INTO mcp_servers (id, name, slug, description, transport_type, endpoint_url,
+                        auth_type, requires_user_auth, is_active, tool_manifest, created_at, updated_at)
+                    VALUES ({0}, 'Microsoft 365', 'm365', 'Email and calendar access via Microsoft Graph',
+                        'http', {1}, 'm365_token', 0, 1, {2},
+                        NOW(6), NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                        endpoint_url = VALUES(endpoint_url),
+                        auth_type = VALUES(auth_type),
+                        requires_user_auth = VALUES(requires_user_auth),
+                        tool_manifest = VALUES(tool_manifest),
+                        updated_at = NOW(6)
+                    """,
+                    m365Id, m365EndpointUrl, m365Manifest);
+                _logger.LogInformation("Seeded Microsoft 365 MCP server (endpoint: {Url}).", m365EndpointUrl);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Microsoft 365 seed (non-fatal): {Message}", ex.Message);
+            }
+
             // One-time cleanup: delete ghost conversations (created on page load with no messages)
             try
             {

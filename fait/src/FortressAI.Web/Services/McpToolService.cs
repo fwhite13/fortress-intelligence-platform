@@ -17,6 +17,16 @@ internal static class DevOpsSlug
     public const string AuthType = "devops_pat";
 }
 
+// M365 auth type sentinel — signals McpToolService to pass userId as X-API-Key
+// rather than looking up UserMcpTokens. The internal /internal/mcp/m365 endpoint
+// receives the userId and resolves the user's Graph access token from MicrosoftTokenService.
+// DO NOT change without updating M365McpAdapter and the seed in DatabaseInitializationService.
+internal static class M365Slug
+{
+    public const string Slug = "m365";
+    public const string AuthType = "m365_token";
+}
+
 public interface IMcpToolService
 {
     Task<List<AvailableTool>> GetConversationToolsAsync(Guid conversationId, Guid userId);
@@ -93,6 +103,14 @@ public class McpToolService : IMcpToolService
             // Skip DevOps tools when user has no Azure DevOps connection
             if (server.AuthType == DevOpsSlug.AuthType && !devOpsConnected) continue;
 
+            // Gate M365 tools on token existence in user_microsoft_tokens
+            if (server.AuthType == M365Slug.AuthType)
+            {
+                var m365Connected = await db.UserMicrosoftTokens
+                    .AnyAsync(t => t.UserId == userId && t.AccessToken != null);
+                if (!m365Connected) continue;
+            }
+
             if (string.IsNullOrEmpty(server.ToolManifestJson)) continue;
 
             List<McpToolDefinition>? defs;
@@ -136,6 +154,15 @@ public class McpToolService : IMcpToolService
             if (server.AuthType == DevOpsSlug.AuthType)
             {
                 if (devOpsConnected) result.Add(server);
+                continue;
+            }
+
+            // M365 uses UserMicrosoftTokens (not UserMcpTokens)
+            if (server.AuthType == M365Slug.AuthType)
+            {
+                var m365Connected = await db.UserMicrosoftTokens
+                    .AnyAsync(t => t.UserId == userId && t.AccessToken != null);
+                if (m365Connected) result.Add(server);
                 continue;
             }
 
@@ -202,9 +229,13 @@ public class McpToolService : IMcpToolService
         // For DevOps (devops_pat auth), pass the userId as the api_key — the internal
         // /internal/mcp/devops endpoint receives it via X-API-Key and resolves the user's
         // PAT from DevOpsConnectionService. No UserMcpTokens row is used.
+        // For M365 (m365_token auth), same pattern — M365McpAdapter resolves the Graph
+        // access token from MicrosoftTokenService using the userId.
         string? accessToken;
         if (server.AuthType == DevOpsSlug.AuthType)
             accessToken = userId.ToString();
+        else if (server.AuthType == M365Slug.AuthType)
+            accessToken = userId.ToString(); // M365McpAdapter resolves token by userId
         else
             accessToken = await _connectionService.GetAccessTokenAsync(userId, server.Id);
 
@@ -226,7 +257,7 @@ public class McpToolService : IMcpToolService
             var endpointUrl = server.EndpointUrl ?? throw new InvalidOperationException("Server has no endpoint URL");
 
             JsonElement result;
-            if ((server.AuthType == "api_key" || server.AuthType == DevOpsSlug.AuthType) && !string.IsNullOrEmpty(accessToken))
+            if ((server.AuthType == "api_key" || server.AuthType == DevOpsSlug.AuthType || server.AuthType == M365Slug.AuthType) && !string.IsNullOrEmpty(accessToken))
                 result = await _transport.CallToolAsync(endpointUrl, actualToolName, toolInput, apiKey: accessToken, ct: ct);
             else if (!string.IsNullOrEmpty(accessToken))
                 result = await _transport.CallToolAsync(endpointUrl, actualToolName, toolInput, bearerToken: accessToken, ct: ct);
