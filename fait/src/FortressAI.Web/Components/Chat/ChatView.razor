@@ -660,6 +660,29 @@
             {
                 // Inject tool-use guidance into system prompt so the model is judicious about tool calls
                 var hasSearchTool = availableTools.Any(t => t.FullName.Contains("search", StringComparison.OrdinalIgnoreCase));
+                var hasDevOpsTool = availableTools.Any(t => t.FullName.StartsWith("devops__", StringComparison.OrdinalIgnoreCase));
+
+                if (hasDevOpsTool)
+                {
+                    var devOpsGuidance = @"
+## Azure DevOps Tools Available
+You have access to the user's Azure DevOps organization. Use these tools when the user asks about:
+- Work items, bugs, tasks, user stories, sprints, backlogs
+- Git repositories, branches, clone URLs
+- Build or release pipelines
+- Triggering pipeline runs
+
+**Tool usage guidance:**
+- Use `list_devops_projects` first if you don't know the project name.
+- For work item queries, use `query_work_items` with a WIQL query (SELECT...) or natural language description.
+- Default WIQL for open items assigned to user: SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo] FROM WorkItems WHERE [System.AssignedTo]=@Me AND [System.State]<>'Closed' AND [System.State]<>'Resolved' ORDER BY [System.ChangedDate] DESC
+- The `project` parameter is optional for `query_work_items` — if omitted, it defaults to the first project.
+- Use `trigger_pipeline` only when the user explicitly requests it (it triggers a real build).";
+                    effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
+                        ? devOpsGuidance
+                        : effectiveSystemPrompt + "\n\n" + devOpsGuidance;
+                }
+
                 if (hasSearchTool)
                 {
                     var toolGuidance = @"

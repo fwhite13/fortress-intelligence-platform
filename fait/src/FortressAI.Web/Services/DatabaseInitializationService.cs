@@ -467,10 +467,43 @@ public class DatabaseInitializationService : IHostedService
                 _logger.LogWarning(ex, "Brave Search seed (non-fatal): {Message}", ex.Message);
             }
 
-            // Azure DevOps MCP server seed intentionally omitted.
-            // DevOps connection uses dedicated user_devops_connections table + PAT-based auth.
-            // MCP server row will be added in a follow-up task once the Microsoft-hosted
-            // endpoint URL is confirmed.
+            // Seed Azure DevOps MCP server
+            // Auth type: "devops_pat" — McpToolService passes userId as X-API-Key;
+            // DevOpsMcpAdapter resolves the user's PAT from DevOpsConnectionService.
+            // requires_user_auth = 0 (auto-available) but GetConversationToolsAsync
+            // gates on DevOpsConnectionService.IsConnectedAsync so only connected users see it.
+            try
+            {
+                var devOpsId = "00000000-0000-0000-0000-000000000002";
+                var devOpsEndpointUrl = "http://localhost:8080/internal/mcp/devops";
+                var devOpsManifest = System.Text.Json.JsonSerializer.Serialize(new[]
+                {
+                    new { Name = "list_devops_projects",  Description = "List all Azure DevOps projects in the user's organization",                            InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{},""required"":[]}").RootElement },
+                    new { Name = "get_work_item",         Description = "Get details of a specific Azure DevOps work item by ID",                               InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""id"":{""type"":""integer"",""description"":""Work item ID""}},""required"":[""id""]}").RootElement },
+                    new { Name = "query_work_items",      Description = "Query Azure DevOps work items using WIQL or a natural language description",            InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""wiql"":{""type"":""string"",""description"":""WIQL query or natural language description""},""project"":{""type"":""string"",""description"":""Project name (optional)""}},""required"":[""wiql""]}").RootElement },
+                    new { Name = "list_repositories",     Description = "List Git repositories in an Azure DevOps project",                                    InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""project"":{""type"":""string"",""description"":""Project name""}},""required"":[""project""]}").RootElement },
+                    new { Name = "list_pipelines",        Description = "List build/release pipelines in an Azure DevOps project",                             InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""project"":{""type"":""string"",""description"":""Project name""}},""required"":[""project""]}").RootElement },
+                    new { Name = "trigger_pipeline",      Description = "Trigger a pipeline run in Azure DevOps",                                              InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""project"":{""type"":""string""},""pipeline_id"":{""type"":""integer""},""parameters"":{""type"":""object"",""additionalProperties"":{""type"":""string""}}},""required"":[""project"",""pipeline_id""]}").RootElement }
+                });
+                await db.Database.ExecuteSqlRawAsync(
+                    """
+                    INSERT INTO mcp_servers (id, name, slug, description, transport_type, endpoint_url,
+                        auth_type, requires_user_auth, is_active, tool_manifest, created_at, updated_at)
+                    VALUES ({0}, 'Azure DevOps', 'devops', 'Work items, repos, and pipelines via Azure DevOps REST API',
+                        'http', {1}, 'devops_pat', 0, 1, {2},
+                        NOW(6), NOW(6))
+                    ON DUPLICATE KEY UPDATE
+                        endpoint_url = VALUES(endpoint_url),
+                        tool_manifest = VALUES(tool_manifest),
+                        updated_at = NOW(6)
+                    """,
+                    devOpsId, devOpsEndpointUrl, devOpsManifest);
+                _logger.LogInformation("Seeded Azure DevOps MCP server (endpoint: {Url}).", devOpsEndpointUrl);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Azure DevOps seed (non-fatal): {Message}", ex.Message);
+            }
 
             // One-time cleanup: delete ghost conversations (created on page load with no messages)
             try

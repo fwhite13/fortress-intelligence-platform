@@ -69,6 +69,7 @@ builder.Services.AddScoped<BriefingGenerationService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<MicrosoftTokenService>();
 builder.Services.AddScoped<DevOpsConnectionService>();
+builder.Services.AddScoped<DevOpsToolService>();
 builder.Services.AddScoped<GraphTaskService>();
 builder.Services.AddScoped<GraphCalendarService>();
 builder.Services.AddScoped<PreMeetingBriefService>();
@@ -255,6 +256,12 @@ builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient("devops-test", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(10);
+});
+
+// Named HttpClient for Azure DevOps REST API calls (DevOpsToolService)
+builder.Services.AddHttpClient("azure-devops", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
 });
 
 // Named HttpClient for MCP transport with 30s timeout

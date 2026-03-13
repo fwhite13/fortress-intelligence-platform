@@ -7,6 +7,16 @@ using FortressAI.Web.Services.Mcp;
 
 namespace FortressAI.Web.Services;
 
+// DevOps auth type sentinel — signals McpToolService to pass userId as X-API-Key
+// rather than looking up UserMcpTokens. The internal /internal/mcp/devops endpoint
+// receives the userId and resolves the user's PAT from DevOpsConnectionService.
+// DO NOT change without updating DevOpsMcpAdapter and the seed in DatabaseInitializationService.
+internal static class DevOpsSlug
+{
+    public const string Slug = "devops";
+    public const string AuthType = "devops_pat";
+}
+
 public interface IMcpToolService
 {
     Task<List<AvailableTool>> GetConversationToolsAsync(Guid conversationId, Guid userId);
@@ -26,6 +36,7 @@ public class McpToolService : IMcpToolService
     private readonly McpHttpTransport _transport;
     private readonly IMemoryCache _cache;
     private readonly ILogger<McpToolService> _logger;
+    private readonly DevOpsConnectionService _devOpsConn;
     private const int DefaultRateLimitPerMinute = 30;
 
     public McpToolService(
@@ -33,13 +44,15 @@ public class McpToolService : IMcpToolService
         IMcpConnectionService connectionService,
         McpHttpTransport transport,
         IMemoryCache cache,
-        ILogger<McpToolService> logger)
+        ILogger<McpToolService> logger,
+        DevOpsConnectionService devOpsConn)
     {
         _dbFactory = dbFactory;
         _connectionService = connectionService;
         _transport = transport;
         _cache = cache;
         _logger = logger;
+        _devOpsConn = devOpsConn;
     }
 
     public async Task<List<AvailableTool>> GetConversationToolsAsync(Guid conversationId, Guid userId)
@@ -70,9 +83,16 @@ public class McpToolService : IMcpToolService
             .DistinctBy(s => s.Id)
             .ToList();
 
+        // DevOps server (devops_pat auth type) is auto-registered but only injected when
+        // the user has an active Azure DevOps PAT connection.
+        var devOpsConnected = await _devOpsConn.IsConnectedAsync(userId);
+
         var tools = new List<AvailableTool>();
         foreach (var server in allServers)
         {
+            // Skip DevOps tools when user has no Azure DevOps connection
+            if (server.AuthType == DevOpsSlug.AuthType && !devOpsConnected) continue;
+
             if (string.IsNullOrEmpty(server.ToolManifestJson)) continue;
 
             List<McpToolDefinition>? defs;
@@ -107,9 +127,18 @@ public class McpToolService : IMcpToolService
             .ToListAsync();
 
         // Only show user-auth servers (e.g. OAuth) if the user has a connected token
+        var devOpsConnected = await _devOpsConn.IsConnectedAsync(userId);
+
         var result = new List<McpServer>();
         foreach (var server in servers)
         {
+            // DevOps uses its own PAT connection table (not UserMcpTokens)
+            if (server.AuthType == DevOpsSlug.AuthType)
+            {
+                if (devOpsConnected) result.Add(server);
+                continue;
+            }
+
             if (server.RequiresUserAuth)
             {
                 var connected = await db.UserMcpTokens
@@ -169,8 +198,15 @@ public class McpToolService : IMcpToolService
             return new McpToolResult(false, null, $"Rate limit exceeded for {slug} (max {server.RateLimitPerMinute}/min)", 0);
         }
 
-        // Get access token
-        var accessToken = await _connectionService.GetAccessTokenAsync(userId, server.Id);
+        // Get access token.
+        // For DevOps (devops_pat auth), pass the userId as the api_key — the internal
+        // /internal/mcp/devops endpoint receives it via X-API-Key and resolves the user's
+        // PAT from DevOpsConnectionService. No UserMcpTokens row is used.
+        string? accessToken;
+        if (server.AuthType == DevOpsSlug.AuthType)
+            accessToken = userId.ToString();
+        else
+            accessToken = await _connectionService.GetAccessTokenAsync(userId, server.Id);
 
         // Log the call
         var logEntry = new McpToolCallLog
@@ -190,7 +226,7 @@ public class McpToolService : IMcpToolService
             var endpointUrl = server.EndpointUrl ?? throw new InvalidOperationException("Server has no endpoint URL");
 
             JsonElement result;
-            if (server.AuthType == "api_key" && !string.IsNullOrEmpty(accessToken))
+            if ((server.AuthType == "api_key" || server.AuthType == DevOpsSlug.AuthType) && !string.IsNullOrEmpty(accessToken))
                 result = await _transport.CallToolAsync(endpointUrl, actualToolName, toolInput, apiKey: accessToken, ct: ct);
             else if (!string.IsNullOrEmpty(accessToken))
                 result = await _transport.CallToolAsync(endpointUrl, actualToolName, toolInput, bearerToken: accessToken, ct: ct);
