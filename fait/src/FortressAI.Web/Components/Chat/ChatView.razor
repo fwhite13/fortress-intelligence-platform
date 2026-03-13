@@ -64,7 +64,7 @@
 
                 @foreach (var msg in messages)
                 {
-                    <MessageBubble Message="msg" />
+                    <MessageBubble Message="msg" AssistantConfig="@_assistantConfig" UserInitial="@UserInitial" />
                 }
                 @if (messages.Any(m => m.Role == "assistant") && _lastKbResult != null)
                 {
@@ -80,7 +80,7 @@
             }
             @if (isStreaming)
             {
-                <MessageBubble Message="@streamingMessage" IsStreaming="true" />
+                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" UserInitial="@UserInitial" />
             }
         </div>
 
@@ -255,6 +255,10 @@
     private string _interimTranscript = "";
     private string? _micError = null;
     private UserAssistantConfig? _assistantConfig;
+    private string UserInitial =>
+        (Session.CurrentUser?.DisplayName?.Trim().FirstOrDefault()
+         ?? Session.CurrentUser?.Email?.Trim().FirstOrDefault()
+         ?? '?').ToString().ToUpperInvariant();
     private List<KbTeam> _userTeams = new();
     private HashSet<int> _selectedTeamIds = new();
     // Local KB toggle state — works before conversation exists, synced to DB on first message send

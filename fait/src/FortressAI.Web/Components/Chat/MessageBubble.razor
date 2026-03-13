@@ -7,11 +7,22 @@
     <div class="message-avatar">
         @if (Message.Role == "user")
         {
-            <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" />
+            @if (!string.IsNullOrEmpty(UserInitial))
+            {
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--haven-gold,#d4af37);color:#1a2332;font-size:0.7rem;font-weight:700;letter-spacing:0.05em;flex-shrink:0;">
+                    @UserInitial
+                </span>
+            }
+            else
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Person" Size="Size.Small" />
+            }
         }
         else
         {
-            <MudIcon Icon="@Icons.Material.Filled.Shield" Size="Size.Small" />
+            <MudIcon Icon="@GetAvatarIcon(AssistantConfig?.AvatarId)"
+                     Size="Size.Small"
+                     Style="@($"color: {AssistantConfig?.ColorHex ?? "#6366f1"}")" />
         }
     </div>
     <div class="message-body">
@@ -61,6 +72,18 @@
     [Parameter] public ChatMessage Message { get; set; } = new();
     [Parameter] public bool IsStreaming { get; set; } = false;
     [Parameter] public List<ChatAttachment> Attachments { get; set; } = new();
+    [Parameter] public UserAssistantConfig? AssistantConfig { get; set; }
+    [Parameter] public string? UserInitial { get; set; }
+
+    private static string GetAvatarIcon(string? avatarId) => avatarId switch
+    {
+        "robot"   => Icons.Material.Filled.SmartToy,
+        "star"    => Icons.Material.Filled.Star,
+        "bolt"    => Icons.Material.Filled.Bolt,
+        "diamond" => Icons.Material.Filled.Diamond,
+        "rocket"  => Icons.Material.Filled.RocketLaunch,
+        _         => Icons.Material.Filled.Shield  // default (includes "shield" and null)
+    };
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
