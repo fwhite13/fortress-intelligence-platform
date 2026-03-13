@@ -58,13 +58,13 @@
                 </CardHeaderContent>
             </MudCardHeader>
             <MudCardContent>
-                @if (_mcpConnections.Count == 0)
+                @if (!_mcpConnections.Any(s => s.Server.Slug != "devops"))
                 {
                     <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">No tool integrations configured.</MudText>
                 }
                 else
                 {
-                    @foreach (var status in _mcpConnections)
+                    @foreach (var status in _mcpConnections.Where(s => s.Server.Slug != "devops"))
                     {
                         <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--color-border);">
                             <MudText Style="flex: 1; font-weight: 500;">@status.Server.Name</MudText>
