@@ -130,6 +130,15 @@ public class BedrockService : IDisposable
                 });
             }
         }
+        // Sonnet 4.6+ does not support assistant prefill — strip trailing assistant messages.
+        while (messagesArray.Count > 0 &&
+               messagesArray[^1] is JsonObject lastObj &&
+               lastObj["role"]?.GetValue<string>() == "assistant")
+        {
+            _logger.LogWarning("Stripping trailing assistant message from JSON messages array (prefill not supported in Sonnet 4.6+).");
+            messagesArray.RemoveAt(messagesArray.Count - 1);
+        }
+
         requestObj["messages"] = messagesArray;
 
         // Handle system prompt - may contain image data URIs that need multimodal format
@@ -722,6 +731,14 @@ public class BedrockService : IDisposable
                 });
             }
         }
+        // Sonnet 4.6+ does not support assistant prefill — messages array must end with a user turn.
+        // Strip any trailing assistant messages (e.g. synthetic "Understood" ack from sliding window).
+        while (result.Count > 0 && result[^1].Role == Amazon.BedrockRuntime.ConversationRole.Assistant)
+        {
+            _logger.LogWarning("Stripping trailing assistant message from Converse messages array (prefill not supported in Sonnet 4.6+).");
+            result.RemoveAt(result.Count - 1);
+        }
+
         return result;
     }
 
