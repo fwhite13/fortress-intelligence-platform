@@ -34,7 +34,7 @@ public class MicrosoftTokenService
         _httpClient = httpClientFactory.CreateClient();
 
         _clientId = configuration["Azure:ClientId"] ?? "";
-        _tenantId = configuration["Azure:TenantId"] ?? "";
+        _tenantId = (configuration["Azure:TenantId"] ?? "").Trim().TrimEnd('/');
         _clientSecret = configuration["Azure:ClientSecret"] ?? "";
         _useStubAuth = configuration.GetValue<bool>("UseStubAuth", false);
         IsConfigured = !string.IsNullOrEmpty(_clientId) && !string.IsNullOrEmpty(_tenantId) && !string.IsNullOrEmpty(_clientSecret);
