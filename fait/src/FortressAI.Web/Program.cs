@@ -314,7 +314,8 @@ app.UseAuthorization();
 if (useStubAuth) { app.UseMiddleware<FortressAI.Web.Middleware.StubAuthUserInitializationMiddleware>(); }
 
 // Microsoft OAuth callback endpoint
-app.MapGet("/auth/microsoft-callback", async (HttpContext ctx, IDbContextFactory<AppDbContext> dbFactory, IHttpClientFactory httpFactory, IConfiguration config) =>
+// Registered under both paths: /auth/microsoft-callback (legacy) and /auth/ms-callback (matches ECS MicrosoftGraph__RedirectUri)
+Func<HttpContext, IDbContextFactory<AppDbContext>, IHttpClientFactory, IConfiguration, Task<IResult>> msCallbackHandler = async (ctx, dbFactory, httpFactory, config) =>
 {
     var code = ctx.Request.Query["code"].ToString();
     var state = ctx.Request.Query["state"].ToString();
@@ -380,7 +381,10 @@ app.MapGet("/auth/microsoft-callback", async (HttpContext ctx, IDbContextFactory
             "<p><a href='/settings'>Back to Settings</a></p>" +
             "</body></html>", "text/html");
     }
-});
+};
+
+app.MapGet("/auth/microsoft-callback", msCallbackHandler);
+app.MapGet("/auth/ms-callback", msCallbackHandler);
 
 // API endpoint for Lambda to get user access token
 app.MapGet("/api/tokens/{userId}", async (HttpContext context, string userId, IDbContextFactory<AppDbContext> dbFactory, IHttpClientFactory httpFactory, IConfiguration config) =>
