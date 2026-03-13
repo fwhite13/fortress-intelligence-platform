@@ -494,6 +494,8 @@ public class DatabaseInitializationService : IHostedService
                         NOW(6), NOW(6))
                     ON DUPLICATE KEY UPDATE
                         endpoint_url = VALUES(endpoint_url),
+                        auth_type = VALUES(auth_type),
+                        requires_user_auth = VALUES(requires_user_auth),
                         tool_manifest = VALUES(tool_manifest),
                         updated_at = NOW(6)
                     """,
