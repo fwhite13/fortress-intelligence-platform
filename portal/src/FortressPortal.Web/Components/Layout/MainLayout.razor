@@ -1,0 +1,46 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <!-- Top App Bar -->
+    <MudAppBar Elevation="1" Style="background: #0d1117; border-bottom: 1px solid #30363d; height: 56px;">
+        <div style="display: flex; align-items: center; gap: 10px; padding-left: 8px;">
+            <!-- Fortress Shield Icon -->
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z"
+                      fill="#C9A84C" opacity="0.9"/>
+                <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <MudText Style="font-size: 15px; font-weight: 600; color: #C9A84C; letter-spacing: 0.3px;">
+                Fortress Intelligence Platform
+            </MudText>
+        </div>
+        <MudSpacer />
+        <NavMenu />
+    </MudAppBar>
+
+    <MudMainContent Style="padding-top: 56px; background: #0d1117; min-height: 100vh;">
+        @Body
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private MudTheme _theme = new MudTheme
+    {
+        PaletteLight = new PaletteLight
+        {
+            Background = "#0d1117",
+            Surface = "#1c2333",
+            AppbarBackground = "#0d1117",
+            DrawerBackground = "#161b22",
+            Primary = "#C9A84C",
+            PrimaryContrastText = "#0d1117",
+            TextPrimary = "#e6edf3",
+            TextSecondary = "#8b949e",
+        }
+    };
+}

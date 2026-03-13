@@ -1,0 +1,52 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject NavigationManager Navigation
+@inject IConfiguration Configuration
+
+<PageTitle>Sign In — Fortress Intelligence Platform</PageTitle>
+
+<div style="display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #0d1117;">
+    <MudCard Style="background: #1c2333; border: 1px solid #30363d; border-radius: 12px; padding: 2rem; max-width: 380px; width: 100%;">
+        <MudCardContent>
+            <div style="text-align: center; margin-bottom: 2rem;">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" style="margin-bottom: 1rem;">
+                    <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z"
+                          fill="#C9A84C" opacity="0.9"/>
+                    <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <MudText Typo="Typo.h5" Style="color: #C9A84C; font-weight: 700;">Fortress Intelligence Platform</MudText>
+                <MudText Typo="Typo.body2" Style="color: #8b949e; margin-top: 0.5rem;">Sign in to continue</MudText>
+            </div>
+
+            @if (_isStubMode)
+            {
+                <MudAlert Severity="Severity.Warning" Style="margin-bottom: 1.5rem; background: #2a2000; border: 1px solid #C9A84C44;">
+                    <strong>Stub Mode Active</strong> — Auth not wired yet. Redirecting to app...
+                </MudAlert>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           FullWidth="true"
+                           Href="/auth/login"
+                           Style="background: #C9A84C; color: #0d1117; font-weight: 600;">
+                    Sign in with Cognito
+                </MudButton>
+            }
+        </MudCardContent>
+    </MudCard>
+</div>
+
+@code {
+    private bool _isStubMode;
+
+    protected override void OnInitialized()
+    {
+        _isStubMode = Configuration.GetValue<bool>("UseStubAuth");
+        if (_isStubMode)
+        {
+            Navigation.NavigateTo("/", forceLoad: false);
+        }
+    }
+}

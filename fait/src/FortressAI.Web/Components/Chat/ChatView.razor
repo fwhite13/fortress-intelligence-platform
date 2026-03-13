@@ -689,12 +689,12 @@ You have access to the user's Azure DevOps organization. Use these tools when th
 - Use `trigger_pipeline` only when the user explicitly requests it (it triggers a real build).
 
 **Write tools available:**
-- `azdo__create_work_item` — create a new work item (Task, Bug, User Story, etc.)
-- `azdo__update_work_item` — update state, title, description, assigned to, priority, tags
-- `azdo__add_work_item_comment` — add a comment/discussion entry to a work item
-- `azdo__create_branch` — create a new Git branch from a base ref
-- `azdo__create_pull_request` — create a pull request between branches
-- `azdo__update_pull_request` — complete, abandon, or update a pull request
+- `devops__create_work_item` — create a new work item (Task, Bug, User Story, etc.)
+- `devops__update_work_item` — update state, title, description, assigned to, priority, tags
+- `devops__add_work_item_comment` — add a comment/discussion entry to a work item
+- `devops__create_branch` — create a new Git branch from a base ref
+- `devops__create_pull_request` — create a pull request between branches
+- `devops__update_pull_request` — complete, abandon, or update a pull request
 
 Use write tools only when the user explicitly asks to create, update, or modify something. Always confirm the action with the user before executing write operations (creating items, completing PRs, etc.).";
                     effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)

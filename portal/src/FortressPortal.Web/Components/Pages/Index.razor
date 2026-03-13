@@ -1,0 +1,129 @@
+@page "/"
+@attribute [AllowAnonymous]
+
+<PageTitle>Fortress Intelligence Platform</PageTitle>
+
+<div class="portal-wrapper">
+    <!-- Header -->
+    <div class="portal-header">
+        <MudText Typo="Typo.h4" Class="portal-title">Fortress Intelligence Platform</MudText>
+        <MudText Typo="Typo.body1" Class="portal-subtitle">Select an application to continue</MudText>
+    </div>
+
+    <!-- App Grid -->
+    <MudGrid Justify="Justify.Center" Class="portal-grid">
+
+        <!-- FAIT -->
+        <MudItem xs="12" sm="6" md="6" lg="3">
+            <MudCard Class="app-tile" Elevation="2">
+                <MudCardContent Class="app-tile-content">
+                    <div class="app-icon-wrap">
+                        <MudIcon Icon="@Icons.Material.Filled.SmartToy" Style="font-size: 2.5rem; color: #C9A84C;" />
+                    </div>
+                    <MudText Typo="Typo.h6" Class="app-name">FAIT</MudText>
+                    <MudText Typo="Typo.caption" Class="app-full-name">Fortress AI</MudText>
+                    <MudText Typo="Typo.body2" Class="app-description">
+                        Your AI assistant. Chat, knowledge base, and smart briefings.
+                    </MudText>
+                </MudCardContent>
+                <MudCardActions Class="app-tile-actions">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Href="https://fait.dev.fortressam.ai"
+                               Target="_blank"
+                               Class="app-open-btn"
+                               FullWidth="true">
+                        Open
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+
+        <!-- FIRM -->
+        <MudItem xs="12" sm="6" md="6" lg="3">
+            <MudCard Class="app-tile" Elevation="2">
+                <MudCardContent Class="app-tile-content">
+                    <div class="app-icon-wrap">
+                        <MudIcon Icon="@Icons.Material.Filled.VideoCall" Style="font-size: 2.5rem; color: #C9A84C;" />
+                    </div>
+                    <MudText Typo="Typo.h6" Class="app-name">FIRM</MudText>
+                    <MudText Typo="Typo.caption" Class="app-full-name">Meeting Intelligence</MudText>
+                    <MudText Typo="Typo.body2" Class="app-description">
+                        Record, transcribe, and summarize meetings automatically.
+                    </MudText>
+                </MudCardContent>
+                <MudCardActions Class="app-tile-actions">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Href="https://meetings.dev.fortressam.ai"
+                               Target="_blank"
+                               Class="app-open-btn"
+                               FullWidth="true">
+                        Open
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+
+        <!-- FORMS -->
+        <MudItem xs="12" sm="6" md="6" lg="3">
+            <MudCard Class="app-tile" Elevation="2">
+                <MudCardContent Class="app-tile-content">
+                    <div class="app-icon-wrap">
+                        <MudIcon Icon="@Icons.Material.Filled.Assignment" Style="font-size: 2.5rem; color: #C9A84C;" />
+                    </div>
+                    <MudText Typo="Typo.h6" Class="app-name">FORMS</MudText>
+                    <MudText Typo="Typo.caption" Class="app-full-name">Form Intelligence</MudText>
+                    <MudText Typo="Typo.body2" Class="app-description">
+                        AI-powered form creation and submission workflows.
+                    </MudText>
+                </MudCardContent>
+                <MudCardActions Class="app-tile-actions">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Href="https://forms.dev.fortressam.ai"
+                               Target="_blank"
+                               Class="app-open-btn"
+                               FullWidth="true">
+                        Open
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+
+        <!-- FORGE (Coming Soon) -->
+        <MudItem xs="12" sm="6" md="6" lg="3">
+            <MudCard Class="app-tile app-tile--disabled" Elevation="2">
+                <MudCardContent Class="app-tile-content">
+                    <div class="app-icon-wrap app-icon-wrap--disabled">
+                        <MudIcon Icon="@Icons.Material.Filled.Construction" Style="font-size: 2.5rem; color: #484f58;" />
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px; justify-content: center;">
+                        <MudText Typo="Typo.h6" Class="app-name app-name--disabled">FORGE</MudText>
+                        <MudChip T="string" Size="Size.Small" Class="coming-soon-badge">Coming Soon</MudChip>
+                    </div>
+                    <MudText Typo="Typo.caption" Class="app-full-name app-full-name--disabled">Intelligence Forge</MudText>
+                    <MudText Typo="Typo.body2" Class="app-description app-description--disabled">
+                        Build and deploy custom AI workflows.
+                    </MudText>
+                </MudCardContent>
+                <MudCardActions Class="app-tile-actions">
+                    <MudButton Variant="Variant.Filled"
+                               Disabled="true"
+                               Class="app-open-btn app-open-btn--disabled"
+                               FullWidth="true">
+                        Coming Soon
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+
+    </MudGrid>
+
+    <!-- Footer -->
+    <div class="portal-footer">
+        <MudText Typo="Typo.caption" Style="color: #484f58;">
+            © 2025 Refuge Group. All rights reserved.
+        </MudText>
+    </div>
+</div>
