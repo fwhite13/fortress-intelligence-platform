@@ -47,7 +47,7 @@ builder.Services.AddAuthentication(options =>
 .AddCookie(options =>
 {
     options.Cookie.Name = ".FortressAI.Session";
-    options.Cookie.Domain = builder.Configuration["Auth__CookieDomain"] ?? "";
+    options.Cookie.Domain = builder.Configuration["Auth:CookieDomain"] ?? "";
     options.Cookie.SameSite = SameSiteMode.Lax;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.Cookie.IsEssential = true;
@@ -56,9 +56,9 @@ builder.Services.AddAuthentication(options =>
 })
 .AddOpenIdConnect(options =>
 {
-    options.Authority = $"https://login.microsoftonline.com/{builder.Configuration["AzureAd__TenantId"]}/v2.0";
-    options.ClientId = builder.Configuration["AzureAd__ClientId"];
-    options.ClientSecret = builder.Configuration["AzureAd__ClientSecret"];
+    options.Authority = $"https://login.microsoftonline.com/{builder.Configuration["AzureAd:TenantId"]}/v2.0";
+    options.ClientId = builder.Configuration["AzureAd:ClientId"];
+    options.ClientSecret = builder.Configuration["AzureAd:ClientSecret"];
     options.ResponseType = "code";
     options.SaveTokens = true;
     options.GetClaimsFromUserInfoEndpoint = true;
@@ -120,7 +120,8 @@ app.UseAntiforgery();
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fip" }))
-   .AllowAnonymous();
+   .AllowAnonymous()
+   .DisableAntiforgery();
 
 // ── Sign-out ──────────────────────────────────────────────────────────────────
 app.MapGet("/auth/logout", async (HttpContext ctx) =>
