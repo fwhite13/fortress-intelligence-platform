@@ -337,12 +337,27 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred
 
 // FIP mode: redirect unauthenticated users to FIP portal for login
 // LoginPath = /auth/redirect-to-login when FIP__LoginUrl is set
+// Passes returnUrl so FIP redirects back to FAIT after authentication
 app.MapGet("/auth/redirect-to-login", (HttpContext ctx, IConfiguration config) =>
 {
     var fipUrl = (config["FIP:LoginUrl"] ?? config["FIP__LoginUrl"])?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
-    // After FIP login, FIP portal redirects back to /auth/firm-callback which returns user to FAIT
-    var returnUrl = $"https://{ctx.Request.Host}/";
-    return Results.Redirect(fipUrl);
+    var faitCallbackUrl = (config["FIP:FaitCallbackUrl"] ?? config["FIP__FaitCallbackUrl"])?.TrimEnd('/')
+        ?? "https://fait.dev.fortressam.ai/auth/fait-session";
+    var redirectUrl = $"{fipUrl}/auth/firm-callback?returnUrl={Uri.EscapeDataString(faitCallbackUrl)}";
+    return Results.Redirect(redirectUrl);
+}).AllowAnonymous();
+
+// FAIT session endpoint — user arrives here from FIP after successful Entra authentication
+// The shared .FortressAI.Session cookie is already set by FIP — just validate and redirect to app
+app.MapGet("/auth/fait-session", async ctx =>
+{
+    var authResult = await ctx.AuthenticateAsync(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+    if (!authResult.Succeeded)
+    {
+        ctx.Response.Redirect("/");
+        return;
+    }
+    ctx.Response.Redirect("/");
 }).AllowAnonymous();
 
 // FIRM auth callback — after user logs into FAIT, redirect back to FIRM
