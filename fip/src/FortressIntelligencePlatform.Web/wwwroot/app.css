@@ -1,0 +1,82 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+body {
+    background: #1a2332;
+    color: #ffffff;
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+}
+
+.fip-portal { display: flex; flex-direction: column; min-height: 100vh; }
+
+.fip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 32px;
+    background: #111c2a;
+    border-bottom: 1px solid rgba(212,175,55,0.3);
+}
+
+.fip-logo {
+    color: #d4af37;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+}
+
+.fip-user-bar { display: flex; align-items: center; gap: 20px; }
+.fip-username { font-size: 14px; color: rgba(255,255,255,0.7); }
+.fip-signout {
+    font-size: 13px;
+    color: #d4af37;
+    text-decoration: none;
+    border: 1px solid rgba(212,175,55,0.4);
+    padding: 6px 14px;
+    border-radius: 4px;
+    transition: all 0.15s;
+}
+.fip-signout:hover { background: rgba(212,175,55,0.1); }
+
+.fip-main { flex: 1; padding: 60px 32px; max-width: 900px; margin: 0 auto; width: 100%; }
+.fip-title { font-size: 28px; font-weight: 600; margin-bottom: 40px; color: #fff; }
+
+.app-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 24px;
+}
+
+.app-tile {
+    display: flex;
+    flex-direction: column;
+    background: #1e2d40;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 28px 24px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.app-tile:hover {
+    border-color: rgba(212,175,55,0.5);
+    background: #243349;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+
+.app-tile-icon { font-size: 32px; margin-bottom: 16px; }
+.app-tile h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #d4af37; }
+.app-tile p { font-size: 14px; color: rgba(255,255,255,0.6); line-height: 1.5; flex: 1; }
+.app-tile-open {
+    margin-top: 20px;
+    font-size: 13px;
+    color: #d4af37;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}

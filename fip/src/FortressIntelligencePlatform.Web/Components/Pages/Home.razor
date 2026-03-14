@@ -1,0 +1,45 @@
+@page "/"
+@attribute [Authorize]
+@inject IConfiguration Config
+@inject NavigationManager Nav
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+
+<PageTitle>Fortress Intelligence Platform</PageTitle>
+
+<AuthorizeView>
+    <Authorized>
+        <div class="fip-portal">
+            <header class="fip-header">
+                <div class="fip-logo">Fortress Intelligence Platform</div>
+                <div class="fip-user-bar">
+                    <span class="fip-username">Welcome, @context.User.FindFirst("name")?.Value</span>
+                    <a class="fip-signout" href="/auth/logout">Sign Out</a>
+                </div>
+            </header>
+            <main class="fip-main">
+                <h1 class="fip-title">Your Applications</h1>
+                <div class="app-grid">
+                    <a class="app-tile" href="@Config["Apps__FaitUrl"]" target="_blank">
+                        <div class="app-tile-icon">⚡</div>
+                        <h2>FAIT</h2>
+                        <p>Fortress AI Toolkit — AI chat, knowledge bases, document analysis</p>
+                        <span class="app-tile-open">Open →</span>
+                    </a>
+                    <a class="app-tile" href="@Config["Apps__FirmUrl"]" target="_blank">
+                        <div class="app-tile-icon">🎙</div>
+                        <h2>FIRM</h2>
+                        <p>Fortress Intelligent Recording — meeting transcription and intelligence</p>
+                        <span class="app-tile-open">Open →</span>
+                    </a>
+                    <a class="app-tile" href="@Config["Apps__FormsUrl"]" target="_blank">
+                        <div class="app-tile-icon">📄</div>
+                        <h2>FORMS</h2>
+                        <p>Fortress Optical Recognition — insurance form extraction and mapping</p>
+                        <span class="app-tile-open">Open →</span>
+                    </a>
+                </div>
+            </main>
+        </div>
+    </Authorized>
+</AuthorizeView>
