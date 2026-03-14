@@ -3,6 +3,7 @@ import type { Message } from '../hooks/useChat';
 
 interface MessageBubbleProps {
   message: Message;
+  streaming?: boolean;
 }
 
 /** Very lightweight markdown → HTML: handles **bold**, `code`, and newlines. No full parser needed for MVP. */
@@ -16,8 +17,9 @@ function simpleMarkdown(text: string): string {
     .replace(/\n/g, '<br />');
 }
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, streaming }) => {
   const isUser = message.role === 'user';
+  const isStreaming = streaming ?? message.streaming ?? false;
 
   return (
     <div
@@ -55,10 +57,39 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           fontSize: '13px',
           lineHeight: 1.6,
           wordBreak: 'break-word',
+          position: 'relative',
         }}
-        // Rendering assistant markdown — cell values are already sanitized before being sent
-        dangerouslySetInnerHTML={{ __html: simpleMarkdown(message.content) }}
-      />
+      >
+        {/* Rendering assistant markdown — cell values are already sanitized before being sent */}
+        <span
+          dangerouslySetInnerHTML={{ __html: simpleMarkdown(message.content) }}
+        />
+        {isStreaming && (
+          <span
+            aria-hidden="true"
+            style={{
+              display: 'inline-block',
+              width: '2px',
+              height: '13px',
+              background: '#d4af37',
+              marginLeft: '2px',
+              verticalAlign: 'text-bottom',
+              animation: 'blink 1s step-end infinite',
+            }}
+          />
+        )}
+      </div>
+
+      <style>{`
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0; }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 };

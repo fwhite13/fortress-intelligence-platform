@@ -1,12 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useChat } from '../hooks/useChat';
+import { useWriteBack } from '../hooks/useWriteBack';
 import { getSelectedRange } from '../services/excelReader';
 import { formatContext } from '../services/contextFormatter';
+import { searchKb } from '../services/faitApi';
+import { scanRangeForIssues } from '../services/errorScanner';
+import type { KbResult } from './KbResultPanel';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import ModelPicker from './ModelPicker';
 import ContextIndicator from './ContextIndicator';
 import ErrorBanner from './ErrorBanner';
+import WriteSuggestionsDialog from './WriteSuggestionsDialog';
+import KbResultPanel from './KbResultPanel';
+import ErrorSummaryCard from './ErrorSummaryCard';
+import type { CellIssue } from './ErrorSummaryCard';
 
 interface ChatPanelProps {
   apiKey: string;
@@ -22,7 +30,29 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
     cols: number;
   } | null>(null);
 
-  const { messages, loading, error, send, clearError } = useChat(apiKey, model);
+  // FORGE KB search state
+  const [showForgeSearch, setShowForgeSearch] = useState(false);
+  const [forgeQuery, setForgeQuery] = useState('');
+  const [forgeLoading, setForgeLoading] = useState(false);
+  const [forgeResults, setForgeResults] = useState<KbResult[] | null>(null);
+  const forgeInputRef = useRef<HTMLInputElement>(null);
+
+  // Error scanner state
+  const [scanIssues, setScanIssues] = useState<CellIssue[] | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+
+  const { messages, loading, error, pendingSuggestions, send, clearError, clearPendingSuggestions } =
+    useChat(apiKey, model);
+
+  const { suggestions: writeBackSuggestions, showDialog, offerSuggestions, acceptAll, reject } = useWriteBack();
+
+  // When useChat detects suggestions in the FAIT response, surface the dialog
+  useEffect(() => {
+    if (pendingSuggestions && pendingSuggestions.length > 0) {
+      offerSuggestions(pendingSuggestions);
+      clearPendingSuggestions();
+    }
+  }, [pendingSuggestions]);
 
   // Refresh selection info on mount and periodically
   useEffect(() => {
@@ -35,15 +65,19 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
       }
     };
     refresh();
-
-    // Refresh every 2s to keep indicator current (lightweight — just loads address + counts)
     const interval = setInterval(refresh, 2000);
     return () => clearInterval(interval);
   }, []);
 
+  // Focus FORGE input when it appears
+  useEffect(() => {
+    if (showForgeSearch) {
+      forgeInputRef.current?.focus();
+    }
+  }, [showForgeSearch]);
+
   const handleSend = async (text: string) => {
     let context: string | undefined;
-
     if (includeSelection) {
       try {
         const ctx = await getSelectedRange();
@@ -55,8 +89,43 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
         // Non-fatal: proceed without context
       }
     }
-
     await send(text, context);
+  };
+
+  // ── Check for Issues ─────────────────────────────────────────────────────────
+  const handleCheckIssues = async () => {
+    setScanIssues(null);
+    setScanError(null);
+    try {
+      const issues = await scanRangeForIssues();
+      setScanIssues(issues);
+    } catch (e) {
+      setScanError("Couldn't scan range — make sure a range is selected.");
+    }
+  };
+
+  // ── Ask FORGE ────────────────────────────────────────────────────────────────
+  const handleForgeSearch = async () => {
+    if (!forgeQuery.trim()) return;
+    setForgeLoading(true);
+    setForgeResults(null);
+    try {
+      const { results } = await searchKb(forgeQuery.trim(), apiKey);
+      setForgeResults(results);
+    } catch {
+      setForgeResults([]);
+    } finally {
+      setForgeLoading(false);
+    }
+  };
+
+  const handleForgeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleForgeSearch();
+    if (e.key === 'Escape') {
+      setShowForgeSearch(false);
+      setForgeQuery('');
+      setForgeResults(null);
+    }
   };
 
   return (
@@ -89,27 +158,90 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
           <span style={{ color: '#556677', fontSize: '11px' }}>for Excel</span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* Check for Issues button */}
+          <button
+            onClick={handleCheckIssues}
+            title="Scan selected range for formula errors"
+            aria-label="Check selected range for issues"
+            style={headerBtnStyle}
+          >
+            ⚠
+          </button>
+
+          {/* Ask FORGE button */}
+          <button
+            onClick={() => setShowForgeSearch((v) => !v)}
+            title="Search FORGE knowledge base"
+            aria-label="Ask FORGE"
+            style={{
+              ...headerBtnStyle,
+              color: showForgeSearch ? '#d4af37' : '#8899aa',
+            }}
+          >
+            🔍
+          </button>
+
           <ModelPicker model={model} onChange={setModel} />
+
           <button
             onClick={onOpenSettings}
             title="Settings"
             aria-label="Open settings"
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#8899aa',
-              cursor: 'pointer',
-              fontSize: '14px',
-              padding: '2px 4px',
-              borderRadius: '4px',
-              lineHeight: 1,
-            }}
+            style={headerBtnStyle}
           >
             ⚙
           </button>
         </div>
       </div>
+
+      {/* FORGE search bar */}
+      {showForgeSearch && (
+        <div
+          style={{
+            padding: '6px 10px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#111d2b',
+            display: 'flex',
+            gap: '6px',
+            flexShrink: 0,
+          }}
+        >
+          <input
+            ref={forgeInputRef}
+            value={forgeQuery}
+            onChange={(e) => setForgeQuery(e.target.value)}
+            onKeyDown={handleForgeKeyDown}
+            placeholder="Search FORGE knowledge base…"
+            style={{
+              flex: 1,
+              background: '#1a2332',
+              border: '1px solid #2e3f54',
+              borderRadius: '4px',
+              color: '#e8edf3',
+              padding: '5px 8px',
+              fontSize: '12px',
+              outline: 'none',
+            }}
+          />
+          <button
+            onClick={handleForgeSearch}
+            disabled={forgeLoading || !forgeQuery.trim()}
+            style={{
+              background: '#d4af37',
+              color: '#0f1720',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '5px 10px',
+              fontSize: '12px',
+              fontWeight: '600',
+              cursor: 'pointer',
+            }}
+          >
+            {forgeLoading ? '…' : 'Go'}
+          </button>
+        </div>
+      )}
 
       {/* Context indicator bar */}
       {includeSelection && selectionInfo && (
@@ -131,12 +263,59 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
       )}
 
       {/* Error banner */}
-      {error && (
-        <ErrorBanner message={error} onDismiss={clearError} />
+      {error && <ErrorBanner message={error} onDismiss={clearError} />}
+
+      {/* Scan error */}
+      {scanError && (
+        <div
+          style={{
+            padding: '6px 10px',
+            background: '#2a1515',
+            color: '#e07070',
+            fontSize: '12px',
+            borderBottom: '1px solid #5a2020',
+            flexShrink: 0,
+          }}
+        >
+          {scanError}{' '}
+          <button
+            onClick={() => setScanError(null)}
+            style={{ background: 'none', border: 'none', color: '#8899aa', cursor: 'pointer', fontSize: '12px' }}
+          >
+            ✕
+          </button>
+        </div>
       )}
 
-      {/* Message list */}
-      <MessageList messages={messages} loading={loading} />
+      {/* Scrollable content area */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {/* Error summary card */}
+        {scanIssues !== null && (
+          <div style={{ padding: '4px 8px', flexShrink: 0 }}>
+            <ErrorSummaryCard
+              issues={scanIssues}
+              onClose={() => setScanIssues(null)}
+            />
+          </div>
+        )}
+
+        {/* FORGE KB results */}
+        {(forgeLoading || forgeResults !== null) && (
+          <div style={{ padding: '4px 8px', flexShrink: 0 }}>
+            <KbResultPanel results={forgeResults ?? []} loading={forgeLoading} />
+          </div>
+        )}
+
+        {/* Message list */}
+        <MessageList messages={messages} loading={loading} />
+      </div>
 
       {/* Input area */}
       <ChatInput
@@ -145,8 +324,31 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
         includeSelection={includeSelection}
         onToggleSelection={() => setIncludeSelection((v) => !v)}
       />
+
+      {/* Write-back dialog (modal overlay) */}
+      {showDialog && writeBackSuggestions && (
+        <WriteSuggestionsDialog
+          suggestions={writeBackSuggestions}
+          onAcceptAll={acceptAll}
+          onRejectAll={reject}
+          onReviewEach={() => {
+            /* review mode is managed internally in the dialog */
+          }}
+        />
+      )}
     </div>
   );
+};
+
+const headerBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  color: '#8899aa',
+  cursor: 'pointer',
+  fontSize: '14px',
+  padding: '2px 4px',
+  borderRadius: '4px',
+  lineHeight: 1,
 };
 
 export default ChatPanel;
