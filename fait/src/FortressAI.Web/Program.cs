@@ -217,10 +217,15 @@ else
         Console.WriteLine("⚠️  Entra OIDC not configured — SSO disabled, email/password only");
     }
 
-    // API key auth for machine-to-machine endpoints (Haven PWA → /api/haven/chat)
+    // API key auth for machine-to-machine endpoints (Haven PWA, Excel Add-in → /api/haven/chat)
     authBuilder.AddScheme<AppKeyAuthOptions, AppKeyAuthHandler>("AppKeyAuth", options =>
     {
+        // Legacy Haven key (backward compatible)
         options.ApiKey = builder.Configuration["AppKeys:Haven"];
+        // Excel Add-in key (Sprint 1 — multi-key support)
+        var excelKey = builder.Configuration["AppKeys:ExcelAddin"];
+        if (!string.IsNullOrEmpty(excelKey))
+            options.ApiKeys.Add(excelKey);
     });
 }
 // Register AppKey authorization handler

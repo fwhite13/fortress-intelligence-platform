@@ -6,13 +6,29 @@ using Microsoft.Extensions.Options;
 namespace FortressAI.Web.Auth;
 
 /// <summary>
-/// API key authentication handler for machine-to-machine endpoints (e.g., Haven PWA).
-/// Reads the x-api-key header and validates it against the AppKeys:Haven configuration value.
+/// API key authentication handler for machine-to-machine endpoints (e.g., Haven PWA, Excel Add-in).
+/// Reads the x-api-key header and validates it against the configured AppKeys.
+///
+/// Supports multiple valid keys via <see cref="AppKeyAuthOptions.ApiKeys"/> (Sprint 1: Excel Add-in).
+/// Legacy single-key field <see cref="AppKeyAuthOptions.ApiKey"/> remains supported for backward compatibility.
 /// Returns NoResult (not Fail) when the header is absent so other schemes (Cookie/OIDC) can still handle the request.
 /// </summary>
 public class AppKeyAuthOptions : AuthenticationSchemeOptions
 {
+    /// <summary>Legacy single API key — Haven PWA service account.</summary>
     public string? ApiKey { get; set; }
+
+    /// <summary>Additional valid API keys (e.g., AppKeys:ExcelAddin).</summary>
+    public List<string> ApiKeys { get; set; } = new();
+
+    /// <summary>
+    /// Resolved set of all valid keys: ApiKeys list + ApiKey (if set).
+    /// Filters empty/null entries.
+    /// </summary>
+    public IEnumerable<string> AllKeys =>
+        ApiKeys
+            .Concat(string.IsNullOrEmpty(ApiKey) ? Array.Empty<string>() : new[] { ApiKey })
+            .Where(k => !string.IsNullOrEmpty(k));
 }
 
 public class AppKeyAuthHandler : AuthenticationHandler<AppKeyAuthOptions>
@@ -30,13 +46,14 @@ public class AppKeyAuthHandler : AuthenticationHandler<AppKeyAuthOptions>
         if (string.IsNullOrEmpty(apiKey))
             return Task.FromResult(AuthenticateResult.NoResult());
 
-        var configuredKey = Options.ApiKey;
+        // Check against all configured keys
+        var allKeys = Options.AllKeys.ToList();
 
-        // Key is configured but doesn't match — explicit failure
-        if (string.IsNullOrEmpty(configuredKey) || !string.Equals(apiKey, configuredKey, StringComparison.Ordinal))
+        if (allKeys.Count == 0 || !allKeys.Any(k => string.Equals(apiKey, k, StringComparison.Ordinal)))
             return Task.FromResult(AuthenticateResult.Fail("Invalid API key"));
 
-        // Valid key — issue claims for Fred White (the Haven PWA service account)
+        // Valid key — issue claims for the service account (Fred White / FAIT service identity)
+        // Sprint 2: differentiate per-key identity. For MVP, all keys share the same service account.
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, "08de7605-3f7d-427d-858a-637777b41018"),
