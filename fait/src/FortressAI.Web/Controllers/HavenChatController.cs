@@ -54,19 +54,25 @@ public class HavenChatController : ControllerBase
     /// <summary>
     /// POST /api/haven/chat
     /// Accepts a user message, retrieves relevant KB chunks (project + corp), synthesises an
-    /// answer via Claude, and returns it as plain JSON.  SSE streaming is a future enhancement.
+    /// answer via Claude. Supports both buffered JSON (default) and SSE streaming
+    /// (when client sends Accept: text/event-stream).
     /// </summary>
     [HttpPost("chat")]
-    public async Task<IActionResult> Chat(
+    public async Task Chat(
         [FromBody] HavenChatRequest request,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.Message))
-            return BadRequest(new { error = "message is required" });
+        {
+            Response.StatusCode = 400;
+            await Response.WriteAsync("{\"error\":\"message is required\"}", ct);
+            return;
+        }
 
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        _logger.LogInformation("[Haven] Chat request from user={UserId} projectId={ProjectId} messageLen={Len}",
-            userId, request.ProjectId, request.Message.Length);
+        var wantsStream = Request.Headers.Accept.ToString().Contains("text/event-stream");
+        _logger.LogInformation("[Haven] Chat request from user={UserId} projectId={ProjectId} messageLen={Len} streaming={Streaming}",
+            userId, request.ProjectId, request.Message.Length, wantsStream);
 
         // ── KB Retrieval ──────────────────────────────────────────────────────────────
         var kbChunks = new List<KbChunk>();
@@ -125,12 +131,41 @@ public class HavenChatController : ControllerBase
             systemPromptBuilder.AppendLine("No specific context was retrieved. Answer based on your general knowledge if applicable.");
         }
 
-        // ── Generate Answer via Bedrock ───────────────────────────────────────────────
         var messages = new List<MessageDto>
         {
             new() { Role = "user", Content = request.Message }
         };
 
+        // ── SSE streaming path ────────────────────────────────────────────────────────
+        if (wantsStream)
+        {
+            Response.ContentType = "text/event-stream";
+            Response.Headers["Cache-Control"] = "no-cache";
+            Response.Headers["X-Accel-Buffering"] = "no"; // disable nginx buffering if any
+
+            try
+            {
+                await foreach (var chunk in _bedrockService.StreamChatAsync(
+                    messages,
+                    systemPromptBuilder.ToString(),
+                    "claude-sonnet-4-6",
+                    maxTokens: 2048,
+                    temperature: 0.3).WithCancellation(ct))
+                {
+                    if (chunk.Type == "text" && chunk.Text != null)
+                        await Response.WriteAsync($"data: {JsonSerializer.Serialize(chunk.Text)}\n\n", ct);
+                }
+                await Response.WriteAsync("data: [DONE]\n\n", ct);
+            }
+            catch (OperationCanceledException) { /* client disconnected — normal */ }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Haven] SSE streaming failed");
+            }
+            return;
+        }
+
+        // ── Buffered JSON path (original behaviour) ───────────────────────────────────
         var answerBuilder = new StringBuilder();
         try
         {
@@ -147,28 +182,91 @@ public class HavenChatController : ControllerBase
         }
         catch (OperationCanceledException)
         {
-            return StatusCode(499, new { error = "Request cancelled" });
+            Response.StatusCode = 499;
+            await Response.WriteAsync("{\"error\":\"Request cancelled\"}", ct);
+            return;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[Haven] Bedrock streaming failed");
-            return StatusCode(502, new { error = "AI service unavailable" });
+            Response.StatusCode = 502;
+            await Response.WriteAsync("{\"error\":\"AI service unavailable\"}", ct);
+            return;
         }
 
         var answer = answerBuilder.ToString().Trim();
         if (string.IsNullOrEmpty(answer))
         {
             _logger.LogWarning("[Haven] Bedrock returned empty answer");
-            return StatusCode(502, new { error = "AI service returned empty response" });
+            Response.StatusCode = 502;
+            await Response.WriteAsync("{\"error\":\"AI service returned empty response\"}", ct);
+            return;
         }
 
         _logger.LogInformation("[Haven] Answer generated: {Len} chars, {SourceCount} sources", answer.Length, sources.Count);
 
-        return Ok(new HavenChatResponse
+        Response.ContentType = "application/json";
+        await Response.WriteAsync(
+            JsonSerializer.Serialize(new HavenChatResponse { Answer = answer, Sources = sources }),
+            ct);
+    }
+
+    // ── /api/haven/kb-search ──────────────────────────────────────────────────────
+
+    public sealed class KbSearchRequest
+    {
+        public string Query { get; set; } = "";
+        public Guid? ProjectId { get; set; }
+    }
+
+    /// <summary>
+    /// POST /api/haven/kb-search
+    /// Returns raw KB chunks for a given query. Used by the Excel add-in "Ask FORGE" feature.
+    /// </summary>
+    [HttpPost("kb-search")]
+    public async Task<IActionResult> KbSearch(
+        [FromBody] KbSearchRequest request,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Query))
+            return BadRequest(new { error = "query is required" });
+
+        var chunks = new List<KbChunk>();
+
+        try
         {
-            Answer = answer,
-            Sources = sources
-        });
+            var corpChunks = await _kbService.RetrieveCorpAsync(request.Query);
+            chunks.AddRange(corpChunks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Haven] KbSearch corp retrieval failed");
+        }
+
+        if (request.ProjectId.HasValue)
+        {
+            try
+            {
+                var projChunks = await _kbService.RetrieveProjectAsync(request.Query, request.ProjectId.Value);
+                chunks.AddRange(projChunks);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Haven] KbSearch project retrieval failed for {ProjectId}", request.ProjectId.Value);
+            }
+        }
+
+        var results = chunks
+            .OrderByDescending(c => c.Score)
+            .Take(5)
+            .Select(c => new
+            {
+                content = c.Content,
+                source = ExtractSourceName(c.Source),
+                score = c.Score
+            });
+
+        return Ok(new { results });
     }
 
     /// <summary>Extracts a human-readable filename from an S3 URI or path.</summary>
