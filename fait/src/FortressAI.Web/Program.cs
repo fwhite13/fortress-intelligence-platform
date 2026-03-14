@@ -508,6 +508,37 @@ app.MapGet("/auth/logout", async ctx =>
 });
 
 app.MapControllers();
+
+// Excel add-in static files endpoint — must be BEFORE MapRazorComponents
+// Serves /excel-addin/* from wwwroot/excel-addin/
+app.MapGet("/excel-addin/{*path}", async (HttpContext ctx, string path) =>
+{
+    // If path is empty (directory request), serve index.html
+    var filePath = string.IsNullOrEmpty(path) 
+        ? "wwwroot/excel-addin/index.html" 
+        : $"wwwroot/excel-addin/{path}";
+    
+    if (System.IO.File.Exists(filePath))
+    {
+        var contentType = path switch
+        {
+            var p when p.EndsWith(".html") => "text/html",
+            var p when p.EndsWith(".js") => "application/javascript",
+            var p when p.EndsWith(".css") => "text/css",
+            var p when p.EndsWith(".png") => "image/png",
+            var p when p.EndsWith(".jpg") || p.EndsWith(".jpeg") => "image/jpeg",
+            var p when p.EndsWith(".gif") => "image/gif",
+            var p when p.EndsWith(".svg") => "image/svg+xml",
+            var p when p.EndsWith(".json") => "application/json",
+            _ => "application/octet-stream"
+        };
+        
+        return Results.File(filePath, contentType);
+    }
+    
+    return Results.NotFound();
+});
+
 app.MapRazorComponents<FortressAI.Web.Components.App>()
     .AddInteractiveServerRenderMode();
 app.MapHub<DashboardHub>("/hubs/dashboard");
