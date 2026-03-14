@@ -58,6 +58,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [scanIssues, setScanIssues] = useState<CellIssue[] | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
 
+  // Office JS operation error (chart/pivot/CF failures)
+  const [officeError, setOfficeError] = useState<string | null>(null);
+
   // ── Sprint 4: Chart state ──────────────────────────────────────────────────
   const [chartSpec, setChartSpec] = useState<ChartSpec | null>(null);
   const [showChartDialog, setShowChartDialog] = useState(false);
@@ -203,12 +206,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         setChartSpec(parsed.chartSpec);
         setShowChartDialog(true);
       } else {
-        // FAIT didn't return a chart spec — show the text response in chat
-        // We append as a system-style note; use the messages setter via send fallback
-        clearError();
+        // FAIT didn't return a chart spec — surface the text response as an info message
+        setOfficeError(`FAIT responded: ${parsed.displayText.slice(0, 200)}${parsed.displayText.length > 200 ? '…' : ''}`);
       }
     } catch {
-      // Error state set below
+      setOfficeError('Chart generation failed — check your selection and try again');
     } finally {
       setChartLoading(false);
     }
@@ -234,9 +236,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       if (parsed.pivotSpec) {
         setPivotSpec(parsed.pivotSpec);
         setShowPivotDialog(true);
+      } else {
+        setOfficeError(`FAIT responded: ${parsed.displayText.slice(0, 200)}${parsed.displayText.length > 200 ? '…' : ''}`);
       }
     } catch {
-      // silent — error handled by finally
+      setOfficeError('Pivot table generation failed — check your selection and try again');
     } finally {
       setPivotLoading(false);
     }
@@ -544,6 +548,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       {/* Error banner */}
       {error && <ErrorBanner message={error} onDismiss={clearError} />}
 
+      {/* Office JS operation error (chart/pivot/CF) */}
+      {officeError && (
+        <ErrorBanner message={officeError} onDismiss={() => setOfficeError(null)} />
+      )}
+
       {/* Scan error */}
       {scanError && (
         <div
@@ -629,7 +638,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
               await insertChart(chartSpec);
               setShowChartDialog(false);
             } catch {
-              // Error is visible via the banner if we wire it — for now silently close
+              setOfficeError('Failed to insert chart — check the data range and try again');
             } finally {
               setChartLoading(false);
             }
@@ -649,7 +658,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
               await insertPivotTable(pivotSpec);
               setShowPivotDialog(false);
             } catch {
-              // silent
+              setOfficeError('Failed to create pivot table — ensure field names match your data headers');
             } finally {
               setPivotLoading(false);
             }
@@ -669,7 +678,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
               await applyConditionalFormat(cfSpec);
               setShowCfDialog(false);
             } catch {
-              // silent
+              setOfficeError('Failed to apply conditional formatting — check the range and rule settings');
             } finally {
               setCfLoading(false);
             }
