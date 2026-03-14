@@ -54,6 +54,29 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseMySql(fredConnectionString, fredServerVersion,
         mysqlOptions => mysqlOptions.EnableRetryOnFailure(3)));
 
+// SharedKeyRingDbContext: dedicated context for DataProtection key ring.
+// Must be registered as a standard scoped DbContext (not a factory) so that
+// PersistKeysToDbContext<SharedKeyRingDbContext>() can resolve it from DI.
+// Uses FIP_KEYRING_DB_NAME env var (defaults to fred_dev — same DB as FAIT's AppDbContext).
+var keyRingDbName = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? dbName;
+var keyRingCsb = new MySqlConnectionStringBuilder
+{
+    Server = dbHost ?? "localhost",
+    Port = uint.Parse(dbPort),
+    Database = keyRingDbName,
+    UserID = dbUser,
+    Password = dbPass,
+    ConnectionTimeout = 10
+};
+var keyRingConnectionString = !string.IsNullOrEmpty(dbHost)
+    ? keyRingCsb.ConnectionString
+    : (builder.Configuration.GetConnectionString("DefaultConnection")
+       ?? $"Server=localhost;Database={keyRingDbName};User=root;Password=dev;");
+builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
+    options.UseMySql(keyRingConnectionString,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mysql => mysql.EnableRetryOnFailure(3)));
+
 // Application services
 builder.Services.AddScoped<UserSessionService>();
 builder.Services.AddScoped<AuthService>();
@@ -295,10 +318,13 @@ builder.Services.AddHttpClient("graph", client =>
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 });
 
-// DataProtection: persist keys to DB (survives ECS container restarts)
-// DisableAutomaticKeyGeneration: FIP portal owns key generation — consumers must not create new keys
+// DataProtection: use SharedKeyRingDbContext (standard scoped DbContext) to persist/read keys.
+// AppDbContext is registered as a factory (AddDbContextFactory) and cannot be resolved by
+// PersistKeysToDbContext<> — that's why FAIT was generating ephemeral in-process keys instead
+// of reading FIP's key ring, causing the shared .FortressAI.Session cookie to be rejected.
+// DisableAutomaticKeyGeneration: FIP portal owns key creation — FAIT is a consumer only.
 builder.Services.AddDataProtection()
-    .PersistKeysToDbContext<AppDbContext>()
+    .PersistKeysToDbContext<SharedKeyRingDbContext>()
     .SetApplicationName("FortressAI")
     .DisableAutomaticKeyGeneration();
 
