@@ -293,7 +293,7 @@ app.MapGet("/auth/firm-callback", (HttpContext ctx, IConfiguration config) =>
         ctx.Response.Redirect("/");
     }
     return Task.CompletedTask;
-});
+}).AllowAnonymous();
 
 if (!app.Environment.IsDevelopment())
 {
