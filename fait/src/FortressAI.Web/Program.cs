@@ -530,7 +530,8 @@ app.MapGet("/auth/logout", async ctx =>
 app.MapControllers();
 
 app.MapRazorComponents<FortressAI.Web.Components.App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .RequireAuthorization();
 app.MapHub<DashboardHub>("/hubs/dashboard");
 
 app.Run();
