@@ -199,6 +199,9 @@ else
                     if (identity != null)
                         foreach (var role in roles)
                             identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, role));
+                    // Persistent cookie for cross-app SSO (shared .FortressAI.Session cookie)
+                    ctx.Properties!.IsPersistent = true;
+                    ctx.Properties.ExpiresUtc = DateTimeOffset.UtcNow.AddHours(12);
                     return Task.CompletedTask;
                 },
                 OnRedirectToIdentityProviderForSignOut = ctx =>
@@ -283,9 +286,11 @@ builder.Services.AddHttpClient("graph", client =>
 });
 
 // DataProtection: persist keys to DB (survives ECS container restarts)
+// DisableAutomaticKeyGeneration: FIP portal owns key generation — consumers must not create new keys
 builder.Services.AddDataProtection()
     .PersistKeysToDbContext<AppDbContext>()
-    .SetApplicationName("FortressAI");
+    .SetApplicationName("FortressAI")
+    .DisableAutomaticKeyGeneration();
 
 var app = builder.Build();
 

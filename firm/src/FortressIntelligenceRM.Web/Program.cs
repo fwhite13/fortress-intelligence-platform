@@ -87,10 +87,34 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHostedService<DatabaseInitializationService>();
 
-// DataProtection: persist keys to SAME table as FAIT (DataProtectionKeys) for shared cookie ring
+// DataProtection: shared key ring points to fred_dev (FAIT's DB) — same DataProtectionKeys table
+// SharedKeyRingDbContext reads from fred_dev via FIP_KEYRING_DB_NAME env var
+var keyRingDbHost = builder.Configuration["FORTRESS_DB_HOST"];
+var keyRingDbPort = builder.Configuration["FORTRESS_DB_PORT"] ?? "3306";
+var keyRingDbUser = builder.Configuration["FORTRESS_DB_USER"] ?? "fortress_mysql";
+var keyRingDbPass = builder.Configuration["FORTRESS_DB_PASS"] ?? "";
+var keyRingDbName = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? "fred_dev";
+
+var keyRingCsb = new MySqlConnector.MySqlConnectionStringBuilder
+{
+    Server = keyRingDbHost ?? "localhost",
+    Port = uint.Parse(keyRingDbPort),
+    Database = keyRingDbName,
+    UserID = keyRingDbUser,
+    Password = keyRingDbPass,
+    ConnectionTimeout = 10
+};
+
+builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
+    options.UseMySql(keyRingCsb.ConnectionString,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mysql => mysql.EnableRetryOnFailure(3)));
+
+// FIRM is a consumer — DisableAutomaticKeyGeneration so only FIP portal creates keys
 builder.Services.AddDataProtection()
-    .PersistKeysToDbContext<FirmDbContext>()
-    .SetApplicationName("FortressAI");
+    .PersistKeysToDbContext<SharedKeyRingDbContext>()
+    .SetApplicationName("FortressAI")
+    .DisableAutomaticKeyGeneration();
 
 var app = builder.Build();
 

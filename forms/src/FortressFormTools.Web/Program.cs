@@ -10,9 +10,6 @@ using FortressFormTools.Web.Components;
 using Amazon.S3;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
-using Microsoft.IdentityModel.Tokens;
-using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,66 +29,24 @@ builder.Services.AddMudServices();
 // ── Controllers (API endpoints) ──
 builder.Services.AddControllers();
 
-// ── Authentication (Cognito OIDC — matching FIRM pattern) ──
-var cognitoAuthority = builder.Configuration["Auth:CognitoAuthority"];
-var cognitoClientId = builder.Configuration["Auth:CognitoClientId"];
-var cognitoClientSecret = builder.Configuration["Auth:CognitoClientSecret"];
-
+// ── Authentication — FORMS is a cookie consumer only ──
+// FIP portal (FAIT) owns OIDC. FORMS reads the shared .FortressAI.Session cookie.
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
 })
 .AddCookie(options =>
 {
-    options.LoginPath = "/login";
+    options.LoginPath = "/auth/redirect-to-login";
     options.AccessDeniedPath = "/access-denied";
-    options.ExpireTimeSpan = TimeSpan.FromHours(8);
+    options.ExpireTimeSpan = TimeSpan.FromHours(12);
     options.SlidingExpiration = true;
-})
-.AddOpenIdConnect(options =>
-{
-    options.Authority = cognitoAuthority;
-    options.ClientId = cognitoClientId;
-    options.ClientSecret = cognitoClientSecret;
-    options.ResponseType = "code";
-    options.SaveTokens = true;
-    options.GetClaimsFromUserInfoEndpoint = true;
-    options.CallbackPath = "/signin-oidc";
-    options.SignedOutCallbackPath = "/signout-callback-oidc";
-
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        RoleClaimType = "cognito:groups"
-    };
-
-    options.Events = new OpenIdConnectEvents
-    {
-        OnRedirectToIdentityProvider = ctx =>
-        {
-            if (ctx.ProtocolMessage.RedirectUri != null && ctx.ProtocolMessage.RedirectUri.StartsWith("http://"))
-                ctx.ProtocolMessage.RedirectUri = ctx.ProtocolMessage.RedirectUri.Replace("http://", "https://");
-            if (ctx.ProtocolMessage.PostLogoutRedirectUri != null && ctx.ProtocolMessage.PostLogoutRedirectUri.StartsWith("http://"))
-                ctx.ProtocolMessage.PostLogoutRedirectUri = ctx.ProtocolMessage.PostLogoutRedirectUri.Replace("http://", "https://");
-            return Task.CompletedTask;
-        },
-        OnTokenValidated = ctx =>
-        {
-            var groups = ctx.Principal?.FindAll("cognito:groups").Select(c => c.Value) ?? [];
-            var identity = ctx.Principal?.Identity as ClaimsIdentity;
-            if (identity != null)
-            {
-                foreach (var group in groups)
-                    identity.AddClaim(new Claim(ClaimTypes.Role, group));
-            }
-            return Task.CompletedTask;
-        }
-    };
-
-    options.Scope.Clear();
-    options.Scope.Add("openid");
-    options.Scope.Add("email");
-    options.Scope.Add("profile");
+    options.Cookie.Name = ".FortressAI.Session";
+    options.Cookie.Domain = builder.Configuration["Auth__CookieDomain"] ?? "";
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.IsEssential = true;
 });
 
 builder.Services.AddAuthorization(options =>
@@ -140,10 +95,34 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseMySql(connectionString, serverVersion,
         mysqlOptions => mysqlOptions.EnableRetryOnFailure(3)));
 
-// ── Data Protection: persist keys to DB so antiforgery tokens survive container restarts ──
+// ── Data Protection: shared key ring points to fred_dev (FAIT's DB) ──
+// SetApplicationName("FortressAI") — must match FAIT/FIRM for shared cookie decryption
+// DisableAutomaticKeyGeneration — FIP portal (FAIT) owns key creation; FORMS is a consumer
+var keyRingDbHost = builder.Configuration["FORTRESS_DB_HOST"];
+var keyRingDbPort = builder.Configuration["FORTRESS_DB_PORT"] ?? "3306";
+var keyRingDbUser = builder.Configuration["FORTRESS_DB_USER"] ?? "fortress_mysql";
+var keyRingDbPass = builder.Configuration["FORTRESS_DB_PASS"] ?? "";
+var keyRingDbName = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? "fred_dev";
+
+var keyRingCsb = new MySqlConnector.MySqlConnectionStringBuilder
+{
+    Server = keyRingDbHost ?? "localhost",
+    Port = uint.Parse(keyRingDbPort),
+    Database = keyRingDbName,
+    UserID = keyRingDbUser,
+    Password = keyRingDbPass,
+    ConnectionTimeout = 10
+};
+
+builder.Services.AddDbContext<FortressFormTools.Data.SharedKeyRingDbContext>(options =>
+    options.UseMySql(keyRingCsb.ConnectionString,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mysql => mysql.EnableRetryOnFailure(3)));
+
 builder.Services.AddDataProtection()
-    .PersistKeysToDbContext<AppDbContext>()
-    .SetApplicationName("FortressFormTools");
+    .PersistKeysToDbContext<FortressFormTools.Data.SharedKeyRingDbContext>()
+    .SetApplicationName("FortressAI")
+    .DisableAutomaticKeyGeneration();
 
 // ── Default HttpClient for Blazor component API calls ──
 var internalBaseUrl = builder.Environment.IsDevelopment()
@@ -371,19 +350,33 @@ app.MapControllers();
 // ── Health check endpoint (ALB health probe — no DB dependency) ──
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow })).AllowAnonymous();
 
+// Redirect unauthenticated users to FIP portal (FAIT) for login
+app.MapGet("/auth/redirect-to-login", (HttpContext ctx) =>
+{
+    var fipLoginUrl = ctx.RequestServices.GetRequiredService<IConfiguration>()["FIP__LoginUrl"]
+        ?? "https://fip.dev.fortressam.ai";
+    var formsCallbackUrl = ctx.RequestServices.GetRequiredService<IConfiguration>()["FIP__FormsCallbackUrl"]
+        ?? "https://forms.dev.fortressam.ai/auth/forms-session";
+    var redirectUrl = $"{fipLoginUrl.TrimEnd('/')}/auth/firm-callback?returnUrl={Uri.EscapeDataString(formsCallbackUrl)}";
+    return Results.Redirect(redirectUrl);
+}).AllowAnonymous().DisableAntiforgery();
+
+// FORMS session endpoint — user arrives here from FIP portal with a valid shared cookie
+app.MapGet("/auth/forms-session", async (HttpContext ctx) =>
+{
+    var authResult = await ctx.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    if (!authResult.Succeeded)
+        return Results.Redirect("/");
+    // Cookie is already set by FIP portal — just redirect to home
+    return Results.Redirect("/");
+}).AllowAnonymous().DisableAntiforgery();
+
+// Logout: clear local cookie only (FIP portal owns OIDC sign-out)
 app.MapGet("/auth/logout", async (HttpContext ctx) =>
 {
     await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    await ctx.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme);
-}).AllowAnonymous();
-
-app.MapGet("/auth/login", async (HttpContext ctx) =>
-{
-    await ctx.ChallengeAsync(OpenIdConnectDefaults.AuthenticationScheme, new AuthenticationProperties
-    {
-        RedirectUri = "/"
-    });
-}).AllowAnonymous();
+    return Results.Redirect("/");
+}).AllowAnonymous().DisableAntiforgery();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
