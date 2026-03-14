@@ -50,7 +50,7 @@ public class HavenChatController : ControllerBase
         /// <summary>Optional: conversation ID for history context (not yet used in v1).</summary>
         public Guid? ConversationId { get; set; }
         /// <summary>Optional: override which KB types to search. Values: "corp", "personal", "team".
-        /// If null/empty, defaults to corp + personal (existing behaviour).</summary>
+        /// If null/empty, defaults to corp KB only — preserves existing Haven PWA behaviour.</summary>
         public List<string>? KbTypes { get; set; }
     }
 
