@@ -66,7 +66,8 @@ var keyRingCsb = new MySqlConnectionStringBuilder
     Database = keyRingDbName,
     UserID = dbUser,
     Password = dbPass,
-    ConnectionTimeout = 10
+    ConnectionTimeout = 10,
+    SslMode = MySqlConnector.MySqlSslMode.Required
 };
 var keyRingConnectionString = !string.IsNullOrEmpty(dbHost)
     ? keyRingCsb.ConnectionString
