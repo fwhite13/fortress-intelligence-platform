@@ -19,11 +19,26 @@ export interface UseChatReturn {
   clearPendingSuggestions: () => void;
 }
 
-export function useChat(apiKey: string, model: 'haiku' | 'sonnet'): UseChatReturn {
+export function useChat(
+  apiKey: string,
+  model: 'haiku' | 'sonnet',
+  kbToggles?: Record<string, boolean>,
+  projectId?: string | null
+): UseChatReturn {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingSuggestions, setPendingSuggestions] = useState<CellSuggestion[] | null>(null);
+
+  /** Build the kbTypes array from toggles — personal is always included. */
+  const buildKbTypes = (): string[] => {
+    if (!kbToggles) return ['corp', 'personal'];
+    const types = Object.entries(kbToggles)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    if (!types.includes('personal')) types.push('personal');
+    return types;
+  };
 
   const send = async (text: string, context?: string) => {
     const fullMessage = context ? `${context}\n\nUser question: ${text}` : text;
@@ -40,6 +55,8 @@ export function useChat(apiKey: string, model: 'haiku' | 'sonnet'): UseChatRetur
         return [...prev, { role: 'assistant', content: '', streaming: true }];
       });
     });
+
+    const kbTypes = buildKbTypes();
 
     try {
       // Try SSE streaming first
@@ -66,7 +83,9 @@ export function useChat(apiKey: string, model: 'haiku' | 'sonnet'): UseChatRetur
             });
           },
           model,
-          controller.signal
+          controller.signal,
+          kbTypes,
+          projectId
         );
         clearTimeout(timeout);
       } catch (streamErr) {
@@ -77,7 +96,7 @@ export function useChat(apiKey: string, model: 'haiku' | 'sonnet'): UseChatRetur
         }
         // SSE not supported or network issue — fall back to buffered
         rawText = '';
-        const { answer } = await sendChat(fullMessage, apiKey, model);
+        const { answer } = await sendChat(fullMessage, apiKey, model, undefined, kbTypes, projectId);
         rawText = answer;
       }
 

@@ -8,7 +8,6 @@ import { scanRangeForIssues } from '../services/errorScanner';
 import type { KbResult } from './KbResultPanel';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
-import ModelPicker from './ModelPicker';
 import ContextIndicator from './ContextIndicator';
 import ErrorBanner from './ErrorBanner';
 import WriteSuggestionsDialog from './WriteSuggestionsDialog';
@@ -18,11 +17,19 @@ import type { CellIssue } from './ErrorSummaryCard';
 
 interface ChatPanelProps {
   apiKey: string;
+  model: 'haiku' | 'sonnet';
+  kbToggles: Record<string, boolean>;
+  projectId: string | null;
   onOpenSettings: () => void;
 }
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
-  const [model, setModel] = useState<'haiku' | 'sonnet'>('sonnet');
+const ChatPanel: React.FC<ChatPanelProps> = ({
+  apiKey,
+  model,
+  kbToggles,
+  projectId,
+  onOpenSettings,
+}) => {
   const [includeSelection, setIncludeSelection] = useState(true);
   const [selectionInfo, setSelectionInfo] = useState<{
     address: string;
@@ -42,7 +49,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
   const [scanError, setScanError] = useState<string | null>(null);
 
   const { messages, loading, error, pendingSuggestions, send, clearError, clearPendingSuggestions } =
-    useChat(apiKey, model);
+    useChat(apiKey, model, kbToggles, projectId);
 
   const { suggestions: writeBackSuggestions, showDialog, offerSuggestions, acceptAll, reject } = useWriteBack();
 
@@ -99,18 +106,32 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
     try {
       const issues = await scanRangeForIssues();
       setScanIssues(issues);
-    } catch (e) {
+    } catch {
       setScanError("Couldn't scan range — make sure a range is selected.");
     }
   };
 
   // ── Ask FORGE ────────────────────────────────────────────────────────────────
+  const buildKbTypes = (): string[] => {
+    const types = Object.entries(kbToggles)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    // Personal is always included
+    if (!types.includes('personal')) types.push('personal');
+    return types;
+  };
+
   const handleForgeSearch = async () => {
     if (!forgeQuery.trim()) return;
     setForgeLoading(true);
     setForgeResults(null);
     try {
-      const { results } = await searchKb(forgeQuery.trim(), apiKey);
+      const { results } = await searchKb(
+        forgeQuery.trim(),
+        apiKey,
+        projectId ?? undefined,
+        buildKbTypes()
+      );
       setForgeResults(results);
     } catch {
       setForgeResults([]);
@@ -127,6 +148,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
       setForgeResults(null);
     }
   };
+
+  // Model display label
+  const modelLabel = model === 'haiku' ? 'Haiku' : 'Sonnet';
 
   return (
     <div
@@ -182,8 +206,24 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ apiKey, onOpenSettings }) => {
             🔍
           </button>
 
-          <ModelPicker model={model} onChange={setModel} />
+          {/* Model read-only indicator */}
+          <button
+            onClick={onOpenSettings}
+            title={`Model: ${modelLabel} — click to change in Settings`}
+            style={{
+              ...headerBtnStyle,
+              fontSize: '11px',
+              color: '#8899aa',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+            }}
+          >
+            <span style={{ color: '#556677' }}>Model:</span>{' '}
+            <span style={{ color: '#d4af37' }}>{modelLabel}</span>
+          </button>
 
+          {/* Settings gear */}
           <button
             onClick={onOpenSettings}
             title="Settings"

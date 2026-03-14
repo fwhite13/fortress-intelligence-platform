@@ -9,7 +9,9 @@ export async function sendChat(
   message: string,
   apiKey: string,
   model: 'haiku' | 'sonnet' = 'sonnet',
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  kbTypes?: string[],
+  projectId?: string | null
 ): Promise<ChatResponse> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
@@ -24,7 +26,12 @@ export async function sendChat(
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
       },
-      body: JSON.stringify({ message, model }),
+      body: JSON.stringify({
+        message,
+        model,
+        kbTypes: kbTypes ?? undefined,
+        projectId: projectId ?? undefined,
+      }),
       signal: combinedSignal,
     });
 
@@ -53,7 +60,9 @@ export async function sendChatStreaming(
   apiKey: string,
   onChunk: (text: string) => void,
   model: 'haiku' | 'sonnet' = 'sonnet',
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  kbTypes?: string[],
+  projectId?: string | null
 ): Promise<void> {
   const resp = await fetch(`${FAIT_BASE}/api/haven/chat`, {
     method: 'POST',
@@ -62,7 +71,12 @@ export async function sendChatStreaming(
       'x-api-key': apiKey,
       Accept: 'text/event-stream',
     },
-    body: JSON.stringify({ message, model }),
+    body: JSON.stringify({
+      message,
+      model,
+      kbTypes: kbTypes ?? undefined,
+      projectId: projectId ?? undefined,
+    }),
     signal,
   });
 
@@ -114,7 +128,8 @@ export interface KbSearchResponse {
 export async function searchKb(
   query: string,
   apiKey: string,
-  projectId?: string
+  projectId?: string,
+  kbTypes?: string[]
 ): Promise<KbSearchResponse> {
   const resp = await fetch(`${FAIT_BASE}/api/haven/kb-search`, {
     method: 'POST',
@@ -122,11 +137,48 @@ export async function searchKb(
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
     },
-    body: JSON.stringify({ query, projectId: projectId ?? null }),
+    body: JSON.stringify({
+      query,
+      projectId: projectId ?? null,
+      kbTypes: kbTypes ?? undefined,
+    }),
   });
 
   if (resp.status === 401) throw new Error('INVALID_KEY');
   if (!resp.ok) throw new Error(`HTTP_${resp.status}`);
 
   return resp.json();
+}
+
+// ── Sprint 3: KB list + Project list ─────────────────────────────────────────
+
+export interface KbInfo {
+  id: string;
+  name: string;
+  type: string;
+  alwaysOn: boolean;
+  available: boolean;
+}
+
+export interface ProjectInfo {
+  id: string;
+  name: string;
+}
+
+export async function fetchKbList(apiKey: string): Promise<KbInfo[]> {
+  const resp = await fetch(`${FAIT_BASE}/api/haven/kb-list`, {
+    headers: { 'x-api-key': apiKey },
+  });
+  if (!resp.ok) return [];
+  const data = await resp.json();
+  return data.kbs ?? [];
+}
+
+export async function fetchProjectList(apiKey: string): Promise<ProjectInfo[]> {
+  const resp = await fetch(`${FAIT_BASE}/api/haven/project-list`, {
+    headers: { 'x-api-key': apiKey },
+  });
+  if (!resp.ok) return [];
+  const data = await resp.json();
+  return data.projects ?? [];
 }

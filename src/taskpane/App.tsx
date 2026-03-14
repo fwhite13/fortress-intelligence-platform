@@ -1,33 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { getApiKey } from './services/storage';
+import { loadSettings } from './services/settings';
 import ChatPanel from './components/ChatPanel';
 import SettingsPanel from './components/SettingsPanel';
 
 const App: React.FC = () => {
-  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState<string>('');
+  const [model, setModel] = useState<'haiku' | 'sonnet'>('sonnet');
+  const [kbToggles, setKbToggles] = useState<Record<string, boolean>>({ corp: true, team: false });
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
-    getApiKey().then((key) => {
-      setApiKey(key);
+    loadSettings().then((s) => {
+      setApiKey(s.apiKey ?? '');
+      setModel(s.model);
+      setKbToggles(s.kbToggles);
+      setProjectId(s.projectId);
+      // If no API key, open settings automatically
+      if (!s.apiKey) setShowSettings(true);
       setLoading(false);
     });
   }, []);
 
-  const handleKeySet = async (key: string) => {
-    if (key === '__USE_EXISTING__') {
-      // User clicked "back to chat" — reload the existing key
-      const existing = await getApiKey();
-      setApiKey(existing);
-    } else {
-      setApiKey(key);
-    }
+  const handleKeyChange = (key: string) => {
+    setApiKey(key);
     setShowSettings(false);
-  };
-
-  const handleOpenSettings = () => {
-    setShowSettings(true);
   };
 
   if (loading) {
@@ -48,11 +46,25 @@ const App: React.FC = () => {
     );
   }
 
-  if (!apiKey || showSettings) {
-    return <SettingsPanel onKeySet={handleKeySet} />;
+  if (showSettings) {
+    return (
+      <SettingsPanel
+        onClose={() => setShowSettings(false)}
+        apiKey={apiKey}
+        onKeyChange={handleKeyChange}
+      />
+    );
   }
 
-  return <ChatPanel apiKey={apiKey} onOpenSettings={handleOpenSettings} />;
+  return (
+    <ChatPanel
+      apiKey={apiKey}
+      model={model}
+      kbToggles={kbToggles}
+      projectId={projectId}
+      onOpenSettings={() => setShowSettings(true)}
+    />
+  );
 };
 
 export default App;
