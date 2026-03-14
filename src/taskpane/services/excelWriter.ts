@@ -17,9 +17,9 @@ export async function applySuggestions(suggestions: CellSuggestion[]): Promise<v
 
       range.format.fill.color = '#FFFF00';
 
-      // Add comment — may fail if the cell already has a comment in some Excel versions
+      // Add comment via worksheet (Range has no .comments — must use Worksheet.comments.add)
       try {
-        range.comments.add(ctx.workbook, `AI suggestion: ${s.explanation}`);
+        sheet.comments.add(s.address, `AI suggestion: ${s.explanation}`);
       } catch {
         /* ignore comment failures */
       }
