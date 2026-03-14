@@ -10,6 +10,7 @@ using FortressAI.Web.Data;
 using FortressAI.Web.Services;
 using FortressAI.Web.Hubs;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using FortressAI.Web.Auth;
@@ -147,129 +148,41 @@ builder.Services.AddControllers();
 builder.Services.AddSignalR();
 builder.Services.AddMudServices();
 
-// Entra OIDC configuration (read here so routes can reference entraConfigured)
-var entraAuthority = builder.Configuration["Auth:EntraAuthority"];
-var entraClientId = builder.Configuration["Auth:EntraClientId"];
-var entraClientSecret = builder.Configuration["Auth:EntraClientSecret"];
-var entraConfigured = !string.IsNullOrEmpty(entraAuthority)
-    && !string.IsNullOrEmpty(entraClientId)
-    && !string.IsNullOrEmpty(entraClientSecret);
-
-// Stub authentication for dev (toggle via UseStubAuth config)
-var useStubAuth = builder.Configuration.GetValue<bool>("UseStubAuth", false);
-if (useStubAuth)
+// Authentication: pure cookie consumer — FIP portal owns Entra OIDC.
+// FAIT reads the shared .FortressAI.Session cookie issued by FIP.
+builder.Services.AddAuthentication(options =>
 {
-    builder.Services.AddAuthentication("StubAuth")
-        .AddScheme<AuthenticationSchemeOptions, StubAuthHandler>("StubAuth", _ => { });
-    Console.WriteLine("⚠️  STUB AUTH ENABLED — auto-authenticating as Fred White (dev only)");
-}
-else
+    options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+})
+.AddCookie(options =>
 {
-    // Production: Entra OIDC with graceful degradation to email/password only
-    // When FIP__LoginUrl is set, FAIT is a cookie consumer — unauthenticated requests
-    // redirect to FIP portal instead of FAIT's own Entra OIDC challenge.
-    var fipLoginUrl = builder.Configuration["FIP:LoginUrl"]
-        ?? builder.Configuration["FIP__LoginUrl"];
-    var fipModeEnabled = !string.IsNullOrEmpty(fipLoginUrl);
+    options.LoginPath = "/auth/redirect-to-login";
+    options.AccessDeniedPath = "/access-denied";
+    options.ExpireTimeSpan = TimeSpan.FromHours(12);
+    options.SlidingExpiration = true;
+    options.Cookie.Name = ".FortressAI.Session";
+    options.Cookie.Domain = builder.Configuration["Auth__CookieDomain"] ?? "";
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.IsEssential = true;
+})
+.AddScheme<AppKeyAuthOptions, AppKeyAuthHandler>("AppKeyAuth", options =>
+{
+    // Legacy Haven key (backward compatible)
+    options.ApiKey = builder.Configuration["AppKeys:Haven"];
+    // Excel Add-in key (Sprint 1 — multi-key support)
+    var excelKey = builder.Configuration["AppKeys:ExcelAddin"];
+    if (!string.IsNullOrEmpty(excelKey))
+        options.ApiKeys.Add(excelKey);
+});
 
-    var authBuilder = builder.Services.AddAuthentication(options =>
-    {
-        options.DefaultScheme = Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme;
-        // When FIP mode is active: always use Cookie challenge (LoginPath handles redirect to FIP portal).
-        // When FIP mode is off: challenge with Entra OIDC if configured.
-        options.DefaultChallengeScheme = (!fipModeEnabled && entraConfigured)
-            ? Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme
-            : Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme;
-    })
-    .AddCookie(options =>
-    {
-        // FIP mode: redirect unauthenticated users to FIP portal via /auth/redirect-to-login.
-        // Standalone mode: redirect to root (existing login page).
-        options.LoginPath = fipModeEnabled ? "/auth/redirect-to-login" : "/";
-        options.AccessDeniedPath = "/access-denied";
-        options.ExpireTimeSpan = TimeSpan.FromHours(8);
-        options.SlidingExpiration = true;
-        // Shared FIP cookie — must be accessible across all *.dev.fortressam.ai subdomains
-        options.Cookie.Name = ".FortressAI.Session";
-        options.Cookie.Domain = builder.Configuration["Auth:CookieDomain"] ?? "";
-        // SameSite=Lax required for cross-subdomain redirect flows
-        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
-        options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
-    });
-
-    if (entraConfigured)
-    {
-        authBuilder.AddOpenIdConnect(options =>
-        {
-            options.Authority = entraAuthority;
-            options.ClientId = entraClientId;
-            options.ClientSecret = entraClientSecret;
-            options.ResponseType = "code";
-            options.SaveTokens = true;
-            options.GetClaimsFromUserInfoEndpoint = true;
-            options.CallbackPath = "/signin-oidc";
-            options.SignedOutCallbackPath = "/signout-callback-oidc";
-            options.Scope.Add("openid");
-            options.Scope.Add("profile");
-            options.Scope.Add("email");
-            options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
-            {
-                RoleClaimType = "roles",
-                NameClaimType = "preferred_username"
-            };
-            options.Events = new Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectEvents
-            {
-                OnRedirectToIdentityProvider = ctx =>
-                {
-                    if (ctx.ProtocolMessage.RedirectUri?.StartsWith("http://") == true)
-                        ctx.ProtocolMessage.RedirectUri = ctx.ProtocolMessage.RedirectUri.Replace("http://", "https://");
-                    return Task.CompletedTask;
-                },
-                OnTokenValidated = ctx =>
-                {
-                    // Map Entra "roles" claims to ClaimTypes.Role
-                    var roles = ctx.Principal?.FindAll("roles").Select(c => c.Value) ?? Enumerable.Empty<string>();
-                    var identity = ctx.Principal?.Identity as System.Security.Claims.ClaimsIdentity;
-                    if (identity != null)
-                        foreach (var role in roles)
-                            identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, role));
-                    // Persistent cookie for cross-app SSO (shared .FortressAI.Session cookie)
-                    ctx.Properties!.IsPersistent = true;
-                    ctx.Properties.ExpiresUtc = DateTimeOffset.UtcNow.AddHours(12);
-                    return Task.CompletedTask;
-                },
-                OnRedirectToIdentityProviderForSignOut = ctx =>
-                {
-                    // Ensure Entra redirects back to FAIT's root after sign-out
-                    ctx.ProtocolMessage.PostLogoutRedirectUri =
-                        ctx.Request.Scheme + "://" + ctx.Request.Host + "/";
-                    return Task.CompletedTask;
-                }
-            };
-        });
-        Console.WriteLine("Production authentication configured (Entra OIDC)");
-    }
-    else
-    {
-        Console.WriteLine("⚠️  Entra OIDC not configured — SSO disabled, email/password only");
-    }
-
-    // API key auth for machine-to-machine endpoints (Haven PWA, Excel Add-in → /api/haven/chat)
-    authBuilder.AddScheme<AppKeyAuthOptions, AppKeyAuthHandler>("AppKeyAuth", options =>
-    {
-        // Legacy Haven key (backward compatible)
-        options.ApiKey = builder.Configuration["AppKeys:Haven"];
-        // Excel Add-in key (Sprint 1 — multi-key support)
-        var excelKey = builder.Configuration["AppKeys:ExcelAddin"];
-        if (!string.IsNullOrEmpty(excelKey))
-            options.ApiKeys.Add(excelKey);
-    });
-}
 // Register AppKey authorization handler
 builder.Services.AddSingleton<IAuthorizationHandler, AppKeyAuthorizationHandler>();
 
 builder.Services.AddAuthorization(options =>
 {
+    options.FallbackPolicy = options.DefaultPolicy;
     options.AddPolicy("AppKeyOnly", policy =>
         policy.AddRequirements(new AppKeyRequirement()));
 });
@@ -391,7 +304,6 @@ if (!app.Environment.IsDevelopment())
 app.UseAntiforgery();
 app.UseAuthentication();
 app.UseAuthorization();
-if (useStubAuth) { app.UseMiddleware<FortressAI.Web.Middleware.StubAuthUserInitializationMiddleware>(); }
 
 // Microsoft OAuth callback endpoint
 // Registered under both paths: /auth/microsoft-callback (legacy) and /auth/ms-callback (matches ECS MicrosoftGraph__RedirectUri)
@@ -518,57 +430,17 @@ app.MapPost("/api/briefing/generate", async (HttpContext ctx, BriefingGeneration
 }).RequireAuthorization();
 
 // Auth endpoints
-app.MapGet("/auth/login", async ctx =>
-{
-    if (!entraConfigured)
-    {
-        ctx.Response.Redirect("/");
-        return;
-    }
-    await ctx.ChallengeAsync(
-        Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme,
-        new Microsoft.AspNetCore.Authentication.AuthenticationProperties { RedirectUri = "/chat" });
-});
-
-app.MapGet("/auth/login-entra", async ctx =>
-{
-    if (!entraConfigured)
-    {
-        ctx.Response.Redirect("/");
-        return;
-    }
-    await ctx.ChallengeAsync(
-        Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme,
-        new Microsoft.AspNetCore.Authentication.AuthenticationProperties { RedirectUri = "/chat" });
-});
+// /auth/login and /auth/login-entra — redirects to FIP (FAIT is a pure cookie consumer)
+app.MapGet("/auth/login", ctx => { ctx.Response.Redirect("/auth/redirect-to-login"); return Task.CompletedTask; })
+    .AllowAnonymous();
+app.MapGet("/auth/login-entra", ctx => { ctx.Response.Redirect("/auth/redirect-to-login"); return Task.CompletedTask; })
+    .AllowAnonymous();
 
 app.MapGet("/auth/logout", async ctx =>
 {
-    // Always clear the cookie session
-    await ctx.SignOutAsync(
-        Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
-
-    // Only attempt OIDC sign-out if the scheme is registered (not registered when entraConfigured=false)
-    try
-    {
-        var schemes = ctx.RequestServices.GetRequiredService<Microsoft.AspNetCore.Authentication.IAuthenticationSchemeProvider>();
-        var oidcScheme = await schemes.GetSchemeAsync(
-            Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme);
-        if (oidcScheme != null)
-        {
-            await ctx.SignOutAsync(
-                Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme,
-                new Microsoft.AspNetCore.Authentication.AuthenticationProperties { RedirectUri = "/" });
-            return;
-        }
-    }
-    catch
-    {
-        // OIDC sign-out failed (unreachable authority, placeholder config) — fall through
-    }
-
+    await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     ctx.Response.Redirect("/");
-});
+}).AllowAnonymous();
 
 app.MapControllers();
 
