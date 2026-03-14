@@ -289,6 +289,16 @@ builder.Services.AddDataProtection()
 
 var app = builder.Build();
 
+// Static file middleware must run BEFORE endpoint routing (MapGet/MapRazorComponents etc.)
+// UseDefaultFiles rewrites /excel-addin/ → /excel-addin/index.html before static file serving.
+// If placed after any app.Map* call, Blazor's catch-all terminal route wins first.
+app.UseDefaultFiles(new DefaultFilesOptions
+{
+    RequestPath = "/excel-addin",
+    DefaultFileNames = new[] { "index.html" }
+});
+app.UseStaticFiles();
+
 // Health endpoint (must be before other middleware)
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }));
 
@@ -319,13 +329,6 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-// Serve index.html for /excel-addin/ (directory default file)
-app.UseDefaultFiles(new DefaultFilesOptions
-{
-    RequestPath = "/excel-addin",
-    DefaultFileNames = new[] { "index.html" }
-});
-app.UseStaticFiles();
 app.UseAntiforgery();
 app.UseAuthentication();
 app.UseAuthorization();
