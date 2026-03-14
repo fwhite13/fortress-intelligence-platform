@@ -142,16 +142,25 @@ if (useStubAuth)
 else
 {
     // Production: Entra OIDC with graceful degradation to email/password only
+    // When FIP__LoginUrl is set, FAIT is a cookie consumer — unauthenticated requests
+    // redirect to FIP portal instead of FAIT's own Entra OIDC challenge.
+    var fipLoginUrl = builder.Configuration["FIP__LoginUrl"];
+    var fipModeEnabled = !string.IsNullOrEmpty(fipLoginUrl);
+
     var authBuilder = builder.Services.AddAuthentication(options =>
     {
         options.DefaultScheme = Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme;
-        options.DefaultChallengeScheme = entraConfigured
+        // When FIP mode is active: always use Cookie challenge (LoginPath handles redirect to FIP portal).
+        // When FIP mode is off: challenge with Entra OIDC if configured.
+        options.DefaultChallengeScheme = (!fipModeEnabled && entraConfigured)
             ? Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectDefaults.AuthenticationScheme
             : Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme;
     })
     .AddCookie(options =>
     {
-        options.LoginPath = "/";
+        // FIP mode: redirect unauthenticated users to FIP portal via /auth/redirect-to-login.
+        // Standalone mode: redirect to root (existing login page).
+        options.LoginPath = fipModeEnabled ? "/auth/redirect-to-login" : "/";
         options.AccessDeniedPath = "/access-denied";
         options.ExpireTimeSpan = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
@@ -298,6 +307,16 @@ app.UseStaticFiles();
 
 // Health endpoint (must be before other middleware)
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }));
+
+// FIP mode: redirect unauthenticated users to FIP portal for login
+// LoginPath = /auth/redirect-to-login when FIP__LoginUrl is set
+app.MapGet("/auth/redirect-to-login", (HttpContext ctx, IConfiguration config) =>
+{
+    var fipUrl = config["FIP__LoginUrl"]?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
+    // After FIP login, FIP portal redirects back to /auth/firm-callback which returns user to FAIT
+    var returnUrl = $"https://{ctx.Request.Host}/";
+    return Results.Redirect(fipUrl);
+}).AllowAnonymous();
 
 // FIRM auth callback — after user logs into FAIT, redirect back to FIRM
 // Only redirects to *.fortressam.ai domains for safety
