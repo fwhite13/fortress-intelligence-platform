@@ -313,7 +313,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred
 // LoginPath = /auth/redirect-to-login when FIP__LoginUrl is set
 app.MapGet("/auth/redirect-to-login", (HttpContext ctx, IConfiguration config) =>
 {
-    var fipUrl = config["FIP__LoginUrl"]?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
+    var fipUrl = (config["FIP:LoginUrl"] ?? config["FIP__LoginUrl"])?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
     // After FIP login, FIP portal redirects back to /auth/firm-callback which returns user to FAIT
     var returnUrl = $"https://{ctx.Request.Host}/";
     return Results.Redirect(fipUrl);
