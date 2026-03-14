@@ -294,10 +294,6 @@ app.UseStaticFiles();
 // Health endpoint (must be before other middleware)
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }));
 
-// Excel add-in: serve index.html for /excel-addin/ and /excel-addin (trailing slash optional)
-app.MapGet("/excel-addin", () => Results.Redirect("/excel-addin/index.html", permanent: false));
-app.MapGet("/excel-addin/", () => Results.Redirect("/excel-addin/index.html", permanent: false));
-
 // FIRM auth callback — after user logs into FAIT, redirect back to FIRM
 // Only redirects to *.fortressam.ai domains for safety
 app.MapGet("/auth/firm-callback", (HttpContext ctx, IConfiguration config) =>
