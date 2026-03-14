@@ -289,18 +289,14 @@ builder.Services.AddDataProtection()
 
 var app = builder.Build();
 
-// Static file middleware must run BEFORE endpoint routing (MapGet/MapRazorComponents etc.)
-// UseDefaultFiles rewrites /excel-addin/ → /excel-addin/index.html before static file serving.
-// If placed after any app.Map* call, Blazor's catch-all terminal route wins first.
-app.UseDefaultFiles(new DefaultFilesOptions
-{
-    RequestPath = "/excel-addin",
-    DefaultFileNames = new[] { "index.html" }
-});
 app.UseStaticFiles();
 
 // Health endpoint (must be before other middleware)
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }));
+
+// Excel add-in: serve index.html for /excel-addin/ and /excel-addin (trailing slash optional)
+app.MapGet("/excel-addin", () => Results.Redirect("/excel-addin/index.html", permanent: false));
+app.MapGet("/excel-addin/", () => Results.Redirect("/excel-addin/index.html", permanent: false));
 
 // FIRM auth callback — after user logs into FAIT, redirect back to FIRM
 // Only redirects to *.fortressam.ai domains for safety
