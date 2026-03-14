@@ -319,6 +319,12 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+// Serve index.html for /excel-addin/ (directory default file)
+app.UseDefaultFiles(new DefaultFilesOptions
+{
+    RequestPath = "/excel-addin",
+    DefaultFileNames = new[] { "index.html" }
+});
 app.UseStaticFiles();
 app.UseAntiforgery();
 app.UseAuthentication();
