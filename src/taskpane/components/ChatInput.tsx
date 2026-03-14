@@ -1,6 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useRef } from 'react';
 
 interface ChatInputProps {
+  value: string;
+  onChange: (value: string) => void;
   onSend: (text: string) => void;
   disabled: boolean;
   includeSelection: boolean;
@@ -8,19 +10,20 @@ interface ChatInputProps {
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({
+  value,
+  onChange,
   onSend,
   disabled,
   includeSelection,
   onToggleSelection,
 }) => {
-  const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSend = () => {
-    const trimmed = text.trim();
+    const trimmed = value.trim();
     if (!trimmed || disabled) return;
     onSend(trimmed);
-    setText('');
+    onChange('');
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -35,7 +38,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setText(e.target.value);
+    onChange(e.target.value);
     // Auto-grow textarea
     const ta = e.target;
     ta.style.height = 'auto';
@@ -78,7 +81,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-end' }}>
         <textarea
           ref={textareaRef}
-          value={text}
+          value={value}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
           placeholder="Ask FAIT…"
@@ -106,14 +109,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
         />
         <button
           onClick={handleSend}
-          disabled={disabled || !text.trim()}
+          disabled={disabled || !value.trim()}
           aria-label="Send message"
           style={{
-            background: disabled || !text.trim() ? '#243447' : '#d4af37',
+            background: disabled || !value.trim() ? '#243447' : '#d4af37',
             border: 'none',
             borderRadius: '8px',
-            color: disabled || !text.trim() ? '#556677' : '#1a2332',
-            cursor: disabled || !text.trim() ? 'not-allowed' : 'pointer',
+            color: disabled || !value.trim() ? '#556677' : '#1a2332',
+            cursor: disabled || !value.trim() ? 'not-allowed' : 'pointer',
             fontWeight: '600',
             fontSize: '16px',
             width: '36px',

@@ -9,9 +9,12 @@ import { parseSuggestions } from '../services/suggestionParser';
 import { insertChart } from '../services/chartBuilder';
 import { insertPivotTable } from '../services/pivotBuilder';
 import { applyConditionalFormat } from '../services/cfBuilder';
+import { applySortFilter } from '../services/sortFilterBuilder';
+import { saveConversation, loadConversation, clearConversation } from '../services/sessionStorage';
 import type { ChartSpec } from '../services/chartBuilder';
 import type { PivotSpec } from '../services/pivotBuilder';
 import type { CfSpec } from '../services/cfBuilder';
+import type { SortFilterSpec } from '../services/sortFilterBuilder';
 import type { KbResult } from './KbResultPanel';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
@@ -23,6 +26,8 @@ import ErrorSummaryCard from './ErrorSummaryCard';
 import ChartConfirmDialog from './ChartConfirmDialog';
 import PivotConfirmDialog from './PivotConfirmDialog';
 import CfConfirmDialog from './CfConfirmDialog';
+import SortFilterConfirmDialog from './SortFilterConfirmDialog';
+import SlashCommandPicker from './SlashCommandPicker';
 import type { CellIssue } from './ErrorSummaryCard';
 
 interface ChatPanelProps {
@@ -58,7 +63,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [scanIssues, setScanIssues] = useState<CellIssue[] | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
 
-  // Office JS operation error (chart/pivot/CF failures)
+  // Office JS operation error (chart/pivot/CF/sort-filter failures)
   const [officeError, setOfficeError] = useState<string | null>(null);
 
   // ── Sprint 4: Chart state ──────────────────────────────────────────────────
@@ -79,10 +84,60 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [showCfInput, setShowCfInput] = useState(false);
   const cfInputRef = useRef<HTMLInputElement>(null);
 
-  const { messages, loading, error, pendingSuggestions, send, clearError, clearPendingSuggestions } =
-    useChat(apiKey, model, kbToggles, projectId);
+  // ── Sprint 5: Sort/Filter state ───────────────────────────────────────────
+  const [sortFilterSpec, setSortFilterSpec] = useState<SortFilterSpec | null>(null);
+  const [showSortFilterDialog, setShowSortFilterDialog] = useState(false);
+  const [sortFilterLoading, setSortFilterLoading] = useState(false);
+  const [sortFilterPrompt, setSortFilterPrompt] = useState('sort by the first numeric column descending');
+  const [showSortFilterInput, setShowSortFilterInput] = useState(false);
+  const sortFilterInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Sprint 5: Chat input text (lifted state for slash commands) ───────────
+  const [inputText, setInputText] = useState('');
+  const chatInputAreaRef = useRef<HTMLDivElement>(null);
+
+  // Slash command picker visibility
+  const showSlashPicker = inputText.startsWith('/');
+  const slashQuery = showSlashPicker ? inputText.slice(1) : '';
+
+  const {
+    messages,
+    loading,
+    error,
+    pendingSuggestions,
+    send,
+    clearError,
+    clearPendingSuggestions,
+    setMessages,
+  } = useChat(apiKey, model, kbToggles, projectId);
 
   const { suggestions: writeBackSuggestions, showDialog, offerSuggestions, acceptAll, reject } = useWriteBack();
+
+  // ── Sprint 5: Session persistence — load on mount ────────────────────────
+  useEffect(() => {
+    loadConversation()
+      .then((persisted) => {
+        if (persisted.length > 0) {
+          setMessages(persisted);
+        }
+      })
+      .catch(() => {
+        /* ignore storage errors */
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Sprint 5: Session persistence — save on messages change (debounced) ──
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (messages.length === 0) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveConversation(messages.filter((m) => !m.streaming));
+    }, 1000);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [messages]);
 
   // When useChat detects suggestions in the FAIT response, surface the dialog
   useEffect(() => {
@@ -90,7 +145,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       offerSuggestions(pendingSuggestions);
       clearPendingSuggestions();
     }
-  }, [pendingSuggestions]);
+  }, [pendingSuggestions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Refresh selection info on mount and periodically
   useEffect(() => {
@@ -120,6 +175,13 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       cfInputRef.current?.focus();
     }
   }, [showCfInput]);
+
+  // Focus Sort/Filter input when it appears
+  useEffect(() => {
+    if (showSortFilterInput) {
+      sortFilterInputRef.current?.focus();
+    }
+  }, [showSortFilterInput]);
 
   const handleSend = async (text: string) => {
     let context: string | undefined;
@@ -206,8 +268,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         setChartSpec(parsed.chartSpec);
         setShowChartDialog(true);
       } else {
-        // FAIT didn't return a chart spec — surface the text response as an info message
-        setOfficeError(`FAIT responded: ${parsed.displayText.slice(0, 200)}${parsed.displayText.length > 200 ? '…' : ''}`);
+        setOfficeError(
+          `FAIT responded: ${parsed.displayText.slice(0, 200)}${parsed.displayText.length > 200 ? '…' : ''}`
+        );
       }
     } catch {
       setOfficeError('Chart generation failed — check your selection and try again');
@@ -237,7 +300,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         setPivotSpec(parsed.pivotSpec);
         setShowPivotDialog(true);
       } else {
-        setOfficeError(`FAIT responded: ${parsed.displayText.slice(0, 200)}${parsed.displayText.length > 200 ? '…' : ''}`);
+        setOfficeError(
+          `FAIT responded: ${parsed.displayText.slice(0, 200)}${parsed.displayText.length > 200 ? '…' : ''}`
+        );
       }
     } catch {
       setOfficeError('Pivot table generation failed — check your selection and try again');
@@ -249,11 +314,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   // ── Sprint 4: Conditional Formatting ─────────────────────────────────────
   const handleFormat = async () => {
     if (!showCfInput) {
-      // First click: show the inline input
       setShowCfInput(true);
       return;
     }
-    // Second click (or submit): send to FAIT
     setShowCfInput(false);
     setCfLoading(true);
     clearError();
@@ -283,9 +346,59 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const handleCfKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') handleFormat();
-    if (e.key === 'Escape') {
-      setShowCfInput(false);
+    if (e.key === 'Escape') setShowCfInput(false);
+  };
+
+  // ── Sprint 5: Sort/Filter ─────────────────────────────────────────────────
+  const handleSortFilter = async () => {
+    if (!showSortFilterInput) {
+      setShowSortFilterInput(true);
+      return;
     }
+    setShowSortFilterInput(false);
+    setSortFilterLoading(true);
+    clearError();
+    try {
+      const ctx = await getSelectedRange();
+      const ctxBlock = formatContext(ctx);
+      const userRequest = sortFilterPrompt.trim() || 'sort by the first numeric column descending';
+      const prompt =
+        `${ctxBlock}\n\nPlease analyze this data and return a sort/filter specification. ` +
+        `Return a sort_filter_spec JSON block with optional "sort" (fields array with columnIndex 0-based ` +
+        `and ascending bool, hasHeaders) and optional "filter" (criteria array with columnIndex, filterType, ` +
+        `and values/operator/value params).\n\nUser request: ${userRequest}`;
+
+      const { answer } = await sendChat(prompt, apiKey, model, undefined, buildKbTypes(), projectId);
+      const parsed = parseSuggestions(answer);
+
+      if (parsed.sortFilterSpec) {
+        setSortFilterSpec(parsed.sortFilterSpec);
+        setShowSortFilterDialog(true);
+      } else {
+        setOfficeError(
+          `FAIT responded: ${parsed.displayText.slice(0, 200)}${parsed.displayText.length > 200 ? '…' : ''}`
+        );
+      }
+    } catch {
+      setOfficeError('Sort/filter generation failed — check your selection and try again');
+    } finally {
+      setSortFilterLoading(false);
+    }
+  };
+
+  const handleSortFilterKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleSortFilter();
+    if (e.key === 'Escape') setShowSortFilterInput(false);
+  };
+
+  // ── Sprint 5: Clear History ───────────────────────────────────────────────
+  const handleClearHistory = async () => {
+    try {
+      await clearConversation();
+    } catch {
+      /* ignore */
+    }
+    setMessages([]);
   };
 
   // Model display label
@@ -387,6 +500,30 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
             {cfLoading ? '…' : '🎨'}
           </button>
 
+          {/* Sort/Filter button — Sprint 5 */}
+          <button
+            onClick={handleSortFilter}
+            disabled={sortFilterLoading}
+            title="Sort or filter selected data"
+            aria-label="Sort or filter data"
+            style={{
+              ...headerBtnStyle,
+              color: sortFilterLoading || showSortFilterInput ? '#d4af37' : '#8899aa',
+            }}
+          >
+            {sortFilterLoading ? '…' : '🔀'}
+          </button>
+
+          {/* Clear History button — Sprint 5 */}
+          <button
+            onClick={handleClearHistory}
+            title="Clear conversation history"
+            aria-label="Clear conversation history"
+            style={headerBtnStyle}
+          >
+            🗑
+          </button>
+
           {/* Model read-only indicator */}
           <button
             onClick={onOpenSettings}
@@ -478,6 +615,68 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         </div>
       )}
 
+      {/* Sort/Filter inline prompt input — Sprint 5 */}
+      {showSortFilterInput && (
+        <div
+          style={{
+            padding: '6px 10px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#111d2b',
+            display: 'flex',
+            gap: '6px',
+            flexShrink: 0,
+          }}
+        >
+          <input
+            ref={sortFilterInputRef}
+            value={sortFilterPrompt}
+            onChange={(e) => setSortFilterPrompt(e.target.value)}
+            onKeyDown={handleSortFilterKeyDown}
+            placeholder="Describe sort/filter operation…"
+            style={{
+              flex: 1,
+              background: '#1a2332',
+              border: '1px solid #2e3f54',
+              borderRadius: '4px',
+              color: '#e8edf3',
+              padding: '5px 8px',
+              fontSize: '12px',
+              outline: 'none',
+            }}
+          />
+          <button
+            onClick={handleSortFilter}
+            disabled={sortFilterLoading}
+            style={{
+              background: '#d4af37',
+              color: '#0f1720',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '5px 10px',
+              fontSize: '12px',
+              fontWeight: '600',
+              cursor: 'pointer',
+            }}
+          >
+            Go
+          </button>
+          <button
+            onClick={() => setShowSortFilterInput(false)}
+            style={{
+              background: '#2e3f54',
+              color: '#e8edf3',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '5px 8px',
+              fontSize: '12px',
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* FORGE search bar */}
       {showForgeSearch && (
         <div
@@ -548,7 +747,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       {/* Error banner */}
       {error && <ErrorBanner message={error} onDismiss={clearError} />}
 
-      {/* Office JS operation error (chart/pivot/CF) */}
+      {/* Office JS operation error (chart/pivot/CF/sort-filter) */}
       {officeError && (
         <ErrorBanner message={officeError} onDismiss={() => setOfficeError(null)} />
       )}
@@ -605,13 +804,31 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         <MessageList messages={messages} loading={loading} />
       </div>
 
-      {/* Input area */}
-      <ChatInput
-        onSend={handleSend}
-        disabled={loading}
-        includeSelection={includeSelection}
-        onToggleSelection={() => setIncludeSelection((v) => !v)}
-      />
+      {/* Input area — positioned relatively so slash picker can anchor to it */}
+      <div ref={chatInputAreaRef} style={{ position: 'relative', flexShrink: 0 }}>
+        {/* Slash command picker overlay — Sprint 5 */}
+        {showSlashPicker && (
+          <SlashCommandPicker
+            query={slashQuery}
+            onSelect={(prompt) => {
+              setInputText(prompt);
+            }}
+            onClose={() => setInputText('')}
+          />
+        )}
+
+        <ChatInput
+          value={inputText}
+          onChange={setInputText}
+          onSend={(text) => {
+            setInputText('');
+            handleSend(text);
+          }}
+          disabled={loading}
+          includeSelection={includeSelection}
+          onToggleSelection={() => setIncludeSelection((v) => !v)}
+        />
+      </div>
 
       {/* Write-back dialog (modal overlay) */}
       {showDialog && writeBackSuggestions && (
@@ -684,6 +901,28 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
             }
           }}
           onCancel={() => setShowCfDialog(false)}
+        />
+      )}
+
+      {/* ── Sprint 5 Dialogs ── */}
+
+      {/* Sort/Filter confirmation dialog */}
+      {showSortFilterDialog && sortFilterSpec && (
+        <SortFilterConfirmDialog
+          spec={sortFilterSpec}
+          applying={sortFilterLoading}
+          onConfirm={async () => {
+            setSortFilterLoading(true);
+            try {
+              await applySortFilter(sortFilterSpec);
+              setShowSortFilterDialog(false);
+            } catch {
+              setOfficeError('Failed to apply sort/filter — check the range and try again');
+            } finally {
+              setSortFilterLoading(false);
+            }
+          }}
+          onCancel={() => setShowSortFilterDialog(false)}
         />
       )}
     </div>

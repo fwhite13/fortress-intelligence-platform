@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { sendChat, sendChatStreaming } from '../services/faitApi';
 import { parseSuggestions } from '../services/suggestionParser';
 import type { CellSuggestion } from '../components/WriteSuggestionsDialog';
@@ -17,15 +17,17 @@ export interface UseChatReturn {
   send: (text: string, context?: string) => Promise<void>;
   clearError: () => void;
   clearPendingSuggestions: () => void;
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
 }
 
 export function useChat(
   apiKey: string,
   model: 'haiku' | 'sonnet',
   kbToggles?: Record<string, boolean>,
-  projectId?: string | null
+  projectId?: string | null,
+  initialMessages?: Message[]
 ): UseChatReturn {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(initialMessages ?? []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingSuggestions, setPendingSuggestions] = useState<CellSuggestion[] | null>(null);
@@ -139,5 +141,5 @@ export function useChat(
   const clearError = () => setError(null);
   const clearPendingSuggestions = () => setPendingSuggestions(null);
 
-  return { messages, loading, error, pendingSuggestions, send, clearError, clearPendingSuggestions };
+  return { messages, loading, error, pendingSuggestions, send, clearError, clearPendingSuggestions, setMessages };
 }

@@ -2,6 +2,7 @@ import type { CellSuggestion } from '../components/WriteSuggestionsDialog';
 import type { ChartSpec } from './chartBuilder';
 import type { PivotSpec } from './pivotBuilder';
 import type { CfSpec } from './cfBuilder';
+import type { SortFilterSpec } from './sortFilterBuilder';
 
 export interface ParseResult {
   displayText: string;   // response with JSON blocks stripped
@@ -9,6 +10,7 @@ export interface ParseResult {
   chartSpec: ChartSpec | null;
   pivotSpec: PivotSpec | null;
   cfSpec: CfSpec | null;
+  sortFilterSpec: SortFilterSpec | null;
 }
 
 export function parseSuggestions(rawText: string): ParseResult {
@@ -17,6 +19,7 @@ export function parseSuggestions(rawText: string): ParseResult {
   let chartSpec: ChartSpec | null = null;
   let pivotSpec: PivotSpec | null = null;
   let cfSpec: CfSpec | null = null;
+  let sortFilterSpec: SortFilterSpec | null = null;
 
   // ── suggestions block ─────────────────────────────────────────────────────
   const suggestionsRegex = /```json\s*(\{[\s\S]*?"suggestions"[\s\S]*?\})\s*```/;
@@ -79,8 +82,23 @@ export function parseSuggestions(rawText: string): ParseResult {
     }
   }
 
+  // ── sort_filter_spec block ────────────────────────────────────────────────
+  const sortFilterRegex = /```json\s*(\{[\s\S]*?"sort_filter_spec"[\s\S]*?\})\s*```/;
+  const sortFilterMatch = displayText.match(sortFilterRegex);
+  if (sortFilterMatch) {
+    try {
+      const parsed = JSON.parse(sortFilterMatch[1]);
+      if (parsed.sort_filter_spec) {
+        sortFilterSpec = parsed.sort_filter_spec as SortFilterSpec;
+        displayText = displayText.replace(sortFilterMatch[0], '');
+      }
+    } catch {
+      // Bad JSON — ignore
+    }
+  }
+
   // Clean up excess blank lines left behind by stripped blocks
   displayText = displayText.replace(/\n{3,}/g, '\n\n').trim();
 
-  return { displayText, suggestions, chartSpec, pivotSpec, cfSpec };
+  return { displayText, suggestions, chartSpec, pivotSpec, cfSpec, sortFilterSpec };
 }
