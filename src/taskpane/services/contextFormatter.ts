@@ -45,7 +45,13 @@ export function formatContext(ctx: SpreadsheetContext): string {
 }
 
 function getCellAddr(row: number, col: number): string {
-  // Simple column letter (A–Z only; good for 26 cols)
-  const colLetter = String.fromCharCode(65 + col);
+  // Multi-letter column (A, B, ..., Z, AA, AB, ...) — handles up to 50 cols (AX)
+  let colNum = col + 1;
+  let colLetter = '';
+  while (colNum > 0) {
+    const rem = (colNum - 1) % 26;
+    colLetter = String.fromCharCode(65 + rem) + colLetter;
+    colNum = Math.floor((colNum - 1) / 26);
+  }
   return `${colLetter}${row + 1}`;
 }

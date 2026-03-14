@@ -11,40 +11,20 @@ export function useExcelContext() {
   const [selectionInfo, setSelectionInfo] = useState<{ address: string; rows: number; cols: number } | null>(null);
 
   useEffect(() => {
-    let handler: any = null;
-
-    // Register a selection change handler so ContextIndicator stays current
-    Office.onReady(() => {
+    // Poll selection every 2s — simpler and reliable across all Excel versions.
+    // onSelectionChanged registration inside Excel.run() produces a proxy that cannot
+    // be safely removed from a different Excel.run() context on cleanup, causing
+    // memory leaks. Polling avoids this entirely.
+    const interval = setInterval(async () => {
       try {
-        Excel.run(async (ctx: any) => {
-          handler = ctx.workbook.onSelectionChanged.add(async () => {
-            try {
-              const info = await getSelectedRange();
-              setSelectionInfo({ address: info.address, rows: info.rows, cols: info.cols });
-            } catch {
-              // ignore — selection may be invalid/empty
-            }
-          });
-          await ctx.sync();
-        });
+        const info = await getSelectedRange();
+        setSelectionInfo({ address: info.address, rows: info.rows, cols: info.cols });
       } catch {
-        // Excel JS not available (e.g., non-Excel host)
+        // ignore — no selection or Excel unavailable
       }
-    });
+    }, 2000);
 
-    return () => {
-      // Cleanup: remove the handler if registered
-      if (handler) {
-        try {
-          Excel.run(async (ctx: any) => {
-            handler.remove();
-            await ctx.sync();
-          });
-        } catch {
-          // ignore cleanup errors
-        }
-      }
-    };
+    return () => clearInterval(interval);
   }, []);
 
   const readSelection = async (): Promise<SpreadsheetContext | null> => {

@@ -14,7 +14,11 @@ export async function getApiKey(): Promise<string | null> {
 }
 
 export async function setApiKey(key: string): Promise<void> {
-  await OfficeRuntime.storage.setItem(KEY, key);
+  try {
+    await OfficeRuntime.storage.setItem(KEY, key);
+  } catch {
+    throw new Error('STORAGE_UNAVAILABLE');
+  }
 }
 
 export async function clearApiKey(): Promise<void> {
