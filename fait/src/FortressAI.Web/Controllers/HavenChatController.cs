@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using FortressAI.Web.Data;
+using Microsoft.Extensions.Configuration;
 
 namespace FortressAI.Web.Controllers;
 
@@ -13,6 +14,8 @@ namespace FortressAI.Web.Controllers;
 /// REST endpoint for the Haven PWA to query FAIT's knowledge base.
 /// Authenticated via API key (x-api-key header) — no browser/cookie session required.
 /// POST /api/haven/chat
+/// GET  /api/haven/kb-list
+/// GET  /api/haven/project-list
 /// </summary>
 [ApiController]
 [Route("api/haven")]
@@ -23,17 +26,20 @@ public class HavenChatController : ControllerBase
     private readonly BedrockService _bedrockService;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<HavenChatController> _logger;
+    private readonly IConfiguration _configuration;
 
     public HavenChatController(
         KnowledgeBaseService kbService,
         BedrockService bedrockService,
         IDbContextFactory<AppDbContext> dbFactory,
-        ILogger<HavenChatController> logger)
+        ILogger<HavenChatController> logger,
+        IConfiguration configuration)
     {
         _kbService = kbService;
         _bedrockService = bedrockService;
         _dbFactory = dbFactory;
         _logger = logger;
+        _configuration = configuration;
     }
 
     public sealed class HavenChatRequest
@@ -43,6 +49,9 @@ public class HavenChatController : ControllerBase
         public Guid? ProjectId { get; set; }
         /// <summary>Optional: conversation ID for history context (not yet used in v1).</summary>
         public Guid? ConversationId { get; set; }
+        /// <summary>Optional: override which KB types to search. Values: "corp", "personal", "team".
+        /// If null/empty, defaults to corp + personal (existing behaviour).</summary>
+        public List<string>? KbTypes { get; set; }
     }
 
     public sealed class HavenChatResponse
@@ -53,7 +62,7 @@ public class HavenChatController : ControllerBase
 
     /// <summary>
     /// POST /api/haven/chat
-    /// Accepts a user message, retrieves relevant KB chunks (project + corp), synthesises an
+    /// Accepts a user message, retrieves relevant KB chunks, synthesises an
     /// answer via Claude. Supports both buffered JSON (default) and SSE streaming
     /// (when client sends Accept: text/event-stream).
     /// </summary>
@@ -69,15 +78,78 @@ public class HavenChatController : ControllerBase
             return;
         }
 
-        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         var wantsStream = Request.Headers.Accept.ToString().Contains("text/event-stream");
         _logger.LogInformation("[Haven] Chat request from user={UserId} projectId={ProjectId} messageLen={Len} streaming={Streaming}",
-            userId, request.ProjectId, request.Message.Length, wantsStream);
+            userIdStr, request.ProjectId, request.Message.Length, wantsStream);
 
-        // ── KB Retrieval ──────────────────────────────────────────────────────────────
+        // ── KB Retrieval ──────────────────────────────────────────────────────────
         var kbChunks = new List<KbChunk>();
+        var hasKbTypes = request.KbTypes != null && request.KbTypes.Count > 0;
 
-        // If a projectId was provided, search that project's KB first
+        if (hasKbTypes)
+        {
+            // Explicit KB types requested
+            foreach (var kbType in request.KbTypes!)
+            {
+                switch (kbType.ToLowerInvariant())
+                {
+                    case "corp":
+                        try
+                        {
+                            var chunks = await _kbService.RetrieveCorpAsync(request.Message);
+                            kbChunks.AddRange(chunks);
+                            _logger.LogInformation("[Haven] Corp KB returned {Count} chunks", chunks.Count);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "[Haven] Corp KB retrieval failed");
+                        }
+                        break;
+
+                    case "personal":
+                        if (Guid.TryParse(userIdStr, out var userId))
+                        {
+                            try
+                            {
+                                var chunks = await _kbService.RetrievePersonalAsync(request.Message, userId);
+                                kbChunks.AddRange(chunks);
+                                _logger.LogInformation("[Haven] Personal KB returned {Count} chunks", chunks.Count);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "[Haven] Personal KB retrieval failed for user {UserId}", userId);
+                            }
+                        }
+                        break;
+
+                    case "team":
+                        // Team KB requires a teamId — not available in Haven context yet. Skip with warning.
+                        _logger.LogWarning("[Haven] Team KB requested but teamId is not available in Haven context — skipping");
+                        break;
+
+                    default:
+                        _logger.LogWarning("[Haven] Unknown KB type requested: {KbType}", kbType);
+                        break;
+                }
+            }
+        }
+        else
+        {
+            // Default behaviour: corp + project (if provided)
+            try
+            {
+                var corpChunks = await _kbService.RetrieveCorpAsync(request.Message);
+                kbChunks.AddRange(corpChunks);
+                _logger.LogInformation("[Haven] Corp KB returned {Count} chunks", corpChunks.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Haven] Corp KB retrieval failed");
+            }
+        }
+
+        // Project KB is always added if ProjectId is set (regardless of KbTypes)
         if (request.ProjectId.HasValue)
         {
             try
@@ -90,18 +162,6 @@ public class HavenChatController : ControllerBase
             {
                 _logger.LogWarning(ex, "[Haven] Project KB retrieval failed for project {ProjectId}", request.ProjectId.Value);
             }
-        }
-
-        // Also pull from corp KB for general context
-        try
-        {
-            var corpChunks = await _kbService.RetrieveCorpAsync(request.Message);
-            kbChunks.AddRange(corpChunks);
-            _logger.LogInformation("[Haven] Corp KB returned {Count} chunks", corpChunks.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[Haven] Corp KB retrieval failed");
         }
 
         // ── Build System Prompt ───────────────────────────────────────────────────────
@@ -217,6 +277,9 @@ public class HavenChatController : ControllerBase
     {
         public string Query { get; set; } = "";
         public Guid? ProjectId { get; set; }
+        /// <summary>Optional: override which KB types to search. Values: "corp", "personal", "team".
+        /// If null/empty, defaults to corp (existing behaviour).</summary>
+        public List<string>? KbTypes { get; set; }
     }
 
     /// <summary>
@@ -231,18 +294,64 @@ public class HavenChatController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Query))
             return BadRequest(new { error = "query is required" });
 
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         var chunks = new List<KbChunk>();
+        var hasKbTypes = request.KbTypes != null && request.KbTypes.Count > 0;
 
-        try
+        if (hasKbTypes)
         {
-            var corpChunks = await _kbService.RetrieveCorpAsync(request.Query);
-            chunks.AddRange(corpChunks);
+            foreach (var kbType in request.KbTypes!)
+            {
+                switch (kbType.ToLowerInvariant())
+                {
+                    case "corp":
+                        try
+                        {
+                            var c = await _kbService.RetrieveCorpAsync(request.Query);
+                            chunks.AddRange(c);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "[Haven] KbSearch corp retrieval failed");
+                        }
+                        break;
+
+                    case "personal":
+                        if (Guid.TryParse(userIdStr, out var uid))
+                        {
+                            try
+                            {
+                                var c = await _kbService.RetrievePersonalAsync(request.Query, uid);
+                                chunks.AddRange(c);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "[Haven] KbSearch personal retrieval failed for user {UserId}", uid);
+                            }
+                        }
+                        break;
+
+                    case "team":
+                        _logger.LogWarning("[Haven] KbSearch: Team KB requested but teamId not available — skipping");
+                        break;
+                }
+            }
         }
-        catch (Exception ex)
+        else
         {
-            _logger.LogWarning(ex, "[Haven] KbSearch corp retrieval failed");
+            // Default: corp only
+            try
+            {
+                var corpChunks = await _kbService.RetrieveCorpAsync(request.Query);
+                chunks.AddRange(corpChunks);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Haven] KbSearch corp retrieval failed");
+            }
         }
 
+        // Project KB always added if ProjectId provided
         if (request.ProjectId.HasValue)
         {
             try
@@ -267,6 +376,70 @@ public class HavenChatController : ControllerBase
             });
 
         return Ok(new { results });
+    }
+
+    // ── /api/haven/kb-list ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// GET /api/haven/kb-list
+    /// Returns the configured KB types available for this deployment.
+    /// </summary>
+    [HttpGet("kb-list")]
+    public IActionResult KbList()
+    {
+        var kbs = new[]
+        {
+            new
+            {
+                id       = "corp",
+                name     = "Fortress Knowledge Base",
+                type     = "corp",
+                alwaysOn = false,
+                available = !string.IsNullOrEmpty(_configuration["KnowledgeBase:CorpKbId"])
+            },
+            new
+            {
+                id       = "personal",
+                name     = "My Knowledge Base",
+                type     = "personal",
+                alwaysOn = true,
+                available = !string.IsNullOrEmpty(_configuration["KnowledgeBase:PersonalKbId"])
+            },
+            new
+            {
+                id       = "team",
+                name     = "Team Knowledge Base",
+                type     = "team",
+                alwaysOn = false,
+                available = !string.IsNullOrEmpty(_configuration["KnowledgeBase:TeamKbId"])
+            },
+        };
+
+        // Only return KBs that are configured
+        return Ok(new { kbs = kbs.Where(k => k.available) });
+    }
+
+    // ── /api/haven/project-list ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// GET /api/haven/project-list
+    /// Returns projects owned by the authenticated user.
+    /// </summary>
+    [HttpGet("project-list")]
+    public async Task<IActionResult> ProjectList(CancellationToken ct)
+    {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdStr, out var userId))
+            return Ok(new { projects = Array.Empty<object>() });
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var projects = await db.Projects
+            .Where(p => p.UserId == userId)
+            .OrderBy(p => p.Name)
+            .Select(p => new { id = p.Id, name = p.Name })
+            .ToListAsync(ct);
+
+        return Ok(new { projects });
     }
 
     /// <summary>Extracts a human-readable filename from an S3 URI or path.</summary>
