@@ -100,7 +100,7 @@ export function useChat(
         rawText = answer;
       }
 
-      // Parse suggestions out of the raw response
+      // Parse suggestions out of the raw response (new fields chartSpec/pivotSpec/cfSpec are unused here)
       const { displayText, suggestions } = parseSuggestions(rawText);
 
       // Finalise the assistant message (remove streaming flag)

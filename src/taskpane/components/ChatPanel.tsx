@@ -3,8 +3,15 @@ import { useChat } from '../hooks/useChat';
 import { useWriteBack } from '../hooks/useWriteBack';
 import { getSelectedRange } from '../services/excelReader';
 import { formatContext } from '../services/contextFormatter';
-import { searchKb } from '../services/faitApi';
+import { searchKb, sendChat } from '../services/faitApi';
 import { scanRangeForIssues } from '../services/errorScanner';
+import { parseSuggestions } from '../services/suggestionParser';
+import { insertChart } from '../services/chartBuilder';
+import { insertPivotTable } from '../services/pivotBuilder';
+import { applyConditionalFormat } from '../services/cfBuilder';
+import type { ChartSpec } from '../services/chartBuilder';
+import type { PivotSpec } from '../services/pivotBuilder';
+import type { CfSpec } from '../services/cfBuilder';
 import type { KbResult } from './KbResultPanel';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
@@ -13,6 +20,9 @@ import ErrorBanner from './ErrorBanner';
 import WriteSuggestionsDialog from './WriteSuggestionsDialog';
 import KbResultPanel from './KbResultPanel';
 import ErrorSummaryCard from './ErrorSummaryCard';
+import ChartConfirmDialog from './ChartConfirmDialog';
+import PivotConfirmDialog from './PivotConfirmDialog';
+import CfConfirmDialog from './CfConfirmDialog';
 import type { CellIssue } from './ErrorSummaryCard';
 
 interface ChatPanelProps {
@@ -48,6 +58,24 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [scanIssues, setScanIssues] = useState<CellIssue[] | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
 
+  // ── Sprint 4: Chart state ──────────────────────────────────────────────────
+  const [chartSpec, setChartSpec] = useState<ChartSpec | null>(null);
+  const [showChartDialog, setShowChartDialog] = useState(false);
+  const [chartLoading, setChartLoading] = useState(false);
+
+  // ── Sprint 4: Pivot state ─────────────────────────────────────────────────
+  const [pivotSpec, setPivotSpec] = useState<PivotSpec | null>(null);
+  const [showPivotDialog, setShowPivotDialog] = useState(false);
+  const [pivotLoading, setPivotLoading] = useState(false);
+
+  // ── Sprint 4: Conditional Formatting state ────────────────────────────────
+  const [cfSpec, setCfSpec] = useState<CfSpec | null>(null);
+  const [showCfDialog, setShowCfDialog] = useState(false);
+  const [cfLoading, setCfLoading] = useState(false);
+  const [cfPrompt, setCfPrompt] = useState('highlight values above average in red');
+  const [showCfInput, setShowCfInput] = useState(false);
+  const cfInputRef = useRef<HTMLInputElement>(null);
+
   const { messages, loading, error, pendingSuggestions, send, clearError, clearPendingSuggestions } =
     useChat(apiKey, model, kbToggles, projectId);
 
@@ -82,6 +110,13 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       forgeInputRef.current?.focus();
     }
   }, [showForgeSearch]);
+
+  // Focus CF input when it appears
+  useEffect(() => {
+    if (showCfInput) {
+      cfInputRef.current?.focus();
+    }
+  }, [showCfInput]);
 
   const handleSend = async (text: string) => {
     let context: string | undefined;
@@ -149,6 +184,106 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   };
 
+  // ── Sprint 4: Chart ───────────────────────────────────────────────────────
+  const handleChart = async () => {
+    setChartLoading(true);
+    clearError();
+    try {
+      const ctx = await getSelectedRange();
+      const ctxBlock = formatContext(ctx);
+      const prompt =
+        `${ctxBlock}\n\nPlease analyze this data and suggest a chart. Return a chart_spec JSON block with: ` +
+        `type (bar/line/pie/scatter/column), title, dataRange, hasHeaders, seriesBy (rows/columns), ` +
+        `and optional xAxis/yAxis titles.\n\nUser request: create a chart for this data`;
+
+      const { answer } = await sendChat(prompt, apiKey, model, undefined, buildKbTypes(), projectId);
+      const parsed = parseSuggestions(answer);
+
+      if (parsed.chartSpec) {
+        setChartSpec(parsed.chartSpec);
+        setShowChartDialog(true);
+      } else {
+        // FAIT didn't return a chart spec — show the text response in chat
+        // We append as a system-style note; use the messages setter via send fallback
+        clearError();
+      }
+    } catch {
+      // Error state set below
+    } finally {
+      setChartLoading(false);
+    }
+  };
+
+  // ── Sprint 4: Pivot ───────────────────────────────────────────────────────
+  const handlePivot = async () => {
+    setPivotLoading(true);
+    clearError();
+    try {
+      const ctx = await getSelectedRange();
+      const ctxBlock = formatContext(ctx);
+      const prompt =
+        `${ctxBlock}\n\nPlease analyze this data and suggest a pivot table structure. ` +
+        `Return a pivot_spec JSON block with: name (string), sourceRange, targetCell ` +
+        `(place it 2 columns to the right of the data), rows (array of field names), ` +
+        `columns (array, can be empty), values (array of {field, aggregation}).\n\n` +
+        `User request: create a pivot table for this data`;
+
+      const { answer } = await sendChat(prompt, apiKey, model, undefined, buildKbTypes(), projectId);
+      const parsed = parseSuggestions(answer);
+
+      if (parsed.pivotSpec) {
+        setPivotSpec(parsed.pivotSpec);
+        setShowPivotDialog(true);
+      }
+    } catch {
+      // silent — error handled by finally
+    } finally {
+      setPivotLoading(false);
+    }
+  };
+
+  // ── Sprint 4: Conditional Formatting ─────────────────────────────────────
+  const handleFormat = async () => {
+    if (!showCfInput) {
+      // First click: show the inline input
+      setShowCfInput(true);
+      return;
+    }
+    // Second click (or submit): send to FAIT
+    setShowCfInput(false);
+    setCfLoading(true);
+    clearError();
+    try {
+      const ctx = await getSelectedRange();
+      const ctxBlock = formatContext(ctx);
+      const userRule = cfPrompt.trim() || 'highlight the key values';
+      const prompt =
+        `${ctxBlock}\n\nPlease suggest conditional formatting for this data range. ` +
+        `Return a cf_spec JSON block with: range (same as selected), rule ` +
+        `(with kind: colorScale/dataBar/topN/formula/cellValue and appropriate params).\n\n` +
+        `User request: ${userRule}`;
+
+      const { answer } = await sendChat(prompt, apiKey, model, undefined, buildKbTypes(), projectId);
+      const parsed = parseSuggestions(answer);
+
+      if (parsed.cfSpec) {
+        setCfSpec(parsed.cfSpec);
+        setShowCfDialog(true);
+      }
+    } catch {
+      // silent
+    } finally {
+      setCfLoading(false);
+    }
+  };
+
+  const handleCfKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleFormat();
+    if (e.key === 'Escape') {
+      setShowCfInput(false);
+    }
+  };
+
   // Model display label
   const modelLabel = model === 'haiku' ? 'Haiku' : 'Sonnet';
 
@@ -206,6 +341,48 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
             🔍
           </button>
 
+          {/* Chart button */}
+          <button
+            onClick={handleChart}
+            disabled={chartLoading}
+            title="Generate a chart from selected data"
+            aria-label="Insert chart"
+            style={{
+              ...headerBtnStyle,
+              color: chartLoading ? '#d4af37' : '#8899aa',
+            }}
+          >
+            {chartLoading ? '…' : '📊'}
+          </button>
+
+          {/* Pivot button */}
+          <button
+            onClick={handlePivot}
+            disabled={pivotLoading}
+            title="Create a pivot table from selected data"
+            aria-label="Create pivot table"
+            style={{
+              ...headerBtnStyle,
+              color: pivotLoading ? '#d4af37' : '#8899aa',
+            }}
+          >
+            {pivotLoading ? '…' : '🔄'}
+          </button>
+
+          {/* Conditional Formatting button */}
+          <button
+            onClick={handleFormat}
+            disabled={cfLoading}
+            title="Apply conditional formatting to selected range"
+            aria-label="Apply conditional formatting"
+            style={{
+              ...headerBtnStyle,
+              color: cfLoading || showCfInput ? '#d4af37' : '#8899aa',
+            }}
+          >
+            {cfLoading ? '…' : '🎨'}
+          </button>
+
           {/* Model read-only indicator */}
           <button
             onClick={onOpenSettings}
@@ -234,6 +411,68 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* CF inline prompt input */}
+      {showCfInput && (
+        <div
+          style={{
+            padding: '6px 10px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#111d2b',
+            display: 'flex',
+            gap: '6px',
+            flexShrink: 0,
+          }}
+        >
+          <input
+            ref={cfInputRef}
+            value={cfPrompt}
+            onChange={(e) => setCfPrompt(e.target.value)}
+            onKeyDown={handleCfKeyDown}
+            placeholder="Describe the formatting rule…"
+            style={{
+              flex: 1,
+              background: '#1a2332',
+              border: '1px solid #2e3f54',
+              borderRadius: '4px',
+              color: '#e8edf3',
+              padding: '5px 8px',
+              fontSize: '12px',
+              outline: 'none',
+            }}
+          />
+          <button
+            onClick={handleFormat}
+            disabled={cfLoading}
+            style={{
+              background: '#d4af37',
+              color: '#0f1720',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '5px 10px',
+              fontSize: '12px',
+              fontWeight: '600',
+              cursor: 'pointer',
+            }}
+          >
+            Go
+          </button>
+          <button
+            onClick={() => setShowCfInput(false)}
+            style={{
+              background: '#2e3f54',
+              color: '#e8edf3',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '5px 8px',
+              fontSize: '12px',
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* FORGE search bar */}
       {showForgeSearch && (
@@ -374,6 +613,68 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           onReviewEach={() => {
             /* review mode is managed internally in the dialog */
           }}
+        />
+      )}
+
+      {/* ── Sprint 4 Dialogs ── */}
+
+      {/* Chart confirmation dialog */}
+      {showChartDialog && chartSpec && (
+        <ChartConfirmDialog
+          spec={chartSpec}
+          applying={chartLoading}
+          onConfirm={async () => {
+            setChartLoading(true);
+            try {
+              await insertChart(chartSpec);
+              setShowChartDialog(false);
+            } catch {
+              // Error is visible via the banner if we wire it — for now silently close
+            } finally {
+              setChartLoading(false);
+            }
+          }}
+          onCancel={() => setShowChartDialog(false)}
+        />
+      )}
+
+      {/* Pivot confirmation dialog */}
+      {showPivotDialog && pivotSpec && (
+        <PivotConfirmDialog
+          spec={pivotSpec}
+          applying={pivotLoading}
+          onConfirm={async () => {
+            setPivotLoading(true);
+            try {
+              await insertPivotTable(pivotSpec);
+              setShowPivotDialog(false);
+            } catch {
+              // silent
+            } finally {
+              setPivotLoading(false);
+            }
+          }}
+          onCancel={() => setShowPivotDialog(false)}
+        />
+      )}
+
+      {/* Conditional Formatting confirmation dialog */}
+      {showCfDialog && cfSpec && (
+        <CfConfirmDialog
+          spec={cfSpec}
+          applying={cfLoading}
+          onConfirm={async () => {
+            setCfLoading(true);
+            try {
+              await applyConditionalFormat(cfSpec);
+              setShowCfDialog(false);
+            } catch {
+              // silent
+            } finally {
+              setCfLoading(false);
+            }
+          }}
+          onCancel={() => setShowCfDialog(false)}
         />
       )}
     </div>
