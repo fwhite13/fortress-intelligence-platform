@@ -133,17 +133,14 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // Redirect unauthenticated users to FAIT for login — pass returnUrl so FAIT can redirect back
-app.MapGet("/auth/redirect-to-login", ctx =>
+app.MapGet("/auth/redirect-to-login", (HttpContext ctx, IConfiguration config) =>
 {
-    var faitLoginUrl = ctx.RequestServices.GetRequiredService<IConfiguration>()["FIP:LoginUrl"]
-        ?? "https://fait.dev.fortressam.ai/";
-    // Pass returnUrl so FAIT can redirect back to FIRM after login
-    var firmCallbackUrl = ctx.RequestServices.GetRequiredService<IConfiguration>()["FIP:FirmCallbackUrl"]
-        ?? "https://meetings.dev.fortressam.ai/auth/firm-session";
-    var redirectUrl = $"{faitLoginUrl.TrimEnd('/')}/auth/firm-callback?returnUrl={Uri.EscapeDataString(firmCallbackUrl)}";
-    ctx.Response.Redirect(redirectUrl);
-    return Task.CompletedTask;
-});
+    var fipUrl = config["FIP__LoginUrl"]?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
+    var firmCallbackUrl = config["FIP__FirmCallbackUrl"]?.TrimEnd('/')
+        ?? "https://firm.dev.fortressam.ai/auth/firm-session";
+    var redirectUrl = $"{fipUrl}/auth/firm-callback?returnUrl={Uri.EscapeDataString(firmCallbackUrl)}";
+    return Results.Redirect(redirectUrl);
+}).AllowAnonymous();
 
 // FIRM session endpoint — user arrives here from FAIT with a valid shared cookie
 // Resolves local user record and fait_user_id, then redirects to /meetings
