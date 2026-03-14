@@ -144,7 +144,8 @@ else
     // Production: Entra OIDC with graceful degradation to email/password only
     // When FIP__LoginUrl is set, FAIT is a cookie consumer — unauthenticated requests
     // redirect to FIP portal instead of FAIT's own Entra OIDC challenge.
-    var fipLoginUrl = builder.Configuration["FIP__LoginUrl"];
+    var fipLoginUrl = builder.Configuration["FIP:LoginUrl"]
+        ?? builder.Configuration["FIP__LoginUrl"];
     var fipModeEnabled = !string.IsNullOrEmpty(fipLoginUrl);
 
     var authBuilder = builder.Services.AddAuthentication(options =>
