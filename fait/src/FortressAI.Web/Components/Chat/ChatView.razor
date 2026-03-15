@@ -18,6 +18,7 @@
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
 @inject IServiceScopeFactory ScopeFactory
 @inject ILogger<ChatView> Logger
+@inject MicrosoftTokenService M365TokenSvc
 @implements IAsyncDisposable
 @using FortressAI.Web.Services
 @using FortressAI.Web.Services.Mcp
@@ -749,6 +750,21 @@ Use these tools proactively when the user asks about their email, inbox, calenda
                     effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
                         ? m365Guidance
                         : effectiveSystemPrompt + "\n\n" + m365Guidance;
+                }
+
+                // Pre-warm M365 token — trigger refresh before Bedrock streaming starts.
+                // Prevents cold-start token refresh during tool execution → null token → Bedrock retry loop → maxIterations hit.
+                if (hasM365Tools)
+                {
+                    try
+                    {
+                        await M365TokenSvc.GetValidAccessTokenAsync(Session.UserId);
+                        Logger.LogInformation("[M365] Token pre-warmed for user {UserId}", Session.UserId);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[M365] Token pre-warm failed (non-fatal) for user {UserId}", Session.UserId);
+                    }
                 }
 
                 if (hasSearchTool)
