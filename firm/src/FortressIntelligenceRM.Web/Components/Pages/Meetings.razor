@@ -5,6 +5,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject MeetingService MeetingService
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 @inject ILogger<Meetings> Logger
 @implements IDisposable
 @using FortressIntelligenceRM.Web.Models
@@ -85,53 +86,15 @@
     }
 </MudContainer>
 
-<!-- Join Meeting Dialog -->
-<MudDialog Visible="_joinDialogOpen" VisibleChanged="@((v) => _joinDialogOpen = v)" Options="_dialogOptions">
-    <TitleContent>
-        <MudText Typo="Typo.h6" Style="color: #e8edf2;">Join a Meeting</MudText>
-    </TitleContent>
-    <DialogContent>
-        <MudTextField @bind-Value="_joinUrl" Label="Teams Meeting URL"
-                      Style="color: #e8edf2;" Variant="Variant.Outlined"
-                      Placeholder="https://teams.microsoft.com/l/meetup-join/..."
-                      Required Class="mb-3" />
-        <MudTextField @bind-Value="_joinTitle" Label="Meeting Title (optional)"
-                      Style="color: #e8edf2;" Variant="Variant.Outlined" />
-    </DialogContent>
-    <DialogActions>
-        <MudButton OnClick="@(() => _joinDialogOpen = false)" Style="color: #8899aa;">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
-                   OnClick="JoinMeeting" Disabled="_joining">
-            @if (_joining)
-            {
-                <MudProgressCircular Size="Size.Small" Indeterminate />
-            }
-            else
-            {
-                <span>Join Now</span>
-            }
-        </MudButton>
-    </DialogActions>
-</MudDialog>
 
 @code {
     private List<FirmMeeting> _meetings = new();
     private bool _loading = true;
-    private bool _joinDialogOpen = false;
     private bool _joining = false;
-    private string _joinUrl = "";
-    private string? _joinTitle;
     private int _page = 1;
     private const int _pageSize = 20;
     private Guid? _userId;
     private System.Threading.Timer? _pollTimer;
-
-    private DialogOptions _dialogOptions = new DialogOptions
-    {
-        CloseOnEscapeKey = true,
-        MaxWidth = MaxWidth.Small,
-        FullWidth = true
-    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -227,24 +190,33 @@
         }, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
     }
 
-    private void OpenJoinDialog()
+    private async Task OpenJoinDialog()
     {
-        _joinUrl = "";
-        _joinTitle = null;
-        _joinDialogOpen = true;
+        var options = new DialogOptions
+        {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true
+        };
+        var dialog = await DialogService.ShowAsync<JoinMeetingDialog>("Join a Meeting", options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?> data)
+        {
+            await JoinMeetingWithParams(data.Item1, data.Item2);
+        }
     }
 
-    private async Task JoinMeeting()
+    private async Task JoinMeetingWithParams(string meetingUrl, string? meetingTitle)
     {
-        if (string.IsNullOrWhiteSpace(_joinUrl)) return;
+        if (string.IsNullOrWhiteSpace(meetingUrl)) return;
         _joining = true;
+        StateHasChanged();
         try
         {
             var response = await Http.PostAsJsonAsync("/api/meetings/join",
-                new { meetingUrl = _joinUrl, title = _joinTitle });
+                new { meetingUrl = meetingUrl, title = meetingTitle });
             if (response.IsSuccessStatusCode)
             {
-                _joinDialogOpen = false;
                 Snackbar.Add("Bot is joining the meeting!", Severity.Success);
                 await LoadMeetings();
             }
