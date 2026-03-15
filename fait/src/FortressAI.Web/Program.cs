@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Caching.Memory;
 using MySqlConnector;
 using Amazon.BedrockAgentRuntime;
-using Amazon.CognitoIdentityProvider;
 using MudBlazor.Services;
 using FortressAI.Web.Data;
 using FortressAI.Web.Services;
@@ -162,7 +161,7 @@ builder.Services.AddAuthentication(options =>
     options.ExpireTimeSpan = TimeSpan.FromHours(12);
     options.SlidingExpiration = true;
     options.Cookie.Name = ".FortressAI.Session";
-    options.Cookie.Domain = builder.Configuration["Auth:CookieDomain"] ?? builder.Configuration["Auth__CookieDomain"] ?? "";
+    options.Cookie.Domain = builder.Configuration["Auth__CookieDomain"] ?? "";
     options.Cookie.SameSite = SameSiteMode.Lax;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.Cookie.IsEssential = true;
@@ -189,8 +188,8 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 
-builder.Services.AddSingleton<IAmazonCognitoIdentityProvider>(sp =>
-    new AmazonCognitoIdentityProviderClient(
+builder.Services.AddSingleton<Amazon.CognitoIdentityProvider.IAmazonCognitoIdentityProvider>(sp =>
+    new Amazon.CognitoIdentityProvider.AmazonCognitoIdentityProviderClient(
         Amazon.RegionEndpoint.GetBySystemName(
             builder.Configuration["AWS:Region"] ?? "us-east-1")));
 builder.Services.AddScoped<IUserManagementService, UserManagementService>();
@@ -244,7 +243,20 @@ builder.Services.AddDataProtection()
 
 var app = builder.Build();
 
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                     | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto,
+};
+forwardedHeadersOptions.KnownNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
+
 app.UseStaticFiles();
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseAntiforgery();
 
 // Health endpoint (must be before other middleware)
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }))
@@ -295,16 +307,6 @@ app.MapGet("/auth/firm-callback", (HttpContext ctx, IConfiguration config) =>
     }
     return Task.CompletedTask;
 }).AllowAnonymous().DisableAntiforgery();
-
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler("/Error");
-    app.UseHsts();
-}
-
-app.UseAuthentication();
-app.UseAuthorization();
-app.UseAntiforgery();
 
 // Microsoft OAuth callback endpoint
 // Registered under both paths: /auth/microsoft-callback (legacy) and /auth/ms-callback (matches ECS MicrosoftGraph__RedirectUri)
@@ -446,8 +448,7 @@ app.MapGet("/auth/logout", async ctx =>
 app.MapControllers();
 
 app.MapRazorComponents<FortressAI.Web.Components.App>()
-    .AddInteractiveServerRenderMode()
-    .RequireAuthorization();
+    .AddInteractiveServerRenderMode();
 app.MapHub<DashboardHub>("/hubs/dashboard");
 
 app.Run();
