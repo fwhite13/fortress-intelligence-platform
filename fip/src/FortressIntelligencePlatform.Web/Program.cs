@@ -27,7 +27,6 @@ var keyRingConnectionString = new MySqlConnector.MySqlConnectionStringBuilder
     UserID = dbUser,
     Password = dbPass,
     Database = keyRingDb,
-    SslMode = MySqlConnector.MySqlSslMode.Required,
 }.ConnectionString;
 
 builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
