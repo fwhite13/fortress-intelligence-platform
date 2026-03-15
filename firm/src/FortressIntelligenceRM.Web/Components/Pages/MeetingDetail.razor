@@ -233,35 +233,46 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var claimsUser = authState.User;
-        var entraOid = claimsUser.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? claimsUser.FindFirst("oid")?.Value
-            ?? claimsUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? claimsUser.FindFirst("sub")?.Value;
-        if (string.IsNullOrEmpty(entraOid)) { Navigation.NavigateTo("/"); return; }
-
-        var email = claimsUser.FindFirst(ClaimTypes.Email)?.Value
-            ?? claimsUser.FindFirst("email")?.Value
-            ?? claimsUser.FindFirst("preferred_username")?.Value ?? "";
-        var displayName = claimsUser.FindFirst(ClaimTypes.Name)?.Value
-            ?? claimsUser.FindFirst("name")?.Value ?? email;
-        FortressIntelligenceRM.Web.Models.FirmUser? user = null;
         try
         {
-            user = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
-        }
-        catch (Exception dbEx)
-        {
-            Logger.LogError(dbEx, "FIRM MeetingDetail: GetOrCreateUserAsync failed for entraOid={OID}", entraOid);
-            Snackbar.Add("Error loading user profile. Please refresh.", Severity.Error);
-            _loading = false;
-            return;
-        }
-        if (user == null) { Navigation.NavigateTo("/meetings"); return; }
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var claimsUser = authState.User;
+            var entraOid = claimsUser.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                ?? claimsUser.FindFirst("oid")?.Value
+                ?? claimsUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? claimsUser.FindFirst("sub")?.Value;
+            if (string.IsNullOrEmpty(entraOid)) { Navigation.NavigateTo("/"); return; }
 
-        _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
-        _loading = false;
+            var email = claimsUser.FindFirst(ClaimTypes.Email)?.Value
+                ?? claimsUser.FindFirst("email")?.Value
+                ?? claimsUser.FindFirst("preferred_username")?.Value ?? "";
+            var displayName = claimsUser.FindFirst(ClaimTypes.Name)?.Value
+                ?? claimsUser.FindFirst("name")?.Value ?? email;
+            FortressIntelligenceRM.Web.Models.FirmUser? user = null;
+            try
+            {
+                user = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+            }
+            catch (Exception dbEx)
+            {
+                Logger.LogError(dbEx, "FIRM MeetingDetail: GetOrCreateUserAsync failed for entraOid={OID}", entraOid);
+                Snackbar.Add("Error loading user profile. Please refresh.", Severity.Error);
+                return;
+            }
+            if (user == null) { Navigation.NavigateTo("/meetings"); return; }
+
+            _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: error in OnInitializedAsync for meeting {MeetingId}", Id);
+            Snackbar.Add("Error loading meeting. Please refresh.", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
     }
 
     private void DownloadAudio()
