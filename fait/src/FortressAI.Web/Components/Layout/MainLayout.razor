@@ -43,16 +43,22 @@
                         <span style="color: var(--color-gold);">●</span>
                     </div>
                 </MudMenuItem>
-                <MudMenuItem Href="https://forms.dev.fortressam.ai" Icon="@Icons.Material.Filled.Description">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span>FORMS — Form Intelligence</span>
-                    </div>
-                </MudMenuItem>
-                <MudMenuItem Href="https://firm.dev.fortressam.ai" Icon="@Icons.Material.Filled.Groups">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span>FIRM — Meeting Assistant</span>
-                    </div>
-                </MudMenuItem>
+                @if (!_comingSoonApps.Contains("forms"))
+                {
+                    <MudMenuItem Href="https://forms.dev.fortressam.ai" Icon="@Icons.Material.Filled.Description">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span>FORMS — Form Intelligence</span>
+                        </div>
+                    </MudMenuItem>
+                }
+                @if (!_comingSoonApps.Contains("firm"))
+                {
+                    <MudMenuItem Href="https://firm.dev.fortressam.ai" Icon="@Icons.Material.Filled.Groups">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span>FIRM — Meeting Assistant</span>
+                        </div>
+                    </MudMenuItem>
+                }
             </MudMenu>
 
             <MudMenu Dense="true" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
@@ -122,6 +128,7 @@
     private bool _drawerOpen = true;
     private HelpDrawer? _helpDrawer;
     private bool _nameNagShown = false;
+    private HashSet<string> _comingSoonApps = new();
     private MudTheme _theme = new MudTheme
     {
         PaletteLight = new PaletteLight
@@ -219,6 +226,11 @@
                 }
             }
         }
+
+        var raw = Configuration["FIP:ComingSoonApps"] ?? "";
+        _comingSoonApps = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                            .Select(s => s.ToLowerInvariant())
+                            .ToHashSet();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
