@@ -15,5 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\FortressFormTools.Data\FortressFormTools.Data.csproj" />
+    <ProjectReference Include="..\..\..\shared\FipShared\FipShared.csproj" />
   </ItemGroup>
 </Project>

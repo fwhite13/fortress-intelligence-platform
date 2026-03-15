@@ -1,6 +1,9 @@
 @inherits LayoutComponentBase
 @using FortressFormTools.Web.Theme
 @using System.Security.Claims
+@using FipShared.Components
+@using FipShared.Models
+@inject NavigationManager _nav
 
 <MudThemeProvider Theme="_theme" />
 <MudPopoverProvider />
@@ -8,57 +11,12 @@
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudAppBar Elevation="1" Style="background: var(--color-header-bg); height: 48px; padding: 0;">
-        <div style="display: flex; align-items: center; gap: var(--space-3); padding-left: var(--space-1);">
-            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
-                               OnClick="@ToggleDrawer" />
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="color: var(--color-text-inverse);">
-              <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor" opacity="0.9"/>
-              <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <MudText Style="font-size: var(--text-md); font-weight: var(--font-semibold); color: var(--color-text-inverse);">
-                <span class="d-none d-sm-inline">Form Intelligence</span>
-                <span class="d-inline d-sm-none">FORMS</span>
-            </MudText>
-        </div>
-
-        <MudSpacer />
-
-        <div style="display: flex; align-items: center; gap: var(--space-2); padding-right: var(--space-1);">
-            <MudMenu Icon="@Icons.Material.Filled.Apps" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
-                <MudMenuItem Href="https://fait.dev.fortressam.ai" Icon="@Icons.Material.Filled.Chat">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span>FAIT — AI Toolkit</span>
-                    </div>
-                </MudMenuItem>
-                <MudMenuItem Href="/" Icon="@Icons.Material.Filled.Description">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span>FORMS — Form Intelligence</span>
-                        <span style="color: var(--color-gold);">●</span>
-                    </div>
-                </MudMenuItem>
-                <MudMenuItem Href="https://firm.dev.fortressam.ai" Icon="@Icons.Material.Filled.Groups">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span>FIRM — Meeting Assistant</span>
-                    </div>
-                </MudMenuItem>
-            </MudMenu>
-
-            <MudMenu Dense="true" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
-            <ActivatorContent>
-                <MudAvatar Style="background: var(--color-gold); width: 28px; height: 28px; font-size: 13px; cursor: pointer;">@_userInitial</MudAvatar>
-            </ActivatorContent>
-            <ChildContent>
-                <MudMenuItem Disabled="true">
-                    <MudText Typo="Typo.body2"><strong>@_userName</strong></MudText>
-                    <MudText Typo="Typo.caption" Style="color: #6b7280;">@_userEmail</MudText>
-                </MudMenuItem>
-                <MudDivider />
-                <MudMenuItem Icon="@Icons.Material.Filled.Logout" Href="/auth/logout">Sign Out</MudMenuItem>
-            </ChildContent>
-        </MudMenu>
-        </div>
-    </MudAppBar>
+    <FipNavBar ActiveModule="FipModule.FORMS"
+               UserInitial="@_userInitial"
+               UserName="@_userName"
+               UserEmail="@_userEmail"
+               OnMenuClick="ToggleDrawer"
+               OnSignOut="@(() => _nav.NavigateTo("/auth/logout", forceLoad: true))" />
 
     <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
         <div style="display: flex; flex-direction: column; height: 100%;">
