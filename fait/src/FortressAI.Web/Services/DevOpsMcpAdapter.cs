@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using FortressAI.Web.Services.Mcp;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FortressAI.Web.Services;
@@ -215,6 +216,7 @@ public class DevOpsMcpAdapter : ControllerBase
         _logger = logger;
     }
 
+    [AllowAnonymous]
     [HttpPost("/internal/mcp/devops")]
     public async Task<IActionResult> HandleMcpRequest([FromBody] McpCallRequest request)
     {

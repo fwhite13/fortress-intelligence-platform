@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using FortressAI.Web.Services.Mcp;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FortressAI.Web.Services;
@@ -36,6 +37,7 @@ public class BraveSearchMcpAdapter : ControllerBase
         _logger = logger;
     }
 
+    [AllowAnonymous]
     [HttpPost("/internal/mcp/brave")]
     public async Task<IActionResult> HandleMcpRequest([FromBody] McpCallRequest request)
     {
