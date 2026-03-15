@@ -2,6 +2,7 @@
 @inject ProjectService ProjectSvc
 @inject ChatService ChatSvc
 @inject NavigationManager Nav
+@inject ILogger<FortressAI.Web.Components.Layout.SidebarContent> Logger
 @implements IDisposable
 
 <MudNavMenu>
@@ -41,6 +42,7 @@
 @code {
     private List<Project>? projects;
     private List<Conversation>? recentChats;
+    private static int _loadCount = 0;
 
     protected override async Task OnInitializedAsync()
     {
@@ -50,6 +52,8 @@
 
     private async void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
+        Logger.LogInformation("[SidebarContent] OnLocationChanged fired — url={Url} loadCount={LoadCount}",
+            e.Location, _loadCount);
         try
         {
             await LoadData();
@@ -60,9 +64,14 @@
 
     private async Task LoadData()
     {
+        var count = System.Threading.Interlocked.Increment(ref _loadCount);
+        Logger.LogInformation("[SidebarContent] LoadData called — count={Count} IsAuthenticated={IsAuthenticated}",
+            count, Session.IsAuthenticated);
         if (!Session.IsAuthenticated) return;
         projects = await ProjectSvc.GetUserProjectsAsync(Session.UserId);
         recentChats = await ChatSvc.GetUserConversationsAsync(Session.UserId, 15);
+        Logger.LogInformation("[SidebarContent] LoadData complete — count={Count} projects={ProjectCount} recentChats={ChatCount}",
+            count, projects?.Count ?? 0, recentChats?.Count ?? 0);
     }
 
     public void Dispose()

@@ -6,6 +6,7 @@
 @inject IConfiguration Configuration
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> ContextFactory
 @inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider AuthStateProvider
+@inject ILogger<FortressAI.Web.Components.Layout.MainLayout> Logger
 @inject IDialogService DialogService
 @implements IDisposable
 
@@ -133,6 +134,7 @@ else
     private bool _drawerOpen = true;
     private HelpDrawer? _helpDrawer;
     private bool _nameNagShown = false;
+    private static int _renderCount = 0;
 
     private MudTheme _theme = new MudTheme
     {
@@ -189,9 +191,14 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        var cycle = System.Threading.Interlocked.Increment(ref _renderCount);
+        Logger.LogInformation("[MainLayout] OnInitializedAsync START — cycle={Cycle} IsAuthenticated={IsAuthenticated}",
+            cycle, Session.IsAuthenticated);
+
         // Bridge HTTP auth (StubAuth or Cognito OIDC) into the Blazor circuit scoped session
         if (!Session.IsAuthenticated)
         {
+            Logger.LogInformation("[MainLayout] Session not authenticated — checking auth state (cycle={Cycle})", cycle);
             var authState = await AuthStateProvider.GetAuthenticationStateAsync();
             if (authState.User.Identity?.IsAuthenticated == true)
             {
@@ -231,10 +238,20 @@ else
                 }
             }
         }
+        else
+        {
+            Logger.LogInformation("[MainLayout] Session already authenticated — skipping auth bridge (cycle={Cycle})", cycle);
+        }
+
+        Logger.LogInformation("[MainLayout] OnInitializedAsync END — cycle={Cycle} IsAuthenticated={IsAuthenticated}",
+            cycle, Session.IsAuthenticated);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        Logger.LogInformation("[MainLayout] OnAfterRenderAsync — firstRender={FirstRender} IsAuthenticated={IsAuthenticated} cycle={Cycle}",
+            firstRender, Session.IsAuthenticated, _renderCount);
+
         if (firstRender)
         {
             // Subscribe AFTER initial render so SetUser() in OnInitializedAsync

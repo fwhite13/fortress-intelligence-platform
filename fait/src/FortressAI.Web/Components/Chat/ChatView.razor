@@ -275,8 +275,13 @@
     private bool _isDragOver = false;
     // KB retrieval result for UI indicator (set per-message)
     private KbRetrievalResult? _lastKbResult;
+    private static int _chatRenderCount = 0;
     protected override async Task OnParametersSetAsync()
     {
+        var cycle = System.Threading.Interlocked.Increment(ref _chatRenderCount);
+        Logger.LogInformation("[ChatView] OnParametersSetAsync START — cycle={Cycle} ConversationId={ConversationId} lastConversationId={LastConversationId}",
+            cycle, ConversationId, _lastConversationId);
+
         _teamKbPopoverOpen = false;
         if (ConversationId.HasValue)
         {
@@ -323,13 +328,21 @@
         // Track conversation changes — scroll to bottom when switching chats
         if (ConversationId != _lastConversationId)
         {
+            Logger.LogInformation("[ChatView] ConversationId changed — old={OldId} new={NewId} (cycle={Cycle})",
+                _lastConversationId, ConversationId, cycle);
             _lastConversationId = ConversationId;
             _needsScroll = true;
         }
+
+        Logger.LogInformation("[ChatView] OnParametersSetAsync END — cycle={Cycle} ConversationId={ConversationId} messageCount={MessageCount}",
+            cycle, ConversationId, messages.Count);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        Logger.LogInformation("[ChatView] OnAfterRenderAsync — firstRender={FirstRender} cycle={Cycle} ConversationId={ConversationId} IsAuthenticated={IsAuthenticated}",
+            firstRender, _chatRenderCount, ConversationId, Session.IsAuthenticated);
+
         if (firstRender)
         {
             _dotNetRef = DotNetObjectReference.Create(this);
@@ -382,6 +395,7 @@
             conversation = await ChatSvc.CreateConversationAsync(Session.UserId, null, currentModel);
             // Sync local KB toggle state to the new conversation
             await ChatSvc.UpdateConversationKbAsync(conversation.Id, _fortressKbEnabled, _personalKbEnabled, _selectedTeamIds.ToList());
+            Logger.LogInformation("[ChatView] Nav.NavigateTo — /chat/{ConversationId} (lazy creation, replace=true)", conversation.Id);
             Nav.NavigateTo($"/chat/{conversation.Id}", replace: true);
         }
 
