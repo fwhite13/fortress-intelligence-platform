@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using FortressAI.Web.Auth;
 using System.Security.Claims;
+using Microsoft.AspNetCore.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -228,7 +229,27 @@ builder.Services.AddDataProtection()
     .SetApplicationName("FortressAI")
     .DisableAutomaticKeyGeneration();
 
+// ⚠️ TEST AUTH — DEVELOPMENT ONLY — MUST NOT REACH PRODUCTION
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddSingleton<TestAuthService>();
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.AddFixedWindowLimiter("test-auth", policy =>
+        {
+            policy.PermitLimit = 10;
+            policy.Window = TimeSpan.FromMinutes(1);
+        });
+    });
+}
+
 var app = builder.Build();
+
+// ⚠️ TEST AUTH — DEVELOPMENT ONLY
+if (app.Environment.IsDevelopment())
+{
+    app.UseRateLimiter();
+}
 
 if (!app.Environment.IsDevelopment())
 {
