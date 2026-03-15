@@ -758,12 +758,24 @@ Use these tools proactively when the user asks about their email, inbox, calenda
                 {
                     try
                     {
-                        await M365TokenSvc.GetValidAccessTokenAsync(Session.UserId);
-                        Logger.LogInformation("[M365] Token pre-warmed for user {UserId}", Session.UserId);
+                        var m365AccessToken = await M365TokenSvc.GetValidAccessTokenAsync(Session.UserId);
+                        if (m365AccessToken == null)
+                        {
+                            // Token null (expired/refresh failed) — remove M365 tools so Bedrock doesn't retry 5x
+                            Logger.LogWarning("[M365] Token null for user {UserId} — removing M365 tools from this request", Session.UserId);
+                            availableTools = availableTools.Where(t => !t.FullName.StartsWith("m365__", StringComparison.OrdinalIgnoreCase)).ToList();
+                            hasM365Tools = false;
+                        }
+                        else
+                        {
+                            Logger.LogInformation("[M365] Token validated for user {UserId}", Session.UserId);
+                        }
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogWarning(ex, "[M365] Token pre-warm failed (non-fatal) for user {UserId}", Session.UserId);
+                        Logger.LogWarning(ex, "[M365] Token validation failed for user {UserId} — removing M365 tools", Session.UserId);
+                        availableTools = availableTools.Where(t => !t.FullName.StartsWith("m365__", StringComparison.OrdinalIgnoreCase)).ToList();
+                        hasM365Tools = false;
                     }
                 }
 
