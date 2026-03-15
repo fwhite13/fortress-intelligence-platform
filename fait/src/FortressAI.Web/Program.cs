@@ -266,6 +266,33 @@ forwardedHeadersOptions.KnownNetworks.Clear();
 forwardedHeadersOptions.KnownProxies.Clear();
 app.UseForwardedHeaders(forwardedHeadersOptions);
 
+// Serve /excel-addin/ SPA static assets publicly (no auth required — client-side Office Add-in)
+app.UseStaticFiles(new StaticFileOptions
+{
+    RequestPath = "/excel-addin",
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(
+        Path.Combine(app.Environment.WebRootPath, "excel-addin")),
+    OnPrepareResponse = ctx =>
+    {
+        ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=3600";
+    }
+});
+
+// Serve excel-addin index.html for SPA sub-routes
+app.MapGet("/excel-addin/{**path}", async (HttpContext ctx) =>
+{
+    var indexPath = Path.Combine(app.Environment.WebRootPath, "excel-addin", "index.html");
+    if (File.Exists(indexPath))
+    {
+        ctx.Response.ContentType = "text/html";
+        await ctx.Response.SendFileAsync(indexPath);
+    }
+    else
+    {
+        ctx.Response.StatusCode = 404;
+    }
+}).AllowAnonymous();
+
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
