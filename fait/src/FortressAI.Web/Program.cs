@@ -266,31 +266,31 @@ forwardedHeadersOptions.KnownNetworks.Clear();
 forwardedHeadersOptions.KnownProxies.Clear();
 app.UseForwardedHeaders(forwardedHeadersOptions);
 
-// Serve /excel-addin/ SPA static assets publicly (no auth required — client-side Office Add-in)
-app.UseStaticFiles(new StaticFileOptions
+// Serve /excel-addin/ static files publicly (Office Add-in — no auth required)
+// Must use MapGet + AllowAnonymous because FallbackPolicy=DefaultPolicy intercepts UseStaticFiles
+app.MapGet("/excel-addin/{**path}", async (HttpContext ctx, string? path) =>
 {
-    RequestPath = "/excel-addin",
-    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(
-        Path.Combine(app.Environment.WebRootPath, "excel-addin")),
-    OnPrepareResponse = ctx =>
-    {
-        ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=3600";
-    }
-});
+    var webRoot = ctx.RequestServices.GetRequiredService<IWebHostEnvironment>().WebRootPath;
+    var filePath = string.IsNullOrEmpty(path)
+        ? Path.Combine(webRoot, "excel-addin", "index.html")
+        : Path.Combine(webRoot, "excel-addin", path.Replace("/", Path.DirectorySeparatorChar.ToString()));
 
-// Serve excel-addin index.html for SPA sub-routes
-app.MapGet("/excel-addin/{**path}", async (HttpContext ctx) =>
-{
-    var indexPath = Path.Combine(app.Environment.WebRootPath, "excel-addin", "index.html");
-    if (File.Exists(indexPath))
+    if (!File.Exists(filePath))
+        return Results.NotFound();
+
+    var contentType = Path.GetExtension(filePath) switch
     {
-        ctx.Response.ContentType = "text/html";
-        await ctx.Response.SendFileAsync(indexPath);
-    }
-    else
-    {
-        ctx.Response.StatusCode = 404;
-    }
+        ".html" => "text/html",
+        ".js" => "application/javascript",
+        ".css" => "text/css",
+        ".png" => "image/png",
+        ".svg" => "image/svg+xml",
+        ".json" => "application/json",
+        ".xml" => "application/xml",
+        _ => "application/octet-stream"
+    };
+
+    return Results.File(filePath, contentType);
 }).AllowAnonymous();
 
 app.UseStaticFiles();
