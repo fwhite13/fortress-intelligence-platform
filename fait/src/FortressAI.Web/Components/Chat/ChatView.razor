@@ -276,6 +276,16 @@
     // KB retrieval result for UI indicator (set per-message)
     private KbRetrievalResult? _lastKbResult;
     private static int _chatRenderCount = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Session.IsAuthenticated)
+        {
+            Nav.NavigateTo("/auth/redirect-to-login", forceLoad: true);
+            return;
+        }
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         var cycle = System.Threading.Interlocked.Increment(ref _chatRenderCount);

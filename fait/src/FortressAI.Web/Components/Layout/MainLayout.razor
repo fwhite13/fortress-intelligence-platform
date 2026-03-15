@@ -6,26 +6,15 @@
 @inject IConfiguration Configuration
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> ContextFactory
 @inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider AuthStateProvider
-@inject ILogger<FortressAI.Web.Components.Layout.MainLayout> Logger
 @inject IDialogService DialogService
 @implements IDisposable
 
-@if (!Session.IsAuthenticated)
-{
-    <MudThemeProvider Theme="_theme" />
-    <MudPopoverProvider />
-    <MudDialogProvider />
-    <MudSnackbarProvider />
-    <Login />
-}
-else
-{
-    <MudThemeProvider Theme="_theme" />
-    <MudPopoverProvider />
-    <MudDialogProvider />
-    <MudSnackbarProvider />
+<MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
 
-    <MudLayout>
+<MudLayout>
         <MudAppBar Elevation="1" Style="background: var(--color-header-bg); height: 48px; padding: 0;">
             <div style="display: flex; align-items: center; gap: var(--space-3); padding-left: var(--space-1);">
             <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
@@ -127,15 +116,12 @@ else
             </CascadingValue>
         </MudMainContent>
         <HelpDrawer @ref="_helpDrawer" />
-    </MudLayout>
-}
+</MudLayout>
 
 @code {
     private bool _drawerOpen = true;
     private HelpDrawer? _helpDrawer;
     private bool _nameNagShown = false;
-    private static int _renderCount = 0;
-
     private MudTheme _theme = new MudTheme
     {
         PaletteLight = new PaletteLight
@@ -191,14 +177,9 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        var cycle = System.Threading.Interlocked.Increment(ref _renderCount);
-        Logger.LogInformation("[MainLayout] OnInitializedAsync START — cycle={Cycle} IsAuthenticated={IsAuthenticated}",
-            cycle, Session.IsAuthenticated);
-
         // Bridge HTTP auth (StubAuth or Cognito OIDC) into the Blazor circuit scoped session
         if (!Session.IsAuthenticated)
         {
-            Logger.LogInformation("[MainLayout] Session not authenticated — checking auth state (cycle={Cycle})", cycle);
             var authState = await AuthStateProvider.GetAuthenticationStateAsync();
             if (authState.User.Identity?.IsAuthenticated == true)
             {
@@ -238,20 +219,10 @@ else
                 }
             }
         }
-        else
-        {
-            Logger.LogInformation("[MainLayout] Session already authenticated — skipping auth bridge (cycle={Cycle})", cycle);
-        }
-
-        Logger.LogInformation("[MainLayout] OnInitializedAsync END — cycle={Cycle} IsAuthenticated={IsAuthenticated}",
-            cycle, Session.IsAuthenticated);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        Logger.LogInformation("[MainLayout] OnAfterRenderAsync — firstRender={FirstRender} IsAuthenticated={IsAuthenticated} cycle={Cycle}",
-            firstRender, Session.IsAuthenticated, _renderCount);
-
         if (firstRender)
         {
             // Subscribe AFTER initial render so SetUser() in OnInitializedAsync
