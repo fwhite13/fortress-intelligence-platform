@@ -13,12 +13,12 @@ namespace FortressAI.Web.Controllers;
 [AllowAnonymous]
 public class TestAuthController : ControllerBase
 {
-    private readonly TestAuthService _testAuth;
+    private readonly IServiceProvider _services;
     private readonly ILogger<TestAuthController> _logger;
 
-    public TestAuthController(TestAuthService testAuth, ILogger<TestAuthController> logger)
+    public TestAuthController(IServiceProvider services, ILogger<TestAuthController> logger)
     {
-        _testAuth = testAuth;
+        _services = services;
         _logger = logger;
     }
 
@@ -26,14 +26,19 @@ public class TestAuthController : ControllerBase
     [HttpPost("test-session")]
     public async Task<IActionResult> CreateTestSession([FromBody] TestSessionRequest request)
     {
-        if (!_testAuth.ValidateSecret(request.Secret))
+        // Guard: only available in Development. Returns 404 in all other environments.
+        var testAuth = _services.GetService<TestAuthService>();
+        if (testAuth == null)
+            return NotFound();
+
+        if (!testAuth.ValidateSecret(request.Secret))
         {
             _logger.LogWarning("TestAuth: invalid secret attempt from {IP}",
                 HttpContext.Connection.RemoteIpAddress);
             return Unauthorized(new { error = "Invalid secret" });
         }
 
-        var principal = _testAuth.BuildTestPrincipal(request.UserId, request.DisplayName);
+        var principal = testAuth.BuildTestPrincipal(request.UserId, request.DisplayName);
 
         _logger.LogInformation("TestAuth: creating test session for {UserId} from {IP}",
             request.UserId, HttpContext.Connection.RemoteIpAddress);
