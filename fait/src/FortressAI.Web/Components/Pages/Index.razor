@@ -1,5 +1,9 @@
 @page "/"
 @inject NavigationManager Nav
 @code {
-    protected override void OnInitialized() => Nav.NavigateTo("/chat", replace: true);
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            Nav.NavigateTo("/chat", replace: true);
+    }
 }

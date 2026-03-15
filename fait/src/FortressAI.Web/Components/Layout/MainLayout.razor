@@ -233,13 +233,15 @@ else
         }
     }
 
-    protected override void OnInitialized()
-    {
-        Session.OnAuthStateChanged += StateHasChanged;
-    }
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            // Subscribe AFTER initial render so SetUser() in OnInitializedAsync
+            // doesn't fire StateHasChanged mid-initialization (causes render loop)
+            Session.OnAuthStateChanged += StateHasChanged;
+        }
+
         if (firstRender && Session.IsAuthenticated && !_nameNagShown
             && string.IsNullOrWhiteSpace(Session.CurrentUser?.DisplayName))
         {
