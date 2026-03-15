@@ -72,7 +72,7 @@ builder.Services.AddAuthentication(options =>
 .AddCookie(options =>
 {
     // Redirect to FAIT for login — FIRM has no auth of its own
-    options.LoginPath = new Microsoft.AspNetCore.Http.PathString("/auth/redirect-to-login");
+    options.LoginPath = "/auth/redirect-to-login";
     options.AccessDeniedPath = "/access-denied";
     options.ExpireTimeSpan = TimeSpan.FromHours(12);
     options.SlidingExpiration = true;
