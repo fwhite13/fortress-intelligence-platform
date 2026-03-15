@@ -4,6 +4,7 @@
 @inject NavigationManager Nav
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
+@using System.Linq
 
 <PageTitle>Fortress Intelligence Platform</PageTitle>
 
@@ -26,20 +27,58 @@
                         <p>Fortress AI Toolkit — AI chat, knowledge bases, document analysis</p>
                         <span class="app-tile-open">Open →</span>
                     </a>
-                    <a class="app-tile" href="@Config["Apps:FirmUrl"]" target="_blank">
-                        <div class="app-tile-icon">🎙</div>
-                        <h2>FIRM</h2>
-                        <p>Fortress Intelligent Recording — meeting transcription and intelligence</p>
-                        <span class="app-tile-open">Open →</span>
-                    </a>
-                    <a class="app-tile" href="@Config["Apps:FormsUrl"]" target="_blank">
-                        <div class="app-tile-icon">📄</div>
-                        <h2>FORMS</h2>
-                        <p>Fortress Optical Recognition — insurance form extraction and mapping</p>
-                        <span class="app-tile-open">Open →</span>
-                    </a>
+                    @if (IsComingSoon("firm"))
+                    {
+                        <div class="app-tile app-tile-disabled">
+                            <div class="app-tile-coming-soon">Coming Soon</div>
+                            <div class="app-tile-icon">🎙</div>
+                            <h2>FIRM</h2>
+                            <p>Fortress Intelligent Recording — meeting transcription and intelligence</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <a class="app-tile" href="@Config["Apps:FirmUrl"]" target="_blank">
+                            <div class="app-tile-icon">🎙</div>
+                            <h2>FIRM</h2>
+                            <p>Fortress Intelligent Recording — meeting transcription and intelligence</p>
+                            <span class="app-tile-open">Open →</span>
+                        </a>
+                    }
+                    @if (IsComingSoon("forms"))
+                    {
+                        <div class="app-tile app-tile-disabled">
+                            <div class="app-tile-coming-soon">Coming Soon</div>
+                            <div class="app-tile-icon">📄</div>
+                            <h2>FORMS</h2>
+                            <p>Fortress Optical Recognition — insurance form extraction and mapping</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <a class="app-tile" href="@Config["Apps:FormsUrl"]" target="_blank">
+                            <div class="app-tile-icon">📄</div>
+                            <h2>FORMS</h2>
+                            <p>Fortress Optical Recognition — insurance form extraction and mapping</p>
+                            <span class="app-tile-open">Open →</span>
+                        </a>
+                    }
                 </div>
             </main>
         </div>
     </Authorized>
 </AuthorizeView>
+
+@code {
+    private HashSet<string> _comingSoon = new();
+
+    protected override void OnInitialized()
+    {
+        var raw = Config["FIP:ComingSoonApps"] ?? "";
+        _comingSoon = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Select(s => s.ToLowerInvariant())
+                        .ToHashSet();
+    }
+
+    private bool IsComingSoon(string appKey) => _comingSoon.Contains(appKey.ToLowerInvariant());
+}
