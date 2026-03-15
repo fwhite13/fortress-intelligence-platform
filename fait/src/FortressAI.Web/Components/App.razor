@@ -1,3 +1,5 @@
+@using Microsoft.AspNetCore.Components.Web
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,11 +16,11 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
     <link rel="stylesheet" href="css/fortress.css" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-    <HeadOutlet />
+    <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
 </head>
 <body>
-    <Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
-    <script src="_framework/blazor.server.js"></script>
+    <Routes @rendermode="RenderMode.InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="js/chat.js"></script>
