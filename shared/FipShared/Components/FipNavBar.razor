@@ -54,19 +54,22 @@
                     @foreach (var module in Enum.GetValues<FipModule>())
                     {
                         var isActive = module == ActiveModule;
-                        <a class="fip-waffle-menu__item @(isActive ? "fip-waffle-menu__item--active" : "")"
-                           href="@module.Url()"
-                           role="menuitem"
-                           aria-current="@(isActive ? "true" : null)">
-                            <span class="fip-waffle-menu__icon">
-                                @if (isActive)
-                                {
-                                    <span class="fip-waffle-menu__gold-dot" aria-hidden="true"></span>
-                                }
-                            </span>
-                            <span class="fip-waffle-menu__label">@module.ShortName()</span>
-                            <span class="fip-waffle-menu__sublabel">@module.FullName()</span>
-                        </a>
+                        @if (IsVisible(module))
+                        {
+                            <a class="fip-waffle-menu__item @(isActive ? "fip-waffle-menu__item--active" : "")"
+                               href="@module.Url()"
+                               role="menuitem"
+                               aria-current="@(isActive ? "true" : null)">
+                                <span class="fip-waffle-menu__icon">
+                                    @if (isActive)
+                                    {
+                                        <span class="fip-waffle-menu__gold-dot" aria-hidden="true"></span>
+                                    }
+                                </span>
+                                <span class="fip-waffle-menu__label">@module.ShortName()</span>
+                                <span class="fip-waffle-menu__sublabel">@module.FullName()</span>
+                            </a>
+                        }
                     }
                 </div>
             }
@@ -349,6 +352,10 @@
     [Parameter] public EventCallback OnMenuClick { get; set; }
     [Parameter] public EventCallback OnSignOut { get; set; }
     [Parameter] public RenderFragment? LeftActions { get; set; }
+    [Parameter] public HashSet<FipModule>? HiddenModules { get; set; }
+
+    private bool IsVisible(FipModule module) =>
+        module == ActiveModule || HiddenModules == null || !HiddenModules.Contains(module);
 
     private bool _waffleOpen;
     private bool _avatarOpen;
