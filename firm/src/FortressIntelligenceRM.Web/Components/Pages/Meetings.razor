@@ -5,6 +5,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject MeetingService MeetingService
 @inject ISnackbar Snackbar
+@inject ILogger<Meetings> Logger
 @implements IDisposable
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
@@ -134,33 +135,75 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var entraOid = authState.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? authState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (entraOid != null)
+        try
         {
-            var email = authState.User.FindFirst(ClaimTypes.Email)?.Value
-                ?? authState.User.FindFirst("preferred_username")?.Value ?? "";
-            var displayName = authState.User.FindFirst(ClaimTypes.Name)?.Value
-                ?? authState.User.FindFirst("name")?.Value ?? email;
-            var user = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
-            _userId = user?.Id;
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            // Log all claims for diagnostics
+            var claimsList = string.Join(", ", user.Claims.Select(c => $"{c.Type.Split('/').Last()}={c.Value}"));
+            Logger.LogInformation("FIRM Meetings: claims = {Claims}", claimsList);
+
+            var entraOid = user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                ?? user.FindFirst("oid")?.Value
+                ?? user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                ?? user.FindFirst("sub")?.Value;
+
+            if (entraOid != null)
+            {
+                var email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                    ?? user.FindFirst("email")?.Value
+                    ?? user.FindFirst("preferred_username")?.Value ?? "";
+                var displayName = user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+                    ?? user.FindFirst("name")?.Value ?? email;
+                try
+                {
+                    var firmUser = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+                    _userId = firmUser?.Id;
+                    Logger.LogInformation("FIRM Meetings: resolved userId={UserId} for entraOid={OID}", _userId, entraOid);
+                }
+                catch (Exception dbEx)
+                {
+                    Logger.LogError(dbEx, "FIRM Meetings: GetOrCreateUserAsync failed for entraOid={OID}", entraOid);
+                    Snackbar.Add("Error loading user profile. Please refresh.", Severity.Error);
+                }
+            }
+            else
+            {
+                Logger.LogWarning("FIRM Meetings: entraOid not found in claims. User cannot load meetings.");
+                Snackbar.Add("Unable to identify user. Please sign out and sign in again.", Severity.Warning);
+            }
         }
-        await LoadMeetings();
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM Meetings: error resolving user in OnInitializedAsync");
+            Snackbar.Add("Error loading user profile. Please refresh.", Severity.Error);
+        }
+        finally
+        {
+            // Always load (or show empty state) — never leave _loading = true
+            await LoadMeetings();
+        }
         StartPolling();
     }
 
     private async Task LoadMeetings()
     {
-        if (_userId == null) return;
         _loading = true;
         try
         {
+            if (_userId == null)
+            {
+                _meetings = new();
+                return;
+            }
             _meetings = await MeetingService.GetMeetingsAsync(_userId.Value);
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "FIRM Meetings: error loading meetings for user {UserId}", _userId);
             Snackbar.Add($"Failed to load meetings: {ex.Message}", Severity.Error);
+            _meetings = new();
         }
         finally
         {

@@ -4,6 +4,7 @@
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ISnackbar Snackbar
+@inject ILogger<MeetingDetail> Logger
 @inject IHttpClientFactory HttpClientFactory
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
@@ -233,15 +234,30 @@
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var entraOid = authState.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? authState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var claimsUser = authState.User;
+        var entraOid = claimsUser.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? claimsUser.FindFirst("oid")?.Value
+            ?? claimsUser.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? claimsUser.FindFirst("sub")?.Value;
         if (string.IsNullOrEmpty(entraOid)) { Navigation.NavigateTo("/"); return; }
 
-        var email = authState.User.FindFirst(ClaimTypes.Email)?.Value
-            ?? authState.User.FindFirst("preferred_username")?.Value ?? "";
-        var displayName = authState.User.FindFirst(ClaimTypes.Name)?.Value
-            ?? authState.User.FindFirst("name")?.Value ?? email;
-        var user = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+        var email = claimsUser.FindFirst(ClaimTypes.Email)?.Value
+            ?? claimsUser.FindFirst("email")?.Value
+            ?? claimsUser.FindFirst("preferred_username")?.Value ?? "";
+        var displayName = claimsUser.FindFirst(ClaimTypes.Name)?.Value
+            ?? claimsUser.FindFirst("name")?.Value ?? email;
+        FortressIntelligenceRM.Web.Models.FirmUser? user = null;
+        try
+        {
+            user = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+        }
+        catch (Exception dbEx)
+        {
+            Logger.LogError(dbEx, "FIRM MeetingDetail: GetOrCreateUserAsync failed for entraOid={OID}", entraOid);
+            Snackbar.Add("Error loading user profile. Please refresh.", Severity.Error);
+            _loading = false;
+            return;
+        }
         if (user == null) { Navigation.NavigateTo("/meetings"); return; }
 
         _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
