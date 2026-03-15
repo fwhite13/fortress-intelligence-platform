@@ -17,7 +17,7 @@
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-6">
     <MudStack Row AlignItems="AlignItems.Center" Class="mb-6">
-        <MudText Typo="Typo.h5" Style="color: #e8edf2; font-weight: 600;">My Meetings</MudText>
+        <MudText Typo="Typo.h5" Style="color: var(--color-text-primary); font-weight: 600;">My Meetings</MudText>
         <MudSpacer />
         <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;" OnClick="OpenJoinDialog">
             Join a Meeting
@@ -30,10 +30,10 @@
     }
     else if (!_meetings.Any())
     {
-        <MudPaper Style="background: #1a2332; padding: 60px; text-align: center;" Elevation="0">
-            <MudIcon Icon="@Icons.Material.Filled.VideoCall" Style="color: #3a4a5a; font-size: 64px;" />
-            <MudText Typo="Typo.h6" Class="mt-4" Style="color: #8899aa;">No meetings yet.</MudText>
-            <MudText Typo="Typo.body2" Style="color: #5a6a7a;" Class="mt-2">
+        <MudPaper Style="background: var(--color-bg-page); padding: 60px; text-align: center;" Elevation="0">
+            <MudIcon Icon="@Icons.Material.Filled.VideoCall" Style="color: var(--color-border); font-size: 64px;" />
+            <MudText Typo="Typo.h6" Class="mt-4" Style="color: var(--color-text-secondary);">No meetings yet.</MudText>
+            <MudText Typo="Typo.body2" Style="color: var(--color-border);" Class="mt-2">
                 Click "Join a Meeting" to get started.
             </MudText>
         </MudPaper>
@@ -41,23 +41,23 @@
     else
     {
         <MudTable Items="@(_meetings.Skip((_page - 1) * _pageSize).Take(_pageSize).ToList())"
-                  Style="background: #1a2332;" Elevation="0" T="FirmMeeting">
+                  Style="background: var(--color-bg-page);" Elevation="0" T="FirmMeeting">
             <HeaderContent>
-                <MudTh Style="color: #8899aa;">Title</MudTh>
-                <MudTh Style="color: #8899aa;">Date</MudTh>
-                <MudTh Style="color: #8899aa;">Duration</MudTh>
-                <MudTh Style="color: #8899aa;">Status</MudTh>
-                <MudTh Style="color: #8899aa;">Actions</MudTh>
+                <MudTh Style="color: var(--color-text-secondary);">Title</MudTh>
+                <MudTh Style="color: var(--color-text-secondary);">Date</MudTh>
+                <MudTh Style="color: var(--color-text-secondary);">Duration</MudTh>
+                <MudTh Style="color: var(--color-text-secondary);">Status</MudTh>
+                <MudTh Style="color: var(--color-text-secondary);">Actions</MudTh>
             </HeaderContent>
             <RowTemplate>
                 <MudTd DataLabel="Title">
-                    <MudText Style="color: #e8edf2;">@(context.Title ?? $"Meeting — {context.CreatedAt:yyyy-MM-dd}")</MudText>
+                    <MudText Style="color: var(--color-text-primary);">@(context.Title ?? $"Meeting — {context.CreatedAt:yyyy-MM-dd}")</MudText>
                 </MudTd>
                 <MudTd DataLabel="Date">
-                    <MudText Style="color: #8899aa;">@context.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</MudText>
+                    <MudText Style="color: var(--color-text-secondary);">@context.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</MudText>
                 </MudTd>
                 <MudTd DataLabel="Duration">
-                    <MudText Style="color: #8899aa;">@FormatDuration(context.DurationSeconds)</MudText>
+                    <MudText Style="color: var(--color-text-secondary);">@FormatDuration(context.DurationSeconds)</MudText>
                 </MudTd>
                 <MudTd DataLabel="Status">
                     @StatusBadge(context.Status)
@@ -65,12 +65,12 @@
                 <MudTd DataLabel="Actions">
                     <MudStack Row>
                         <MudIconButton Icon="@Icons.Material.Filled.Visibility"
-                                       Style="color: #d4af37;" Size="Size.Small"
+                                       Style="color: var(--color-gold);" Size="Size.Small"
                                        OnClick="@(() => Navigation.NavigateTo($"/meetings/{context.Id}"))" />
                         @if (context.Status == MeetingStatus.Complete)
                         {
                             <MudIconButton Icon="@Icons.Material.Filled.Download"
-                                           Style="color: #8899aa;" Size="Size.Small"
+                                           Style="color: var(--color-text-secondary);" Size="Size.Small"
                                            Href="@($"/api/meetings/{context.Id}/transcript/download")" />
                         }
                     </MudStack>

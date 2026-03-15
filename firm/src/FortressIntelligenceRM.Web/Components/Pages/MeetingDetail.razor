@@ -15,7 +15,7 @@
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-6">
     <MudButton StartIcon="@Icons.Material.Filled.ArrowBack"
-               Href="/meetings" Style="color: #8899aa;" Class="mb-4">
+               Href="/meetings" Style="color: var(--color-text-secondary);" Class="mb-4">
         Back to Meetings
     </MudButton>
 
@@ -25,34 +25,34 @@
     }
     else if (_meeting == null)
     {
-        <MudAlert Severity="Severity.Error" Style="background: #2a1a1a; color: #ff6b6b;">
+        <MudAlert Severity="Severity.Error" Style="background: var(--color-bg-card); color: #ff6b6b;">
             Meeting not found or you don't have permission to view it.
         </MudAlert>
     }
     else
     {
-        <MudPaper Style="background: #1a2332; padding: 24px; margin-bottom: 24px;" Elevation="0">
+        <MudPaper Style="background: var(--color-bg-page); padding: 24px; margin-bottom: 24px;" Elevation="0">
             <MudStack Row AlignItems="AlignItems.Center" Class="mb-2">
-                <MudText Typo="Typo.h5" Style="color: #e8edf2; font-weight: 600;">
+                <MudText Typo="Typo.h5" Style="color: var(--color-text-primary); font-weight: 600;">
                     @(_meeting.Title ?? $"Meeting — {_meeting.CreatedAt:yyyy-MM-dd}")
                 </MudText>
                 <MudSpacer />
                 @StatusBadge(_meeting.Status)
             </MudStack>
             <MudStack Row Class="mb-4" Style="gap: 24px; flex-wrap: wrap;">
-                <MudText Typo="Typo.body2" Style="color: #8899aa;">
+                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
                     @_meeting.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
                 </MudText>
                 @if (_meeting.DurationSeconds.HasValue)
                 {
-                    <MudText Typo="Typo.body2" Style="color: #8899aa;">
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
                         @FormatDuration(_meeting.DurationSeconds)
                     </MudText>
                 }
-                <MudText Typo="Typo.body2" Style="color: #8899aa;">Teams</MudText>
+                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">Teams</MudText>
                 @if (_meeting.Participants.Any())
                 {
-                    <MudText Typo="Typo.body2" Style="color: #8899aa;">
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
                         @string.Join(", ", _meeting.Participants.Select(p => p.DisplayName))
                     </MudText>
                 }
@@ -60,7 +60,7 @@
 
             @if (_meeting.Status == MeetingStatus.Failed && !string.IsNullOrEmpty(_meeting.ErrorMessage))
             {
-                <MudAlert Severity="Severity.Error" Style="background: #2a1a1a; color: #ff6b6b;" Class="mb-3">
+                <MudAlert Severity="Severity.Error" Style="background: var(--color-bg-card); color: #ff6b6b;" Class="mb-3">
                     @_meeting.ErrorMessage
                 </MudAlert>
             }
@@ -69,33 +69,33 @@
             {
                 <MudStack Row Style="gap: 12px; flex-wrap: wrap;">
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
-                               Style="border-color: #d4af37; color: #d4af37;"
+                               Style="border-color: var(--color-gold); color: var(--color-gold);"
                                Href="@($"/api/meetings/{_meeting.Id}/transcript/download")">
                         Transcript
                     </MudButton>
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
-                               Style="border-color: #d4af37; color: #d4af37;"
+                               Style="border-color: var(--color-gold); color: var(--color-gold);"
                                Href="@($"/api/meetings/{_meeting.Id}/summary/download")">
                         Summary
                     </MudButton>
                     @if (!string.IsNullOrEmpty(_meeting.AudioS3Key))
                     {
                         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AudioFile"
-                                   Style="border-color: #5a6a7a; color: #8899aa;"
+                                   Style="border-color: var(--color-border); color: var(--color-text-secondary);"
                                    OnClick="DownloadAudio">
                             Audio
                         </MudButton>
                     }
                     <MudButton Variant="Variant.Outlined"
                                StartIcon="@(_meeting.TranscriptKbPushed ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.LibraryAdd)"
-                               Style="@(_meeting.TranscriptKbPushed ? "border-color: #4caf50; color: #4caf50;" : "border-color: #5a6a7a; color: #8899aa;")"
+                               Style="@(_meeting.TranscriptKbPushed ? "border-color: #4caf50; color: #4caf50;" : "border-color: var(--color-border); color: var(--color-text-secondary);")"
                                OnClick="PushTranscriptToKb"
                                Disabled="_pushingTranscript || _meeting.TranscriptKbPushed">
                         @(_meeting.TranscriptKbPushed ? "In My KB" : "Add Transcript to KB")
                     </MudButton>
                     <MudButton Variant="Variant.Outlined"
                                StartIcon="@(_meeting.SummaryKbPushed ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.LibraryAdd)"
-                               Style="@(_meeting.SummaryKbPushed ? "border-color: #4caf50; color: #4caf50;" : "border-color: #5a6a7a; color: #8899aa;")"
+                               Style="@(_meeting.SummaryKbPushed ? "border-color: #4caf50; color: #4caf50;" : "border-color: var(--color-border); color: var(--color-text-secondary);")"
                                OnClick="PushSummaryToKb"
                                Disabled="_pushingSummary || _meeting.SummaryKbPushed">
                         @(_meeting.SummaryKbPushed ? "In My KB" : "Add Summary to KB")
@@ -105,11 +105,11 @@
         </MudPaper>
 
         <MudTabs Elevation="0" Style="background: transparent;">
-            <MudTabPanel Text="Summary" Style="color: #e8edf2;">
-                <MudPaper Style="background: #1a2332; padding: 24px; margin-top: 8px;" Elevation="0">
+            <MudTabPanel Text="Summary" Style="color: var(--color-text-primary);">
+                <MudPaper Style="background: var(--color-bg-page); padding: 24px; margin-top: 8px;" Elevation="0">
                     @if (_meeting.Summary == null)
                     {
-                        <MudText Style="color: #8899aa; text-align: center; padding: 40px 0;">
+                        <MudText Style="color: var(--color-text-secondary); text-align: center; padding: 40px 0;">
                             @if (_meeting.Status is MeetingStatus.Summarizing or MeetingStatus.Transcribing
                                 or MeetingStatus.Recording or MeetingStatus.Joining)
                             {
@@ -125,8 +125,8 @@
                     {
                         @if (!string.IsNullOrEmpty(_meeting.Summary.SummaryText))
                         {
-                            <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-2">Overview</MudText>
-                            <MudText Style="color: #e8edf2; line-height: 1.7;" Class="mb-6">
+                            <MudText Typo="Typo.h6" Style="color: var(--color-gold);" Class="mb-2">Overview</MudText>
+                            <MudText Style="color: var(--color-text-primary); line-height: 1.7;" Class="mb-6">
                                 @_meeting.Summary.SummaryText
                             </MudText>
                         }
@@ -135,11 +135,11 @@
                             var decisions = TryDeserializeStringList(_meeting.Summary.KeyDecisionsJson);
                             @if (decisions.Any())
                             {
-                                <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-2">Key Decisions</MudText>
+                                <MudText Typo="Typo.h6" Style="color: var(--color-gold);" Class="mb-2">Key Decisions</MudText>
                                 <MudList T="string" Style="margin-bottom: 24px;">
                                     @foreach (var d in decisions)
                                     {
-                                        <MudListItem T="string" Style="color: #e8edf2;">
+                                        <MudListItem T="string" Style="color: var(--color-text-primary);">
                                             <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" Class="mr-2" />@d
                                         </MudListItem>
                                     }
@@ -151,15 +151,15 @@
                             var items = TryDeserializeActionItems(_meeting.Summary.ActionItemsJson);
                             @if (items.Any())
                             {
-                                <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-2">Action Items</MudText>
+                                <MudText Typo="Typo.h6" Style="color: var(--color-gold);" Class="mb-2">Action Items</MudText>
                                 <MudList T="string" Style="margin-bottom: 24px;">
                                     @foreach (var item in items)
                                     {
-                                        <MudListItem T="string" Style="color: #e8edf2;">
+                                        <MudListItem T="string" Style="color: var(--color-text-primary);">
                                             <MudIcon Icon="@Icons.Material.Filled.AssignmentTurnedIn" Color="Color.Warning" Size="Size.Small" Class="mr-2" />
                                             @if (!string.IsNullOrEmpty(item.Owner))
                                             {
-                                                <strong style="color: #d4af37;">[@item.Owner]</strong>
+                                                <strong style="color: var(--color-gold);">[@item.Owner]</strong>
                                                 <span> @item.Description</span>
                                             }
                                             else { @item.Description }
@@ -173,11 +173,11 @@
                             var followUps = TryDeserializeStringList(_meeting.Summary.FollowUpsJson);
                             @if (followUps.Any())
                             {
-                                <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-2">Follow-ups</MudText>
+                                <MudText Typo="Typo.h6" Style="color: var(--color-gold);" Class="mb-2">Follow-ups</MudText>
                                 <MudList T="string">
                                     @foreach (var f in followUps)
                                     {
-                                        <MudListItem T="string" Style="color: #e8edf2;">
+                                        <MudListItem T="string" Style="color: var(--color-text-primary);">
                                             <MudIcon Icon="@Icons.Material.Filled.ArrowForward" Size="Size.Small" Class="mr-2" />@f
                                         </MudListItem>
                                     }
@@ -188,11 +188,11 @@
                 </MudPaper>
             </MudTabPanel>
 
-            <MudTabPanel Text="Transcript" Style="color: #e8edf2;">
-                <MudPaper Style="background: #1a2332; padding: 24px; margin-top: 8px;" Elevation="0">
+            <MudTabPanel Text="Transcript" Style="color: var(--color-text-primary);">
+                <MudPaper Style="background: var(--color-bg-page); padding: 24px; margin-top: 8px;" Elevation="0">
                     @if (!_meeting.Transcripts.Any())
                     {
-                        <MudText Style="color: #8899aa; text-align: center; padding: 40px 0;">
+                        <MudText Style="color: var(--color-text-secondary); text-align: center; padding: 40px 0;">
                             No transcript available yet.
                         </MudText>
                     }
@@ -201,18 +201,18 @@
                         <MudTable Items="_meeting.Transcripts" Style="background: transparent;" Elevation="0"
                                   FixedHeader Height="500px">
                             <HeaderContent>
-                                <MudTh Style="color: #8899aa; width: 100px;">Time</MudTh>
-                                <MudTh Style="color: #8899aa; width: 160px;">Speaker</MudTh>
-                                <MudTh Style="color: #8899aa;">Text</MudTh>
+                                <MudTh Style="color: var(--color-text-secondary); width: 100px;">Time</MudTh>
+                                <MudTh Style="color: var(--color-text-secondary); width: 160px;">Speaker</MudTh>
+                                <MudTh Style="color: var(--color-text-secondary);">Text</MudTh>
                             </HeaderContent>
                             <RowTemplate>
-                                <MudTd Style="color: #5a7a8a; font-size: 12px; font-family: monospace;">
+                                <MudTd Style="color: var(--color-border); font-size: 12px; font-family: monospace;">
                                     @FormatTimestamp(context.StartTimeMs)
                                 </MudTd>
-                                <MudTd Style="color: #d4af37; font-size: 13px; font-weight: 500;">
+                                <MudTd Style="color: var(--color-gold); font-size: 13px; font-weight: 500;">
                                     @(context.SpeakerName ?? context.SpeakerLabel ?? "Unknown")
                                 </MudTd>
-                                <MudTd Style="color: #e8edf2; font-size: 14px; line-height: 1.5;">
+                                <MudTd Style="color: var(--color-text-primary); font-size: 14px; line-height: 1.5;">
                                     @context.Text
                                 </MudTd>
                             </RowTemplate>

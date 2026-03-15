@@ -2,18 +2,18 @@
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6" Style="color: #e8edf2;">Join a Meeting</MudText>
+        <MudText Typo="Typo.h6" Style="color: var(--color-text-primary);">Join a Meeting</MudText>
     </TitleContent>
     <DialogContent>
         <MudTextField @bind-Value="MeetingUrl" Label="Teams Meeting URL"
-                      Style="color: #e8edf2;" Variant="Variant.Outlined"
+                      Style="color: var(--color-text-primary);" Variant="Variant.Outlined"
                       Placeholder="https://teams.microsoft.com/l/meetup-join/..."
                       Required Class="mb-3" />
         <MudTextField @bind-Value="MeetingTitle" Label="Meeting Title (optional)"
-                      Style="color: #e8edf2;" Variant="Variant.Outlined" />
+                      Style="color: var(--color-text-primary);" Variant="Variant.Outlined" />
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel" Style="color: #8899aa;">Cancel</MudButton>
+        <MudButton OnClick="Cancel" Style="color: var(--color-text-secondary);">Cancel</MudButton>
         <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
                    OnClick="Submit">
             Join Now
