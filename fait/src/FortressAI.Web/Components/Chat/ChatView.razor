@@ -276,6 +276,7 @@
     // KB retrieval result for UI indicator (set per-message)
     private KbRetrievalResult? _lastKbResult;
     private static int _chatRenderCount = 0;
+    private static int _afterRenderNoFirstCount = 0;
 
     protected override async Task OnInitializedAsync()
     {
@@ -350,6 +351,12 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!firstRender)
+        {
+            var count = System.Threading.Interlocked.Increment(ref _afterRenderNoFirstCount);
+            if (count % 10 == 0)
+                Logger.LogWarning("[ChatView] OnAfterRenderAsync non-firstRender loop count={Count}", count);
+        }
         Logger.LogInformation("[ChatView] OnAfterRenderAsync — firstRender={FirstRender} cycle={Cycle} ConversationId={ConversationId} IsAuthenticated={IsAuthenticated}",
             firstRender, _chatRenderCount, ConversationId, Session.IsAuthenticated);
 

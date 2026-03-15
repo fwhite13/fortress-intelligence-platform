@@ -50,10 +50,12 @@ public class McpHttpTransport
 
         var http = _httpClientFactory.CreateClient("mcp-transport");
         var response = await http.SendAsync(httpRequest, ct);
+        var rawBody = await response.Content.ReadAsStringAsync(ct);
+        _logger.LogInformation("[McpTransport] CallTool {Url} → {Status} | body[0..300]: {Body}",
+            endpointUrl, (int)response.StatusCode,
+            rawBody.Length > 300 ? rawBody[..300] : rawBody);
         response.EnsureSuccessStatusCode();
-
-        var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        using var doc = JsonDocument.Parse(rawBody);
 
         if (doc.RootElement.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null && error.ValueKind != JsonValueKind.Undefined)
         {
@@ -94,10 +96,12 @@ public class McpHttpTransport
 
         var http = _httpClientFactory.CreateClient("mcp-transport");
         var response = await http.SendAsync(httpRequest, ct);
+        var rawBody = await response.Content.ReadAsStringAsync(ct);
+        _logger.LogInformation("[McpTransport] ListTools {Url} → {Status} | body[0..300]: {Body}",
+            endpointUrl, (int)response.StatusCode,
+            rawBody.Length > 300 ? rawBody[..300] : rawBody);
         response.EnsureSuccessStatusCode();
-
-        var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        using var doc = JsonDocument.Parse(rawBody);
 
         if (doc.RootElement.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null && error.ValueKind != JsonValueKind.Undefined)
         {

@@ -57,6 +57,7 @@
         try
         {
             await LoadData();
+            Logger.LogInformation("[SidebarContent] InvokeAsync(StateHasChanged) triggered by LocationChanged — url={Url}", e.Location);
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception) { /* component may have been disposed */ }
