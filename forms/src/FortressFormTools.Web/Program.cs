@@ -379,7 +379,8 @@ app.MapGet("/auth/logout", async (HttpContext ctx) =>
 }).AllowAnonymous().DisableAntiforgery();
 
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .AddAdditionalAssemblies(typeof(FipShared.Components.FipNavBar).Assembly);
 
 Console.WriteLine("═══════════════════════════════════════════════════");
 Console.WriteLine("  Fortress Form Tools — Form Intelligence Platform");

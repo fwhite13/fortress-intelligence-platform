@@ -166,6 +166,7 @@ app.MapGet("/auth/logout", async (HttpContext ctx) =>
 
 app.MapControllers();
 app.MapRazorComponents<FortressIntelligenceRM.Web.Components.App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .AddAdditionalAssemblies(typeof(FipShared.Components.FipNavBar).Assembly);
 
 app.Run();
