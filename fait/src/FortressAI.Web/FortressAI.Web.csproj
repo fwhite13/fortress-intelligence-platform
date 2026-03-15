@@ -33,5 +33,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\FortressAI.Shared\FortressAI.Shared.csproj" />
+    <ProjectReference Include="..\..\..\shared\FipShared\FipShared.csproj" />
   </ItemGroup>
 </Project>

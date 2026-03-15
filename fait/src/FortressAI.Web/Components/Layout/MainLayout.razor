@@ -1,6 +1,8 @@
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.Extensions.Configuration
 @using FortressAI.Web.Theme
+@using FipShared.Components
+@using FipShared.Models
 @inherits LayoutComponentBase
 @inject UserSessionService Session
 @inject NavigationManager Nav
@@ -16,69 +18,13 @@
 <MudSnackbarProvider />
 
 <MudLayout>
-        <MudAppBar Elevation="1" Style="background: var(--color-header-bg); height: 48px; padding: 0;">
-            <div style="display: flex; align-items: center; gap: var(--space-3); padding-left: var(--space-1);">
-            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
-                               OnClick="@ToggleDrawer" />
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="color: var(--color-text-inverse);">
-              <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor" opacity="0.9"/>
-              <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <MudText Style="font-size: var(--text-md); font-weight: var(--font-semibold); color: var(--color-text-inverse);">
-                <span class="d-none d-sm-inline">AI Toolkit</span>
-                <span class="d-inline d-sm-none">FAIT</span>
-            </MudText>
-        </div>
-
-            <MudSpacer />
-
-        <div style="display: flex; align-items: center; gap: var(--space-2); padding-right: var(--space-1);">
-            <MudIconButton Icon="@Icons.Material.Filled.HelpOutline"
-                           Color="Color.Inherit"
-                           title="Help & User Guide"
-                           OnClick="@(async () => { if (_helpDrawer != null) await _helpDrawer.OpenAsync(); })" />
-            <MudMenu Icon="@Icons.Material.Filled.Apps" Color="Color.Inherit" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
-                <MudMenuItem Href="/" Icon="@Icons.Material.Filled.Chat">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span>FAIT — AI Toolkit</span>
-                        <span style="color: var(--color-gold);">●</span>
-                    </div>
-                </MudMenuItem>
-                @if (!_comingSoonApps.Contains("forms"))
-                {
-                    <MudMenuItem Href="https://forms.dev.fortressam.ai" Icon="@Icons.Material.Filled.Description">
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <span>FORMS — Form Intelligence</span>
-                        </div>
-                    </MudMenuItem>
-                }
-                @if (!_comingSoonApps.Contains("firm"))
-                {
-                    <MudMenuItem Href="https://firm.dev.fortressam.ai" Icon="@Icons.Material.Filled.Groups">
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <span>FIRM — Meeting Assistant</span>
-                        </div>
-                    </MudMenuItem>
-                }
-            </MudMenu>
-
-            <MudMenu Dense="true" AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
-                <ActivatorContent>
-                    <MudAvatar Style="background: var(--color-gold); width: 28px; height: 28px; font-size: 13px; cursor: pointer;">
-                        @(Session.CurrentUser?.DisplayName?.FirstOrDefault() ?? Session.CurrentUser?.Email?.FirstOrDefault() ?? '?')
-                    </MudAvatar>
-                </ActivatorContent>
-                <ChildContent>
-                    <MudMenuItem Disabled="true">
-                        <MudText Typo="Typo.body2"><strong>@(Session.CurrentUser?.DisplayName ?? "User")</strong></MudText>
-                        <MudText Typo="Typo.caption" Style="color: #6b7280;">@Session.CurrentUser?.Email</MudText>
-                    </MudMenuItem>
-                    <MudDivider />
-                    <MudMenuItem Icon="@Icons.Material.Filled.Logout" OnClick="Logout">Sign Out</MudMenuItem>
-                </ChildContent>
-            </MudMenu>
-        </div>
-        </MudAppBar>
+        <FipNavBar ActiveModule="FipModule.FAIT"
+                 UserInitial="@(Session.CurrentUser?.DisplayName?.FirstOrDefault().ToString().ToUpperInvariant() ?? Session.CurrentUser?.Email?.FirstOrDefault().ToString().ToUpperInvariant() ?? "F")"
+                 UserName="@(Session.CurrentUser?.DisplayName ?? "User")"
+                 UserEmail="@(Session.CurrentUser?.Email ?? "")"
+                 HiddenModules="@_hiddenModules"
+                 OnMenuClick="ToggleDrawer"
+                 OnSignOut="Logout" />
 
         <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
             <div style="display: flex; flex-direction: column; height: 100%;">
@@ -129,7 +75,7 @@
     private bool _drawerOpen = true;
     private HelpDrawer? _helpDrawer;
     private bool _nameNagShown = false;
-    private HashSet<string> _comingSoonApps = new();
+    private HashSet<FipModule>? _hiddenModules;
     private MudTheme _theme = FipTheme.Create();
 
     protected override async Task OnInitializedAsync()
@@ -178,9 +124,16 @@
         }
 
         var raw = Configuration["FIP:ComingSoonApps"] ?? "";
-        _comingSoonApps = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                            .Select(s => s.ToLowerInvariant())
-                            .ToHashSet();
+        var comingSoonStrings = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                                     .Select(s => s.Trim().ToLowerInvariant())
+                                     .ToHashSet();
+        _hiddenModules = comingSoonStrings.Count > 0
+            ? comingSoonStrings
+                .Select(s => Enum.TryParse<FipModule>(s, true, out var m) ? m : (FipModule?)null)
+                .Where(m => m.HasValue)
+                .Select(m => m!.Value)
+                .ToHashSet()
+            : null;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
