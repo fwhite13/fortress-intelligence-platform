@@ -58,23 +58,24 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
 // Must be registered as a standard scoped DbContext (not a factory) so that
 // PersistKeysToDbContext<SharedKeyRingDbContext>() can resolve it from DI.
 // Uses FIP_KEYRING_DB_NAME env var (defaults to fred_dev — same DB as FAIT's AppDbContext).
-var keyRingDbName = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? dbName;
-var keyRingCsb = new MySqlConnectionStringBuilder
+var keyRingDbHost = builder.Configuration["FORTRESS_DB_HOST"];
+var keyRingDbPort = builder.Configuration["FORTRESS_DB_PORT"] ?? "3306";
+var keyRingDbUser = builder.Configuration["FORTRESS_DB_USER"] ?? "fortress_mysql";
+var keyRingDbPass = builder.Configuration["FORTRESS_DB_PASS"] ?? "";
+var keyRingDbName = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? "fred_dev";
+
+var keyRingCsb = new MySqlConnector.MySqlConnectionStringBuilder
 {
-    Server = dbHost ?? "localhost",
-    Port = uint.Parse(dbPort),
+    Server = keyRingDbHost ?? "localhost",
+    Port = uint.Parse(keyRingDbPort),
     Database = keyRingDbName,
-    UserID = dbUser,
-    Password = dbPass,
-    ConnectionTimeout = 10,
-    SslMode = MySqlConnector.MySqlSslMode.Required
+    UserID = keyRingDbUser,
+    Password = keyRingDbPass,
+    ConnectionTimeout = 10
 };
-var keyRingConnectionString = !string.IsNullOrEmpty(dbHost)
-    ? keyRingCsb.ConnectionString
-    : (builder.Configuration.GetConnectionString("DefaultConnection")
-       ?? $"Server=localhost;Database={keyRingDbName};User=root;Password=dev;");
+
 builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
-    options.UseMySql(keyRingConnectionString,
+    options.UseMySql(keyRingCsb.ConnectionString,
         new MySqlServerVersion(new Version(8, 0, 28)),
         mysql => mysql.EnableRetryOnFailure(3)));
 
@@ -243,6 +244,12 @@ builder.Services.AddDataProtection()
 
 var app = builder.Build();
 
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error");
+    app.UseHsts();
+}
+
 var forwardedHeadersOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
@@ -276,15 +283,13 @@ app.MapGet("/auth/redirect-to-login", (HttpContext ctx, IConfiguration config) =
 
 // FAIT session endpoint — user arrives here from FIP after successful Entra authentication
 // The shared .FortressAI.Session cookie is already set by FIP — just validate and redirect to app
-app.MapGet("/auth/fait-session", async ctx =>
+app.MapGet("/auth/fait-session", async (HttpContext ctx) =>
 {
-    var authResult = await ctx.AuthenticateAsync(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+    var authResult = await ctx.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     if (!authResult.Succeeded)
-    {
-        ctx.Response.Redirect("/");
-        return;
-    }
-    ctx.Response.Redirect("/");
+        return Results.Redirect("/");
+    // Cookie is already set by FIP portal — just redirect home
+    return Results.Redirect("/");
 }).AllowAnonymous().DisableAntiforgery();
 
 // FIRM auth callback — after user logs into FAIT, redirect back to FIRM
