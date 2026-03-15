@@ -166,28 +166,14 @@ builder.Services.AddAuthentication(options =>
     options.Cookie.SameSite = SameSiteMode.Lax;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.Cookie.IsEssential = true;
-})
-.AddScheme<AppKeyAuthOptions, AppKeyAuthHandler>("AppKeyAuth", options =>
-{
-    // Legacy Haven key (backward compatible)
-    options.ApiKey = builder.Configuration["AppKeys:Haven"];
-    // Excel Add-in key (Sprint 1 — multi-key support)
-    var excelKey = builder.Configuration["AppKeys:ExcelAddin"];
-    if (!string.IsNullOrEmpty(excelKey))
-        options.ApiKeys.Add(excelKey);
 });
-
-// Register AppKey authorization handler
-builder.Services.AddSingleton<IAuthorizationHandler, AppKeyAuthorizationHandler>();
 
 builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = options.DefaultPolicy;
-    options.AddPolicy("AppKeyOnly", policy =>
-        policy.AddRequirements(new AppKeyRequirement()));
 });
-builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddCascadingAuthenticationState();
 
 builder.Services.AddSingleton<Amazon.CognitoIdentityProvider.IAmazonCognitoIdentityProvider>(sp =>
     new Amazon.CognitoIdentityProvider.AmazonCognitoIdentityProviderClient(
@@ -266,18 +252,17 @@ app.UseAuthorization();
 app.UseAntiforgery();
 
 // Health endpoint (must be before other middleware)
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }))
-    .AllowAnonymous().DisableAntiforgery();
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow })).AllowAnonymous();
 
 // FIP mode: redirect unauthenticated users to FIP portal for login
 // LoginPath = /auth/redirect-to-login when FIP__LoginUrl is set
 // Passes returnUrl so FIP redirects back to FAIT after authentication
-app.MapGet("/auth/redirect-to-login", (HttpContext ctx, IConfiguration config) =>
+app.MapGet("/auth/redirect-to-login", (HttpContext ctx) =>
 {
-    var fipUrl = (config["FIP:LoginUrl"] ?? config["FIP__LoginUrl"])?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
-    var faitCallbackUrl = (config["FIP:FaitCallbackUrl"] ?? config["FIP__FaitCallbackUrl"])?.TrimEnd('/')
-        ?? "https://fait.dev.fortressam.ai/auth/fait-session";
-    var redirectUrl = $"{fipUrl}/auth/firm-callback?returnUrl={Uri.EscapeDataString(faitCallbackUrl)}";
+    var config = ctx.RequestServices.GetRequiredService<IConfiguration>();
+    var fipLoginUrl = config["FIP__LoginUrl"]?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
+    var faitCallbackUrl = config["FIP__FaitCallbackUrl"]?.TrimEnd('/') ?? "https://fait.dev.fortressam.ai/auth/fait-session";
+    var redirectUrl = $"{fipLoginUrl}/auth/firm-callback?returnUrl={Uri.EscapeDataString(faitCallbackUrl)}";
     return Results.Redirect(redirectUrl);
 }).AllowAnonymous().DisableAntiforgery();
 
@@ -288,7 +273,7 @@ app.MapGet("/auth/fait-session", async (HttpContext ctx) =>
     var authResult = await ctx.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     if (!authResult.Succeeded)
         return Results.Redirect("/");
-    // Cookie is already set by FIP portal — just redirect home
+    // Cookie is already set by FIP portal — just redirect to home
     return Results.Redirect("/");
 }).AllowAnonymous().DisableAntiforgery();
 
@@ -444,11 +429,11 @@ app.MapGet("/auth/login", ctx => { ctx.Response.Redirect("/auth/redirect-to-logi
 app.MapGet("/auth/login-entra", ctx => { ctx.Response.Redirect("/auth/redirect-to-login"); return Task.CompletedTask; })
     .AllowAnonymous();
 
-app.MapGet("/auth/logout", async ctx =>
+app.MapGet("/auth/logout", async (HttpContext ctx) =>
 {
     await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    ctx.Response.Redirect("/");
-}).AllowAnonymous();
+    return Results.Redirect("/");
+}).AllowAnonymous().DisableAntiforgery();
 
 app.MapControllers();
 
