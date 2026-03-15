@@ -1829,7 +1829,7 @@ a:hover {
 /* Nav header — push left/right groups to edges */
 .mud-appbar .mud-toolbar {
     padding-left: 4px !important;
-    padding-right: 4px !important;
+    padding-right: 8px !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════
