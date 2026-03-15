@@ -15,8 +15,8 @@
         <div class="fip-navbar__brand">
             <!-- Shield Logo -->
             <svg class="fip-navbar__shield" width="28" height="32" viewBox="0 0 28 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M14 1L2 6V16C2 22.627 7.373 29.254 14 31C20.627 29.254 26 22.627 26 16V6L14 1Z" fill="#1a2332" stroke="#d4af37" stroke-width="1.5"/>
-                <path d="M14 7L8 10V16C8 19.314 10.686 22.627 14 23.5C17.314 22.627 20 19.314 20 16V10L14 7Z" fill="#d4af37" opacity="0.85"/>
+                <path d="M14 1L2 6V16C2 22.627 7.373 29.254 14 31C20.627 29.254 26 22.627 26 16V6L14 1Z" fill="currentColor" stroke="var(--color-gold)" stroke-width="1.5"/>
+                <path d="M14 7L8 10V16C8 19.314 10.686 22.627 14 23.5C17.314 22.627 20 19.314 20 16V10L14 7Z" fill="var(--color-gold)" opacity="0.85"/>
             </svg>
 
             <span class="fip-navbar__module-name">@ActiveModule.ShortName()</span>
@@ -109,8 +109,8 @@
         justify-content: space-between;
         height: 48px;
         padding: 0 12px;
-        background: var(--color-primary, #1a2332);
-        color: #ffffff;
+        background: var(--color-primary);
+        color: var(--color-surface);
         position: relative;
         z-index: 1000;
         box-shadow: 0 1px 3px rgba(0,0,0,0.3);
@@ -139,7 +139,7 @@
         font-size: 15px;
         font-weight: 600;
         letter-spacing: 0.06em;
-        color: #ffffff;
+        color: var(--color-surface);
         white-space: nowrap;
     }
 
@@ -166,7 +166,7 @@
 
     .fip-navbar__icon-btn:hover {
         background: rgba(255,255,255,0.1);
-        color: #ffffff;
+        color: var(--color-surface);
     }
 
     .fip-navbar__avatar {
@@ -176,8 +176,8 @@
         width: 32px;
         height: 32px;
         border-radius: 50%;
-        background: var(--color-accent, #d4af37);
-        color: var(--color-primary, #1a2332);
+        background: var(--color-accent);
+        color: var(--color-primary);
         font-size: 13px;
         font-weight: 700;
         font-family: 'Inter', system-ui, sans-serif;
@@ -201,8 +201,8 @@
         position: absolute;
         top: calc(100% + 8px);
         right: 0;
-        background: #ffffff;
-        border: 1px solid #E2E8F0;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
         border-radius: 10px;
         box-shadow: 0 8px 24px rgba(0,0,0,0.12);
         padding: 8px;
@@ -220,13 +220,13 @@
         padding: 8px 10px;
         border-radius: 6px;
         text-decoration: none;
-        color: #0F172A;
+        color: var(--color-text-primary);
         transition: background 150ms ease;
         position: relative;
     }
 
     .fip-waffle-menu__item:hover {
-        background: #F8FAFC;
+        background: var(--color-bg-page);
     }
 
     .fip-waffle-menu__item--active {
@@ -246,7 +246,7 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: #C9A84C;
+        background: var(--color-gold-hover, #C9A84C);
         display: block;
     }
 
@@ -254,13 +254,13 @@
         font-size: 13px;
         font-weight: 600;
         font-family: 'Inter', system-ui, sans-serif;
-        color: #0F172A;
+        color: var(--color-text-primary);
         min-width: 52px;
     }
 
     .fip-waffle-menu__sublabel {
         font-size: 11px;
-        color: #6b7280;
+        color: var(--color-text-secondary);
         font-family: 'Inter', system-ui, sans-serif;
         white-space: nowrap;
         overflow: hidden;
@@ -272,8 +272,8 @@
         position: absolute;
         top: calc(100% + 8px);
         right: 0;
-        background: #ffffff;
-        border: 1px solid #E2E8F0;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
         border-radius: 10px;
         box-shadow: 0 8px 24px rgba(0,0,0,0.12);
         min-width: 200px;
@@ -288,13 +288,13 @@
     .fip-avatar-menu__name {
         font-size: 13px;
         font-weight: 600;
-        color: #0F172A;
+        color: var(--color-text-primary);
         font-family: 'Inter', system-ui, sans-serif;
     }
 
     .fip-avatar-menu__email {
         font-size: 11px;
-        color: #6b7280;
+        color: var(--color-text-secondary);
         font-family: 'Inter', system-ui, sans-serif;
         margin-top: 2px;
         word-break: break-all;
@@ -302,7 +302,7 @@
 
     .fip-avatar-menu__divider {
         border: none;
-        border-top: 1px solid #E2E8F0;
+        border-top: 1px solid var(--color-border);
         margin: 0;
     }
 
@@ -317,15 +317,15 @@
         border: none;
         cursor: pointer;
         transition: background 150ms ease;
-        color: #0F172A;
+        color: var(--color-text-primary);
     }
 
     .fip-avatar-menu__item:hover {
-        background: #F8FAFC;
+        background: var(--color-bg-page);
     }
 
     .fip-avatar-menu__item--danger {
-        color: #dc2626;
+        color: var(--color-danger, #dc2626);
     }
 
     .fip-avatar-menu__item--danger:hover {
