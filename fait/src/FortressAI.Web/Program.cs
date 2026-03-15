@@ -281,8 +281,8 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = Dat
 app.MapGet("/auth/redirect-to-login", (HttpContext ctx) =>
 {
     var config = ctx.RequestServices.GetRequiredService<IConfiguration>();
-    var fipLoginUrl = config["FIP__LoginUrl"]?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
-    var faitCallbackUrl = config["FIP__FaitCallbackUrl"]?.TrimEnd('/') ?? "https://fait.dev.fortressam.ai/auth/fait-session";
+    var fipLoginUrl = config["FIP:LoginUrl"]?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
+    var faitCallbackUrl = config["FIP:FaitCallbackUrl"]?.TrimEnd('/') ?? "https://fait.fortressam.ai/auth/fait-session";
     var redirectUrl = $"{fipLoginUrl}/auth/firm-callback?returnUrl={Uri.EscapeDataString(faitCallbackUrl)}";
     return Results.Redirect(redirectUrl);
 }).AllowAnonymous().DisableAntiforgery();
