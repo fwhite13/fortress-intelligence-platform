@@ -11,13 +11,16 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
 # Copy project files for layer caching
-COPY src/FortressAI.Shared/FortressAI.Shared.csproj FortressAI.Shared/
-COPY src/FortressAI.Web/FortressAI.Web.csproj FortressAI.Web/
-RUN dotnet restore "FortressAI.Web/FortressAI.Web.csproj"
+COPY fait/src/FortressAI.Shared/FortressAI.Shared.csproj fait/src/FortressAI.Shared/
+COPY fait/src/FortressAI.Web/FortressAI.Web.csproj fait/src/FortressAI.Web/
+# Copy FipShared RCL (shared component library — ProjectReference from FortressAI.Web)
+COPY shared/FipShared/FipShared.csproj shared/FipShared/
+RUN dotnet restore "fait/src/FortressAI.Web/FortressAI.Web.csproj"
 
 # Copy source and build
-COPY src/ .
-WORKDIR "/src/FortressAI.Web"
+COPY fait/src/ fait/src/
+COPY shared/FipShared/ shared/FipShared/
+WORKDIR "/src/fait/src/FortressAI.Web"
 RUN dotnet build "FortressAI.Web.csproj" -c Release -o /app/build
 
 FROM build AS publish
