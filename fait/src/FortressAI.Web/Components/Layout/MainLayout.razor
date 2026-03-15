@@ -195,7 +195,8 @@ else
             var authState = await AuthStateProvider.GetAuthenticationStateAsync();
             if (authState.User.Identity?.IsAuthenticated == true)
             {
-                var email = authState.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+                var email = authState.User.FindFirst("email")?.Value
+                           ?? authState.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
                 if (!string.IsNullOrEmpty(email))
                 {
                     await using var db = await ContextFactory.CreateDbContextAsync();
