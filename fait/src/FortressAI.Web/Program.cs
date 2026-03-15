@@ -248,7 +248,7 @@ app.UseStaticFiles();
 
 // Health endpoint (must be before other middleware)
 app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }))
-    .AllowAnonymous();
+    .AllowAnonymous().DisableAntiforgery();
 
 // FIP mode: redirect unauthenticated users to FIP portal for login
 // LoginPath = /auth/redirect-to-login when FIP__LoginUrl is set
@@ -260,7 +260,7 @@ app.MapGet("/auth/redirect-to-login", (HttpContext ctx, IConfiguration config) =
         ?? "https://fait.dev.fortressam.ai/auth/fait-session";
     var redirectUrl = $"{fipUrl}/auth/firm-callback?returnUrl={Uri.EscapeDataString(faitCallbackUrl)}";
     return Results.Redirect(redirectUrl);
-}).AllowAnonymous();
+}).AllowAnonymous().DisableAntiforgery();
 
 // FAIT session endpoint — user arrives here from FIP after successful Entra authentication
 // The shared .FortressAI.Session cookie is already set by FIP — just validate and redirect to app
@@ -273,7 +273,7 @@ app.MapGet("/auth/fait-session", async ctx =>
         return;
     }
     ctx.Response.Redirect("/");
-}).AllowAnonymous();
+}).AllowAnonymous().DisableAntiforgery();
 
 // FIRM auth callback — after user logs into FAIT, redirect back to FIRM
 // Only redirects to *.fortressam.ai domains for safety
@@ -294,7 +294,7 @@ app.MapGet("/auth/firm-callback", (HttpContext ctx, IConfiguration config) =>
         ctx.Response.Redirect("/");
     }
     return Task.CompletedTask;
-}).AllowAnonymous();
+}).AllowAnonymous().DisableAntiforgery();
 
 if (!app.Environment.IsDevelopment())
 {
@@ -302,9 +302,9 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-app.UseAntiforgery();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseAntiforgery();
 
 // Microsoft OAuth callback endpoint
 // Registered under both paths: /auth/microsoft-callback (legacy) and /auth/ms-callback (matches ECS MicrosoftGraph__RedirectUri)
@@ -376,8 +376,8 @@ Func<HttpContext, IDbContextFactory<AppDbContext>, IHttpClientFactory, IConfigur
     }
 };
 
-app.MapGet("/auth/microsoft-callback", msCallbackHandler).AllowAnonymous();
-app.MapGet("/auth/ms-callback", msCallbackHandler).AllowAnonymous();
+app.MapGet("/auth/microsoft-callback", msCallbackHandler).AllowAnonymous().DisableAntiforgery();
+app.MapGet("/auth/ms-callback", msCallbackHandler).AllowAnonymous().DisableAntiforgery();
 
 // API endpoint for Lambda to get user access token
 app.MapGet("/api/tokens/{userId}", async (HttpContext context, string userId, IDbContextFactory<AppDbContext> dbFactory, IHttpClientFactory httpFactory, IConfiguration config) =>
