@@ -1,0 +1,379 @@
+@using FipShared.Models
+@namespace FipShared.Components
+
+<div class="fip-navbar">
+    <!-- Left: Hamburger + Shield Logo + Module Name -->
+    <div class="fip-navbar__left">
+        <button class="fip-navbar__icon-btn" @onclick="OnMenuClick" aria-label="Open menu">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <rect y="3" width="20" height="2" rx="1" fill="currentColor"/>
+                <rect y="9" width="20" height="2" rx="1" fill="currentColor"/>
+                <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
+            </svg>
+        </button>
+
+        <div class="fip-navbar__brand">
+            <!-- Shield Logo -->
+            <svg class="fip-navbar__shield" width="28" height="32" viewBox="0 0 28 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M14 1L2 6V16C2 22.627 7.373 29.254 14 31C20.627 29.254 26 22.627 26 16V6L14 1Z" fill="#1a2332" stroke="#d4af37" stroke-width="1.5"/>
+                <path d="M14 7L8 10V16C8 19.314 10.686 22.627 14 23.5C17.314 22.627 20 19.314 20 16V10L14 7Z" fill="#d4af37" opacity="0.85"/>
+            </svg>
+
+            <span class="fip-navbar__module-name">@ActiveModule.ShortName()</span>
+        </div>
+
+        @if (LeftActions is not null)
+        {
+            <div class="fip-navbar__left-actions">
+                @LeftActions
+            </div>
+        }
+    </div>
+
+    <!-- Right: Waffle Menu + Avatar Dropdown -->
+    <div class="fip-navbar__right">
+        <!-- Waffle / App Switcher -->
+        <div class="fip-navbar__waffle-wrapper">
+            <button class="fip-navbar__icon-btn" @onclick="ToggleWaffle" aria-label="Switch app" aria-expanded="@_waffleOpen">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <rect x="1" y="1" width="5" height="5" rx="1" fill="currentColor"/>
+                    <rect x="8" y="1" width="5" height="5" rx="1" fill="currentColor"/>
+                    <rect x="15" y="1" width="5" height="5" rx="1" fill="currentColor"/>
+                    <rect x="1" y="8" width="5" height="5" rx="1" fill="currentColor"/>
+                    <rect x="8" y="8" width="5" height="5" rx="1" fill="currentColor"/>
+                    <rect x="15" y="8" width="5" height="5" rx="1" fill="currentColor"/>
+                    <rect x="1" y="15" width="5" height="5" rx="1" fill="currentColor"/>
+                    <rect x="8" y="15" width="5" height="5" rx="1" fill="currentColor"/>
+                    <rect x="15" y="15" width="5" height="5" rx="1" fill="currentColor"/>
+                </svg>
+            </button>
+
+            @if (_waffleOpen)
+            {
+                <div class="fip-waffle-menu" role="menu" aria-label="FIP applications">
+                    @foreach (var module in Enum.GetValues<FipModule>())
+                    {
+                        var isActive = module == ActiveModule;
+                        <a class="fip-waffle-menu__item @(isActive ? "fip-waffle-menu__item--active" : "")"
+                           href="@module.Url()"
+                           role="menuitem"
+                           aria-current="@(isActive ? "true" : null)">
+                            <span class="fip-waffle-menu__icon">
+                                @if (isActive)
+                                {
+                                    <span class="fip-waffle-menu__gold-dot" aria-hidden="true"></span>
+                                }
+                            </span>
+                            <span class="fip-waffle-menu__label">@module.ShortName()</span>
+                            <span class="fip-waffle-menu__sublabel">@module.FullName()</span>
+                        </a>
+                    }
+                </div>
+            }
+        </div>
+
+        <!-- Avatar / User Dropdown -->
+        <div class="fip-navbar__avatar-wrapper">
+            <button class="fip-navbar__avatar" @onclick="ToggleAvatar" aria-label="User menu" aria-expanded="@_avatarOpen">
+                <span>@(string.IsNullOrWhiteSpace(UserInitial) ? "?" : UserInitial.Substring(0, 1).ToUpperInvariant())</span>
+            </button>
+
+            @if (_avatarOpen)
+            {
+                <div class="fip-avatar-menu" role="menu" aria-label="User options">
+                    <div class="fip-avatar-menu__header">
+                        <div class="fip-avatar-menu__name">@UserName</div>
+                        <div class="fip-avatar-menu__email">@UserEmail</div>
+                    </div>
+                    <hr class="fip-avatar-menu__divider" />
+                    <button class="fip-avatar-menu__item fip-avatar-menu__item--danger"
+                            role="menuitem"
+                            @onclick="HandleSignOut">
+                        Sign out
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@if (_waffleOpen || _avatarOpen)
+{
+    <div class="fip-navbar__backdrop" @onclick="CloseAll" aria-hidden="true"></div>
+}
+
+<style>
+    .fip-navbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 48px;
+        padding: 0 12px;
+        background: var(--color-primary, #1a2332);
+        color: #ffffff;
+        position: relative;
+        z-index: 1000;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    .fip-navbar__left,
+    .fip-navbar__right {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .fip-navbar__brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: 4px;
+    }
+
+    .fip-navbar__shield {
+        flex-shrink: 0;
+    }
+
+    .fip-navbar__module-name {
+        font-family: 'Inter', system-ui, sans-serif;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        color: #ffffff;
+        white-space: nowrap;
+    }
+
+    .fip-navbar__left-actions {
+        display: flex;
+        align-items: center;
+        margin-left: 8px;
+    }
+
+    .fip-navbar__icon-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border: none;
+        background: transparent;
+        color: rgba(255,255,255,0.85);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 150ms ease, color 150ms ease;
+        padding: 0;
+    }
+
+    .fip-navbar__icon-btn:hover {
+        background: rgba(255,255,255,0.1);
+        color: #ffffff;
+    }
+
+    .fip-navbar__avatar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: var(--color-accent, #d4af37);
+        color: var(--color-primary, #1a2332);
+        font-size: 13px;
+        font-weight: 700;
+        font-family: 'Inter', system-ui, sans-serif;
+        border: none;
+        cursor: pointer;
+        transition: opacity 150ms ease;
+        margin-left: 4px;
+    }
+
+    .fip-navbar__avatar:hover {
+        opacity: 0.85;
+    }
+
+    /* Waffle Menu */
+    .fip-navbar__waffle-wrapper,
+    .fip-navbar__avatar-wrapper {
+        position: relative;
+    }
+
+    .fip-waffle-menu {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        background: #ffffff;
+        border: 1px solid #E2E8F0;
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        padding: 8px;
+        min-width: 220px;
+        z-index: 1100;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .fip-waffle-menu__item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        text-decoration: none;
+        color: #0F172A;
+        transition: background 150ms ease;
+        position: relative;
+    }
+
+    .fip-waffle-menu__item:hover {
+        background: #F8FAFC;
+    }
+
+    .fip-waffle-menu__item--active {
+        background: rgba(201, 168, 76, 0.1);
+    }
+
+    .fip-waffle-menu__icon {
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .fip-waffle-menu__gold-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #C9A84C;
+        display: block;
+    }
+
+    .fip-waffle-menu__label {
+        font-size: 13px;
+        font-weight: 600;
+        font-family: 'Inter', system-ui, sans-serif;
+        color: #0F172A;
+        min-width: 52px;
+    }
+
+    .fip-waffle-menu__sublabel {
+        font-size: 11px;
+        color: #6b7280;
+        font-family: 'Inter', system-ui, sans-serif;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Avatar Menu */
+    .fip-avatar-menu {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        background: #ffffff;
+        border: 1px solid #E2E8F0;
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        min-width: 200px;
+        z-index: 1100;
+        overflow: hidden;
+    }
+
+    .fip-avatar-menu__header {
+        padding: 12px 14px;
+    }
+
+    .fip-avatar-menu__name {
+        font-size: 13px;
+        font-weight: 600;
+        color: #0F172A;
+        font-family: 'Inter', system-ui, sans-serif;
+    }
+
+    .fip-avatar-menu__email {
+        font-size: 11px;
+        color: #6b7280;
+        font-family: 'Inter', system-ui, sans-serif;
+        margin-top: 2px;
+        word-break: break-all;
+    }
+
+    .fip-avatar-menu__divider {
+        border: none;
+        border-top: 1px solid #E2E8F0;
+        margin: 0;
+    }
+
+    .fip-avatar-menu__item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 10px 14px;
+        font-size: 13px;
+        font-family: 'Inter', system-ui, sans-serif;
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        transition: background 150ms ease;
+        color: #0F172A;
+    }
+
+    .fip-avatar-menu__item:hover {
+        background: #F8FAFC;
+    }
+
+    .fip-avatar-menu__item--danger {
+        color: #dc2626;
+    }
+
+    .fip-avatar-menu__item--danger:hover {
+        background: rgba(239, 68, 68, 0.06);
+    }
+
+    /* Backdrop */
+    .fip-navbar__backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1050;
+        background: transparent;
+    }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public FipModule ActiveModule { get; set; }
+    [Parameter] public string UserInitial { get; set; } = string.Empty;
+    [Parameter] public string UserName { get; set; } = string.Empty;
+    [Parameter] public string UserEmail { get; set; } = string.Empty;
+    [Parameter] public EventCallback OnMenuClick { get; set; }
+    [Parameter] public EventCallback OnSignOut { get; set; }
+    [Parameter] public RenderFragment? LeftActions { get; set; }
+
+    private bool _waffleOpen;
+    private bool _avatarOpen;
+
+    private void ToggleWaffle()
+    {
+        _waffleOpen = !_waffleOpen;
+        if (_waffleOpen) _avatarOpen = false;
+    }
+
+    private void ToggleAvatar()
+    {
+        _avatarOpen = !_avatarOpen;
+        if (_avatarOpen) _waffleOpen = false;
+    }
+
+    private void CloseAll()
+    {
+        _waffleOpen = false;
+        _avatarOpen = false;
+    }
+
+    private async Task HandleSignOut()
+    {
+        _avatarOpen = false;
+        await OnSignOut.InvokeAsync();
+    }
+}
