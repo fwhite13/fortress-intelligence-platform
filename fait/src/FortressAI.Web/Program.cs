@@ -247,7 +247,8 @@ var app = builder.Build();
 app.UseStaticFiles();
 
 // Health endpoint (must be before other middleware)
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "fred", timestamp = DateTime.UtcNow }))
+    .AllowAnonymous();
 
 // FIP mode: redirect unauthenticated users to FIP portal for login
 // LoginPath = /auth/redirect-to-login when FIP__LoginUrl is set
@@ -375,8 +376,8 @@ Func<HttpContext, IDbContextFactory<AppDbContext>, IHttpClientFactory, IConfigur
     }
 };
 
-app.MapGet("/auth/microsoft-callback", msCallbackHandler);
-app.MapGet("/auth/ms-callback", msCallbackHandler);
+app.MapGet("/auth/microsoft-callback", msCallbackHandler).AllowAnonymous();
+app.MapGet("/auth/ms-callback", msCallbackHandler).AllowAnonymous();
 
 // API endpoint for Lambda to get user access token
 app.MapGet("/api/tokens/{userId}", async (HttpContext context, string userId, IDbContextFactory<AppDbContext> dbFactory, IHttpClientFactory httpFactory, IConfiguration config) =>
