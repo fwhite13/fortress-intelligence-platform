@@ -1,236 +1,58 @@
 .fip-navbar {
-    position: relative;
-    z-index: 1300;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 48px;
-    padding: 0 12px;
-    background: var(--color-primary);
-    color: var(--color-surface);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    height: 56px;
+    padding: 0 16px;
+    background: var(--color-navy, #0f172a);
+    color: rgba(248, 250, 252, 0.9);
+    width: 100%;
 }
 
-.fip-navbar__left,
-.fip-navbar__right {
+.fip-navbar__left {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
 }
 
 .fip-navbar__brand {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-left: 4px;
+    gap: 10px;
 }
 
 .fip-navbar__shield {
-    flex-shrink: 0;
+    color: var(--color-navy, #0f172a);
 }
 
 .fip-navbar__module-name {
-    font-family: 'Inter', system-ui, sans-serif;
-    font-size: 15px;
+    font-size: 1.125rem;
     font-weight: 600;
-    letter-spacing: 0.06em;
-    color: var(--color-surface);
-    white-space: nowrap;
+    color: var(--color-gold, #d4af37);
+    letter-spacing: 0.02em;
 }
 
-.fip-navbar__left-actions {
+.fip-navbar__right {
     display: flex;
     align-items: center;
-    margin-left: 8px;
-}
-
-.fip-navbar__icon-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border: none;
-    background: transparent;
-    color: rgba(255,255,255,0.85);
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background 150ms ease, color 150ms ease;
-    padding: 0;
-}
-
-.fip-navbar__icon-btn:hover {
-    background: rgba(255,255,255,0.1);
-    color: var(--color-surface);
+    gap: 8px;
 }
 
 .fip-navbar__avatar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--color-accent);
-    color: var(--color-primary);
-    font-size: 13px;
-    font-weight: 700;
-    font-family: 'Inter', system-ui, sans-serif;
-    border: none;
     cursor: pointer;
-    transition: opacity 150ms ease;
-    margin-left: 4px;
 }
 
-.fip-navbar__avatar:hover {
-    opacity: 0.85;
-}
-
-/* Waffle Menu */
-.fip-navbar__waffle-wrapper,
-.fip-navbar__avatar-wrapper {
-    position: relative;
-}
-
-.fip-waffle-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-    padding: 8px;
-    min-width: 220px;
-    z-index: 1100;
+.fip-waffle-item {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    padding: 4px 0;
 }
 
-.fip-waffle-menu__item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 10px;
-    border-radius: 6px;
-    text-decoration: none;
-    color: var(--color-text-primary);
-    transition: background 150ms ease;
-    position: relative;
+::deep .fip-waffle-sublabel {
+    color: rgba(0, 0, 0, 0.6);
 }
 
-.fip-waffle-menu__item:hover {
-    background: var(--color-bg-page);
-}
-
-.fip-waffle-menu__item--active {
-    background: rgba(201, 168, 76, 0.1);
-}
-
-.fip-waffle-menu__icon {
-    width: 20px;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.fip-waffle-menu__gold-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--color-gold-hover);
-    display: block;
-}
-
-.fip-waffle-menu__label {
-    font-size: 13px;
-    font-weight: 600;
-    font-family: 'Inter', system-ui, sans-serif;
-    color: var(--color-text-primary);
-    min-width: 52px;
-}
-
-.fip-waffle-menu__sublabel {
-    font-size: 11px;
-    color: var(--color-text-secondary);
-    font-family: 'Inter', system-ui, sans-serif;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* Avatar Menu */
-.fip-avatar-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+.fip-avatar-header {
+    padding: 12px 16px;
     min-width: 200px;
-    z-index: 1100;
-    overflow: hidden;
-}
-
-.fip-avatar-menu__header {
-    padding: 12px 14px;
-}
-
-.fip-avatar-menu__name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--color-text-primary);
-    font-family: 'Inter', system-ui, sans-serif;
-}
-
-.fip-avatar-menu__email {
-    font-size: 11px;
-    color: var(--color-text-secondary);
-    font-family: 'Inter', system-ui, sans-serif;
-    margin-top: 2px;
-    word-break: break-all;
-}
-
-.fip-avatar-menu__divider {
-    border: none;
-    border-top: 1px solid var(--color-border);
-    margin: 0;
-}
-
-.fip-avatar-menu__item {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 10px 14px;
-    font-size: 13px;
-    font-family: 'Inter', system-ui, sans-serif;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    transition: background 150ms ease;
-    color: var(--color-text-primary);
-}
-
-.fip-avatar-menu__item:hover {
-    background: var(--color-bg-page);
-}
-
-.fip-avatar-menu__item--danger {
-    color: var(--color-danger);
-}
-
-.fip-avatar-menu__item--danger:hover {
-    background: rgba(239, 68, 68, 0.06);
-}
-
-/* Backdrop */
-.fip-navbar__backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 1050;
-    background: transparent;
 }

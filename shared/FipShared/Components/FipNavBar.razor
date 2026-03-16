@@ -2,146 +2,73 @@
 @namespace FipShared.Components
 
 <div class="fip-navbar">
-    <!-- Left: Hamburger + Shield Logo + Module Name -->
     <div class="fip-navbar__left">
-        <button class="fip-navbar__icon-btn" @onclick="OnMenuClick" aria-label="Open menu">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <rect y="3" width="20" height="2" rx="1" fill="currentColor"/>
-                <rect y="9" width="20" height="2" rx="1" fill="currentColor"/>
-                <rect y="15" width="20" height="2" rx="1" fill="currentColor"/>
-            </svg>
-        </button>
+        <MudIconButton Icon="@Icons.Material.Filled.Menu"
+                       Color="Color.Inherit"
+                       OnClick="OnMenuClick"
+                       aria-label="Open menu" />
 
         <div class="fip-navbar__brand">
-            <!-- Shield Logo -->
             <svg class="fip-navbar__shield" width="28" height="32" viewBox="0 0 28 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <path d="M14 1L2 6V16C2 22.627 7.373 29.254 14 31C20.627 29.254 26 22.627 26 16V6L14 1Z" fill="currentColor" stroke="var(--color-gold)" stroke-width="1.5"/>
                 <path d="M14 7L8 10V16C8 19.314 10.686 22.627 14 23.5C17.314 22.627 20 19.314 20 16V10L14 7Z" fill="var(--color-gold)" opacity="0.85"/>
             </svg>
-
             <span class="fip-navbar__module-name">@ActiveModule.ShortName()</span>
         </div>
-
-        @if (LeftActions is not null)
-        {
-            <div class="fip-navbar__left-actions">
-                @LeftActions
-            </div>
-        }
     </div>
 
-    <!-- Right: Waffle Menu + Avatar Dropdown -->
     <div class="fip-navbar__right">
-        <!-- Waffle / App Switcher -->
-        <div class="fip-navbar__waffle-wrapper">
-            <button class="fip-navbar__icon-btn" @onclick="ToggleWaffle" aria-label="Switch app" aria-expanded="@_waffleOpen">
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                    <rect x="1" y="1" width="5" height="5" rx="1" fill="currentColor"/>
-                    <rect x="8" y="1" width="5" height="5" rx="1" fill="currentColor"/>
-                    <rect x="15" y="1" width="5" height="5" rx="1" fill="currentColor"/>
-                    <rect x="1" y="8" width="5" height="5" rx="1" fill="currentColor"/>
-                    <rect x="8" y="8" width="5" height="5" rx="1" fill="currentColor"/>
-                    <rect x="15" y="8" width="5" height="5" rx="1" fill="currentColor"/>
-                    <rect x="1" y="15" width="5" height="5" rx="1" fill="currentColor"/>
-                    <rect x="8" y="15" width="5" height="5" rx="1" fill="currentColor"/>
-                    <rect x="15" y="15" width="5" height="5" rx="1" fill="currentColor"/>
-                </svg>
-            </button>
-
-            @if (_waffleOpen)
+        <MudMenu Icon="@Icons.Material.Filled.Apps"
+                 Color="Color.Inherit"
+                 AnchorOrigin="Origin.BottomRight"
+                 TransformOrigin="Origin.TopRight"
+                 aria-label="Switch app">
+            @foreach (var module in Enum.GetValues<FipModule>())
             {
-                <div class="fip-waffle-menu" role="menu" aria-label="FIP applications">
-                    @foreach (var module in Enum.GetValues<FipModule>())
-                    {
-                        var isActive = module == ActiveModule;
-                        @if (IsVisible(module))
-                        {
-                            <a class="fip-waffle-menu__item @(isActive ? "fip-waffle-menu__item--active" : "")"
-                               href="@module.Url()"
-                               role="menuitem"
-                               aria-current="@(isActive ? "true" : null)">
-                                <span class="fip-waffle-menu__icon">
-                                    @if (isActive)
-                                    {
-                                        <span class="fip-waffle-menu__gold-dot" aria-hidden="true"></span>
-                                    }
-                                </span>
-                                <span class="fip-waffle-menu__label">@module.ShortName()</span>
-                                <span class="fip-waffle-menu__sublabel">@module.FullName()</span>
-                            </a>
-                        }
-                    }
-                </div>
+                if (IsVisible(module))
+                {
+                    <MudMenuItem Href="@module.Url()">
+                        <div class="fip-waffle-item">
+                            <MudText Typo="Typo.body1">@module.ShortName()</MudText>
+                            <MudText Typo="Typo.caption" Class="fip-waffle-sublabel">@module.FullName()</MudText>
+                        </div>
+                    </MudMenuItem>
+                }
             }
-        </div>
+        </MudMenu>
 
-        <!-- Avatar / User Dropdown -->
-        <div class="fip-navbar__avatar-wrapper">
-            <button class="fip-navbar__avatar" @onclick="ToggleAvatar" aria-label="User menu" aria-expanded="@_avatarOpen">
-                <span>@(string.IsNullOrWhiteSpace(UserInitial) ? "?" : UserInitial.Substring(0, 1).ToUpperInvariant())</span>
-            </button>
-
-            @if (_avatarOpen)
-            {
-                <div class="fip-avatar-menu" role="menu" aria-label="User options">
-                    <div class="fip-avatar-menu__header">
-                        <div class="fip-avatar-menu__name">@UserName</div>
-                        <div class="fip-avatar-menu__email">@UserEmail</div>
-                    </div>
-                    <hr class="fip-avatar-menu__divider" />
-                    <button class="fip-avatar-menu__item fip-avatar-menu__item--danger"
-                            role="menuitem"
-                            @onclick="HandleSignOut">
-                        Sign out
-                    </button>
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+            <ActivatorContent>
+                <MudAvatar Color="Color.Primary" Size="Size.Small" Class="fip-navbar__avatar">
+                    @(string.IsNullOrWhiteSpace(UserInitial) ? "?" : UserInitial.Substring(0, 1).ToUpperInvariant())
+                </MudAvatar>
+            </ActivatorContent>
+            <ChildContent>
+                <div class="fip-avatar-header">
+                    <MudText Typo="Typo.body1">@UserName</MudText>
+                    <MudText Typo="Typo.caption">@UserEmail</MudText>
                 </div>
-            }
-        </div>
+                <MudDivider />
+                <MudMenuItem OnClick="HandleSignOut">Sign out</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
     </div>
 </div>
-
-@if (_waffleOpen || _avatarOpen)
-{
-    <div class="fip-navbar__backdrop" @onclick="CloseAll" aria-hidden="true"></div>
-}
 
 @code {
     [Parameter, EditorRequired] public FipModule ActiveModule { get; set; }
     [Parameter] public string UserInitial { get; set; } = string.Empty;
     [Parameter] public string UserName { get; set; } = string.Empty;
     [Parameter] public string UserEmail { get; set; } = string.Empty;
+    [Parameter] public IEnumerable<FipModule>? HiddenModules { get; set; }
     [Parameter] public EventCallback OnMenuClick { get; set; }
     [Parameter] public EventCallback OnSignOut { get; set; }
-    [Parameter] public RenderFragment? LeftActions { get; set; }
-    [Parameter] public HashSet<FipModule>? HiddenModules { get; set; }
 
     private bool IsVisible(FipModule module) =>
         module == ActiveModule || HiddenModules == null || !HiddenModules.Contains(module);
 
-    private bool _waffleOpen;
-    private bool _avatarOpen;
-
-    private void ToggleWaffle()
-    {
-        _waffleOpen = !_waffleOpen;
-        if (_waffleOpen) _avatarOpen = false;
-    }
-
-    private void ToggleAvatar()
-    {
-        _avatarOpen = !_avatarOpen;
-        if (_avatarOpen) _waffleOpen = false;
-    }
-
-    private void CloseAll()
-    {
-        _waffleOpen = false;
-        _avatarOpen = false;
-    }
-
     private async Task HandleSignOut()
     {
-        _avatarOpen = false;
         await OnSignOut.InvokeAsync();
     }
 }
