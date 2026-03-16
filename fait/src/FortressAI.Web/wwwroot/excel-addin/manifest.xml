@@ -77,7 +77,7 @@
       </bt:Images>
       <bt:Urls>
         <bt:Url id="Commands.Url" DefaultValue="https://fait.dev.fortressam.ai/excel-addin/commands.html"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://fait.dev.fortressam.ai/excel-addin/taskpane.html"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://fait.dev.fortressam.ai/excel-addin/"/>
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://fait.dev.fortressam.ai"/>
       </bt:Urls>
       <bt:ShortStrings>
