@@ -11,12 +11,15 @@
 <MudSnackbarProvider />
 
 <MudLayout>
-    <FipNavBar ActiveModule="FipModule.FIRM"
-               UserInitial="@_userInitial"
-               UserName="@_userName"
-               UserEmail="@_userEmail"
-               OnMenuClick="ToggleDrawer"
-               OnSignOut="@(() => _nav.NavigateTo("/auth/logout", forceLoad: true))" />
+    <MudAppBar Elevation="0" Style="padding: 0; background: transparent; box-shadow: none; border: none;">
+        <FipNavBar ActiveModule="FipModule.FIRM"
+                   UserInitial="@_userInitial"
+                   UserName="@_userName"
+                   UserEmail="@_userEmail"
+                   OnMenuClick="ToggleDrawer"
+                   OnSignOut="@(() => _nav.NavigateTo("/auth/logout", forceLoad: true))"
+                   Style="width: 100%;" />
+    </MudAppBar>
 
     <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
         <div style="display: flex; flex-direction: column; height: 100%;">

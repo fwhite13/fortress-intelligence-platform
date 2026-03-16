@@ -18,13 +18,16 @@
 <MudSnackbarProvider />
 
 <MudLayout>
-        <FipNavBar ActiveModule="FipModule.FAIT"
-                 UserInitial="@(Session.CurrentUser?.DisplayName?.FirstOrDefault().ToString().ToUpperInvariant() ?? Session.CurrentUser?.Email?.FirstOrDefault().ToString().ToUpperInvariant() ?? "F")"
-                 UserName="@(Session.CurrentUser?.DisplayName ?? "User")"
-                 UserEmail="@(Session.CurrentUser?.Email ?? "")"
-                 HiddenModules="@_hiddenModules"
-                 OnMenuClick="ToggleDrawer"
-                 OnSignOut="Logout" />
+        <MudAppBar Elevation="0" Style="padding: 0; background: transparent; box-shadow: none; border: none;">
+            <FipNavBar ActiveModule="FipModule.FAIT"
+                     UserInitial="@(Session.CurrentUser?.DisplayName?.FirstOrDefault().ToString().ToUpperInvariant() ?? Session.CurrentUser?.Email?.FirstOrDefault().ToString().ToUpperInvariant() ?? "F")"
+                     UserName="@(Session.CurrentUser?.DisplayName ?? "User")"
+                     UserEmail="@(Session.CurrentUser?.Email ?? "")"
+                     HiddenModules="@_hiddenModules"
+                     OnMenuClick="ToggleDrawer"
+                     OnSignOut="Logout"
+                     Style="width: 100%;" />
+        </MudAppBar>
 
         <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
             <div style="display: flex; flex-direction: column; height: 100%;">
