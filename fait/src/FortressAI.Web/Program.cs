@@ -170,10 +170,10 @@ builder.Services.AddAuthentication(options =>
 })
 .AddScheme<AppKeyAuthOptions, AppKeyAuthHandler>("AppKeyAuth", options =>
 {
-    options.ApiKey  = builder.Configuration["AppKeys__Haven"];
+    options.ApiKey  = builder.Configuration["AppKeys:Haven"];
     options.ApiKeys = new List<string>
     {
-        builder.Configuration["AppKeys__ExcelAddin"] ?? ""
+        builder.Configuration["AppKeys:ExcelAddin"] ?? ""
     };
 });
 
