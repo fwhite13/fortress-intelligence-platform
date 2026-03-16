@@ -25,8 +25,7 @@
                      UserEmail="@(Session.CurrentUser?.Email ?? "")"
                      HiddenModules="@_hiddenModules"
                      OnMenuClick="ToggleDrawer"
-                     OnSignOut="Logout"
-                     Style="width: 100%;" />
+                     OnSignOut="Logout" />
         </MudAppBar>
 
         <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">

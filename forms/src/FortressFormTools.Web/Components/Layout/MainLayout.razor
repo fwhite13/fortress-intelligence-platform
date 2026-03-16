@@ -17,8 +17,7 @@
                    UserName="@_userName"
                    UserEmail="@_userEmail"
                    OnMenuClick="ToggleDrawer"
-                   OnSignOut="@(() => _nav.NavigateTo("/auth/logout", forceLoad: true))"
-                   Style="width: 100%;" />
+                   OnSignOut="@(() => _nav.NavigateTo("/auth/logout", forceLoad: true))" />
     </MudAppBar>
 
     <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
