@@ -52,7 +52,12 @@ const WriteSuggestionsDialog: React.FC<WriteSuggestionsDialogProps> = ({
       await applySuggestions(suggestions);
       onAcceptAll();
     } catch (e) {
-      setError('Failed to apply suggestions — check the active sheet and try again.');
+      const msg = e instanceof Error ? e.message : '';
+      if (msg.includes('dimension') || msg.includes('mismatch') || msg.includes('does not fit')) {
+        setError('Range mismatch — the selected cells don\'t fit the suggested data. Try accepting each suggestion individually.');
+      } else {
+        setError('Failed to apply — check that the correct sheet is active and try again.');
+      }
     } finally {
       setApplying(false);
     }
@@ -76,7 +81,13 @@ const WriteSuggestionsDialog: React.FC<WriteSuggestionsDialogProps> = ({
         onAcceptAll(); // done reviewing — close dialog
       }
     } catch (e) {
-      setError(`Failed to apply cell ${s.address} — skipping.`);
+      const msg = e instanceof Error ? e.message : '';
+      const cellAddr = s.address;
+      if (msg.includes('dimension') || msg.includes('mismatch')) {
+        setError(`Cell ${cellAddr}: range doesn't fit — skipping.`);
+      } else {
+        setError(`Failed to apply cell ${cellAddr} — skipping.`);
+      }
       if (currentIndex < suggestions.length - 1) {
         setCurrentIndex((i) => i + 1);
       }

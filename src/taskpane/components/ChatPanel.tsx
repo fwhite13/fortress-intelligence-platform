@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useChat } from '../hooks/useChat';
 import { useWriteBack } from '../hooks/useWriteBack';
 import { getSelectedRange } from '../services/excelReader';
+import { writeRangeData, WriteRangeError } from '../services/excelWriter';
 import { formatContext } from '../services/contextFormatter';
 import { searchKb, sendChat } from '../services/faitApi';
 import { scanRangeForIssues } from '../services/errorScanner';
@@ -725,8 +726,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         </div>
       )}
 
-      {/* Context indicator bar */}
-      {includeSelection && selectionInfo && (
+      {/* Context indicator bar — always show when include toggle is on */}
+      {includeSelection && (
         <div
           style={{
             padding: '4px 8px',
@@ -736,10 +737,10 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           }}
         >
           <ContextIndicator
-            address={selectionInfo.address}
-            rows={selectionInfo.rows}
-            cols={selectionInfo.cols}
-            visible={includeSelection}
+            address={selectionInfo?.address ?? null}
+            rows={selectionInfo?.rows ?? 0}
+            cols={selectionInfo?.cols ?? 0}
+            visible={true}
           />
         </div>
       )}

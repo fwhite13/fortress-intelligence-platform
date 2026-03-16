@@ -45,3 +45,27 @@ export async function getFullWorksheet(): Promise<SpreadsheetContext> {
     };
   });
 }
+
+/**
+ * Returns whether the user currently has a non-empty selection.
+ * Safe to call at any time — returns false if Excel is unavailable.
+ */
+export async function getSelectionState(): Promise<{
+  hasSelection: boolean;
+  address: string | null;
+  rows: number;
+  cols: number;
+}> {
+  try {
+    const ctx = await getSelectedRange();
+    // A "no selection" in Excel often returns a single cell — treat 1×1 as valid
+    return {
+      hasSelection: ctx.rows > 0 && ctx.cols > 0,
+      address: ctx.address,
+      rows: ctx.rows,
+      cols: ctx.cols,
+    };
+  } catch {
+    return { hasSelection: false, address: null, rows: 0, cols: 0 };
+  }
+}

@@ -8,8 +8,33 @@ interface ContextIndicatorProps {
 }
 
 const ContextIndicator: React.FC<ContextIndicatorProps> = ({ address, rows, cols, visible }) => {
-  if (!visible || !address) return null;
+  if (!visible) return null;
 
+  // No selection — show an informational empty state instead of nothing
+  if (!address) {
+    return (
+      <div
+        title="No range selected — click a cell or range in Excel to include context"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '2px 8px',
+          background: '#1e2b3a',
+          border: '1px solid #2e3f54',
+          borderRadius: '12px',
+          fontSize: '11px',
+          color: '#556677',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span>📊</span>
+        <span>No selection — click a cell to include context</span>
+      </div>
+    );
+  }
+
+  // Has selection — existing display
   return (
     <div
       title={`Spreadsheet context will be included: ${address}`}
