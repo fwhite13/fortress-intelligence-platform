@@ -17,6 +17,7 @@ import type { PivotSpec } from '../services/pivotBuilder';
 import type { CfSpec } from '../services/cfBuilder';
 import type { SortFilterSpec } from '../services/sortFilterBuilder';
 import type { KbResult } from './KbResultPanel';
+import type { ParsedTable } from '../services/suggestionParser';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import ContextIndicator from './ContextIndicator';
@@ -92,6 +93,14 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [sortFilterPrompt, setSortFilterPrompt] = useState('sort by the first numeric column descending');
   const [showSortFilterInput, setShowSortFilterInput] = useState(false);
   const sortFilterInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Sprint 6: Write Table state ───────────────────────────────────────────
+  const [pendingTableData, setPendingTableData] = useState<ParsedTable | null>(null);
+  const [writeTableTarget, setWriteTableTarget] = useState('');
+  const [writeTableLoading, setWriteTableLoading] = useState(false);
+  const [writeTableError, setWriteTableError] = useState<string | null>(null);
+  const [writeTableSuccess, setWriteTableSuccess] = useState<string | null>(null);
+  const writeTableInputRef = useRef<HTMLInputElement>(null);
 
   // ── Sprint 5: Chat input text (lifted state for slash commands) ───────────
   const [inputText, setInputText] = useState('');
@@ -402,6 +411,60 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     setMessages([]);
   };
 
+  // ── Sprint 6: Write Table ─────────────────────────────────────────────────
+  const handleWriteTableRequest = (tableData: ParsedTable) => {
+    setPendingTableData(tableData);
+    setWriteTableTarget(selectionInfo?.address?.split(':')[0] ?? 'A1');
+    setWriteTableError(null);
+    setWriteTableSuccess(null);
+    setTimeout(() => writeTableInputRef.current?.focus(), 50);
+  };
+
+  const handleWriteTableConfirm = async () => {
+    if (!pendingTableData) return;
+    const target = writeTableTarget.trim() || 'A1';
+
+    setWriteTableLoading(true);
+    setWriteTableError(null);
+    setWriteTableSuccess(null);
+
+    const data: (string | number | boolean | null)[][] = [
+      pendingTableData.headers,
+      ...pendingTableData.rows,
+    ];
+
+    try {
+      const result = await writeRangeData(target, data);
+      setWriteTableSuccess(`Written to ${result.address} (${result.rows} rows × ${result.cols} cols)`);
+      setPendingTableData(null);
+    } catch (e) {
+      if (e instanceof WriteRangeError) {
+        if (e.code === 'EMPTY_DATA') {
+          setWriteTableError('No data to write.');
+        } else if (e.code === 'DIMENSION_MISMATCH') {
+          setWriteTableError('Rows have inconsistent column counts — cannot write.');
+        } else {
+          setWriteTableError('Write failed — check the target cell address and try again.');
+        }
+      } else {
+        setWriteTableError('Write failed — check the target cell address and try again.');
+      }
+    } finally {
+      setWriteTableLoading(false);
+    }
+  };
+
+  const handleWriteTableCancel = () => {
+    setPendingTableData(null);
+    setWriteTableError(null);
+    setWriteTableSuccess(null);
+  };
+
+  const handleWriteTableKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') handleWriteTableConfirm();
+    if (e.key === 'Escape') handleWriteTableCancel();
+  };
+
   // Model display label
   const modelLabel = model === 'haiku' ? 'Haiku' : 'Sonnet';
 
@@ -678,6 +741,102 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         </div>
       )}
 
+      {/* ── Sprint 6: Write Table target cell prompt ── */}
+      {pendingTableData && (
+        <div
+          style={{
+            padding: '8px 10px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#111d2b',
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ fontSize: '11px', color: '#8899aa', marginBottom: '4px' }}>
+            Writing {pendingTableData.rows.length + 1} rows ×{' '}
+            {pendingTableData.headers.length} cols — top-left cell:
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <input
+              ref={writeTableInputRef}
+              value={writeTableTarget}
+              onChange={(e) => setWriteTableTarget(e.target.value)}
+              onKeyDown={handleWriteTableKeyDown}
+              placeholder="e.g. A1 or Sheet1!B3"
+              style={{
+                flex: 1,
+                background: '#1a2332',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#e8edf3',
+                padding: '5px 8px',
+                fontSize: '12px',
+                outline: 'none',
+              }}
+            />
+            <button
+              onClick={handleWriteTableConfirm}
+              disabled={writeTableLoading}
+              style={{
+                background: '#d4af37',
+                color: '#0f1720',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '5px 10px',
+                fontSize: '12px',
+                fontWeight: '600',
+                cursor: 'pointer',
+              }}
+            >
+              {writeTableLoading ? '…' : 'Write'}
+            </button>
+            <button
+              onClick={handleWriteTableCancel}
+              style={{
+                background: '#2e3f54',
+                color: '#e8edf3',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '5px 8px',
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          {writeTableError && (
+            <div style={{ marginTop: '4px', fontSize: '11px', color: '#e07070' }}>
+              {writeTableError}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Sprint 6: Write Table success toast ── */}
+      {writeTableSuccess && !pendingTableData && (
+        <div
+          style={{
+            padding: '6px 10px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#0f2a1a',
+            color: '#6fcf97',
+            fontSize: '11px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <span>✓ {writeTableSuccess}</span>
+          <button
+            onClick={() => setWriteTableSuccess(null)}
+            style={{ background: 'none', border: 'none', color: '#8899aa', cursor: 'pointer', fontSize: '12px' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* FORGE search bar */}
       {showForgeSearch && (
         <div
@@ -802,7 +961,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         )}
 
         {/* Message list */}
-        <MessageList messages={messages} loading={loading} />
+        <MessageList
+          messages={messages}
+          loading={loading}
+          onWriteTable={handleWriteTableRequest}
+        />
       </div>
 
       {/* Input area — positioned relatively so slash picker can anchor to it */}

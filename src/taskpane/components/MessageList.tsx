@@ -1,14 +1,16 @@
 import React, { useEffect, useRef } from 'react';
 import type { Message } from '../hooks/useChat';
+import type { ParsedTable } from '../services/suggestionParser';
 import MessageBubble from './MessageBubble';
 import LoadingDots from './LoadingDots';
 
 interface MessageListProps {
   messages: Message[];
   loading: boolean;
+  onWriteTable?: (tableData: ParsedTable) => void;
 }
 
-const MessageList: React.FC<MessageListProps> = ({ messages, loading }) => {
+const MessageList: React.FC<MessageListProps> = ({ messages, loading, onWriteTable }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when messages or loading state changes
@@ -52,7 +54,11 @@ const MessageList: React.FC<MessageListProps> = ({ messages, loading }) => {
       }}
     >
       {messages.map((msg, idx) => (
-        <MessageBubble key={idx} message={msg} />
+        <MessageBubble
+          key={idx}
+          message={msg}
+          onWriteTable={msg.role === 'assistant' ? onWriteTable : undefined}
+        />
       ))}
       {loading && <LoadingDots />}
       <div ref={bottomRef} />

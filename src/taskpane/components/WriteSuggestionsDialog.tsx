@@ -83,7 +83,7 @@ const WriteSuggestionsDialog: React.FC<WriteSuggestionsDialogProps> = ({
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
       const cellAddr = s.address;
-      if (msg.includes('dimension') || msg.includes('mismatch')) {
+      if (msg.includes('dimension') || msg.includes('mismatch') || msg.includes('does not fit')) {
         setError(`Cell ${cellAddr}: range doesn't fit — skipping.`);
       } else {
         setError(`Failed to apply cell ${cellAddr} — skipping.`);

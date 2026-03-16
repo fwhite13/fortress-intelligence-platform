@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { sendChat, sendChatStreaming } from '../services/faitApi';
-import { parseSuggestions } from '../services/suggestionParser';
+import { parseSuggestions, type ParsedTable } from '../services/suggestionParser';
 import type { CellSuggestion } from '../components/WriteSuggestionsDialog';
 
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
   streaming?: boolean;
+  tableData?: ParsedTable | null;
 }
 
 export interface UseChatReturn {
@@ -102,13 +103,18 @@ export function useChat(
         rawText = answer;
       }
 
-      // Parse suggestions out of the raw response (new fields chartSpec/pivotSpec/cfSpec are unused here)
-      const { displayText, suggestions } = parseSuggestions(rawText);
+      // Parse suggestions/tableData out of the raw response
+      const { displayText, suggestions, tableData } = parseSuggestions(rawText);
 
       // Finalise the assistant message (remove streaming flag)
       setMessages((prev) => {
         const next = [...prev];
-        next[assistantIndex] = { role: 'assistant', content: displayText, streaming: false };
+        next[assistantIndex] = {
+          role: 'assistant',
+          content: displayText,
+          streaming: false,
+          tableData: tableData ?? null,
+        };
         return next;
       });
 

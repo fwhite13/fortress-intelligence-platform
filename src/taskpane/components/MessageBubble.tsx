@@ -1,9 +1,11 @@
 import React from 'react';
 import type { Message } from '../hooks/useChat';
+import type { ParsedTable } from '../services/suggestionParser';
 
 interface MessageBubbleProps {
   message: Message;
   streaming?: boolean;
+  onWriteTable?: (tableData: ParsedTable) => void;
 }
 
 /** Very lightweight markdown → HTML: handles **bold**, `code`, and newlines. No full parser needed for MVP. */
@@ -17,9 +19,104 @@ function simpleMarkdown(text: string): string {
     .replace(/\n/g, '<br />');
 }
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, streaming }) => {
+const TableRenderer: React.FC<{
+  tableData: ParsedTable;
+  onWrite: () => void;
+}> = ({ tableData, onWrite }) => {
+  return (
+    <div style={{ marginTop: '6px', overflowX: 'auto', maxWidth: '100%' }}>
+      <table
+        style={{
+          borderCollapse: 'collapse',
+          fontSize: '11px',
+          width: '100%',
+          color: '#e8edf3',
+        }}
+      >
+        <thead>
+          <tr>
+            {tableData.headers.map((h, i) => (
+              <th
+                key={i}
+                style={{
+                  padding: '4px 8px',
+                  background: '#1a3a5f',
+                  borderBottom: '1px solid #2e5080',
+                  textAlign: 'left',
+                  fontWeight: '600',
+                  whiteSpace: 'nowrap',
+                  color: '#d4af37',
+                }}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {tableData.rows.map((row, ri) => (
+            <tr
+              key={ri}
+              style={{
+                background: ri % 2 === 0 ? '#131f2e' : '#0f1720',
+              }}
+            >
+              {row.map((cell, ci) => (
+                <td
+                  key={ci}
+                  style={{
+                    padding: '3px 8px',
+                    borderBottom: '1px solid #1a2840',
+                    whiteSpace: 'nowrap',
+                    textAlign: typeof cell === 'number' ? 'right' : 'left',
+                  }}
+                >
+                  {cell === null || cell === undefined ? '' : String(cell)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Write to Sheet button */}
+      <button
+        onClick={onWrite}
+        title="Write this table to the active worksheet"
+        style={{
+          marginTop: '6px',
+          padding: '4px 10px',
+          background: '#1e3a5f',
+          border: '1px solid #2e5080',
+          borderRadius: '4px',
+          color: '#d4af37',
+          fontSize: '11px',
+          fontWeight: '600',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+        }}
+      >
+        <span>↓</span>
+        <span>Write to Sheet</span>
+      </button>
+    </div>
+  );
+};
+
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, streaming, onWriteTable }) => {
   const isUser = message.role === 'user';
   const isStreaming = streaming ?? message.streaming ?? false;
+  const hasTable = !isUser && !isStreaming && message.tableData != null;
+
+  // For assistant messages with a parsed table, strip raw markdown table text from display
+  let displayContent = message.content;
+  if (hasTable && message.tableData) {
+    displayContent = message.content
+      .replace(/\|.+\|\s*\n\|[-| :]+\|\s*\n(?:\|.+\|\s*\n?)+/g, '')
+      .trim();
+  }
 
   return (
     <div
@@ -60,10 +157,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, streaming }) => 
           position: 'relative',
         }}
       >
-        {/* Rendering assistant markdown — cell values are already sanitized before being sent */}
-        <span
-          dangerouslySetInnerHTML={{ __html: simpleMarkdown(message.content) }}
-        />
+        {/* Text content — suppress when table present and no remaining text */}
+        {(displayContent.length > 0 || isStreaming) && (
+          <span dangerouslySetInnerHTML={{ __html: simpleMarkdown(displayContent) }} />
+        )}
+
+        {/* Streaming cursor */}
         {isStreaming && (
           <span
             aria-hidden="true"
@@ -76,6 +175,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, streaming }) => 
               verticalAlign: 'text-bottom',
               animation: 'blink 1s step-end infinite',
             }}
+          />
+        )}
+
+        {/* Rendered table + Write button */}
+        {hasTable && message.tableData && onWriteTable && (
+          <TableRenderer
+            tableData={message.tableData}
+            onWrite={() => onWriteTable(message.tableData!)}
           />
         )}
       </div>
