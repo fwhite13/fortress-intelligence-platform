@@ -10,7 +10,7 @@ phases:
     commands:
       - echo Build started on `date`
       - echo Building Docker image...
-      - docker build -f fait/Dockerfile -t fred-chat:$IMAGE_TAG fait/
+      - docker build -f fait/Dockerfile -t fred-chat:$IMAGE_TAG .
       - docker tag fred-chat:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fred-chat:kb-latest
       - docker tag fred-chat:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fred-chat:$IMAGE_TAG
   post_build:
