@@ -77,7 +77,7 @@
         <bt:Image id="Icon.80x80" DefaultValue="https://fait.dev.fortressam.ai/excel-addin/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/public/commands.html"/>
+        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html"/>
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/src/taskpane/index.html"/>
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://fait.dev.fortressam.ai"/>
       </bt:Urls>
