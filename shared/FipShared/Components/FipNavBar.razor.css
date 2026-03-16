@@ -7,6 +7,11 @@
     background: var(--color-navy, #0f172a);
     color: rgba(248, 250, 252, 0.9);
     width: 100%;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1300;
 }
 
 .fip-navbar__left {
