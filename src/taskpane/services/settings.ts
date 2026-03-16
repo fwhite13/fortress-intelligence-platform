@@ -1,8 +1,19 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-declare const OfficeRuntime: any;
-/* eslint-enable @typescript-eslint/no-explicit-any */
+// localStorage shim — used when OfficeRuntime is not available (plain browser / dev)
+const localStorageShim = {
+  getItem: (key: string): Promise<string | null> =>
+    Promise.resolve(localStorage.getItem(key)),
+  setItem: (key: string, value: string): Promise<void> =>
+    Promise.resolve(void localStorage.setItem(key, value)),
+  removeItem: (key: string): Promise<void> =>
+    Promise.resolve(void localStorage.removeItem(key)),
+};
 
-const storage = OfficeRuntime.storage;
+// Safe accessor — checks at call time, not module load time.
+// In Excel Online, OfficeRuntime.storage IS backed by localStorage anyway,
+// so the shim is semantically equivalent for the web scenario.
+function getStorage() {
+  return (window as any).OfficeRuntime?.storage ?? localStorageShim;
+}
 
 export interface FaitSettings {
   apiKey: string | null;
@@ -12,6 +23,7 @@ export interface FaitSettings {
 }
 
 export async function loadSettings(): Promise<FaitSettings> {
+  const storage = getStorage();
   const [apiKey, model, projectId, corpToggle, teamToggle] = await Promise.all([
     storage.getItem('fait_api_key').catch(() => null),
     storage.getItem('fait_model').catch(() => null),
@@ -31,6 +43,7 @@ export async function loadSettings(): Promise<FaitSettings> {
 }
 
 export async function saveSetting(key: string, value: string): Promise<void> {
+  const storage = getStorage();
   await storage.setItem(key, value).catch(() => {
     throw new Error('STORAGE_UNAVAILABLE');
   });

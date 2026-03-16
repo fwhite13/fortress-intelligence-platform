@@ -1,19 +1,30 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import mkcert from 'vite-plugin-mkcert';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    mkcert(), // generates locally-trusted HTTPS cert for dev
+  ],
+
   server: {
-    https: true,
     port: 3000,
+    host: 'localhost',
+    https: true, // required — Office Add-ins reject http://
   },
+
   build: {
     outDir: 'dist',
+    target: 'es2017', // raised from es2015; WebView2/WKWebView/Edge all support es2017
     rollupOptions: {
       input: {
-        taskpane: 'src/taskpane/index.html',
+        taskpane: 'src/taskpane/index.html', // HTML entry point — outputs to dist/src/taskpane/index.html
+        commands: 'public/commands.html',    // ribbon commands page — outputs to dist/commands.html
       },
+      // No output.format override — defaults to ES modules, which is correct
     },
   },
-  base: '/excel-addin/',
+
+  base: '/excel-addin/', // must match deployment URL prefix and manifest URLs
 });
