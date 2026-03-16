@@ -10,6 +10,7 @@
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> ContextFactory
 @inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider AuthStateProvider
 @inject IDialogService DialogService
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment HostEnv
 @implements IDisposable
 
 <MudThemeProvider Theme="_theme" />
@@ -24,7 +25,8 @@
                      UserEmail="@(Session.CurrentUser?.Email ?? "")"
                      HiddenModules="@_hiddenModules"
                      OnMenuClick="ToggleDrawer"
-                     OnSignOut="Logout" />
+                     OnSignOut="Logout"
+                     IsDev="@HostEnv.IsDevelopment()" />
 
         <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
             <div style="display: flex; flex-direction: column; height: 100%;">

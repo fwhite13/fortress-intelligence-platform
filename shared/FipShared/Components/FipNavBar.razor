@@ -56,6 +56,11 @@
     </div>
 </div>
 
+@if (IsDev)
+{
+    <div class="fip-dev-banner">⚠ Development Environment</div>
+}
+
 @code {
     [Parameter, EditorRequired] public FipModule ActiveModule { get; set; }
     [Parameter] public string UserInitial { get; set; } = string.Empty;
@@ -64,6 +69,7 @@
     [Parameter] public IEnumerable<FipModule>? HiddenModules { get; set; }
     [Parameter] public EventCallback OnMenuClick { get; set; }
     [Parameter] public EventCallback OnSignOut { get; set; }
+    [Parameter] public bool IsDev { get; set; } = false;
 
     private bool IsVisible(FipModule module) =>
         module == ActiveModule || HiddenModules == null || !HiddenModules.Contains(module);

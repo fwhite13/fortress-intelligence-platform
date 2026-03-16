@@ -2,6 +2,7 @@
 @using FipShared.Components
 @using FipShared.Models
 @inject NavigationManager _nav
+@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment HostEnv
 @using FortressIntelligenceRM.Web.Theme
 @using System.Security.Claims
 
@@ -16,7 +17,8 @@
                    UserName="@_userName"
                    UserEmail="@_userEmail"
                    OnMenuClick="ToggleDrawer"
-                   OnSignOut="@(() => _nav.NavigateTo("/auth/logout", forceLoad: true))" />
+                   OnSignOut="@(() => _nav.NavigateTo("/auth/logout", forceLoad: true))"
+                   IsDev="@HostEnv.IsDevelopment()" />
 
     <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
         <div style="display: flex; flex-direction: column; height: 100%;">
