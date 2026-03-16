@@ -167,11 +167,22 @@ builder.Services.AddAuthentication(options =>
     options.Cookie.SameSite = SameSiteMode.Lax;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.Cookie.IsEssential = true;
+})
+.AddScheme<AppKeyAuthOptions, AppKeyAuthHandler>("AppKeyAuth", options =>
+{
+    options.ApiKey  = builder.Configuration["AppKeys__Haven"];
+    options.ApiKeys = new List<string>
+    {
+        builder.Configuration["AppKeys__ExcelAddin"] ?? ""
+    };
 });
 
 builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = options.DefaultPolicy;
+    options.AddPolicy("AppKeyOnly", policy =>
+        policy.AddAuthenticationSchemes("AppKeyAuth")
+              .RequireAuthenticatedUser());
 });
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCascadingAuthenticationState();
