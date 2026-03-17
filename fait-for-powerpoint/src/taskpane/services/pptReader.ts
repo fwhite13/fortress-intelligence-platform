@@ -38,7 +38,8 @@ export async function getSlideContext(): Promise<SlideContext> {
     allSlides.load(['items/id', 'items/shapes/items/id',
                     'items/shapes/items/name',
                     'items/shapes/items/textFrame/textRange/text',
-                    'items/shapes/items/type']);
+                    'items/shapes/items/type',
+                    'items/notes/textFrame/textRange/text']);
     await ctx.sync();
 
     const slideItems = allSlides.items as any[];

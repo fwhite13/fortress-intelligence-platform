@@ -35,7 +35,7 @@ export async function applyTextToShape(shapeId: string, text: string): Promise<v
     target.load('textFrame/hasText');
     await ctx.sync();
 
-    if (!target.textFrame) {
+    if (!target.textFrame.hasText) {
       throw new PptWriteError(`Shape ${shapeId} has no text frame`, 'NO_TEXT_FRAME');
     }
 
