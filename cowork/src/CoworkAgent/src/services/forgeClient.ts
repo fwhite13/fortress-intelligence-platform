@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import { z } from 'zod/v4';
+import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { getRedis } from './taskStore.js';
 
 const FORGE_API_URL = process.env.FORGE_API_URL ?? 'https://fait.dev.fortressam.ai';
@@ -98,35 +100,31 @@ export async function queryForgeContextCached(
 }
 
 /**
- * Factory function that builds a SearchForge tool per-task.
+ * Factory function that builds a SearchForge SDK MCP server per-task.
  * userId and userEmail are captured in closure — NOT module-level.
+ * Returns a McpSdkServerConfigWithInstance suitable for Options.mcpServers.
  */
-export function buildSearchForgeTool(userId: string, userEmail: string) {
-  return {
-    name: 'SearchForge',
-    description: `Search the FORGE knowledge base for relevant documents, notes, and context.
+export function buildSearchForgeMcpServer(userId: string, userEmail: string) {
+  return createSdkMcpServer({
+    name: 'forge',
+    tools: [
+      {
+        name: 'SearchForge',
+        description: `Search the FORGE knowledge base for relevant documents, notes, and context.
 Use this when you need information about Fortress AM's funds, strategies, clients, policies, or past work.
 The FORGE knowledge base contains internal documents and analysis — prefer it over guessing from general knowledge.
 Returns the top matching results with source attribution.`,
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        query: {
-          type: 'string',
-          description: 'The search query — describe what information you need in natural language',
+        inputSchema: {
+          query: z.string().describe('The search query — describe what information you need in natural language'),
+          topK: z.number().optional().describe('Number of results to return (1-8, default 5)'),
         },
-        topK: {
-          type: 'number',
-          description: 'Number of results to return (1-8, default 5)',
+        handler: async (args: Record<string, unknown>) => {
+          const results = await searchForge(String(args['query'] ?? ''), userId, userEmail, {
+            topK: Math.min(Number(args['topK'] ?? 5), 8),
+          });
+          return { content: [{ type: 'text' as const, text: formatForgeToolResult(results) }] };
         },
       },
-      required: ['query'],
-    },
-    async execute(input: { query: string; topK?: number }) {
-      const results = await searchForge(input.query, userId, userEmail, {
-        topK: Math.min(input.topK ?? 5, 8),
-      });
-      return formatForgeToolResult(results);
-    },
-  };
+    ],
+  });
 }

@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { SDKAssistantMessage, SDKResultSuccess, PreToolUseHookInput, HookInput } from '@anthropic-ai/claude-agent-sdk';
 import { auditLog } from './audit.js';
-import { buildSearchForgeTool, queryForgeContextCached } from '../services/forgeClient.js';
+import { buildSearchForgeMcpServer, queryForgeContextCached } from '../services/forgeClient.js';
 import { waitForApproval, getRedis } from '../services/taskStore.js';
 import { uploadOutputToS3 } from '../services/fileService.js';
 
@@ -122,8 +122,8 @@ export async function* runTask(params: TaskParams): AsyncGenerator<SseChunk> {
       : '',
   ].filter(Boolean).join('\n\n');
 
-  // Build SearchForge tool per-task (closure captures userId and userEmail)
-  const forgeTool = buildSearchForgeTool(params.userId, params.userEmail);
+  // Build SearchForge MCP server per-task (closure captures userId and userEmail)
+  const forgeMcpServer = buildSearchForgeMcpServer(params.userId, params.userEmail);
 
   // Closure to emit chunks from within the preToolCall hook
   const pendingChunks: SseChunk[] = [];
@@ -134,8 +134,8 @@ export async function* runTask(params: TaskParams): AsyncGenerator<SseChunk> {
       prompt: params.prompt,
       options: {
         cwd: params.workingDir,
-        allowedTools: ['Read', 'Write', 'Edit', 'Bash'],
-        tools: [forgeTool],
+        allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'mcp__forge__SearchForge'],
+        mcpServers: { forge: forgeMcpServer },
         maxBudgetUsd: params.maxBudgetUsd,
         maxTurns:     params.maxTurns,
         systemPrompt,
