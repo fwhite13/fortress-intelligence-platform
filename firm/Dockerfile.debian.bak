@@ -1,0 +1,53 @@
+# Debian-based Dockerfile for local WSL2 builds (MCR-free)
+# Build stage - uses Debian + dotnet-install script
+FROM debian:bookworm-slim AS build
+WORKDIR /src
+
+# Install .NET 8 SDK dependencies + curl
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libicu72 \
+    libssl3 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install .NET 8 SDK via dotnet-install.sh (avoids MCR CDN issue on WSL2)
+ENV DOTNET_ROOT=/usr/local/lib/dotnet
+ENV PATH="$PATH:/usr/local/lib/dotnet"
+RUN curl -sSL https://dot.net/v1/dotnet-install.sh \
+    | bash -s -- --channel 8.0 --install-dir /usr/local/lib/dotnet \
+    && dotnet --info
+
+# Restore and build
+COPY ["src/FortressIntelligenceRM.Web/FortressIntelligenceRM.Web.csproj", "FortressIntelligenceRM.Web/"]
+RUN dotnet restore "FortressIntelligenceRM.Web/FortressIntelligenceRM.Web.csproj"
+COPY src/ .
+WORKDIR "/src/FortressIntelligenceRM.Web"
+RUN dotnet publish "FortressIntelligenceRM.Web.csproj" -c Release -o /app/publish /p:UseAppHost=false
+
+# Runtime stage - uses Debian + ASP.NET Core runtime only
+FROM debian:bookworm-slim AS final
+WORKDIR /app
+EXPOSE 8080
+
+# Install .NET 8 ASP.NET Core Runtime dependencies + curl for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libicu72 \
+    libssl3 \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install .NET 8 ASP.NET Core Runtime via dotnet-install.sh
+ENV DOTNET_ROOT=/usr/local/lib/dotnet
+ENV PATH="$PATH:/usr/local/lib/dotnet"
+RUN curl -sSL https://dot.net/v1/dotnet-install.sh \
+    | bash -s -- --channel 8.0 --runtime aspnetcore --install-dir /usr/local/lib/dotnet \
+    && dotnet --info
+
+ENV ASPNETCORE_URLS=http://+:8080
+RUN mkdir -p /app/keys && chmod 755 /app/keys
+COPY --from=build /app/publish .
+ENTRYPOINT ["dotnet", "FortressIntelligenceRM.Web.dll"]

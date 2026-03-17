@@ -14,6 +14,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<FirmMeetingParticipant> Participants => Set<FirmMeetingParticipant>();
     public DbSet<FirmMeetingTranscript> Transcripts => Set<FirmMeetingTranscript>();
     public DbSet<FirmMeetingSummary> Summaries => Set<FirmMeetingSummary>();
+    public DbSet<FirmMeetingKbPush> FirmMeetingKbPushes => Set<FirmMeetingKbPush>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -130,6 +131,24 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
                 .HasForeignKey<FirmMeetingSummary>(e => e.MeetingId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("fk_fms_meeting");
+        });
+
+        modelBuilder.Entity<FirmMeetingKbPush>(entity =>
+        {
+            entity.ToTable("firm_meeting_kb_pushes");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.MeetingId).HasColumnName("meeting_id");
+            entity.Property(e => e.DocType).HasColumnName("doc_type").HasMaxLength(20).IsRequired();
+            entity.Property(e => e.KbScope).HasColumnName("kb_scope").HasMaxLength(50).IsRequired();
+            entity.Property(e => e.KbId).HasColumnName("kb_id").HasMaxLength(100);
+            entity.Property(e => e.PushedAt).HasColumnName("pushed_at").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.Meeting)
+                .WithMany()
+                .HasForeignKey(e => e.MeetingId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_fmkp_meeting");
+            entity.HasIndex(e => new { e.MeetingId, e.DocType, e.KbScope }).HasDatabaseName("idx_fmkp_lookup");
         });
     }
 }

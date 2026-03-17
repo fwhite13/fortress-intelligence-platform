@@ -340,9 +340,10 @@ public class MeetingsApiController : ControllerBase
             return NotFound(new { error = "Audio not available" });
 
         var url = await _s3Service.GeneratePresignedUrlAsync(meeting.AudioS3Key, expiryHours: 1);
-        return Ok(new { url });
+        return Redirect(url);
     }
 
+    [Obsolete("Use /push-to-kb instead")]
     [HttpPost("/api/meetings/{id}/push-transcript-to-kb")]
     [Authorize]
     public async Task<IActionResult> PushTranscriptToKb(long id)
@@ -368,6 +369,7 @@ public class MeetingsApiController : ControllerBase
         }
     }
 
+    [Obsolete("Use /push-to-kb instead")]
     [HttpPost("/api/meetings/{id}/push-summary-to-kb")]
     [Authorize]
     public async Task<IActionResult> PushSummaryToKb(long id)
@@ -392,6 +394,59 @@ public class MeetingsApiController : ControllerBase
             return StatusCode(500, new { error = "Failed to push summary to KB" });
         }
     }
+
+    [HttpPost("/api/meetings/{id}/push-to-kb")]
+    [Authorize]
+    public async Task<IActionResult> PushToKb(long id, [FromBody] PushToKbRequest request)
+    {
+        var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
+        if (error != null) return error;
+
+        if (meeting!.Status != MeetingStatus.Complete)
+            return BadRequest(new { error = "Meeting is not complete" });
+
+        if (string.IsNullOrEmpty(user!.FaitUserId))
+            return BadRequest(new { error = "FAIT user ID not linked. Please sign out and back in." });
+
+        if (string.IsNullOrEmpty(request.DocType) || !new[] { "transcript", "summary" }.Contains(request.DocType))
+            return BadRequest(new { error = "docType must be 'transcript' or 'summary'" });
+
+        if (request.KbScopes == null || !request.KbScopes.Any())
+            return BadRequest(new { error = "At least one KB scope required" });
+
+        var validScopes = request.KbScopes.Where(s => new[] { "personal", "team" }.Contains(s)).ToList();
+        if (!validScopes.Any())
+            return BadRequest(new { error = "Valid scopes: 'personal', 'team'" });
+
+        try
+        {
+            await _firmKbService.PushDocumentAsync(id, user.Id, user.FaitUserId, request.DocType, validScopes);
+            return Ok(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Failed to push {DocType} to KB for meeting {Id}", request.DocType, id);
+            return StatusCode(500, new { error = "Failed to push to KB" });
+        }
+    }
+
+    [HttpGet("/api/meetings/{id}/kb-status")]
+    [Authorize]
+    public async Task<IActionResult> GetKbStatus(long id)
+    {
+        var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
+        if (error != null) return error;
+
+        var transcriptScopes = await _firmKbService.GetPushedScopesAsync(id, "transcript");
+        var summaryScopes    = await _firmKbService.GetPushedScopesAsync(id, "summary");
+
+        return Ok(new {
+            transcript = transcriptScopes,
+            summary    = summaryScopes,
+        });
+    }
+
+    public record PushToKbRequest(string DocType, List<string> KbScopes);
 
     private async Task<(FirmMeeting? meeting, IActionResult? error)> ResolveOwnedMeeting(long id)
     {

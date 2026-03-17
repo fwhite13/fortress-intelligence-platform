@@ -111,7 +111,17 @@ public class DatabaseInitializationService : IHostedService
                     follow_ups_json JSON NULL,
                     model_used VARCHAR(100) NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                ("firm_meeting_kb_pushes", @"CREATE TABLE IF NOT EXISTS firm_meeting_kb_pushes (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    meeting_id BIGINT NOT NULL,
+    doc_type VARCHAR(20) NOT NULL,
+    kb_scope VARCHAR(50) NOT NULL,
+    kb_id VARCHAR(100) NULL,
+    pushed_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_push (meeting_id, doc_type, kb_scope),
+    INDEX idx_meeting (meeting_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
             };
 
             foreach (var (name, sql) in extraTables)

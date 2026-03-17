@@ -5,7 +5,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ISnackbar Snackbar
 @inject ILogger<MeetingDetail> Logger
-@inject IHttpClientFactory HttpClientFactory
+@inject HttpClient Http
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
@@ -86,21 +86,72 @@
                             Audio
                         </MudButton>
                     }
-                    <MudButton Variant="Variant.Outlined"
-                               StartIcon="@(_meeting.TranscriptKbPushed ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.LibraryAdd)"
-                               Style="@(_meeting.TranscriptKbPushed ? "border-color: #4caf50; color: #4caf50;" : "border-color: var(--color-border); color: var(--color-text-secondary);")"
-                               OnClick="PushTranscriptToKb"
-                               Disabled="_pushingTranscript || _meeting.TranscriptKbPushed">
-                        @(_meeting.TranscriptKbPushed ? "In My KB" : "Add Transcript to KB")
-                    </MudButton>
-                    <MudButton Variant="Variant.Outlined"
-                               StartIcon="@(_meeting.SummaryKbPushed ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.LibraryAdd)"
-                               Style="@(_meeting.SummaryKbPushed ? "border-color: #4caf50; color: #4caf50;" : "border-color: var(--color-border); color: var(--color-text-secondary);")"
-                               OnClick="PushSummaryToKb"
-                               Disabled="_pushingSummary || _meeting.SummaryKbPushed">
-                        @(_meeting.SummaryKbPushed ? "In My KB" : "Add Summary to KB")
-                    </MudButton>
                 </MudStack>
+                <div style="margin-top: 8px; border: 1px solid var(--color-border); border-radius: 8px; padding: 16px; background: var(--color-bg-page);">
+                    <div style="font-size: 13px; font-weight: 600; color: var(--color-text-secondary); margin-bottom: 12px;">Add to FORGE Knowledge Base</div>
+
+                    @* Transcript row *@
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;">
+                        <span style="font-size: 13px; color: var(--color-text-primary); min-width: 80px;">Transcript</span>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;">
+                                <input type="checkbox" @bind="_transcriptSelectPersonal"
+                                       disabled="@(_transcriptPushedTo.Contains("personal") || _pushingTranscript)" />
+                                My KB
+                                @if (_transcriptPushedTo.Contains("personal"))
+                                {
+                                    <span style="color: #4caf50; font-size: 11px; margin-left: 2px;">✓</span>
+                                }
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;">
+                                <input type="checkbox" @bind="_transcriptSelectTeam"
+                                       disabled="@(_transcriptPushedTo.Contains("team") || _pushingTranscript)" />
+                                Team KB
+                                @if (_transcriptPushedTo.Contains("team"))
+                                {
+                                    <span style="color: #4caf50; font-size: 11px; margin-left: 2px;">✓</span>
+                                }
+                            </label>
+                        </div>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                   Style="border-color: var(--color-border); color: var(--color-text-secondary);"
+                                   Disabled="@(!TranscriptHasSelection() || _pushingTranscript)"
+                                   OnClick="PushTranscript">
+                            @(_pushingTranscript ? "Adding…" : "Add")
+                        </MudButton>
+                    </div>
+
+                    @* Summary row *@
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <span style="font-size: 13px; color: var(--color-text-primary); min-width: 80px;">Summary</span>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;">
+                                <input type="checkbox" @bind="_summarySelectPersonal"
+                                       disabled="@(_summaryPushedTo.Contains("personal") || _pushingSummary)" />
+                                My KB
+                                @if (_summaryPushedTo.Contains("personal"))
+                                {
+                                    <span style="color: #4caf50; font-size: 11px; margin-left: 2px;">✓</span>
+                                }
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;">
+                                <input type="checkbox" @bind="_summarySelectTeam"
+                                       disabled="@(_summaryPushedTo.Contains("team") || _pushingSummary)" />
+                                Team KB
+                                @if (_summaryPushedTo.Contains("team"))
+                                {
+                                    <span style="color: #4caf50; font-size: 11px; margin-left: 2px;">✓</span>
+                                }
+                            </label>
+                        </div>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                   Style="border-color: var(--color-border); color: var(--color-text-secondary);"
+                                   Disabled="@(!SummaryHasSelection() || _pushingSummary)"
+                                   OnClick="PushSummary">
+                            @(_pushingSummary ? "Adding…" : "Add")
+                        </MudButton>
+                    </div>
+                </div>
             }
         </MudPaper>
 
@@ -231,6 +282,16 @@
     private bool _pushingTranscript = false;
     private bool _pushingSummary = false;
 
+    // KB push status (loaded from /kb-status on init)
+    private HashSet<string> _transcriptPushedTo = new();
+    private HashSet<string> _summaryPushedTo = new();
+
+    // KB selection state
+    private bool _transcriptSelectPersonal = true;
+    private bool _transcriptSelectTeam = false;
+    private bool _summarySelectPersonal = true;
+    private bool _summarySelectTeam = false;
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -262,6 +323,21 @@
             if (user == null) { Navigation.NavigateTo("/meetings"); return; }
 
             _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
+
+            // Load KB push status
+            if (_meeting != null && _meeting.Status == MeetingStatus.Complete)
+            {
+                try
+                {
+                    var kbStatusResp = await Http.GetFromJsonAsync<KbStatusResponse>($"/api/meetings/{Id}/kb-status");
+                    if (kbStatusResp != null)
+                    {
+                        _transcriptPushedTo = kbStatusResp.Transcript?.ToHashSet() ?? new();
+                        _summaryPushedTo    = kbStatusResp.Summary?.ToHashSet() ?? new();
+                    }
+                }
+                catch { /* Non-fatal */ }
+            }
         }
         catch (Exception ex)
         {
@@ -281,65 +357,71 @@
         Navigation.NavigateTo($"/api/meetings/{_meeting.Id}/audio", forceLoad: true);
     }
 
-    private async Task PushTranscriptToKb()
+    private bool TranscriptHasSelection() =>
+        (_transcriptSelectPersonal && !_transcriptPushedTo.Contains("personal")) ||
+        (_transcriptSelectTeam     && !_transcriptPushedTo.Contains("team"));
+
+    private bool SummaryHasSelection() =>
+        (_summarySelectPersonal && !_summaryPushedTo.Contains("personal")) ||
+        (_summarySelectTeam     && !_summaryPushedTo.Contains("team"));
+
+    private async Task PushTranscript()
     {
-        if (_meeting == null || _pushingTranscript) return;
+        if (_pushingTranscript || _meeting == null) return;
         _pushingTranscript = true;
         try
         {
-            var http = HttpClientFactory.CreateClient();
-            var resp = await http.PostAsync($"/api/meetings/{_meeting.Id}/push-transcript-to-kb", null);
+            var scopes = new List<string>();
+            if (_transcriptSelectPersonal && !_transcriptPushedTo.Contains("personal")) scopes.Add("personal");
+            if (_transcriptSelectTeam     && !_transcriptPushedTo.Contains("team"))     scopes.Add("team");
+            if (!scopes.Any()) return;
+
+            var resp = await Http.PostAsJsonAsync($"/api/meetings/{_meeting.Id}/push-to-kb",
+                new { docType = "transcript", kbScopes = scopes });
             if (resp.IsSuccessStatusCode)
             {
-                _meeting.TranscriptKbPushed = true;
-                Snackbar.Add("Transcript added to your KB!", Severity.Success);
+                foreach (var s in scopes) _transcriptPushedTo.Add(s);
+                Snackbar.Add($"Transcript added to {string.Join(" + ", scopes.Select(s => s == "personal" ? "My KB" : "Team KB"))}!", Severity.Success);
             }
             else
             {
                 var body = await resp.Content.ReadAsStringAsync();
-                Snackbar.Add($"Failed to push transcript: {body}", Severity.Error);
+                Snackbar.Add($"Failed: {body}", Severity.Error);
             }
         }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _pushingTranscript = false;
-            StateHasChanged();
-        }
+        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        finally { _pushingTranscript = false; StateHasChanged(); }
     }
 
-    private async Task PushSummaryToKb()
+    private async Task PushSummary()
     {
-        if (_meeting == null || _pushingSummary) return;
+        if (_pushingSummary || _meeting == null) return;
         _pushingSummary = true;
         try
         {
-            var http = HttpClientFactory.CreateClient();
-            var resp = await http.PostAsync($"/api/meetings/{_meeting.Id}/push-summary-to-kb", null);
+            var scopes = new List<string>();
+            if (_summarySelectPersonal && !_summaryPushedTo.Contains("personal")) scopes.Add("personal");
+            if (_summarySelectTeam     && !_summaryPushedTo.Contains("team"))     scopes.Add("team");
+            if (!scopes.Any()) return;
+
+            var resp = await Http.PostAsJsonAsync($"/api/meetings/{_meeting.Id}/push-to-kb",
+                new { docType = "summary", kbScopes = scopes });
             if (resp.IsSuccessStatusCode)
             {
-                _meeting.SummaryKbPushed = true;
-                Snackbar.Add("Summary added to your KB!", Severity.Success);
+                foreach (var s in scopes) _summaryPushedTo.Add(s);
+                Snackbar.Add($"Summary added to {string.Join(" + ", scopes.Select(s => s == "personal" ? "My KB" : "Team KB"))}!", Severity.Success);
             }
             else
             {
                 var body = await resp.Content.ReadAsStringAsync();
-                Snackbar.Add($"Failed to push summary: {body}", Severity.Error);
+                Snackbar.Add($"Failed: {body}", Severity.Error);
             }
         }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _pushingSummary = false;
-            StateHasChanged();
-        }
+        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        finally { _pushingSummary = false; StateHasChanged(); }
     }
+
+    private record KbStatusResponse(List<string>? Transcript, List<string>? Summary);
 
     private static string FormatDuration(int? seconds)
     {
