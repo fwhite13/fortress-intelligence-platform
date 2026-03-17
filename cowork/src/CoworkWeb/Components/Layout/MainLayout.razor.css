@@ -1,0 +1,4 @@
+/* MainLayout scoped styles — minimal, layout handled by global fip-tokens */
+:deep(.mud-main-content) {
+    padding: 0;
+}

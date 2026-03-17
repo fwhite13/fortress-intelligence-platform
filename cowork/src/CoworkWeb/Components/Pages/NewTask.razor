@@ -1,0 +1,108 @@
+@page "/tasks/new"
+@inject AgentApiClient AgentApi
+@inject NavigationManager Nav
+@inject CoworkSessionService Session
+
+<PageTitle>New Task — FAIT Cowork</PageTitle>
+
+<div style="max-width: 720px; margin: 0 auto; padding: 40px 16px;">
+
+    <h1 style="font-size: var(--text-2xl); font-weight: var(--font-semibold); color: var(--color-text-primary); margin-bottom: 8px;">
+        New Task
+    </h1>
+    <p style="color: var(--color-text-secondary); margin-bottom: 32px; font-size: var(--text-base);">
+        Describe what you need. Claude will plan and complete the task step by step.
+    </p>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 24px;">
+        @foreach (var hint in _hints)
+        {
+            <div style="padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface);">
+                <div style="font-weight: var(--font-medium); font-size: var(--text-sm); color: var(--color-text-primary);">@hint.Title</div>
+                <div style="font-size: var(--text-xs); color: var(--color-text-muted); margin-top: 2px;">@hint.Example</div>
+            </div>
+        }
+    </div>
+
+    <MudTextField @bind-Value="_prompt"
+                  Label="Describe your task"
+                  Placeholder="e.g. Create an HTML prototype of a fund performance dashboard with Q1 metrics and a chart placeholder."
+                  Lines="5"
+                  Variant="Variant.Outlined"
+                  Class="mb-3"
+                  FullWidth="true" />
+
+    <div style="margin-bottom: 24px;">
+        <InputFile id="file-upload" multiple OnChange="HandleFilesSelected" style="display:none;" />
+        <label for="file-upload" style="display:block; padding: 16px; border: 2px dashed var(--color-border); border-radius: var(--radius-md); text-align: center; cursor: pointer; font-size: var(--text-sm); color: var(--color-text-muted);">
+            @if (_files.Count == 0)
+            {
+                <span>Drop files here or click to upload</span>
+                <br />
+                <span style="font-size: var(--text-xs);">PDF, .docx, .xlsx, .txt, .png, .jpg — max 10MB each, up to 5 files</span>
+            }
+            else
+            {
+                @string.Join(", ", _files.Select(f => f.Name))
+            }
+        </label>
+    </div>
+
+    <MudButton Variant="Variant.Filled"
+               Color="Color.Warning"
+               Disabled="@(string.IsNullOrWhiteSpace(_prompt) || _submitting)"
+               OnClick="HandleSubmit"
+               FullWidth="false"
+               Style="background: var(--color-btn-gold-bg); color: var(--color-btn-gold-text); font-weight: var(--font-semibold); padding: 10px 28px;">
+        @(_submitting ? "Starting…" : "Start Task →")
+    </MudButton>
+
+    @if (_error is not null)
+    {
+        <div style="margin-top: 12px; color: var(--color-error); font-size: var(--text-sm);">@_error</div>
+    }
+</div>
+
+@code {
+    private string _prompt = string.Empty;
+    private List<IBrowserFile> _files = new();
+    private bool _submitting;
+    private string? _error;
+
+    private static readonly (string Title, string Example)[] _hints =
+    [
+        ("HTML Prototype",      "\"Build a fund dashboard page with charts\""),
+        ("Document from Notes", "\"Turn my scattered bullet points into a report\""),
+        ("Summarize Files",     "\"Summarize this PDF and pull key numbers\""),
+        ("Data Analysis",       "\"Analyze this spreadsheet for trends\""),
+    ];
+
+    private void HandleFilesSelected(InputFileChangeEventArgs e)
+    {
+        _files = e.GetMultipleFiles(5).ToList();
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(_prompt) || _submitting) return;
+        _submitting = true;
+        _error = null;
+
+        try
+        {
+            var fileStreams = _files.Select(f => (
+                Name: f.Name,
+                Data: f.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024),
+                ContentType: f.ContentType
+            ));
+
+            var taskId = await AgentApi.StartTaskAsync(_prompt, fileStreams);
+            Nav.NavigateTo($"/tasks/{taskId}");
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to start task: {ex.Message}";
+            _submitting = false;
+        }
+    }
+}

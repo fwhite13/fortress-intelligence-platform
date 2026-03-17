@@ -1,0 +1,190 @@
+@page "/tasks/{TaskId}"
+@inject AgentApiClient AgentApi
+@inject CoworkSessionService Session
+@implements IAsyncDisposable
+
+<PageTitle>Task — FAIT Cowork</PageTitle>
+
+<div style="max-width: 800px; margin: 0 auto; padding: 32px 16px; font-family: var(--font-primary);">
+
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:24px;">
+        <div style="width:10px;height:10px;border-radius:50%;background:@(_done ? "var(--color-success)" : "var(--color-gold)");"></div>
+        <span style="font-size:var(--text-sm);color:var(--color-text-secondary);">
+            @(_done ? "Completed" : "In progress…")
+        </span>
+    </div>
+
+    <div style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:20px;margin-bottom:24px;">
+        <h2 style="font-size:var(--text-lg);font-weight:var(--font-semibold);color:var(--color-text-primary);margin:0 0 16px 0;">
+            Task Progress
+        </h2>
+        @if (_steps.Count == 0 && !_done)
+        {
+            <div style="color:var(--color-text-muted);font-size:var(--text-sm);">Starting…</div>
+        }
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            @{int stepNum = 1;}
+            @foreach (var step in _steps)
+            {
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                    <span style="flex-shrink:0;width:20px;height:20px;border-radius:50%;background:var(--color-primary);color:#fff;font-size:11px;font-weight:var(--font-bold);display:flex;align-items:center;justify-content:center;">
+                        @(stepNum++)
+                    </span>
+                    <span style="font-size:var(--text-sm);color:var(--color-text-primary);line-height:1.5;">@step</span>
+                </div>
+            }
+        </div>
+        @if (!_done)
+        {
+            <div style="margin-top:12px;color:var(--color-text-muted);font-size:var(--text-sm);">
+                <span style="animation:pulse 1.5s infinite;">●</span> Claude is working…
+            </div>
+        }
+    </div>
+
+    @if (_outputText is not null || _outputHtmlBase64 is not null)
+    {
+        <div style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:20px;">
+            <h2 style="font-size:var(--text-lg);font-weight:var(--font-semibold);color:var(--color-text-primary);margin:0 0 16px 0;">
+                Output
+            </h2>
+
+            @if (_outputHtmlBase64 is not null)
+            {
+                <div style="margin-bottom:16px;">
+                    <div style="font-size:var(--text-sm);font-weight:var(--font-medium);color:var(--color-text-secondary);margin-bottom:6px;">HTML Preview</div>
+                    <iframe srcdoc="@_outputHtmlDecoded"
+                            sandbox="allow-scripts"
+                            style="width:100%;height:400px;border:1px solid var(--color-border);border-radius:var(--radius-md);"
+                            title="Task output preview">
+                    </iframe>
+                </div>
+            }
+
+            @if (_outputText is not null)
+            {
+                <div style="background:var(--color-bg-page);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:16px;margin-bottom:16px;">
+                    <pre style="white-space:pre-wrap;font-family:var(--font-primary);font-size:var(--text-sm);color:var(--color-text-primary);margin:0;line-height:1.6;">@_outputText</pre>
+                </div>
+            }
+
+            @foreach (var file in _outputFiles)
+            {
+                <div style="margin-bottom:8px;">
+                    <a href="@file.Url" download="@file.Name"
+                       style="color:var(--color-text-link);font-size:var(--text-sm);text-decoration:underline;">
+                        ⬇ @file.Name
+                    </a>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_error is not null)
+    {
+        <div style="padding:12px 16px;background:var(--color-error-bg);border:1px solid var(--color-error);border-radius:var(--radius-md);color:var(--color-error);font-size:var(--text-sm);">
+            ⚠ @_error
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string TaskId { get; set; } = string.Empty;
+
+    private List<string> _steps = new();
+    private bool _done;
+    private string? _outputText;
+    private string? _outputHtmlBase64;
+    private string? _outputHtmlDecoded => _outputHtmlBase64 is null ? null
+        : System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(_outputHtmlBase64));
+    private List<(string Name, string Url)> _outputFiles = new();
+    private string? _error;
+    private CancellationTokenSource _cts = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _ = ConsumeStreamAsync(_cts.Token);
+    }
+
+    private async Task ConsumeStreamAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var stream = await AgentApi.OpenStreamAsync(TaskId, ct);
+            using var reader = new System.IO.StreamReader(stream);
+
+            while (!reader.EndOfStream && !ct.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(ct);
+                if (line is null) break;
+
+                if (!line.StartsWith("data: ")) continue;
+                var json = line["data: ".Length..];
+
+                var chunk = System.Text.Json.JsonSerializer.Deserialize<SseChunk>(json);
+                if (chunk is null) continue;
+
+                await InvokeAsync(() =>
+                {
+                    ProcessChunk(chunk);
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            await InvokeAsync(() =>
+            {
+                _error = $"Stream error: {ex.Message}";
+                _done = true;
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void ProcessChunk(SseChunk chunk)
+    {
+        switch (chunk.Type)
+        {
+            case "step":
+                if (!string.IsNullOrWhiteSpace(chunk.Text))
+                    _steps.Add(chunk.Text);
+                break;
+
+            case "result":
+                _done = true;
+                _outputText = chunk.Text;
+                break;
+
+            case "html_output":
+                _done = true;
+                _outputHtmlBase64 = chunk.Base64;
+                break;
+
+            case "file_output":
+                if (chunk.FileName is not null && chunk.DownloadUrl is not null)
+                    _outputFiles.Add((chunk.FileName, chunk.DownloadUrl));
+                break;
+
+            case "error":
+                _done = true;
+                _error = chunk.Text ?? "Task failed";
+                break;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _cts.CancelAsync();
+        _cts.Dispose();
+    }
+
+    private record SseChunk(
+        string Type,
+        string? Text = null,
+        string? Base64 = null,
+        string? FileName = null,
+        string? DownloadUrl = null
+    );
+}

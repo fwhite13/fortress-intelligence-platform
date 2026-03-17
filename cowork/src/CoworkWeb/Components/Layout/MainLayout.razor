@@ -1,0 +1,33 @@
+@inherits LayoutComponentBase
+@inject CoworkSessionService Session
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+
+@if (!Session.IsLoaded)
+{
+    <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:var(--font-primary);color:var(--color-text-secondary);">
+        Loading…
+    </div>
+}
+else
+{
+    <FipNavBar ActiveModule="FipModule.Cowork"
+               UserInitial="@Session.Initial"
+               UserName="@Session.Name"
+               UserEmail="@Session.Email"
+               OnSignOut="@HandleSignOut" />
+
+    <main style="padding: 0; min-height: calc(100vh - 48px);">
+        @Body
+    </main>
+}
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        Session.SetFromClaims(authState.User);
+    }
+
+    private void HandleSignOut() => Nav.NavigateTo("/auth/logout", forceLoad: true);
+}
