@@ -171,3 +171,42 @@ export async function searchKb(
 
   return resp.json();
 }
+
+// ── Sprint 3: Template fetch ──────────────────────────────────────────────
+
+export interface TemplateResult {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export async function fetchTemplateBase64(
+  templateId: string,
+  _apiKey: string
+): Promise<string> {
+  // TODO: DO NOT SHIP — /api/haven/template-fetch not yet implemented
+  // Hardcoded test template for development only
+  // Replace with real fetch when FORGE template backend is ready:
+  // const resp = await fetch(`${FAIT_BASE}/api/haven/template-fetch`, {
+  //   method: 'POST',
+  //   headers: { 'Content-Type': 'application/json', 'x-api-key': _apiKey },
+  //   body: JSON.stringify({ id: templateId }),
+  // });
+  // if (resp.status === 401) throw new Error('INVALID_KEY');
+  // if (resp.status === 404) throw new Error('TEMPLATE_NOT_FOUND');
+  // if (!resp.ok) throw new Error(`HTTP_${resp.status}`);
+  // const { base64 } = await resp.json();
+  // return base64;
+  console.warn(`fetchTemplateBase64: using hardcoded test template for id="${templateId}" — backend not yet implemented`);
+  // Minimal valid 1-slide PPTX (base64) for development testing
+  return Promise.resolve(TEST_PPTX_BASE64);
+}
+
+/**
+ * Minimal 1-slide PPTX fragment for development/testing only.
+ * DO NOT SHIP — replace with real FORGE template fetch.
+ */
+const TEST_PPTX_BASE64 =
+  'UEsDBBQABgAIAAAAIQDfpNJsWgEAACAFAAATAAgCW0NvbnRlbnRfVHlwZXNdLnhtbCCiBAIo' +
+  'oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
+  'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';

@@ -3,7 +3,16 @@ import { useChat } from '../hooks/useChat';
 import { usePptContext } from '../hooks/usePptContext';
 import { getSlideContext, formatSlideContext, getAllSlidesContext, getSlideNotes, formatDeckContext } from '../services/pptReader';
 import { applyTextToShape, PptWriteError, writeNotes, PptNotesError } from '../services/pptWriter';
-import { parseNotesSpec, stripAllSpecs } from '../services/pptNotesParser';
+import { parseNotesSpec } from '../services/pptNotesParser';
+import { parseTableSpec, parseChartSpec, parseTemplateSpec, stripAllSpecs } from '../services/pptSpecParser';
+import { renderChartToBase64 } from '../services/pptChartRenderer';
+import { insertTable, PptTableError } from '../services/pptTableWriter';
+import { insertChartImage } from '../services/pptWriter';
+import { insertTemplateSlide, PptTemplateError } from '../services/pptTemplateService';
+import TablePreview from './TablePreview';
+import ChartPreview from './ChartPreview';
+import TemplateGallery from './TemplateGallery';
+import type { PptTableSpec, PptChartSpec, PptTemplateSpec } from '../services/pptSpecParser';
 import { searchKb } from '../services/faitApi';
 import type { KbResult } from './KbResultPanel';
 import KbResultPanel from './KbResultPanel';
@@ -48,6 +57,22 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [pendingNotes, setPendingNotes] = useState<PptNotesSpec | null>(null);
   const [notesLoading, setNotesLoading] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
+
+  // ── Sprint 3: Table state ─────────────────────────────────────────────────
+  const [pendingTable, setPendingTable] = useState<PptTableSpec | null>(null);
+  const [tableLoading, setTableLoading] = useState(false);
+  const [tableError, setTableError] = useState<string | null>(null);
+
+  // ── Sprint 3: Chart state ─────────────────────────────────────────────────
+  const [pendingChart, setPendingChart] = useState<PptChartSpec | null>(null);
+  const [pendingChartBase64, setPendingChartBase64] = useState<string | null>(null);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartRenderError, setChartRenderError] = useState<string | null>(null);
+
+  // ── Sprint 3: Template state ──────────────────────────────────────────────
+  const [pendingTemplates, setPendingTemplates] = useState<PptTemplateSpec | null>(null);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
 
   // Input state (lifted for slash commands)
   const [inputText, setInputText] = useState('');
@@ -127,14 +152,45 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   }, [messages]);
 
-  // Sprint 2: Detect ppt_notes_spec block in last assistant message
+  // Detect spec blocks in last assistant message (S2: notes, S3: table/chart/template)
   useEffect(() => {
     const lastMsg = messages[messages.length - 1];
     if (lastMsg?.role === 'assistant' && !lastMsg.streaming && lastMsg.content.trim()) {
-      const spec = parseNotesSpec(lastMsg.content);
-      if (spec) {
-        setPendingNotes(spec);
+      // S2: notes spec
+      const notesSpec = parseNotesSpec(lastMsg.content);
+      if (notesSpec) {
+        setPendingNotes(notesSpec);
         setNotesError(null);
+      }
+
+      // S3: table spec
+      const tableSpec = parseTableSpec(lastMsg.content);
+      if (tableSpec) {
+        setPendingTable(tableSpec);
+        setTableError(null);
+      }
+
+      // S3: chart spec — parse then render
+      const chartSpec = parseChartSpec(lastMsg.content);
+      if (chartSpec) {
+        setPendingChart(chartSpec);
+        setChartRenderError(null);
+        setChartLoading(true);
+        renderChartToBase64(chartSpec)
+          .then((b64) => {
+            setPendingChartBase64(b64);
+          })
+          .catch(() => {
+            setChartRenderError('Chart render failed — check the data format.');
+          })
+          .finally(() => setChartLoading(false));
+      }
+
+      // S3: template spec
+      const tmplSpec = parseTemplateSpec(lastMsg.content);
+      if (tmplSpec) {
+        setPendingTemplates(tmplSpec);
+        setTemplateError(null);
       }
     }
   }, [messages]);
@@ -260,6 +316,84 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const handleNotesDiscard = () => {
     setPendingNotes(null);
     setNotesError(null);
+  };
+
+  // ── Sprint 3: Table handlers ──────────────────────────────────────────────
+  const handleTableCreate = async () => {
+    if (!pendingTable) return;
+    setTableLoading(true);
+    setTableError(null);
+    try {
+      await insertTable(pendingTable);
+      setPendingTable(null);
+    } catch (e) {
+      if (e instanceof PptTableError) {
+        setTableError(
+          e.code === 'DIMENSION_MISMATCH'
+            ? 'Table dimensions mismatch — FAIT generated invalid data.'
+            : 'Table creation failed — try again.'
+        );
+      } else {
+        setTableError('Table creation failed — try again.');
+      }
+    } finally {
+      setTableLoading(false);
+    }
+  };
+
+  const handleTableDiscard = () => {
+    setPendingTable(null);
+    setTableError(null);
+  };
+
+  // ── Sprint 3: Chart handlers ──────────────────────────────────────────────
+  const handleChartInsert = async () => {
+    if (!pendingChartBase64) return;
+    setChartLoading(true);
+    try {
+      const width = pendingChart?.width ?? 400;
+      const height = pendingChart?.height ?? 267;
+      await insertChartImage(pendingChartBase64, width, height);
+      setPendingChart(null);
+      setPendingChartBase64(null);
+    } catch {
+      setChartRenderError('Insert failed — position your cursor on the slide and try again.');
+    } finally {
+      setChartLoading(false);
+    }
+  };
+
+  const handleChartDiscard = () => {
+    setPendingChart(null);
+    setPendingChartBase64(null);
+    setChartRenderError(null);
+  };
+
+  // ── Sprint 3: Template handlers ───────────────────────────────────────────
+  const handleTemplateInsert = async (templateId: string, keepSource: boolean) => {
+    setTemplateLoading(true);
+    setTemplateError(null);
+    try {
+      await insertTemplateSlide(templateId, apiKey, keepSource);
+      setPendingTemplates(null);
+    } catch (e) {
+      if (e instanceof PptTemplateError) {
+        setTemplateError(
+          e.code === 'FETCH_FAILED'
+            ? 'Could not fetch template from FORGE — check your API key.'
+            : 'Template insert failed.'
+        );
+      } else {
+        setTemplateError('Template insert failed.');
+      }
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
+
+  const handleTemplateDiscard = () => {
+    setPendingTemplates(null);
+    setTemplateError(null);
   };
 
   const handleClearHistory = () => {
@@ -511,6 +645,82 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           }}
         >
           {notesError}
+        </div>
+      )}
+
+      {/* Table preview (Sprint 3) */}
+      {pendingTable && (
+        <TablePreview
+          spec={pendingTable}
+          onAccept={handleTableCreate}
+          onReject={handleTableDiscard}
+          loading={tableLoading}
+        />
+      )}
+      {tableError && (
+        <div
+          style={{
+            padding: '4px 12px',
+            background: '#1a0f0f',
+            color: '#e07070',
+            fontSize: '11px',
+            flexShrink: 0,
+          }}
+        >
+          {tableError}
+        </div>
+      )}
+
+      {/* Chart preview (Sprint 3) */}
+      {chartLoading && !pendingChartBase64 && (
+        <div style={{ padding: '8px 12px', color: '#556677', fontSize: '11px', flexShrink: 0 }}>
+          Rendering chart…
+        </div>
+      )}
+      {pendingChartBase64 && (
+        <ChartPreview
+          base64DataUrl={pendingChartBase64}
+          title={pendingChart?.title ?? 'Chart'}
+          onAccept={handleChartInsert}
+          onReject={handleChartDiscard}
+          loading={chartLoading}
+          error={chartRenderError}
+        />
+      )}
+      {chartRenderError && !pendingChartBase64 && (
+        <div
+          style={{
+            padding: '4px 12px',
+            background: '#1a0f0f',
+            color: '#e07070',
+            fontSize: '11px',
+            flexShrink: 0,
+          }}
+        >
+          {chartRenderError}
+        </div>
+      )}
+
+      {/* Template gallery (Sprint 3) */}
+      {pendingTemplates && (
+        <TemplateGallery
+          spec={pendingTemplates}
+          onInsert={handleTemplateInsert}
+          onReject={handleTemplateDiscard}
+          loading={templateLoading}
+        />
+      )}
+      {templateError && (
+        <div
+          style={{
+            padding: '4px 12px',
+            background: '#1a0f0f',
+            color: '#e07070',
+            fontSize: '11px',
+            flexShrink: 0,
+          }}
+        >
+          {templateError}
         </div>
       )}
 

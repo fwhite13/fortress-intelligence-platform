@@ -22,7 +22,7 @@
   </Hosts>
   <Requirements>
     <Sets>
-      <Set Name="PowerPointApi" MinVersion="1.6"/>
+      <Set Name="PowerPointApi" MinVersion="1.8"/>
     </Sets>
   </Requirements>
   <DefaultSettings>

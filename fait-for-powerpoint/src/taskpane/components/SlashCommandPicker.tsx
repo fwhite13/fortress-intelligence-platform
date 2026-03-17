@@ -38,6 +38,37 @@ const COMMANDS: SlashCommand[] = [
     description: 'Expand the selected shape text with more detail',
     prompt: 'Please expand the selected shape text with more detail and supporting context. Apply to shape when ready.',
   },
+  {
+    name: 'table',
+    description: 'Create a data table on the current slide',
+    prompt:
+      'Create a data table for the current slide. ' +
+      'Based on the slide context and my request, return a ```ppt_table_spec block with JSON: ' +
+      '{"rowCount": N, "columnCount": N, "headers": [...], "values": [[...]], "headerStyle": "darkHeader", "position": null}. ' +
+      'All cell values must be strings. Empty cells must be "". ' +
+      'Use darkHeader style for financial/data tables.',
+  },
+  {
+    name: 'chart',
+    description: 'Create a chart on the current slide',
+    prompt:
+      'Create a chart for the current slide. ' +
+      'Return a ```ppt_chart_spec block with JSON following the Chart.js data format: ' +
+      '{"type": "bar|line|pie", "title": "...", "width": 600, "height": 400, "labels": [...], ' +
+      '"datasets": [{"label": "...", "data": [...], "backgroundColor": "..."}], ' +
+      '"xAxis": {"title": "..."}, "yAxis": {"title": "..."}}. ' +
+      'Use Fortress brand color #1F3864 for primary datasets.',
+  },
+  {
+    name: 'template',
+    description: 'Insert a branded slide template from FORGE',
+    prompt:
+      'Search FORGE for a slide template matching my description. ' +
+      'Return a ```ppt_template_spec block with JSON: ' +
+      '{"templates": [{"id": "...", "name": "...", "description": "...", "keepSourceFormatting": false}]}. ' +
+      'Search kbTypes: ["template"]. ' +
+      'Return the top 3 matches sorted by relevance.',
+  },
 ];
 
 interface SlashCommandPickerProps {
