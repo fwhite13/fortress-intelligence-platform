@@ -3,37 +3,68 @@ import type { SpreadsheetContext } from './excelReader';
 export function formatContext(ctx: SpreadsheetContext): string {
   const sanitize = (v: unknown): string =>
     String(v)
-      .replace(/[\n\r]/g, ' ')       // prevent prompt injection via newlines
-      .replace(/\|/g, '\\|');        // escape pipe chars to avoid breaking markdown table
+      .replace(/[\n\r]/g, ' ')
+      .replace(/\|/g, '\\|');
 
-  let out = `[SPREADSHEET CONTEXT]\nSheet range: ${ctx.address} | ${ctx.rows} rows × ${ctx.cols} cols\n\n`;
+  let out = `[SPREADSHEET CONTEXT]\nSheet range: ${ctx.address} | ${ctx.rows} rows × ${ctx.cols} cols\n`;
 
-  // Detect headers: row 0 is all strings, no numerics
-  const row0 = ctx.values[0] ?? [];
-  const isHeader =
-    row0.length > 0 &&
-    row0.every((v) => typeof v === 'string' && v.trim() !== '' && isNaN(Number(v)));
+  if (ctx.tableInfo) {
+    // Table-aware path: authoritative column names from the Table definition
+    out += `Excel Table: ${ctx.tableInfo.name} | ${ctx.tableInfo.dataRowCount} data rows × ${ctx.tableInfo.columnNames.length} columns\n`;
+    out += `Table columns: ${ctx.tableInfo.columnNames.map(sanitize).join(', ')}\n`;
+    out += '\n';
 
-  if (isHeader) {
-    out += `Headers: | ${row0.map(sanitize).join(' | ')} |\n`;
+    // Emit data rows (skip the header row if it's included in the selection)
+    const firstRow = ctx.values[0] ?? [];
+    const firstRowMatchesHeaders =
+      firstRow.length === ctx.tableInfo.columnNames.length &&
+      firstRow.every((v, i) => String(v).trim() === ctx.tableInfo!.columnNames[i].trim());
+
+    const dataRows = firstRowMatchesHeaders ? ctx.values.slice(1) : ctx.values;
+    const fmlRows = firstRowMatchesHeaders ? ctx.formulas.slice(1) : ctx.formulas;
+    const rowOffset = firstRowMatchesHeaders ? 2 : 1;
+
+    dataRows.forEach((row, ri) => {
+      out += `Row ${ri + 1}: | ${row.map(sanitize).join(' | ')} |\n`;
+
+      const fmlRow = fmlRows[ri] ?? [];
+      const fmlStr = fmlRow
+        .map((f: string, ci: number) =>
+          f.startsWith('=') ? `${getCellAddr(ri + rowOffset, ci)}=${f}` : ''
+        )
+        .filter(Boolean)
+        .join(', ');
+      if (fmlStr) out += `Formulas: ${fmlStr}\n`;
+    });
+  } else {
+    // Non-table path: existing heuristic header detection (unchanged — verbatim copy)
+    out += '\n';
+
+    const row0 = ctx.values[0] ?? [];
+    const isHeader =
+      row0.length > 0 &&
+      row0.every((v) => typeof v === 'string' && v.trim() !== '' && isNaN(Number(v)));
+
+    if (isHeader) {
+      out += `Headers: | ${row0.map(sanitize).join(' | ')} |\n`;
+    }
+
+    const dataRows = isHeader ? ctx.values.slice(1) : ctx.values;
+    const fmlRows = isHeader ? ctx.formulas.slice(1) : ctx.formulas;
+
+    dataRows.forEach((row, ri) => {
+      out += `Row ${ri + 1}: | ${row.map(sanitize).join(' | ')} |\n`;
+
+      const fmlRow = fmlRows[ri] ?? [];
+      const fmlStr = fmlRow
+        .map((f: string, ci: number) =>
+          f.startsWith('=') ? `${getCellAddr(ri + (isHeader ? 2 : 1), ci)}=${f}` : ''
+        )
+        .filter(Boolean)
+        .join(', ');
+      if (fmlStr) out += `Formulas: ${fmlStr}\n`;
+    });
   }
-
-  const dataRows = isHeader ? ctx.values.slice(1) : ctx.values;
-  const fmlRows = isHeader ? ctx.formulas.slice(1) : ctx.formulas;
-
-  dataRows.forEach((row, ri) => {
-    out += `Row ${ri + 1}: | ${row.map(sanitize).join(' | ')} |\n`;
-
-    // Include non-trivial formulas alongside each row
-    const fmlRow = fmlRows[ri] ?? [];
-    const fmlStr = fmlRow
-      .map((f: string, ci: number) =>
-        f.startsWith('=') ? `${getCellAddr(ri + (isHeader ? 2 : 1), ci)}=${f}` : ''
-      )
-      .filter(Boolean)
-      .join(', ');
-    if (fmlStr) out += `Formulas: ${fmlStr}\n`;
-  });
 
   // Token cap: ~6,000 chars
   if (out.length > 6000) {

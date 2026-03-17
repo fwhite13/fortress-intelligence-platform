@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useChat } from '../hooks/useChat';
 import { useWriteBack } from '../hooks/useWriteBack';
 import { getSelectedRange } from '../services/excelReader';
-import { writeRangeData, WriteRangeError } from '../services/excelWriter';
+import { writeRangeData, WriteRangeError, writeToTable, WriteTableError } from '../services/excelWriter';
 import { formatContext } from '../services/contextFormatter';
 import { searchKb, sendChat } from '../services/faitApi';
 import { scanRangeForIssues } from '../services/errorScanner';
@@ -52,6 +52,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     address: string;
     rows: number;
     cols: number;
+    tableName?: string | null;
   } | null>(null);
 
   // FORGE KB search state
@@ -162,7 +163,12 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     const refresh = async () => {
       try {
         const ctx = await getSelectedRange();
-        setSelectionInfo({ address: ctx.address, rows: ctx.rows, cols: ctx.cols });
+        setSelectionInfo({
+          address: ctx.address,
+          rows: ctx.rows,
+          cols: ctx.cols,
+          tableName: ctx.tableInfo?.name ?? null,
+        });
       } catch {
         setSelectionInfo(null);
       }
@@ -200,7 +206,12 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         const ctx = await getSelectedRange();
         if (ctx.rows > 0 && ctx.cols > 0) {
           context = formatContext(ctx);
-          setSelectionInfo({ address: ctx.address, rows: ctx.rows, cols: ctx.cols });
+          setSelectionInfo({
+            address: ctx.address,
+            rows: ctx.rows,
+            cols: ctx.cols,
+            tableName: ctx.tableInfo?.name ?? null,
+          });
         }
       } catch {
         // Non-fatal: proceed without context
@@ -428,29 +439,66 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     setWriteTableError(null);
     setWriteTableSuccess(null);
 
-    const data: (string | number | boolean | null)[][] = [
-      pendingTableData.headers,
-      ...pendingTableData.rows,
-    ];
+    // Determine write mode: Table name vs cell address
+    // Strip optional sheet prefix (e.g. "Sheet1!SalesData" → "SalesData", "Sheet1!B3" → "B3")
+    const stripped = target.includes('!') ? target.split('!').pop()! : target;
+    // If stripped part matches cell address pattern (letter(s) followed by digit(s)), it's a cell address
+    const isCellAddress = /^[A-Z$][A-Z$0-9]*\d+$/i.test(stripped);
+    const isTableTarget = !isCellAddress;
 
-    try {
-      const result = await writeRangeData(target, data);
-      setWriteTableSuccess(`Written to ${result.address} (${result.rows} rows × ${result.cols} cols)`);
-      setPendingTableData(null);
-    } catch (e) {
-      if (e instanceof WriteRangeError) {
-        if (e.code === 'EMPTY_DATA') {
-          setWriteTableError('No data to write.');
-        } else if (e.code === 'DIMENSION_MISMATCH') {
-          setWriteTableError('Rows have inconsistent column counts — cannot write.');
+    if (isTableTarget) {
+      // Write to named Table — append rows only (NOT [headers, ...rows])
+      try {
+        const result = await writeToTable(target, pendingTableData.rows);
+        setWriteTableSuccess(
+          `Appended ${result.rowsAdded} rows to Table "${target}" (${result.tableAddress})`
+        );
+        setPendingTableData(null);
+      } catch (e) {
+        if (e instanceof WriteTableError) {
+          if (e.code === 'TABLE_NOT_FOUND') {
+            setWriteTableError(`Table "${target}" not found on active worksheet. Use a cell address (e.g. A1) to write as a new range.`);
+          } else if (e.code === 'EMPTY_ROWS') {
+            setWriteTableError('No rows to append.');
+          } else {
+            setWriteTableError('Table write failed — Excel error.');
+          }
+        } else {
+          setWriteTableError('Write failed.');
+        }
+      } finally {
+        setWriteTableLoading(false);
+      }
+    } else {
+      // Write to cell address — include headers row
+      const data: (string | number | boolean | null)[][] = [
+        pendingTableData.headers,
+        ...pendingTableData.rows,
+      ];
+
+      try {
+        const result = await writeRangeData(target, data);
+        let successMsg = `Written to ${result.address} (${result.rows} rows × ${result.cols} cols)`;
+        if (result.warning) {
+          successMsg += ` ⚠️ ${result.warning}`;
+        }
+        setWriteTableSuccess(successMsg);
+        setPendingTableData(null);
+      } catch (e) {
+        if (e instanceof WriteRangeError) {
+          if (e.code === 'EMPTY_DATA') {
+            setWriteTableError('No data to write.');
+          } else if (e.code === 'DIMENSION_MISMATCH') {
+            setWriteTableError('Rows have inconsistent column counts — cannot write.');
+          } else {
+            setWriteTableError('Write failed — check the target cell address and try again.');
+          }
         } else {
           setWriteTableError('Write failed — check the target cell address and try again.');
         }
-      } else {
-        setWriteTableError('Write failed — check the target cell address and try again.');
+      } finally {
+        setWriteTableLoading(false);
       }
-    } finally {
-      setWriteTableLoading(false);
     }
   };
 
@@ -752,8 +800,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           }}
         >
           <div style={{ fontSize: '11px', color: '#8899aa', marginBottom: '4px' }}>
-            Writing {pendingTableData.rows.length + 1} rows ×{' '}
-            {pendingTableData.headers.length} cols — top-left cell:
+            Writing {pendingTableData.rows.length} rows × {pendingTableData.headers.length} cols
+            — cell address or Table name:
           </div>
           <div style={{ display: 'flex', gap: '6px' }}>
             <input
@@ -761,7 +809,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
               value={writeTableTarget}
               onChange={(e) => setWriteTableTarget(e.target.value)}
               onKeyDown={handleWriteTableKeyDown}
-              placeholder="e.g. A1 or Sheet1!B3"
+              placeholder="e.g. A1, Sheet1!B3, or SalesData"
               style={{
                 flex: 1,
                 background: '#1a2332',
@@ -900,6 +948,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
             rows={selectionInfo?.rows ?? 0}
             cols={selectionInfo?.cols ?? 0}
             visible={true}
+            tableName={selectionInfo?.tableName ?? null}
           />
         </div>
       )}

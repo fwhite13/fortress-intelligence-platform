@@ -8,7 +8,12 @@ declare const Office: any;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 export function useExcelContext() {
-  const [selectionInfo, setSelectionInfo] = useState<{ address: string; rows: number; cols: number } | null>(null);
+  const [selectionInfo, setSelectionInfo] = useState<{
+    address: string;
+    rows: number;
+    cols: number;
+    tableName?: string | null;
+  } | null>(null);
 
   useEffect(() => {
     // Poll selection every 2s — simpler and reliable across all Excel versions.
@@ -18,7 +23,12 @@ export function useExcelContext() {
     const interval = setInterval(async () => {
       try {
         const info = await getSelectedRange();
-        setSelectionInfo({ address: info.address, rows: info.rows, cols: info.cols });
+        setSelectionInfo({
+          address: info.address,
+          rows: info.rows,
+          cols: info.cols,
+          tableName: info.tableInfo?.name ?? null,
+        });
       } catch {
         // ignore — no selection or Excel unavailable
       }

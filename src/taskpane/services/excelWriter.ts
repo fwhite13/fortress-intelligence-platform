@@ -44,7 +44,7 @@ export async function applySingleSuggestion(suggestion: CellSuggestion): Promise
 export async function writeRangeData(
   targetCell: string,
   data: (string | number | boolean | null)[][]
-): Promise<{ address: string; rows: number; cols: number }> {
+): Promise<{ address: string; rows: number; cols: number; warning?: string }> {
   if (!data || data.length === 0 || data[0].length === 0) {
     throw new WriteRangeError('No data to write', 'EMPTY_DATA');
   }
@@ -71,17 +71,107 @@ export async function writeRangeData(
 
     // Load the final address so we can return it
     writeRange.load('address');
+
+    // Detect if write target overlaps a Table (advisory warning — write still proceeds)
+    const tables = sheet.tables;
+    tables.load('count');
+
     await ctx.sync();
+
+    let warning: string | undefined;
+
+    if ((tables.count as number) > 0) {
+      const tableCount = tables.count as number;
+      const checkItems: { intersection: any; table: any }[] = [];
+
+      for (let i = 0; i < tableCount; i++) {
+        const table = tables.getItemAt(i);
+        table.load('name');
+        const tRange = table.getRange();
+        const intersection = writeRange.getIntersectionOrNullObject(tRange);
+        intersection.load('isNullObject');
+        checkItems.push({ intersection, table });
+      }
+
+      await ctx.sync();
+
+      for (const { intersection, table } of checkItems) {
+        if (!intersection.isNullObject) {
+          warning = `Target overlaps Table "${table.name as string}" — consider writeToTable() for clean row appends`;
+          break;
+        }
+      }
+    }
 
     return {
       address: writeRange.address as string,
       rows,
       cols,
+      warning,
     };
   }).catch((e: any) => {
     if (e instanceof WriteRangeError) throw e;
     throw new WriteRangeError(
       e?.message ?? 'Excel write failed',
+      'EXCEL_ERROR'
+    );
+  });
+}
+
+export class WriteTableError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'TABLE_NOT_FOUND' | 'EMPTY_ROWS' | 'EXCEL_ERROR'
+  ) {
+    super(message);
+    this.name = 'WriteTableError';
+  }
+}
+
+/**
+ * Append rows to a named Excel Table (ListObject) on the active worksheet.
+ *
+ * @param tableName  Name of the Excel Table (e.g. "SalesData"). Case-sensitive.
+ * @param rows       2D array of values to append. Each inner array is one row.
+ * @throws WriteTableError with .code "TABLE_NOT_FOUND" | "EMPTY_ROWS" | "EXCEL_ERROR"
+ */
+export async function writeToTable(
+  tableName: string,
+  rows: (string | number | boolean | null)[][]
+): Promise<{ rowsAdded: number; tableAddress: string }> {
+  if (!rows || rows.length === 0) {
+    throw new WriteTableError('No rows to append', 'EMPTY_ROWS');
+  }
+
+  return Excel.run(async (ctx: any) => {
+    const sheet = ctx.workbook.worksheets.getActiveWorksheet();
+
+    // getItemOrNullObject returns a proxy — load isNullObject to check existence
+    const table = sheet.tables.getItemOrNullObject(tableName);
+    table.load('isNullObject');
+    await ctx.sync();
+
+    if (table.isNullObject) {
+      throw new WriteTableError(`Table "${tableName}" not found on active worksheet`, 'TABLE_NOT_FOUND');
+    }
+
+    // Append rows at end of table (index -1)
+    // rows is data only — do NOT include headers; Table manages its own header row
+    table.rows.add(-1, rows);
+
+    // Reload the table range address for the return value
+    const tRange = table.getRange();
+    tRange.load('address');
+    await ctx.sync();
+
+    return {
+      rowsAdded: rows.length,
+      tableAddress: tRange.address as string,
+    };
+  }).catch((e: any) => {
+    if (e instanceof WriteTableError) throw e;
+    throw new WriteTableError(
+      e?.message ?? 'Excel table write failed',
       'EXCEL_ERROR'
     );
   });
