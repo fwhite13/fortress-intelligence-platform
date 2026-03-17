@@ -52,6 +52,48 @@ public sealed class AgentApiClient
         return await resp.Content.ReadAsStreamAsync(ct);
     }
 
+    // ── Approval ──────────────────────────────────────────────────────────────
+
+    /// <summary>Send an approve or reject decision for a pending tool call.</summary>
+    public async Task SendApprovalAsync(string taskId, string approvalId, bool approve, CancellationToken ct = default)
+    {
+        var client = CreateClient();
+        var action = approve ? "approve" : "reject";
+        var resp   = await client.PostAsJsonAsync($"/tasks/{taskId}/{action}", new { approvalId }, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    // ── Task history ──────────────────────────────────────────────────────────
+
+    /// <summary>Get task history for the current user (most recent first, up to 20).</summary>
+    public async Task<List<TaskSummary>> GetTaskHistoryAsync(CancellationToken ct = default)
+    {
+        var client = CreateClient();
+        var resp   = await client.GetAsync("/tasks", ct);
+        resp.EnsureSuccessStatusCode();
+        var body = await resp.Content.ReadFromJsonAsync<TaskListResponse>(ct: ct);
+        return body?.Tasks ?? new List<TaskSummary>();
+    }
+
+    /// <summary>Get metadata for a single task (returns null if not found or not owned by user).</summary>
+    public async Task<TaskSummary?> GetTaskMetaAsync(string taskId, CancellationToken ct = default)
+    {
+        var client = CreateClient();
+        var resp   = await client.GetAsync($"/tasks/{taskId}", ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<TaskSummary>(ct: ct);
+    }
+
+    /// <summary>Cancel a running task (sends reject for any pending approval + signals cancellation).</summary>
+    public async Task CancelTaskAsync(string taskId, CancellationToken ct = default)
+    {
+        var client = CreateClient();
+        // Best-effort — ignore errors (task may already be done)
+        try { await client.PostAsJsonAsync($"/tasks/{taskId}/cancel", new { }, ct); }
+        catch { /* Non-fatal */ }
+    }
+
     private HttpClient CreateClient()
     {
         var client = _httpClientFactory.CreateClient("cowork-agent");
@@ -62,3 +104,15 @@ public sealed class AgentApiClient
 
     private record StartTaskResponse(string TaskId);
 }
+
+public record OutputFileSummary(string Name, string Type, string DownloadUrl);
+
+public record TaskSummary(
+    string TaskId,
+    string Status,
+    string Prompt,
+    string CreatedAt,
+    string? CompletedAt,
+    List<OutputFileSummary> OutputFiles);
+
+file record TaskListResponse(List<TaskSummary> Tasks);

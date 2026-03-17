@@ -7,6 +7,11 @@
 
 <div style="max-width: 800px; margin: 0 auto; padding: 32px 16px; font-family: var(--font-primary);">
 
+    @* History nav *@
+    <div style="margin-bottom: 16px;">
+        <a href="/tasks/history" style="color: var(--color-text-link); font-size: var(--text-sm);">← Back to tasks</a>
+    </div>
+
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:24px;">
         <div style="width:10px;height:10px;border-radius:50%;background:@(_done ? "var(--color-success)" : "var(--color-gold)");"></div>
         <span style="font-size:var(--text-sm);color:var(--color-text-secondary);">
@@ -40,43 +45,39 @@
                 <span style="animation:pulse 1.5s infinite;">●</span> Claude is working…
             </div>
         }
+
+        @* Approval dialog — rendered inline in the progress panel *@
+        @if (_pendingApprovalId is not null)
+        {
+            <ApprovalDialog TaskId="@TaskId"
+                            ApprovalId="@_pendingApprovalId"
+                            Description="@(_pendingApprovalDescription ?? "")"
+                            OnResolved="HandleApprovalResolved" />
+        }
     </div>
 
-    @if (_outputText is not null || _outputHtmlBase64 is not null)
+    @if (_outputFiles.Count > 0)
     {
         <div style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:20px;">
             <h2 style="font-size:var(--text-lg);font-weight:var(--font-semibold);color:var(--color-text-primary);margin:0 0 16px 0;">
                 Output
             </h2>
-
-            @if (_outputHtmlBase64 is not null)
+            @foreach (var f in _outputFiles)
             {
-                <div style="margin-bottom:16px;">
-                    <div style="font-size:var(--text-sm);font-weight:var(--font-medium);color:var(--color-text-secondary);margin-bottom:6px;">HTML Preview</div>
-                    <iframe srcdoc="@_outputHtmlDecoded"
-                            sandbox="allow-scripts"
-                            style="width:100%;height:400px;border:1px solid var(--color-border);border-radius:var(--radius-md);"
-                            title="Task output preview">
-                    </iframe>
-                </div>
+                <OutputPanel File="@f" />
             }
+        </div>
+    }
 
-            @if (_outputText is not null)
-            {
-                <div style="background:var(--color-bg-page);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:16px;margin-bottom:16px;">
-                    <pre style="white-space:pre-wrap;font-family:var(--font-primary);font-size:var(--text-sm);color:var(--color-text-primary);margin:0;line-height:1.6;">@_outputText</pre>
-                </div>
-            }
-
-            @foreach (var file in _outputFiles)
-            {
-                <div style="margin-bottom:8px;">
-                    <a href="@file.Url" download="@file.Name"
-                       style="color:var(--color-text-link);font-size:var(--text-sm);text-decoration:underline;">
-                        ⬇ @file.Name
-                    </a>
-                </div>
-            }
+    @if (_outputText is not null && _outputFiles.Count == 0)
+    {
+        <div style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:20px;">
+            <h2 style="font-size:var(--text-lg);font-weight:var(--font-semibold);color:var(--color-text-primary);margin:0 0 16px 0;">
+                Result
+            </h2>
+            <div style="background:var(--color-bg-page);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:16px;">
+                <pre style="white-space:pre-wrap;font-family:var(--font-primary);font-size:var(--text-sm);color:var(--color-text-primary);margin:0;line-height:1.6;">@_outputText</pre>
+            </div>
         </div>
     }
 
@@ -91,18 +92,34 @@
 @code {
     [Parameter] public string TaskId { get; set; } = string.Empty;
 
-    private List<string> _steps = new();
-    private bool _done;
-    private string? _outputText;
-    private string? _outputHtmlBase64;
-    private string? _outputHtmlDecoded => _outputHtmlBase64 is null ? null
-        : System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(_outputHtmlBase64));
-    private List<(string Name, string Url)> _outputFiles = new();
-    private string? _error;
-    private CancellationTokenSource _cts = new();
+    private List<string>       _steps       = new();
+    private bool               _done;
+    private string?            _outputText;
+    private List<OutputFile>   _outputFiles = new();
+    private string?            _error;
+    private CancellationTokenSource _cts    = new();
+
+    // Approval gate state
+    private string? _pendingApprovalId;
+    private string? _pendingApprovalDescription;
 
     protected override async Task OnInitializedAsync()
     {
+        // Check if task is already completed — load from metadata, skip stream
+        try
+        {
+            var meta = await AgentApi.GetTaskMetaAsync(TaskId);
+            if (meta?.Status == "completed")
+            {
+                _done = true;
+                foreach (var f in meta.OutputFiles)
+                    _outputFiles.Add(new OutputFile(f.Name, f.Type, null, f.DownloadUrl, 0));
+                return;
+            }
+        }
+        catch { /* Non-fatal — fall through to stream */ }
+
+        // Task is running or unknown — open SSE stream
         _ = ConsumeStreamAsync(_cts.Token);
     }
 
@@ -117,18 +134,14 @@
             {
                 var line = await reader.ReadLineAsync(ct);
                 if (line is null) break;
-
                 if (!line.StartsWith("data: ")) continue;
-                var json = line["data: ".Length..];
 
-                var chunk = System.Text.Json.JsonSerializer.Deserialize<SseChunk>(json);
+                var json  = line["data: ".Length..];
+                var chunk = System.Text.Json.JsonSerializer.Deserialize<SseChunk>(json,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (chunk is null) continue;
 
-                await InvokeAsync(() =>
-                {
-                    ProcessChunk(chunk);
-                    StateHasChanged();
-                });
+                await InvokeAsync(() => { ProcessChunk(chunk); StateHasChanged(); });
             }
         }
         catch (OperationCanceledException) { }
@@ -137,7 +150,7 @@
             await InvokeAsync(() =>
             {
                 _error = $"Stream error: {ex.Message}";
-                _done = true;
+                _done  = true;
                 StateHasChanged();
             });
         }
@@ -148,30 +161,51 @@
         switch (chunk.Type)
         {
             case "step":
+            case "tool_call":
                 if (!string.IsNullOrWhiteSpace(chunk.Text))
                     _steps.Add(chunk.Text);
                 break;
 
-            case "result":
-                _done = true;
-                _outputText = chunk.Text;
+            case "approval_required":
+                _pendingApprovalId          = chunk.ApprovalId;
+                _pendingApprovalDescription = chunk.ApprovalDescription ?? chunk.Text ?? chunk.ApprovalToolName;
                 break;
 
-            case "html_output":
-                _done = true;
-                _outputHtmlBase64 = chunk.Base64;
+            case "approval_resolved":
+                _pendingApprovalId          = null;
+                _pendingApprovalDescription = null;
+                if (!string.IsNullOrWhiteSpace(chunk.Text))
+                    _steps.Add(chunk.Text);
                 break;
 
             case "file_output":
                 if (chunk.FileName is not null && chunk.DownloadUrl is not null)
-                    _outputFiles.Add((chunk.FileName, chunk.DownloadUrl));
+                    _outputFiles.Add(new OutputFile(
+                        chunk.FileName,
+                        chunk.OutputType ?? "other",
+                        chunk.Base64,
+                        chunk.DownloadUrl,
+                        chunk.SizeBytes ?? 0));
+                break;
+
+            case "result":
+                _done       = true;
+                _outputText = chunk.Text;
                 break;
 
             case "error":
-                _done = true;
-                _error = chunk.Text ?? "Task failed";
+                _done   = true;
+                _error  = chunk.Text ?? "Task failed";
                 break;
         }
+    }
+
+    private Task HandleApprovalResolved(bool approved)
+    {
+        _pendingApprovalId          = null;
+        _pendingApprovalDescription = null;
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
@@ -180,11 +214,25 @@
         _cts.Dispose();
     }
 
+    // ── Records ──────────────────────────────────────────────────────────
+
+    public record OutputFile(
+        string  Name,
+        string  Type,
+        string? Base64,
+        string  DownloadUrl,
+        long    SizeBytes);
+
     private record SseChunk(
-        string Type,
-        string? Text = null,
-        string? Base64 = null,
-        string? FileName = null,
-        string? DownloadUrl = null
+        string  Type,
+        string? Text                = null,
+        string? Base64              = null,
+        string? FileName            = null,
+        string? DownloadUrl         = null,
+        string? OutputType          = null,
+        long?   SizeBytes           = null,
+        string? ApprovalId          = null,
+        string? ApprovalToolName    = null,
+        string? ApprovalDescription = null
     );
 }

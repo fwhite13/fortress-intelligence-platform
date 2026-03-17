@@ -1,0 +1,64 @@
+@* Components/Shared/ApprovalDialog.razor — approve/reject UI for pending tool calls *@
+
+<div style="margin-top: 12px; border: 2px solid #d97706; border-radius: var(--radius-md); padding: 16px; background: #fffbeb;">
+    <div style="font-weight: var(--font-semibold); font-size: var(--text-sm); color: var(--color-text-primary); margin-bottom: 8px;">
+        ⚠ Claude wants to perform an action — please review:
+    </div>
+    <div style="background: var(--color-bg-page); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 10px 12px; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-text-primary); margin-bottom: 12px; word-break: break-all;">
+        @Description
+    </div>
+    <div style="display: flex; gap: 8px;">
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Warning"
+                   Disabled="@_acting"
+                   OnClick="HandleApprove"
+                   Size="Size.Small">
+            @(_acting ? "…" : "✓ Allow")
+        </MudButton>
+        <MudButton Variant="Variant.Outlined"
+                   Color="Color.Error"
+                   Disabled="@_acting"
+                   OnClick="HandleReject"
+                   Size="Size.Small">
+            Deny
+        </MudButton>
+    </div>
+    @if (_error is not null)
+    {
+        <div style="margin-top: 8px; color: var(--color-error, #dc2626); font-size: var(--text-xs);">@_error</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string TaskId     { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string ApprovalId { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Description { get; set; } = string.Empty;
+    [Parameter] public EventCallback<bool> OnResolved    { get; set; }
+
+    [Inject] private AgentApiClient AgentApi { get; set; } = default!;
+
+    private bool    _acting;
+    private string? _error;
+
+    private Task HandleApprove() => Resolve(approve: true);
+    private Task HandleReject()  => Resolve(approve: false);
+
+    private async Task Resolve(bool approve)
+    {
+        _acting = true;
+        _error  = null;
+        try
+        {
+            await AgentApi.SendApprovalAsync(TaskId, ApprovalId, approve);
+            await OnResolved.InvokeAsync(approve);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed: {ex.Message}";
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
+}
