@@ -71,7 +71,7 @@ public sealed class AgentApiClient
         var client = CreateClient();
         var resp   = await client.GetAsync("/tasks", ct);
         resp.EnsureSuccessStatusCode();
-        var body = await resp.Content.ReadFromJsonAsync<TaskListResponse>(ct: ct);
+        var body = await resp.Content.ReadFromJsonAsync<TaskListResponse>(cancellationToken: ct);
         return body?.Tasks ?? new List<TaskSummary>();
     }
 
@@ -82,7 +82,7 @@ public sealed class AgentApiClient
         var resp   = await client.GetAsync($"/tasks/{taskId}", ct);
         if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
         resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadFromJsonAsync<TaskSummary>(ct: ct);
+        return await resp.Content.ReadFromJsonAsync<TaskSummary>(cancellationToken: ct);
     }
 
     /// <summary>Cancel a running task (sends reject for any pending approval + signals cancellation).</summary>
