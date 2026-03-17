@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import crypto from 'crypto';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { SDKAssistantMessage, SDKResultSuccess } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKAssistantMessage, SDKResultSuccess, PreToolUseHookInput, HookInput } from '@anthropic-ai/claude-agent-sdk';
 import { auditLog } from './audit.js';
 import { queryForgeContext } from '../services/forgeClient.js';
 import { waitForApproval } from '../services/taskStore.js';
@@ -117,53 +117,61 @@ export async function* runTask(params: TaskParams): AsyncGenerator<SseChunk> {
           COWORK_USER_EMAIL: params.userEmail,
         },
         hooks: {
-          preToolCall: async (toolName: string, toolInput: unknown) => {
-            await auditLog({
-              event: 'tool_call',
-              taskId:  params.taskId,
-              userId:  params.userId,
-              data:    { tool: toolName, input: safeSerialize(toolInput) },
-            });
-
-            if (requiresApproval(toolName, toolInput)) {
-              const approvalId   = crypto.randomUUID();
-              const description  = describeApproval(toolName, toolInput);
+          PreToolUse: [{
+            hooks: [async (hookInput: HookInput) => {
+              const preHook  = hookInput as PreToolUseHookInput;
+              const toolName = preHook.tool_name;
+              const toolInput = preHook.tool_input;
 
               await auditLog({
-                event: 'approval_requested',
-                taskId: params.taskId,
-                userId: params.userId,
-                data:   { approvalId, tool: toolName, description },
+                event: 'tool_call',
+                taskId:  params.taskId,
+                userId:  params.userId,
+                data:    { tool: toolName, input: safeSerialize(toolInput) },
               });
 
-              emitChunk({
-                type: 'approval_required',
-                approvalId,
-                approvalToolName:  toolName,
-                approvalToolInput: toolInput,
-                approvalDescription: description,
-              });
+              if (requiresApproval(toolName, toolInput)) {
+                const approvalId   = crypto.randomUUID();
+                const description  = describeApproval(toolName, toolInput);
 
-              const decision = await waitForApproval(approvalId);
+                await auditLog({
+                  event: 'approval_requested',
+                  taskId: params.taskId,
+                  userId: params.userId,
+                  data:   { approvalId, tool: toolName, description },
+                });
 
-              await auditLog({
-                event: decision === 'approve' ? 'approval_granted' : 'approval_denied',
-                taskId: params.taskId,
-                userId: params.userId,
-                data:   { approvalId, decision },
-              });
+                emitChunk({
+                  type: 'approval_required',
+                  approvalId,
+                  approvalToolName:  toolName,
+                  approvalToolInput: toolInput,
+                  approvalDescription: description,
+                });
 
-              emitChunk({
-                type:       'approval_resolved',
-                approvalId,
-                text:       decision === 'approve' ? 'Approved — proceeding' : 'Denied — skipping',
-              });
+                const decision = await waitForApproval(approvalId);
 
-              return { action: decision === 'approve' ? 'allow' : 'block' } as const;
-            }
+                await auditLog({
+                  event: decision === 'approve' ? 'approval_granted' : 'approval_denied',
+                  taskId: params.taskId,
+                  userId: params.userId,
+                  data:   { approvalId, decision },
+                });
 
-            return { action: 'allow' } as const;
-          },
+                emitChunk({
+                  type:       'approval_resolved',
+                  approvalId,
+                  text:       decision === 'approve' ? 'Approved — proceeding' : 'Denied — skipping',
+                });
+
+                return {
+                  decision: decision === 'approve' ? 'approve' as const : 'block' as const,
+                };
+              }
+
+              return { decision: 'approve' as const };
+            }],
+          }],
         },
       },
     })) {

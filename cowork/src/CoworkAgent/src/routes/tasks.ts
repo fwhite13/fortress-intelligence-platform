@@ -34,7 +34,7 @@ export interface SseChunk {
 
 // ── POST /tasks — create and start a new task ─────────────────────────────
 router.post('/', upload.array('files', 5), async (req, res) => {
-  const authed = req as AuthedRequest;
+  const authed = req as unknown as AuthedRequest;
   const { prompt } = req.body as { prompt: string };
 
   if (!prompt?.trim()) {
@@ -106,7 +106,7 @@ async function startTaskWithRedis(
 
 // ── GET /tasks — list user's task history ────────────────────────────────
 router.get('/', async (req, res) => {
-  const authed = req as AuthedRequest;
+  const authed = req as unknown as AuthedRequest;
   const ids = await getUserTaskIds(authed.userId, 20);
 
   const tasks = await Promise.all(ids.map(async (id) => {
@@ -127,7 +127,7 @@ router.get('/', async (req, res) => {
 
 // ── GET /tasks/:id — get single task metadata ─────────────────────────────
 router.get('/:id', async (req, res) => {
-  const authed = req as AuthedRequest;
+  const authed = req as unknown as AuthedRequest;
   const { id } = req.params;
 
   const meta = await getTaskMeta(id);

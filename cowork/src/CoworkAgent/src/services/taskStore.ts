@@ -12,8 +12,13 @@ if (!REDIS_URL.startsWith('rediss://')) {
 const redis    = createClient({ url: REDIS_URL });
 const redisSub = createClient({ url: REDIS_URL });
 
-await redis.connect();
-await redisSub.connect();
+let _connected = false;
+async function ensureConnected(): Promise<void> {
+  if (_connected) return;
+  await redis.connect();
+  await redisSub.connect();
+  _connected = true;
+}
 
 export const TASK_TTL_SECONDS    = 7 * 24 * 60 * 60;   // 7 days
 export const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;       // 5 minutes
@@ -34,6 +39,7 @@ export async function createTaskMeta(
   taskId: string,
   meta: Omit<TaskMeta, 'status' | 'completedAt' | 'outputFiles'>
 ): Promise<void> {
+  await ensureConnected();
   const key = `cowork:task:${taskId}`;
   await redis.hSet(key, { ...meta, status: 'running', completedAt: '', outputFiles: '[]' });
   await redis.expire(key, TASK_TTL_SECONDS);
@@ -45,6 +51,7 @@ export async function createTaskMeta(
 }
 
 export async function updateTaskComplete(taskId: string, outputFiles: object[]): Promise<void> {
+  await ensureConnected();
   await redis.hSet(`cowork:task:${taskId}`, {
     status:      'completed',
     completedAt: new Date().toISOString(),
@@ -53,6 +60,7 @@ export async function updateTaskComplete(taskId: string, outputFiles: object[]):
 }
 
 export async function updateTaskFailed(taskId: string): Promise<void> {
+  await ensureConnected();
   await redis.hSet(`cowork:task:${taskId}`, {
     status:      'failed',
     completedAt: new Date().toISOString(),
@@ -60,12 +68,14 @@ export async function updateTaskFailed(taskId: string): Promise<void> {
 }
 
 export async function getTaskMeta(taskId: string): Promise<TaskMeta | null> {
+  await ensureConnected();
   const data = await redis.hGetAll(`cowork:task:${taskId}`);
   if (!data || !data.status) return null;
   return data as unknown as TaskMeta;
 }
 
 export async function getUserTaskIds(userId: string, limit = 20): Promise<string[]> {
+  await ensureConnected();
   return redis.zRange(`cowork:user:${userId}:tasks`, '+inf', '-inf', {
     BY: 'SCORE', REV: true, LIMIT: { offset: 0, count: limit },
   });
@@ -75,6 +85,7 @@ export async function getUserTaskIds(userId: string, limit = 20): Promise<string
 // Polls Redis every 200ms. Auto-rejects after APPROVAL_TIMEOUT_MS (5 min).
 
 export async function waitForApproval(approvalId: string): Promise<'approve' | 'reject'> {
+  await ensureConnected();
   const key      = `cowork:approval:${approvalId}`;
   const deadline = Date.now() + APPROVAL_TIMEOUT_MS;
 
@@ -89,6 +100,7 @@ export async function waitForApproval(approvalId: string): Promise<'approve' | '
 }
 
 export async function setApprovalDecision(approvalId: string, decision: 'approve' | 'reject'): Promise<void> {
+  await ensureConnected();
   await redis.set(`cowork:approval:${approvalId}`, decision, { EX: 30 });
 }
 
@@ -99,6 +111,7 @@ export function taskChannel(taskId: string): string {
 }
 
 export async function publishChunk(taskId: string, chunk: object): Promise<void> {
+  await ensureConnected();
   const logKey = `cowork:stream:log:${taskId}`;
   // Append to replay log with TTL reset on every push
   await redis.rPush(logKey, JSON.stringify(chunk));
@@ -108,6 +121,7 @@ export async function publishChunk(taskId: string, chunk: object): Promise<void>
 }
 
 export async function* subscribeToTask(taskId: string): AsyncGenerator<object> {
+  await ensureConnected();
   const channel = taskChannel(taskId);
 
   // Replay missed events (for SSE reconnects mid-task)
