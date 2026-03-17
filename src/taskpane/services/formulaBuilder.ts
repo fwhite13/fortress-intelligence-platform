@@ -27,7 +27,7 @@ async function ensureScratchSheet(): Promise<void> {
 
     if (existing.isNullObject) {
       const scratch = ctx.workbook.worksheets.add(SCRATCH_SHEET_NAME);
-      (scratch as any).visibility = "VeryHidden";
+      scratch.visibility = Excel.SheetVisibility.veryHidden;
       await ctx.sync();
     }
   });
@@ -94,16 +94,16 @@ export async function writeFormula(
       const cell = sheet.getRange(address);
 
       cell.formulas = [[formula]];
+      await ctx.sync();  // commit formula first
 
       if (explanation) {
         try {
           sheet.comments.add(address, `FAIT formula: ${explanation}`);
+          await ctx.sync();  // comment sync in its own try/catch
         } catch {
-          // non-fatal
+          // non-fatal — ExcelApi 1.10, may fail on duplicate or unsupported version
         }
       }
-
-      await ctx.sync();
     });
   } finally {
     setFaitWriting(false);
