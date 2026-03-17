@@ -8,6 +8,17 @@ interface SlashCommand {
 
 const COMMANDS: SlashCommand[] = [
   {
+    name: 'notes',
+    description: 'Generate speaker notes for the current slide',
+    prompt:
+      'Generate professional speaker notes for the current slide. ' +
+      'The notes should: explain the key points concisely (2-4 sentences), ' +
+      'provide talking points not visible on the slide, and cite any FORGE knowledge base sources used. ' +
+      'Return your response as a ```ppt_notes_spec block with JSON: ' +
+      '{"speakerNotes": "<full notes text>", "sources": ["<FORGE source IDs>"]}. ' +
+      'If no FORGE sources apply, use an empty array for sources.',
+  },
+  {
     name: 'summarize',
     description: 'Summarize the current slide content',
     prompt: 'Please summarize the content of this slide. Describe what it covers, key points, and any notable data or claims.',

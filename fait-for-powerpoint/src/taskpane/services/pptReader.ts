@@ -156,3 +156,103 @@ export function formatSlideContext(ctx: SlideContext): string {
   out += `[END PRESENTATION CONTEXT]`;
   return out;
 }
+
+export interface SlideSnapshot {
+  slideNumber: number;   // 1-based
+  title: string;
+  shapes: Array<{
+    name: string;
+    text: string;        // truncated to 150 chars
+  }>;
+}
+
+const MAX_SLIDES = 20;
+const MAX_SHAPES = 3;
+const SHAPE_TEXT_CAP = 150;
+
+export async function getAllSlidesContext(): Promise<SlideSnapshot[]> {
+  return PowerPoint.run(async (ctx: any) => {
+    const allSlides = ctx.presentation.slides;
+    allSlides.load([
+      'items/shapes/items/id',
+      'items/shapes/items/name',
+      'items/shapes/items/type',
+      'items/shapes/items/textFrame/textRange/text',
+    ]);
+    await ctx.sync();
+
+    const snapshots: SlideSnapshot[] = [];
+    const slideItems = allSlides.items as any[];
+
+    for (let i = 0; i < Math.min(slideItems.length, MAX_SLIDES); i++) {
+      const slide = slideItems[i];
+      const shapeItems = (slide.shapes?.items ?? []) as any[];
+
+      let title = '';
+      const shapes: SlideSnapshot['shapes'] = [];
+
+      for (const shape of shapeItems) {
+        const text: string = shape.textFrame?.textRange?.text ?? '';
+        if (!text.trim()) continue;
+
+        const shapeName: string = (shape.name ?? '').toLowerCase();
+        if (!title && (shapeName.includes('title') || shape.type === 'title')) {
+          title = text;
+        }
+
+        shapes.push({
+          name: shape.name ?? '',
+          text: text.length > SHAPE_TEXT_CAP ? text.slice(0, SHAPE_TEXT_CAP) + '…' : text,
+        });
+
+        if (shapes.length >= MAX_SHAPES) break;
+      }
+
+      if (!title && shapes.length > 0) title = shapes[0].text;
+
+      if (shapes.length > 0) {
+        snapshots.push({ slideNumber: i + 1, title, shapes });
+      }
+    }
+
+    return snapshots;
+  }).catch((): SlideSnapshot[] => []);
+}
+
+export function formatDeckContext(snapshots: SlideSnapshot[]): string {
+  if (snapshots.length === 0) return '';
+
+  let out = `[DECK CONTEXT — ${snapshots.length} slide(s)]\n`;
+  for (const s of snapshots) {
+    out += `Slide ${s.slideNumber}`;
+    if (s.title) out += ` — ${s.title.slice(0, 60)}`;
+    out += `\n`;
+    for (const shape of s.shapes) {
+      out += `  • ${shape.text.replace(/\n/g, ' ')}\n`;
+    }
+  }
+  out += `[END DECK CONTEXT]`;
+  return out;
+}
+
+export async function getSlideNotes(): Promise<string> {
+  return PowerPoint.run(async (ctx: any) => {
+    const selectedSlides = ctx.presentation.getSelectedSlides();
+    selectedSlides.load('items');
+    await ctx.sync();
+
+    if (!selectedSlides.items || selectedSlides.items.length === 0) return '';
+
+    const slide = selectedSlides.items[0];
+    slide.load('notes');
+    await ctx.sync();
+
+    if (!slide.notes) return '';
+
+    const notesRange = slide.notes.textFrame.textRange;
+    notesRange.load('text');
+    await ctx.sync();
+
+    return notesRange.text ?? '';
+  }).catch((): string => '');
+}

@@ -138,3 +138,36 @@ export async function fetchProjectList(apiKey: string): Promise<ProjectInfo[]> {
   const data = await resp.json();
   return data.projects ?? [];
 }
+
+export interface KbSearchResponse {
+  results: Array<{
+    content: string;
+    source: string;
+    score: number;
+  }>;
+}
+
+export async function searchKb(
+  query: string,
+  apiKey: string,
+  projectId?: string,
+  kbTypes?: string[]
+): Promise<KbSearchResponse> {
+  const resp = await fetch(`${FAIT_BASE}/api/haven/kb-search`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+    },
+    body: JSON.stringify({
+      query,
+      projectId: projectId ?? null,
+      kbTypes: kbTypes ?? undefined,
+    }),
+  });
+
+  if (resp.status === 401) throw new Error('INVALID_KEY');
+  if (!resp.ok) throw new Error(`HTTP_${resp.status}`);
+
+  return resp.json();
+}
