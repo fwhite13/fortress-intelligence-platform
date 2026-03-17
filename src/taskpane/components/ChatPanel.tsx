@@ -32,6 +32,8 @@ import type { KbResult } from './KbResultPanel';
 import type { ParsedTable } from '../services/suggestionParser';
 import { createReportSheet } from '../services/reportBuilder';
 import type { ReportSpec } from '../services/reportBuilder';
+import { previewFormula, writeFormula, formatPreviewValue } from '../services/formulaBuilder';
+import type { FormulaSpec, FormulaPreviewResult } from '../services/formulaBuilder';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import ContextIndicator from './ContextIndicator';
@@ -146,6 +148,17 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSuccess, setReportSuccess] = useState<string | null>(null);
   const [reportSourceAddress, setReportSourceAddress] = useState('');
+
+  // ── Sprint 11: Formula intelligence state ──────────────────────────────────
+  const [showFormulaConfig, setShowFormulaConfig] = useState(false);
+  const [formulaDescription, setFormulaDescription] = useState('');
+  const [pendingFormulaSpec, setPendingFormulaSpec] = useState<FormulaSpec | null>(null);
+  const [formulaPreview, setFormulaPreview] = useState<FormulaPreviewResult | null>(null);
+  const [formulaPreviewLoading, setFormulaPreviewLoading] = useState(false);
+  const [formulaWriteLoading, setFormulaWriteLoading] = useState(false);
+  const [formulaError, setFormulaError] = useState<string | null>(null);
+  const [formulaSuccess, setFormulaSuccess] = useState<string | null>(null);
+  const formulaInputRef = useRef<HTMLInputElement>(null);
 
   // ── Sprint 5: Chat input text (lifted state for slash commands) ───────────
   const [inputText, setInputText] = useState('');
@@ -275,6 +288,23 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       setReportConfigChartType(
         validTypes.includes(specType as any) ? (specType as 'column' | 'bar' | 'line' | 'pie') : 'column'
       );
+    }
+  }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Sprint 11: Watch for formula_spec in the latest assistant message ─────
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    if (
+      lastMsg?.role === 'assistant' &&
+      !lastMsg.streaming &&
+      lastMsg.formulaSpec &&
+      !pendingFormulaSpec
+    ) {
+      setPendingFormulaSpec(lastMsg.formulaSpec);
+      setFormulaPreview(null);
+      if (lastMsg.formulaSpec.previewable) {
+        void handleFormulaPreview(lastMsg.formulaSpec);
+      }
     }
   }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -798,6 +828,121 @@ Return ONLY the JSON block, no prose before or after it.`;
     }
   };
 
+  // ── Sprint 11: Formula Intelligence handlers ──────────────────────────────
+
+  const handleFormulaGenerate = async () => {
+    if (!formulaDescription.trim()) return;
+    setShowFormulaConfig(false);
+    setFormulaError(null);
+    setFormulaSuccess(null);
+    setPendingFormulaSpec(null);
+    setFormulaPreview(null);
+
+    let context: string | undefined;
+    try {
+      const ctx = await getSelectedRange();
+      if (ctx.rows > 0 && ctx.cols > 0) {
+        context = formatContext(ctx);
+        setSelectionInfo({ address: ctx.address, rows: ctx.rows, cols: ctx.cols });
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    const formulaPrompt = `The user wants a formula for: "${formulaDescription.trim()}"
+
+Please generate an Excel formula and return it as a formula_spec JSON block:
+\`\`\`json
+{
+  "formula_spec": {
+    "formula": "=THE_FORMULA_HERE",
+    "explanation": "Plain-English explanation of what this formula does",
+    "functionNames": ["LIST", "OF", "FUNCTIONS", "USED"],
+    "targetCell": "__SELECTED__",
+    "previewable": true
+  }
+}
+\`\`\`
+
+Rules:
+- formula must start with = and use en-US Excel function names
+- If the formula uses volatile functions (NOW, TODAY, RAND, RANDBETWEEN, OFFSET, INDIRECT, INFO, CELL), set previewable: false
+- If you cannot generate a valid formula, return a prose explanation instead of the JSON block
+Return ONLY the JSON block.`;
+
+    await send(formulaPrompt, context);
+  };
+
+  const handleFormulaPreview = async (spec: FormulaSpec) => {
+    if (!spec.previewable) {
+      setFormulaPreview({
+        value: null,
+        valueType: 'String',
+        isError: false,
+        errorMessage: 'Preview unavailable for this formula type',
+      });
+      return;
+    }
+
+    setFormulaPreviewLoading(true);
+
+    try {
+      const activeSheetName = await Excel.run(async (ctx: any) => {
+        const sheet = ctx.workbook.worksheets.getActiveWorksheet();
+        sheet.load('name');
+        await ctx.sync();
+        return sheet.name as string;
+      });
+
+      const result = await previewFormula(spec.formula, activeSheetName);
+      setFormulaPreview(result);
+    } catch (e) {
+      setFormulaPreview({
+        value: null,
+        valueType: 'Error',
+        isError: true,
+        errorMessage: e instanceof Error ? e.message : 'Preview failed',
+      });
+    } finally {
+      setFormulaPreviewLoading(false);
+    }
+  };
+
+  const handleFormulaWrite = async (spec: FormulaSpec) => {
+    if (!spec) return;
+    if (!selectionInfo?.address) {
+      setFormulaError('Select a target cell first.');
+      return;
+    }
+
+    setFormulaWriteLoading(true);
+    setFormulaError(null);
+
+    const targetAddress = selectionInfo.address.split(':')[0];
+
+    try {
+      await writeFormula(spec.formula, targetAddress, spec.explanation);
+      setFormulaSuccess(`Formula written to ${targetAddress}`);
+      setPendingFormulaSpec(null);
+      setFormulaPreview(null);
+    } catch (e) {
+      setFormulaError(e instanceof Error ? e.message : 'Failed to write formula');
+    } finally {
+      setFormulaWriteLoading(false);
+    }
+  };
+
+  const handleFormulaDismiss = () => {
+    setPendingFormulaSpec(null);
+    setFormulaPreview(null);
+    setFormulaError(null);
+  };
+
+  const handleFormulaInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') void handleFormulaGenerate();
+    if (e.key === 'Escape') setShowFormulaConfig(false);
+  };
+
   // ── Sprint 9: Watch Mode ────────────────────────────────────────────────
 
   const handleWatchToggle = () => {
@@ -1317,6 +1462,75 @@ Return ONLY the JSON block, no prose before or after it.`;
         </div>
       )}
 
+      {/* ── Sprint 11: Formula config panel ── */}
+      {showFormulaConfig && (
+        <div
+          style={{
+            padding: '10px 12px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#111d2b',
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <div style={{ fontSize: '11px', fontWeight: '600', color: '#d4af37' }}>
+            ƒx Formula Generator
+          </div>
+          <input
+            ref={formulaInputRef}
+            value={formulaDescription}
+            onChange={(e) => setFormulaDescription(e.target.value)}
+            onKeyDown={handleFormulaInputKeyDown}
+            placeholder="e.g. sum revenue where region is North and quarter > 0"
+            style={{
+              background: '#1a2332',
+              border: '1px solid #2e3f54',
+              borderRadius: '4px',
+              color: '#e8edf3',
+              padding: '6px 8px',
+              fontSize: '12px',
+              outline: 'none',
+              width: '100%',
+              boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button
+              onClick={() => void handleFormulaGenerate()}
+              disabled={!formulaDescription.trim()}
+              style={{
+                background: formulaDescription.trim() ? '#1a3020' : '#1e2d3e',
+                border: `1px solid ${formulaDescription.trim() ? '#2e5040' : '#2e3f54'}`,
+                borderRadius: '4px',
+                color: formulaDescription.trim() ? '#6fcf97' : '#445566',
+                fontSize: '11px',
+                fontWeight: '600',
+                padding: '5px 12px',
+                cursor: formulaDescription.trim() ? 'pointer' : 'not-allowed',
+              }}
+            >
+              Generate Formula
+            </button>
+            <button
+              onClick={() => setShowFormulaConfig(false)}
+              style={{
+                background: 'none',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#556677',
+                fontSize: '11px',
+                padding: '5px 8px',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* CF inline prompt input */}
       {showCfInput && (
         <div
@@ -1712,6 +1926,134 @@ Return ONLY the JSON block, no prose before or after it.`;
         </div>
       )}
 
+      {/* ── Sprint 11: Formula preview + write action bar ── */}
+      {pendingFormulaSpec && (
+        <div
+          style={{
+            padding: '8px 10px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#0f1720',
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+          }}
+        >
+          <div
+            style={{
+              fontFamily: 'monospace',
+              fontSize: '12px',
+              color: '#d4af37',
+              background: '#131f2e',
+              padding: '5px 8px',
+              borderRadius: '4px',
+              border: '1px solid #2e3f54',
+              wordBreak: 'break-all',
+            }}
+          >
+            {pendingFormulaSpec.formula}
+          </div>
+
+          <div style={{ fontSize: '11px', color: '#8899aa' }}>
+            {pendingFormulaSpec.explanation}
+          </div>
+
+          {pendingFormulaSpec.functionNames.length > 0 && (
+            <div style={{ fontSize: '10px', color: '#556677' }}>
+              Uses: {pendingFormulaSpec.functionNames.join(', ')}
+            </div>
+          )}
+
+          <div style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {formulaPreviewLoading ? (
+              <span style={{ color: '#556677' }}>Computing preview…</span>
+            ) : formulaPreview ? (
+              <span
+                style={{
+                  color: formulaPreview.isError ? '#e07070' : '#6fcf97',
+                  fontFamily: 'monospace',
+                  fontWeight: '600',
+                }}
+              >
+                {formatPreviewValue(formulaPreview)}
+                {formulaPreview.isError && (
+                  <span style={{ color: '#556677', fontFamily: 'sans-serif', fontWeight: 'normal' }}>
+                    {' '}(preview error — formula may still be valid)
+                  </span>
+                )}
+              </span>
+            ) : !pendingFormulaSpec.previewable ? (
+              <span style={{ color: '#556677' }}>Preview unavailable (volatile function)</span>
+            ) : null}
+          </div>
+
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: '#556677', flexShrink: 0 }}>
+              Write to: {selectionInfo?.address?.split(':')[0] ?? '(select a cell)'}
+            </span>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => void handleFormulaWrite(pendingFormulaSpec)}
+              disabled={formulaWriteLoading || !selectionInfo}
+              style={{
+                background: selectionInfo ? '#d4af37' : '#2e3f54',
+                color: selectionInfo ? '#0f1720' : '#445566',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '5px 12px',
+                fontSize: '11px',
+                fontWeight: '600',
+                cursor: selectionInfo ? 'pointer' : 'not-allowed',
+              }}
+            >
+              {formulaWriteLoading ? '…' : 'Write Formula'}
+            </button>
+            <button
+              onClick={handleFormulaDismiss}
+              style={{
+                background: 'none',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#556677',
+                fontSize: '11px',
+                padding: '5px 8px',
+                cursor: 'pointer',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {formulaError && (
+            <div style={{ fontSize: '11px', color: '#e07070' }}>{formulaError}</div>
+          )}
+        </div>
+      )}
+
+      {formulaSuccess && !pendingFormulaSpec && (
+        <div
+          style={{
+            padding: '6px 10px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#0f2a1a',
+            color: '#6fcf97',
+            fontSize: '11px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <span>✓ {formulaSuccess}</span>
+          <button
+            onClick={() => setFormulaSuccess(null)}
+            style={{ background: 'none', border: 'none', color: '#8899aa', cursor: 'pointer', fontSize: '12px' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* FORGE search bar */}
       {showForgeSearch && (
         <div
@@ -1856,6 +2198,15 @@ Return ONLY the JSON block, no prose before or after it.`;
                 setShowReportConfig(true);
                 setReportError(null);
                 setReportSuccess(null);
+              } else if (name === 'formula') {
+                setInputText('');
+                setShowFormulaConfig(true);
+                setFormulaError(null);
+                setFormulaSuccess(null);
+                setFormulaDescription('');
+                setPendingFormulaSpec(null);
+                setFormulaPreview(null);
+                setTimeout(() => formulaInputRef.current?.focus(), 50);
               } else {
                 setInputText(prompt);
               }

@@ -4,6 +4,7 @@ import type { PivotSpec } from './pivotBuilder';
 import type { CfSpec } from './cfBuilder';
 import type { SortFilterSpec } from './sortFilterBuilder';
 import type { ReportSpec } from './reportBuilder';
+import type { FormulaSpec } from './formulaBuilder';
 
 export interface ParsedTable {
   headers: string[];
@@ -19,6 +20,7 @@ export interface ParseResult {
   sortFilterSpec: SortFilterSpec | null;
   tableData: ParsedTable | null;
   reportSpec: ReportSpec | null;   // ← NEW Sprint 10
+  formulaSpec: FormulaSpec | null;   // Sprint 11
 }
 
 export function parseSuggestions(rawText: string): ParseResult {
@@ -30,6 +32,7 @@ export function parseSuggestions(rawText: string): ParseResult {
   let sortFilterSpec: SortFilterSpec | null = null;
   let tableData: ParsedTable | null = null;
   let reportSpec: ReportSpec | null = null;
+  let formulaSpec: FormulaSpec | null = null;
 
   // ── suggestions block ─────────────────────────────────────────────────────
   const suggestionsRegex = /```json\s*(\{[\s\S]*?"suggestions"[\s\S]*?\})\s*```/;
@@ -138,6 +141,35 @@ export function parseSuggestions(rawText: string): ParseResult {
     }
   }
 
+  // ── formula_spec block ────────────────────────────────────────────────────
+  const formulaSpecRegex = /```json\s*(\{[\s\S]*?"formula_spec"[\s\S]*?\})\s*```/;
+  const formulaSpecMatch = displayText.match(formulaSpecRegex);
+  if (formulaSpecMatch) {
+    try {
+      const parsed = JSON.parse(formulaSpecMatch[1]);
+      const fs = parsed.formula_spec;
+      if (
+        fs &&
+        typeof fs.formula === 'string' &&
+        fs.formula.startsWith('=') &&
+        typeof fs.explanation === 'string'
+      ) {
+        formulaSpec = {
+          formula: fs.formula as string,
+          explanation: fs.explanation as string,
+          functionNames: Array.isArray(fs.functionNames)
+            ? (fs.functionNames as string[])
+            : [],
+          targetCell: typeof fs.targetCell === 'string' ? fs.targetCell : '__SELECTED__',
+          previewable: fs.previewable !== false,
+        };
+        displayText = displayText.replace(formulaSpecMatch[0], '');
+      }
+    } catch {
+      // Bad JSON — leave displayText unchanged
+    }
+  }
+
   // ── table_data block ──────────────────────────────────────────────────────
   const tableDataRegex = /```json\s*(\{[\s\S]*?"table_data"[\s\S]*?\})\s*```/;
   const tableDataMatch = displayText.match(tableDataRegex);
@@ -208,5 +240,5 @@ export function parseSuggestions(rawText: string): ParseResult {
   // Clean up excess blank lines left behind by stripped blocks
   displayText = displayText.replace(/\n{3,}/g, '\n\n').trim();
 
-  return { displayText, suggestions, chartSpec, pivotSpec, cfSpec, sortFilterSpec, tableData, reportSpec };
+  return { displayText, suggestions, chartSpec, pivotSpec, cfSpec, sortFilterSpec, tableData, reportSpec, formulaSpec };
 }

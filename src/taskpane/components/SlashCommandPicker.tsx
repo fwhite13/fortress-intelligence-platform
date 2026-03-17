@@ -13,6 +13,11 @@ const COMMANDS: SlashCommand[] = [
     prompt: '__REPORT_COMMAND__',
   },
   {
+    name: 'formula',
+    description: 'Generate a formula from a plain-English description',
+    prompt: '__FORMULA_COMMAND__',
+  },
+  {
     name: 'audit',
     description: 'Scan for formula errors, hardcoded values, circular refs',
     prompt:
