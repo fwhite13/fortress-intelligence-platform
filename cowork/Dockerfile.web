@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /app
 
 COPY shared/FipShared/FipShared.csproj ./shared/FipShared/
@@ -9,7 +9,7 @@ COPY shared/FipShared/ ./shared/FipShared/
 COPY cowork/src/CoworkWeb/ ./cowork/src/CoworkWeb/
 RUN dotnet publish ./cowork/src/CoworkWeb/CoworkWeb.csproj -c Release -o /out
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0
+FROM mcr.microsoft.com/dotnet/aspnet:9.0
 WORKDIR /app
 COPY --from=build /out .
 EXPOSE 8080
