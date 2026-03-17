@@ -2,7 +2,6 @@
 
 import type { ChartSpec } from './chartBuilder';
 import { insertChart } from './chartBuilder';
-import { setFaitWriting } from './watchMode';
 
 export interface KeyMetric {
   label: string;
@@ -45,9 +44,7 @@ export async function createReportSheet(
   // Copy this character exactly: —
   const sheetName = `FAIT Report — ${today}`;
 
-  setFaitWriting(true);
-  try {
-    const result = await Excel.run(async (ctx: any) => {
+  const result = await Excel.run(async (ctx: any) => {
       const wb = ctx.workbook;
 
       // ── 1. Delete any existing same-day report sheet ─────────────────────
@@ -182,7 +179,4 @@ export async function createReportSheet(
       metricsAddress: result.metricsAddress,
       reportAddress: result.reportAddress,
     };
-  } finally {
-    setFaitWriting(false);
-  }
 }
