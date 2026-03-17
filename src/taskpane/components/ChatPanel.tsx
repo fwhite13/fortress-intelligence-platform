@@ -2,8 +2,19 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useChat } from '../hooks/useChat';
 import { useWriteBack } from '../hooks/useWriteBack';
 import { getSelectedRange } from '../services/excelReader';
-import { writeRangeData, WriteRangeError, writeToTable, WriteTableError } from '../services/excelWriter';
+import { writeRangeData, WriteRangeError, writeToTable, WriteTableError, createNamedRange, deleteNamedRange, renameWorkbookNamedRange, listWorkbookNamedRanges, NamedRangeError } from '../services/excelWriter';
 import { formatContext } from '../services/contextFormatter';
+import {
+  loadNamedRanges,
+  addNamedRange,
+  removeNamedRange,
+  renameNamedRange,
+  syncRegistry,
+  generateFaitName,
+  toAbsoluteReference,
+  toA1Address,
+} from '../services/namedRangeStorage';
+import type { FaitNamedRange } from '../services/namedRangeStorage';
 import { searchKb, sendChat } from '../services/faitApi';
 import { scanRangeForIssues } from '../services/errorScanner';
 import { parseSuggestions } from '../services/suggestionParser';
@@ -103,6 +114,14 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [writeTableSuccess, setWriteTableSuccess] = useState<string | null>(null);
   const writeTableInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Sprint 8: Named Range state ───────────────────────────────────────────
+  const [pendingNameAddress, setPendingNameAddress] = useState<string | null>(null);
+  const [namedRangeName, setNamedRangeName] = useState('');
+  const [namedRangeLoading, setNamedRangeLoading] = useState(false);
+  const [namedRangeError, setNamedRangeError] = useState<string | null>(null);
+  const [namedRanges, setNamedRanges] = useState<FaitNamedRange[]>([]);
+  const namedRangeInputRef = useRef<HTMLInputElement>(null);
+
   // ── Sprint 5: Chat input text (lifted state for slash commands) ───────────
   const [inputText, setInputText] = useState('');
   const chatInputAreaRef = useRef<HTMLDivElement>(null);
@@ -149,6 +168,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, [messages]);
+
+  // ── Sprint 8: Load named ranges from workbook custom XML on mount ─────────
+  useEffect(() => {
+    loadNamedRanges().then(setNamedRanges).catch(() => null);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When useChat detects suggestions in the FAIT response, surface the dialog
   useEffect(() => {
@@ -201,11 +225,60 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const handleSend = async (text: string) => {
     let context: string | undefined;
+
+    // Sprint 8: Resolve FAIT named range references in the user's message
+    const faitRefMatches = text.match(/\bFAIT_\w+/g) ?? [];
+    const resolvedRanges: string[] = [];
+
+    if (faitRefMatches.length > 0 && namedRanges.length > 0) {
+      for (const ref of faitRefMatches) {
+        const entry = namedRanges.find(
+          (r) => r.name.toLowerCase() === ref.toLowerCase()
+        );
+        if (entry) {
+          try {
+            const rangeCtx = await Excel.run(async (ctx: any) => {
+              // Use workbook.names to resolve — correct for cross-sheet references
+              const namedItem = ctx.workbook.names.getItemOrNullObject(entry.name);
+              namedItem.load('isNullObject');
+              await ctx.sync();
+
+              if (namedItem.isNullObject) {
+                throw new Error('NAME_NOT_FOUND');
+              }
+
+              const range = namedItem.getRange();
+              range.load(['values', 'formulas', 'address', 'rowCount', 'columnCount']);
+              await ctx.sync();
+
+              return {
+                address: range.address as string,
+                rows: range.rowCount as number,
+                cols: range.columnCount as number,
+                values: range.values as unknown[][],
+                formulas: range.formulas as string[][],
+              };
+            });
+            const rangeContext = formatContext(rangeCtx, entry.name);
+            resolvedRanges.push(`[Named Range: ${ref}]\n${rangeContext}`);
+          } catch {
+            resolvedRanges.push(`[Named Range: ${ref} — could not read; range may have been moved or deleted]`);
+          }
+        } else {
+          resolvedRanges.push(`[Named Range: ${ref} — not found in FAIT registry]`);
+        }
+      }
+    }
+
     if (includeSelection) {
       try {
         const ctx = await getSelectedRange();
         if (ctx.rows > 0 && ctx.cols > 0) {
-          context = formatContext(ctx);
+          // Check if the current selection matches a named range
+          const matchingRange = namedRanges.find(
+            (r) => toA1Address(r.address) === ctx.address || r.address === ctx.address
+          );
+          context = formatContext(ctx, matchingRange?.name);
           setSelectionInfo({
             address: ctx.address,
             rows: ctx.rows,
@@ -217,6 +290,13 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         // Non-fatal: proceed without context
       }
     }
+
+    // Prepend resolved named range contexts to the regular context
+    if (resolvedRanges.length > 0) {
+      const rangeBlock = resolvedRanges.join('\n\n');
+      context = context ? `${rangeBlock}\n\n${context}` : rangeBlock;
+    }
+
     await send(text, context);
   };
 
@@ -485,6 +565,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         }
         setWriteTableSuccess(successMsg);
         setPendingTableData(null);
+        handleNameRangeRequest(result.address);  // Sprint 8: offer to name the range
       } catch (e) {
         if (e instanceof WriteRangeError) {
           if (e.code === 'EMPTY_DATA') {
@@ -512,6 +593,63 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const handleWriteTableKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') handleWriteTableConfirm();
     if (e.key === 'Escape') handleWriteTableCancel();
+  };
+
+  // ── Sprint 8: Named Range handlers ───────────────────────────────────────
+  const handleNameRangeRequest = (address: string) => {
+    const suggestion = generateFaitName('output');
+    setPendingNameAddress(address);
+    setNamedRangeName(suggestion);
+    setNamedRangeError(null);
+    setTimeout(() => namedRangeInputRef.current?.focus(), 50);
+  };
+
+  const handleNameRangeConfirm = async () => {
+    if (!pendingNameAddress) return;
+    const name = namedRangeName.trim();
+    if (!name) {
+      setNamedRangeError('Please enter a name.');
+      return;
+    }
+
+    setNamedRangeLoading(true);
+    setNamedRangeError(null);
+
+    try {
+      await createNamedRange(name, pendingNameAddress, 'Created by FAIT');
+      const entry: FaitNamedRange = {
+        name,
+        address: toAbsoluteReference(pendingNameAddress),
+        created: new Date().toISOString(),
+      };
+      await addNamedRange(entry);
+      setNamedRanges((prev) => [...prev.filter((r) => r.name !== name), entry]);
+      setPendingNameAddress(null);
+    } catch (e) {
+      if (e instanceof NamedRangeError) {
+        if (e.code === 'DUPLICATE_NAME') {
+          setNamedRangeError(`"${name}" already exists — choose a different name.`);
+        } else if (e.code === 'INVALID_NAME') {
+          setNamedRangeError('Invalid name — no spaces, cannot start with a digit.');
+        } else {
+          setNamedRangeError('Failed to create named range.');
+        }
+      } else {
+        setNamedRangeError('Failed to create named range.');
+      }
+    } finally {
+      setNamedRangeLoading(false);
+    }
+  };
+
+  const handleNameRangeSkip = () => {
+    setPendingNameAddress(null);
+    setNamedRangeError(null);
+  };
+
+  const handleNameRangeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') void handleNameRangeConfirm();
+    if (e.key === 'Escape') handleNameRangeSkip();
   };
 
   // Model display label
@@ -883,6 +1021,76 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* ── Sprint 8: Name range prompt (shown after successful writeRangeData()) ── */}
+      {pendingNameAddress && (
+        <div
+          style={{
+            padding: '8px 10px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#111d2b',
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ fontSize: '11px', color: '#8899aa', marginBottom: '4px' }}>
+            Name this range for future reference? (optional)
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <input
+              ref={namedRangeInputRef}
+              value={namedRangeName}
+              onChange={(e) => setNamedRangeName(e.target.value)}
+              onKeyDown={handleNameRangeKeyDown}
+              placeholder="e.g. FAIT_revenue_q1"
+              style={{
+                flex: 1,
+                background: '#1a2332',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#e8edf3',
+                padding: '5px 8px',
+                fontSize: '12px',
+                outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => void handleNameRangeConfirm()}
+              disabled={namedRangeLoading}
+              style={{
+                background: '#d4af37',
+                color: '#0f1720',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '5px 10px',
+                fontSize: '12px',
+                fontWeight: '600',
+                cursor: 'pointer',
+              }}
+            >
+              {namedRangeLoading ? '…' : 'Save'}
+            </button>
+            <button
+              onClick={handleNameRangeSkip}
+              style={{
+                background: '#2e3f54',
+                color: '#e8edf3',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '5px 8px',
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              Skip
+            </button>
+          </div>
+          {namedRangeError && (
+            <div style={{ marginTop: '4px', fontSize: '11px', color: '#e07070' }}>
+              {namedRangeError}
+            </div>
+          )}
         </div>
       )}
 

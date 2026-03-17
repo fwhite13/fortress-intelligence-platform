@@ -4,14 +4,28 @@ import { sendChat, fetchKbList, fetchProjectList } from '../services/faitApi';
 import { saveSetting } from '../services/settings';
 import ModelPicker from './ModelPicker';
 import type { KbInfo, ProjectInfo } from '../services/faitApi';
+import { loadNamedRanges, syncRegistry, removeNamedRange, renameNamedRange, toA1Address } from '../services/namedRangeStorage';
+import { deleteNamedRange, renameWorkbookNamedRange, listWorkbookNamedRanges } from '../services/excelWriter';
+import type { FaitNamedRange } from '../services/namedRangeStorage';
 
 interface SettingsPanelProps {
   onClose: () => void;
   apiKey: string;
   onKeyChange: (key: string) => void;
+  // Sprint 8: Named ranges — optional props, panel loads its own data if not provided
+  namedRanges?: FaitNamedRange[];
+  onDeleteNamedRange?: (name: string) => Promise<void>;
+  onRenameNamedRange?: (oldName: string, newName: string) => Promise<void>;
 }
 
-const SettingsPanel: React.FC<SettingsPanelProps> = ({ onClose, apiKey, onKeyChange }) => {
+const SettingsPanel: React.FC<SettingsPanelProps> = ({
+  onClose,
+  apiKey,
+  onKeyChange,
+  namedRanges: namedRangesProp,
+  onDeleteNamedRange,
+  onRenameNamedRange,
+}) => {
   // ── API Key section ─────────────────────────────────────────────────────────
   const [inputKey, setInputKey] = useState(apiKey ?? '');
   const [testing, setTesting] = useState(false);
@@ -30,6 +44,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onClose, apiKey, onKeyCha
 
   // ── Model section ───────────────────────────────────────────────────────────
   const [model, setModel] = useState<'haiku' | 'sonnet'>('sonnet');
+
+  // ── Sprint 8: Named Ranges section ────────────────────────────────────────
+  const [localNamedRanges, setLocalNamedRanges] = useState<FaitNamedRange[]>(namedRangesProp ?? []);
+  const [renamingName, setRenamingName] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [rangeActionError, setRangeActionError] = useState<string | null>(null);
+
+  // Derive which list to show: prop-provided or locally loaded
+  const displayedRanges = namedRangesProp ?? localNamedRanges;
 
   // ── Load persisted values on mount ─────────────────────────────────────────
   useEffect(() => {
@@ -78,6 +102,63 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onClose, apiKey, onKeyCha
       .then(setProjects)
       .finally(() => setProjectsLoading(false));
   }, [apiKey]);
+
+  // ── Sprint 8: Load named ranges and sync with workbook on panel open ──────
+  useEffect(() => {
+    loadNamedRanges().then(async (ranges) => {
+      // Only set local state if parent didn't provide ranges
+      if (!namedRangesProp) {
+        setLocalNamedRanges(ranges);
+      }
+      // Validate registry against live workbook names (background sync)
+      const liveNames = await listWorkbookNamedRanges();
+      // syncRegistry guard: only sync if liveNames is non-empty
+      if (liveNames.length > 0) {
+        await syncRegistry(liveNames);
+        // Reload after sync to get cleaned-up list
+        const cleaned = await loadNamedRanges();
+        if (!namedRangesProp) {
+          setLocalNamedRanges(cleaned);
+        }
+      }
+    }).catch(() => null);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDeleteRange = async (name: string) => {
+    setRangeActionError(null);
+    try {
+      if (onDeleteNamedRange) {
+        await onDeleteNamedRange(name);
+      } else {
+        await deleteNamedRange(name);
+        await removeNamedRange(name);
+        setLocalNamedRanges((prev) => prev.filter((r) => r.name !== name));
+      }
+    } catch {
+      setRangeActionError('Delete failed.');
+    }
+  };
+
+  const handleRenameRange = async (oldName: string, newName: string) => {
+    setRenameLoading(true);
+    setRangeActionError(null);
+    try {
+      if (onRenameNamedRange) {
+        await onRenameNamedRange(oldName, newName);
+      } else {
+        await renameWorkbookNamedRange(oldName, newName);
+        await renameNamedRange(oldName, newName);
+        setLocalNamedRanges((prev) =>
+          prev.map((r) => (r.name === oldName ? { ...r, name: newName } : r))
+        );
+      }
+      setRenamingName(null);
+    } catch {
+      setRangeActionError('Rename failed — name may already exist or be invalid.');
+    } finally {
+      setRenameLoading(false);
+    }
+  };
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const handleSaveAndTest = async () => {
@@ -408,6 +489,141 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onClose, apiKey, onKeyCha
             Sonnet is more capable; Haiku is faster and cheaper.
           </p>
           <ModelPicker model={model} onChange={handleModelChange} />
+        </div>
+
+        {/* ── Section: Named Ranges ─────────────────────────────────────── */}
+        <div style={sectionStyle}>
+          <div style={sectionHeadingStyle}>Named Ranges</div>
+          <p style={labelStyle}>
+            Ranges FAIT has written to this workbook. Reference them by name in your prompts.
+          </p>
+
+          {rangeActionError && (
+            <div style={{ color: '#e07070', fontSize: '11px', padding: '4px 0' }}>
+              {rangeActionError}
+            </div>
+          )}
+
+          {displayedRanges.length === 0 ? (
+            <p style={{ ...labelStyle, color: '#445566' }}>
+              No named ranges yet. After writing a table to the sheet, FAIT will offer to name the range.
+            </p>
+          ) : (
+            displayedRanges.map((r, idx) => (
+              <div
+                key={r.name}
+                style={{
+                  ...toggleRowStyle,
+                  borderBottom: idx < displayedRanges.length - 1 ? '1px solid #2e3f54' : 'none',
+                  flexDirection: 'column' as const,
+                  alignItems: 'flex-start' as const,
+                  gap: '6px',
+                  padding: '8px 0',
+                }}
+              >
+                {renamingName === r.name ? (
+                  <div style={{ width: '100%', display: 'flex', gap: '6px' }}>
+                    <input
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void handleRenameRange(r.name, renameValue.trim());
+                        if (e.key === 'Escape') setRenamingName(null);
+                      }}
+                      autoFocus
+                      style={{
+                        flex: 1,
+                        background: '#1a2332',
+                        border: '1px solid #2e3f54',
+                        borderRadius: '4px',
+                        color: '#e8edf3',
+                        padding: '4px 8px',
+                        fontSize: '12px',
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      disabled={renameLoading}
+                      onClick={() => void handleRenameRange(r.name, renameValue.trim())}
+                      style={{
+                        background: '#d4af37',
+                        color: '#0f1720',
+                        border: 'none',
+                        borderRadius: '4px',
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {renameLoading ? '…' : 'OK'}
+                    </button>
+                    <button
+                      onClick={() => setRenamingName(null)}
+                      style={{
+                        background: '#2e3f54',
+                        color: '#e8edf3',
+                        border: 'none',
+                        borderRadius: '4px',
+                        padding: '4px 6px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ color: '#e8edf3', fontSize: '12px', fontWeight: '600', fontFamily: 'monospace' }}>
+                        {r.name}
+                      </div>
+                      <div style={{ color: '#556677', fontSize: '11px', marginTop: '1px' }}>
+                        {r.address}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                      <button
+                        title="Rename"
+                        onClick={() => {
+                          setRenamingName(r.name);
+                          setRenameValue(r.name);
+                          setRangeActionError(null);
+                        }}
+                        style={{
+                          background: '#1e2d3e',
+                          color: '#8899aa',
+                          border: '1px solid #2e3f54',
+                          borderRadius: '4px',
+                          padding: '3px 6px',
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        ✏
+                      </button>
+                      <button
+                        title="Delete"
+                        onClick={() => void handleDeleteRange(r.name)}
+                        style={{
+                          background: '#2d1515',
+                          color: '#e07070',
+                          border: '1px solid #4a1515',
+                          borderRadius: '4px',
+                          padding: '3px 6px',
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
         </div>
 
         {/* Footer note */}

@@ -1,12 +1,16 @@
 import type { SpreadsheetContext } from './excelReader';
 
-export function formatContext(ctx: SpreadsheetContext): string {
+export function formatContext(ctx: SpreadsheetContext, namedRangeName?: string): string {
   const sanitize = (v: unknown): string =>
     String(v)
       .replace(/[\n\r]/g, ' ')
       .replace(/\|/g, '\\|');
 
   let out = `[SPREADSHEET CONTEXT]\nSheet range: ${ctx.address} | ${ctx.rows} rows × ${ctx.cols} cols\n`;
+
+  if (namedRangeName) {
+    out += `Named range: ${namedRangeName}\n`;
+  }
 
   if (ctx.tableInfo) {
     // Table-aware path: authoritative column names from the Table definition
