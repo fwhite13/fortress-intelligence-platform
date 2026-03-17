@@ -63,8 +63,8 @@ export async function getSelectedRange(): Promise<SpreadsheetContext> {
       const headerRange = table.getHeaderRowRange();
       headerRange.load(['values']);
 
-      const dataRange = table.getDataBodyRange();
-      dataRange.load(['rowCount']);
+      const dataRange = table.getDataBodyRangeOrNullObject();
+      dataRange.load(['isNullObject', 'rowCount']);
 
       const intersection = range.getIntersectionOrNullObject(tRange);
       intersection.load(['isNullObject']);
@@ -84,10 +84,11 @@ export async function getSelectedRange(): Promise<SpreadsheetContext> {
       const { table, headerRange, dataRange } = tableItems[i];
       const columnNames = (headerRange.values[0] as string[]).map(String);
 
+      const dataRowCount = dataRange.isNullObject ? 0 : (dataRange.rowCount as number);
       baseContext.tableInfo = {
         name: table.name as string,
         columnNames,
-        dataRowCount: dataRange.rowCount as number,
+        dataRowCount,
         boundAddress: tableRanges[i].address as string,
       };
       break; // Use the first matching table
