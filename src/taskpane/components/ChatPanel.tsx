@@ -442,8 +442,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     // Determine write mode: Table name vs cell address
     // Strip optional sheet prefix (e.g. "Sheet1!SalesData" → "SalesData", "Sheet1!B3" → "B3")
     const stripped = target.includes('!') ? target.split('!').pop()! : target;
-    // If stripped part matches cell address pattern (letter(s) followed by digit(s)), it's a cell address
-    const isCellAddress = /^[A-Z$][A-Z$0-9]*\d+$/i.test(stripped);
+    // Excel columns are max 3 letters (A–XFD), rows max 7 digits (1–1048576)
+    // This prevents "SalesData2023" (9 letters before digit) from matching as a cell address
+    const isCellAddress = /^\$?[A-Z]{1,3}\$?\d{1,7}$/i.test(stripped);
     const isTableTarget = !isCellAddress;
 
     if (isTableTarget) {
