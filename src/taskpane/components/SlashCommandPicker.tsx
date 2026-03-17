@@ -8,6 +8,11 @@ interface SlashCommand {
 
 const COMMANDS: SlashCommand[] = [
   {
+    name: 'report',
+    description: 'Generate an analysis report sheet from selected data',
+    prompt: '__REPORT_COMMAND__',
+  },
+  {
     name: 'audit',
     description: 'Scan for formula errors, hardcoded values, circular refs',
     prompt:
@@ -35,7 +40,7 @@ const COMMANDS: SlashCommand[] = [
 
 interface SlashCommandPickerProps {
   query: string; // text after the slash (for filtering)
-  onSelect: (prompt: string) => void;
+  onSelect: (prompt: string, name?: string) => void;
   onClose: () => void;
 }
 
@@ -61,7 +66,7 @@ const SlashCommandPicker: React.FC<SlashCommandPickerProps> = ({ query, onSelect
         setActiveIndex((i) => (i - 1 + filtered.length) % filtered.length);
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        onSelect(filtered[activeIndex].prompt);
+        onSelect(filtered[activeIndex].prompt, filtered[activeIndex].name);
       } else if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
@@ -112,7 +117,7 @@ const SlashCommandPicker: React.FC<SlashCommandPickerProps> = ({ query, onSelect
           key={cmd.name}
           role="option"
           aria-selected={idx === activeIndex}
-          onClick={() => onSelect(cmd.prompt)}
+          onClick={() => onSelect(cmd.prompt, cmd.name)}
           onMouseEnter={() => setActiveIndex(idx)}
           style={{
             padding: '8px 12px',

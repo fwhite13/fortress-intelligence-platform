@@ -30,6 +30,8 @@ import type { CfSpec } from '../services/cfBuilder';
 import type { SortFilterSpec } from '../services/sortFilterBuilder';
 import type { KbResult } from './KbResultPanel';
 import type { ParsedTable } from '../services/suggestionParser';
+import { createReportSheet } from '../services/reportBuilder';
+import type { ReportSpec } from '../services/reportBuilder';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import ContextIndicator from './ContextIndicator';
@@ -134,6 +136,16 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [lastWatchTrigger, setLastWatchTrigger] = useState<Date | null>(null);
   const eventHandlerRef = useRef<any>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Sprint 10: Report generation state ────────────────────────────────────
+  const [showReportConfig, setShowReportConfig] = useState(false);
+  const [reportConfigTitle, setReportConfigTitle] = useState('');
+  const [reportConfigChartType, setReportConfigChartType] = useState<'column' | 'bar' | 'line' | 'pie'>('column');
+  const [pendingReportSpec, setPendingReportSpec] = useState<ReportSpec | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportSuccess, setReportSuccess] = useState<string | null>(null);
+  const [reportSourceAddress, setReportSourceAddress] = useState('');
 
   // ── Sprint 5: Chat input text (lifted state for slash commands) ───────────
   const [inputText, setInputText] = useState('');
@@ -246,6 +258,25 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       }
     };
   }, []);
+
+  // ── Sprint 10: Capture reportSpec from latest assistant message ───────────
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    if (
+      lastMsg?.role === 'assistant' &&
+      !lastMsg.streaming &&
+      lastMsg.reportSpec &&
+      !pendingReportSpec
+    ) {
+      setPendingReportSpec(lastMsg.reportSpec);
+      setReportConfigTitle(lastMsg.reportSpec.title);
+      const specType = lastMsg.reportSpec.chartSpec?.type;
+      const validTypes = ['column', 'bar', 'line', 'pie'] as const;
+      setReportConfigChartType(
+        validTypes.includes(specType as any) ? (specType as 'column' | 'bar' | 'line' | 'pie') : 'column'
+      );
+    }
+  }, [messages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSend = async (text: string) => {
     let context: string | undefined;
@@ -686,6 +717,85 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const handleNameRangeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') void handleNameRangeConfirm();
     if (e.key === 'Escape') handleNameRangeSkip();
+  };
+
+  // ── Sprint 10: Report handlers ─────────────────────────────────────────────
+
+  const handleReportAnalyze = async () => {
+    setShowReportConfig(false);
+    setReportError(null);
+    setReportSuccess(null);
+    setPendingReportSpec(null);
+
+    let context: string | undefined;
+    let address = '';
+    try {
+      const ctx = await getSelectedRange();
+      if (ctx.rows > 0 && ctx.cols > 0) {
+        context = formatContext(ctx);
+        address = ctx.address;
+        setSelectionInfo({ address: ctx.address, rows: ctx.rows, cols: ctx.cols });
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    setReportSourceAddress(address);
+
+    const reportPrompt = `Please analyze the selected spreadsheet data and return a structured report_spec JSON block.
+Return a JSON block with key "report_spec" containing:
+- title: string — a concise report title (max 50 chars)
+- summary: string — 2-4 sentences describing the data, key trends, and notable findings
+- keyMetrics: array of { label: string, value: string, note?: string } — max 8 metrics
+- chartSpec: object with keys: type ("column"|"bar"|"line"|"pie"), title (string), dataRange (string — use "A7:B14" as a placeholder since the actual range will be computed), hasHeaders (true), seriesBy ("columns")
+
+The keyMetrics should highlight the most important numbers from the data.
+Return ONLY the JSON block, no prose before or after it.`;
+
+    await send(reportPrompt, context);
+  };
+
+  const handleCreateReportSheet = async () => {
+    if (reportLoading || !pendingReportSpec) return;
+
+    const spec = pendingReportSpec;
+    setReportLoading(true);
+    setReportError(null);
+    setReportSuccess(null);
+    setPendingReportSpec(null);
+
+    setFaitWriting(true);
+    try {
+      const result = await createReportSheet(
+        spec,
+        reportSourceAddress,
+        reportConfigTitle.trim() || undefined,
+        reportConfigChartType
+      );
+
+      // Sprint 8 integration: register as named range (graceful degradation)
+      try {
+        const nameForReport = generateFaitName('report');
+        await createNamedRange(nameForReport, result.reportAddress, 'FAIT report sheet');
+        const entry: FaitNamedRange = {
+          name: nameForReport,
+          address: toAbsoluteReference(result.reportAddress),
+          created: new Date().toISOString(),
+        };
+        await addNamedRange(entry);
+        setNamedRanges((prev) => [...prev, entry]);
+      } catch {
+        // S8 named range registration failed — report still created successfully
+      }
+
+      setReportSuccess(`Report sheet created: "${result.sheetName}"`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown error';
+      setReportError(`Report creation failed: ${msg}`);
+    } finally {
+      setFaitWriting(false);
+      setReportLoading(false);
+    }
   };
 
   // ── Sprint 9: Watch Mode ────────────────────────────────────────────────
@@ -1132,6 +1242,81 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         </div>
       )}
 
+      {/* ── Sprint 10: Report config panel ── */}
+      {showReportConfig && (
+        <div
+          style={{
+            padding: '10px 12px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#111d2b',
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <div style={{ fontSize: '11px', fontWeight: '600', color: '#d4af37' }}>
+            📊 Generate Report Sheet
+          </div>
+          <div style={{ fontSize: '11px', color: '#8899aa' }}>
+            FAIT will analyze the selected range and create a formatted report sheet.
+          </div>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: '#8899aa', flexShrink: 0 }}>Chart:</span>
+            {(['column', 'bar', 'line', 'pie'] as const).map((type) => (
+              <button
+                key={type}
+                onClick={() => setReportConfigChartType(type)}
+                style={{
+                  background: reportConfigChartType === type ? '#1e3a5f' : '#1a2332',
+                  border: `1px solid ${reportConfigChartType === type ? '#2e5080' : '#2e3f54'}`,
+                  borderRadius: '4px',
+                  color: reportConfigChartType === type ? '#d4af37' : '#556677',
+                  fontSize: '11px',
+                  padding: '3px 8px',
+                  cursor: 'pointer',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {type}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button
+              onClick={() => void handleReportAnalyze()}
+              disabled={!selectionInfo}
+              style={{
+                background: selectionInfo ? '#1a3020' : '#1e2d3e',
+                border: `1px solid ${selectionInfo ? '#2e5040' : '#2e3f54'}`,
+                borderRadius: '4px',
+                color: selectionInfo ? '#6fcf97' : '#445566',
+                fontSize: '11px',
+                fontWeight: '600',
+                padding: '5px 12px',
+                cursor: selectionInfo ? 'pointer' : 'not-allowed',
+              }}
+            >
+              {selectionInfo ? `Analyze ${selectionInfo.address}` : 'Select a range first'}
+            </button>
+            <button
+              onClick={() => setShowReportConfig(false)}
+              style={{
+                background: 'none',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#556677',
+                fontSize: '11px',
+                padding: '5px 8px',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* CF inline prompt input */}
       {showCfInput && (
         <div
@@ -1422,6 +1607,111 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         </div>
       )}
 
+      {/* ── Sprint 10: Create Report Sheet action bar ── */}
+      {pendingReportSpec && !reportLoading && (
+        <div
+          style={{
+            padding: '8px 10px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#0f1720',
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+          }}
+        >
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <input
+              value={reportConfigTitle}
+              onChange={(e) => setReportConfigTitle(e.target.value)}
+              placeholder="Report title"
+              maxLength={45}
+              style={{
+                flex: 1,
+                background: '#1a2332',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#e8edf3',
+                padding: '5px 8px',
+                fontSize: '12px',
+                outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => void handleCreateReportSheet()}
+              style={{
+                background: '#1a3020',
+                border: '1px solid #2e5040',
+                borderRadius: '4px',
+                color: '#6fcf97',
+                fontSize: '11px',
+                fontWeight: '600',
+                padding: '5px 12px',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              📋 Create Report Sheet
+            </button>
+            <button
+              onClick={() => { setPendingReportSpec(null); setReportError(null); }}
+              style={{
+                background: 'none',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#556677',
+                fontSize: '11px',
+                padding: '5px 8px',
+                cursor: 'pointer',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          {reportError && (
+            <div style={{ fontSize: '11px', color: '#e07070' }}>{reportError}</div>
+          )}
+        </div>
+      )}
+
+      {reportLoading && (
+        <div
+          style={{
+            padding: '6px 10px',
+            fontSize: '11px',
+            color: '#8899aa',
+            borderBottom: '1px solid #2e3f54',
+            flexShrink: 0,
+          }}
+        >
+          Creating report sheet…
+        </div>
+      )}
+
+      {reportSuccess && !pendingReportSpec && (
+        <div
+          style={{
+            padding: '6px 10px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#0f2a1a',
+            color: '#6fcf97',
+            fontSize: '11px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <span>✓ {reportSuccess}</span>
+          <button
+            onClick={() => setReportSuccess(null)}
+            style={{ background: 'none', border: 'none', color: '#8899aa', cursor: 'pointer', fontSize: '12px' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* FORGE search bar */}
       {showForgeSearch && (
         <div
@@ -1560,8 +1850,15 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         {showSlashPicker && (
           <SlashCommandPicker
             query={slashQuery}
-            onSelect={(prompt) => {
-              setInputText(prompt);
+            onSelect={(prompt, name) => {
+              if (name === 'report') {
+                setInputText('');
+                setShowReportConfig(true);
+                setReportError(null);
+                setReportSuccess(null);
+              } else {
+                setInputText(prompt);
+              }
             }}
             onClose={() => setInputText('')}
           />

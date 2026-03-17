@@ -11,9 +11,11 @@ export interface ChartSpec {
   position?: { top: number; left: number; width: number; height: number };
 }
 
-export async function insertChart(spec: ChartSpec): Promise<void> {
+export async function insertChart(spec: ChartSpec, sheetName?: string): Promise<void> {
   await Excel.run(async (ctx: any) => {
-    const sheet = ctx.workbook.worksheets.getActiveWorksheet();
+    const sheet = sheetName
+      ? ctx.workbook.worksheets.getItem(sheetName)
+      : ctx.workbook.worksheets.getActiveWorksheet();
     const dataRange = sheet.getRange(spec.dataRange);
 
     // Map spec type to Excel ChartType

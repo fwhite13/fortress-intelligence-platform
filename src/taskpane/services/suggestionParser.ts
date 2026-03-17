@@ -3,6 +3,7 @@ import type { ChartSpec } from './chartBuilder';
 import type { PivotSpec } from './pivotBuilder';
 import type { CfSpec } from './cfBuilder';
 import type { SortFilterSpec } from './sortFilterBuilder';
+import type { ReportSpec } from './reportBuilder';
 
 export interface ParsedTable {
   headers: string[];
@@ -17,6 +18,7 @@ export interface ParseResult {
   cfSpec: CfSpec | null;
   sortFilterSpec: SortFilterSpec | null;
   tableData: ParsedTable | null;
+  reportSpec: ReportSpec | null;   // ← NEW Sprint 10
 }
 
 export function parseSuggestions(rawText: string): ParseResult {
@@ -27,6 +29,7 @@ export function parseSuggestions(rawText: string): ParseResult {
   let cfSpec: CfSpec | null = null;
   let sortFilterSpec: SortFilterSpec | null = null;
   let tableData: ParsedTable | null = null;
+  let reportSpec: ReportSpec | null = null;
 
   // ── suggestions block ─────────────────────────────────────────────────────
   const suggestionsRegex = /```json\s*(\{[\s\S]*?"suggestions"[\s\S]*?\})\s*```/;
@@ -104,6 +107,37 @@ export function parseSuggestions(rawText: string): ParseResult {
     }
   }
 
+  // ── report_spec block ─────────────────────────────────────────────────────
+  const reportSpecRegex = /```json\s*(\{[\s\S]*?"report_spec"[\s\S]*?\})\s*```/;
+  const reportSpecMatch = displayText.match(reportSpecRegex);
+  if (reportSpecMatch) {
+    try {
+      const parsed = JSON.parse(reportSpecMatch[1]);
+      const rs = parsed.report_spec;
+      if (
+        rs &&
+        typeof rs.title === 'string' &&
+        typeof rs.summary === 'string' &&
+        Array.isArray(rs.keyMetrics) &&
+        rs.chartSpec
+      ) {
+        reportSpec = {
+          title: rs.title as string,
+          summary: rs.summary as string,
+          keyMetrics: (rs.keyMetrics as any[]).map((m) => ({
+            label: String(m.label ?? ''),
+            value: String(m.value ?? ''),
+            note: m.note ? String(m.note) : undefined,
+          })),
+          chartSpec: rs.chartSpec as ChartSpec,
+        };
+        displayText = displayText.replace(reportSpecMatch[0], '');
+      }
+    } catch {
+      // Bad JSON — leave displayText unchanged
+    }
+  }
+
   // ── table_data block ──────────────────────────────────────────────────────
   const tableDataRegex = /```json\s*(\{[\s\S]*?"table_data"[\s\S]*?\})\s*```/;
   const tableDataMatch = displayText.match(tableDataRegex);
@@ -174,5 +208,5 @@ export function parseSuggestions(rawText: string): ParseResult {
   // Clean up excess blank lines left behind by stripped blocks
   displayText = displayText.replace(/\n{3,}/g, '\n\n').trim();
 
-  return { displayText, suggestions, chartSpec, pivotSpec, cfSpec, sortFilterSpec, tableData };
+  return { displayText, suggestions, chartSpec, pivotSpec, cfSpec, sortFilterSpec, tableData, reportSpec };
 }

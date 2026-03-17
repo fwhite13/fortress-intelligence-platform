@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { sendChat, sendChatStreaming } from '../services/faitApi';
 import { parseSuggestions, type ParsedTable } from '../services/suggestionParser';
+import type { ReportSpec } from '../services/reportBuilder';
 import type { CellSuggestion } from '../components/WriteSuggestionsDialog';
 
 export interface Message {
@@ -8,6 +9,7 @@ export interface Message {
   content: string;
   streaming?: boolean;
   tableData?: ParsedTable | null;
+  reportSpec?: ReportSpec | null;   // Sprint 10
 }
 
 export interface UseChatReturn {
@@ -104,7 +106,7 @@ export function useChat(
       }
 
       // Parse suggestions/tableData out of the raw response
-      const { displayText, suggestions, tableData } = parseSuggestions(rawText);
+      const { displayText, suggestions, tableData, reportSpec } = parseSuggestions(rawText);
 
       // Finalise the assistant message (remove streaming flag)
       setMessages((prev) => {
@@ -114,6 +116,7 @@ export function useChat(
           content: displayText,
           streaming: false,
           tableData: tableData ?? null,
+          reportSpec: reportSpec ?? null,
         };
         return next;
       });
