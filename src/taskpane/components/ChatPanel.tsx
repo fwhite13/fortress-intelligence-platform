@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useChat } from '../hooks/useChat';
 import { useWriteBack } from '../hooks/useWriteBack';
 import { getSelectedRange } from '../services/excelReader';
-import { writeRangeData, WriteRangeError, writeToTable, WriteTableError, createNamedRange, deleteNamedRange, renameWorkbookNamedRange, listWorkbookNamedRanges, NamedRangeError } from '../services/excelWriter';
+import { writeRangeData, WriteRangeError, writeToTable, WriteTableError, createNamedRange, deleteNamedRange, renameWorkbookNamedRange, listWorkbookNamedRanges, NamedRangeError, registerWatchHandler, unregisterWatchHandler } from '../services/excelWriter';
+import { setFaitWriting, isFaitWriting } from '../services/watchMode';
 import { formatContext } from '../services/contextFormatter';
 import {
   loadNamedRanges,
@@ -122,6 +123,18 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const [namedRanges, setNamedRanges] = useState<FaitNamedRange[]>([]);
   const namedRangeInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Sprint 9: Watch mode state ─────────────────────────────────────────
+  const [watchModeOn, setWatchModeOn] = useState(false);
+  const [showWatchConfig, setShowWatchConfig] = useState(false);
+  const [watchRange, setWatchRange] = useState('');
+  const [watchPrompt, setWatchPrompt] = useState(
+    'Analyze changes in this range and flag any issues or anomalies'
+  );
+  const [watchTriggerCount, setWatchTriggerCount] = useState(0);
+  const [lastWatchTrigger, setLastWatchTrigger] = useState<Date | null>(null);
+  const eventHandlerRef = useRef<any>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── Sprint 5: Chat input text (lifted state for slash commands) ───────────
   const [inputText, setInputText] = useState('');
   const chatInputAreaRef = useRef<HTMLDivElement>(null);
@@ -222,6 +235,17 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       sortFilterInputRef.current?.focus();
     }
   }, [showSortFilterInput]);
+
+  // Sprint 9: Cleanup debounce timer on unmount
+  // Note: async unregisterWatchHandler() cannot run in React's synchronous cleanup.
+  // The handler proxy becomes stale on unmount — acceptable for a taskpane that rarely unmounts.
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleSend = async (text: string) => {
     let context: string | undefined;
@@ -530,9 +554,15 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     if (isTableTarget) {
       // Write to named Table — append rows only (NOT [headers, ...rows])
       try {
-        const result = await writeToTable(target, pendingTableData.rows);
+        setFaitWriting(true);
+        let result: Awaited<ReturnType<typeof writeToTable>>;
+        try {
+          result = await writeToTable(target, pendingTableData.rows);
+        } finally {
+          setFaitWriting(false);
+        }
         setWriteTableSuccess(
-          `Appended ${result.rowsAdded} rows to Table "${target}" (${result.tableAddress})`
+          `Appended ${result!.rowsAdded} rows to Table "${target}" (${result!.tableAddress})`
         );
         setPendingTableData(null);
       } catch (e) {
@@ -558,14 +588,20 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       ];
 
       try {
-        const result = await writeRangeData(target, data);
-        let successMsg = `Written to ${result.address} (${result.rows} rows × ${result.cols} cols)`;
-        if (result.warning) {
-          successMsg += ` ⚠️ ${result.warning}`;
+        setFaitWriting(true);
+        let result: Awaited<ReturnType<typeof writeRangeData>>;
+        try {
+          result = await writeRangeData(target, data);
+        } finally {
+          setFaitWriting(false);
+        }
+        let successMsg = `Written to ${result!.address} (${result!.rows} rows × ${result!.cols} cols)`;
+        if (result!.warning) {
+          successMsg += ` ⚠️ ${result!.warning}`;
         }
         setWriteTableSuccess(successMsg);
         setPendingTableData(null);
-        handleNameRangeRequest(result.address);  // Sprint 8: offer to name the range
+        handleNameRangeRequest(result!.address);  // Sprint 8: offer to name the range
       } catch (e) {
         if (e instanceof WriteRangeError) {
           if (e.code === 'EMPTY_DATA') {
@@ -650,6 +686,103 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const handleNameRangeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') void handleNameRangeConfirm();
     if (e.key === 'Escape') handleNameRangeSkip();
+  };
+
+  // ── Sprint 9: Watch Mode ────────────────────────────────────────────────
+
+  const handleWatchToggle = () => {
+    if (watchModeOn) {
+      void stopWatching();
+    } else {
+      if (selectionInfo?.address) {
+        setWatchRange(selectionInfo.address);
+      }
+      setShowWatchConfig((v) => !v);
+    }
+  };
+
+  const startWatching = async () => {
+    if (!watchRange.trim()) return;
+    if (eventHandlerRef.current) {
+      await unregisterWatchHandler(eventHandlerRef.current);
+      eventHandlerRef.current = null;
+    }
+    try {
+      const handler = await registerWatchHandler(handleWatchChange);
+      eventHandlerRef.current = handler;
+      setWatchModeOn(true);
+      setShowWatchConfig(false);
+    } catch (e) {
+      console.warn('FAIT watch: failed to register handler:', e);
+    }
+  };
+
+  const stopWatching = async () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    if (eventHandlerRef.current) {
+      await unregisterWatchHandler(eventHandlerRef.current);
+      eventHandlerRef.current = null;
+    }
+    setWatchModeOn(false);
+    setShowWatchConfig(false);
+  };
+
+  // NOTE: handleWatchChange is intentionally NOT async.
+  // The onChanged event proxy is only valid synchronously — do not await inside this function.
+  const handleWatchChange = (event: any) => {
+    // Loop prevention: ignore events triggered by FAIT's own writes
+    if (isFaitWriting()) return;
+
+    const changedAddress: string = event.address ?? '';
+    if (!changedAddress || !watchRange) return;
+
+    // Lightweight sheet-name prefix check for fast rejection (no Excel.run needed)
+    const watchSheet = watchRange.split('!')[0] ?? '';
+    const changedSheet = changedAddress.split('!')[0] ?? '';
+    if (watchSheet && changedSheet && watchSheet.toLowerCase() !== changedSheet.toLowerCase()) return;
+
+    // Debounce: reset timer on each change event
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null;
+      void triggerWatchAnalysis();
+    }, 500);
+  };
+
+  const triggerWatchAnalysis = async () => {
+    if (loading) return;
+    if (isFaitWriting()) return;
+
+    try {
+      const ctx = await Excel.run(async (excelCtx: any) => {
+        const sheet = excelCtx.workbook.worksheets.getActiveWorksheet();
+        const range = sheet.getRange(watchRange);
+        range.load(['values', 'formulas', 'address', 'rowCount', 'columnCount']);
+        await excelCtx.sync();
+        return {
+          address: range.address as string,
+          rows: range.rowCount as number,
+          cols: range.columnCount as number,
+          values: range.values as unknown[][],
+          formulas: range.formulas as string[][],
+        };
+      });
+
+      const context = formatContext(ctx);
+      const triggerMessage = `👁 Watch trigger: ${watchPrompt}`;
+
+      setWatchTriggerCount((n) => n + 1);
+      setLastWatchTrigger(new Date());
+
+      await send(triggerMessage, context);
+    } catch (e) {
+      console.warn('FAIT watch: trigger analysis failed:', e);
+    }
   };
 
   // Model display label
@@ -765,6 +898,39 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
             {sortFilterLoading ? '…' : '🔀'}
           </button>
 
+          {/* Watch mode toggle — Sprint 9 */}
+          <button
+            onClick={handleWatchToggle}
+            title={watchModeOn
+              ? `Watch mode ON — ${watchTriggerCount} trigger${watchTriggerCount !== 1 ? 's' : ''}`
+              : 'Enable watch mode — FAIT reacts to cell changes'}
+            aria-label={watchModeOn ? 'Disable watch mode' : 'Enable watch mode'}
+            style={{
+              ...headerBtnStyle,
+              color: watchModeOn ? '#6fcf97' : (showWatchConfig ? '#d4af37' : '#8899aa'),
+              position: 'relative',
+            }}
+          >
+            {watchModeOn ? (
+              <>
+                👁
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    right: '2px',
+                    width: '5px',
+                    height: '5px',
+                    borderRadius: '50%',
+                    background: '#6fcf97',
+                    animation: 'watchPulse 2s ease-in-out infinite',
+                  }}
+                />
+              </>
+            ) : '👁'}
+          </button>
+
           {/* Clear History button — Sprint 5 */}
           <button
             onClick={handleClearHistory}
@@ -803,6 +969,168 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* ── Sprint 9: Watch mode config panel ── */}
+      {showWatchConfig && !watchModeOn && (
+        <div
+          style={{
+            padding: '10px 12px',
+            borderBottom: '1px solid #2e3f54',
+            background: '#0f1720',
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <div style={{ fontSize: '11px', fontWeight: '600', color: '#d4af37' }}>
+            👁 Watch Mode
+          </div>
+
+          {/* Range input */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <span style={{ fontSize: '11px', color: '#8899aa', flexShrink: 0 }}>Range:</span>
+            <input
+              value={watchRange}
+              onChange={(e) => setWatchRange(e.target.value)}
+              placeholder="e.g. Sheet1!A1:D20"
+              style={{
+                flex: 1,
+                background: '#1a2332',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#e8edf3',
+                padding: '4px 8px',
+                fontSize: '12px',
+                outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => { if (selectionInfo?.address) setWatchRange(selectionInfo.address); }}
+              title="Use current selection"
+              style={{
+                background: '#1e2d3e',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#8899aa',
+                fontSize: '11px',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              Use selection
+            </button>
+          </div>
+
+          {/* Prompt input */}
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+            <span style={{ fontSize: '11px', color: '#8899aa', flexShrink: 0, paddingTop: '5px' }}>
+              Prompt:
+            </span>
+            <input
+              value={watchPrompt}
+              onChange={(e) => setWatchPrompt(e.target.value)}
+              placeholder="What should FAIT do when this range changes?"
+              style={{
+                flex: 1,
+                background: '#1a2332',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#e8edf3',
+                padding: '4px 8px',
+                fontSize: '12px',
+                outline: 'none',
+              }}
+            />
+          </div>
+
+          {/* Start / Cancel buttons */}
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button
+              onClick={() => void startWatching()}
+              disabled={!watchRange.trim()}
+              style={{
+                background: watchRange.trim() ? '#1a3020' : '#1e2d3e',
+                border: `1px solid ${watchRange.trim() ? '#2e5040' : '#2e3f54'}`,
+                borderRadius: '4px',
+                color: watchRange.trim() ? '#6fcf97' : '#445566',
+                fontSize: '11px',
+                fontWeight: '600',
+                padding: '5px 12px',
+                cursor: watchRange.trim() ? 'pointer' : 'not-allowed',
+              }}
+            >
+              Start Watching
+            </button>
+            <button
+              onClick={() => setShowWatchConfig(false)}
+              style={{
+                background: 'none',
+                border: '1px solid #2e3f54',
+                borderRadius: '4px',
+                color: '#556677',
+                fontSize: '11px',
+                padding: '5px 8px',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Sprint 9: Watch mode active status bar ── */}
+      {watchModeOn && (
+        <div
+          style={{
+            padding: '4px 12px',
+            borderBottom: '1px solid #1a3020',
+            background: '#0d1a10',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span
+              style={{
+                display: 'inline-block',
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: '#6fcf97',
+                animation: 'watchPulse 2s ease-in-out infinite',
+              }}
+            />
+            <span style={{ fontSize: '11px', color: '#6fcf97', fontWeight: '600' }}>
+              Watching: {watchRange}
+            </span>
+            {lastWatchTrigger && (
+              <span style={{ fontSize: '10px', color: '#445566' }}>
+                · last triggered {lastWatchTrigger.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => void stopWatching()}
+            title="Stop watching"
+            style={{
+              background: 'none',
+              border: '1px solid #2e4030',
+              borderRadius: '4px',
+              color: '#6fcf97',
+              fontSize: '10px',
+              padding: '2px 6px',
+              cursor: 'pointer',
+            }}
+          >
+            Stop
+          </button>
+        </div>
+      )}
 
       {/* CF inline prompt input */}
       {showCfInput && (
@@ -1347,6 +1675,13 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           onCancel={() => setShowSortFilterDialog(false)}
         />
       )}
+
+      <style>{`
+        @keyframes watchPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(0.7); }
+        }
+      `}</style>
     </div>
   );
 };

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { applySuggestions, applySingleSuggestion } from '../services/excelWriter';
+import { setFaitWriting } from '../services/watchMode';
 
 export interface CellSuggestion {
   address: string;
@@ -49,7 +50,12 @@ const WriteSuggestionsDialog: React.FC<WriteSuggestionsDialogProps> = ({
     setApplying(true);
     setError(null);
     try {
-      await applySuggestions(suggestions);
+      setFaitWriting(true);
+      try {
+        await applySuggestions(suggestions);
+      } finally {
+        setFaitWriting(false);
+      }
       onAcceptAll();
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
@@ -74,7 +80,12 @@ const WriteSuggestionsDialog: React.FC<WriteSuggestionsDialogProps> = ({
     setApplying(true);
     setError(null);
     try {
-      await applySingleSuggestion(s);
+      setFaitWriting(true);
+      try {
+        await applySingleSuggestion(s);
+      } finally {
+        setFaitWriting(false);
+      }
       if (currentIndex < suggestions.length - 1) {
         setCurrentIndex((i) => i + 1);
       } else {

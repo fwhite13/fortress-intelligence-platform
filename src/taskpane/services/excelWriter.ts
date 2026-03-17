@@ -1,4 +1,5 @@
 import type { CellSuggestion } from '../components/WriteSuggestionsDialog';
+import { isFaitWriting } from './watchMode';
 
 /* global Excel */
 
@@ -61,6 +62,11 @@ export async function writeRangeData(
   }
 
   return Excel.run(async (ctx: any) => {
+    // Sprint 9: Defense-in-depth loop prevention when watch mode is active
+    if (isFaitWriting()) {
+      ctx.runtime.enableEvents = false;
+    }
+
     const sheet = ctx.workbook.worksheets.getActiveWorksheet();
 
     // Resize the range from the target cell to fit the data exactly
@@ -144,6 +150,11 @@ export async function writeToTable(
   }
 
   return Excel.run(async (ctx: any) => {
+    // Sprint 9: Defense-in-depth loop prevention when watch mode is active
+    if (isFaitWriting()) {
+      ctx.runtime.enableEvents = false;
+    }
+
     const sheet = ctx.workbook.worksheets.getActiveWorksheet();
 
     // getItemOrNullObject returns a proxy — load isNullObject to check existence
@@ -315,4 +326,39 @@ export async function listWorkbookNamedRanges(): Promise<string[]> {
     await ctx.sync();
     return (names.items as any[]).map((item: any) => item.name as string);
   }).catch(() => [] as string[]);
+}
+
+// ── Sprint 9: Watch mode event handler registration ───────────────────────
+
+/**
+ * Register a worksheet.onChanged event handler on the active worksheet.
+ * Returns the event result object — caller MUST store it to unregister later.
+ *
+ * @param onChange  Callback invoked when the worksheet changes.
+ *                  MUST NOT be async — the event proxy is only valid synchronously.
+ */
+export async function registerWatchHandler(
+  onChange: (args: any) => void
+): Promise<any> {
+  return Excel.run(async (ctx: any) => {
+    const sheet = ctx.workbook.worksheets.getActiveWorksheet();
+    const handler = sheet.onChanged.add(onChange);
+    await ctx.sync();
+    return handler;
+  });
+}
+
+/**
+ * Unregister a previously registered worksheet.onChanged handler.
+ * Safe to call with null — does nothing.
+ *
+ * @param handlerResult  The event result object returned by registerWatchHandler().
+ */
+export async function unregisterWatchHandler(handlerResult: any): Promise<void> {
+  if (!handlerResult) return;
+  try {
+    await handlerResult.context.remove(handlerResult);
+  } catch {
+    // Handler may already be invalid (sheet deleted, workbook closed) — silent failure is safe
+  }
 }
