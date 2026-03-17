@@ -10,6 +10,7 @@ import {
   publishChunk, subscribeToTask,
   setApprovalDecision,
 } from '../services/taskStore.js';
+import { tryStartTask, onTaskFinished, cancelTask, getQueuePosition } from '../services/taskQueue.js';
 import { uploadInputsToS3 } from '../services/fileService.js';
 
 const router = express.Router();
@@ -18,7 +19,7 @@ const upload = multer({ dest: '/tmp/cowork-uploads/' });
 export type OutputType = 'html' | 'markdown' | 'csv' | 'docx' | 'txt' | 'other';
 
 export interface SseChunk {
-  type: 'step' | 'tool_call' | 'result' | 'file_output' | 'approval_required' | 'approval_resolved' | 'error';
+  type: 'step' | 'tool_call' | 'result' | 'file_output' | 'approval_required' | 'approval_resolved' | 'error' | 'queued';
   text?: string;
   toolName?: string;
   outputType?: OutputType;
@@ -30,6 +31,7 @@ export interface SseChunk {
   approvalToolName?: string;
   approvalToolInput?: unknown;
   approvalDescription?: string;
+  position?: number; // queue position for 'queued' type
 }
 
 // ── POST /tasks — create and start a new task ─────────────────────────────
@@ -60,10 +62,22 @@ router.post('/', upload.array('files', 5), async (req, res) => {
     createdAt: new Date().toISOString(),
   });
 
-  // Start task async — publishes chunks to Redis Pub/Sub
-  startTaskWithRedis(taskId, workingDir, authed.userId, authed.userEmail, prompt).catch(console.error);
+  // Atomically check concurrency limit and either start or queue
+  const decision = await tryStartTask(taskId, authed.userId);
 
-  res.json({ taskId });
+  if (decision === 'started') {
+    startTaskWithRedis(taskId, workingDir, authed.userId, authed.userEmail, prompt).catch(console.error);
+  } else {
+    // Task queued — notify via pub/sub
+    await publishChunk(taskId, {
+      type: 'step',
+      text: 'Task is queued — will start when a slot is available.',
+    });
+    const position = await getQueuePosition(taskId, authed.userId);
+    await publishChunk(taskId, { type: 'queued', position });
+  }
+
+  res.json({ taskId, status: decision });
 });
 
 async function startTaskWithRedis(
@@ -101,6 +115,18 @@ async function startTaskWithRedis(
   } catch (e: any) {
     await publishChunk(taskId, { type: 'error', text: e.message });
     await updateTaskFailed(taskId);
+  } finally {
+    // Always drain queue on finish
+    const nextTaskId = await onTaskFinished(userId);
+    if (nextTaskId) {
+      const nextMeta = await getTaskMeta(nextTaskId);
+      if (nextMeta) {
+        await publishChunk(nextTaskId, { type: 'step', text: 'Task starting now…' });
+        const nextWorkingDir = `/tmp/cowork-${nextTaskId}`;
+        await fs.mkdir(nextWorkingDir, { recursive: true }).catch(() => {});
+        startTaskWithRedis(nextTaskId, nextWorkingDir, nextMeta.userId, nextMeta.userEmail, nextMeta.prompt).catch(console.error);
+      }
+    }
   }
 }
 
@@ -194,6 +220,14 @@ router.post('/:id/reject', async (req, res) => {
   if (!approvalId) { res.status(400).json({ error: 'approvalId required' }); return; }
 
   await setApprovalDecision(approvalId, 'reject');
+  res.json({ ok: true });
+});
+
+// ── DELETE /tasks/:id — cancel a task ────────────────────────────────────
+router.delete('/:id', async (req, res) => {
+  const authed = req as unknown as AuthedRequest;
+  const { id } = req.params;
+  await cancelTask(id, authed.userId);
   res.json({ ok: true });
 });
 

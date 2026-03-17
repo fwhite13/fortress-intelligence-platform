@@ -17,9 +17,12 @@ else
                UserEmail="@Session.Email"
                OnSignOut="@HandleSignOut" />
 
+    <TaskQueue />
+
     <nav style="display: flex; gap: 16px; padding: 0 16px; align-items: center; height: 40px; border-bottom: 1px solid var(--color-border); background: var(--color-surface);">
         <a href="/tasks/new"     style="font-size: var(--text-sm); color: var(--color-text-secondary); text-decoration: none;">+ New Task</a>
         <a href="/tasks/history" style="font-size: var(--text-sm); color: var(--color-text-secondary); text-decoration: none;">My Tasks</a>
+        <a href="/settings" style="font-size: var(--text-sm); color: var(--color-text-secondary); text-decoration: none;">Settings</a>
     </nav>
 
     <main style="padding: 0; min-height: calc(100vh - 48px);">

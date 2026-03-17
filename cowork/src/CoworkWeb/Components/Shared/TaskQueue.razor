@@ -1,0 +1,52 @@
+@* Components/Shared/TaskQueue.razor — running/queued task count badge *@
+@inject AgentApiClient AgentApi
+@implements IDisposable
+
+@if (_runningCount > 0 || _queuedCount > 0)
+{
+    <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--color-surface); border-bottom: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-text-secondary);">
+        @if (_runningCount > 0)
+        {
+            <span>
+                <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--color-warning);animation:pulse 1.5s infinite;margin-right:4px;"></span>
+                @_runningCount running
+            </span>
+        }
+        @if (_queuedCount > 0)
+        {
+            <span>· @_queuedCount queued</span>
+        }
+        <a href="/tasks/history" style="color: var(--color-text-link); text-decoration: none; margin-left: 4px;">View →</a>
+    </div>
+}
+
+@code {
+    private int _runningCount;
+    private int _queuedCount;
+    private Timer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshQueueAsync();
+        // CRITICAL: Poll at 10s — NOT 2s. Task queue doesn't need sub-second freshness.
+        _timer = new Timer(async _ => await InvokeAsync(async () =>
+        {
+            await RefreshQueueAsync();
+            StateHasChanged();
+        }), null, TimeSpan.Zero, TimeSpan.FromSeconds(10));
+    }
+
+    private async Task RefreshQueueAsync()
+    {
+        try
+        {
+            var tasks = await AgentApi.GetTaskHistoryAsync();
+            _runningCount = tasks.Count(t => t.Status == "running");
+            _queuedCount  = tasks.Count(t => t.Status == "queued");
+        }
+        catch { /* Non-fatal — stale count is acceptable */ }
+    }
+
+    // CRITICAL: Dispose must cancel the timer to prevent dangling polls after navigation
+    public void Dispose() => _timer?.Dispose();
+}

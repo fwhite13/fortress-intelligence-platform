@@ -14,19 +14,24 @@ if (!REDIS_URL.startsWith('rediss://')) {
 // redisSub = SUBSCRIBE ONLY — never call commands on this one
 let _redis:    ReturnType<typeof createClient> | null = null;
 let _redisSub: ReturnType<typeof createClient> | null = null;
-let _connected = false;
+let _connectPromise: Promise<void> | null = null;
 
 async function ensureConnected(): Promise<void> {
-  if (_connected) return;
-  _redis    = createClient({ url: REDIS_URL });
-  _redisSub = createClient({ url: REDIS_URL });
-  await _redis.connect();
-  await _redisSub.connect();
-  _connected = true;
+  _connectPromise ??= (async () => {
+    _redis    = createClient({ url: REDIS_URL });
+    _redisSub = createClient({ url: REDIS_URL });
+    await Promise.all([_redis.connect(), _redisSub.connect()]);
+  })();
+  return _connectPromise;
 }
 
 function redis():    ReturnType<typeof createClient> { if (!_redis)    throw new Error('Redis not connected'); return _redis; }
 function redisSub(): ReturnType<typeof createClient> { if (!_redisSub) throw new Error('RedisSub not connected'); return _redisSub; }
+
+export async function getRedis(): Promise<ReturnType<typeof createClient>> {
+  await ensureConnected();
+  return redis();
+}
 
 export const TASK_TTL_SECONDS    = 7 * 24 * 60 * 60;   // 7 days
 export const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;       // 5 minutes
@@ -34,7 +39,7 @@ export const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;       // 5 minutes
 // ── Task metadata ─────────────────────────────────────────────────────────
 
 export interface TaskMeta {
-  status:       'running' | 'completed' | 'failed';
+  status:       'running' | 'completed' | 'failed' | 'queued' | 'cancelled';
   userId:       string;
   userEmail:    string;
   prompt:       string;

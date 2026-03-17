@@ -89,9 +89,24 @@ public sealed class AgentApiClient
     public async Task CancelTaskAsync(string taskId, CancellationToken ct = default)
     {
         var client = CreateClient();
-        // Best-effort — ignore errors (task may already be done)
-        try { await client.PostAsJsonAsync($"/tasks/{taskId}/cancel", new { }, ct); }
+        try { await client.DeleteAsync($"/tasks/{taskId}", ct); }
         catch { /* Non-fatal */ }
+    }
+
+    public async Task<string?> GetInstructionsAsync(CancellationToken ct = default)
+    {
+        var client = CreateClient();
+        var resp = await client.GetAsync("/users/me/instructions", ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        var body = await resp.Content.ReadFromJsonAsync<InstructionsResponse>(cancellationToken: ct);
+        return body?.Text;
+    }
+
+    public async Task SaveInstructionsAsync(string text, CancellationToken ct = default)
+    {
+        var client = CreateClient();
+        var resp = await client.PutAsJsonAsync("/users/me/instructions", new { text }, ct);
+        resp.EnsureSuccessStatusCode();
     }
 
     private HttpClient CreateClient()
@@ -103,6 +118,7 @@ public sealed class AgentApiClient
     }
 
     private record StartTaskResponse(string TaskId);
+    private record InstructionsResponse(string Text, string? UpdatedAt);
 }
 
 public record OutputFileSummary(string Name, string Type, string DownloadUrl);

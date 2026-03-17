@@ -1,0 +1,96 @@
+@page "/settings"
+@inject AgentApiClient AgentApi
+@inject CoworkSessionService Session
+
+<PageTitle>Settings — FAIT Cowork</PageTitle>
+
+<div style="max-width: 640px; margin: 0 auto; padding: 40px 16px;">
+
+    <h1 style="font-size: var(--text-2xl); font-weight: var(--font-semibold); color: var(--color-text-primary); margin-bottom: 8px;">
+        Settings
+    </h1>
+    <p style="color: var(--color-text-secondary); margin-bottom: 32px; font-size: var(--text-sm);">
+        These settings apply to all your tasks.
+    </p>
+
+    <section style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px;">
+        <h2 style="font-size: var(--text-lg); font-weight: var(--font-semibold); color: var(--color-text-primary); margin: 0 0 6px 0;">
+            Standing Instructions
+        </h2>
+        <p style="font-size: var(--text-sm); color: var(--color-text-secondary); margin: 0 0 16px 0;">
+            These instructions are prepended to every task. Use them to set your preferred tone, format, or context.
+        </p>
+
+        <MudTextField @bind-Value="_instructions"
+                      Placeholder="e.g. &quot;Always use Fortress AM formal tone. Include a Key Takeaways section.&quot;"
+                      Lines="4"
+                      MaxLength="2000"
+                      Variant="Variant.Outlined"
+                      FullWidth="true"
+                      Class="mb-2" />
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+            <span style="font-size: var(--text-xs); color: var(--color-text-muted);">
+                @_instructions.Length / 2000
+            </span>
+            <div style="display: flex; gap: 8px;">
+                @if (_instructions.Length > 0)
+                {
+                    <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small"
+                               Disabled="@_saving"
+                               OnClick="ClearInstructions">
+                        Clear
+                    </MudButton>
+                }
+                <MudButton Variant="Variant.Filled" Size="Size.Small"
+                           Disabled="@(_saving || _instructions == _savedInstructions)"
+                           OnClick="SaveInstructions"
+                           Style="background: var(--color-btn-gold-bg); color: var(--color-btn-gold-text); font-weight: var(--font-semibold);">
+                    @(_saving ? "Saving…" : "Save")
+                </MudButton>
+            </div>
+        </div>
+
+        @if (_saveMessage is not null)
+        {
+            <div style="margin-top: 8px; font-size: var(--text-xs); color: var(--color-success);">@_saveMessage</div>
+        }
+    </section>
+
+</div>
+
+@code {
+    private string _instructions = string.Empty;
+    private string _savedInstructions = string.Empty;
+    private bool _saving;
+    private string? _saveMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var result = await AgentApi.GetInstructionsAsync();
+        _instructions = result ?? string.Empty;
+        _savedInstructions = _instructions;
+    }
+
+    private async Task SaveInstructions()
+    {
+        _saving = true;
+        _saveMessage = null;
+        try
+        {
+            await AgentApi.SaveInstructionsAsync(_instructions);
+            _savedInstructions = _instructions;
+            _saveMessage = "Saved ✓";
+            await Task.Delay(2000);
+            _saveMessage = null;
+        }
+        catch { _saveMessage = "Save failed — try again."; }
+        finally { _saving = false; StateHasChanged(); }
+    }
+
+    private async Task ClearInstructions()
+    {
+        _instructions = string.Empty;
+        await SaveInstructions();
+    }
+}

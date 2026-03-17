@@ -4,8 +4,8 @@ import crypto from 'crypto';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { SDKAssistantMessage, SDKResultSuccess, PreToolUseHookInput, HookInput } from '@anthropic-ai/claude-agent-sdk';
 import { auditLog } from './audit.js';
-import { queryForgeContext } from '../services/forgeClient.js';
-import { waitForApproval } from '../services/taskStore.js';
+import { buildSearchForgeTool, queryForgeContextCached } from '../services/forgeClient.js';
+import { waitForApproval, getRedis } from '../services/taskStore.js';
 import { uploadOutputToS3 } from '../services/fileService.js';
 
 export type OutputType = 'html' | 'markdown' | 'csv' | 'docx' | 'txt' | 'other';
@@ -87,16 +87,43 @@ Data sovereignty: You run on Fortress AM's private AWS infrastructure. No data l
 export async function* runTask(params: TaskParams): AsyncGenerator<SseChunk> {
   await auditLog({ event: 'task_started', ...params });
 
+  // Fetch persistent instructions before FORGE query
+  let persistentInstructions = '';
+  try {
+    const redis = await getRedis();
+    const instrData = await redis.hGetAll(`cowork:user:${params.userId}:instructions`);
+    persistentInstructions = instrData?.text ?? '';
+  } catch {
+    // Non-fatal — proceed without instructions
+  }
+  if (persistentInstructions) {
+    await auditLog({
+      event: 'instructions_loaded',
+      taskId: params.taskId,
+      userId: params.userId,
+      data: { length: persistentInstructions.length }, // NO content field — must not log instruction text
+    });
+  }
+
   let forgeContext = '';
   try {
-    forgeContext = await queryForgeContext(params.prompt, params.userId, params.userEmail);
+    forgeContext = await queryForgeContextCached(params.prompt, params.userId, params.userEmail);
   } catch {
     // Non-fatal — task runs without FORGE context if fetch fails
   }
 
-  const systemPrompt = forgeContext
-    ? `${SYSTEM_PROMPT}\n\n## Relevant Knowledge from FORGE\n${forgeContext}`
-    : SYSTEM_PROMPT;
+  const systemPrompt = [
+    SYSTEM_PROMPT,
+    persistentInstructions
+      ? `## Your Standing Instructions\n${persistentInstructions}`
+      : '',
+    forgeContext
+      ? `## Relevant Knowledge from FORGE\n${forgeContext}`
+      : '',
+  ].filter(Boolean).join('\n\n');
+
+  // Build SearchForge tool per-task (closure captures userId and userEmail)
+  const forgeTool = buildSearchForgeTool(params.userId, params.userEmail);
 
   // Closure to emit chunks from within the preToolCall hook
   const pendingChunks: SseChunk[] = [];
@@ -108,6 +135,7 @@ export async function* runTask(params: TaskParams): AsyncGenerator<SseChunk> {
       options: {
         cwd: params.workingDir,
         allowedTools: ['Read', 'Write', 'Edit', 'Bash'],
+        tools: [forgeTool],
         maxBudgetUsd: params.maxBudgetUsd,
         maxTurns:     params.maxTurns,
         systemPrompt,
@@ -195,6 +223,15 @@ export async function* runTask(params: TaskParams): AsyncGenerator<SseChunk> {
             yield { type: 'tool_call', toolName: block.name, text: describeToolCall(block) };
           }
         }
+      }
+
+      // Check cancellation AFTER processing each message (not inside hooks)
+      const redis = await getRedis();
+      const cancelled = await redis.get(`cowork:cancel:${params.taskId}`);
+      if (cancelled) {
+        await auditLog({ event: 'task_cancelled', taskId: params.taskId, userId: params.userId });
+        yield { type: 'error', text: 'Task cancelled' };
+        return;
       }
     }
 
