@@ -73,8 +73,14 @@ router.get('/:id/stream', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
+  let cancelled = false;
+  req.on('close', () => {
+    cancelled = true;
+  });
+
   try {
     for await (const chunk of gen) {
+      if (cancelled) break;
       res.write(`data: ${JSON.stringify(chunk)}\n\n`);
 
       if (chunk.type === 'result' || chunk.type === 'error') {
