@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKAssistantMessage, SDKResultSuccess } from '@anthropic-ai/claude-agent-sdk';
 import { auditLog } from './audit.js';
 import { queryForgeContext } from '../services/forgeClient.js';
 
@@ -65,30 +66,30 @@ export async function* runTask(params: TaskParams): AsyncGenerator<SseChunk> {
           COWORK_USER_ID:    params.userId,
           COWORK_USER_EMAIL: params.userEmail,
         },
-        hooks: {
-          preToolCall: async (toolName: string, toolInput: any) => {
-            await auditLog({
-              event: 'tool_call',
-              taskId: params.taskId,
-              userId: params.userId,
-              data: { tool: toolName, input: safeSerialize(toolInput) },
-            });
-            return { action: 'allow' as const };
-          },
-        },
       },
     })) {
-      if ('result' in message) {
+      if (message.type === 'result') {
+        const resultMsg = message as SDKResultSuccess;
+
+        // Audit pre-result tool calls aren't tracked here — hook API requires
+        // separate HookCallbackMatcher setup; audit is handled via CloudWatch
         const outputs = await collectOutputFiles(params.workingDir);
         for (const chunk of outputs) yield chunk;
 
         await auditLog({ event: 'task_completed', taskId: params.taskId, userId: params.userId });
-        yield { type: 'result', text: typeof message.result === 'string' ? message.result : JSON.stringify(message.result) };
+        yield { type: 'result', text: resultMsg.result };
       } else if (message.type === 'assistant') {
-        for (const block of (message.content as any[]) ?? []) {
+        const assistantMsg = message as SDKAssistantMessage;
+        for (const block of assistantMsg.message.content ?? []) {
           if (block.type === 'text' && block.text?.trim()) {
             yield { type: 'step', text: block.text };
           } else if (block.type === 'tool_use') {
+            await auditLog({
+              event: 'tool_call',
+              taskId: params.taskId,
+              userId: params.userId,
+              data: { tool: block.name, input: safeSerialize(block.input) },
+            });
             yield { type: 'tool_call', toolName: block.name, text: describeToolCall(block) };
           }
         }
@@ -127,15 +128,15 @@ async function collectOutputFiles(workingDir: string): Promise<SseChunk[]> {
   return chunks;
 }
 
-function describeToolCall(block: any): string {
-  if (block.name === 'Read')  return `Reading ${block.input?.file_path ?? 'file'}`;
-  if (block.name === 'Write') return `Writing ${block.input?.file_path ?? 'file'}`;
-  if (block.name === 'Edit')  return `Editing ${block.input?.file_path ?? 'file'}`;
-  if (block.name === 'Bash')  return `Running: ${(block.input?.command ?? '').slice(0, 80)}`;
+function describeToolCall(block: { name: string; input?: Record<string, unknown> }): string {
+  if (block.name === 'Read')  return `Reading ${block.input?.['file_path'] ?? 'file'}`;
+  if (block.name === 'Write') return `Writing ${block.input?.['file_path'] ?? 'file'}`;
+  if (block.name === 'Edit')  return `Editing ${block.input?.['file_path'] ?? 'file'}`;
+  if (block.name === 'Bash')  return `Running: ${String(block.input?.['command'] ?? '').slice(0, 80)}`;
   return `Using ${block.name}`;
 }
 
-function safeSerialize(input: any): any {
+function safeSerialize(input: unknown): unknown {
   try {
     return JSON.parse(JSON.stringify(input));
   } catch {

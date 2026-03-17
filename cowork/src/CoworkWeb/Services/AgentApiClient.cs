@@ -38,7 +38,7 @@ public sealed class AgentApiClient
         var resp = await client.PostAsync("/tasks", form, ct);
         resp.EnsureSuccessStatusCode();
 
-        var body = await resp.Content.ReadFromJsonAsync<StartTaskResponse>(ct: ct);
+        var body = await resp.Content.ReadFromJsonAsync<StartTaskResponse>(cancellationToken: ct);
         return body?.TaskId ?? throw new InvalidOperationException("Agent API did not return taskId");
     }
 

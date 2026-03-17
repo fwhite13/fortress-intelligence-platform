@@ -1,6 +1,7 @@
 using CoworkWeb.Services;
 using CoworkWeb.Data;
 using FipShared.Models;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;

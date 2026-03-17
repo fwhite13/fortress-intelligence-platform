@@ -4,6 +4,9 @@ import jwt from 'jsonwebtoken';
 const SECRET = process.env.COWORK_INTERNAL_SECRET;
 if (!SECRET) throw new Error('COWORK_INTERNAL_SECRET env var required');
 
+// Capture as non-nullable after the guard above
+const VERIFIED_SECRET: string = SECRET;
+
 export interface AuthedRequest extends Request {
   userId: string;
   userEmail: string;
@@ -18,10 +21,10 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
 
   try {
     const token = auth.slice(7);
-    const payload = jwt.verify(token, SECRET, {
+    const payload = jwt.verify(token, VERIFIED_SECRET, {
       issuer:   'cowork-web',
       audience: 'cowork-agent',
-    }) as { sub: string; email: string };
+    }) as unknown as { sub: string; email: string };
 
     (req as AuthedRequest).userId    = payload.sub;
     (req as AuthedRequest).userEmail = payload.email;
