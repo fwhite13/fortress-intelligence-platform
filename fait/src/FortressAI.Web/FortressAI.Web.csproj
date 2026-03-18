@@ -28,6 +28,7 @@
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
     <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="8.0.12" />
     <PackageReference Include="MudBlazor" Version="7.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.*" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.*" />
   </ItemGroup>
 

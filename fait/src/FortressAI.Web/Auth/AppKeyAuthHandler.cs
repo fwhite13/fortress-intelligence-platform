@@ -52,18 +52,27 @@ public class AppKeyAuthHandler : AuthenticationHandler<AppKeyAuthOptions>
         if (allKeys.Count == 0 || !allKeys.Any(k => string.Equals(apiKey, k, StringComparison.Ordinal)))
             return Task.FromResult(AuthenticateResult.Fail("Invalid API key"));
 
-        // Valid key — issue claims for the service account (Fred White / FAIT service identity)
-        // Sprint 2: differentiate per-key identity. For MVP, all keys share the same service account.
-        var claims = new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "08de7605-3f7d-427d-858a-637777b41018"),
-            new Claim("oid",                     "08de7605-3f7d-427d-858a-637777b41018"),
-            new Claim(ClaimTypes.Email,          "fwhite@refugems.com"),
-            new Claim(ClaimTypes.Name,           "Fred White"),
-            new Claim("preferred_username",      "fwhite@refugems.com"),
-            new Claim("groups",                  "FIP-Users"),
-            new Claim("groups",                  "FAIT-Users")
-        };
+        // Check if this is the FfE Excel Addin key (not the Haven key)
+        var isExcelAddinKey = Options.ApiKeys.Contains(apiKey);
+        var claims = isExcelAddinKey
+            ? new[]
+              {
+                // Service-level identity for CI/testing — no personal KB access
+                new Claim(ClaimTypes.NameIdentifier, "00000000-0000-0000-0000-000000000001"),
+                new Claim(ClaimTypes.Name,           "FfE Service Account"),
+                new Claim(ClaimTypes.Email,          "ffe-service@internal"),
+              }
+            : new[]
+              {
+                // Haven key — existing Fred White claims (unchanged for backward compat)
+                new Claim(ClaimTypes.NameIdentifier, "08de7605-3f7d-427d-858a-637777b41018"),
+                new Claim("oid",                     "08de7605-3f7d-427d-858a-637777b41018"),
+                new Claim(ClaimTypes.Email,          "fwhite@refugems.com"),
+                new Claim(ClaimTypes.Name,           "Fred White"),
+                new Claim("preferred_username",      "fwhite@refugems.com"),
+                new Claim("groups",                  "FIP-Users"),
+                new Claim("groups",                  "FAIT-Users"),
+              };
 
         var identity  = new ClaimsIdentity(claims, Scheme.Name);
         var principal = new ClaimsPrincipal(identity);

@@ -19,7 +19,7 @@ namespace FortressAI.Web.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/haven")]
-[Authorize(AuthenticationSchemes = "AppKeyAuth", Policy = "AppKeyOnly")]
+[Authorize(Policy = "ExcelAddinAccess")]
 public class HavenChatController : ControllerBase
 {
     private readonly KnowledgeBaseService _kbService;

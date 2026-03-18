@@ -10,7 +10,9 @@ using FortressAI.Web.Services;
 using FortressAI.Web.Hubs;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.SignalR;
 using FortressAI.Web.Auth;
 using System.Security.Claims;
@@ -175,13 +177,64 @@ builder.Services.AddAuthentication(options =>
     {
         builder.Configuration["AppKeys:ExcelAddin"] ?? ""
     };
+})
+// NEW: Entra JWT Bearer for FfE
+.AddJwtBearer("EntraBearer", options =>
+{
+    var tenantId = builder.Configuration["Azure:TenantId"]
+                   ?? "d2bf3425-f8ab-451c-83bd-1e0ebd9508fe";
+    var clientId = builder.Configuration["Azure:ClientId"]
+                   ?? "887206bc-fac1-436a-a8ed-2150418d76c0";
+    options.Authority = $"https://login.microsoftonline.com/{tenantId}/v2.0";
+    options.Audience  = $"api://{clientId}";
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer   = true,
+        ValidIssuer      = $"https://login.microsoftonline.com/{tenantId}/v2.0",
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ClockSkew        = TimeSpan.FromMinutes(5),
+    };
+    options.Events = new JwtBearerEvents
+    {
+        OnTokenValidated = async ctx =>
+        {
+            // Map the Entra user to their FAIT AppUser.Id for personal KB scoping
+            // Entra tokens use 'preferred_username' for email and 'oid' for the object ID
+            var email = ctx.Principal?.FindFirst("preferred_username")?.Value
+                        ?? ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "";
+            if (string.IsNullOrEmpty(email)) return;
+
+            var dbFactory = ctx.HttpContext.RequestServices
+                .GetRequiredService<IDbContextFactory<FortressAI.Web.Data.AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync();
+
+            var user = await db.Users.FirstOrDefaultAsync(
+                u => u.IsEntraUser && u.Email == email);
+
+            if (user != null)
+            {
+                // Inject the FAIT userId as NameIdentifier so controllers get the right userId
+                var identity = ctx.Principal!.Identity as System.Security.Claims.ClaimsIdentity;
+                var existing = identity?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (existing != null) identity?.RemoveClaim(existing);
+                identity?.AddClaim(new System.Security.Claims.Claim(
+                    System.Security.Claims.ClaimTypes.NameIdentifier,
+                    user.Id.ToString()));
+            }
+            // If user not found, leave claims as-is; whoami endpoint will provision them
+        }
+    };
 });
 
 builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = options.DefaultPolicy;
-    options.AddPolicy("AppKeyOnly", policy =>
+    options.AddPolicy("AppKeyOnly", policy =>  // Keep for backward compat
         policy.AddAuthenticationSchemes("AppKeyAuth")
+              .RequireAuthenticatedUser());
+    options.AddPolicy("ExcelAddinAccess", policy =>  // NEW — used by HavenChat + ExcelAddin
+        policy.AddAuthenticationSchemes("AppKeyAuth", "EntraBearer")
               .RequireAuthenticatedUser());
 });
 builder.Services.AddHttpContextAccessor();
