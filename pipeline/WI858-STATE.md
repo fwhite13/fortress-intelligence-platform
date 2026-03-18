@@ -1,16 +1,16 @@
 # Pipeline State: WI858
 
-## Current Stage: BUILD (active)
+## Current Stage: IN-REVIEW
 ## Risk Level: high
 ## Pipeline Path: full
-## Review Cycles: 0
+## Review Cycles: 1
 
 ### Stage History
 | Stage | Status | Agent | Started | Completed | Notes |
 |-------|--------|-------|---------|-----------|-------|
 | PLAN | ✅ DONE | Reed Richards | — | 2026-03-17 | Spec: FFE-ENTRA-AUTH-SPEC.md (906 lines) |
-| BUILD | 🔄 ACTIVE | Tony Stark | 20:35 | — | 4 new + 12 modified (taskpane) + 1 new + 3 modified (backend) |
-| REVIEW | ⏳ PENDING | Hawkeye | — | — | Top: authDialog in AppDomains, getAuthHeader() replaces apiKey param, OID→userId mapping, AppKey fallback intact |
+| BUILD | ✅ DONE | Tony Stark | 20:35 | 21:44 | commits 9d33305 (ffe) + 83011c0 (fip); TS clean; all gate checks pass |
+| REVIEW | ↩️ NEEDS-CHANGES | Hawkeye | 21:45 | 21:50 | C1: auth-dialog path mismatch (404); I1: whoami missing authScheme; I2: storage duplication; I3: hardcoded URL |
 | SECURITY | ⏳ PENDING | CodeSec | — | — | High risk: new auth scheme, JWT validation, token storage |
 | APPROVE | ✅ DONE | Fred | — | 20:33 | Standing approval |
 | DEPLOY | ⏳ PENDING | Rhodey | — | — | INFRA FIRST: (1) Expose FfE.Access scope on FIP app reg; (2) Add redirect URIs for authDialog.html; then CodeBuild + ECS |

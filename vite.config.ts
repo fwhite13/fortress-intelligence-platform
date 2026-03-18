@@ -21,7 +21,7 @@ export default defineConfig({
       input: {
         taskpane:       'src/taskpane/index.html',        // HTML entry point — outputs to dist/src/taskpane/index.html
         commands:       'public/commands.html',           // ribbon commands page — outputs to dist/commands.html
-        'auth-dialog':  'src/taskpane/auth/auth-dialog.html', // auth dialog — outputs to dist/auth-dialog.html
+        'auth-dialog':  'auth-dialog.html', // auth dialog — outputs to dist/auth-dialog.html
       },
       // No output.format override — defaults to ES modules, which is correct
     },

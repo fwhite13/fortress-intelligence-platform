@@ -9,13 +9,13 @@ const localStorageShim = {
 };
 
 // Safe accessor — checks at call time, not module load time.
-function getStorage() {
+export function getStorage() {
   return (window as any).OfficeRuntime?.storage ?? localStorageShim;
 }
 
 export const AUTH_TOKEN_KEY  = 'fait_entra_token';
 export const AUTH_EXPIRY_KEY = 'fait_entra_expiry';
-export const AUTH_USER_KEY   = 'fait_entra_user';
+export const AUTH_USER_KEY   = 'fait_entra_user';   // JSON: { userId, email, name, oid }
 export const APIKEY_KEY = 'fait_api_key';
 
 const KEY = APIKEY_KEY;

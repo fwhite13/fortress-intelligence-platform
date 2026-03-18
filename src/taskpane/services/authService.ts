@@ -9,18 +9,13 @@ const SCOPE      = 'api://887206bc-fac1-436a-a8ed-2150418d76c0/FfE.Access';
 // In production: https://fait.dev.fortressam.ai/excel-addin/auth-dialog.html
 const DIALOG_URL_BASE = `${window.location.origin}/excel-addin/auth-dialog.html`;
 
-const AUTH_TOKEN_KEY   = 'fait_entra_token';
-const AUTH_EXPIRY_KEY  = 'fait_entra_expiry';
-const AUTH_USER_KEY    = 'fait_entra_user';   // JSON: { userId, email, name, oid }
-const APIKEY_KEY       = 'fait_api_key';
-
-function getStorage() {
-  return (window as any).OfficeRuntime?.storage ?? {
-    getItem: (k: string) => Promise.resolve(localStorage.getItem(k)),
-    setItem: (k: string, v: string) => Promise.resolve(void localStorage.setItem(k, v)),
-    removeItem: (k: string) => Promise.resolve(void localStorage.removeItem(k)),
-  };
-}
+import {
+  getStorage,
+  AUTH_TOKEN_KEY,
+  AUTH_EXPIRY_KEY,
+  AUTH_USER_KEY,
+  APIKEY_KEY,
+} from './storage';
 
 export interface FaitUser {
   userId: string;   // FAIT AppUser GUID (resolved from backend after first auth)
@@ -183,7 +178,8 @@ interface DialogMessage {
  */
 async function resolveUserIdentity(accessToken: string, oid: string, email: string, name: string): Promise<FaitUser> {
   try {
-    const resp = await fetch('https://fait.dev.fortressam.ai/api/excel/whoami', {
+    const base = window.location.origin;
+    const resp = await fetch(`${base}/api/excel/whoami`, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${accessToken}` },
     });
@@ -195,4 +191,3 @@ async function resolveUserIdentity(accessToken: string, oid: string, email: stri
   // Fallback: use oid as userId (backend will reconcile on next API call)
   return { userId: oid, email, name, oid };
 }
-
