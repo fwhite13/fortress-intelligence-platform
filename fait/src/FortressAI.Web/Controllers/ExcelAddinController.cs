@@ -70,9 +70,10 @@ public class ExcelAddinController : ControllerBase
 
         return Ok(new
         {
-            userId = user.Id,
-            email  = user.Email,
-            name   = user.DisplayName ?? user.Email,
+            userId     = user.Id,
+            email      = user.Email,
+            name       = user.DisplayName ?? user.Email,
+            authScheme = User.Identity?.AuthenticationType ?? "unknown",
         });
     }
 }
