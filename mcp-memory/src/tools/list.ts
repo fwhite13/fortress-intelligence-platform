@@ -30,7 +30,7 @@ export async function memoryList(params: ListParams, user: CcMemoryUser): Promis
     whereClause = 'user_id = $1';
     queryParams = [user.id, limit];
   } else if (scope === 'org') {
-    whereClause = "scope = 'org'";
+    whereClause = "scope = 'org' AND user_id IS NULL";
     queryParams = [user.id, limit];
   } else {
     whereClause = "(scope = 'org' OR user_id = $1)";

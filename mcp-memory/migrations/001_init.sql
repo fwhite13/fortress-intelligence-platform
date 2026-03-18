@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS cc_memory_entries (
     content     TEXT        NOT NULL,
     entry_type  VARCHAR(32) NOT NULL DEFAULT 'note',
     source      VARCHAR(32) NOT NULL DEFAULT 'manual',
-    embedding   vector(1536),
+    embedding   vector(1024),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by  UUID        REFERENCES cc_memory_users(id),
     expires_at  TIMESTAMPTZ,

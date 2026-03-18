@@ -36,7 +36,7 @@ export async function memorySearch(params: SearchParams, user: CcMemoryUser): Pr
              1 - (embedding <=> $1::vector) AS similarity
       FROM cc_memory_entries
       WHERE
-        (scope = 'org' OR user_id = $2)
+        (scope = 'org' AND user_id IS NULL OR user_id = $2)
         AND (expires_at IS NULL OR expires_at > NOW())
         AND (project = $3 OR project IS NULL)
       ORDER BY embedding <=> $1::vector
@@ -50,7 +50,7 @@ export async function memorySearch(params: SearchParams, user: CcMemoryUser): Pr
              1 - (embedding <=> $1::vector) AS similarity
       FROM cc_memory_entries
       WHERE
-        (scope = 'org' OR user_id = $2)
+        (scope = 'org' AND user_id IS NULL OR user_id = $2)
         AND (expires_at IS NULL OR expires_at > NOW())
       ORDER BY embedding <=> $1::vector
       LIMIT $3
