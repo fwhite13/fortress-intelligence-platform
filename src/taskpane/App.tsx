@@ -1,10 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { loadSettings } from './services/settings';
+import { getAuthHeader } from './services/authService';
+import type { FaitUser } from './services/authService';
 import ChatPanel from './components/ChatPanel';
 import SettingsPanel from './components/SettingsPanel';
 
-const App: React.FC = () => {
-  const [apiKey, setApiKey] = useState<string>('');
+interface AppProps {
+  user: FaitUser;
+}
+
+const App: React.FC<AppProps> = ({ user }) => {
+  const [authHeader, setAuthHeader] = useState<Record<string, string>>({});
   const [model, setModel] = useState<'haiku' | 'sonnet'>('sonnet');
   const [kbToggles, setKbToggles] = useState<Record<string, boolean>>({ corp: true, team: false });
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -12,21 +18,14 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
-    loadSettings().then((s) => {
-      setApiKey(s.apiKey ?? '');
+    Promise.all([loadSettings(), getAuthHeader()]).then(([s, hdr]) => {
+      setAuthHeader(hdr);
       setModel(s.model);
       setKbToggles(s.kbToggles);
       setProjectId(s.projectId);
-      // If no API key, open settings automatically
-      if (!s.apiKey) setShowSettings(true);
       setLoading(false);
     });
   }, []);
-
-  const handleKeyChange = (key: string) => {
-    setApiKey(key);
-    setShowSettings(false);
-  };
 
   if (loading) {
     return (
@@ -50,15 +49,14 @@ const App: React.FC = () => {
     return (
       <SettingsPanel
         onClose={() => setShowSettings(false)}
-        apiKey={apiKey}
-        onKeyChange={handleKeyChange}
+        user={user}
       />
     );
   }
 
   return (
     <ChatPanel
-      apiKey={apiKey}
+      authHeader={authHeader}
       model={model}
       kbToggles={kbToggles}
       projectId={projectId}

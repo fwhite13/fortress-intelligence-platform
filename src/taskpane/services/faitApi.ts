@@ -7,7 +7,7 @@ export interface ChatResponse {
 
 export async function sendChat(
   message: string,
-  apiKey: string,
+  authHeader: Record<string, string>,
   model: 'haiku' | 'sonnet' = 'sonnet',
   signal?: AbortSignal,
   kbTypes?: string[],
@@ -24,7 +24,7 @@ export async function sendChat(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
+        ...authHeader,
       },
       body: JSON.stringify({
         message,
@@ -57,7 +57,7 @@ export async function sendChat(
  */
 export async function sendChatStreaming(
   message: string,
-  apiKey: string,
+  authHeader: Record<string, string>,
   onChunk: (text: string) => void,
   model: 'haiku' | 'sonnet' = 'sonnet',
   signal?: AbortSignal,
@@ -68,7 +68,7 @@ export async function sendChatStreaming(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
+      ...authHeader,
       Accept: 'text/event-stream',
     },
     body: JSON.stringify({
@@ -127,7 +127,7 @@ export interface KbSearchResponse {
 
 export async function searchKb(
   query: string,
-  apiKey: string,
+  authHeader: Record<string, string>,
   projectId?: string,
   kbTypes?: string[]
 ): Promise<KbSearchResponse> {
@@ -135,7 +135,7 @@ export async function searchKb(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
+      ...authHeader,
     },
     body: JSON.stringify({
       query,
@@ -165,18 +165,18 @@ export interface ProjectInfo {
   name: string;
 }
 
-export async function fetchKbList(apiKey: string): Promise<KbInfo[]> {
+export async function fetchKbList(authHeader: Record<string, string>): Promise<KbInfo[]> {
   const resp = await fetch(`${FAIT_BASE}/api/haven/kb-list`, {
-    headers: { 'x-api-key': apiKey },
+    headers: { ...authHeader },
   });
   if (!resp.ok) return [];
   const data = await resp.json();
   return data.kbs ?? [];
 }
 
-export async function fetchProjectList(apiKey: string): Promise<ProjectInfo[]> {
+export async function fetchProjectList(authHeader: Record<string, string>): Promise<ProjectInfo[]> {
   const resp = await fetch(`${FAIT_BASE}/api/haven/project-list`, {
-    headers: { 'x-api-key': apiKey },
+    headers: { ...authHeader },
   });
   if (!resp.ok) return [];
   const data = await resp.json();

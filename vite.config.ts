@@ -19,8 +19,9 @@ export default defineConfig({
     target: 'es2017', // raised from es2015; WebView2/WKWebView/Edge all support es2017
     rollupOptions: {
       input: {
-        taskpane: 'src/taskpane/index.html', // HTML entry point — outputs to dist/src/taskpane/index.html
-        commands: 'public/commands.html',    // ribbon commands page — outputs to dist/commands.html
+        taskpane:       'src/taskpane/index.html',        // HTML entry point — outputs to dist/src/taskpane/index.html
+        commands:       'public/commands.html',           // ribbon commands page — outputs to dist/commands.html
+        'auth-dialog':  'src/taskpane/auth/auth-dialog.html', // auth dialog — outputs to dist/auth-dialog.html
       },
       // No output.format override — defaults to ES modules, which is correct
     },

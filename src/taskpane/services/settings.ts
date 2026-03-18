@@ -20,16 +20,18 @@ export interface FaitSettings {
   model: 'haiku' | 'sonnet';
   kbToggles: Record<string, boolean>; // { corp: true, team: false, ... }
   projectId: string | null;
+  authMode: 'entra' | 'appkey';  // NEW
 }
 
 export async function loadSettings(): Promise<FaitSettings> {
   const storage = getStorage();
-  const [apiKey, model, projectId, corpToggle, teamToggle] = await Promise.all([
+  const [apiKey, model, projectId, corpToggle, teamToggle, entraToken] = await Promise.all([
     storage.getItem('fait_api_key').catch(() => null),
     storage.getItem('fait_model').catch(() => null),
     storage.getItem('fait_project_id').catch(() => null),
     storage.getItem('fait_kb_corp').catch(() => null),
     storage.getItem('fait_kb_team').catch(() => null),
+    storage.getItem('fait_entra_token').catch(() => null),
   ]);
   return {
     apiKey: apiKey ?? null,
@@ -39,6 +41,7 @@ export async function loadSettings(): Promise<FaitSettings> {
       team: teamToggle === 'true',  // default OFF
     },
     projectId: projectId || null,
+    authMode: entraToken ? 'entra' : 'appkey',
   };
 }
 

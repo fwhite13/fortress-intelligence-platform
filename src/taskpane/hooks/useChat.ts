@@ -26,7 +26,7 @@ export interface UseChatReturn {
 }
 
 export function useChat(
-  apiKey: string,
+  authHeader: Record<string, string>,
   model: 'haiku' | 'sonnet',
   kbToggles?: Record<string, boolean>,
   projectId?: string | null,
@@ -75,7 +75,7 @@ export function useChat(
       try {
         await sendChatStreaming(
           fullMessage,
-          apiKey,
+          authHeader,
           (chunk) => {
             rawText += chunk;
             // Update the streaming message in-place
@@ -103,7 +103,7 @@ export function useChat(
         }
         // SSE not supported or network issue — fall back to buffered
         rawText = '';
-        const { answer } = await sendChat(fullMessage, apiKey, model, undefined, kbTypes, projectId);
+        const { answer } = await sendChat(fullMessage, authHeader, model, undefined, kbTypes, projectId);
         rawText = answer;
       }
 

@@ -13,7 +13,12 @@ function getStorage() {
   return (window as any).OfficeRuntime?.storage ?? localStorageShim;
 }
 
-const KEY = 'fait_api_key';
+export const AUTH_TOKEN_KEY  = 'fait_entra_token';
+export const AUTH_EXPIRY_KEY = 'fait_entra_expiry';
+export const AUTH_USER_KEY   = 'fait_entra_user';
+export const APIKEY_KEY = 'fait_api_key';
+
+const KEY = APIKEY_KEY;
 
 export async function getApiKey(): Promise<string | null> {
   try {

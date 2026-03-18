@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { setApiKey } from '../services/storage';
 import { sendChat, fetchKbList, fetchProjectList } from '../services/faitApi';
+import { getAuthHeader, clearAuth } from '../services/authService';
+import type { FaitUser } from '../services/authService';
 import { saveSetting } from '../services/settings';
 import ModelPicker from './ModelPicker';
 import type { KbInfo, ProjectInfo } from '../services/faitApi';
-import { loadNamedRanges, syncRegistry, removeNamedRange, renameNamedRange, toA1Address } from '../services/namedRangeStorage';
+import { loadNamedRanges, syncRegistry, removeNamedRange, renameNamedRange } from '../services/namedRangeStorage';
 import { deleteNamedRange, renameWorkbookNamedRange, listWorkbookNamedRanges } from '../services/excelWriter';
 import type { FaitNamedRange } from '../services/namedRangeStorage';
 
 interface SettingsPanelProps {
   onClose: () => void;
-  apiKey: string;
-  onKeyChange: (key: string) => void;
+  user?: FaitUser;
   // Sprint 8: Named ranges — optional props, panel loads its own data if not provided
   namedRanges?: FaitNamedRange[];
   onDeleteNamedRange?: (name: string) => Promise<void>;
@@ -20,14 +21,14 @@ interface SettingsPanelProps {
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onClose,
-  apiKey,
-  onKeyChange,
+  user,
   namedRanges: namedRangesProp,
   onDeleteNamedRange,
   onRenameNamedRange,
 }) => {
-  // ── API Key section ─────────────────────────────────────────────────────────
-  const [inputKey, setInputKey] = useState(apiKey ?? '');
+  // ── Advanced: AppKey section ─────────────────────────────────────────────────
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [inputKey, setInputKey] = useState('');
   const [testing, setTesting] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
   const [keySuccess, setKeySuccess] = useState(false);
@@ -77,45 +78,47 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     });
   }, []);
 
-  // ── Fetch KB list + projects when we have an API key ───────────────────────
+  // ── Fetch KB list + projects using current auth header ─────────────────────
   useEffect(() => {
-    if (!apiKey) return;
-    setKbLoading(true);
-    fetchKbList(apiKey)
-      .then((list) => {
-        setKbList(list);
-        // Initialise toggle defaults for any KB not yet stored
-        setKbToggles((prev) => {
-          const next = { ...prev };
-          for (const kb of list) {
-            if (!(kb.id in next)) {
-              next[kb.id] = kb.alwaysOn || kb.type === 'corp'; // corp on by default
-            }
-          }
-          return next;
-        });
-      })
-      .finally(() => setKbLoading(false));
+    let cancelled = false;
+    getAuthHeader().then((hdr) => {
+      if (cancelled) return;
+      if (!Object.keys(hdr).length) return;
 
-    setProjectsLoading(true);
-    fetchProjectList(apiKey)
-      .then(setProjects)
-      .finally(() => setProjectsLoading(false));
-  }, [apiKey]);
+      setKbLoading(true);
+      fetchKbList(hdr)
+        .then((list) => {
+          if (cancelled) return;
+          setKbList(list);
+          setKbToggles((prev) => {
+            const next = { ...prev };
+            for (const kb of list) {
+              if (!(kb.id in next)) {
+                next[kb.id] = kb.alwaysOn || kb.type === 'corp';
+              }
+            }
+            return next;
+          });
+        })
+        .finally(() => { if (!cancelled) setKbLoading(false); });
+
+      setProjectsLoading(true);
+      fetchProjectList(hdr)
+        .then((list) => { if (!cancelled) setProjects(list); })
+        .finally(() => { if (!cancelled) setProjectsLoading(false); });
+    });
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Sprint 8: Load named ranges and sync with workbook on panel open ──────
   useEffect(() => {
     loadNamedRanges().then(async (ranges) => {
-      // Only set local state if parent didn't provide ranges
       if (!namedRangesProp) {
         setLocalNamedRanges(ranges);
       }
-      // Validate registry against live workbook names (background sync)
       const liveNames = await listWorkbookNamedRanges();
-      // syncRegistry guard: only sync if liveNames is non-empty
       if (liveNames.length > 0) {
         await syncRegistry(liveNames);
-        // Reload after sync to get cleaned-up list
         const cleaned = await loadNamedRanges();
         if (!namedRangesProp) {
           setLocalNamedRanges(cleaned);
@@ -171,9 +174,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setKeyError(null);
     setKeySuccess(false);
     try {
-      await sendChat('ping', trimmed);
+      await sendChat('ping', { 'x-api-key': trimmed });
       await setApiKey(trimmed);
-      onKeyChange(trimmed);
       setKeySuccess(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Unknown error';
@@ -187,6 +189,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     } finally {
       setTesting(false);
     }
+  };
+
+  const handleSignOut = async () => {
+    await clearAuth();
+    window.location.reload();
   };
 
   const handleKbToggle = async (id: string, value: boolean) => {
@@ -293,86 +300,36 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           gap: '12px',
         }}
       >
-        {/* ── Section: API Key ─────────────────────────────── */}
+        {/* ── Section: Account ─────────────────────────────── */}
         <div style={sectionStyle}>
-          <div style={sectionHeadingStyle}>API Key</div>
-          <p style={labelStyle}>
-            Enter your FAIT API key. Contact IT or check your onboarding email.
-          </p>
-
-          <input
-            type="password"
-            value={inputKey}
-            onChange={(e) => { setInputKey(e.target.value); setKeySuccess(false); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSaveAndTest(); }}
-            placeholder="Paste your API key here…"
-            autoComplete="off"
-            style={{
-              width: '100%',
-              background: '#243447',
-              border: `1px solid ${keyError ? '#e74c3c' : '#2e3f54'}`,
-              borderRadius: '6px',
-              color: '#e8edf3',
-              fontFamily: 'Inter, sans-serif',
-              fontSize: '13px',
-              padding: '8px 10px',
-              outline: 'none',
-              boxSizing: 'border-box',
-            }}
-            onFocus={(e) => { if (!keyError) e.target.style.borderColor = '#d4af37'; }}
-            onBlur={(e) => { if (!keyError) e.target.style.borderColor = '#2e3f54'; }}
-          />
-
-          {keyError && (
-            <div
-              role="alert"
-              style={{
-                color: '#e74c3c',
-                fontSize: '12px',
-                padding: '6px 10px',
-                background: '#2d1515',
-                borderRadius: '4px',
-                border: '1px solid #e74c3c',
-              }}
-            >
-              ⚠ {keyError}
-            </div>
+          <div style={sectionHeadingStyle}>Account</div>
+          {user ? (
+            <>
+              <div style={{ color: '#e8edf3', fontSize: '13px' }}>
+                Signed in as <span style={{ color: '#d4af37', fontWeight: 600 }}>{user.name}</span>
+              </div>
+              <div style={{ color: '#556677', fontSize: '11px' }}>{user.email}</div>
+              <button
+                onClick={handleSignOut}
+                style={{
+                  background: '#2d1515',
+                  border: '1px solid #4a1515',
+                  borderRadius: '6px',
+                  color: '#e07070',
+                  cursor: 'pointer',
+                  fontFamily: 'Inter, sans-serif',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  padding: '7px 12px',
+                  alignSelf: 'flex-start',
+                }}
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <div style={{ color: '#556677', fontSize: '12px' }}>Not signed in via Entra.</div>
           )}
-
-          {keySuccess && (
-            <div
-              style={{
-                color: '#4caf50',
-                fontSize: '12px',
-                padding: '6px 10px',
-                background: '#152d15',
-                borderRadius: '4px',
-                border: '1px solid #4caf50',
-              }}
-            >
-              ✓ Key saved and verified
-            </div>
-          )}
-
-          <button
-            onClick={handleSaveAndTest}
-            disabled={testing}
-            style={{
-              width: '100%',
-              background: testing ? '#243447' : '#d4af37',
-              border: 'none',
-              borderRadius: '6px',
-              color: testing ? '#8899aa' : '#1a2332',
-              cursor: testing ? 'not-allowed' : 'pointer',
-              fontFamily: 'Inter, sans-serif',
-              fontWeight: '600',
-              fontSize: '13px',
-              padding: '9px',
-              transition: 'background 0.15s',
-            }}
-          >
-            {testing ? 'Testing connection…' : 'Save & Test Connection'}
-          </button>
         </div>
 
         {/* ── Section: Knowledge Bases ─────────────────────── */}
@@ -385,7 +342,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
           {!kbLoading && kbList.length === 0 && (
             <div style={{ color: '#556677', fontSize: '12px' }}>
-              {apiKey ? 'No knowledge bases configured.' : 'Enter an API key above to load KBs.'}
+              No knowledge bases configured.
             </div>
           )}
 
@@ -623,6 +580,113 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 )}
               </div>
             ))
+          )}
+        </div>
+
+        {/* ── Section: Advanced (AppKey fallback) ───────────── */}
+        <div style={sectionStyle}>
+          <button
+            onClick={() => setShowAdvanced((v) => !v)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#556677',
+              cursor: 'pointer',
+              fontFamily: 'Inter, sans-serif',
+              fontSize: '12px',
+              fontWeight: '700',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              textAlign: 'left',
+              padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span>{showAdvanced ? '▾' : '▸'}</span> Advanced
+          </button>
+
+          {showAdvanced && (
+            <>
+              <p style={labelStyle}>
+                AppKey fallback — for CI/testing only. Enter a FAIT API key to use instead of Entra auth.
+              </p>
+
+              <input
+                type="password"
+                value={inputKey}
+                onChange={(e) => { setInputKey(e.target.value); setKeySuccess(false); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveAndTest(); }}
+                placeholder="Paste API key here…"
+                autoComplete="off"
+                style={{
+                  width: '100%',
+                  background: '#243447',
+                  border: `1px solid ${keyError ? '#e74c3c' : '#2e3f54'}`,
+                  borderRadius: '6px',
+                  color: '#e8edf3',
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '13px',
+                  padding: '8px 10px',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+                onFocus={(e) => { if (!keyError) e.target.style.borderColor = '#d4af37'; }}
+                onBlur={(e) => { if (!keyError) e.target.style.borderColor = '#2e3f54'; }}
+              />
+
+              {keyError && (
+                <div
+                  role="alert"
+                  style={{
+                    color: '#e74c3c',
+                    fontSize: '12px',
+                    padding: '6px 10px',
+                    background: '#2d1515',
+                    borderRadius: '4px',
+                    border: '1px solid #e74c3c',
+                  }}
+                >
+                  ⚠ {keyError}
+                </div>
+              )}
+
+              {keySuccess && (
+                <div
+                  style={{
+                    color: '#4caf50',
+                    fontSize: '12px',
+                    padding: '6px 10px',
+                    background: '#152d15',
+                    borderRadius: '4px',
+                    border: '1px solid #4caf50',
+                  }}
+                >
+                  ✓ Key saved and verified
+                </div>
+              )}
+
+              <button
+                onClick={handleSaveAndTest}
+                disabled={testing}
+                style={{
+                  width: '100%',
+                  background: testing ? '#243447' : '#d4af37',
+                  border: 'none',
+                  borderRadius: '6px',
+                  color: testing ? '#8899aa' : '#1a2332',
+                  cursor: testing ? 'not-allowed' : 'pointer',
+                  fontFamily: 'Inter, sans-serif',
+                  fontWeight: '600',
+                  fontSize: '13px',
+                  padding: '9px',
+                  transition: 'background 0.15s',
+                }}
+              >
+                {testing ? 'Testing connection…' : 'Save & Test Connection'}
+              </button>
+            </>
           )}
         </div>
 

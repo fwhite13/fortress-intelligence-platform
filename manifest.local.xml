@@ -15,6 +15,7 @@
   <SupportUrl DefaultValue="https://fait.dev.fortressam.ai"/>
   <AppDomains>
     <AppDomain>https://fait.dev.fortressam.ai</AppDomain>
+    <AppDomain>https://login.microsoftonline.com</AppDomain>
     <AppDomain>https://localhost:3000</AppDomain>
   </AppDomains>
   <Hosts>

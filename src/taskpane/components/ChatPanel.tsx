@@ -17,6 +17,7 @@ import {
 } from '../services/namedRangeStorage';
 import type { FaitNamedRange } from '../services/namedRangeStorage';
 import { searchKb, sendChat } from '../services/faitApi';
+import { getAuthHeader } from '../services/authService';
 import { scanRangeForIssues } from '../services/errorScanner';
 import { parseSuggestions } from '../services/suggestionParser';
 import { insertChart } from '../services/chartBuilder';
@@ -49,7 +50,7 @@ import SlashCommandPicker from './SlashCommandPicker';
 import type { CellIssue } from './ErrorSummaryCard';
 
 interface ChatPanelProps {
-  apiKey: string;
+  authHeader: Record<string, string>;
   model: 'haiku' | 'sonnet';
   kbToggles: Record<string, boolean>;
   projectId: string | null;
@@ -57,7 +58,7 @@ interface ChatPanelProps {
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = ({
-  apiKey,
+  authHeader,
   model,
   kbToggles,
   projectId,
@@ -177,7 +178,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     clearError,
     clearPendingSuggestions,
     setMessages,
-  } = useChat(apiKey, model, kbToggles, projectId);
+  } = useChat(authHeader, model, kbToggles, projectId);
 
   const { suggestions: writeBackSuggestions, showDialog, offerSuggestions, acceptAll, reject } = useWriteBack();
 
@@ -412,9 +413,10 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     setForgeLoading(true);
     setForgeResults(null);
     try {
+      const hdr = await getAuthHeader();
       const { results } = await searchKb(
         forgeQuery.trim(),
-        apiKey,
+        hdr,
         projectId ?? undefined,
         buildKbTypes()
       );
@@ -447,7 +449,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         `type (bar/line/pie/scatter/column), title, dataRange, hasHeaders, seriesBy (rows/columns), ` +
         `and optional xAxis/yAxis titles.\n\nUser request: create a chart for this data`;
 
-      const { answer } = await sendChat(prompt, apiKey, model, undefined, buildKbTypes(), projectId);
+      const hdr = await getAuthHeader();
+      const { answer } = await sendChat(prompt, hdr, model, undefined, buildKbTypes(), projectId);
       const parsed = parseSuggestions(answer);
 
       if (parsed.chartSpec) {
@@ -479,7 +482,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         `columns (array, can be empty), values (array of {field, aggregation}).\n\n` +
         `User request: create a pivot table for this data`;
 
-      const { answer } = await sendChat(prompt, apiKey, model, undefined, buildKbTypes(), projectId);
+      const hdr = await getAuthHeader();
+      const { answer } = await sendChat(prompt, hdr, model, undefined, buildKbTypes(), projectId);
       const parsed = parseSuggestions(answer);
 
       if (parsed.pivotSpec) {
@@ -516,7 +520,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         `(with kind: colorScale/dataBar/topN/formula/cellValue and appropriate params).\n\n` +
         `User request: ${userRule}`;
 
-      const { answer } = await sendChat(prompt, apiKey, model, undefined, buildKbTypes(), projectId);
+      const hdr = await getAuthHeader();
+      const { answer } = await sendChat(prompt, hdr, model, undefined, buildKbTypes(), projectId);
       const parsed = parseSuggestions(answer);
 
       if (parsed.cfSpec) {
@@ -554,7 +559,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         `and ascending bool, hasHeaders) and optional "filter" (criteria array with columnIndex, filterType, ` +
         `and values/operator/value params).\n\nUser request: ${userRequest}`;
 
-      const { answer } = await sendChat(prompt, apiKey, model, undefined, buildKbTypes(), projectId);
+      const hdr = await getAuthHeader();
+      const { answer } = await sendChat(prompt, hdr, model, undefined, buildKbTypes(), projectId);
       const parsed = parseSuggestions(answer);
 
       if (parsed.sortFilterSpec) {
