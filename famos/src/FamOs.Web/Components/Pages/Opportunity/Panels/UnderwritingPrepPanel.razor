@@ -1,0 +1,52 @@
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+
+<MudCard Class="mb-4">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.h6">Underwriting Prep</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Complete underwriting data gathering and select carriers.
+            </MudText>
+        </CardHeaderContent>
+    </MudCardHeader>
+    <MudCardContent>
+        <MudText Typo="Typo.body2">Enter the carriers to route this account to:</MudText>
+        <MudTextField @bind-Value="_carriers" Label="Carriers (comma-separated)"
+                      Class="mt-2" HelperText="e.g. Progressive, Great West, Canal" />
+    </MudCardContent>
+    <MudCardActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="RouteToMarket" Disabled="@(_saving || string.IsNullOrWhiteSpace(_carriers))">
+            Route to Market
+        </MudButton>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback OnAdvanced { get; set; }
+    private string _carriers = "";
+    private bool _saving;
+
+    private async Task RouteToMarket()
+    {
+        _saving = true;
+        try
+        {
+            var userId      = await UserSession.GetUserIdAsync();
+            var carrierList = _carriers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            await Lifecycle.RouteToMarketAsync(Opportunity.Id, carrierList, userId);
+            Snackbar.Add($"Routed to {carrierList.Length} carrier(s).", Severity.Success);
+            await OnAdvanced.InvokeAsync();
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+}

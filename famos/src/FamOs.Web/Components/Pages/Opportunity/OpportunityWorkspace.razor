@@ -1,0 +1,153 @@
+@page "/opportunity/{Id:guid}"
+@attribute [Authorize]
+@inject OpportunityService OppService
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+@using FamOs.Web.Services
+
+<PageTitle>@(_opp?.Name ?? "Opportunity") — FAM OS</PageTitle>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_opp == null)
+{
+    <MudAlert Severity="Severity.Error">Opportunity not found.</MudAlert>
+}
+else
+{
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:8px;">
+        <div>
+            <MudText Typo="Typo.h5" Style="margin-bottom:4px;">@_opp.Name</MudText>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <MudChip T="string" Color="Color.Primary" Size="Size.Small">@GetStageLabel(_opp.LifecycleStage)</MudChip>
+                <SignalChip Signal="_opp.DominantSignal" />
+                @if (!string.IsNullOrEmpty(_opp.DominantSignalReason))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@_opp.DominantSignalReason</MudText>
+                }
+            </div>
+        </div>
+        <div style="display:flex; gap:8px;">
+            @if (!_opp.IsClosed)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                           OnClick="ParkOpportunity">Park</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                           OnClick="CloseOpportunity">Close</MudButton>
+            }
+        </div>
+    </div>
+
+    @switch (_opp.LifecycleStage)
+    {
+        case LifecycleStage.Intake:
+            <IntakePanel Opportunity="_opp" OnAdvanced="Reload" />
+            break;
+        case LifecycleStage.UnderwritingPrep:
+            <UnderwritingPrepPanel Opportunity="_opp" OnAdvanced="Reload" />
+            break;
+        case LifecycleStage.Marketed:
+            <MarketedPanel Opportunity="_opp" OnAdvanced="Reload" />
+            break;
+        case LifecycleStage.QuotesReceived:
+            <QuotesReceivedPanel Opportunity="_opp" OnAdvanced="Reload" />
+            break;
+        case LifecycleStage.ClientDecision:
+            <ClientDecisionPanel Opportunity="_opp" OnAdvanced="Reload" />
+            break;
+        case LifecycleStage.Binding:
+            <BindingPanel Opportunity="_opp" OnAdvanced="Reload" />
+            break;
+        case LifecycleStage.Bound:
+            <BoundPanel Opportunity="_opp" />
+            break;
+        default:
+            <MudAlert Severity="Severity.Info">
+                This opportunity is @_opp.LifecycleStage.
+            </MudAlert>
+            break;
+    }
+
+    @if (_opp.Activities.Any())
+    {
+        <MudText Typo="Typo.h6" Class="mt-6 mb-3">Activity</MudText>
+        <MudTimeline TimelinePosition="TimelinePosition.Left">
+            @foreach (var act in _opp.Activities.OrderByDescending(a => a.OccurredAt).Take(20))
+            {
+                <MudTimelineItem Color="Color.Primary" Size="Size.Small">
+                    <MudText Typo="Typo.body2">@act.Description</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        @act.OccurredAt.ToLocalTime().ToString("MMM d, h:mm tt")
+                    </MudText>
+                </MudTimelineItem>
+            }
+        </MudTimeline>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private Opportunity? _opp;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _opp     = await OppService.GetByIdAsync(Id);
+        _loading = false;
+    }
+
+    private async Task Reload() => await LoadAsync();
+
+    private async Task ParkOpportunity()
+    {
+        try
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.ParkOpportunityAsync(Id, userId);
+            Snackbar.Add("Opportunity parked.", Severity.Info);
+            await Reload();
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task CloseOpportunity()
+    {
+        var dialog = await DialogService.ShowAsync<CloseOpportunityDialog>(
+            "Close Opportunity",
+            new DialogParameters { ["OpportunityId"] = Id });
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled)
+        {
+            Snackbar.Add("Opportunity closed.", Severity.Info);
+            Nav.NavigateTo("/pipeline");
+        }
+    }
+
+    private static string GetStageLabel(LifecycleStage stage) => stage switch
+    {
+        LifecycleStage.Intake           => "Intake",
+        LifecycleStage.UnderwritingPrep => "App Review",
+        LifecycleStage.Marketed         => "Submitted",
+        LifecycleStage.QuotesReceived   => "Quotes In",
+        LifecycleStage.ClientDecision   => "Proposal",
+        LifecycleStage.Binding          => "Binding",
+        LifecycleStage.Bound            => "Bound",
+        LifecycleStage.ClosedNotBound   => "Closed",
+        _                               => stage.ToString()
+    };
+}

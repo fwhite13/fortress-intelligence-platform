@@ -14,6 +14,8 @@ phases:
   post_build:
     commands:
       - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/famos-web:dev-latest
+      - docker tag famos-web:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/famos-web:latest
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/famos-web:latest
       - aws ecs update-service --cluster fortress-tools-cluster --service famos-dev --force-new-deployment --region $AWS_DEFAULT_REGION
       - echo Deploy triggered
 

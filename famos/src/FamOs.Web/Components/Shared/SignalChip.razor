@@ -1,0 +1,35 @@
+@using FamOs.Web.Domain
+
+<span class="famos-signal-chip @GetCssClass()">@GetLabel()</span>
+
+@code {
+    [Parameter, EditorRequired] public DominantSignal Signal { get; set; }
+
+    private string GetLabel() => Signal switch
+    {
+        DominantSignal.WaitingOnClient        => "Waiting on Client",
+        DominantSignal.UnderwritingInProgress => "Underwriting",
+        DominantSignal.WaitingOnMarket        => "Waiting on Market",
+        DominantSignal.DecisionRequired       => "Decision Required",
+        DominantSignal.AwaitingClientDecision => "Awaiting Client",
+        DominantSignal.BindingInProgress      => "Binding",
+        DominantSignal.PostBindProcessing     => "Post-Bind",
+        DominantSignal.TimeRisk               => "⚠ Time Risk",
+        DominantSignal.Parked                 => "Parked",
+        _                                     => Signal.ToString()
+    };
+
+    private string GetCssClass() => Signal switch
+    {
+        DominantSignal.TimeRisk               => "famos-signal-time-risk",
+        DominantSignal.WaitingOnClient        => "famos-signal-waiting-on-client",
+        DominantSignal.DecisionRequired       => "famos-signal-decision-required",
+        DominantSignal.WaitingOnMarket        => "famos-signal-waiting-on-market",
+        DominantSignal.AwaitingClientDecision => "famos-signal-awaiting-client",
+        DominantSignal.BindingInProgress      => "famos-signal-binding",
+        DominantSignal.UnderwritingInProgress => "famos-signal-underwriting",
+        DominantSignal.PostBindProcessing     => "famos-signal-post-bind",
+        DominantSignal.Parked                 => "famos-signal-parked",
+        _                                     => "famos-signal-parked"
+    };
+}

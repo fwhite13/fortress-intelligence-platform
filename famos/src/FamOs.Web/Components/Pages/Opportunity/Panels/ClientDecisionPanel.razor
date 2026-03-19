@@ -1,0 +1,76 @@
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+
+<MudCard Class="mb-4">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.h6">Client Decision</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Proposal sent. Awaiting client acceptance or re-market request.
+            </MudText>
+        </CardHeaderContent>
+    </MudCardHeader>
+    <MudCardContent>
+        @if (Opportunity.ProposalSentAt.HasValue)
+        {
+            <MudText Typo="Typo.body2">
+                Proposal sent @Opportunity.ProposalSentAt.Value.ToLocalTime().ToString("MMM d, yyyy 'at' h:mm tt")
+            </MudText>
+        }
+    </MudCardContent>
+    <MudCardActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Success"
+                   OnClick="RequestBind" Disabled="_saving">
+            Request Bind
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                   OnClick="ReopenMarket" Disabled="_saving">
+            Reopen Market
+        </MudButton>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback OnAdvanced { get; set; }
+    private bool _saving;
+
+    private async Task RequestBind()
+    {
+        _saving = true;
+        try
+        {
+            var userId       = await UserSession.GetUserIdAsync();
+            var winningQuote = Opportunity.Quotes.FirstOrDefault(q => q.IsRecommended)
+                               ?? Opportunity.Quotes.First();
+            await Lifecycle.RequestBindAsync(Opportunity.Id, winningQuote.Id, userId);
+            Snackbar.Add("Bind requested.", Severity.Success);
+            await OnAdvanced.InvokeAsync();
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task ReopenMarket()
+    {
+        _saving = true;
+        try
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.ReopenMarketAsync(Opportunity.Id, userId);
+            Snackbar.Add("Market reopened.", Severity.Info);
+            await OnAdvanced.InvokeAsync();
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+}

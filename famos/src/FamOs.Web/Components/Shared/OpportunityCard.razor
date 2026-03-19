@@ -1,0 +1,31 @@
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+@inject NavigationManager Nav
+
+<MudCard Class="mb-2 cursor-pointer" Style="border-radius: 6px;"
+         @onclick="() => Nav.NavigateTo($"/opportunity/{Opportunity.Id}")">
+    <MudCardContent Class="pa-3">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+            <MudText Typo="Typo.subtitle2" Style="font-size:13px; font-weight:600; line-height:1.3;">
+                @Opportunity.Name
+            </MudText>
+        </div>
+        <SignalChip Signal="Opportunity.DominantSignal" />
+        @if (Opportunity.EstimatedPremium.HasValue)
+        {
+            <div style="margin-top:6px; font-size:12px; color:var(--color-text-secondary);">
+                $@Opportunity.EstimatedPremium.Value.ToString("N0")
+            </div>
+        }
+        @if (Opportunity.EffectiveDateTarget.HasValue)
+        {
+            <div style="font-size:11px; color:var(--color-text-muted); margin-top:2px;">
+                Eff: @Opportunity.EffectiveDateTarget.Value.ToString("MMM d, yyyy")
+            </div>
+        }
+    </MudCardContent>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+}

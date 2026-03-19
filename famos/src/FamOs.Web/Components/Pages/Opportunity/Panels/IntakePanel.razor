@@ -1,0 +1,50 @@
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+
+<MudCard Class="mb-4">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.h6">Intake</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Gather required underwriting data to pursue this opportunity.
+            </MudText>
+        </CardHeaderContent>
+    </MudCardHeader>
+    <MudCardContent>
+        <MudAlert Severity="Severity.Info" Class="mb-3">
+            Collect policy documents, loss runs, and driver schedule before pursuing.
+        </MudAlert>
+    </MudCardContent>
+    <MudCardActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="PursueOpportunity" Disabled="_saving">
+            Pursue Opportunity
+        </MudButton>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback OnAdvanced { get; set; }
+    private bool _saving;
+
+    private async Task PursueOpportunity()
+    {
+        _saving = true;
+        try
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.PursueOpportunityAsync(Opportunity.Id, userId);
+            Snackbar.Add("Advanced to Underwriting Prep.", Severity.Success);
+            await OnAdvanced.InvokeAsync();
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+}

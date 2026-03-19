@@ -1,0 +1,72 @@
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+
+<MudCard Class="mb-4">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.h6">Submitted to Market</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Awaiting carrier quotes. Record quotes as they arrive.
+            </MudText>
+        </CardHeaderContent>
+    </MudCardHeader>
+    <MudCardContent>
+        @if (Opportunity.Submissions.Any())
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Active Submissions</MudText>
+            @foreach (var sub in Opportunity.Submissions)
+            {
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--color-border);">
+                    <MudText Typo="Typo.body2">@sub.CarrierName</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default">@sub.Status</MudChip>
+                </div>
+            }
+        }
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Record a Quote</MudText>
+        <MudSelect @bind-Value="_selectedSubmissionId" Label="Carrier" Class="mb-2">
+            @foreach (var sub in Opportunity.Submissions)
+            {
+                <MudSelectItem Value="sub.Id">@sub.CarrierName</MudSelectItem>
+            }
+        </MudSelect>
+        <MudNumericField @bind-Value="_quotePremium" Label="Premium ($)" Format="N0" Class="mb-2" />
+    </MudCardContent>
+    <MudCardActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="RecordQuote"
+                   Disabled="@(_saving || _selectedSubmissionId == Guid.Empty || !_quotePremium.HasValue)">
+            Record Quote
+        </MudButton>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback OnAdvanced { get; set; }
+    private Guid _selectedSubmissionId;
+    private decimal? _quotePremium;
+    private bool _saving;
+
+    private async Task RecordQuote()
+    {
+        _saving = true;
+        try
+        {
+            var sub    = Opportunity.Submissions.First(s => s.Id == _selectedSubmissionId);
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.RecordQuoteAsync(Opportunity.Id, _selectedSubmissionId,
+                sub.CarrierName, _quotePremium!.Value, null, userId);
+            Snackbar.Add("Quote recorded.", Severity.Success);
+            await OnAdvanced.InvokeAsync();
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+}

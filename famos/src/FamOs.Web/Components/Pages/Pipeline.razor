@@ -1,8 +1,96 @@
 @page "/pipeline"
 @attribute [Authorize]
+@inject OpportunityService OppService
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+@using FamOs.Web.Services
+
 <PageTitle>Pipeline — FAM OS</PageTitle>
 
-<MudText Typo="Typo.h5" Class="mb-4">Pipeline</MudText>
-<MudText Typo="Typo.body1" Color="Color.Secondary">
-    Sprint 2: Kanban board with lifecycle stage columns will appear here.
-</MudText>
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <MudText Typo="Typo.h5">Pipeline</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="OpenCreateDialog">
+        New Opportunity
+    </MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <div class="famos-pipeline-board">
+        @foreach (var col in _columns)
+        {
+            <div class="famos-pipeline-column">
+                <div class="famos-pipeline-column-header">
+                    @col.DisplayName
+                    <span style="float:right; font-weight:400; color:var(--color-text-muted);">
+                        @GetStageCount(col.Stage)
+                    </span>
+                </div>
+                <div style="padding:8px;">
+                    @foreach (var opp in GetStageOpportunities(col.Stage))
+                    {
+                        <OpportunityCard Opportunity="opp" />
+                    }
+                    @if (!GetStageOpportunities(col.Stage).Any())
+                    {
+                        <div style="padding:16px;text-align:center;color:var(--color-text-muted);font-size:12px;">
+                            No opportunities
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private Dictionary<LifecycleStage, List<Opportunity>> _byStage = new();
+
+    private static readonly (LifecycleStage Stage, string DisplayName)[] _columns =
+    {
+        (LifecycleStage.Intake,           "Intake"),
+        (LifecycleStage.UnderwritingPrep, "App Review"),
+        (LifecycleStage.Marketed,         "Submitted"),
+        (LifecycleStage.QuotesReceived,   "Quotes In"),
+        (LifecycleStage.ClientDecision,   "Proposal"),
+        (LifecycleStage.Binding,          "Binding"),
+        (LifecycleStage.Bound,            "Bound"),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _byStage = await OppService.GetPipelineByStageAsync();
+        _loading = false;
+    }
+
+    private List<Opportunity> GetStageOpportunities(LifecycleStage stage)
+        => _byStage.TryGetValue(stage, out var list) ? list : new();
+
+    private int GetStageCount(LifecycleStage stage)
+        => _byStage.TryGetValue(stage, out var list) ? list.Count : 0;
+
+    private async Task OpenCreateDialog()
+    {
+        var dialog = await DialogService.ShowAsync<OpportunityCreateDialog>("New Opportunity");
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled)
+        {
+            var oppId = (Guid)result.Data!;
+            Nav.NavigateTo($"/opportunity/{oppId}");
+        }
+    }
+}

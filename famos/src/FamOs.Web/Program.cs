@@ -107,6 +107,7 @@ builder.Services.AddDataProtection()
 builder.Services.AddScoped<UserSessionService>();
 builder.Services.AddScoped<SignalResolver>();
 builder.Services.AddScoped<LifecycleCommandService>();
+builder.Services.AddScoped<OpportunityService>();
 builder.Services.AddScoped<IHubSpotService, HubSpotServiceStub>();
 builder.Services.AddScoped<IAmsService, AmsServiceStub>();
 

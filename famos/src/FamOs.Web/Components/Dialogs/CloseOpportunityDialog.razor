@@ -1,0 +1,49 @@
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@using FamOs.Web.Domain
+
+<MudDialog>
+    <TitleContent>Close Opportunity</TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            Select the reason this opportunity is closing without binding.
+        </MudText>
+        <MudSelect @bind-Value="_reason" Label="Close Reason" Required="true">
+            <MudSelectItem Value="@("Pricing")">Pricing</MudSelectItem>
+            <MudSelectItem Value="@("Coverage gap")">Coverage gap</MudSelectItem>
+            <MudSelectItem Value="@("No response")">No response</MudSelectItem>
+            <MudSelectItem Value="@("Timing")">Timing</MudSelectItem>
+            <MudSelectItem Value="@("Lost relationship")">Lost relationship</MudSelectItem>
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error"
+                   OnClick="Submit" Disabled="@string.IsNullOrEmpty(_reason)">
+            Close Opportunity
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Guid OpportunityId { get; set; }
+
+    private string _reason = "";
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Submit()
+    {
+        var userId = await UserSession.GetUserIdAsync();
+        try
+        {
+            await Lifecycle.CloseOpportunityAsync(OpportunityId, _reason, userId);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (LifecycleValidationException)
+        {
+            // Surface validation error in dialog — do not close
+        }
+    }
+}

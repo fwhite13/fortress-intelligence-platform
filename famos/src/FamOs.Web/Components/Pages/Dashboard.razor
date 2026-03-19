@@ -1,8 +1,71 @@
 @page "/"
 @attribute [Authorize]
+@inject OpportunityService OppService
+@inject UserSessionService UserSession
+@inject NavigationManager Nav
+@using FamOs.Web.Domain
+@using FamOs.Web.Services
+
 <PageTitle>Dashboard — FAM OS</PageTitle>
 
 <MudText Typo="Typo.h5" Class="mb-4">Dashboard</MudText>
-<MudText Typo="Typo.body1" Color="Color.Secondary">
-    Sprint 2: signal prioritization and pipeline summary will appear here.
-</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_summary != null)
+{
+    <MudGrid Spacing="3" Class="mb-6">
+        <MudItem xs="12" sm="6" md="3">
+            <MudCard Elevation="1">
+                <MudCardContent Class="text-center pa-4">
+                    <MudText Typo="Typo.h4" Style="color:var(--mud-palette-primary)">
+                        @_summary.TotalActive
+                    </MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Active Opportunities</MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudCard Elevation="1" Style="border-left: 4px solid #DC2626;">
+                <MudCardContent Class="text-center pa-4">
+                    <MudText Typo="Typo.h4" Style="color:#DC2626">@_summary.TimeRiskCount</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Time Risk</MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudCard Elevation="1" Style="border-left: 4px solid #D97706;">
+                <MudCardContent Class="text-center pa-4">
+                    <MudText Typo="Typo.h4" Style="color:#D97706">@_summary.DecisionNeeded</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Decision Needed</MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudCard Elevation="1" Style="border-left: 4px solid #059669;">
+                <MudCardContent Class="text-center pa-4">
+                    <MudText Typo="Typo.h4" Style="color:#059669">@_summary.BoundThisMonth</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Bound This Month</MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+
+    <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+               OnClick="@(() => Nav.NavigateTo("/pipeline"))">
+        Open Pipeline →
+    </MudButton>
+}
+
+@code {
+    private DashboardSummary? _summary;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _summary = await OppService.GetDashboardSummaryAsync();
+        _loading = false;
+    }
+}

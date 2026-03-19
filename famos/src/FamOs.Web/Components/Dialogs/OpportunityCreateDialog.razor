@@ -1,0 +1,45 @@
+@inject OpportunityService OppService
+@inject UserSessionService UserSession
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent>New Opportunity</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Account Name" Required="true"
+                      Immediate="true" Class="mb-3" />
+        <MudNumericField @bind-Value="_premium" Label="Estimated Premium ($)"
+                         Format="N0" Class="mb-3" />
+        <MudDatePicker @bind-Date="_effectiveDate" Label="Target Effective Date"
+                       Class="mb-3" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="Submit" Disabled="@string.IsNullOrWhiteSpace(_name)">
+            Create
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _name = "";
+    private decimal? _premium;
+    private DateTime? _effectiveDate;
+    private bool _saving;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_name)) return;
+        _saving = true;
+        var userId = await UserSession.GetUserIdAsync();
+        DateOnly? effDate = _effectiveDate.HasValue
+            ? DateOnly.FromDateTime(_effectiveDate.Value)
+            : null;
+        var id = await OppService.CreateOpportunityAsync(_name.Trim(), userId, _premium, effDate);
+        MudDialog.Close(DialogResult.Ok(id));
+    }
+}

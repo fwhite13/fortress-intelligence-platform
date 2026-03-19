@@ -1,0 +1,70 @@
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+
+<MudCard Class="mb-4">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.h6">Quote Comparison</MudText>
+        </CardHeaderContent>
+    </MudCardHeader>
+    <MudCardContent>
+        <MudTable Items="Opportunity.Quotes" Hover="true" Dense="true" Class="mb-3">
+            <HeaderContent>
+                <MudTh>Carrier</MudTh>
+                <MudTh>Premium</MudTh>
+                <MudTh>Recommended</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.CarrierName</MudTd>
+                <MudTd>$@context.PremiumAmount.ToString("N0")</MudTd>
+                <MudTd>
+                    <MudRadio Value="context.Id" @bind-Value="_recommendedId"
+                              Color="Color.Primary" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudCardContent>
+    <MudCardActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="SendProposal"
+                   Disabled="@(_saving || _recommendedId == Guid.Empty)">
+            Send Proposal
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                   OnClick="RecordAnotherQuote">
+            + Add Quote
+        </MudButton>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback OnAdvanced { get; set; }
+    private Guid _recommendedId;
+    private bool _saving;
+
+    private async Task SendProposal()
+    {
+        _saving = true;
+        try
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.SendProposalAsync(Opportunity.Id, _recommendedId, userId);
+            Snackbar.Add("Proposal sent.", Severity.Success);
+            await OnAdvanced.InvokeAsync();
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+
+    private void RecordAnotherQuote()
+    {
+        Snackbar.Add("Sprint 3: inline add-quote form. Use Pipeline to navigate.", Severity.Info);
+    }
+}

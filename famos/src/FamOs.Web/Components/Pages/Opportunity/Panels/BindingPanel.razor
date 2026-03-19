@@ -1,0 +1,51 @@
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+
+<MudCard Class="mb-4">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.h6">Binding in Progress</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                Awaiting carrier binder confirmation. Record when received.
+            </MudText>
+        </CardHeaderContent>
+    </MudCardHeader>
+    <MudCardContent>
+        <MudDatePicker @bind-Date="_effectiveDate" Label="Policy Effective Date" />
+    </MudCardContent>
+    <MudCardActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Success"
+                   OnClick="RecordBinder"
+                   Disabled="@(_saving || !_effectiveDate.HasValue)">
+            Binder Received — Mark Bound
+        </MudButton>
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback OnAdvanced { get; set; }
+    private DateTime? _effectiveDate;
+    private bool _saving;
+
+    private async Task RecordBinder()
+    {
+        _saving = true;
+        try
+        {
+            var userId  = await UserSession.GetUserIdAsync();
+            var effDate = DateOnly.FromDateTime(_effectiveDate!.Value);
+            await Lifecycle.RecordBinderReceivedAsync(Opportunity.Id, effDate, userId);
+            Snackbar.Add("Policy bound! Post-bind tasks created.", Severity.Success);
+            await OnAdvanced.InvokeAsync();
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+}
