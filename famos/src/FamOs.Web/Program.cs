@@ -7,6 +7,7 @@ using FamOs.Web.Domain;
 using FamOs.Web.Services;
 using FamOs.Web.Components;
 using MudBlazor.Services;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -144,7 +145,7 @@ _ = Task.Run(async () =>
         {
             try
             {
-                var creator = db.Database.GetService<IRelationalDatabaseCreator>();
+                var creator = db.Database.GetService<Microsoft.EntityFrameworkCore.Storage.IRelationalDatabaseCreator>();
                 await creator.CreateTablesAsync();
                 Console.WriteLine("[FAM OS] Database tables created.");
             }
