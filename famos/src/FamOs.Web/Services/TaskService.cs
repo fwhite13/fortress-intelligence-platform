@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using FamOs.Web.Data;
 using FamOs.Web.Data.Entities;
+using FamOs.Web.Domain;
 
 namespace FamOs.Web.Services;
 
