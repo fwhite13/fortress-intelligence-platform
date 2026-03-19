@@ -1,5 +1,6 @@
 @inject LifecycleCommandService Lifecycle
 @inject UserSessionService UserSession
+@inject ISnackbar Snackbar
 @using FamOs.Web.Domain
 
 <MudDialog>
@@ -41,9 +42,9 @@
             await Lifecycle.CloseOpportunityAsync(OpportunityId, _reason, userId);
             MudDialog.Close(DialogResult.Ok(true));
         }
-        catch (LifecycleValidationException)
+        catch (LifecycleValidationException ex)
         {
-            // Surface validation error in dialog — do not close
+            Snackbar.Add(ex.Message, Severity.Error);
         }
     }
 }

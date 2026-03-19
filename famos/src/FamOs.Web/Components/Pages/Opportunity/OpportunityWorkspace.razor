@@ -97,15 +97,20 @@ else
 
     private Opportunity? _opp;
     private bool _loading = true;
+    private Guid _loadedId;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
-    protected override async Task OnParametersSetAsync() => await LoadAsync();
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Id == _loadedId) return;
+        await LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
-        _loading = true;
-        _opp     = await OppService.GetByIdAsync(Id);
-        _loading = false;
+        _loading  = true;
+        _opp      = await OppService.GetByIdAsync(Id);
+        _loadedId = Id;
+        _loading  = false;
     }
 
     private async Task Reload() => await LoadAsync();
