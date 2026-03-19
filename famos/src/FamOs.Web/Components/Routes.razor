@@ -2,7 +2,8 @@
 
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
-        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)"
+                            @rendermode="InteractiveServer">
             <NotAuthorized>
                 @if (!context.User.Identity?.IsAuthenticated ?? true)
                 {

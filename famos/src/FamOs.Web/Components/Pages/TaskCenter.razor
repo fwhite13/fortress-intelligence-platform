@@ -10,12 +10,10 @@
 
 <PageTitle>Task Center — FAM OS</PageTitle>
 
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:8px;">
+<div class="famos-page-header famos-page-header-row mb-4">
     <div>
-        <MudText Typo="Typo.h5" Style="color:var(--navy);">Task Center</MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
-            @_tasks.Count open task@(_tasks.Count == 1 ? "" : "s") across @_tasks.Select(t => t.Opportunity.Id).Distinct().Count() opportunities
-        </MudText>
+        <h2 class="famos-page-h2">Task Center</h2>
+        <p class="famos-page-sub">@_tasks.Count open task@(_tasks.Count == 1 ? "" : "s") across @_tasks.Select(t => t.Opportunity.Id).Distinct().Count() opportunities</p>
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <MudTextField Class="famos-input-filter" @bind-Value="_filterText"

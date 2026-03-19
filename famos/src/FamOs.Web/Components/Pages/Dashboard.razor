@@ -152,9 +152,8 @@ else if (_summary != null)
 
     protected override async Task OnInitializedAsync()
     {
-        var userId = await UserSession.GetUserIdAsync();
-        _summary   = await OppService.GetDashboardSummaryAsync(userId);
-        _loading   = false;
+        _summary = await OppService.GetDashboardSummaryAsync(null);
+        _loading = false;
     }
 
     private static string GetStageLabel(LifecycleStage stage) => stage switch

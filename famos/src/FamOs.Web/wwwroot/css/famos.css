@@ -458,6 +458,8 @@
     height: 44px;
     object-fit: contain;
     object-position: center;
+    display: block;
+    margin: 0 auto;
 }
 .sb-logo-text {
     font-family: 'Fraunces', Georgia, serif;

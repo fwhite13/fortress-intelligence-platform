@@ -25,7 +25,10 @@ public class UserSessionService
     public async Task<string> GetUserIdAsync()
     {
         var user = await GetUserAsync();
-        return user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+        return user.FindFirst("preferred_username")?.Value
+            ?? user.FindFirst(ClaimTypes.Email)?.Value
+            ?? user.FindFirst("email")?.Value
+            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
             ?? user.FindFirst("sub")?.Value
             ?? user.FindFirst("oid")?.Value
             ?? "unknown";
