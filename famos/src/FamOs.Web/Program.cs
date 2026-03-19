@@ -165,9 +165,17 @@ _ = Task.Run(async () =>
             Console.WriteLine("[FAM OS] DB tables already exist.");
         }
 
-        // Sprint 4: add intake_responses_json column if missing (idempotent)
-        await db.Database.ExecuteSqlRawAsync(
-            "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS intake_responses_json MEDIUMTEXT NULL");
+        // Sprint 4: add intake_responses_json column if missing (Aurora MySQL compatible — no IF NOT EXISTS)
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE opportunities ADD COLUMN intake_responses_json MEDIUMTEXT NULL");
+        }
+        catch (MySqlException ex) when (ex.Number == 1060)
+        {
+            // 1060 = Duplicate column name — column already exists, safe to continue
+            logger.LogDebug("intake_responses_json column already exists (1060), continuing");
+        }
     }
     catch (Exception ex)
     {
