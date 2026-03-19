@@ -2,7 +2,6 @@
 @inject UserSessionService UserSession
 @inject ISnackbar Snackbar
 @using FamOs.Web.Data.Entities
-@using FamOs.Web.Domain
 
 <MudCard Class="mb-4">
     <MudCardHeader>
@@ -11,6 +10,7 @@
         </CardHeaderContent>
     </MudCardHeader>
     <MudCardContent>
+        <MudRadioGroup @bind-Value="_recommendedId">
         <MudTable Items="Opportunity.Quotes" Hover="true" Dense="true" Class="mb-3">
             <HeaderContent>
                 <MudTh>Carrier</MudTh>
@@ -21,11 +21,11 @@
                 <MudTd>@context.CarrierName</MudTd>
                 <MudTd>$@context.PremiumAmount.ToString("N0")</MudTd>
                 <MudTd>
-                    <MudRadio Value="context.Id" @bind-Value="_recommendedId"
-                              Color="Color.Primary" />
+                    <MudRadio Value="context.Id" Color="Color.Primary" />
                 </MudTd>
             </RowTemplate>
         </MudTable>
+        </MudRadioGroup>
     </MudCardContent>
     <MudCardActions>
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
