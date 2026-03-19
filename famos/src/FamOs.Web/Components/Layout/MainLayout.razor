@@ -23,29 +23,32 @@
     <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive"
                Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
         <div style="display: flex; flex-direction: column; height: 100%;">
-            <MudDrawerHeader Style="padding: 12px 16px; background: var(--color-sidebar-bg);">
+            <MudDrawerHeader Style="padding: 16px 16px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); background: white;">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="color: var(--color-gold)">
-                        <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor" opacity="0.9"/>
-                        <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                    <span style="color: rgba(248,250,252,0.8); font-size: 14px; font-weight: 500;">Fortress</span>
+                    <span style="font-family: 'Fraunces', Georgia, serif; font-size: 18px; font-weight: 700; color: #002050; letter-spacing: -0.3px;">FAM OS</span>
+                    <span style="font-size: 10px; font-weight: 700; background: rgba(0,144,208,0.12); color: #0090d0; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.8px;">Beta</span>
                 </div>
-                <div style="color: var(--color-gold); font-size: var(--text-lg); font-weight: var(--font-bold); margin-top: 2px;">
-                    FAM OS
-                </div>
+                <div style="font-size: 11px; color: #6b7585; margin-top: 2px;">Fortress Affinity Management OS</div>
             </MudDrawerHeader>
             <div style="flex: 1; overflow-y: auto;">
                 <NavMenu />
             </div>
-            <div class="fip-drawer-footer">
-                <MudText Typo="Typo.caption">Fortress Affinity Management OS</MudText>
+            <div style="padding: 11px 14px; border-top: 1px solid rgba(255,255,255,0.07); display: flex; align-items: center; gap: 9px;">
+                <div style="width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, #0090d0, #10b0f0); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; flex-shrink: 0;">
+                    @_userInitial
+                </div>
+                <div>
+                    <div style="font-size: 12px; font-weight: 700; color: #fff;">@(_userName.Length > 0 ? _userName : "User")</div>
+                    <div style="font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 1px;">FAM OS</div>
+                </div>
             </div>
         </div>
     </MudDrawer>
 
-    <MudMainContent Class="pa-4" Style="padding-top: 80px !important;">
-        @Body
+    <MudMainContent Style="padding-top: 54px !important;">
+        <div style="padding: 24px 28px;">
+            @Body
+        </div>
     </MudMainContent>
 </MudLayout>
 

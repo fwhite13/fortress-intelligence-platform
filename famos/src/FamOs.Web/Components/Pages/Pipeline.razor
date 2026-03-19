@@ -8,10 +8,13 @@
 
 <PageTitle>Pipeline — FAM OS</PageTitle>
 
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-    <MudText Typo="Typo.h5">Pipeline</MudText>
+<div class="famos-page-header famos-page-header-row mb-4">
+    <div>
+        <h2 class="famos-page-h2">Pipeline</h2>
+        <p class="famos-page-sub">@(_byStage.Values.Sum(l => l.Count)) active opportunities</p>
+    </div>
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-               OnClick="OpenCreateDialog">
+               Class="famos-btn-primary" OnClick="OpenCreateDialog">
         New Opportunity
     </MudButton>
 </div>
@@ -27,10 +30,9 @@ else
         {
             <div class="famos-pipeline-column">
                 <div class="famos-pipeline-column-header">
-                    @col.DisplayName
-                    <span style="float:right; font-weight:400; color:var(--color-text-muted);">
-                        @GetStageCount(col.Stage)
-                    </span>
+                    <span class="famos-kcol-dot" style="background: @GetStageColor(col.Stage);"></span>
+                    <span class="famos-kcol-label">@col.DisplayName</span>
+                    <span class="famos-kcol-count">@GetStageCount(col.Stage)</span>
                 </div>
                 <div style="padding:8px;">
                     @foreach (var opp in GetStageOpportunities(col.Stage))
@@ -81,6 +83,18 @@ else
 
     private int GetStageCount(LifecycleStage stage)
         => _byStage.TryGetValue(stage, out var list) ? list.Count : 0;
+
+    private static string GetStageColor(LifecycleStage stage) => stage switch
+    {
+        LifecycleStage.Intake           => "#1d4ed8",
+        LifecycleStage.UnderwritingPrep => "#6d28d9",
+        LifecycleStage.Marketed         => "#d97706",
+        LifecycleStage.QuotesReceived   => "#0369a1",
+        LifecycleStage.ClientDecision   => "#9333ea",
+        LifecycleStage.Binding          => "#0090d0",
+        LifecycleStage.Bound            => "#059669",
+        _                               => "#6b7585",
+    };
 
     private async Task OpenCreateDialog()
     {

@@ -1,20 +1,50 @@
 @using Microsoft.AspNetCore.Components.Routing
 
-<MudNavMenu>
-    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
+<div style="padding: 12px 10px 4px;">
+    <div style="font-size: 9.5px; font-weight: 700; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 1.2px; padding: 0 8px; margin-bottom: 4px;">
+        Main
+    </div>
+
+    <NavLink href="/" Match="NavLinkMatch.All" class="famos-nav-item" ActiveClass="famos-nav-item--active">
+        <span class="famos-nav-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Dashboard" Size="Size.Small" />
+        </span>
         Dashboard
-    </MudNavLink>
-    <MudNavLink Href="/pipeline" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.ViewKanban">
+    </NavLink>
+
+    <NavLink href="/pipeline" Match="NavLinkMatch.Prefix" class="famos-nav-item" ActiveClass="famos-nav-item--active">
+        <span class="famos-nav-icon">
+            <MudIcon Icon="@Icons.Material.Filled.ViewKanban" Size="Size.Small" />
+        </span>
         Pipeline
-    </MudNavLink>
-    <MudNavLink Href="/tasks" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.CheckBox">
+    </NavLink>
+
+    <NavLink href="/tasks" Match="NavLinkMatch.Prefix" class="famos-nav-item" ActiveClass="famos-nav-item--active">
+        <span class="famos-nav-icon">
+            <MudIcon Icon="@Icons.Material.Filled.CheckBox" Size="Size.Small" />
+        </span>
         Task Center
-    </MudNavLink>
-    <MudDivider Class="my-2" />
-    <MudNavLink Href="/accounts" Disabled="true" Icon="@Icons.Material.Filled.Business">
-        Accounts <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="ml-1">Soon</MudChip>
-    </MudNavLink>
-    <MudNavLink Href="/reports" Disabled="true" Icon="@Icons.Material.Filled.BarChart">
-        Reports <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="ml-1">Soon</MudChip>
-    </MudNavLink>
-</MudNavMenu>
+    </NavLink>
+
+    <div style="height: 1px; background: rgba(255,255,255,0.07); margin: 8px 14px;"></div>
+
+    <div style="font-size: 9.5px; font-weight: 700; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 1.2px; padding: 0 8px; margin-bottom: 4px; margin-top: 8px;">
+        Coming Soon
+    </div>
+
+    <span class="famos-nav-item famos-nav-item--disabled">
+        <span class="famos-nav-icon">
+            <MudIcon Icon="@Icons.Material.Filled.Business" Size="Size.Small" />
+        </span>
+        Accounts
+        <span class="famos-nav-badge">Soon</span>
+    </span>
+
+    <span class="famos-nav-item famos-nav-item--disabled">
+        <span class="famos-nav-icon">
+            <MudIcon Icon="@Icons.Material.Filled.BarChart" Size="Size.Small" />
+        </span>
+        Reports
+        <span class="famos-nav-badge">Soon</span>
+    </span>
+</div>

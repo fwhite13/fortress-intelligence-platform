@@ -7,7 +7,18 @@
 
 <PageTitle>Dashboard — FAM OS</PageTitle>
 
-<MudText Typo="Typo.h5" Class="mb-4">Dashboard</MudText>
+<div class="famos-page-header famos-page-header-row">
+    <div>
+        <h2 class="famos-page-h2">FAM OS Dashboard</h2>
+        <p class="famos-page-sub">Active Pipeline · @DateTime.Now.ToString("MMMM yyyy")</p>
+    </div>
+    <div style="display: flex; gap: 8px; margin-top: 4px;">
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                   Class="famos-btn-outline-sm" OnClick="GoToPipeline">
+            Pipeline View →
+        </MudButton>
+    </div>
+</div>
 
 @if (_loading)
 {
@@ -15,47 +26,16 @@
 }
 else if (_summary != null)
 {
-    <MudGrid Spacing="3" Class="mb-6">
-        <MudItem xs="12" sm="6" md="3">
-            <MudCard Elevation="1">
-                <MudCardContent Class="text-center pa-4">
-                    <MudText Typo="Typo.h4" Style="color:var(--mud-palette-primary)">
-                        @_summary.TotalActive
-                    </MudText>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">Active Opportunities</MudText>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudCard Elevation="1" Style="border-left: 4px solid #DC2626;">
-                <MudCardContent Class="text-center pa-4">
-                    <MudText Typo="Typo.h4" Style="color:#DC2626">@_summary.TimeRiskCount</MudText>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">Time Risk</MudText>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudCard Elevation="1" Style="border-left: 4px solid #D97706;">
-                <MudCardContent Class="text-center pa-4">
-                    <MudText Typo="Typo.h4" Style="color:#D97706">@_summary.DecisionNeeded</MudText>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">Decision Needed</MudText>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-        <MudItem xs="12" sm="6" md="3">
-            <MudCard Elevation="1" Style="border-left: 4px solid #059669;">
-                <MudCardContent Class="text-center pa-4">
-                    <MudText Typo="Typo.h4" Style="color:#059669">@_summary.BoundThisMonth</MudText>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">Bound This Month</MudText>
-                </MudCardContent>
-            </MudCard>
-        </MudItem>
-    </MudGrid>
-
-    <MudButton Variant="Variant.Outlined" Color="Color.Primary"
-               OnClick="GoToPipeline">
-        Open Pipeline →
-    </MudButton>
+    <div class="famos-kpi-grid mb-5">
+        <StatCard Label="Active Opportunities" Value="@_summary.TotalActive.ToString()"
+                  AccentClass="kpi-navy" Sub="Currently in pipeline" />
+        <StatCard Label="Time Risk" Value="@_summary.TimeRiskCount.ToString()"
+                  AccentClass="kpi-red" Sub="Need immediate action" />
+        <StatCard Label="Decision Needed" Value="@_summary.DecisionNeeded.ToString()"
+                  AccentClass="kpi-amber" Sub="Awaiting client response" />
+        <StatCard Label="Bound This Month" Value="@_summary.BoundThisMonth.ToString()"
+                  AccentClass="kpi-green" Sub="Successfully closed" />
+    </div>
 }
 
 @code {

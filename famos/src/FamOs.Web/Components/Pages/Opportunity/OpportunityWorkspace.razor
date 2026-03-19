@@ -22,11 +22,13 @@ else if (_opp == null)
 }
 else
 {
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:8px;">
+    <div class="famos-page-header famos-page-header-row mb-4">
         <div>
-            <MudText Typo="Typo.h5" Style="margin-bottom:4px;">@_opp.Name</MudText>
-            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                <MudChip T="string" Color="Color.Primary" Size="Size.Small">@GetStageLabel(_opp.LifecycleStage)</MudChip>
+            <h2 class="famos-page-h2" style="font-size: 20px;">@_opp.Name</h2>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px;">
+                <span class="famos-status-pill @GetStagePillClass(_opp.LifecycleStage)">
+                    @GetStageLabel(_opp.LifecycleStage)
+                </span>
                 <SignalChip Signal="_opp.DominantSignal" />
                 @if (!string.IsNullOrEmpty(_opp.DominantSignalReason))
                 {
@@ -34,15 +36,15 @@ else
                 }
             </div>
         </div>
-        <div style="display:flex; gap:8px;">
-            @if (!_opp.IsClosed)
-            {
+        @if (!_opp.IsClosed)
+        {
+            <div style="display: flex; gap: 8px;">
                 <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
-                           OnClick="ParkOpportunity">Park</MudButton>
+                           Class="famos-btn-outline-sm" OnClick="ParkOpportunity">Park</MudButton>
                 <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
-                           OnClick="CloseOpportunity">Close</MudButton>
-            }
-        </div>
+                           Class="famos-btn-outline-sm" OnClick="CloseOpportunity">Close</MudButton>
+            </div>
+        }
     </div>
 
     @switch (_opp.LifecycleStage)
@@ -77,7 +79,7 @@ else
 
     @if (_opp.Activities.Any())
     {
-        <MudText Typo="Typo.h6" Class="mt-6 mb-3">Activity</MudText>
+        <div class="famos-card-title mt-5 mb-3">Activity</div>
         <MudTimeline TimelinePosition="TimelinePosition.Left">
             @foreach (var act in _opp.Activities.OrderByDescending(a => a.OccurredAt).Take(20))
             {
@@ -154,5 +156,17 @@ else
         LifecycleStage.Bound            => "Bound",
         LifecycleStage.ClosedNotBound   => "Closed",
         _                               => stage.ToString()
+    };
+
+    private static string GetStagePillClass(LifecycleStage stage) => stage switch
+    {
+        LifecycleStage.Intake           => "famos-pill-intake",
+        LifecycleStage.UnderwritingPrep => "famos-pill-review",
+        LifecycleStage.Marketed         => "famos-pill-sub",
+        LifecycleStage.QuotesReceived   => "famos-pill-quotes",
+        LifecycleStage.ClientDecision   => "famos-pill-prop",
+        LifecycleStage.Binding          => "famos-pill-binding",
+        LifecycleStage.Bound            => "famos-pill-bound",
+        _                               => "famos-pill-default",
     };
 }

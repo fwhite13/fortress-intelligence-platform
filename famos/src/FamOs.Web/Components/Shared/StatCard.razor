@@ -1,0 +1,37 @@
+@namespace FamOs.Web.Components.Shared
+
+<div class="famos-kpi-card @AccentClass">
+    <div class="famos-kpi-label">@Label</div>
+    <div class="famos-kpi-value">@Value</div>
+    @if (!string.IsNullOrEmpty(Sub))
+    {
+        <div class="famos-kpi-sub">@Sub</div>
+    }
+    @if (!string.IsNullOrEmpty(Trend))
+    {
+        <div class="famos-kpi-trend @TrendClass">@Trend</div>
+    }
+</div>
+
+@code {
+    /// <summary>Short label above the number. Use UPPERCASE short names.</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+
+    /// <summary>The large displayed value (number, $amount, etc).</summary>
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+
+    /// <summary>Small subtitle below the value.</summary>
+    [Parameter] public string Sub { get; set; } = "";
+
+    /// <summary>Optional trend text (e.g. "+18%", "3 urgent").</summary>
+    [Parameter] public string Trend { get; set; } = "";
+
+    /// <summary>
+    /// CSS modifier for the left accent bar color.
+    /// Valid values: kpi-navy | kpi-sky | kpi-green | kpi-amber | kpi-red | kpi-blue
+    /// </summary>
+    [Parameter] public string AccentClass { get; set; } = "kpi-navy";
+
+    /// <summary>CSS class for the trend badge. Valid: trend-up | trend-warn | trend-flat.</summary>
+    [Parameter] public string TrendClass { get; set; } = "trend-flat";
+}
