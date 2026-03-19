@@ -1,10 +1,8 @@
 @inherits LayoutComponentBase
 @using FamOs.Web.Theme
 @using System.Security.Claims
-@using FipShared.Components
-@using FipShared.Models
 @inject NavigationManager _nav
-@inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment HostEnv
+@inject Microsoft.Extensions.Options.IOptions<AffinityConfig> AffinityOptions
 
 <MudThemeProvider Theme="_theme" />
 <MudPopoverProvider />
@@ -12,24 +10,19 @@
 <MudSnackbarProvider />
 
 <MudLayout>
-    <FipNavBar ActiveModule="FipModule.FAMOS"
-               UserInitial="@_userInitial"
-               UserName="@_userName"
-               UserEmail="@_userEmail"
-               OnMenuClick="ToggleDrawer"
-               OnSignOut="@(() => _nav.NavigateTo("/auth/logout", forceLoad: true))"
-               IsDev="@HostEnv.IsDevelopment()" />
-
     <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive"
                Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
         <div style="display: flex; flex-direction: column; height: 100%;">
-            <MudDrawerHeader Style="padding: 16px 16px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); background: white;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-family: 'Fraunces', Georgia, serif; font-size: 18px; font-weight: 700; color: #002050; letter-spacing: -0.3px;">FAM OS</span>
-                    <span style="font-size: 10px; font-weight: 700; background: rgba(0,144,208,0.12); color: #0090d0; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.8px;">Beta</span>
-                </div>
-                <div style="font-size: 11px; color: #6b7585; margin-top: 2px;">Fortress Affinity Management OS</div>
-            </MudDrawerHeader>
+            <div class="sb-logo">
+                @if (!string.IsNullOrEmpty(_affinity.LogoPath))
+                {
+                    <img src="@_affinity.LogoPath" alt="@_affinity.DisplayName" />
+                }
+                else
+                {
+                    <span class="sb-logo-text">@_affinity.PortalName</span>
+                }
+            </div>
             <div style="flex: 1; overflow-y: auto;">
                 <NavMenu />
             </div>
@@ -39,13 +32,13 @@
                 </div>
                 <div>
                     <div style="font-size: 12px; font-weight: 700; color: #fff;">@(_userName.Length > 0 ? _userName : "User")</div>
-                    <div style="font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 1px;">FAM OS</div>
+                    <div style="font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 1px;">@_affinity.PortalName</div>
                 </div>
             </div>
         </div>
     </MudDrawer>
 
-    <MudMainContent Style="padding-top: 54px !important;">
+    <MudMainContent>
         <div style="padding: 24px 28px;">
             @Body
         </div>
@@ -57,6 +50,7 @@
     private string _userInitial = "F";
     private string _userName = "";
     private string _userEmail = "";
+    private AffinityConfig _affinity = new();
 
     private MudTheme _theme = FipTheme.Create();
 
@@ -64,6 +58,8 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _affinity = AffinityOptions.Value;
+
         var authProvider = ServiceProvider.GetService<AuthenticationStateProvider>();
         if (authProvider != null)
         {

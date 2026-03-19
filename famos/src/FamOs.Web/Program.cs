@@ -111,6 +111,9 @@ builder.Services.AddScoped<OpportunityService>();
 builder.Services.AddScoped<IHubSpotService, HubSpotServiceStub>();
 builder.Services.AddScoped<IAmsService, AmsServiceStub>();
 
+builder.Services.Configure<AffinityConfig>(
+    builder.Configuration.GetSection("AffinityConfig"));
+
 // ── Background Services ──
 builder.Services.AddHostedService<OutboxProcessorService>();
 builder.Services.AddHostedService<SignalRecomputeService>();
