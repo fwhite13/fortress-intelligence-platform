@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.AspNetCore.DataProtection;
 using MySqlConnector;
+using FamOs.Web;
 using FamOs.Web.Data;
 using FamOs.Web.Domain;
 using FamOs.Web.Services;
