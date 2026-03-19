@@ -38,7 +38,24 @@
         </div>
     </MudDrawer>
 
-    <MudMainContent>
+    <MudMainContent Style="padding-top: 0 !important;">
+        <div class="famos-topbar">
+            <span class="famos-topbar-crumb">
+                @_affinity.DisplayName
+                <span class="famos-topbar-sep">›</span>
+                <strong>Dashboard</strong>
+            </span>
+            <div class="famos-topbar-right">
+                <div class="famos-topbar-search">
+                    <span class="famos-topbar-search-icon">🔍</span>
+                    <input type="text" placeholder="Search opportunities..." />
+                </div>
+                <div class="famos-topbar-user">
+                    <div class="famos-topbar-avatar">@_userInitial</div>
+                    <span class="famos-topbar-username">@_userName</span>
+                </div>
+            </div>
+        </div>
         <div style="padding: 24px 28px;">
             @Body
         </div>
