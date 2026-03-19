@@ -201,29 +201,28 @@ var logger = app.Logger;
             logger.LogDebug("intake_responses_json column already exists (1060), continuing");
         }
 
-        // Sprint 5: Part C
-        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN close_reason INT NULL"); }
-        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("close_reason column already exists"); }
-        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN close_notes LONGTEXT NULL"); }
-        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("close_notes column already exists"); }
+        // Sprint 5: Part C — PascalCase to match EF model (snake_case renamed in Aurora 2026-03-19)
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN CloseReason INT NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("CloseReason column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN CloseNotes LONGTEXT NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("CloseNotes column already exists"); }
 
         // Sprint 5: Part E
-        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN last_stage_transition_at DATETIME NULL"); }
-        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("last_stage_transition_at column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN LastStageTransitionAt DATETIME NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("LastStageTransitionAt column already exists"); }
 
-        // Sprint 5: Part A (Submission table enhancements)
-        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN coverage_types VARCHAR(200) NULL"); }
-        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("coverage_types column already exists"); }
-        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN submitted_at DATETIME NULL"); }
-        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("submitted_at column already exists"); }
-        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN responded_at DATETIME NULL"); }
-        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("responded_at column already exists"); }
-        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN quote_result_json MEDIUMTEXT NULL"); }
-        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("quote_result_json column already exists"); }
-        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN notes LONGTEXT NULL"); }
-        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("notes column already exists"); }
-        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"); }
-        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("submissions.updated_at column already exists"); }
+        // Sprint 5: Part A (Submission table enhancements — PascalCase)
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN CoverageTypes VARCHAR(200) NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("CoverageTypes column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN SubmittedAt DATETIME NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("SubmittedAt column already exists"); }
+        // RespondedAt already exists from Sprint 1 — skip
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN QuoteResultJson MEDIUMTEXT NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("QuoteResultJson column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN Notes LONGTEXT NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("Notes column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("UpdatedAt column already exists"); }
     }
     catch (Exception ex)
     {
