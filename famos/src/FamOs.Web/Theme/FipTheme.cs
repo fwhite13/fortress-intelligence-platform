@@ -92,37 +92,7 @@ public static class FipTheme
             DrawerWidthLeft = "262px",      // matches mockup --sidebar-w
         },
 
-        Shadows = new Shadow
-        {
-            // Minimal shadow system — cards rely on borders, not heavy shadows
-            Elevation = new[]
-            {
-                "none",
-                "0 1px 2px rgba(0,0,0,0.05)",
-                "0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)",
-                "0 2px 4px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)",
-                "0 4px 6px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04)",
-                "0 4px 12px rgba(0,144,208,0.10)",   // elevation[5] — card hover (sky tint)
-                "0 8px 16px rgba(0,0,0,0.08)",
-                "0 12px 24px rgba(0,0,0,0.08)",
-                "0 16px 32px rgba(0,0,0,0.08)",
-                "0 20px 40px rgba(0,0,0,0.10)",
-                "0 24px 48px rgba(0,0,0,0.12)",
-                "0 32px 56px rgba(0,0,0,0.12)",
-                "0 40px 64px rgba(0,0,0,0.12)",
-                "0 48px 72px rgba(0,0,0,0.12)",
-                "0 56px 80px rgba(0,0,0,0.12)",
-                "0 64px 88px rgba(0,0,0,0.12)",
-                "0 72px 96px rgba(0,0,0,0.12)",
-                "0 80px 104px rgba(0,0,0,0.12)",
-                "0 88px 112px rgba(0,0,0,0.12)",
-                "0 96px 120px rgba(0,0,0,0.12)",
-                "0 104px 128px rgba(0,0,0,0.12)",
-                "0 112px 136px rgba(0,0,0,0.12)",
-                "0 120px 144px rgba(0,0,0,0.12)",
-                "0 128px 152px rgba(0,0,0,0.12)",
-                "0 136px 160px rgba(0,0,0,0.12)",
-            }
-        },
+        // Note: Shadows.Elevation not overridden — MudBlazor v7 requires exactly 25 entries (index 0–24).
+        // Shadow styling handled via famos.css box-shadow overrides instead.
     };
 }
