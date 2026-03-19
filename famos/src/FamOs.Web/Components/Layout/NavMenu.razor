@@ -1,0 +1,20 @@
+@using Microsoft.AspNetCore.Components.Routing
+
+<MudNavMenu>
+    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
+        Dashboard
+    </MudNavLink>
+    <MudNavLink Href="/pipeline" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.ViewKanban">
+        Pipeline
+    </MudNavLink>
+    <MudNavLink Href="/tasks" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.CheckBox">
+        Task Center
+    </MudNavLink>
+    <MudDivider Class="my-2" />
+    <MudNavLink Href="/accounts" Disabled="true" Icon="@Icons.Material.Filled.Business">
+        Accounts <MudChip Size="Size.Small" Color="Color.Default" Class="ml-1">Soon</MudChip>
+    </MudNavLink>
+    <MudNavLink Href="/reports" Disabled="true" Icon="@Icons.Material.Filled.BarChart">
+        Reports <MudChip Size="Size.Small" Color="Color.Default" Class="ml-1">Soon</MudChip>
+    </MudNavLink>
+</MudNavMenu>
