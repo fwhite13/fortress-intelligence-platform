@@ -3,48 +3,296 @@
 @inject UserSessionService UserSession
 @inject ISnackbar Snackbar
 @using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+@using System.Text.Json
 
-<MudCard Class="mb-4">
-    <MudCardHeader>
-        <CardHeaderContent>
-            <MudText Typo="Typo.h6">Intake</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">
-                Gather required underwriting data to pursue this opportunity.
-            </MudText>
-        </CardHeaderContent>
-    </MudCardHeader>
-    <MudCardContent>
-        <MudAlert Severity="Severity.Info" Class="mb-3">
-            Collect policy documents, loss runs, and driver schedule before pursuing.
+<div class="intake-form-container">
+
+    @* ── Header ──────────────────────────────────────────────────── *@
+    <div class="section-header mb-4">
+        <MudText Typo="Typo.h6" Style="color: var(--navy);">Intake Questionnaire</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Complete before pursuing. Required fields marked with *.
+        </MudText>
+    </div>
+
+    @* ── Section 1: Account Information ─────────────────────────── *@
+    <div class="intake-section mb-4">
+        <div class="intake-section-label">Account Information</div>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_contactName"
+                    Label="Primary Contact Name *"
+                    Variant="Variant.Outlined" Dense="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_contactEmail"
+                    Label="Contact Email"
+                    InputType="InputType.Email"
+                    Variant="Variant.Outlined" Dense="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_contactPhone"
+                    Label="Contact Phone"
+                    Variant="Variant.Outlined" Dense="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_stateOfDomicile"
+                    Label="State of Domicile *"
+                    Placeholder="e.g. TX"
+                    Variant="Variant.Outlined" Dense="true" />
+            </MudItem>
+        </MudGrid>
+    </div>
+
+    @* ── Section 2: Fleet Information ───────────────────────────── *@
+    <div class="intake-section mb-4">
+        <div class="intake-section-label">Fleet Information</div>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="4">
+                <MudNumericField @bind-Value="_fleetSize"
+                    Label="Total Power Units *"
+                    Variant="Variant.Outlined" Dense="true" Min="1" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudNumericField @bind-Value="_trailerCount"
+                    Label="Trailers"
+                    Variant="Variant.Outlined" Dense="true" Min="0" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudTextField @bind-Value="_dotNumber"
+                    Label="DOT Number *"
+                    Variant="Variant.Outlined" Dense="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_commodities"
+                    Label="Primary Commodities Hauled"
+                    Variant="Variant.Outlined" Dense="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_operatingRadius"
+                    Label="Operating Radius"
+                    Placeholder="e.g. Regional, National"
+                    Variant="Variant.Outlined" Dense="true" />
+            </MudItem>
+        </MudGrid>
+    </div>
+
+    @* ── Section 3: Coverage Requirements ───────────────────────── *@
+    <div class="intake-section mb-4">
+        <div class="intake-section-label">Coverage Requirements</div>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudNumericField @bind-Value="_liabilityLimit"
+                    Label="Liability Limit Required ($)"
+                    Format="N0" Variant="Variant.Outlined" Dense="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect @bind-Value="_cargoType"
+                    Label="Cargo Type"
+                    Variant="Variant.Outlined" Dense="true">
+                    <MudSelectItem Value="@("")">— Select —</MudSelectItem>
+                    <MudSelectItem Value="@("dry_van")">Dry Van</MudSelectItem>
+                    <MudSelectItem Value="@("refrigerated")">Refrigerated</MudSelectItem>
+                    <MudSelectItem Value="@("flatbed")">Flatbed</MudSelectItem>
+                    <MudSelectItem Value="@("tanker")">Tanker</MudSelectItem>
+                    <MudSelectItem Value="@("intermodal")">Intermodal</MudSelectItem>
+                    <MudSelectItem Value="@("other")">Other</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudCheckBox @bind-Value="_needsCargo" Label="Cargo coverage needed" Dense="true" />
+                <MudCheckBox @bind-Value="_needsPhysicalDamage" Label="Physical damage needed" Dense="true" />
+                <MudCheckBox @bind-Value="_needsGeneralLiability" Label="General liability needed" Dense="true" />
+            </MudItem>
+        </MudGrid>
+    </div>
+
+    @* ── Section 4: Loss History ─────────────────────────────────── *@
+    <div class="intake-section mb-4">
+        <div class="intake-section-label">Loss History</div>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudSelect @bind-Value="_lossRunsAvailable"
+                    Label="Years of Loss Runs Available *"
+                    Variant="Variant.Outlined" Dense="true">
+                    <MudSelectItem Value="@("")">— Select —</MudSelectItem>
+                    <MudSelectItem Value="@("0")">None available</MudSelectItem>
+                    <MudSelectItem Value="@("1")">1 year</MudSelectItem>
+                    <MudSelectItem Value="@("2")">2 years</MudSelectItem>
+                    <MudSelectItem Value="@("3")">3 years</MudSelectItem>
+                    <MudSelectItem Value="@("4+")">4+ years</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect @bind-Value="_priorCarrier"
+                    Label="Currently Insured With"
+                    Variant="Variant.Outlined" Dense="true">
+                    <MudSelectItem Value="@("")">Unknown / New venture</MudSelectItem>
+                    <MudSelectItem Value="@("great_west")">Great West Casualty</MudSelectItem>
+                    <MudSelectItem Value="@("progressive")">Progressive Commercial</MudSelectItem>
+                    <MudSelectItem Value="@("canal")">Canal Insurance</MudSelectItem>
+                    <MudSelectItem Value="@("other")">Other</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_lossNotes"
+                    Label="Loss history notes (claims in last 3 years)"
+                    Lines="2" Variant="Variant.Outlined" />
+            </MudItem>
+        </MudGrid>
+    </div>
+
+    @* ── Validation errors ───────────────────────────────────────── *@
+    @if (_validationErrors.Any())
+    {
+        <MudAlert Severity="Severity.Error" Class="mb-3">
+            @foreach (var err in _validationErrors)
+            {
+                <div>• @err</div>
+            }
         </MudAlert>
-    </MudCardContent>
-    <MudCardActions>
+    }
+
+    @* ── Save + Pursue ───────────────────────────────────────────── *@
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                   OnClick="SaveDraft" Disabled="_saving">
+            Save Draft
+        </MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
                    OnClick="PursueOpportunity" Disabled="_saving">
-            Pursue Opportunity
+            Save & Pursue Opportunity →
         </MudButton>
-    </MudCardActions>
-</MudCard>
+    </div>
+
+</div>
 
 @code {
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
     [Parameter] public EventCallback OnAdvanced { get; set; }
+
     private bool _saving;
+    private List<string> _validationErrors = new();
+
+    // Section 1: Account
+    private string _contactName          = "";
+    private string _contactEmail         = "";
+    private string _contactPhone         = "";
+    private string _stateOfDomicile      = "";
+
+    // Section 2: Fleet
+    private int?   _fleetSize            = null;
+    private int?   _trailerCount         = null;
+    private string _dotNumber            = "";
+    private string _commodities          = "";
+    private string _operatingRadius      = "";
+
+    // Section 3: Coverage
+    private decimal? _liabilityLimit     = null;
+    private string   _cargoType          = "";
+    private bool     _needsCargo         = false;
+    private bool     _needsPhysicalDamage = false;
+    private bool     _needsGeneralLiability = false;
+
+    // Section 4: Loss history
+    private string _lossRunsAvailable    = "";
+    private string _priorCarrier         = "";
+    private string _lossNotes            = "";
+
+    protected override void OnInitialized()
+    {
+        // Populate from existing responses if already saved
+        if (!string.IsNullOrEmpty(Opportunity.IntakeResponsesJson))
+        {
+            try
+            {
+                var d = JsonSerializer.Deserialize<Dictionary<string, string>>(
+                    Opportunity.IntakeResponsesJson) ?? new();
+
+                _contactName           = Get(d, "contact_name");
+                _contactEmail          = Get(d, "contact_email");
+                _contactPhone          = Get(d, "contact_phone");
+                _stateOfDomicile       = Get(d, "state_of_domicile");
+                _dotNumber             = Get(d, "dot_number");
+                _commodities           = Get(d, "commodities");
+                _operatingRadius       = Get(d, "operating_radius");
+                _cargoType             = Get(d, "cargo_type");
+                _priorCarrier          = Get(d, "prior_carrier");
+                _lossRunsAvailable     = Get(d, "loss_runs_available");
+                _lossNotes             = Get(d, "loss_notes");
+
+                if (int.TryParse(Get(d, "fleet_size"), out var fs))    _fleetSize = fs;
+                if (int.TryParse(Get(d, "trailer_count"), out var tc)) _trailerCount = tc;
+                if (decimal.TryParse(Get(d, "liability_limit"), out var ll)) _liabilityLimit = ll;
+                if (bool.TryParse(Get(d, "needs_cargo"), out var nc))  _needsCargo = nc;
+                if (bool.TryParse(Get(d, "needs_pd"), out var npd))    _needsPhysicalDamage = npd;
+                if (bool.TryParse(Get(d, "needs_gl"), out var ngl))    _needsGeneralLiability = ngl;
+            }
+            catch { /* Ignore deserialization errors — start fresh */ }
+        }
+    }
+
+    private static string Get(Dictionary<string, string> d, string key)
+        => d.TryGetValue(key, out var v) ? v : "";
+
+    private Dictionary<string, string> BuildResponseDict() => new()
+    {
+        ["contact_name"]        = _contactName,
+        ["contact_email"]       = _contactEmail,
+        ["contact_phone"]       = _contactPhone,
+        ["state_of_domicile"]   = _stateOfDomicile,
+        ["fleet_size"]          = _fleetSize?.ToString() ?? "",
+        ["trailer_count"]       = _trailerCount?.ToString() ?? "",
+        ["dot_number"]          = _dotNumber,
+        ["commodities"]         = _commodities,
+        ["operating_radius"]    = _operatingRadius,
+        ["liability_limit"]     = _liabilityLimit?.ToString() ?? "",
+        ["cargo_type"]          = _cargoType,
+        ["needs_cargo"]         = _needsCargo.ToString(),
+        ["needs_pd"]            = _needsPhysicalDamage.ToString(),
+        ["needs_gl"]            = _needsGeneralLiability.ToString(),
+        ["loss_runs_available"] = _lossRunsAvailable,
+        ["prior_carrier"]       = _priorCarrier,
+        ["loss_notes"]          = _lossNotes,
+    };
+
+    private List<string> Validate()
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(_contactName))    errors.Add("Primary contact name is required");
+        if (!_fleetSize.HasValue || _fleetSize < 1)     errors.Add("Fleet size is required");
+        if (string.IsNullOrWhiteSpace(_dotNumber))      errors.Add("DOT number is required");
+        if (string.IsNullOrWhiteSpace(_stateOfDomicile)) errors.Add("State of domicile is required");
+        if (string.IsNullOrWhiteSpace(_lossRunsAvailable)) errors.Add("Loss runs availability is required");
+        return errors;
+    }
+
+    private async Task SaveDraft()
+    {
+        _saving = true;
+        _validationErrors.Clear();
+        var userId = await UserSession.GetUserIdAsync();
+        await Lifecycle.SaveIntakeResponsesAsync(
+            Opportunity.Id, BuildResponseDict(), userId);
+        Opportunity.IntakeResponsesJson =
+            JsonSerializer.Serialize(BuildResponseDict());
+        Snackbar.Add("Intake saved.", Severity.Success);
+        _saving = false;
+    }
 
     private async Task PursueOpportunity()
     {
+        _validationErrors = Validate();
+        if (_validationErrors.Any()) return;
+
         _saving = true;
-        try
-        {
-            var userId = await UserSession.GetUserIdAsync();
-            await Lifecycle.PursueOpportunityAsync(Opportunity.Id, userId);
-            Snackbar.Add("Advanced to Underwriting Prep.", Severity.Success);
-            await OnAdvanced.InvokeAsync();
-        }
-        catch (LifecycleValidationException ex)
-        {
-            Snackbar.Add(ex.Message, Severity.Error);
-        }
-        finally { _saving = false; }
+        var userId = await UserSession.GetUserIdAsync();
+        await Lifecycle.SaveIntakeResponsesAsync(
+            Opportunity.Id, BuildResponseDict(), userId);
+        await Lifecycle.PursueOpportunityAsync(Opportunity.Id, userId);
+        Snackbar.Add("Advanced to Underwriting Prep.", Severity.Success);
+        await OnAdvanced.InvokeAsync();
+        _saving = false;
     }
 }

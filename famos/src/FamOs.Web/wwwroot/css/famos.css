@@ -445,3 +445,10 @@
     font-weight: 700;
     color: #002050;
 }
+
+.task-row:hover {
+    background: var(--cream);
+}
+.task-row:last-child {
+    border-bottom: none;
+}

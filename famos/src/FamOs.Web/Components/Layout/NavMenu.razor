@@ -1,4 +1,6 @@
 @using Microsoft.AspNetCore.Components.Routing
+@inject TaskService TaskSvc
+@inject UserSessionService UserSession
 
 <div class="famos-nav-group">
     <div class="famos-nav-section-label">
@@ -23,7 +25,13 @@
         <span class="famos-nav-icon">
             <MudIcon Icon="@Icons.Material.Filled.CheckBox" Size="Size.Small" />
         </span>
-        Task Center
+        <span style="flex:1;">Task Center</span>
+        @if (_openTaskCount > 0)
+        {
+            <span class="famos-nav-badge" style="background:var(--red); color:#fff; min-width:18px; text-align:center;">
+                @_openTaskCount
+            </span>
+        }
     </NavLink>
 
     <div class="famos-nav-divider"></div>
@@ -48,3 +56,17 @@
         <span class="famos-nav-badge">Soon</span>
     </span>
 </div>
+
+@code {
+    private int _openTaskCount = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            _openTaskCount = await TaskSvc.GetOpenTaskCountForUserAsync(userId);
+        }
+        catch { /* Non-fatal — badge just won't show */ }
+    }
+}

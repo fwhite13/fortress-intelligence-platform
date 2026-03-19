@@ -21,6 +21,13 @@ public class Opportunity
     public decimal? EstimatedPremium    { get; set; }
     public DateOnly? EffectiveDateTarget { get; set; }
 
+    /// <summary>
+    /// JSON object mapping intake field IDs to user-entered values.
+    /// Structure: { "fleet_size": "42", "dot_number": "123456", ... }
+    /// Schema is affinity-group-specific; Phase 1 hardcoded for trucking program.
+    /// </summary>
+    public string? IntakeResponsesJson { get; set; }
+
     // State
     public bool   IsClosed              { get; set; } = false;
     public int    Version               { get; set; } = 1;

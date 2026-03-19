@@ -46,6 +46,7 @@ public class LifecycleCommandService
             occurred_at    = DateTime.UtcNow
         });
 
+        await CreateTasksForStageAsync(opp.Id, LifecycleStage.UnderwritingPrep);
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
     }
@@ -84,6 +85,7 @@ public class LifecycleCommandService
             occurred_at = DateTime.UtcNow
         });
 
+        await CreateTasksForStageAsync(opp.Id, LifecycleStage.Marketed);
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
     }
@@ -116,6 +118,7 @@ public class LifecycleCommandService
                 to_stage = opp.LifecycleStage.ToString(), actor_user_id = actorUserId,
                 occurred_at = DateTime.UtcNow
             });
+            await CreateTasksForStageAsync(opp.Id, LifecycleStage.QuotesReceived);
         }
 
         await RecomputeSignalAsync(opp);
@@ -163,6 +166,7 @@ public class LifecycleCommandService
             sent_at = DateTime.UtcNow
         });
 
+        await CreateTasksForStageAsync(opp.Id, LifecycleStage.ClientDecision);
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
     }
@@ -211,6 +215,7 @@ public class LifecycleCommandService
             opportunity_id = opportunityId, winning_quote_id = winningQuoteId
         });
 
+        await CreateTasksForStageAsync(opp.Id, LifecycleStage.Binding);
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
     }
@@ -247,6 +252,7 @@ public class LifecycleCommandService
             opportunity_id = opportunityId, policy_shadow_id = shadow.Id, effective_date = effectiveDate
         });
 
+        await CreateTasksForStageAsync(opp.Id, LifecycleStage.Bound);
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
     }
@@ -299,6 +305,31 @@ public class LifecycleCommandService
 
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
+    }
+
+    /// <summary>
+    /// Saves intake questionnaire responses to the opportunity.
+    /// Does NOT advance the lifecycle stage. Can be called multiple times (draft saves).
+    /// </summary>
+    public async Task SaveIntakeResponsesAsync(
+        Guid opportunityId,
+        Dictionary<string, string> responses,
+        string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var opp = await LoadOpportunityAsync(opportunityId);
+
+            opp.IntakeResponsesJson = System.Text.Json.JsonSerializer.Serialize(responses);
+            opp.UpdatedAt           = DateTime.UtcNow;
+
+            await WriteActivityAsync(opp.Id, "intake_saved",
+                "Intake questionnaire saved", actorUserId);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -366,6 +397,22 @@ public class LifecycleCommandService
             EventType   = type.ToString(),
             PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload)
         });
+        await Task.CompletedTask;
+    }
+
+    private async Task CreateTasksForStageAsync(Guid opportunityId, LifecycleStage stage)
+    {
+        var templates = StageTaskTemplates.ForStage(stage);
+        foreach (var title in templates)
+        {
+            _db.Tasks.Add(new FamOsTask
+            {
+                OpportunityId = opportunityId,
+                Title         = title,
+                Status        = "open",
+            });
+        }
+        // Tasks are saved in the calling method's SaveChangesAsync() — do not call SaveChanges here.
         await Task.CompletedTask;
     }
 }

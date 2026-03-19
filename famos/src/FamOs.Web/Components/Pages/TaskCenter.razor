@@ -1,8 +1,169 @@
 @page "/tasks"
 @attribute [Authorize]
+@inject TaskService TaskSvc
+@inject UserSessionService UserSession
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+@using FamOs.Web.Services
+
 <PageTitle>Task Center — FAM OS</PageTitle>
 
-<MudText Typo="Typo.h5" Class="mb-4">Task Center</MudText>
-<MudText Typo="Typo.body1" Color="Color.Secondary">
-    Sprint 3: task batching and reassignment will appear here.
-</MudText>
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:8px;">
+    <div>
+        <MudText Typo="Typo.h5" Style="color:var(--navy);">Task Center</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            @_tasks.Count open task@(_tasks.Count == 1 ? "" : "s") across @_tasks.Select(t => t.Opportunity.Id).Distinct().Count() opportunities
+        </MudText>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <MudTextField @bind-Value="_filterText"
+            Placeholder="Filter by opportunity or task..."
+            Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+            Clearable="true" Dense="true" Variant="Variant.Outlined"
+            Style="min-width:220px;" />
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OpenAddTaskDialog">
+            Add Task
+        </MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
+else if (!FilteredTasks.Any())
+{
+    <MudPaper Class="pa-6 text-center" Elevation="0"
+              Style="border:1px solid var(--border); border-radius:12px;">
+        <MudIcon Icon="@Icons.Material.Filled.CheckCircle"
+                 Style="font-size:48px; color:var(--green); margin-bottom:12px;" />
+        <MudText Typo="Typo.h6">
+            @(string.IsNullOrEmpty(_filterText) ? "All clear — no open tasks" : "No tasks match your filter")
+        </MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            @(string.IsNullOrEmpty(_filterText)
+                ? "New tasks are auto-generated when opportunities advance through the pipeline."
+                : "Try clearing the filter to see all tasks.")
+        </MudText>
+    </MudPaper>
+}
+else
+{
+    @* Group tasks by opportunity *@
+    @foreach (var group in FilteredTasks
+        .GroupBy(t => t.Opportunity.Id)
+        .OrderBy(g => g.Min(t => t.Task.DueAt.HasValue ? 0 : 1))
+        .ThenBy(g => g.Min(t => t.Task.DueAt)))
+    {
+        var opp = group.First().Opportunity;
+
+        <MudPaper Class="mb-3" Elevation="0"
+                  Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+            @* Opportunity header row *@
+            <div style="display:flex; justify-content:space-between; align-items:center;
+                        padding:10px 16px; background:var(--cream); border-bottom:1px solid var(--border);
+                        cursor:pointer;"
+                 @onclick="() => Nav.NavigateTo($"/opportunity/{opp.Id}")">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <MudText Typo="Typo.subtitle2" Style="color:var(--navy); font-weight:600;">
+                        @opp.Name
+                    </MudText>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary"
+                             Style="font-size:10px; height:18px;">
+                        @GetStageLabel(opp.LifecycleStage)
+                    </MudChip>
+                    <SignalChip Signal="opp.DominantSignal" />
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px;">
+                    <span>@group.Count() task@(group.Count() == 1 ? "" : "s")</span>
+                    <MudIcon Icon="@Icons.Material.Filled.OpenInNew" Style="font-size:14px;" />
+                </div>
+            </div>
+
+            @* Task rows *@
+            @foreach (var item in group.OrderBy(t => t.Task.DueAt.HasValue ? 0 : 1).ThenBy(t => t.Task.DueAt))
+            {
+                var isOverdue = item.Task.DueAt.HasValue && item.Task.DueAt.Value < DateTime.UtcNow;
+                <div style="display:flex; align-items:center; padding:10px 16px;
+                            border-bottom:1px solid var(--border); gap:10px;"
+                     class="task-row">
+                    <MudCheckBox T="bool" Value="false"
+                                 ValueChanged="@(async _ => await CompleteTask(item.Task.Id))"
+                                 Color="Color.Primary" Dense="true" />
+                    <div style="flex:1; min-width:0;">
+                        <MudText Typo="Typo.body2"
+                                 Style="@(isOverdue ? "color: var(--red);" : "")">
+                            @item.Task.Title
+                        </MudText>
+                    </div>
+                    @if (item.Task.DueAt.HasValue)
+                    {
+                        <MudText Typo="Typo.caption"
+                                 Style="@($"color:{(isOverdue ? "var(--red)" : "var(--muted)")}; white-space:nowrap;")">
+                            @(isOverdue ? "Overdue · " : "")@item.Task.DueAt.Value.ToLocalTime().ToString("MMM d")
+                        </MudText>
+                    }
+                </div>
+            }
+        </MudPaper>
+    }
+}
+
+@code {
+    private List<TaskWithOpportunity> _tasks = new();
+    private bool _loading = true;
+    private string _filterText = "";
+
+    private IEnumerable<TaskWithOpportunity> FilteredTasks =>
+        string.IsNullOrWhiteSpace(_filterText)
+            ? _tasks
+            : _tasks.Where(t =>
+                t.Opportunity.Name.Contains(_filterText, StringComparison.OrdinalIgnoreCase) ||
+                t.Task.Title.Contains(_filterText, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var userId = await UserSession.GetUserIdAsync();
+        _tasks   = await TaskSvc.GetOpenTasksForUserAsync(userId);
+        _loading = false;
+    }
+
+    private async Task CompleteTask(Guid taskId)
+    {
+        var userId = await UserSession.GetUserIdAsync();
+        await TaskSvc.CompleteTaskAsync(taskId, userId);
+        _tasks.RemoveAll(t => t.Task.Id == taskId);
+        Snackbar.Add("Task done.", Severity.Success);
+        StateHasChanged();
+    }
+
+    private async Task OpenAddTaskDialog()
+    {
+        var dialog = await DialogService.ShowAsync<AddTaskDialog>("Add Task");
+        var result = await dialog.Result;
+        if (!result.Canceled)
+        {
+            // Reload to show newly created task
+            var userId = await UserSession.GetUserIdAsync();
+            _tasks = await TaskSvc.GetOpenTasksForUserAsync(userId);
+            StateHasChanged();
+        }
+    }
+
+    private static string GetStageLabel(LifecycleStage stage) => stage switch
+    {
+        LifecycleStage.Intake           => "Intake",
+        LifecycleStage.UnderwritingPrep => "App Review",
+        LifecycleStage.Marketed         => "Submitted",
+        LifecycleStage.QuotesReceived   => "Quotes In",
+        LifecycleStage.ClientDecision   => "Proposal",
+        LifecycleStage.Binding          => "Binding",
+        LifecycleStage.Bound            => "Bound",
+        _                               => stage.ToString()
+    };
+}

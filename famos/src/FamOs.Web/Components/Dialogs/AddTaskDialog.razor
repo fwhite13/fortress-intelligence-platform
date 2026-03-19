@@ -1,0 +1,65 @@
+@inject TaskService TaskSvc
+@inject OpportunityService OppService
+@inject UserSessionService UserSession
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Services
+
+<MudDialog>
+    <TitleContent>Add Task</TitleContent>
+    <DialogContent>
+        <MudAutocomplete T="Opportunity"
+            Label="Opportunity *"
+            @bind-Value="_selectedOpp"
+            SearchFunc="SearchOpps"
+            ToStringFunc="@(o => o?.Name ?? "")"
+            Variant="Variant.Outlined" Dense="true" Class="mb-3" />
+        <MudTextField @bind-Value="_title"
+            Label="Task *"
+            Placeholder="What needs to be done?"
+            Variant="Variant.Outlined" Class="mb-3" />
+        <MudDatePicker @bind-Date="_dueDate"
+            Label="Due Date (optional)"
+            Variant="Variant.Outlined" Class="mb-3" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="Submit"
+                   Disabled="@(_selectedOpp == null || string.IsNullOrWhiteSpace(_title))">
+            Add Task
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
+
+    private Opportunity? _selectedOpp;
+    private string _title = "";
+    private DateTime? _dueDate;
+    private List<Opportunity> _allOpps = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var pipeline = await OppService.GetPipelineAsync();
+        _allOpps = pipeline;
+    }
+
+    private Task<IEnumerable<Opportunity>> SearchOpps(string text, CancellationToken ct)
+    {
+        var results = string.IsNullOrWhiteSpace(text)
+            ? _allOpps
+            : _allOpps.Where(o => o.Name.Contains(text, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(results);
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Submit()
+    {
+        if (_selectedOpp == null || string.IsNullOrWhiteSpace(_title)) return;
+        var dueAt = _dueDate.HasValue ? (DateTime?)_dueDate.Value : null;
+        await TaskSvc.CreateTaskAsync(_selectedOpp.Id, _title.Trim(), dueAt, null);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

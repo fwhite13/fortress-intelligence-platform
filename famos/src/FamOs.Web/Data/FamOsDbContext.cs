@@ -33,6 +33,9 @@ public class FamOsDbContext : DbContext
             e.HasIndex(x => x.LifecycleStage).HasDatabaseName("idx_opp_stage");
             e.HasIndex(x => x.OwnerUserId).HasDatabaseName("idx_opp_owner");
             e.HasIndex(x => x.IsClosed).HasDatabaseName("idx_opp_closed");
+            e.Property(x => x.IntakeResponsesJson)
+                .HasColumnName("intake_responses_json")
+                .HasColumnType("mediumtext");
         });
 
         // Submission

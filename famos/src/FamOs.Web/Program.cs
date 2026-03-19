@@ -111,6 +111,7 @@ builder.Services.AddScoped<LifecycleCommandService>();
 builder.Services.AddScoped<OpportunityService>();
 builder.Services.AddScoped<IHubSpotService, HubSpotServiceStub>();
 builder.Services.AddScoped<IAmsService, AmsServiceStub>();
+builder.Services.AddScoped<TaskService>();
 
 builder.Services.Configure<AffinityConfig>(
     builder.Configuration.GetSection("AffinityConfig"));
@@ -163,6 +164,10 @@ _ = Task.Run(async () =>
         {
             Console.WriteLine("[FAM OS] DB tables already exist.");
         }
+
+        // Sprint 4: add intake_responses_json column if missing (idempotent)
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS intake_responses_json MEDIUMTEXT NULL");
     }
     catch (Exception ex)
     {
