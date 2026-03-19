@@ -43,7 +43,7 @@
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="6">
                 <MudSelect @bind-Value="_selectedCarrier" Label="Carrier *"
-                           Variant="Variant.Outlined">
+                           Class="famos-select">
                     <MudSelectItem Value="@("")">— Select or type below —</MudSelectItem>
                     <MudSelectItem Value="@("Great West Casualty")">Great West Casualty</MudSelectItem>
                     <MudSelectItem Value="@("Progressive Commercial")">Progressive Commercial</MudSelectItem>
@@ -60,13 +60,13 @@
                 {
                     <MudTextField @bind-Value="_customCarrier"
                         Label="Carrier Name"
-                        Variant="Variant.Outlined" />
+                        Class="famos-input" />
                 }
                 else
                 {
                     <MudTextField @bind-Value="_coverageTypes"
                         Label="Coverage Types (e.g. AUTO,WC,GL)"
-                        Variant="Variant.Outlined"
+                        Class="famos-input"
                         HelperText="AUTO · GL · WC · UMBRELLA · IM · OTHER" />
                 }
             </MudItem>
@@ -75,12 +75,12 @@
                 <MudItem xs="12">
                     <MudTextField @bind-Value="_coverageTypes"
                         Label="Coverage Types (e.g. AUTO,WC,GL)"
-                        Variant="Variant.Outlined" />
+                        Class="famos-input" />
                 </MudItem>
             }
             <MudItem xs="12">
                 <MudTextField @bind-Value="_subNotes" Label="Notes (optional)"
-                              Variant="Variant.Outlined" />
+                              Class="famos-input" />
             </MudItem>
         </MudGrid>
         <div style="margin-top:8px;">

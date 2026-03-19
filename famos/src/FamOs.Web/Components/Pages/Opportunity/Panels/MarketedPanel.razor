@@ -48,7 +48,7 @@
                             <MudItem xs="12" sm="6">
                                 <MudSelect Value="sub.Status"
                                            ValueChanged="@(async (SubmissionStatus s) => await UpdateStatus(sub, s))"
-                                           Label="Status" Variant="Variant.Outlined">
+                                           Label="Status" Class="famos-select">
                                     <MudSelectItem Value="SubmissionStatus.Pending">Pending</MudSelectItem>
                                     <MudSelectItem Value="SubmissionStatus.Sent">Sent</MudSelectItem>
                                     <MudSelectItem Value="SubmissionStatus.QuoteReceived">Quote Received</MudSelectItem>
@@ -72,7 +72,7 @@
         <div class="intake-section-label mb-2">Record a Quote</div>
         <MudGrid Spacing="2">
             <MudItem xs="12" sm="5">
-                <MudSelect @bind-Value="_quoteSubId" Label="Carrier" Variant="Variant.Outlined">
+                <MudSelect @bind-Value="_quoteSubId" Label="Carrier" Class="famos-select">
                     @foreach (var sub in Opportunity.Submissions.Where(s => s.Status != SubmissionStatus.Declined))
                     {
                         <MudSelectItem Value="sub.Id">@sub.CarrierName</MudSelectItem>
@@ -81,7 +81,7 @@
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudNumericField @bind-Value="_quotePremium" Label="Premium ($)"
-                                 Format="N0" Variant="Variant.Outlined" />
+                                 Format="N0" Class="famos-input" />
             </MudItem>
             <MudItem xs="12" sm="3">
                 <MudButton Class="famos-btn-primary"

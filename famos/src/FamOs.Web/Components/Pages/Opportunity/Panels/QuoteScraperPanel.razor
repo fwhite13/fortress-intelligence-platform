@@ -32,7 +32,7 @@
             <MudGrid Spacing="2">
                 <MudItem xs="12" sm="5">
                     <MudSelect @bind-Value="_selectedSubId"
-                               Label="Carrier" Variant="Variant.Outlined">
+                               Label="Carrier" Class="famos-select">
                         @foreach (var sub in Opportunity.Submissions)
                         {
                             <MudSelectItem Value="sub.Id">@sub.CarrierName</MudSelectItem>
@@ -76,7 +76,7 @@
                 <div class="intake-section-label mb-2">Extracted Coverages</div>
                 <MudTextField Value="_resultJson"
                               Lines="6" ReadOnly="true"
-                              Variant="Variant.Outlined"
+                              Class="famos-input"
                               Style="font-family:monospace; font-size:12px;" />
             }
 
