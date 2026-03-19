@@ -83,31 +83,67 @@ public class OpportunityService
     public async Task<DashboardSummary> GetDashboardSummaryAsync(string? ownerUserId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var query = db.Opportunities.Where(o => !o.IsClosed);
+
+        var query = db.Opportunities.AsQueryable();
         if (!string.IsNullOrEmpty(ownerUserId))
             query = query.Where(o => o.OwnerUserId == ownerUserId);
 
-        var opps = await query.ToListAsync();
+        var all = await query
+            .Include(o => o.Flags)
+            .Where(o => !o.IsClosed)
+            .ToListAsync();
+
+        var urgentSignals = new[]
+        {
+            DominantSignal.Urgent, DominantSignal.AtRisk, DominantSignal.TimeRisk
+        };
+
+        var recent = await db.Activities
+            .OrderByDescending(a => a.OccurredAt)
+            .Take(5)
+            .ToListAsync();
+
+        var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
 
         return new DashboardSummary
         {
-            TotalActive    = opps.Count,
-            TimeRiskCount  = opps.Count(o => o.DominantSignal == DominantSignal.TimeRisk),
-            DecisionNeeded = opps.Count(o => o.DominantSignal is
-                DominantSignal.DecisionRequired or DominantSignal.AwaitingClientDecision),
-            BindingCount   = opps.Count(o => o.LifecycleStage == LifecycleStage.Binding),
-            BoundThisMonth = opps.Count(o =>
-                o.LifecycleStage == LifecycleStage.Bound &&
-                o.UpdatedAt >= DateTime.UtcNow.AddDays(-30)),
+            TotalActive      = all.Count,
+            TimeRiskCount    = all.Count(o => urgentSignals.Contains(o.DominantSignal)),
+            DecisionNeeded   = all.Count(o =>
+                o.LifecycleStage is LifecycleStage.ClientDecision or LifecycleStage.Binding),
+            BoundThisMonth   = await db.Opportunities
+                .CountAsync(o => o.LifecycleStage == LifecycleStage.Bound
+                    && o.UpdatedAt >= monthStart),
+            TotalPremiumAtRisk = all
+                .Where(o => o.EstimatedPremium.HasValue)
+                .Sum(o => o.EstimatedPremium!.Value),
+            UrgentOpportunities = all
+                .Where(o => urgentSignals.Contains(o.DominantSignal))
+                .OrderByDescending(o => o.DominantSignal == DominantSignal.Urgent ? 2
+                                      : o.DominantSignal == DominantSignal.AtRisk  ? 1 : 0)
+                .Take(10)
+                .ToList(),
+            ByStage        = all.GroupBy(o => o.LifecycleStage)
+                .ToDictionary(g => g.Key, g => g.Count()),
+            RecentActivity = recent,
         };
     }
 }
 
-public record DashboardSummary
+public class DashboardSummary
 {
-    public int TotalActive    { get; init; }
-    public int TimeRiskCount  { get; init; }
-    public int DecisionNeeded { get; init; }
-    public int BindingCount   { get; init; }
-    public int BoundThisMonth { get; init; }
+    public int TotalActive            { get; set; }
+    public int TimeRiskCount          { get; set; }
+    public int DecisionNeeded         { get; set; }
+    public int BoundThisMonth         { get; set; }
+    public decimal TotalPremiumAtRisk { get; set; }
+
+    // Urgent/at-risk strip
+    public List<Opportunity> UrgentOpportunities { get; set; } = new();
+
+    // Pipeline distribution
+    public Dictionary<LifecycleStage, int> ByStage { get; set; } = new();
+
+    // Recent activity
+    public List<Activity> RecentActivity { get; set; } = new();
 }

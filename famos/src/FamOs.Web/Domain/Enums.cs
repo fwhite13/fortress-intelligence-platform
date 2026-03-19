@@ -22,7 +22,14 @@ public enum DominantSignal
     AwaitingClientDecision   = 5,
     BindingInProgress        = 6,
     PostBindProcessing       = 7,
-    TimeRisk                 = 8
+    TimeRisk                 = 8,
+
+    // Sprint 5 additions — aging-derived signals
+    FollowUpNeeded         = 9,
+    WaitingOnUW            = 10,
+    WaitingOnCarrier       = 11,
+    AtRisk                 = 12,
+    Urgent                 = 13,
 }
 
 public enum OpportunityFlagType
@@ -43,4 +50,14 @@ public enum DomainEventType
     DominantSignalChanged       = 5,
     OpportunityClosed           = 6,
     OpportunityParked           = 7
+}
+
+public enum CloseReason
+{
+    NotQuoted              = 0,
+    PriceTooHigh           = 1,
+    LostToCompetitor       = 2,
+    ClientDeclinedCoverage = 3,
+    PolicyLapsed           = 4,
+    Other                  = 5
 }

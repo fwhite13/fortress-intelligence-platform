@@ -4,18 +4,21 @@
 @inject UserSessionService UserSession
 @inject NavigationManager Nav
 @using FamOs.Web.Services
-@inject Microsoft.Extensions.Options.IOptions<FamOs.Web.AffinityConfig> AffinityOptions
+@using FamOs.Web.Data.Entities
 
 <PageTitle>Dashboard — FAM OS</PageTitle>
 
 <div class="famos-page-header famos-page-header-row">
     <div>
-        <h2 class="famos-page-h2">@AffinityOptions.Value.DisplayName</h2>
-        <p class="famos-page-sub">Active Pipeline · @DateTime.Now.ToString("MMMM yyyy")</p>
+        <h2 class="famos-page-h2">Command Center</h2>
+        <p class="famos-page-sub">@DateTime.Now.ToString("dddd, MMMM d, yyyy")</p>
     </div>
-    <div style="display: flex; gap: 8px; margin-top: 4px;">
+    <div style="display:flex; gap:8px;">
         <MudButton Class="famos-btn-outline-sm" OnClick="GoToPipeline">
-            Pipeline View →
+            Pipeline →
+        </MudButton>
+        <MudButton Class="famos-btn-outline-sm" OnClick="GoToTasks">
+            Tasks →
         </MudButton>
     </div>
 </div>
@@ -26,16 +29,121 @@
 }
 else if (_summary != null)
 {
+    @* ── KPI Cards ──────────────────────────────────────────────────── *@
     <div class="famos-kpi-grid mb-5">
-        <StatCard Label="Active Opportunities" Value="@_summary.TotalActive.ToString()"
-                  AccentClass="kpi-navy" Sub="Currently in pipeline" />
-        <StatCard Label="Time Risk" Value="@_summary.TimeRiskCount.ToString()"
-                  AccentClass="kpi-red" Sub="Need immediate action" />
-        <StatCard Label="Decision Needed" Value="@_summary.DecisionNeeded.ToString()"
-                  AccentClass="kpi-amber" Sub="Awaiting client response" />
-        <StatCard Label="Bound This Month" Value="@_summary.BoundThisMonth.ToString()"
-                  AccentClass="kpi-green" Sub="Successfully closed" />
+        <StatCard Label="Active Opportunities"
+                  Value="@_summary.TotalActive.ToString()"
+                  AccentClass="kpi-navy"
+                  Sub="Currently in pipeline" />
+        <StatCard Label="Needs Attention"
+                  Value="@_summary.TimeRiskCount.ToString()"
+                  AccentClass="kpi-red"
+                  Sub="Urgent or at-risk" />
+        <StatCard Label="Awaiting Decision"
+                  Value="@_summary.DecisionNeeded.ToString()"
+                  AccentClass="kpi-amber"
+                  Sub="Proposal or binding stage" />
+        <StatCard Label="Bound This Month"
+                  Value="@_summary.BoundThisMonth.ToString()"
+                  AccentClass="kpi-green"
+                  Sub="@($"${_summary.TotalPremiumAtRisk:N0} at risk total")" />
     </div>
+
+    <MudGrid Spacing="3">
+
+        @* ── Urgent / At-Risk Strip ──────────────────────────────────── *@
+        <MudItem xs="12" md="7">
+            <MudPaper Elevation="0"
+                      Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+                <div style="padding:14px 16px; border-bottom:1px solid var(--border);
+                            display:flex; justify-content:space-between; align-items:center;">
+                    <MudText Typo="Typo.subtitle2" Style="color:var(--navy);">
+                        Needs Attention
+                    </MudText>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error">
+                        @_summary.UrgentOpportunities.Count
+                    </MudChip>
+                </div>
+                @if (!_summary.UrgentOpportunities.Any())
+                {
+                    <div style="padding:24px 16px; text-align:center; color:var(--muted); font-size:13px;">
+                        All clear — no urgent items right now
+                    </div>
+                }
+                else
+                {
+                    @foreach (var opp in _summary.UrgentOpportunities)
+                    {
+                        <div style="display:flex; justify-content:space-between; align-items:center;
+                                    padding:10px 16px; border-bottom:1px solid var(--border);
+                                    cursor:pointer;"
+                             @onclick="() => GoToOpportunity(opp.Id)">
+                            <div>
+                                <MudText Typo="Typo.body2" Style="font-weight:600; color:var(--navy);">
+                                    @opp.Name
+                                </MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    @GetStageLabel(opp.LifecycleStage)
+                                    @(opp.EstimatedPremium.HasValue ? $" · ${opp.EstimatedPremium:N0}" : "")
+                                </MudText>
+                            </div>
+                            <SignalChip Signal="opp.DominantSignal" />
+                        </div>
+                    }
+                }
+            </MudPaper>
+        </MudItem>
+
+        @* ── Pipeline Distribution + Recent Activity ──────────────────── *@
+        <MudItem xs="12" md="5">
+            <MudPaper Elevation="0"
+                      Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+                <div style="padding:14px 16px; border-bottom:1px solid var(--border);">
+                    <MudText Typo="Typo.subtitle2" Style="color:var(--navy);">Pipeline Distribution</MudText>
+                </div>
+                <div style="padding:12px 16px;">
+                    @foreach (var stage in Enum.GetValues<LifecycleStage>()
+                        .Where(s => s != LifecycleStage.ClosedNotBound))
+                    {
+                        var count = _summary.ByStage.GetValueOrDefault(stage, 0);
+                        var pct   = _summary.TotalActive > 0
+                            ? (double)count / _summary.TotalActive * 100
+                            : 0;
+                        <div style="margin-bottom:8px;">
+                            <div style="display:flex; justify-content:space-between;
+                                        font-size:12px; margin-bottom:3px;">
+                                <span style="color:var(--text);">@GetStageLabel(stage)</span>
+                                <span style="color:var(--muted); font-weight:600;">@count</span>
+                            </div>
+                            <div style="height:6px; background:var(--border); border-radius:3px;">
+                                <div style="@($"height:6px; width:{pct:F0}%; background:var(--sky); border-radius:3px; transition:width 0.4s;")"></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </MudPaper>
+
+            @if (_summary.RecentActivity.Any())
+            {
+                <MudPaper Elevation="0" Class="mt-3"
+                          Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+                    <div style="padding:14px 16px; border-bottom:1px solid var(--border);">
+                        <MudText Typo="Typo.subtitle2" Style="color:var(--navy);">Recent Activity</MudText>
+                    </div>
+                    @foreach (var act in _summary.RecentActivity)
+                    {
+                        <div style="padding:8px 16px; border-bottom:1px solid var(--border);
+                                    font-size:12px; color:var(--text);">
+                            <span style="color:var(--muted);">
+                                @act.OccurredAt.ToLocalTime().ToString("MMM d h:mm tt") ·
+                            </span>
+                            @act.Description
+                        </div>
+                    }
+                </MudPaper>
+            }
+        </MudItem>
+    </MudGrid>
 }
 
 @code {
@@ -44,9 +152,24 @@ else if (_summary != null)
 
     protected override async Task OnInitializedAsync()
     {
-        _summary = await OppService.GetDashboardSummaryAsync();
-        _loading = false;
+        var userId = await UserSession.GetUserIdAsync();
+        _summary   = await OppService.GetDashboardSummaryAsync(userId);
+        _loading   = false;
     }
 
-    private void GoToPipeline() => Nav.NavigateTo("/pipeline", forceLoad: true);
+    private static string GetStageLabel(LifecycleStage stage) => stage switch
+    {
+        LifecycleStage.Intake           => "Intake",
+        LifecycleStage.UnderwritingPrep => "App Review",
+        LifecycleStage.Marketed         => "Submitted",
+        LifecycleStage.QuotesReceived   => "Quotes In",
+        LifecycleStage.ClientDecision   => "Proposal",
+        LifecycleStage.Binding          => "Binding",
+        LifecycleStage.Bound            => "Bound",
+        _                               => stage.ToString()
+    };
+
+    private void GoToPipeline() => Nav.NavigateTo("/pipeline");
+    private void GoToTasks() => Nav.NavigateTo("/tasks");
+    private void GoToOpportunity(Guid id) => Nav.NavigateTo($"/opportunity/{id}");
 }

@@ -41,6 +41,8 @@ public static class FamosIcons
     public const string Advance = Icons.Material.Outlined.ArrowForward;
     public const string ChevronRight = Icons.Material.Outlined.ChevronRight;
     public const string ChevronDown = Icons.Material.Outlined.ExpandMore;
+    public const string ExpandMore = Icons.Material.Outlined.ExpandMore;
+    public const string ExpandLess = Icons.Material.Outlined.ExpandLess;
 
     // Data
     public const string Dollar = Icons.Material.Outlined.AttachMoney;

@@ -4,43 +4,157 @@
 @inject ISnackbar Snackbar
 @using FamOs.Web.Data.Entities
 
-<MudCard Class="mb-4">
-    <MudCardHeader>
-        <CardHeaderContent>
-            <MudText Typo="Typo.h6">Underwriting Prep</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">
-                Complete underwriting data gathering and select carriers.
-            </MudText>
-        </CardHeaderContent>
-    </MudCardHeader>
-    <MudCardContent>
-        <MudText Typo="Typo.body2">Enter the carriers to route this account to:</MudText>
-        <MudTextField @bind-Value="_carriers" Label="Carriers (comma-separated)"
-                      Class="mt-2" HelperText="e.g. Progressive, Great West, Canal" />
-    </MudCardContent>
-    <MudCardActions>
+<div class="intake-form-container">
+
+    <div class="section-header mb-4">
+        <MudText Typo="Typo.h6" Style="color:var(--navy);">Carrier Submissions</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Add carriers to submit this account to. At least one submission required before routing to market.
+        </MudText>
+    </div>
+
+    @* Existing submission list *@
+    @if (Opportunity.Submissions.Any())
+    {
+        <div class="mb-4">
+            <div class="intake-section-label mb-2">Current Submissions</div>
+            @foreach (var sub in Opportunity.Submissions)
+            {
+                <div style="display:flex; justify-content:space-between; align-items:center;
+                            padding:8px 12px; border:1px solid var(--border); border-radius:8px; margin-bottom:6px;">
+                    <div>
+                        <MudText Typo="Typo.body2" Style="font-weight:600;">@sub.CarrierName</MudText>
+                        @if (!string.IsNullOrEmpty(sub.CoverageTypes))
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@sub.CoverageTypes</MudText>
+                        }
+                    </div>
+                    <MudChip T="string" Size="Size.Small" Color="GetStatusColor(sub.Status)">
+                        @sub.Status
+                    </MudChip>
+                </div>
+            }
+        </div>
+    }
+
+    @* Add submission form *@
+    <div class="intake-section mb-4">
+        <div class="intake-section-label mb-2">Add Carrier</div>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudSelect @bind-Value="_selectedCarrier" Label="Carrier *"
+                           Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("")">— Select or type below —</MudSelectItem>
+                    <MudSelectItem Value="@("Great West Casualty")">Great West Casualty</MudSelectItem>
+                    <MudSelectItem Value="@("Progressive Commercial")">Progressive Commercial</MudSelectItem>
+                    <MudSelectItem Value="@("Canal Insurance")">Canal Insurance</MudSelectItem>
+                    <MudSelectItem Value="@("Protective Insurance")">Protective Insurance</MudSelectItem>
+                    <MudSelectItem Value="@("Northland Insurance")">Northland Insurance</MudSelectItem>
+                    <MudSelectItem Value="@("Old Republic")">Old Republic</MudSelectItem>
+                    <MudSelectItem Value="@("Travelers")">Travelers</MudSelectItem>
+                    <MudSelectItem Value="@("other")">Other (type below)</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                @if (_selectedCarrier == "other")
+                {
+                    <MudTextField @bind-Value="_customCarrier"
+                        Label="Carrier Name"
+                        Variant="Variant.Outlined" />
+                }
+                else
+                {
+                    <MudTextField @bind-Value="_coverageTypes"
+                        Label="Coverage Types (e.g. AUTO,WC,GL)"
+                        Variant="Variant.Outlined"
+                        HelperText="AUTO · GL · WC · UMBRELLA · IM · OTHER" />
+                }
+            </MudItem>
+            @if (_selectedCarrier == "other")
+            {
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_coverageTypes"
+                        Label="Coverage Types (e.g. AUTO,WC,GL)"
+                        Variant="Variant.Outlined" />
+                </MudItem>
+            }
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_subNotes" Label="Notes (optional)"
+                              Variant="Variant.Outlined" />
+            </MudItem>
+        </MudGrid>
+        <div style="margin-top:8px;">
+            <MudButton Class="famos-btn-outline"
+                       OnClick="AddSubmission"
+                       Disabled="@(_saving || string.IsNullOrWhiteSpace(CarrierNameValue))">
+                + Add Submission
+            </MudButton>
+        </div>
+    </div>
+
+    <MudDivider Class="my-4" />
+
+    @* Route to market *@
+    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <MudButton Class="famos-btn-primary"
-                   OnClick="RouteToMarket" Disabled="@(_saving || string.IsNullOrWhiteSpace(_carriers))">
-            Route to Market
+                   OnClick="RouteToMarket"
+                   Disabled="@(_saving || !Opportunity.Submissions.Any())">
+            Route to Market →
         </MudButton>
-    </MudCardActions>
-</MudCard>
+        @if (!Opportunity.Submissions.Any())
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Add at least one submission first
+            </MudText>
+        }
+    </div>
+
+</div>
 
 @code {
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
     [Parameter] public EventCallback OnAdvanced { get; set; }
-    private string _carriers = "";
+
     private bool _saving;
+    private string _selectedCarrier = "";
+    private string _customCarrier   = "";
+    private string _coverageTypes   = "";
+    private string _subNotes        = "";
+
+    private string CarrierNameValue =>
+        _selectedCarrier == "other" ? _customCarrier : _selectedCarrier;
+
+    private async Task AddSubmission()
+    {
+        if (string.IsNullOrWhiteSpace(CarrierNameValue)) return;
+        _saving = true;
+        try
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.CreateSubmissionAsync(
+                Opportunity.Id, CarrierNameValue, _coverageTypes.Trim(), _subNotes.Trim(), userId);
+            Snackbar.Add($"{CarrierNameValue} added.", Severity.Success);
+            _selectedCarrier = "";
+            _customCarrier   = "";
+            _coverageTypes   = "";
+            _subNotes        = "";
+            await OnAdvanced.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
+    }
 
     private async Task RouteToMarket()
     {
         _saving = true;
         try
         {
-            var userId      = await UserSession.GetUserIdAsync();
-            var carrierList = _carriers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            await Lifecycle.RouteToMarketAsync(Opportunity.Id, carrierList, userId);
-            Snackbar.Add($"Routed to {carrierList.Length} carrier(s).", Severity.Success);
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.RouteToMarketAsync(Opportunity.Id, Array.Empty<string>(), userId);
+            Snackbar.Add("Routed to market.", Severity.Success);
             await OnAdvanced.InvokeAsync();
         }
         catch (LifecycleValidationException ex)
@@ -49,4 +163,12 @@
         }
         finally { _saving = false; }
     }
+
+    private static Color GetStatusColor(SubmissionStatus s) => s switch
+    {
+        SubmissionStatus.QuoteReceived => Color.Success,
+        SubmissionStatus.Declined      => Color.Error,
+        SubmissionStatus.Bound         => Color.Primary,
+        _                              => Color.Default
+    };
 }

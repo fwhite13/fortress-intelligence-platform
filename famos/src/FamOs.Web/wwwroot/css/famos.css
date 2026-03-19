@@ -618,3 +618,16 @@
     border-radius: 6px !important;
     font-size: 0.875rem !important;
 }
+
+/* Kanban card — urgent tint (Sprint 5) */
+.famos-kcard--urgent {
+    border-left: 3px solid var(--red);
+    background: rgba(220, 38, 38, 0.03);
+}
+
+/* Signal chip — aging signals (Sprint 5) */
+.famos-signal-follow-up       { background: #fef3c7; color: #92400e; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; }
+.famos-signal-uw-waiting      { background: #e0f2fe; color: #075985; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; }
+.famos-signal-carrier-waiting { background: #ede9fe; color: #5b21b6; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; }
+.famos-signal-at-risk         { background: #fee2e2; color: #991b1b; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; }
+.famos-signal-urgent          { background: #DC2626; color: #ffffff; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; }

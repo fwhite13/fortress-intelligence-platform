@@ -1,8 +1,21 @@
 @using FamOs.Web.Data.Entities
 @inject NavigationManager Nav
 
-<div class="famos-kcard" @onclick="NavigateToOpportunity">
-    <div class="famos-kcard-name">@Opportunity.Name</div>
+<div class="famos-kcard @(IsUrgent ? "famos-kcard--urgent" : "")"
+     @onclick="NavigateToOpportunity">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div class="famos-kcard-name" style="flex:1; min-width:0;">@Opportunity.Name</div>
+        @if (!string.IsNullOrEmpty(Opportunity.OwnerUserId))
+        {
+            var initials = GetInitials(Opportunity.OwnerUserId);
+            <div style="width:24px; height:24px; border-radius:50%; background:var(--sky);
+                        color:#fff; font-size:10px; font-weight:700; flex-shrink:0;
+                        display:flex; align-items:center; justify-content:center;
+                        margin-left:6px;">
+                @initials
+            </div>
+        }
+    </div>
     @if (Opportunity.EstimatedPremium.HasValue)
     {
         <div class="famos-kcard-detail">$@Opportunity.EstimatedPremium.Value.ToString("N0")</div>
@@ -18,5 +31,23 @@
 
 @code {
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+
+    private bool IsUrgent => Opportunity.DominantSignal is
+        FamOs.Web.Domain.DominantSignal.TimeRisk or
+        FamOs.Web.Domain.DominantSignal.Urgent or
+        FamOs.Web.Domain.DominantSignal.AtRisk;
+
     private void NavigateToOpportunity() => Nav.NavigateTo("/opportunity/" + Opportunity.Id);
+
+    private static string GetInitials(string userId)
+    {
+        var atIdx = userId.IndexOf('@');
+        var local = atIdx > 0 ? userId[..atIdx] : userId;
+        var parts = local.Split(new[] { '.', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+            return $"{parts[0][0]}{parts[1][0]}".ToUpper();
+        return local.Length >= 2
+            ? local[..2].ToUpper()
+            : local.ToUpper();
+    }
 }

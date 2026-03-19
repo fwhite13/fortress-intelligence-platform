@@ -1,0 +1,174 @@
+@namespace FamOs.Web.Components.Panels
+@inject IQuoteScraperService Scraper
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Services
+@using FamOs.Web.Theme
+
+<MudCard Class="mb-4" Elevation="0"
+         Style="border:1px solid var(--border); border-radius:12px;">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <MudText Typo="Typo.subtitle2" Style="color:var(--navy);">
+                Quote PDF Scraper
+            </MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Upload a carrier quote PDF to extract coverage data automatically.
+            </MudText>
+        </CardHeaderContent>
+    </MudCardHeader>
+    <MudCardContent>
+
+        @if (!Opportunity.Submissions.Any())
+        {
+            <MudAlert Severity="Severity.Info">
+                Add carrier submissions first (in Underwriting Prep).
+            </MudAlert>
+        }
+        else
+        {
+            <MudGrid Spacing="2">
+                <MudItem xs="12" sm="5">
+                    <MudSelect @bind-Value="_selectedSubId"
+                               Label="Carrier" Variant="Variant.Outlined">
+                        @foreach (var sub in Opportunity.Submissions)
+                        {
+                            <MudSelectItem Value="sub.Id">@sub.CarrierName</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="7">
+                    <MudFileUpload T="IBrowserFile" FilesChanged="OnFileSelected" Accept=".pdf"
+                                   MaximumFileCount="1">
+                        <ActivatorContent>
+                            <MudButton Class="famos-btn-outline"
+                                       StartIcon="@FamosIcons.Upload"
+                                       Disabled="@(_uploading || _selectedSubId == Guid.Empty)">
+                                @(_selectedFile == null ? "Choose PDF" : _selectedFile.Name)
+                            </MudButton>
+                        </ActivatorContent>
+                    </MudFileUpload>
+                    @if (_selectedFile != null)
+                    {
+                        <MudButton Class="famos-btn-primary"
+                                   OnClick="UploadAndSubmit"
+                                   Disabled="_uploading"
+                                   Style="margin-left:8px; margin-top:4px;">
+                            @(_uploading ? "Uploading..." : "Upload & Scrape")
+                        </MudButton>
+                    }
+                </MudItem>
+            </MudGrid>
+
+            @if (_uploading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-3" />
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                    @_statusMessage
+                </MudText>
+            }
+
+            @if (!string.IsNullOrEmpty(_resultJson))
+            {
+                <MudDivider Class="my-3" />
+                <div class="intake-section-label mb-2">Extracted Coverages</div>
+                <MudTextField Value="_resultJson"
+                              Lines="6" ReadOnly="true"
+                              Variant="Variant.Outlined"
+                              Style="font-family:monospace; font-size:12px;" />
+            }
+
+            @if (_scrapeError != null)
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-3">@_scrapeError</MudAlert>
+            }
+        }
+
+    </MudCardContent>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback OnUpdated { get; set; }
+
+    private Guid   _selectedSubId;
+    private IBrowserFile? _selectedFile;
+    private bool   _uploading;
+    private string _statusMessage = "";
+    private string _resultJson    = "";
+    private string? _scrapeError;
+
+    private void OnFileSelected(IBrowserFile file)
+    {
+        _selectedFile = file;
+        _scrapeError  = null;
+        StateHasChanged();
+    }
+
+    private async Task UploadAndSubmit()
+    {
+        if (_selectedFile == null || _selectedSubId == Guid.Empty) return;
+
+        _uploading     = true;
+        _scrapeError   = null;
+        _resultJson    = "";
+        _statusMessage = "Uploading PDF...";
+
+        try
+        {
+            // Read file bytes (max 10MB)
+            const long maxSize = 10 * 1024 * 1024;
+            using var stream = _selectedFile.OpenReadStream(maxSize);
+            var bytes = new byte[_selectedFile.Size];
+            _ = await stream.ReadAsync(bytes);
+
+            _statusMessage = "Submitting to scraper...";
+            var refId     = $"famos-opp-{Opportunity.Id:N}";
+            var requestId = await Scraper.SubmitQuotePdfAsync(
+                refId, _selectedFile.Name, bytes);
+
+            // Poll until complete (max 60 seconds, 5s interval)
+            _statusMessage = "Scraping quote data...";
+            QuoteScraperResult? result = null;
+            for (var i = 0; i < 12; i++)
+            {
+                await Task.Delay(5000);
+                result = await Scraper.PollResultAsync(requestId);
+                if (result != null) break;
+                _statusMessage = $"Processing... ({(i + 1) * 5}s)";
+                StateHasChanged();
+            }
+
+            if (result == null)
+            {
+                _scrapeError = "Scraper timed out after 60 seconds. Try again shortly.";
+                return;
+            }
+
+            if (result.Status == "Failed")
+            {
+                _scrapeError = "Scraper returned an error. Check the PDF and try again.";
+                return;
+            }
+
+            _resultJson = result.RawJson;
+
+            // Persist result JSON on the Submission
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.SaveSubmissionScraperResultAsync(_selectedSubId, result.RawJson, userId);
+            Snackbar.Add("Quote data extracted and saved.", Severity.Success);
+            await OnUpdated.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _scrapeError = $"Upload failed: {ex.Message}";
+        }
+        finally
+        {
+            _uploading = false;
+            StateHasChanged();
+        }
+    }
+}

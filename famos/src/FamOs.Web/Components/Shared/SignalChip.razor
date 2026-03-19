@@ -13,8 +13,13 @@
         DominantSignal.AwaitingClientDecision => "Awaiting Client",
         DominantSignal.BindingInProgress      => "Binding",
         DominantSignal.PostBindProcessing     => "Post-Bind",
-        DominantSignal.TimeRisk               => "⚠ Time Risk",
+        DominantSignal.TimeRisk               => "Time Risk",
         DominantSignal.Parked                 => "Parked",
+        DominantSignal.FollowUpNeeded         => "Follow Up",
+        DominantSignal.WaitingOnUW            => "UW Waiting",
+        DominantSignal.WaitingOnCarrier       => "Carrier Waiting",
+        DominantSignal.AtRisk                 => "At Risk",
+        DominantSignal.Urgent                 => "URGENT",
         _                                     => Signal.ToString()
     };
 
@@ -29,6 +34,11 @@
         DominantSignal.UnderwritingInProgress => "famos-signal-underwriting",
         DominantSignal.PostBindProcessing     => "famos-signal-post-bind",
         DominantSignal.Parked                 => "famos-signal-parked",
+        DominantSignal.FollowUpNeeded         => "famos-signal-follow-up",
+        DominantSignal.WaitingOnUW            => "famos-signal-uw-waiting",
+        DominantSignal.WaitingOnCarrier       => "famos-signal-carrier-waiting",
+        DominantSignal.AtRisk                 => "famos-signal-at-risk",
+        DominantSignal.Urgent                 => "famos-signal-urgent",
         _                                     => "famos-signal-parked"
     };
 }

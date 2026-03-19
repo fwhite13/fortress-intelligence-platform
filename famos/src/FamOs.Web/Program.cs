@@ -109,16 +109,42 @@ builder.Services.AddScoped<UserSessionService>();
 builder.Services.AddScoped<SignalResolver>();
 builder.Services.AddScoped<LifecycleCommandService>();
 builder.Services.AddScoped<OpportunityService>();
-builder.Services.AddScoped<IHubSpotService, HubSpotServiceStub>();
 builder.Services.AddScoped<IAmsService, AmsServiceStub>();
 builder.Services.AddScoped<TaskService>();
 
 builder.Services.Configure<AffinityConfig>(
     builder.Configuration.GetSection("AffinityConfig"));
 
+// ── Fortress API client (QuoteScraperService) ──
+var fortressBase = builder.Configuration["FortressApi:BaseUrl"] ?? "https://api.fortressam.ai";
+builder.Services.AddHttpClient("FortressApi", c =>
+{
+    c.BaseAddress = new Uri(fortressBase);
+    c.DefaultRequestHeaders.Add("X-Api-Key",
+        builder.Configuration["FortressApi:Key"] ?? "246191f33f470f136ebb800516f8e10f");
+    c.DefaultRequestHeaders.Add("X-Api-Secret",
+        builder.Configuration["FortressApi:Secret"]
+            ?? "77a883a60a2d941b0c1f038881150141dd3655f449c5dadf97e6ffb7066faf4d");
+});
+builder.Services.AddScoped<IQuoteScraperService, QuoteScraperService>();
+
+// ── HubSpot API client — real service when key configured, stub otherwise ──
+var hubspotKey = builder.Configuration["HubSpot:ServiceKey"];
+builder.Services.AddHttpClient("HubSpot", c =>
+{
+    c.BaseAddress = new Uri("https://api.hubapi.com");
+    if (!string.IsNullOrEmpty(hubspotKey))
+        c.DefaultRequestHeaders.Add("Authorization", $"Bearer {hubspotKey}");
+});
+if (!string.IsNullOrEmpty(hubspotKey))
+    builder.Services.AddScoped<IHubSpotService, HubSpotService>();
+else
+    builder.Services.AddScoped<IHubSpotService, HubSpotServiceStub>();
+
 // ── Background Services ──
 builder.Services.AddHostedService<OutboxProcessorService>();
 builder.Services.AddHostedService<SignalRecomputeService>();
+builder.Services.AddHostedService<AgingService>();
 
 // ── Internal HTTP client ──
 var internalBase = "http://localhost:8080/";
@@ -176,6 +202,30 @@ _ = Task.Run(async () =>
             // 1060 = Duplicate column name — column already exists, safe to continue
             logger.LogDebug("intake_responses_json column already exists (1060), continuing");
         }
+
+        // Sprint 5: Part C
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN close_reason INT NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("close_reason column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN close_notes LONGTEXT NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("close_notes column already exists"); }
+
+        // Sprint 5: Part E
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN last_stage_transition_at DATETIME NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("last_stage_transition_at column already exists"); }
+
+        // Sprint 5: Part A (Submission table enhancements)
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN coverage_types VARCHAR(200) NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("coverage_types column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN submitted_at DATETIME NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("submitted_at column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN responded_at DATETIME NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("responded_at column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN quote_result_json MEDIUMTEXT NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("quote_result_json column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN notes LONGTEXT NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("notes column already exists"); }
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("submissions.updated_at column already exists"); }
     }
     catch (Exception ex)
     {

@@ -8,37 +8,46 @@
         <MudText Typo="Typo.body2" Class="mb-3">
             Select the reason this opportunity is closing without binding.
         </MudText>
-        <MudSelect @bind-Value="_reason" Label="Close Reason" Required="true">
-            <MudSelectItem Value="@("Pricing")">Pricing</MudSelectItem>
-            <MudSelectItem Value="@("Coverage gap")">Coverage gap</MudSelectItem>
-            <MudSelectItem Value="@("No response")">No response</MudSelectItem>
-            <MudSelectItem Value="@("Timing")">Timing</MudSelectItem>
-            <MudSelectItem Value="@("Lost relationship")">Lost relationship</MudSelectItem>
+        <MudSelect @bind-Value="_reason" Label="Close Reason *" Required="true" Class="mb-3">
+            <MudSelectItem Value="CloseReason.NotQuoted">Not Quoted — carrier(s) declined</MudSelectItem>
+            <MudSelectItem Value="CloseReason.PriceTooHigh">Price Too High — client declined on premium</MudSelectItem>
+            <MudSelectItem Value="CloseReason.LostToCompetitor">Lost to Competitor</MudSelectItem>
+            <MudSelectItem Value="CloseReason.ClientDeclinedCoverage">Client Declined Coverage</MudSelectItem>
+            <MudSelectItem Value="CloseReason.PolicyLapsed">Policy Lapsed — missed renewal window</MudSelectItem>
+            <MudSelectItem Value="CloseReason.Other">Other</MudSelectItem>
         </MudSelect>
+        <MudTextField @bind-Value="_notes"
+                      Label="Notes (optional)"
+                      Lines="3"
+                      Placeholder="Additional context..." />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
         <MudButton Class="famos-btn-danger"
-                   OnClick="Submit" Disabled="@string.IsNullOrEmpty(_reason)">
+                   OnClick="Submit"
+                   Disabled="@(_reason == null)">
             Close Opportunity
         </MudButton>
     </DialogActions>
 </MudDialog>
 
 @code {
-    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public Guid OpportunityId { get; set; }
 
-    private string _reason = "";
+    private CloseReason? _reason;
+    private string _notes = "";
 
     private void Cancel() => MudDialog.Cancel();
 
     private async Task Submit()
     {
+        if (_reason == null) return;
         var userId = await UserSession.GetUserIdAsync();
         try
         {
-            await Lifecycle.CloseOpportunityAsync(OpportunityId, _reason, userId);
+            await Lifecycle.CloseOpportunityAsync(
+                OpportunityId, _reason.Value, _notes.Trim(), userId);
             MudDialog.Close(DialogResult.Ok(true));
         }
         catch (LifecycleValidationException ex)

@@ -36,6 +36,9 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.IntakeResponsesJson)
                 .HasColumnName("intake_responses_json")
                 .HasColumnType("mediumtext");
+            e.Property(x => x.CloseReason).HasConversion<int?>();
+            e.Property(x => x.CloseNotes).HasColumnType("longtext");
+            e.Property(x => x.LastStageTransitionAt).HasColumnType("datetime");
         });
 
         // Submission
@@ -44,7 +47,12 @@ public class FamOsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnType("char(36)");
             e.Property(x => x.OpportunityId).HasColumnType("char(36)");
-            e.HasOne(x => x.Opportunity).WithMany(o => o.Submissions).HasForeignKey(x => x.OpportunityId);
+            e.Property(x => x.Status).HasConversion<int>();
+            e.Property(x => x.QuoteResultJson).HasColumnType("mediumtext");
+            e.Property(x => x.Notes).HasColumnType("longtext");
+            e.HasOne(x => x.Opportunity)
+                .WithMany(o => o.Submissions)
+                .HasForeignKey(x => x.OpportunityId);
         });
 
         // Quote
