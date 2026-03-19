@@ -9,21 +9,21 @@
 
     <NavLink href="/" Match="NavLinkMatch.All" class="famos-nav-item" ActiveClass="famos-nav-item--active">
         <span class="famos-nav-icon">
-            <MudIcon Icon="@Icons.Material.Filled.Dashboard" Size="Size.Small" />
+            <MudIcon Icon="@FamosIcons.Dashboard" Size="Size.Small" />
         </span>
         Dashboard
     </NavLink>
 
     <NavLink href="/pipeline" Match="NavLinkMatch.Prefix" class="famos-nav-item" ActiveClass="famos-nav-item--active">
         <span class="famos-nav-icon">
-            <MudIcon Icon="@Icons.Material.Filled.ViewKanban" Size="Size.Small" />
+            <MudIcon Icon="@FamosIcons.Pipeline" Size="Size.Small" />
         </span>
         Pipeline
     </NavLink>
 
     <NavLink href="/tasks" Match="NavLinkMatch.Prefix" class="famos-nav-item" ActiveClass="famos-nav-item--active">
         <span class="famos-nav-icon">
-            <MudIcon Icon="@Icons.Material.Filled.CheckBox" Size="Size.Small" />
+            <MudIcon Icon="@FamosIcons.Tasks" Size="Size.Small" />
         </span>
         <span style="flex:1;">Task Center</span>
         @if (_openTaskCount > 0)
@@ -42,7 +42,7 @@
 
     <span class="famos-nav-item famos-nav-item--disabled">
         <span class="famos-nav-icon">
-            <MudIcon Icon="@Icons.Material.Filled.Business" Size="Size.Small" />
+            <MudIcon Icon="@FamosIcons.Accounts" Size="Size.Small" />
         </span>
         Accounts
         <span class="famos-nav-badge">Soon</span>
@@ -50,7 +50,7 @@
 
     <span class="famos-nav-item famos-nav-item--disabled">
         <span class="famos-nav-icon">
-            <MudIcon Icon="@Icons.Material.Filled.BarChart" Size="Size.Small" />
+            <MudIcon Icon="@FamosIcons.BarChart" Size="Size.Small" />
         </span>
         Reports
         <span class="famos-nav-badge">Soon</span>

@@ -39,10 +39,8 @@ else
         @if (!_opp.IsClosed)
         {
             <div style="display: flex; gap: 8px;">
-                <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
-                           Class="famos-btn-outline-sm" OnClick="ParkOpportunity">Park</MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
-                           Class="famos-btn-outline-sm" OnClick="CloseOpportunity">Close</MudButton>
+                <MudButton Class="famos-btn-outline-sm" OnClick="ParkOpportunity">Park</MudButton>
+                <MudButton Class="famos-btn-danger" OnClick="CloseOpportunity">Close</MudButton>
             </div>
         }
     </div>

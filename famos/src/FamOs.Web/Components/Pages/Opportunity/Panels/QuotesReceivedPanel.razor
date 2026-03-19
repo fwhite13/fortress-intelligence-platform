@@ -29,12 +29,12 @@
         </MudRadioGroup>
     </MudCardContent>
     <MudCardActions>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+        <MudButton Class="famos-btn-primary"
                    OnClick="SendProposal"
                    Disabled="@(_saving || _recommendedId == Guid.Empty)">
             Send Proposal
         </MudButton>
-        <MudButton Variant="Variant.Outlined" Color="Color.Default"
+        <MudButton Class="famos-btn-outline"
                    OnClick="RecordAnotherQuote">
             + Add Quote
         </MudButton>

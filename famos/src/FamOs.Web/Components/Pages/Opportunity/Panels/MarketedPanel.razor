@@ -36,7 +36,7 @@
         <MudNumericField @bind-Value="_quotePremium" Label="Premium ($)" Format="N0" Class="mb-2" />
     </MudCardContent>
     <MudCardActions>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+        <MudButton Class="famos-btn-primary"
                    OnClick="RecordQuote"
                    Disabled="@(_saving || _selectedSubmissionId == Guid.Empty || !_quotePremium.HasValue)">
             Record Quote

@@ -18,13 +18,12 @@
         </MudText>
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <MudTextField @bind-Value="_filterText" Class="famos-input-filter"
+        <MudTextField Class="famos-input-filter" @bind-Value="_filterText"
             Placeholder="Filter by opportunity or task..."
-            Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.FilterList"
-            Clearable="true" Variant="Variant.Outlined" />
-        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
-                   Class="famos-btn-outline-sm"
-                   StartIcon="@Icons.Material.Filled.Add"
+            Adornment="Adornment.Start" AdornmentIcon="@FamosIcons.Filter"
+            Clearable="true" />
+        <MudButton Class="famos-btn-outline-sm"
+                   StartIcon="@FamosIcons.Add"
                    OnClick="OpenAddTaskDialog">
             Add Task
         </MudButton>
@@ -39,7 +38,7 @@ else if (!FilteredTasks.Any())
 {
     <MudPaper Class="pa-6 text-center" Elevation="0"
               Style="border:1px solid var(--border); border-radius:12px;">
-        <MudIcon Icon="@Icons.Material.Filled.CheckCircle"
+        <MudIcon Icon="@FamosIcons.CheckCircle"
                  Style="font-size:48px; color:var(--green); margin-bottom:12px;" />
         <MudText Typo="Typo.h6">
             @(string.IsNullOrEmpty(_filterText) ? "All clear — no open tasks" : "No tasks match your filter")
@@ -80,7 +79,7 @@ else
                 </div>
                 <div style="display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px;">
                     <span>@group.Count() task@(group.Count() == 1 ? "" : "s")</span>
-                    <MudIcon Icon="@Icons.Material.Filled.OpenInNew" Style="font-size:14px;" />
+                    <MudIcon Icon="@FamosIcons.OpenInNew" Style="font-size:14px;" />
                 </div>
             </div>
 

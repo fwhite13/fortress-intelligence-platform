@@ -17,7 +17,7 @@
         <MudDatePicker @bind-Date="_effectiveDate" Label="Policy Effective Date" />
     </MudCardContent>
     <MudCardActions>
-        <MudButton Variant="Variant.Filled" Color="Color.Success"
+        <MudButton Class="famos-btn-primary"
                    OnClick="RecordBinder"
                    Disabled="@(_saving || !_effectiveDate.HasValue)">
             Binder Received — Mark Bound

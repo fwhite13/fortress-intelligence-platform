@@ -22,6 +22,7 @@ public static class FamosIcons
     public const string Save = Icons.Material.Outlined.Save;
     public const string Upload = Icons.Material.Outlined.Upload;
     public const string Download = Icons.Material.Outlined.Download;
+    public const string OpenInNew = Icons.Material.Outlined.OpenInNew;
 
     // Search / Filter
     public const string Search = Icons.Material.Outlined.Search;
@@ -34,6 +35,7 @@ public static class FamosIcons
     public const string Urgent = Icons.Material.Outlined.PriorityHigh;
     public const string AtRisk = Icons.Material.Outlined.ErrorOutline;
     public const string Clock = Icons.Material.Outlined.AccessTime;
+    public const string CheckCircle = Icons.Material.Outlined.CheckCircle;
 
     // Lifecycle
     public const string Advance = Icons.Material.Outlined.ArrowForward;
@@ -46,4 +48,7 @@ public static class FamosIcons
     public const string Person = Icons.Material.Outlined.Person;
     public const string Document = Icons.Material.Outlined.Description;
     public const string Note = Icons.Material.Outlined.Notes;
+
+    // Data Viz
+    public const string BarChart = Icons.Material.Outlined.BarChart;
 }
