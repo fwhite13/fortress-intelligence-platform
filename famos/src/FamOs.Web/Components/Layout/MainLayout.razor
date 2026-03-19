@@ -10,8 +10,8 @@
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive"
-               Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
+    <MudDrawer Open="true" Variant="DrawerVariant.Persistent"
+               ClipMode="DrawerClipMode.Always" Elevation="2">
         <div style="display: flex; flex-direction: column; height: 100%;">
             <div class="sb-logo">
                 @if (!string.IsNullOrEmpty(_affinity.LogoPath))
@@ -46,7 +46,7 @@
 </MudLayout>
 
 @code {
-    private bool _drawerOpen = true;
+    // Drawer is always-open (Persistent variant) — no toggle needed without FipNavBar
     private string _userInitial = "F";
     private string _userName = "";
     private string _userEmail = "";
@@ -84,5 +84,5 @@
         }
     }
 
-    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
 }
