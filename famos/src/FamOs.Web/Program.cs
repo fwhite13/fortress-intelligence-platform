@@ -81,7 +81,7 @@ builder.Services.AddDbContextFactory<FamOsDbContext>(options =>
 
 // ── Data Protection: shared key ring ──
 var keyRingHost = builder.Configuration["FORTRESS_DB_HOST"];
-var keyRingDb   = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? "fred_dev";
+var keyRingDb   = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? "fip_keyring";
 var keyRingCsb  = new MySqlConnectionStringBuilder
 {
     Server            = keyRingHost ?? "localhost",

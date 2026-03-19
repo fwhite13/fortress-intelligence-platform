@@ -182,6 +182,9 @@ public class LifecycleCommandService
 
         await RecomputeSignalAsync(opp);
         await WriteActivityAsync(opp.Id, "market_reopened", "Market reopened for negotiation", actorUserId);
+        await WriteOutboxAsync(DomainEventType.OpportunityLifecycleChanged, new {
+            opportunity_id = opportunityId, from = from.ToString(), to = opp.LifecycleStage.ToString(), actor_user_id = actorUserId
+        });
         await _db.SaveChangesAsync();
         await tx.CommitAsync();
     }
@@ -261,6 +264,9 @@ public class LifecycleCommandService
             OpportunityId = opportunityId,
             FlagType      = OpportunityFlagType.Parked,
         });
+
+        opp.UpdatedAt = DateTime.UtcNow;
+        opp.Version++;
 
         await RecomputeSignalAsync(opp);
         await WriteActivityAsync(opp.Id, "opportunity_parked", "Opportunity parked", actorUserId);
