@@ -14,7 +14,7 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+        <MudButton Class="famos-btn-primary"
                    OnClick="Submit" Disabled="@(_saving || string.IsNullOrWhiteSpace(_name))">
             Create
         </MudButton>
