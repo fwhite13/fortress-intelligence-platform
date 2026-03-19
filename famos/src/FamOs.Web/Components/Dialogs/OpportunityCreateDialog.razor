@@ -15,7 +15,7 @@
     <DialogActions>
         <MudButton OnClick="Cancel">Cancel</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                   OnClick="Submit" Disabled="@string.IsNullOrWhiteSpace(_name)">
+                   OnClick="Submit" Disabled="@(_saving || string.IsNullOrWhiteSpace(_name))">
             Create
         </MudButton>
     </DialogActions>
@@ -35,11 +35,15 @@
     {
         if (string.IsNullOrWhiteSpace(_name)) return;
         _saving = true;
-        var userId = await UserSession.GetUserIdAsync();
-        DateOnly? effDate = _effectiveDate.HasValue
-            ? DateOnly.FromDateTime(_effectiveDate.Value)
-            : null;
-        var id = await OppService.CreateOpportunityAsync(_name.Trim(), userId, _premium, effDate);
-        MudDialog.Close(DialogResult.Ok(id));
+        try
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            DateOnly? effDate = _effectiveDate.HasValue
+                ? DateOnly.FromDateTime(_effectiveDate.Value)
+                : null;
+            var id = await OppService.CreateOpportunityAsync(_name.Trim(), userId, _premium, effDate);
+            MudDialog.Close(DialogResult.Ok(id));
+        }
+        finally { _saving = false; }
     }
 }

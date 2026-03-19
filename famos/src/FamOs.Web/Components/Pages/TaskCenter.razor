@@ -21,7 +21,7 @@
         <MudTextField @bind-Value="_filterText"
             Placeholder="Filter by opportunity or task..."
             Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-            Clearable="true" Dense="true" Variant="Variant.Outlined"
+            Clearable="true" Variant="Variant.Outlined"
             Style="min-width:220px;" />
         <MudButton Variant="Variant.Outlined" Color="Color.Primary"
                    StartIcon="@Icons.Material.Filled.Add"
@@ -67,7 +67,7 @@ else
             <div style="display:flex; justify-content:space-between; align-items:center;
                         padding:10px 16px; background:var(--cream); border-bottom:1px solid var(--border);
                         cursor:pointer;"
-                 @onclick="() => Nav.NavigateTo($"/opportunity/{opp.Id}")">
+                 @onclick="() => NavigateToOpportunity(opp.Id)">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <MudText Typo="Typo.subtitle2" Style="color:var(--navy); font-weight:600;">
                         @opp.Name
@@ -93,7 +93,7 @@ else
                      class="task-row">
                     <MudCheckBox T="bool" Value="false"
                                  ValueChanged="@(async _ => await CompleteTask(item.Task.Id))"
-                                 Color="Color.Primary" Dense="true" />
+                                 Color="Color.Primary" />
                     <div style="flex:1; min-width:0;">
                         <MudText Typo="Typo.body2"
                                  Style="@(isOverdue ? "color: var(--red);" : "")">
@@ -145,7 +145,7 @@ else
     {
         var dialog = await DialogService.ShowAsync<AddTaskDialog>("Add Task");
         var result = await dialog.Result;
-        if (!result.Canceled)
+        if (result is { Canceled: false })
         {
             // Reload to show newly created task
             var userId = await UserSession.GetUserIdAsync();
@@ -153,6 +153,8 @@ else
             StateHasChanged();
         }
     }
+
+    private void NavigateToOpportunity(Guid id) => Nav.NavigateTo("/opportunity/" + id);
 
     private static string GetStageLabel(LifecycleStage stage) => stage switch
     {

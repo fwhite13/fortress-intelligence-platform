@@ -22,24 +22,24 @@
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_contactName"
                     Label="Primary Contact Name *"
-                    Variant="Variant.Outlined" Dense="true" />
+                    Variant="Variant.Outlined" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_contactEmail"
                     Label="Contact Email"
                     InputType="InputType.Email"
-                    Variant="Variant.Outlined" Dense="true" />
+                    Variant="Variant.Outlined" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_contactPhone"
                     Label="Contact Phone"
-                    Variant="Variant.Outlined" Dense="true" />
+                    Variant="Variant.Outlined" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_stateOfDomicile"
                     Label="State of Domicile *"
                     Placeholder="e.g. TX"
-                    Variant="Variant.Outlined" Dense="true" />
+                    Variant="Variant.Outlined" />
             </MudItem>
         </MudGrid>
     </div>
@@ -51,28 +51,28 @@
             <MudItem xs="12" sm="4">
                 <MudNumericField @bind-Value="_fleetSize"
                     Label="Total Power Units *"
-                    Variant="Variant.Outlined" Dense="true" Min="1" />
+                    Variant="Variant.Outlined" Min="1" />
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudNumericField @bind-Value="_trailerCount"
                     Label="Trailers"
-                    Variant="Variant.Outlined" Dense="true" Min="0" />
+                    Variant="Variant.Outlined" Min="0" />
             </MudItem>
             <MudItem xs="12" sm="4">
                 <MudTextField @bind-Value="_dotNumber"
                     Label="DOT Number *"
-                    Variant="Variant.Outlined" Dense="true" />
+                    Variant="Variant.Outlined" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_commodities"
                     Label="Primary Commodities Hauled"
-                    Variant="Variant.Outlined" Dense="true" />
+                    Variant="Variant.Outlined" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="_operatingRadius"
                     Label="Operating Radius"
                     Placeholder="e.g. Regional, National"
-                    Variant="Variant.Outlined" Dense="true" />
+                    Variant="Variant.Outlined" />
             </MudItem>
         </MudGrid>
     </div>
@@ -84,12 +84,12 @@
             <MudItem xs="12" sm="6">
                 <MudNumericField @bind-Value="_liabilityLimit"
                     Label="Liability Limit Required ($)"
-                    Format="N0" Variant="Variant.Outlined" Dense="true" />
+                    Format="N0" Variant="Variant.Outlined" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect @bind-Value="_cargoType"
                     Label="Cargo Type"
-                    Variant="Variant.Outlined" Dense="true">
+                    Variant="Variant.Outlined">
                     <MudSelectItem Value="@("")">— Select —</MudSelectItem>
                     <MudSelectItem Value="@("dry_van")">Dry Van</MudSelectItem>
                     <MudSelectItem Value="@("refrigerated")">Refrigerated</MudSelectItem>
@@ -100,9 +100,9 @@
                 </MudSelect>
             </MudItem>
             <MudItem xs="12">
-                <MudCheckBox @bind-Value="_needsCargo" Label="Cargo coverage needed" Dense="true" />
-                <MudCheckBox @bind-Value="_needsPhysicalDamage" Label="Physical damage needed" Dense="true" />
-                <MudCheckBox @bind-Value="_needsGeneralLiability" Label="General liability needed" Dense="true" />
+                <MudCheckBox @bind-Value="_needsCargo" Label="Cargo coverage needed" />
+                <MudCheckBox @bind-Value="_needsPhysicalDamage" Label="Physical damage needed" />
+                <MudCheckBox @bind-Value="_needsGeneralLiability" Label="General liability needed" />
             </MudItem>
         </MudGrid>
     </div>
@@ -114,7 +114,7 @@
             <MudItem xs="12" sm="6">
                 <MudSelect @bind-Value="_lossRunsAvailable"
                     Label="Years of Loss Runs Available *"
-                    Variant="Variant.Outlined" Dense="true">
+                    Variant="Variant.Outlined">
                     <MudSelectItem Value="@("")">— Select —</MudSelectItem>
                     <MudSelectItem Value="@("0")">None available</MudSelectItem>
                     <MudSelectItem Value="@("1")">1 year</MudSelectItem>
@@ -126,7 +126,7 @@
             <MudItem xs="12" sm="6">
                 <MudSelect @bind-Value="_priorCarrier"
                     Label="Currently Insured With"
-                    Variant="Variant.Outlined" Dense="true">
+                    Variant="Variant.Outlined">
                     <MudSelectItem Value="@("")">Unknown / New venture</MudSelectItem>
                     <MudSelectItem Value="@("great_west")">Great West Casualty</MudSelectItem>
                     <MudSelectItem Value="@("progressive")">Progressive Commercial</MudSelectItem>
