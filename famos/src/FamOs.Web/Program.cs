@@ -192,6 +192,31 @@ if (!app.Environment.IsDevelopment())
 
 app.UseStaticFiles();
 app.UseRouting();
+
+// QA bypass — dev/staging only (FAMOS_QA_BYPASS=true env var required)
+if (app.Environment.IsDevelopment() ||
+    Environment.GetEnvironmentVariable("FAMOS_QA_BYPASS") == "true")
+{
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Headers.ContainsKey("X-QA-Bypass") &&
+            context.Request.Headers["X-QA-Bypass"] == "natasha-qa-token-famos-dev")
+        {
+            var claims = new[]
+            {
+                new System.Security.Claims.Claim("preferred_username", "qa@fortressam.ai"),
+                new System.Security.Claims.Claim("name", "QA Tester"),
+                new System.Security.Claims.Claim("oid", "00000000-0000-0000-0000-000000000001"),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "QA Tester"),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "qa-bypass-user"),
+            };
+            var identity = new System.Security.Claims.ClaimsIdentity(claims, "QABypass");
+            context.User = new System.Security.Claims.ClaimsPrincipal(identity);
+        }
+        await next();
+    });
+}
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
@@ -201,6 +226,13 @@ app.MapGet("/health", () => Results.Ok(new {
     status    = "healthy",
     service   = "famos",
     timestamp = DateTime.UtcNow
+})).AllowAnonymous();
+
+app.MapGet("/qa/status", () => Results.Ok(new {
+    qaBypass    = true,
+    environment = "dev",
+    timestamp   = DateTime.UtcNow,
+    message     = "QA bypass active"
 })).AllowAnonymous();
 
 // ── Auth redirect helper ──
