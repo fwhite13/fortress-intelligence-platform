@@ -32,7 +32,7 @@
 </MudDialog>
 
 @code {
-    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = null!;
     [Parameter] public Guid OpportunityId { get; set; }
 
     private CloseReason? _reason;
