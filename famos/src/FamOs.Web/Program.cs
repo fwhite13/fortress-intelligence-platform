@@ -153,10 +153,8 @@ builder.Services.AddScoped(_ => new HttpClient { BaseAddress = new Uri(internalB
 var app = builder.Build();
 var logger = app.Logger;
 
-// ── Database initialization (background) ──
-_ = Task.Run(async () =>
+// ── Database initialization (blocking — must complete before hosted services run) ──
 {
-    await Task.Delay(5000);
     using var scope = app.Services.CreateScope();
     var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<FamOsDbContext>>();
     await using var db = await factory.CreateDbContextAsync();
@@ -231,7 +229,7 @@ _ = Task.Run(async () =>
     {
         logger.LogError(ex, "[FAM OS] Database initialization failed");
     }
-});
+}
 
 // ── Middleware pipeline ──
 if (!app.Environment.IsDevelopment())
