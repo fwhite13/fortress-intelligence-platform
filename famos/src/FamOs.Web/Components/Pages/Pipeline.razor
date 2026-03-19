@@ -13,9 +13,9 @@
         <h2 class="famos-page-h2">Pipeline</h2>
         <p class="famos-page-sub">@(_byStage.Values.Sum(l => l.Count)) active opportunities</p>
     </div>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-               Class="famos-btn-primary famos-btn-primary-sm" OnClick="OpenCreateDialog">
-        New Opportunity
+    <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+               Class="famos-btn-outline-sm" OnClick="OpenCreateDialog">
+        + New Opportunity
     </MudButton>
 </div>
 

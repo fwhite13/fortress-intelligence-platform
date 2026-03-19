@@ -18,12 +18,12 @@
         </MudText>
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <MudTextField @bind-Value="_filterText"
+        <MudTextField @bind-Value="_filterText" Style="max-width:280px"
             Placeholder="Filter by opportunity or task..."
             Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.FilterList"
             Clearable="true" Variant="Variant.Outlined"
             Style="min-width:220px;" />
-        <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
                    Class="famos-btn-outline-sm"
                    StartIcon="@Icons.Material.Filled.Add"
                    OnClick="OpenAddTaskDialog">
