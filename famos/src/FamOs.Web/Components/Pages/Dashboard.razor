@@ -53,7 +53,7 @@ else if (_summary != null)
     </MudGrid>
 
     <MudButton Variant="Variant.Outlined" Color="Color.Primary"
-               OnClick="@(() => Nav.NavigateTo("/pipeline"))">
+               OnClick="GoToPipeline">
         Open Pipeline →
     </MudButton>
 }
@@ -67,4 +67,6 @@ else if (_summary != null)
         _summary = await OppService.GetDashboardSummaryAsync();
         _loading = false;
     }
+
+    private void GoToPipeline() => Nav.NavigateTo("/pipeline");
 }
