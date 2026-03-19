@@ -536,3 +536,77 @@
 .mud-drawer--open.mud-drawer-persistent {
     top: 0 !important;
 }
+
+/* ===========================
+   DESIGN SYSTEM — v2 additions
+   All new components use these classes. Never set inline styles.
+   =========================== */
+
+/* Buttons — standard outlined (full size) */
+.famos-btn-outline {
+    border: 1px solid #d1d5db !important;
+    border-radius: 6px !important;
+    color: #374151 !important;
+    background: white !important;
+    font-size: 0.875rem !important;
+    font-weight: 500 !important;
+    height: 36px !important;
+    padding: 0 16px !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+    box-shadow: none !important;
+}
+.famos-btn-outline:hover {
+    background: #f9fafb !important;
+    border-color: #9ca3af !important;
+}
+
+/* Buttons — destructive */
+.famos-btn-danger {
+    border: 1px solid #fca5a5 !important;
+    border-radius: 6px !important;
+    color: #dc2626 !important;
+    background: white !important;
+    font-size: 0.8125rem !important;
+    font-weight: 500 !important;
+    height: 28px !important;
+    padding: 0 12px !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+    box-shadow: none !important;
+}
+.famos-btn-danger:hover {
+    background: #fef2f2 !important;
+    border-color: #f87171 !important;
+}
+
+/* Inputs — standard */
+.famos-input .mud-input-root {
+    border-radius: 6px !important;
+    font-size: 0.875rem !important;
+}
+
+/* Inputs — search (topbar) */
+.famos-input-search {
+    max-width: 240px !important;
+}
+.famos-input-search .mud-input-root {
+    border-radius: 20px !important;
+    font-size: 0.8125rem !important;
+    background: #f9fafb !important;
+}
+
+/* Inputs — filter (inline list narrowing) */
+.famos-input-filter {
+    max-width: 280px !important;
+}
+.famos-input-filter .mud-input-root {
+    border-radius: 6px !important;
+    font-size: 0.8125rem !important;
+}
+
+/* Select — standard */
+.famos-select .mud-input-root {
+    border-radius: 6px !important;
+    font-size: 0.875rem !important;
+}
