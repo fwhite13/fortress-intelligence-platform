@@ -54,33 +54,33 @@ public static class FipTheme
             {
                 FontFamily  = new[] { "Plus Jakarta Sans", "system-ui", "-apple-system", "sans-serif" },
                 FontSize    = "0.875rem",   // 14px
-                FontWeight  = "400",
+                FontWeight = 400,
                 LineHeight  = 1.5,
                 LetterSpacing = "0em",
             },
-            H1 = new H1 { FontFamily = new[] { "Fraunces", "Georgia", "serif" }, FontSize = "2rem",    FontWeight = "400" },
-            H2 = new H2 { FontFamily = new[] { "Fraunces", "Georgia", "serif" }, FontSize = "1.4375rem", FontWeight = "400", LetterSpacing = "-0.3px" },
-            H3 = new H3 { FontFamily = new[] { "Fraunces", "Georgia", "serif" }, FontSize = "1.25rem",  FontWeight = "400" },
-            H4 = new H4 { FontFamily = new[] { "Fraunces", "Georgia", "serif" }, FontSize = "1.875rem", FontWeight = "400", LineHeight = "1.1" }, // KPI value
-            H5 = new H5 { FontFamily = new[] { "Plus Jakarta Sans", "sans-serif" }, FontWeight = "700", FontSize = "0.78125rem" }, // card titles
-            H6 = new H6 { FontFamily = new[] { "Plus Jakarta Sans", "sans-serif" }, FontWeight = "700", FontSize = "0.78125rem" },
-            Subtitle1 = new Subtitle1 { FontSize = "0.78125rem", FontWeight = "700", LineHeight = "1.3" },
-            Subtitle2 = new Subtitle2 { FontSize = "0.71875rem", FontWeight = "600" },
-            Body1 = new Body1 { FontSize = "0.875rem",  FontWeight = "400", LineHeight = "1.5" },
-            Body2 = new Body2 { FontSize = "0.71875rem", FontWeight = "400", LineHeight = "1.45", LetterSpacing = "0em" },
+            H1 = new H1 { FontFamily = new[] { "Fraunces", "Georgia", "serif" }, FontSize = "2rem",    FontWeight = 400 },
+            H2 = new H2 { FontFamily = new[] { "Fraunces", "Georgia", "serif" }, FontSize = "1.4375rem", FontWeight = 400, LetterSpacing = "-0.3px" },
+            H3 = new H3 { FontFamily = new[] { "Fraunces", "Georgia", "serif" }, FontSize = "1.25rem",  FontWeight = 400 },
+            H4 = new H4 { FontFamily = new[] { "Fraunces", "Georgia", "serif" }, FontSize = "1.875rem", FontWeight = 400, LineHeight = 1.1 }, // KPI value
+            H5 = new H5 { FontFamily = new[] { "Plus Jakarta Sans", "sans-serif" }, FontWeight = 700, FontSize = "0.78125rem" }, // card titles
+            H6 = new H6 { FontFamily = new[] { "Plus Jakarta Sans", "sans-serif" }, FontWeight = 700, FontSize = "0.78125rem" },
+            Subtitle1 = new Subtitle1 { FontSize = "0.78125rem", FontWeight = 700, LineHeight = 1.3 },
+            Subtitle2 = new Subtitle2 { FontSize = "0.71875rem", FontWeight = 600 },
+            Body1 = new Body1 { FontSize = "0.875rem",  FontWeight = 400, LineHeight = 1.5 },
+            Body2 = new Body2 { FontSize = "0.71875rem", FontWeight = 400, LineHeight = 1.45, LetterSpacing = "0em" },
             Button = new MudBlazor.Button
             {
                 FontFamily    = new[] { "Plus Jakarta Sans", "sans-serif" },
                 FontSize      = "0.78125rem",  // 12.5px
-                FontWeight    = "600",
+                FontWeight = 600,
                 TextTransform = "none",
                 LetterSpacing = "0em",
             },
-            Caption = new Caption { FontSize = "0.6875rem", FontWeight = "400" },
+            Caption = new Caption { FontSize = "0.6875rem", FontWeight = 400 },
             Overline = new Overline
             {
                 FontSize    = "0.59375rem",  // 9.5px
-                FontWeight  = "700",
+                FontWeight = 700,
                 TextTransform = "uppercase",
                 LetterSpacing = "1.2px",
             },
