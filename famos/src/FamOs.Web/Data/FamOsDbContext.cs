@@ -129,26 +129,35 @@ public class FamOsDbContext : DbContext
             e.HasIndex(x => new { x.Processed, x.OccurredAt }).HasDatabaseName("idx_outbox_pending");
         });
 
-        // Contact
+        // Contact — table uses snake_case columns; map all non-trivial properties
         m.Entity<Contact>(e => {
             e.ToTable("contacts");
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnType("char(36)");
-            e.Property(x => x.OpportunityId).HasColumnType("char(36)");
-            e.Property(x => x.ContactType).HasConversion<int>();
+            e.Property(x => x.OpportunityId).HasColumnType("char(36)").HasColumnName("opportunity_id");
+            e.Property(x => x.FirstName).HasColumnName("first_name");
+            e.Property(x => x.LastName).HasColumnName("last_name");
+            e.Property(x => x.ContactType).HasConversion<int>().HasColumnName("contact_type");
             e.Property(x => x.Notes).HasColumnType("longtext");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.HasOne(x => x.Opportunity)
                 .WithMany(o => o.Contacts)
                 .HasForeignKey(x => x.OpportunityId);
         });
 
-        // OpportunityDocument
+        // OpportunityDocument — table uses snake_case columns; map all non-trivial properties
         m.Entity<OpportunityDocument>(e => {
             e.ToTable("opportunity_documents");
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnType("char(36)");
-            e.Property(x => x.OpportunityId).HasColumnType("char(36)");
-            e.Property(x => x.DocumentCategory).HasConversion<int>();
+            e.Property(x => x.OpportunityId).HasColumnType("char(36)").HasColumnName("opportunity_id");
+            e.Property(x => x.FileName).HasColumnName("file_name");
+            e.Property(x => x.FileType).HasColumnName("file_type");
+            e.Property(x => x.S3Key).HasColumnName("s3_key");
+            e.Property(x => x.DocumentCategory).HasConversion<int>().HasColumnName("document_category");
+            e.Property(x => x.UploadedAt).HasColumnName("uploaded_at");
+            e.Property(x => x.UploadedBy).HasColumnName("uploaded_by");
             e.HasOne(x => x.Opportunity)
                 .WithMany(o => o.Documents)
                 .HasForeignKey(x => x.OpportunityId);
