@@ -3,58 +3,156 @@
 @inject UserSessionService UserSession
 @inject ISnackbar Snackbar
 @using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+@using FamOs.Web.Theme
 
-<MudCard Class="mb-4">
-    <MudCardHeader>
-        <CardHeaderContent>
-            <MudText Typo="Typo.h6">Quote Comparison</MudText>
-        </CardHeaderContent>
-    </MudCardHeader>
-    <MudCardContent>
-        <MudRadioGroup @bind-Value="_recommendedId">
-        <MudTable Items="Opportunity.Quotes" Hover="true" Dense="true" Class="mb-3">
-            <HeaderContent>
-                <MudTh>Carrier</MudTh>
-                <MudTh>Premium</MudTh>
-                <MudTh>Recommended</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-                <MudTd>@context.CarrierName</MudTd>
-                <MudTd>$@context.PremiumAmount.ToString("N0")</MudTd>
-                <MudTd>
-                    <MudRadio Value="context.Id" Color="Color.Primary" />
-                </MudTd>
-            </RowTemplate>
-        </MudTable>
-        </MudRadioGroup>
-    </MudCardContent>
-    <MudCardActions>
-        <MudButton Class="famos-btn-primary"
-                   OnClick="SendProposal"
-                   Disabled="@(_saving || _recommendedId == Guid.Empty)">
-            Send Proposal
-        </MudButton>
-        <MudButton Class="famos-btn-outline"
-                   OnClick="RecordAnotherQuote">
-            + Add Quote
-        </MudButton>
-    </MudCardActions>
-</MudCard>
+<div class="famos-panel">
+
+    <div class="famos-panel-header">
+        <span class="famos-panel-title">Quote Comparison</span>
+        @if (Opportunity.Quotes.Any())
+        {
+            <span class="famos-meta-text">
+                @Opportunity.Quotes.Count quote@(Opportunity.Quotes.Count == 1 ? "" : "s") received
+            </span>
+        }
+    </div>
+
+    @if (!Opportunity.Quotes.Any())
+    {
+        <div class="famos-empty-state">
+            <MudIcon Icon="@FamosIcons.Dollar" Class="famos-empty-icon" />
+            <div>No quotes yet. Record quotes from the submission status panel above.</div>
+        </div>
+    }
+    else
+    {
+        @* Quote comparison table *@
+        <div class="famos-quote-table mb-4">
+            <div class="famos-quote-header-row">
+                <div class="famos-quote-col-carrier">Carrier</div>
+                <div class="famos-quote-col-premium">Premium</div>
+                <div class="famos-quote-col-coverage">Coverage Notes</div>
+                <div class="famos-quote-col-select">Recommend</div>
+            </div>
+            @foreach (var quote in Opportunity.Quotes.OrderBy(q => q.PremiumAmount))
+            {
+                var isSelected = _selectedQuoteId == quote.Id;
+                <div class="@($"famos-quote-row{(isSelected ? " famos-quote-row--selected" : "")}")"
+                     @onclick="() => SelectQuote(quote.Id)">
+                    <div class="famos-quote-col-carrier">
+                        <span style="font-weight: 600; color: var(--navy);">@quote.CarrierName</span>
+                    </div>
+                    <div class="famos-quote-col-premium">
+                        <span class="famos-quote-premium">$@quote.PremiumAmount.ToString("N0")</span>
+                    </div>
+                    <div class="famos-quote-col-coverage">
+                        <span class="famos-meta-text">@(quote.CoverageDetails ?? "—")</span>
+                    </div>
+                    <div class="famos-quote-col-select">
+                        <div class="@($"famos-radio-circle{(isSelected ? " famos-radio-circle--active" : "")}")">
+                            @if (isSelected)
+                            {
+                                <MudIcon Icon="@FamosIcons.Check" Style="font-size:12px; color:#fff;" />
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @* Proposal preview *@
+        @if (_selectedQuoteId != Guid.Empty)
+        {
+            var selected = Opportunity.Quotes.First(q => q.Id == _selectedQuoteId);
+            <div class="famos-proposal-preview mb-4">
+                <div class="famos-section-label mb-2">Proposal Preview</div>
+                <div class="famos-proposal-preview-card">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+                        <div>
+                            <div style="font-size:15px; font-weight:700; color:var(--navy);">
+                                @selected.CarrierName
+                            </div>
+                            <div class="famos-meta-text">
+                                @(selected.CoverageDetails ?? "Coverage details not recorded")
+                            </div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div style="font-size:20px; font-weight:700; color:var(--green);">
+                                $@selected.PremiumAmount.ToString("N0")
+                            </div>
+                            <div class="famos-meta-text">annual premium</div>
+                        </div>
+                    </div>
+                    <MudTextField Class="famos-input"
+                                  @bind-Value="_proposalNotes"
+                                  Placeholder="Add notes to this proposal (optional)..."
+                                  Lines="2" />
+                </div>
+            </div>
+        }
+
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <MudButton Class="famos-btn-primary"
+                       StartIcon="@FamosIcons.ChevronRight"
+                       OnClick="CreateAndSend"
+                       Disabled="@(_saving || _selectedQuoteId == Guid.Empty)">
+                Create &amp; Send Proposal →
+            </MudButton>
+            <MudButton Class="famos-btn-outline"
+                       OnClick="CreateDraft"
+                       Disabled="@(_saving || _selectedQuoteId == Guid.Empty)">
+                Save as Draft
+            </MudButton>
+            @if (_selectedQuoteId == Guid.Empty)
+            {
+                <span class="famos-meta-text">Select a quote to continue</span>
+            }
+        </div>
+
+        @if (_draftCreated)
+        {
+            <MudAlert Severity="Severity.Success" Class="mt-3">
+                Draft proposal saved. Go to Client Decision stage to send it.
+            </MudAlert>
+        }
+    }
+
+</div>
 
 @code {
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
     [Parameter] public EventCallback OnAdvanced { get; set; }
-    private Guid _recommendedId;
-    private bool _saving;
 
-    private async Task SendProposal()
+    private Guid   _selectedQuoteId;
+    private string _proposalNotes = "";
+    private bool   _saving;
+    private bool   _draftCreated;
+
+    protected override void OnInitialized()
+    {
+        // Pre-select previously recommended quote if any
+        var recommended = Opportunity.Quotes.FirstOrDefault(q => q.IsRecommended);
+        if (recommended != null)
+            _selectedQuoteId = recommended.Id;
+    }
+
+    private void SelectQuote(Guid quoteId)
+    {
+        _selectedQuoteId = quoteId;
+        _draftCreated    = false;
+    }
+
+    private async Task CreateAndSend()
     {
         _saving = true;
         try
         {
-            var userId = await UserSession.GetUserIdAsync();
-            await Lifecycle.SendProposalAsync(Opportunity.Id, _recommendedId, userId);
-            Snackbar.Add("Proposal sent.", Severity.Success);
+            var userId     = await UserSession.GetUserIdAsync();
+            var proposalId = await Lifecycle.CreateProposalAsync(
+                Opportunity.Id, _selectedQuoteId, _proposalNotes.Trim(), userId);
+            await Lifecycle.MarkProposalSentAsync(Opportunity.Id, proposalId, userId);
+            Snackbar.Add("Proposal sent to client.", Severity.Success);
             await OnAdvanced.InvokeAsync();
         }
         catch (LifecycleValidationException ex)
@@ -64,8 +162,21 @@
         finally { _saving = false; }
     }
 
-    private void RecordAnotherQuote()
+    private async Task CreateDraft()
     {
-        Snackbar.Add("Sprint 3: inline add-quote form. Use Pipeline to navigate.", Severity.Info);
+        _saving = true;
+        try
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.CreateProposalAsync(
+                Opportunity.Id, _selectedQuoteId, _proposalNotes.Trim(), userId);
+            _draftCreated = true;
+            Snackbar.Add("Draft proposal saved.", Severity.Info);
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
     }
 }

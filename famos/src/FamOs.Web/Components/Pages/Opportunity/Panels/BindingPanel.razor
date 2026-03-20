@@ -3,42 +3,150 @@
 @inject UserSessionService UserSession
 @inject ISnackbar Snackbar
 @using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+@using FamOs.Web.Theme
 
-<MudCard Class="mb-4">
-    <MudCardHeader>
-        <CardHeaderContent>
-            <MudText Typo="Typo.h6">Binding in Progress</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">
-                Awaiting carrier binder confirmation. Record when received.
-            </MudText>
-        </CardHeaderContent>
-    </MudCardHeader>
-    <MudCardContent>
-        <MudDatePicker @bind-Date="_effectiveDate" Label="Policy Effective Date" />
-    </MudCardContent>
-    <MudCardActions>
-        <MudButton Class="famos-btn-primary"
-                   OnClick="RecordBinder"
-                   Disabled="@(_saving || !_effectiveDate.HasValue)">
-            Binder Received — Mark Bound
-        </MudButton>
-    </MudCardActions>
-</MudCard>
+<div class="famos-panel">
+
+    <div class="famos-panel-header">
+        <span class="famos-panel-title">Bind Execution</span>
+        @if (Opportunity.BindRequestSubmittedAt.HasValue)
+        {
+            <span class="famos-meta-text">
+                Request submitted @Opportunity.BindRequestSubmittedAt.Value.ToLocalTime().ToString("MMM d")
+            </span>
+        }
+    </div>
+
+    @* Bind tracking fields *@
+    <div class="famos-section-label mb-2">Bind Request Tracking</div>
+    <MudGrid Spacing="2" Class="mb-4">
+        <MudItem xs="12" sm="6">
+            <MudTextField Class="famos-input"
+                          @bind-Value="_confirmationNumber"
+                          Label="Carrier Confirmation Number"
+                          Placeholder="e.g. GW-2026-99341" />
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudDatePicker @bind-Date="_expectedBindDate"
+                           Label="Expected Bind Date" Class="mb-0" />
+        </MudItem>
+        <MudItem xs="12">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--text);">
+                <input type="checkbox" @bind="_bindRequestSubmitted" style="accent-color:var(--sky);" />
+                Bind request submitted to carrier
+            </label>
+        </MudItem>
+    </MudGrid>
+
+    <MudButton Class="famos-btn-outline"
+               OnClick="SaveTracking"
+               Disabled="_saving">
+        Save Tracking
+    </MudButton>
+
+    <MudDivider Class="my-4" />
+
+    @* Confirm Bound — requires effective date *@
+    <div class="famos-section-label mb-2">Confirm Binder Received</div>
+    <MudGrid Spacing="2" Class="mb-3">
+        <MudItem xs="12" sm="5">
+            <MudDatePicker @bind-Date="_effectiveDate"
+                           Label="Policy Effective Date *" />
+        </MudItem>
+        <MudItem xs="12" sm="5">
+            <MudDatePicker @bind-Date="_expirationDate"
+                           Label="Policy Expiration Date" />
+        </MudItem>
+        <MudItem xs="12" sm="5">
+            <MudTextField Class="famos-input"
+                          @bind-Value="_policyNumber"
+                          Label="Policy Number" />
+        </MudItem>
+        <MudItem xs="12" sm="5">
+            <MudTextField Class="famos-input"
+                          @bind-Value="_coverageType"
+                          Label="Coverage Type"
+                          Placeholder="e.g. Commercial Auto + GL" />
+        </MudItem>
+    </MudGrid>
+
+    <MudButton Class="famos-btn-primary"
+               OnClick="ConfirmBound"
+               Disabled="@(_saving || !_effectiveDate.HasValue)">
+        Binder Received — Mark Bound ✓
+    </MudButton>
+
+    @if (!_effectiveDate.HasValue)
+    {
+        <div class="famos-meta-text mt-1">Policy effective date required to mark bound</div>
+    }
+
+</div>
 
 @code {
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
     [Parameter] public EventCallback OnAdvanced { get; set; }
-    private DateTime? _effectiveDate;
+
     private bool _saving;
 
-    private async Task RecordBinder()
+    // Tracking fields
+    private string    _confirmationNumber   = "";
+    private DateTime? _expectedBindDate;
+    private bool      _bindRequestSubmitted;
+
+    // Bound confirmation fields
+    private DateTime? _effectiveDate;
+    private DateTime? _expirationDate;
+    private string    _policyNumber   = "";
+    private string    _coverageType   = "";
+
+    protected override void OnInitialized()
+    {
+        _confirmationNumber   = Opportunity.BindConfirmationNumber ?? "";
+        _bindRequestSubmitted = Opportunity.BindRequestSubmittedAt.HasValue;
+    }
+
+    private async Task SaveTracking()
     {
         _saving = true;
         try
         {
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.UpdateBindTrackingAsync(
+                Opportunity.Id,
+                _confirmationNumber.Trim(),
+                _bindRequestSubmitted,
+                userId);
+            Snackbar.Add("Bind tracking saved.", Severity.Success);
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task ConfirmBound()
+    {
+        if (!_effectiveDate.HasValue) return;
+        _saving = true;
+        try
+        {
             var userId  = await UserSession.GetUserIdAsync();
-            var effDate = DateOnly.FromDateTime(_effectiveDate!.Value);
-            await Lifecycle.RecordBinderReceivedAsync(Opportunity.Id, effDate, userId);
+            var effDate = DateOnly.FromDateTime(_effectiveDate.Value);
+            var expDate = _expirationDate.HasValue
+                ? DateOnly.FromDateTime(_expirationDate.Value)
+                : (DateOnly?)null;
+
+            await Lifecycle.RecordBinderReceivedAsync(
+                Opportunity.Id,
+                effDate,
+                expDate,
+                _policyNumber.Trim().Length > 0 ? _policyNumber.Trim() : null,
+                _coverageType.Trim().Length > 0 ? _coverageType.Trim() : null,
+                userId);
+
             Snackbar.Add("Policy bound! Post-bind tasks created.", Severity.Success);
             await OnAdvanced.InvokeAsync();
         }

@@ -271,6 +271,27 @@ var logger = app.Logger;
         // Sprint 6 — new column on opportunities (PascalCase for existing table)
         try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN PrimaryContactId CHAR(36) NULL"); }
         catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("PrimaryContactId column already exists"); }
+
+        // Sprint 7 — proposal enhancements
+        async Task TryAddColumnAsync(string sql) {
+            try { await db.Database.ExecuteSqlRawAsync(sql); }
+            catch (MySqlException ex) when (ex.Number == 1060) { /* already exists */ }
+        }
+
+        await TryAddColumnAsync("ALTER TABLE proposals ADD COLUMN carrier_name VARCHAR(200) NULL");
+        await TryAddColumnAsync("ALTER TABLE proposals ADD COLUMN coverage_types VARCHAR(200) NULL");
+        await TryAddColumnAsync("ALTER TABLE proposals ADD COLUMN proposal_date DATETIME NULL");
+        await TryAddColumnAsync("ALTER TABLE proposals ADD COLUMN notes LONGTEXT NULL");
+
+        // Sprint 7 — policy_shadow_records enhancements
+        await TryAddColumnAsync("ALTER TABLE policy_shadow_records ADD COLUMN policy_number VARCHAR(100) NULL");
+        await TryAddColumnAsync("ALTER TABLE policy_shadow_records ADD COLUMN expiration_date DATE NULL");
+        await TryAddColumnAsync("ALTER TABLE policy_shadow_records ADD COLUMN coverage_type VARCHAR(100) NULL");
+        await TryAddColumnAsync("ALTER TABLE policy_shadow_records ADD COLUMN bound_at DATETIME NULL");
+
+        // Sprint 7 — opportunity bind tracking
+        await TryAddColumnAsync("ALTER TABLE opportunities ADD COLUMN bind_confirmation_number VARCHAR(100) NULL");
+        await TryAddColumnAsync("ALTER TABLE opportunities ADD COLUMN bind_request_submitted_at DATETIME NULL");
     }
     catch (Exception ex)
     {

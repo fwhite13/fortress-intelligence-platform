@@ -1,0 +1,83 @@
+@namespace FamOs.Web.Components.Panels
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+@using FamOs.Web.Theme
+
+<div class="famos-panel">
+
+    <div class="famos-panel-header">
+        <span class="famos-panel-title">Closed — Not Bound</span>
+        <span style="color:var(--red); font-size:12px; font-weight:600;">Closed</span>
+    </div>
+
+    <div class="famos-closed-card mb-4">
+
+        <div class="famos-policy-field" style="border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px;">
+            <div class="famos-policy-label">Close Reason</div>
+            <div class="famos-policy-value" style="color:var(--red);">
+                @GetCloseReasonLabel(Opportunity.CloseReason)
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(Opportunity.CloseNotes))
+        {
+            <div class="famos-policy-field" style="border-bottom:1px solid var(--border); padding-bottom:10px; margin-bottom:10px;">
+                <div class="famos-policy-label">Notes</div>
+                <div style="font-size:13px; color:var(--text); font-style:italic;">
+                    @Opportunity.CloseNotes
+                </div>
+            </div>
+        }
+
+        @if (Opportunity.CloseReason == CloseReason.LostToCompetitor)
+        {
+            <div>
+                <div class="famos-policy-label mb-1">Lost To Competitor</div>
+                <div class="famos-meta-text">
+                    The client selected an alternative carrier or broker.
+                    Review the carrier submissions to identify which markets were competitive.
+                </div>
+                @if (Opportunity.Submissions.Any(s => s.Status == SubmissionStatus.QuoteReceived))
+                {
+                    <div class="mt-2">
+                        <div class="famos-section-label mb-1">Competitive Quotes Received</div>
+                        @foreach (var sub in Opportunity.Submissions.Where(s => s.Status == SubmissionStatus.QuoteReceived))
+                        {
+                            <div class="famos-meta-text">· @sub.CarrierName</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+            <div class="famos-policy-label mb-1">Opportunity Summary</div>
+            <div class="famos-meta-text">
+                @if (Opportunity.EstimatedPremium.HasValue)
+                {
+                    <span>Est. premium: $@Opportunity.EstimatedPremium.Value.ToString("N0") · </span>
+                }
+                <span>Submissions: @Opportunity.Submissions.Count · </span>
+                <span>Quotes received: @Opportunity.Quotes.Count</span>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+
+    private static string GetCloseReasonLabel(CloseReason? reason) => reason switch
+    {
+        CloseReason.NotQuoted              => "Not Quoted — carrier(s) declined",
+        CloseReason.PriceTooHigh           => "Price Too High",
+        CloseReason.LostToCompetitor       => "Lost to Competitor",
+        CloseReason.ClientDeclinedCoverage => "Client Declined Coverage",
+        CloseReason.PolicyLapsed           => "Policy Lapsed",
+        CloseReason.Other                  => "Other",
+        null                               => "Not recorded",
+        _                                  => reason.ToString()!
+    };
+}

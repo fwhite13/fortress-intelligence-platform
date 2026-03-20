@@ -1,34 +1,135 @@
 @namespace FamOs.Web.Components.Panels
 @using FamOs.Web.Data.Entities
+@using FamOs.Web.Theme
 
-<MudCard Class="mb-4">
-    <MudCardHeader>
-        <CardHeaderContent>
-            <MudText Typo="Typo.h6">Bound — Post-Bind Processing</MudText>
-        </CardHeaderContent>
-    </MudCardHeader>
-    <MudCardContent>
-        @if (Opportunity.PolicyShadow != null)
-        {
-            <MudText Typo="Typo.body2">
-                Policy effective: @Opportunity.PolicyShadow.PolicyEffectiveDate?.ToString("MMM d, yyyy")
-            </MudText>
-            <MudText Typo="Typo.body2">
-                Carrier: @Opportunity.PolicyShadow.CarrierName
-            </MudText>
-            @if (Opportunity.PolicyShadow.PremiumAmount.HasValue)
+<div class="famos-panel">
+
+    <div class="famos-panel-header">
+        <span class="famos-panel-title">Policy Summary</span>
+        <span style="color:var(--green); font-size:12px; font-weight:700;">
+            <MudIcon Icon="@FamosIcons.CheckCircle"
+                     Style="font-size:14px; vertical-align:middle; margin-right:3px;" />
+            BOUND
+        </span>
+    </div>
+
+    @if (Opportunity.PolicyShadow == null)
+    {
+        <div class="famos-empty-state">
+            <MudIcon Icon="@FamosIcons.Document" Class="famos-empty-icon" />
+            <div>Policy shadow record not found. Contact support.</div>
+        </div>
+    }
+    else
+    {
+        var shadow = Opportunity.PolicyShadow;
+
+        <div class="famos-policy-card mb-4">
+            <div class="famos-policy-grid">
+
+                <div class="famos-policy-field">
+                    <div class="famos-policy-label">Carrier</div>
+                    <div class="famos-policy-value">@(shadow.CarrierName ?? "—")</div>
+                </div>
+
+                <div class="famos-policy-field">
+                    <div class="famos-policy-label">Policy Number</div>
+                    <div class="famos-policy-value">@(shadow.PolicyNumber ?? "Pending")</div>
+                </div>
+
+                <div class="famos-policy-field">
+                    <div class="famos-policy-label">Annual Premium</div>
+                    <div class="famos-policy-value famos-policy-value--premium">
+                        @(shadow.PremiumAmount.HasValue
+                            ? $"${shadow.PremiumAmount.Value:N0}"
+                            : "—")
+                    </div>
+                </div>
+
+                <div class="famos-policy-field">
+                    <div class="famos-policy-label">Coverage Type</div>
+                    <div class="famos-policy-value">@(shadow.CoverageType ?? "—")</div>
+                </div>
+
+                <div class="famos-policy-field">
+                    <div class="famos-policy-label">Effective Date</div>
+                    <div class="famos-policy-value">
+                        @(shadow.PolicyEffectiveDate?.ToString("MMMM d, yyyy") ?? "—")
+                    </div>
+                </div>
+
+                <div class="famos-policy-field">
+                    <div class="famos-policy-label">Expiration Date</div>
+                    <div class="famos-policy-value">
+                        @(shadow.ExpirationDate?.ToString("MMMM d, yyyy") ?? "Not recorded")
+                    </div>
+                </div>
+
+                <div class="famos-policy-field">
+                    <div class="famos-policy-label">Bound Date</div>
+                    <div class="famos-policy-value">
+                        @(shadow.BoundAt.HasValue
+                            ? shadow.BoundAt.Value.ToLocalTime().ToString("MMMM d, yyyy")
+                            : shadow.CreatedAt.ToLocalTime().ToString("MMMM d, yyyy"))
+                    </div>
+                </div>
+
+                @* Renewal timer *@
+                @if (shadow.RenewalTimerStart.HasValue)
+                {
+                    var renewalDate   = shadow.RenewalTimerStart.Value.AddYears(1).AddDays(-60);
+                    var today         = DateOnly.FromDateTime(DateTime.Today);
+                    var daysToRenewal = renewalDate.DayNumber - today.DayNumber;
+                    var renewalColor  = daysToRenewal < 30 ? "var(--red)"
+                                      : daysToRenewal < 90 ? "var(--amber)"
+                                      : "var(--muted)";
+                    <div class="famos-policy-field" style="grid-column: 1 / -1;">
+                        <div class="famos-policy-label">Renewal Window Opens</div>
+                        <div class="famos-policy-value" style="color:@renewalColor;">
+                            @renewalDate.ToString("MMMM d, yyyy")
+                            @if (daysToRenewal > 0)
+                            {
+                                <span class="famos-meta-text" style="margin-left:6px;">
+                                    (@daysToRenewal days away)
+                                </span>
+                            }
+                            else
+                            {
+                                <span style="margin-left:6px; font-weight:700; color:var(--red);">
+                                    RENEWAL WINDOW OPEN
+                                </span>
+                            }
+                        </div>
+                    </div>
+                }
+
+            </div>
+        </div>
+
+        <div class="famos-section-label mb-2">Post-Bind Checklist</div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+            @foreach (var item in PostBindItems)
             {
-                <MudText Typo="Typo.body2">
-                    Premium: $@Opportunity.PolicyShadow.PremiumAmount.Value.ToString("N0")
-                </MudText>
+                <div style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text);">
+                    <MudIcon Icon="@FamosIcons.Check"
+                             Style="font-size:14px; color:var(--muted);" />
+                    @item
+                </div>
             }
-        }
-        <MudAlert Severity="Severity.Info" Class="mt-3">
-            Complete post-bind tasks: deliver policy, issue certificates, confirm coverage start.
-        </MudAlert>
-    </MudCardContent>
-</MudCard>
+        </div>
+    }
+
+</div>
 
 @code {
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+
+    private static readonly string[] PostBindItems =
+    {
+        "Deliver binder / policy documents to client",
+        "Issue certificates of insurance",
+        "Confirm premium payment arrangement",
+        "Update policy record in Epic/AMS",
+        "File signed ACORD application",
+    };
 }

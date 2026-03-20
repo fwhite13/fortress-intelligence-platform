@@ -38,6 +38,8 @@ public class Opportunity
     public DateTime?  MarketedAt              { get; set; }
     public DateTime?  ProposalSentAt          { get; set; }
     public DateTime?  ClientDecisionAt        { get; set; }
+    public string?   BindConfirmationNumber   { get; set; }
+    public DateTime? BindRequestSubmittedAt   { get; set; }
     /// <summary>UTC timestamp of the most recent lifecycle stage change. Used for aging calculations.</summary>
     public DateTime?  LastStageTransitionAt   { get; set; }
 

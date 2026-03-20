@@ -107,6 +107,9 @@ else
         case LifecycleStage.Bound:
             <BoundPanel Opportunity="_opp" />
             break;
+        case LifecycleStage.ClosedNotBound:
+            <ClosedNotBoundPanel Opportunity="_opp" />
+            break;
         default:
             <MudAlert Severity="Severity.Info">
                 This opportunity is @_opp.LifecycleStage.

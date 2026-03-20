@@ -6,11 +6,22 @@ public class Proposal
     public Guid     OpportunityId       { get; set; }
     public Guid     RecommendedQuoteId  { get; set; }
     public int      Version             { get; set; } = 1;
-    public string   Status              { get; set; } = "draft"; // draft | sent | accepted | declined
-    public DateTime CreatedAt           { get; set; } = DateTime.UtcNow;
+
+    /// <summary>"draft" | "sent" | "accepted" | "declined"</summary>
+    public string   Status              { get; set; } = "draft";
+
+    // Sprint 7 additions
+    public string?  CarrierName         { get; set; }
+    public string?  CoverageTypes       { get; set; }
+    public DateTime ProposalDate        { get; set; } = DateTime.UtcNow;
+    public string?  Notes               { get; set; }
+
     public DateTime? SentAt             { get; set; }
     public DateTime? ClientDecisionAt   { get; set; }
-    public string?  DeclineReason       { get; set; }
+    public string?   DeclineReason      { get; set; }
+
+    // Audit
+    public DateTime CreatedAt           { get; set; } = DateTime.UtcNow;
 
     public Opportunity Opportunity      { get; set; } = default!;
 }

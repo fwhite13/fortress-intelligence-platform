@@ -792,3 +792,116 @@
 
 /* Secondary panels container */
 .famos-secondary-panels { display: flex; flex-direction: column; gap: 0; }
+
+/* ── Sprint 7: Quote comparison table ────────────────────────── */
+.famos-quote-table { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.famos-quote-header-row,
+.famos-quote-row {
+    display: grid;
+    grid-template-columns: 1fr 100px 1fr 60px;
+    gap: 12px;
+    padding: 10px 14px;
+    align-items: center;
+}
+.famos-quote-header-row {
+    background: var(--cream);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+}
+.famos-quote-row {
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+}
+.famos-quote-row:last-child { border-bottom: none; }
+.famos-quote-row:hover { background: var(--cream); }
+.famos-quote-row--selected { background: rgba(0,144,208,0.05); border-left: 3px solid var(--sky); }
+.famos-quote-premium { font-size: 14px; font-weight: 700; color: var(--green); }
+
+.famos-radio-circle {
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto;
+}
+.famos-radio-circle--active { background: var(--sky); border-color: var(--sky); }
+
+/* ── Sprint 7: Proposal preview card ─────────────────────────── */
+.famos-proposal-preview-card {
+    padding: 14px;
+    border: 1px solid var(--sky);
+    border-radius: 8px;
+    background: rgba(0,144,208,0.03);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.famos-section-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--muted);
+}
+
+/* ── Sprint 7: Proposal detail card ──────────────────────────── */
+.famos-proposal-detail-card {
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--white);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* ── Sprint 7: Policy grid (BoundPanel) ───────────────────────── */
+.famos-policy-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.famos-policy-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+}
+.famos-policy-field {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+}
+.famos-policy-field:nth-child(even) { border-right: none; }
+.famos-policy-field:last-child,
+.famos-policy-field:nth-last-child(2) { border-bottom: none; }
+.famos-policy-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+    margin-bottom: 3px;
+}
+.famos-policy-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--navy);
+}
+.famos-policy-value--premium {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--green);
+}
+
+/* ── Sprint 7: Closed not bound card ─────────────────────────── */
+.famos-closed-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    background: var(--cream);
+}

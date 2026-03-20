@@ -42,6 +42,9 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.CloseNotes).HasColumnType("longtext");
             e.Property(x => x.LastStageTransitionAt).HasColumnType("datetime");
             e.Property(x => x.PrimaryContactId).HasColumnType("char(36)");
+            // Sprint 7 column mappings
+            e.Property(x => x.BindConfirmationNumber).HasMaxLength(100).HasColumnName("bind_confirmation_number");
+            e.Property(x => x.BindRequestSubmittedAt).HasColumnType("datetime").HasColumnName("bind_request_submitted_at");
         });
 
         // Submission
@@ -77,6 +80,11 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.Id).HasColumnType("char(36)");
             e.Property(x => x.OpportunityId).HasColumnType("char(36)");
             e.Property(x => x.RecommendedQuoteId).HasColumnType("char(36)");
+            // Sprint 7 column mappings
+            e.Property(x => x.Notes).HasColumnType("longtext");
+            e.Property(x => x.CarrierName).HasMaxLength(200);
+            e.Property(x => x.CoverageTypes).HasMaxLength(200);
+            e.Property(x => x.ProposalDate).HasColumnName("proposal_date");
             e.HasOne(x => x.Opportunity).WithMany(o => o.Proposals).HasForeignKey(x => x.OpportunityId);
         });
 
@@ -87,6 +95,11 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.Id).HasColumnType("char(36)");
             e.Property(x => x.OpportunityId).HasColumnType("char(36)");
             e.Property(x => x.PremiumAmount).HasPrecision(18, 2);
+            // Sprint 7 column mappings
+            e.Property(x => x.PolicyNumber).HasMaxLength(100).HasColumnName("policy_number");
+            e.Property(x => x.ExpirationDate).HasColumnType("date").HasColumnName("expiration_date");
+            e.Property(x => x.CoverageType).HasMaxLength(100).HasColumnName("coverage_type");
+            e.Property(x => x.BoundAt).HasColumnType("datetime").HasColumnName("bound_at");
             e.HasOne(x => x.Opportunity).WithOne(o => o.PolicyShadow).HasForeignKey<PolicyShadowRecord>(x => x.OpportunityId);
         });
 

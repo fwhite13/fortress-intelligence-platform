@@ -3,51 +3,160 @@
 @inject UserSessionService UserSession
 @inject ISnackbar Snackbar
 @using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
+@using FamOs.Web.Theme
 
-<MudCard Class="mb-4">
-    <MudCardHeader>
-        <CardHeaderContent>
-            <MudText Typo="Typo.h6">Client Decision</MudText>
-            <MudText Typo="Typo.body2" Color="Color.Secondary">
-                Proposal sent. Awaiting client acceptance or re-market request.
-            </MudText>
-        </CardHeaderContent>
-    </MudCardHeader>
-    <MudCardContent>
-        @if (Opportunity.ProposalSentAt.HasValue)
+<div class="famos-panel">
+
+    @{
+        var sentProposal = Opportunity.Proposals.FirstOrDefault(p => p.Status == "sent");
+        var acceptedProposal = Opportunity.Proposals.FirstOrDefault(p => p.Status == "accepted");
+    }
+
+    @if (sentProposal == null && acceptedProposal == null)
+    {
+        <div class="famos-empty-state">
+            <MudIcon Icon="@FamosIcons.Document" Class="famos-empty-icon" />
+            <div>No sent proposal found. Return to Quotes Received to send a proposal.</div>
+        </div>
+    }
+    else
+    {
+        var activeProposal = acceptedProposal ?? sentProposal!;
+
+        <div class="famos-panel-header">
+            <span class="famos-panel-title">Proposal</span>
+            <span class="@GetProposalStatusClass(activeProposal.Status)">
+                @GetProposalStatusLabel(activeProposal.Status)
+            </span>
+        </div>
+
+        @* Proposal details card *@
+        <div class="famos-proposal-detail-card mb-4">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+                <div>
+                    <div class="famos-contact-name" style="font-size:15px;">
+                        @(activeProposal.CarrierName ?? "Carrier not recorded")
+                    </div>
+                    @if (!string.IsNullOrEmpty(activeProposal.CoverageTypes))
+                    {
+                        <div class="famos-meta-text">@activeProposal.CoverageTypes</div>
+                    }
+                    @if (activeProposal.SentAt.HasValue)
+                    {
+                        <div class="famos-meta-text">
+                            Sent @activeProposal.SentAt.Value.ToLocalTime().ToString("MMM d, yyyy 'at' h:mm tt")
+                        </div>
+                    }
+                </div>
+                @{
+                    var quote = Opportunity.Quotes.FirstOrDefault(q => q.Id == activeProposal.RecommendedQuoteId);
+                }
+                @if (quote != null)
+                {
+                    <div style="text-align:right;">
+                        <div style="font-size:20px; font-weight:700; color:var(--green);">
+                            $@quote.PremiumAmount.ToString("N0")
+                        </div>
+                        <div class="famos-meta-text">annual premium</div>
+                    </div>
+                }
+            </div>
+            @if (!string.IsNullOrEmpty(activeProposal.Notes))
+            {
+                <div class="famos-meta-text" style="margin-top:8px; font-style:italic;">
+                    @activeProposal.Notes
+                </div>
+            }
+        </div>
+
+        @* Response recording — only for sent proposals *@
+        @if (activeProposal.Status == "sent")
         {
-            <MudText Typo="Typo.body2">
-                Proposal sent @Opportunity.ProposalSentAt.Value.ToLocalTime().ToString("MMM d, yyyy 'at' h:mm tt")
-            </MudText>
+            <div class="famos-section-label mb-2">Record Client Response</div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                <MudButton Class="famos-btn-primary"
+                           StartIcon="@FamosIcons.Check"
+                           OnClick="() => RecordResponse(true)"
+                           Disabled="_saving">
+                    Client Accepted →
+                </MudButton>
+                <MudButton Class="famos-btn-danger"
+                           OnClick="OpenDeclineDialog"
+                           Disabled="_saving">
+                    Client Declined
+                </MudButton>
+                <MudButton Class="famos-btn-outline"
+                           OnClick="ReopenMarket"
+                           Disabled="_saving">
+                    Reopen Market
+                </MudButton>
+            </div>
         }
-    </MudCardContent>
-    <MudCardActions>
-        <MudButton Class="famos-btn-primary"
-                   OnClick="RequestBind" Disabled="_saving">
-            Request Bind
-        </MudButton>
-        <MudButton Class="famos-btn-outline"
-                   OnClick="ReopenMarket" Disabled="_saving">
-            Reopen Market
-        </MudButton>
-    </MudCardActions>
-</MudCard>
+        else if (activeProposal.Status == "accepted")
+        {
+            <div style="display:flex; align-items:center; gap:8px; padding:10px 14px;
+                        border:1px solid var(--green); border-radius:8px; background:rgba(5,150,105,0.05);">
+                <MudIcon Icon="@FamosIcons.CheckCircle" Style="color:var(--green); font-size:18px;" />
+                <MudText Typo="Typo.body2" Style="color:var(--green); font-weight:600;">
+                    Client accepted — advancing to binding
+                </MudText>
+            </div>
+        }
+
+        @* Decline dialog state *@
+        @if (_showDeclineForm)
+        {
+            <div class="mt-3" style="padding:12px 14px; border:1px solid var(--red); border-radius:8px; background:rgba(220,38,38,0.03);">
+                <div class="famos-section-label mb-2">Decline Reason</div>
+                <MudTextField Class="famos-input"
+                              @bind-Value="_declineReason"
+                              Placeholder="Why did the client decline? (optional)"
+                              Lines="2" />
+                <div style="display:flex; gap:8px; margin-top:8px;">
+                    <MudButton Class="famos-btn-danger"
+                               OnClick="() => RecordResponse(false)"
+                               Disabled="_saving">
+                        Confirm Decline
+                    </MudButton>
+                    <MudButton Class="famos-btn-outline"
+                               OnClick="() => _showDeclineForm = false">
+                        Cancel
+                    </MudButton>
+                </div>
+            </div>
+        }
+    }
+
+</div>
 
 @code {
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
     [Parameter] public EventCallback OnAdvanced { get; set; }
-    private bool _saving;
 
-    private async Task RequestBind()
+    private bool   _saving;
+    private bool   _showDeclineForm;
+    private string _declineReason = "";
+
+    private void OpenDeclineDialog() => _showDeclineForm = true;
+
+    private async Task RecordResponse(bool accepted)
     {
+        var proposal = Opportunity.Proposals.FirstOrDefault(p => p.Status == "sent");
+        if (proposal == null) return;
+
         _saving = true;
         try
         {
-            var userId       = await UserSession.GetUserIdAsync();
-            var winningQuote = Opportunity.Quotes.FirstOrDefault(q => q.IsRecommended)
-                               ?? Opportunity.Quotes.First();
-            await Lifecycle.RequestBindAsync(Opportunity.Id, winningQuote.Id, userId);
-            Snackbar.Add("Bind requested.", Severity.Success);
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.RecordClientResponseAsync(
+                Opportunity.Id, proposal.Id, accepted, _declineReason, userId);
+
+            if (accepted)
+                Snackbar.Add("Client accepted — advancing to Binding.", Severity.Success);
+            else
+                Snackbar.Add("Decline recorded. Reopen market or create a new proposal.", Severity.Info);
+
             await OnAdvanced.InvokeAsync();
         }
         catch (LifecycleValidationException ex)
@@ -73,4 +182,20 @@
         }
         finally { _saving = false; }
     }
+
+    private static string GetProposalStatusLabel(string status) => status switch
+    {
+        "draft"    => "Draft",
+        "sent"     => "Sent — Awaiting Response",
+        "accepted" => "Accepted",
+        "declined" => "Declined",
+        _          => status
+    };
+
+    private static string GetProposalStatusClass(string status) => status switch
+    {
+        "accepted" => "famos-contact-badge-primary",
+        "declined" => "famos-status-pill famos-pill-default",
+        _          => "famos-meta-text"
+    };
 }

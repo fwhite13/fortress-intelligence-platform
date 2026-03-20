@@ -153,6 +153,162 @@ public class LifecycleCommandService
         });
     }
 
+    /// <summary>
+    /// Creates a draft proposal linked to a recommended quote.
+    /// Does NOT advance lifecycle stage. Must call MarkProposalSentAsync to advance.
+    /// </summary>
+    public async Task<Guid> CreateProposalAsync(
+        Guid opportunityId,
+        Guid recommendedQuoteId,
+        string? notes,
+        string actorUserId)
+    {
+        return await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var opp = await LoadOpportunityWithDetailsAsync(opportunityId);
+
+            Validate(opp.LifecycleStage == LifecycleStage.QuotesReceived,
+                "Proposals can only be created at the Quotes Received stage");
+            Validate(opp.Quotes.Any(q => q.Id == recommendedQuoteId),
+                "Recommended quote not found on this opportunity");
+
+            // Mark quote as recommended
+            foreach (var q in opp.Quotes) q.IsRecommended = false;
+            var winningQuote = opp.Quotes.First(q => q.Id == recommendedQuoteId);
+            winningQuote.IsRecommended = true;
+
+            var proposal = new Proposal
+            {
+                OpportunityId      = opportunityId,
+                RecommendedQuoteId = recommendedQuoteId,
+                CarrierName        = winningQuote.CarrierName,
+                CoverageTypes      = winningQuote.CoverageDetails,
+                ProposalDate       = DateTime.UtcNow,
+                Status             = "draft",
+                Notes              = notes?.Trim(),
+            };
+            _db.Proposals.Add(proposal);
+            opp.UpdatedAt = DateTime.UtcNow;
+
+            await WriteActivityAsync(opp.Id, "proposal_created",
+                $"Proposal drafted: {winningQuote.CarrierName} ${winningQuote.PremiumAmount:N0}",
+                actorUserId);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+            return proposal.Id;
+        });
+    }
+
+    /// <summary>
+    /// Marks a draft proposal as sent and advances lifecycle to CLIENT_DECISION.
+    /// </summary>
+    public async Task MarkProposalSentAsync(
+        Guid opportunityId,
+        Guid proposalId,
+        string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var opp = await LoadOpportunityWithDetailsAsync(opportunityId);
+
+            Validate(opp.LifecycleStage == LifecycleStage.QuotesReceived,
+                "MarkProposalSent requires stage QUOTES_RECEIVED");
+
+            var proposal = opp.Proposals.FirstOrDefault(p => p.Id == proposalId)
+                ?? throw new LifecycleValidationException("Proposal not found on this opportunity");
+            Validate(proposal.Status == "draft",
+                "Only draft proposals can be marked as sent");
+
+            proposal.Status = "sent";
+            proposal.SentAt = DateTime.UtcNow;
+
+            opp.LifecycleStage        = LifecycleStage.ClientDecision;
+            opp.ProposalSentAt        = DateTime.UtcNow;
+            opp.LastStageTransitionAt = DateTime.UtcNow;
+            opp.UpdatedAt             = DateTime.UtcNow;
+            opp.Version++;
+
+            await RecomputeSignalAsync(opp);
+            await WriteActivityAsync(opp.Id, "proposal_sent",
+                $"Proposal sent to client: {proposal.CarrierName}", actorUserId);
+            await WriteOutboxAsync(DomainEventType.ProposalSent, new
+            {
+                opportunity_id = opportunityId,
+                proposal_id    = proposalId,
+                sent_at        = DateTime.UtcNow
+            });
+            await CreateTasksForStageAsync(opp.Id, LifecycleStage.ClientDecision);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+    }
+
+    /// <summary>
+    /// Records client acceptance or decline on a sent proposal.
+    /// On acceptance: advances lifecycle to BINDING.
+    /// On decline: marks proposal declined; opportunity stays at CLIENT_DECISION.
+    /// </summary>
+    public async Task RecordClientResponseAsync(
+        Guid opportunityId,
+        Guid proposalId,
+        bool accepted,
+        string? declineReason,
+        string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var opp = await LoadOpportunityWithDetailsAsync(opportunityId);
+
+            Validate(opp.LifecycleStage == LifecycleStage.ClientDecision,
+                "RecordClientResponse requires stage CLIENT_DECISION");
+
+            var proposal = opp.Proposals.FirstOrDefault(p => p.Id == proposalId)
+                ?? throw new LifecycleValidationException("Proposal not found");
+            Validate(proposal.Status == "sent",
+                "Can only record response on a sent proposal");
+
+            proposal.Status            = accepted ? "accepted" : "declined";
+            proposal.ClientDecisionAt  = DateTime.UtcNow;
+            proposal.DeclineReason     = accepted ? null : declineReason;
+
+            if (accepted)
+            {
+                var winningQuoteId = proposal.RecommendedQuoteId;
+                Validate(opp.Quotes.Any(q => q.Id == winningQuoteId), "Winning quote not found");
+
+                opp.LifecycleStage        = LifecycleStage.Binding;
+                opp.ClientDecisionAt      = DateTime.UtcNow;
+                opp.LastStageTransitionAt = DateTime.UtcNow;
+                opp.UpdatedAt             = DateTime.UtcNow;
+                opp.Version++;
+
+                await RecomputeSignalAsync(opp);
+                await WriteActivityAsync(opp.Id, "client_accepted",
+                    $"Client accepted proposal: {proposal.CarrierName}", actorUserId);
+                await WriteOutboxAsync(DomainEventType.BindRequested, new
+                {
+                    opportunity_id   = opportunityId,
+                    winning_quote_id = winningQuoteId,
+                    proposal_id      = proposalId
+                });
+                await CreateTasksForStageAsync(opp.Id, LifecycleStage.Binding);
+            }
+            else
+            {
+                await WriteActivityAsync(opp.Id, "client_declined",
+                    $"Client declined proposal: {declineReason ?? "no reason given"}", actorUserId);
+            }
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+    }
+
     public async Task SendProposalAsync(Guid opportunityId, Guid recommendedQuoteId, string actorUserId)
     {
         await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
@@ -253,8 +409,46 @@ public class LifecycleCommandService
         });
     }
 
-    public async Task RecordBinderReceivedAsync(Guid opportunityId,
-        DateOnly effectiveDate, string actorUserId)
+    /// <summary>
+    /// Saves bind tracking fields (confirmation number, submitted flag).
+    /// Does NOT advance lifecycle. Stage must be BINDING.
+    /// </summary>
+    public async Task UpdateBindTrackingAsync(
+        Guid opportunityId,
+        string? confirmationNumber,
+        bool bindRequestSubmitted,
+        string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var opp = await LoadOpportunityAsync(opportunityId);
+
+            Validate(opp.LifecycleStage == LifecycleStage.Binding,
+                "UpdateBindTracking requires stage BINDING");
+
+            opp.BindConfirmationNumber = confirmationNumber?.Trim();
+            if (bindRequestSubmitted && !opp.BindRequestSubmittedAt.HasValue)
+                opp.BindRequestSubmittedAt = DateTime.UtcNow;
+
+            opp.UpdatedAt = DateTime.UtcNow;
+
+            await WriteActivityAsync(opp.Id, "bind_tracking_updated",
+                $"Bind tracking updated — confirmation: {confirmationNumber ?? "none"}",
+                actorUserId);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+    }
+
+    public async Task RecordBinderReceivedAsync(
+        Guid opportunityId,
+        DateOnly effectiveDate,
+        DateOnly? expirationDate,
+        string? policyNumber,
+        string? coverageType,
+        string actorUserId)
     {
         await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
@@ -265,21 +459,25 @@ public class LifecycleCommandService
                 "RecordBinderReceived requires stage BINDING");
 
             var winningQuote = opp.Quotes.FirstOrDefault(q => q.IsRecommended);
-            var shadow = new PolicyShadowRecord {
+            var shadow = new PolicyShadowRecord
+            {
                 OpportunityId       = opportunityId,
                 WinningQuoteId      = winningQuote?.Id,
                 CarrierName         = winningQuote?.CarrierName,
                 PolicyEffectiveDate = effectiveDate,
+                ExpirationDate      = expirationDate,
+                PolicyNumber        = policyNumber?.Trim(),
+                CoverageType        = coverageType?.Trim(),
                 PremiumAmount       = winningQuote?.PremiumAmount,
                 RenewalTimerStart   = effectiveDate,
-                SnapshotJson        = winningQuote?.CoverageDetails
+                SnapshotJson        = winningQuote?.CoverageDetails,
+                BoundAt             = DateTime.UtcNow,
             };
             _db.PolicyShadowRecords.Add(shadow);
 
-            var from = opp.LifecycleStage;
-            opp.LifecycleStage          = LifecycleStage.Bound;
-            opp.LastStageTransitionAt   = DateTime.UtcNow;
-            opp.UpdatedAt               = DateTime.UtcNow;
+            opp.LifecycleStage        = LifecycleStage.Bound;
+            opp.LastStageTransitionAt = DateTime.UtcNow;
+            opp.UpdatedAt             = DateTime.UtcNow;
             opp.Version++;
 
             await RecomputeSignalAsync(opp);
@@ -606,11 +804,12 @@ public class LifecycleCommandService
     private async Task<Opportunity> LoadOpportunityWithDetailsAsync(Guid id)
     {
         var opp = await _db.Opportunities
-            .Include(o => o.Flags.Where(f => f.IsActive))
-            .Include(o => o.Quotes)
             .Include(o => o.Submissions)
-            .Include(o => o.Proposals)
+            .Include(o => o.Quotes)
             .Include(o => o.Contacts)
+            .Include(o => o.Proposals)
+            .Include(o => o.Tasks.Where(t => t.Status == "open"))
+            .Include(o => o.Flags)
             .FirstOrDefaultAsync(o => o.Id == id)
             ?? throw new NotFoundException($"Opportunity {id} not found");
         return opp;
