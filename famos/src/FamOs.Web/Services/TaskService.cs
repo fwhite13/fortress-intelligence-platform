@@ -24,6 +24,7 @@ public class TaskService
         var results = await db.Tasks
             .Include(t => t.Opportunity)
             .Where(t => t.Status == "open"
+                && t.Opportunity.OwnerUserId != null
                 && t.Opportunity.OwnerUserId == userId
                 && !t.Opportunity.IsClosed)
             .OrderBy(t => t.DueAt.HasValue ? 0 : 1)
@@ -89,6 +90,7 @@ public class TaskService
         var query = db.Tasks
             .Include(t => t.Opportunity)
             .Where(t => t.Status == "open"
+                && t.Opportunity.OwnerUserId != null
                 && t.Opportunity.OwnerUserId == userId
                 && !t.Opportunity.IsClosed);
 
@@ -118,6 +120,7 @@ public class TaskService
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.Tasks
             .Where(t => t.Status == "open"
+                && t.Opportunity.OwnerUserId != null
                 && t.Opportunity.OwnerUserId == userId
                 && !t.Opportunity.IsClosed)
             .CountAsync();

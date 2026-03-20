@@ -338,6 +338,18 @@ var logger = app.Logger;
     {
         logger.LogError(ex, "[FAM OS] Database initialization failed");
     }
+
+    // WI972: Backfill OwnerUserId — empty string treated as unowned, breaks task filter
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE opportunities SET OwnerUserId = NULL WHERE OwnerUserId = ''");
+        logger.LogInformation("WI972: Backfilled empty OwnerUserId to NULL");
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("WI972: OwnerUserId backfill skipped: {Msg}", ex.Message);
+    }
 }
 
 // ── Middleware pipeline ──
@@ -352,9 +364,9 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// QA bypass — dev/staging only (FAMOS_QA_BYPASS=true env var required)
+// QA bypass — dev only (FAMOS_QA_BYPASS=true env var required)
 // MUST be after UseAuthorization() so the bypass identity is not clobbered by the cookie auth check
-if (app.Environment.IsDevelopment() ||
+if (app.Environment.IsDevelopment() &&
     Environment.GetEnvironmentVariable("FAMOS_QA_BYPASS") == "true")
 {
     app.Use(async (context, next) =>
@@ -398,7 +410,7 @@ app.MapGet("/qa/status", () => Results.Ok(new {
 // QA login — issues a real auth cookie for Blazor Server bypass
 app.MapGet("/qa/login", async (HttpContext ctx) =>
 {
-    if (!((app.Environment.IsDevelopment() ||
+    if (!((app.Environment.IsDevelopment() &&
            Environment.GetEnvironmentVariable("FAMOS_QA_BYPASS") == "true") &&
           ctx.Request.Query["token"] == "natasha-qa-token-famos-dev"))
     {
