@@ -335,6 +335,7 @@
 .famos-btn-primary:hover {
     background-color: #001840 !important;
 }
+.famos-btn-primary .mud-button-label { color: white !important; }
 
 .famos-btn-outline-sm {
     border-radius: 7px !important;
@@ -359,6 +360,7 @@
 .famos-btn-primary-sm:hover {
     background-color: #001840 !important;
 }
+.famos-btn-primary-sm .mud-button-label { color: white !important; }
 
 /* ── PANEL CARDS (Stage Panels: IntakePanel, etc.) ───────── */
 /* Override MudCard elevation inside stage panels */
@@ -584,8 +586,7 @@
     background: white !important;
     font-size: 0.8125rem !important;
     font-weight: 500 !important;
-    height: 28px !important;
-    padding: 0 12px !important;
+    padding: 5px 12px !important;
     text-transform: none !important;
     letter-spacing: 0 !important;
     box-shadow: none !important;
