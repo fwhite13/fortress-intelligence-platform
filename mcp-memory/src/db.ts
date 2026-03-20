@@ -4,23 +4,51 @@ import * as path from 'path';
 import dotenv from 'dotenv';
 dotenv.config();
 
-export const pool = new Pool({
-  host: process.env.PG_HOST || 'localhost',
-  port: parseInt(process.env.PG_PORT || '5433'),
-  database: process.env.PG_DB || 'rag',
-  user: process.env.PG_USER || 'jarvis',
-  password: process.env.PG_PASSWORD,
-  max: 10,
-  idleTimeoutMillis: 30000,
-});
+let pool: Pool | null = null;
+
+async function getDbCredentials(): Promise<{
+  host: string; port: number; database: string; user: string; password: string;
+}> {
+  // Local dev: use env vars directly (no Secrets Manager)
+  if (process.env.PGHOST) {
+    return {
+      host:     process.env.PGHOST,
+      port:     parseInt(process.env.PGPORT ?? '5432', 10),
+      database: process.env.PGDATABASE ?? 'mcp_memory',
+      user:     process.env.PGUSER ?? 'mcp_memory',
+      password: process.env.PGPASSWORD ?? '',
+    };
+  }
+
+  // AWS ECS: fetch from Secrets Manager
+  const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager');
+  const sm = new SecretsManagerClient({ region: process.env.AWS_REGION ?? 'us-east-1' });
+  const secretId = process.env.DB_SECRET_ARN ?? 'mcp-memory/db-credentials';
+  const resp = await sm.send(new GetSecretValueCommand({ SecretId: secretId }));
+  return JSON.parse(resp.SecretString!) as {
+    host: string; port: number; database: string; user: string; password: string;
+  };
+}
 
 export async function initDb(): Promise<void> {
+  if (pool) return; // already initialized
+
+  const creds = await getDbCredentials();
+  pool = new Pool({
+    host:     creds.host,
+    port:     creds.port,
+    database: creds.database,
+    user:     creds.user,
+    password: creds.password,
+    ssl:      process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false,
+    max:      5,
+    idleTimeoutMillis: 30_000,
+  });
+
   const sql = fs.readFileSync(path.join(__dirname, '../migrations/001_init.sql'), 'utf8');
   await pool.query(sql);
 
-  // Ensure embedding column is vector(1024) — idempotent column migration.
-  // CREATE TABLE IF NOT EXISTS skips column changes on existing tables, so we
-  // check atttypmod: vector(1024) stores typmod=1028, vector(1536) stores typmod=1540.
+  // Idempotent column migration: ensure vector(1024) not vector(1536)
   const dimCheck = await pool.query<{ atttypmod: number }>(
     `SELECT a.atttypmod FROM pg_attribute a
      JOIN pg_class c ON c.oid = a.attrelid
@@ -32,4 +60,9 @@ export async function initDb(): Promise<void> {
   }
 
   console.log('[db] Migrations applied');
+}
+
+export function getPool(): Pool {
+  if (!pool) throw new Error('DB not initialized — call initDb() first');
+  return pool;
 }

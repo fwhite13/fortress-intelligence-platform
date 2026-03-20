@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.0.0",
+    "@aws-sdk/client-secrets-manager": "^3.1013.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "bcrypt": "^5.1.0",
     "dotenv": "^16.0.0",

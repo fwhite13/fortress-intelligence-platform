@@ -1,4 +1,4 @@
-import { pool } from '../db';
+import { getPool } from '../db';
 import { embedText } from '../embed';
 import { CcMemoryUser } from '../auth';
 
@@ -36,7 +36,7 @@ export async function memoryAdd(params: AddParams, user: CcMemoryUser): Promise<
 
   const userId = scope === 'personal' ? user.id : null;
 
-  const result = await pool.query<{ id: string; created_at: Date }>(
+  const result = await getPool().query<{ id: string; created_at: Date }>(
     `INSERT INTO cc_memory_entries (user_id, scope, project, content, entry_type, source, embedding, created_by)
      VALUES ($1, $2, $3, $4, $5, 'manual', $6::vector, $7)
      RETURNING id, created_at`,

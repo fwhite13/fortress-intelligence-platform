@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
 import { Request } from 'express';
-import { pool } from './db';
+import { getPool } from './db';
 
 export interface CcMemoryUser {
   id: string;
@@ -24,7 +24,7 @@ async function getActiveUsers(): Promise<CcMemoryUser[]> {
   if (userCache && now - userCache.fetchedAt < CACHE_TTL_MS) {
     return userCache.users;
   }
-  const result = await pool.query<CcMemoryUser>(
+  const result = await getPool().query<CcMemoryUser>(
     'SELECT id, username, email, api_token, scope, is_active FROM cc_memory_users WHERE is_active = true'
   );
   userCache = { users: result.rows, fetchedAt: now };
@@ -43,7 +43,7 @@ export async function authenticate(req: Request): Promise<CcMemoryUser | null> {
   const users = await getActiveUsers();
   for (const user of users) {
     if (await bcrypt.compare(token, user.api_token)) {
-      pool.query('UPDATE cc_memory_users SET last_used_at = NOW() WHERE id = $1', [user.id])
+      getPool().query('UPDATE cc_memory_users SET last_used_at = NOW() WHERE id = $1', [user.id])
         .catch(() => {});
       return user;
     }

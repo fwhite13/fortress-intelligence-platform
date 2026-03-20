@@ -15,7 +15,7 @@ from pathlib import Path
 CONFIG_PATH = Path.home() / ".config" / "fip-memory" / "config.json"
 CONFIG_PATH_LEGACY = Path.home() / ".fip-memory.json"
 
-DEFAULT_SERVER = "https://steamserver.tail7a7e88.ts.net:3100"
+DEFAULT_SERVER = "https://mcp.fortressam.ai"
 
 
 def load_config() -> dict:

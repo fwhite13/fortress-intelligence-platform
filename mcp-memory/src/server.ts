@@ -124,7 +124,7 @@ app.all('/mcp', async (req, res) => {
   await server.close();
 });
 
-const PORT = parseInt(process.env.PORT || '3100');
+const PORT = parseInt(process.env.PORT ?? '8080', 10);
 
 async function main(): Promise<void> {
   await initDb();

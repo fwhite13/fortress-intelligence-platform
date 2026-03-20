@@ -1,4 +1,4 @@
-import { pool } from '../db';
+import { getPool } from '../db';
 import { embedText } from '../embed';
 import { CcMemoryUser } from '../auth';
 
@@ -58,7 +58,7 @@ export async function memorySearch(params: SearchParams, user: CcMemoryUser): Pr
     queryParams = [embeddingStr, user.id, limit * 2];
   }
 
-  const result = await pool.query<MemoryRow>(query, queryParams);
+  const result = await getPool().query<MemoryRow>(query, queryParams);
   return deduplicateAndRank(result.rows, limit);
 }
 

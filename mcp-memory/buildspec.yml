@@ -1,0 +1,22 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-7)
+      - ECR_URI=$AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/mcp-memory
+  build:
+    commands:
+      - cd mcp-memory
+      - docker build -t $ECR_URI:$IMAGE_TAG -t $ECR_URI:latest .
+  post_build:
+    commands:
+      - docker push $ECR_URI:$IMAGE_TAG
+      - docker push $ECR_URI:latest
+      - aws ecs update-service --cluster fortress-tools-cluster --service mcp-memory --force-new-deployment --region us-east-1
+      - printf '[{"name":"mcp-memory","imageUri":"%s"}]' $ECR_URI:$IMAGE_TAG > imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json

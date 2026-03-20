@@ -1,4 +1,4 @@
-import { pool } from '../db';
+import { getPool } from '../db';
 import { CcMemoryUser } from '../auth';
 
 interface ListParams {
@@ -53,6 +53,6 @@ export async function memoryList(params: ListParams, user: CcMemoryUser): Promis
     LIMIT $2
   `;
 
-  const result = await pool.query<MemoryRow>(query, queryParams);
+  const result = await getPool().query<MemoryRow>(query, queryParams);
   return result.rows;
 }

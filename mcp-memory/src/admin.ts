@@ -1,4 +1,4 @@
-import { pool, initDb } from './db';
+import { getPool, initDb } from './db';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { invalidateUserCache } from './auth';
@@ -18,7 +18,7 @@ function parseArgs(argv: string[]): Record<string, string> {
 async function addUser(username: string, email: string, scope = 'user'): Promise<void> {
   const plaintext = crypto.randomBytes(32).toString('hex');
   const hash = await bcrypt.hash(plaintext, 12);
-  const result = await pool.query<{ id: string }>(
+  const result = await getPool().query<{ id: string }>(
     `INSERT INTO cc_memory_users (username, email, api_token, scope)
      VALUES ($1, $2, $3, $4) RETURNING id`,
     [username, email, hash, scope]
@@ -31,7 +31,7 @@ async function addUser(username: string, email: string, scope = 'user'): Promise
 async function resetToken(username: string): Promise<void> {
   const plaintext = crypto.randomBytes(32).toString('hex');
   const hash = await bcrypt.hash(plaintext, 12);
-  const result = await pool.query<{ id: string }>(
+  const result = await getPool().query<{ id: string }>(
     `UPDATE cc_memory_users SET api_token = $1, last_used_at = NULL WHERE username = $2 RETURNING id`,
     [hash, username]
   );
@@ -45,7 +45,7 @@ async function resetToken(username: string): Promise<void> {
 }
 
 async function listUsers(): Promise<void> {
-  const result = await pool.query<{
+  const result = await getPool().query<{
     id: string;
     username: string;
     email: string;
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
       process.exit(1);
   }
 
-  await pool.end();
+  await getPool().end();
 }
 
 main().catch(console.error);
