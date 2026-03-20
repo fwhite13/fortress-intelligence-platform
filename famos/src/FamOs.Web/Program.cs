@@ -128,14 +128,19 @@ builder.Services.Configure<AffinityConfig>(
     builder.Configuration.GetSection("AffinityConfig"));
 
 // ── Fortress API client (QuoteScraperService) ──
-var fortressBase = builder.Configuration["FortressApi:BaseUrl"] ?? "https://api.fortressam.ai";
+var fortressBase = builder.Configuration["FortressApi:Endpoint"]
+        ?? builder.Configuration["FortressApi:BaseUrl"]
+        ?? "https://api.fortressam.ai";
 builder.Services.AddHttpClient("FortressApi", c =>
 {
     c.BaseAddress = new Uri(fortressBase);
     c.DefaultRequestHeaders.Add("X-Api-Key",
-        builder.Configuration["FortressApi:Key"] ?? "246191f33f470f136ebb800516f8e10f");
+        builder.Configuration["FortressApi:ApiKey"]
+            ?? builder.Configuration["FortressApi:Key"]
+            ?? "246191f33f470f136ebb800516f8e10f");
     c.DefaultRequestHeaders.Add("X-Api-Secret",
-        builder.Configuration["FortressApi:Secret"]
+        builder.Configuration["FortressApi:ApiSecret"]
+            ?? builder.Configuration["FortressApi:Secret"]
             ?? "77a883a60a2d941b0c1f038881150141dd3655f449c5dadf97e6ffb7066faf4d");
 });
 builder.Services.AddScoped<IQuoteScraperService, QuoteScraperService>();
