@@ -26,13 +26,13 @@ async function getDbCredentials(): Promise<{
   const secretId = process.env.DB_SECRET_ARN ?? 'mcp-memory/db-credentials';
   const resp = await sm.send(new GetSecretValueCommand({ SecretId: secretId }));
   const raw = JSON.parse(resp.SecretString!) as {
-    host: string; port: number; database: string; username: string; password: string;
+    host: string; port: number; dbname: string; username: string; password: string;
   };
   return {
     host:     raw.host,
     port:     raw.port ?? 5432,
-    database: raw.database ?? 'mcp_memory',
-    user:     raw.username, // RDS Secrets Manager uses 'username'; pg Pool needs 'user'
+    database: raw.dbname ?? 'mcp_memory', // RDS SM uses 'dbname'; pg Pool needs 'database'
+    user:     raw.username, // RDS SM uses 'username'; pg Pool needs 'user'
     password: raw.password,
   };
 }
