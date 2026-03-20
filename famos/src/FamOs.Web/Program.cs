@@ -378,6 +378,42 @@ app.MapGet("/qa/status", () => Results.Ok(new {
     message     = "QA bypass active"
 })).AllowAnonymous();
 
+// QA login — issues a real auth cookie for Blazor Server bypass
+app.MapGet("/qa/login", async (HttpContext ctx) =>
+{
+    if (!((app.Environment.IsDevelopment() ||
+           Environment.GetEnvironmentVariable("FAMOS_QA_BYPASS") == "true") &&
+          ctx.Request.Query["token"] == "natasha-qa-token-famos-dev"))
+    {
+        return Results.Unauthorized();
+    }
+
+    var claims = new[]
+    {
+        new System.Security.Claims.Claim("preferred_username", "qa@fortressam.ai"),
+        new System.Security.Claims.Claim("name", "QA Tester"),
+        new System.Security.Claims.Claim("oid", "00000000-0000-0000-0000-000000000001"),
+        new System.Security.Claims.Claim("http://schemas.microsoft.com/identity/claims/objectidentifier", "00000000-0000-0000-0000-000000000001"),
+        new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "QA Tester"),
+        new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "qa-bypass-user"),
+        new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Email, "qa@fortressam.ai"),
+    };
+    var identity = new System.Security.Claims.ClaimsIdentity(claims, "QABypass");
+    var principal = new System.Security.Claims.ClaimsPrincipal(identity);
+
+    await ctx.SignInAsync(
+        CookieAuthenticationDefaults.AuthenticationScheme,
+        principal,
+        new Microsoft.AspNetCore.Authentication.AuthenticationProperties
+        {
+            IsPersistent = false,
+            ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8)
+        });
+
+    var returnUrl = ctx.Request.Query["returnUrl"].FirstOrDefault() ?? "/";
+    return Results.Redirect(returnUrl);
+}).AllowAnonymous().DisableAntiforgery();
+
 // ── Auth redirect helper ──
 app.MapGet("/auth/redirect-to-login", (HttpContext ctx) =>
 {
