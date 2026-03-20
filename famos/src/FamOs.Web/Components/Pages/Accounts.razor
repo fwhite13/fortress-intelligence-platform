@@ -5,10 +5,12 @@
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDbContextFactory<FamOs.Web.Data.FamOsDbContext> DbFactory
+@inject IDialogService DialogService
 @using FamOs.Web.Data.Entities
 @using FamOs.Web.Services
 @using FamOs.Web.Theme
 @using Microsoft.EntityFrameworkCore
+@using FamOs.Web.Components.Dialogs
 
 <PageTitle>Accounts — FAM OS</PageTitle>
 
@@ -65,7 +67,7 @@ else
         @foreach (var account in _filteredAccounts)
         {
             <div class="famos-account-row"
-                 @onclick="() => GoToPipeline(account.CompanyName)">
+                 @onclick="() => GoToAccount(account)">
                 <div class="famos-account-col-name">
                     <span style="font-weight:600; color:var(--navy);">@account.CompanyName</span>
                 </div>
@@ -169,8 +171,35 @@ else
         finally { _syncing = false; }
     }
 
-    private void GoToPipeline(string companyName)
+    private async Task GoToAccount(Account account)
     {
-        Nav.NavigateTo($"/pipeline?company={Uri.EscapeDataString(companyName)}");
+        if (account.ActiveOppCount == 0)
+        {
+            var parameters = new DialogParameters<OpportunityCreateDialog>
+            {
+                { x => x.InitialCompanyName, account.CompanyName }
+            };
+            var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+            await DialogService.ShowAsync<OpportunityCreateDialog>("New Opportunity", parameters, options);
+        }
+        else if (account.ActiveOppCount == 1)
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var affinityId = await AffinitySvc.GetCurrentAffinityIdAsync();
+            var opp = await db.Opportunities
+                .Where(o => !o.IsClosed
+                    && o.AffinityId == affinityId
+                    && EF.Functions.Like(o.Name, $"%{account.CompanyName}%"))
+                .Select(o => o.Id)
+                .FirstOrDefaultAsync();
+            if (opp != default)
+                Nav.NavigateTo($"/opportunity/{opp}");
+            else
+                Nav.NavigateTo($"/pipeline?company={Uri.EscapeDataString(account.CompanyName)}");
+        }
+        else
+        {
+            Nav.NavigateTo($"/pipeline?company={Uri.EscapeDataString(account.CompanyName)}");
+        }
     }
 }

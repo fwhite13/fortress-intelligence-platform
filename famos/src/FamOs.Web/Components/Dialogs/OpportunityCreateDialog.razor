@@ -5,7 +5,7 @@
 <MudDialog>
     <TitleContent>New Opportunity</TitleContent>
     <DialogContent>
-        <MudTextField @bind-Value="_name" Label="Account Name" Required="true"
+        <MudTextField @bind-Value="_name" Label="Company / Account Name" Required="true"
                       Immediate="true" Class="mb-3" />
         <MudNumericField @bind-Value="_premium" Label="Estimated Premium ($)"
                          Format="N0" Class="mb-3" />
@@ -24,10 +24,18 @@
 @code {
     [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
 
+    [Parameter] public string? InitialCompanyName { get; set; }
+
     private string _name = "";
     private decimal? _premium;
     private DateTime? _effectiveDate;
     private bool _saving;
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrWhiteSpace(InitialCompanyName))
+            _name = InitialCompanyName;
+    }
 
     private void Cancel() => MudDialog.Cancel();
 

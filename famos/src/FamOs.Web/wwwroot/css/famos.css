@@ -347,12 +347,17 @@
 }
 
 .famos-btn-primary-sm {
+    background-color: #002050 !important;
+    color: white !important;
     font-size: 12.5px !important;
     padding: 5px 14px !important;
     text-transform: none !important;
     border-radius: 7px !important;
     font-weight: 600 !important;
     letter-spacing: 0 !important;
+}
+.famos-btn-primary-sm:hover {
+    background-color: #001840 !important;
 }
 
 /* ── PANEL CARDS (Stage Panels: IntakePanel, etc.) ───────── */
