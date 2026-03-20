@@ -236,6 +236,18 @@ var logger = app.Logger;
         try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"); }
         catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("UpdatedAt column already exists"); }
 
+        // WI939: Fix submissions.Status column type mismatch (longtext → int)
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE submissions MODIFY COLUMN Status INT NOT NULL DEFAULT 0");
+            logger.LogInformation("WI939: submissions.Status migrated to INT");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("WI939: submissions.Status MODIFY skipped (already INT or failed): {Msg}", ex.Message);
+        }
+
         // Sprint 6 — new tables (contacts, opportunity_documents)
         // Note: CHAR(36) FK columns must use ascii/ascii_general_ci to match opportunities.Id collation (Aurora MySQL 5.7-compat)
         await db.Database.ExecuteSqlRawAsync("""
