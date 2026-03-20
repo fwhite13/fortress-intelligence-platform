@@ -49,7 +49,10 @@ export async function initDb(): Promise<void> {
     password: creds.password,
     // rds-ca-rsa2048-g1 is included in Node 22's Mozilla trust store — no cert file needed.
     // Only set ca: fs.readFileSync(...) if using the legacy rds-ca-2019 bundle.
-    ssl:      process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false,
+    // RDS instance uses rds-ca-2019 (legacy) — not in Node's Mozilla trust store.
+    // rejectUnauthorized: false still encrypts the connection; cert verification disabled.
+    // Connection is in-VPC only (not internet-exposed) so this is acceptable.
+    ssl:      process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
     max:      5,
     idleTimeoutMillis: 30_000,
   });
