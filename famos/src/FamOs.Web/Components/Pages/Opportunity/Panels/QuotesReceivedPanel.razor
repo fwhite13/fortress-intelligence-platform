@@ -41,7 +41,7 @@
                 <div class="@($"famos-quote-row{(isSelected ? " famos-quote-row--selected" : "")}")"
                      @onclick="() => SelectQuote(quote.Id)">
                     <div class="famos-quote-col-carrier">
-                        <span style="font-weight: 600; color: var(--navy);">@quote.CarrierName</span>
+                        <span class="famos-text-navy famos-fw-600">@quote.CarrierName</span>
                     </div>
                     <div class="famos-quote-col-premium">
                         <span class="famos-quote-premium">$@quote.PremiumAmount.ToString("N0")</span>

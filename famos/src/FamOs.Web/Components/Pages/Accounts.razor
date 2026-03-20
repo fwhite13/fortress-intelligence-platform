@@ -69,7 +69,7 @@ else
             <div class="famos-account-row"
                  @onclick="async () => await GoToAccount(account)">
                 <div class="famos-account-col-name">
-                    <span style="font-weight:600; color:var(--navy);">@account.CompanyName</span>
+                    <span class="famos-text-navy famos-fw-600">@account.CompanyName</span>
                 </div>
                 <div class="famos-account-col-location">
                     @if (!string.IsNullOrEmpty(account.City) || !string.IsNullOrEmpty(account.State))

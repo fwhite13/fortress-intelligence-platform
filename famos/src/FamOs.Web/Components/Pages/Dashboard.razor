@@ -57,7 +57,7 @@ else if (_summary != null)
                       Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
                 <div style="padding:14px 16px; border-bottom:1px solid var(--border);
                             display:flex; justify-content:space-between; align-items:center;">
-                    <MudText Typo="Typo.subtitle2" Style="color:var(--navy);">
+                    <MudText Typo="Typo.subtitle2" Class="famos-text-navy">
                         Needs Attention
                     </MudText>
                     <MudChip T="string" Size="Size.Small" Color="Color.Error">
@@ -79,7 +79,7 @@ else if (_summary != null)
                                     cursor:pointer;"
                              @onclick="() => GoToOpportunity(opp.Id)">
                             <div>
-                                <MudText Typo="Typo.body2" Style="font-weight:600; color:var(--navy);">
+                                <MudText Typo="Typo.body2" Class="famos-text-navy famos-fw-600">
                                     @opp.Name
                                 </MudText>
                                 <MudText Typo="Typo.caption" Color="Color.Secondary">
@@ -99,7 +99,7 @@ else if (_summary != null)
             <MudPaper Elevation="0"
                       Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
                 <div style="padding:14px 16px; border-bottom:1px solid var(--border);">
-                    <MudText Typo="Typo.subtitle2" Style="color:var(--navy);">Pipeline Distribution</MudText>
+                    <MudText Typo="Typo.subtitle2" Class="famos-text-navy">Pipeline Distribution</MudText>
                 </div>
                 <div style="padding:12px 16px;">
                     @foreach (var stage in Enum.GetValues<LifecycleStage>()
@@ -128,13 +128,13 @@ else if (_summary != null)
                 <MudPaper Elevation="0" Class="mt-3"
                           Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
                     <div style="padding:14px 16px; border-bottom:1px solid var(--border);">
-                        <MudText Typo="Typo.subtitle2" Style="color:var(--navy);">Recent Activity</MudText>
+                        <MudText Typo="Typo.subtitle2" Class="famos-text-navy">Recent Activity</MudText>
                     </div>
                     @foreach (var act in _summary.RecentActivity)
                     {
                         <div style="padding:8px 16px; border-bottom:1px solid var(--border);
                                     font-size:12px; color:var(--text);">
-                            <span style="color:var(--muted);">
+                            <span class="famos-text-muted">
                                 @act.OccurredAt.ToLocalTime().ToString("MMM d h:mm tt") ·
                             </span>
                             @act.Description

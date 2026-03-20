@@ -595,6 +595,28 @@
     border-color: #f87171 !important;
 }
 
+/* Text utilities */
+.famos-text-navy { color: var(--navy); }
+.famos-text-success { color: var(--green); }
+.famos-text-muted { color: var(--muted); }
+.famos-fw-600 { font-weight: 600; }
+.famos-fw-700 { font-weight: 700; }
+
+/* Icon button */
+.famos-btn-icon {
+  min-width: 32px !important;
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  color: var(--navy) !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.famos-btn-icon:hover {
+  background: var(--hover) !important;
+}
+
 /* Inputs — standard */
 .famos-input .mud-input-root {
     border-radius: 6px !important;
