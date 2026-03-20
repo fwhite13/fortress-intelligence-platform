@@ -332,8 +332,11 @@ if (!app.Environment.IsDevelopment())
 
 app.UseStaticFiles();
 app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
 
 // QA bypass — dev/staging only (FAMOS_QA_BYPASS=true env var required)
+// MUST be after UseAuthorization() so the bypass identity is not clobbered by the cookie auth check
 if (app.Environment.IsDevelopment() ||
     Environment.GetEnvironmentVariable("FAMOS_QA_BYPASS") == "true")
 {
@@ -347,8 +350,10 @@ if (app.Environment.IsDevelopment() ||
                 new System.Security.Claims.Claim("preferred_username", "qa@fortressam.ai"),
                 new System.Security.Claims.Claim("name", "QA Tester"),
                 new System.Security.Claims.Claim("oid", "00000000-0000-0000-0000-000000000001"),
+                new System.Security.Claims.Claim("http://schemas.microsoft.com/identity/claims/objectidentifier", "00000000-0000-0000-0000-000000000001"),
                 new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "QA Tester"),
                 new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "qa-bypass-user"),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Email, "qa@fortressam.ai"),
             };
             var identity = new System.Security.Claims.ClaimsIdentity(claims, "QABypass");
             context.User = new System.Security.Claims.ClaimsPrincipal(identity);
@@ -357,8 +362,6 @@ if (app.Environment.IsDevelopment() ||
     });
 }
 
-app.UseAuthentication();
-app.UseAuthorization();
 app.UseAntiforgery();
 
 // ── Health check ──
