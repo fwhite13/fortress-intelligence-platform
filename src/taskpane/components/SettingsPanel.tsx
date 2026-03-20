@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { setApiKey } from '../services/storage';
-import { sendChat, fetchKbList, fetchProjectList } from '../services/faitApi';
+import { sendChat, fetchKbList, fetchProjectList, listDevKbDocuments, uploadDevKbDocument, deleteDevKbDocument } from '../services/faitApi';
 import { getAuthHeader, clearAuth } from '../services/authService';
 import type { FaitUser } from '../services/authService';
 import { saveSetting } from '../services/settings';
 import ModelPicker from './ModelPicker';
-import type { KbInfo, ProjectInfo } from '../services/faitApi';
+import type { KbInfo, ProjectInfo, DevKbDocument } from '../services/faitApi';
 import { loadNamedRanges, syncRegistry, removeNamedRange, renameNamedRange } from '../services/namedRangeStorage';
 import { deleteNamedRange, renameWorkbookNamedRange, listWorkbookNamedRanges } from '../services/excelWriter';
 import type { FaitNamedRange } from '../services/namedRangeStorage';
@@ -38,6 +38,16 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [kbToggles, setKbToggles] = useState<Record<string, boolean>>({});
   const [kbLoading, setKbLoading] = useState(false);
 
+  // ── WI863: Dev KB section ────────────────────────────────────────────────────
+  const [devKbDocs, setDevKbDocs] = useState<DevKbDocument[]>([]);
+  const [devKbLoading, setDevKbLoading] = useState(false);
+  const [devKbError, setDevKbError] = useState<string | null>(null);
+  const [devKbUploading, setDevKbUploading] = useState(false);
+  const [devKbUploadProgress, setDevKbUploadProgress] = useState(0);
+  const [devKbUploadError, setDevKbUploadError] = useState<string | null>(null);
+  const [devKbDeleteError, setDevKbDeleteError] = useState<string | null>(null);
+  const devKbFileRef = useRef<HTMLInputElement>(null);
+
   // ── Projects section ────────────────────────────────────────────────────────
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>('');
@@ -45,6 +55,19 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // ── Model section ───────────────────────────────────────────────────────────
   const [model, setModel] = useState<'haiku' | 'sonnet'>('sonnet');
+
+  const loadDevKbDocs = async (hdr: Record<string, string>) => {
+    setDevKbLoading(true);
+    setDevKbError(null);
+    try {
+      const { documents } = await listDevKbDocuments(hdr);
+      setDevKbDocs(documents);
+    } catch {
+      setDevKbError('Could not load Dev KB documents.');
+    } finally {
+      setDevKbLoading(false);
+    }
+  };
 
   // ── Sprint 8: Named Ranges section ────────────────────────────────────────
   const [localNamedRanges, setLocalNamedRanges] = useState<FaitNamedRange[]>(namedRangesProp ?? []);
@@ -106,6 +129,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       fetchProjectList(hdr)
         .then((list) => { if (!cancelled) setProjects(list); })
         .finally(() => { if (!cancelled) setProjectsLoading(false); });
+
+      loadDevKbDocs(hdr);
     });
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -209,6 +234,51 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleModelChange = async (m: 'haiku' | 'sonnet') => {
     setModel(m);
     await saveSetting('fait_model', m).catch(() => null);
+  };
+
+  const handleDevKbUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowed = ['.md', '.txt', '.pdf'];
+    const ext = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+    if (!allowed.includes(ext)) {
+      setDevKbUploadError('Only .md, .txt, and .pdf files are accepted. Wrap code files in Markdown first.');
+      if (devKbFileRef.current) devKbFileRef.current.value = '';
+      return;
+    }
+
+    setDevKbUploading(true);
+    setDevKbUploadProgress(0);
+    setDevKbUploadError(null);
+
+    try {
+      const hdr = await getAuthHeader();
+      await uploadDevKbDocument(file, hdr, (pct) => setDevKbUploadProgress(pct));
+      await loadDevKbDocs(hdr);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      if (msg === 'INVALID_KEY') {
+        setDevKbUploadError('Authentication error — please sign in again.');
+      } else {
+        setDevKbUploadError('Upload failed. Try again.');
+      }
+    } finally {
+      setDevKbUploading(false);
+      setDevKbUploadProgress(0);
+      if (devKbFileRef.current) devKbFileRef.current.value = '';
+    }
+  };
+
+  const handleDevKbDelete = async (filename: string) => {
+    setDevKbDeleteError(null);
+    try {
+      const hdr = await getAuthHeader();
+      await deleteDevKbDocument(filename, hdr);
+      setDevKbDocs((prev) => prev.filter((d) => d.filename !== filename));
+    } catch {
+      setDevKbDeleteError('Delete failed. Try again.');
+    }
   };
 
   // ── Styles ──────────────────────────────────────────────────────────────────
@@ -396,6 +466,130 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     transition: 'left 0.2s',
                   }}
                 />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Section: Dev KB ─────────────────────────────────────────────── */}
+        <div style={sectionStyle}>
+          <div style={sectionHeadingStyle}>Dev KB</div>
+          <p style={labelStyle}>
+            Code docs, runbooks, architecture — large-chunk retrieval for CC sessions.
+            All authenticated users can upload.
+          </p>
+          <p style={{ ...labelStyle, color: '#556677', fontSize: '11px' }}>
+            Accepted: <code style={{ color: '#d4af37' }}>.md</code>,{' '}
+            <code style={{ color: '#d4af37' }}>.txt</code>,{' '}
+            <code style={{ color: '#d4af37' }}>.pdf</code> only.
+            Wrap code files (TypeScript, C#, etc.) in a Markdown code block before uploading.
+          </p>
+
+          {/* Upload button */}
+          <div>
+            <input
+              ref={devKbFileRef}
+              type="file"
+              accept=".md,.txt,.pdf"
+              style={{ display: 'none' }}
+              onChange={(e) => void handleDevKbUpload(e)}
+            />
+            <button
+              onClick={() => devKbFileRef.current?.click()}
+              disabled={devKbUploading}
+              style={{
+                background: devKbUploading ? '#243447' : '#1e3a5f',
+                border: '1px solid #2e5f8a',
+                borderRadius: '6px',
+                color: devKbUploading ? '#8899aa' : '#7bb8e8',
+                cursor: devKbUploading ? 'not-allowed' : 'pointer',
+                fontFamily: 'Inter, sans-serif',
+                fontWeight: '600',
+                fontSize: '12px',
+                padding: '7px 14px',
+                transition: 'background 0.15s',
+              }}
+            >
+              {devKbUploading ? `Uploading… ${devKbUploadProgress}%` : '↑ Upload Document'}
+            </button>
+          </div>
+
+          {devKbUploadError && (
+            <div
+              role="alert"
+              style={{
+                color: '#e07070',
+                fontSize: '11px',
+                padding: '5px 8px',
+                background: '#2d1515',
+                borderRadius: '4px',
+                border: '1px solid #4a1515',
+              }}
+            >
+              ⚠ {devKbUploadError}
+            </div>
+          )}
+
+          {/* Document list */}
+          {devKbLoading && (
+            <div style={{ color: '#556677', fontSize: '12px' }}>Loading documents…</div>
+          )}
+          {devKbError && (
+            <div style={{ color: '#556677', fontSize: '11px' }}>{devKbError}</div>
+          )}
+          {devKbDeleteError && (
+            <div style={{ color: '#e07070', fontSize: '11px' }}>{devKbDeleteError}</div>
+          )}
+          {!devKbLoading && !devKbError && devKbDocs.length === 0 && (
+            <div style={{ color: '#445566', fontSize: '11px' }}>
+              No documents yet. Upload a Markdown file to get started.
+            </div>
+          )}
+          {devKbDocs.map((doc, idx) => (
+            <div
+              key={doc.key}
+              style={{
+                ...toggleRowStyle,
+                borderBottom: idx < devKbDocs.length - 1 ? '1px solid #2e3f54' : 'none',
+                padding: '7px 0',
+              }}
+            >
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <div
+                  style={{
+                    color: '#e8edf3',
+                    fontSize: '12px',
+                    fontWeight: '500',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={doc.filename}
+                >
+                  {doc.filename}
+                </div>
+                <div style={{ color: '#556677', fontSize: '10px', marginTop: '1px' }}>
+                  {(doc.size / 1024).toFixed(1)} KB
+                  {' · '}
+                  {new Date(doc.lastModified).toLocaleDateString()}
+                </div>
+              </div>
+              <button
+                title={`Delete ${doc.filename}`}
+                onClick={() => void handleDevKbDelete(doc.filename)}
+                style={{
+                  background: '#2d1515',
+                  color: '#e07070',
+                  border: '1px solid #4a1515',
+                  borderRadius: '4px',
+                  padding: '3px 7px',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  marginLeft: '8px',
+                }}
+              >
+                🗑
               </button>
             </div>
           ))}

@@ -182,3 +182,80 @@ export async function fetchProjectList(authHeader: Record<string, string>): Prom
   const data = await resp.json();
   return data.projects ?? [];
 }
+
+// ── WI863: Dev KB upload/list/delete ─────────────────────────────────────────
+
+export interface DevKbDocument {
+  key: string;       // S3 key, e.g. "kb-docs/dev/firm-architecture.md"
+  filename: string;  // just the filename part, e.g. "firm-architecture.md"
+  size: number;      // bytes
+  lastModified: string; // ISO 8601 date string
+}
+
+export interface DevKbListResponse {
+  documents: DevKbDocument[];
+}
+
+export async function listDevKbDocuments(
+  authHeader: Record<string, string>
+): Promise<DevKbListResponse> {
+  const resp = await fetch(`${FAIT_BASE}/api/haven/kb-documents?tier=developer`, {
+    headers: { ...authHeader },
+  });
+  if (resp.status === 401) throw new Error('INVALID_KEY');
+  if (!resp.ok) throw new Error(`HTTP_${resp.status}`);
+  return resp.json();
+}
+
+export async function uploadDevKbDocument(
+  file: File,
+  authHeader: Record<string, string>,
+  onProgress?: (pct: number) => void
+): Promise<void> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('tier', 'developer');
+
+  // Use XMLHttpRequest for progress tracking
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${FAIT_BASE}/api/haven/kb-upload`);
+
+    // Set auth header(s)
+    for (const [key, value] of Object.entries(authHeader)) {
+      xhr.setRequestHeader(key, value);
+    }
+
+    if (onProgress) {
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      });
+    }
+
+    xhr.onload = () => {
+      if (xhr.status === 401) return reject(new Error('INVALID_KEY'));
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      reject(new Error(`HTTP_${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error('NETWORK_ERROR'));
+    xhr.send(formData);
+  });
+}
+
+export async function deleteDevKbDocument(
+  filename: string,
+  authHeader: Record<string, string>
+): Promise<void> {
+  const resp = await fetch(`${FAIT_BASE}/api/haven/kb-document`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeader,
+    },
+    body: JSON.stringify({ filename, tier: 'developer' }),
+  });
+  if (resp.status === 401) throw new Error('INVALID_KEY');
+  if (!resp.ok) throw new Error(`HTTP_${resp.status}`);
+}
