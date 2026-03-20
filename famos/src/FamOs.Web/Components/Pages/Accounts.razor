@@ -67,7 +67,7 @@ else
         @foreach (var account in _filteredAccounts)
         {
             <div class="famos-account-row"
-                 @onclick="() => GoToAccount(account)">
+                 @onclick="async () => await GoToAccount(account)">
                 <div class="famos-account-col-name">
                     <span style="font-weight:600; color:var(--navy);">@account.CompanyName</span>
                 </div>
