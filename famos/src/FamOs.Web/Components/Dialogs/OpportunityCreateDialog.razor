@@ -13,7 +13,7 @@
                        Class="mb-3" />
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Class="famos-btn-outline" OnClick="Cancel">Cancel</MudButton>
         <MudButton Class="famos-btn-primary"
                    OnClick="Submit" Disabled="@(_saving || string.IsNullOrWhiteSpace(_name))">
             Create
