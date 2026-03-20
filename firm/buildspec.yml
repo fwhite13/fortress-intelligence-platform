@@ -6,6 +6,8 @@ phases:
       - echo Logging in to Amazon ECR...
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+      - echo "Building commit:" && git log -1 --oneline
+      - echo "IMAGE_TAG=$IMAGE_TAG"
   build:
     commands:
       - echo Build started on `date`

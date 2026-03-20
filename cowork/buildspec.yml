@@ -5,6 +5,8 @@ phases:
       - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 742932328420.dkr.ecr.us-east-1.amazonaws.com
       - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
       - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - echo "Building commit:" && git log -1 --oneline
+      - echo "IMAGE_TAG=$IMAGE_TAG"
   build:
     commands:
       - docker build -f cowork/Dockerfile.web -t cowork-web .

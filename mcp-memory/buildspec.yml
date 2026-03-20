@@ -10,6 +10,8 @@ phases:
       - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
       - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-7)
       - ECR_URI=$AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/mcp-memory
+      - echo "Building commit:" && git log -1 --oneline
+      - echo "IMAGE_TAG=$IMAGE_TAG"
   build:
     commands:
       - cd mcp-memory
