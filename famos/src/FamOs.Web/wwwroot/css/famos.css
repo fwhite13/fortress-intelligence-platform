@@ -905,3 +905,57 @@
     padding: 16px;
     background: var(--cream);
 }
+
+/* ── Sprint 8: Pipeline column empty state ───────────────── */
+.famos-pipeline-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    font-style: italic;
+}
+
+/* ── Sprint 8: Accounts table ────────────────────────────── */
+.famos-account-table-header,
+.famos-account-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 120px 140px 32px;
+    gap: 12px;
+    padding: 10px 16px;
+    align-items: center;
+}
+.famos-account-table-header {
+    background: var(--cream);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+}
+.famos-account-row {
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+}
+.famos-account-row:last-child { border-bottom: none; }
+.famos-account-row:hover { background: var(--cream); }
+
+/* ── Sprint 8: Panel error boundary ─────────────────────── */
+.famos-error-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--amber);
+    border-radius: 8px;
+    background: rgba(240, 160, 16, 0.05);
+    margin-bottom: 12px;
+}
+.famos-error-detail {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+    font-family: monospace;
+    word-break: break-all;
+}

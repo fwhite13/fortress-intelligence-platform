@@ -3,8 +3,10 @@
 @using System.Security.Claims
 @using FamOs.Web.Services
 @using FamOs.Web.Domain
+@using FamOs.Web
 @inject NavigationManager _nav
 @inject Microsoft.Extensions.Options.IOptions<AffinityConfig> AffinityOptions
+@inject UserAffinityService AffinitySvc
 @inject OpportunitySearchService SearchSvc
 
 <MudThemeProvider Theme="_theme" />
@@ -109,7 +111,14 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _affinity = AffinityOptions.Value;
+        var affinityConfig = await AffinitySvc.GetCurrentAffinityConfigAsync();
+        _affinity = new AffinityConfig
+        {
+            AffinityId  = affinityConfig?.AffinityId  ?? AffinityOptions.Value.AffinityId,
+            DisplayName = affinityConfig?.DisplayName ?? AffinityOptions.Value.DisplayName,
+            PortalName  = affinityConfig?.PortalName  ?? AffinityOptions.Value.PortalName,
+            LogoPath    = affinityConfig?.LogoPath    ?? AffinityOptions.Value.LogoPath,
+        };
 
         var authProvider = ServiceProvider.GetService<AuthenticationStateProvider>();
         if (authProvider != null)

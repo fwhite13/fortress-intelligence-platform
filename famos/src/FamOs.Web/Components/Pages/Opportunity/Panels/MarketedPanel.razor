@@ -16,6 +16,15 @@
 
     @* Submission status table *@
     <div class="mb-4">
+        @if (!Opportunity.Submissions.Any())
+        {
+            <div class="famos-empty-state">
+                <MudIcon Icon="@FamosIcons.Warning" Class="famos-empty-icon" />
+                <div>No submissions found. This may be a data issue — contact support.</div>
+            </div>
+        }
+        else
+        {
         @foreach (var sub in Opportunity.Submissions)
         {
             var isExpanded = _expandedId == sub.Id;
@@ -64,6 +73,7 @@
                     </div>
                 }
             </div>
+        }
         }
     </div>
 

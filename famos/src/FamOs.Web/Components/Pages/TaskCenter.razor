@@ -7,13 +7,14 @@
 @inject IDialogService DialogService
 @using FamOs.Web.Data.Entities
 @using FamOs.Web.Services
+@using FamOs.Web.Domain
 
 <PageTitle>Task Center — FAM OS</PageTitle>
 
 <div class="famos-page-header famos-page-header-row mb-4">
     <div>
         <h2 class="famos-page-h2">Task Center</h2>
-        <p class="famos-page-sub">@_tasks.Count open task@(_tasks.Count == 1 ? "" : "s") across @_tasks.Select(t => t.Opportunity.Id).Distinct().Count() opportunities</p>
+        <p class="famos-page-sub">@_totalCount open task@(_totalCount == 1 ? "" : "s") across @_tasks.Select(t => t.Opportunity.Id).Distinct().Count() opportunities</p>
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <MudTextField Class="famos-input-filter" @bind-Value="_filterText"
@@ -108,12 +109,26 @@ else
             }
         </MudPaper>
     }
+
+    @if (_hasMore)
+    {
+        <div style="text-align:center; margin-top:12px;">
+            <MudButton Class="famos-btn-outline"
+                       OnClick="LoadMore"
+                       Disabled="_loading">
+                Load more (@(_totalCount - _tasks.Count) remaining)
+            </MudButton>
+        </div>
+    }
 }
 
 @code {
-    private List<TaskWithOpportunity> _tasks = new();
-    private bool _loading = true;
+    private List<TaskWithOpportunity> _tasks     = new();
+    private bool   _loading    = true;
     private string _filterText = "";
+    private int    _page       = 0;
+    private int    _totalCount = 0;
+    private bool   _hasMore    = false;
 
     private IEnumerable<TaskWithOpportunity> FilteredTasks =>
         string.IsNullOrWhiteSpace(_filterText)
@@ -122,12 +137,26 @@ else
                 t.Opportunity.Name.Contains(_filterText, StringComparison.OrdinalIgnoreCase) ||
                 t.Task.Title.Contains(_filterText, StringComparison.OrdinalIgnoreCase));
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync() => await LoadPageAsync(0);
+
+    private async Task LoadPageAsync(int pageIndex)
     {
+        _loading = true;
         var userId = await UserSession.GetUserIdAsync();
-        _tasks   = await TaskSvc.GetOpenTasksForUserAsync(userId);
-        _loading = false;
+        var result = await TaskSvc.GetOpenTasksPagedAsync(userId, pageIndex);
+
+        if (pageIndex == 0)
+            _tasks = result.Items;
+        else
+            _tasks.AddRange(result.Items);
+
+        _page       = pageIndex;
+        _totalCount = result.TotalCount;
+        _hasMore    = result.HasMore;
+        _loading    = false;
     }
+
+    private async Task LoadMore() => await LoadPageAsync(_page + 1);
 
     private async Task CompleteTask(Guid taskId)
     {
@@ -145,8 +174,8 @@ else
         if (result is { Canceled: false })
         {
             // Reload to show newly created task
-            var userId = await UserSession.GetUserIdAsync();
-            _tasks = await TaskSvc.GetOpenTasksForUserAsync(userId);
+            _tasks.Clear();
+            await LoadPageAsync(0);
             StateHasChanged();
         }
     }

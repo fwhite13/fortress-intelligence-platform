@@ -10,13 +10,16 @@ public class OpportunityService
     private readonly IDbContextFactory<FamOsDbContext> _dbFactory;
     private readonly LifecycleCommandService _lifecycle;
     private readonly ILogger<OpportunityService> _logger;
+    private readonly UserAffinityService _affinity;
 
     public OpportunityService(IDbContextFactory<FamOsDbContext> dbFactory,
-        LifecycleCommandService lifecycle, ILogger<OpportunityService> logger)
+        LifecycleCommandService lifecycle, ILogger<OpportunityService> logger,
+        UserAffinityService affinity)
     {
         _dbFactory = dbFactory;
         _lifecycle = lifecycle;
         _logger    = logger;
+        _affinity  = affinity;
     }
 
     public async Task<List<Opportunity>> GetPipelineAsync()
@@ -24,7 +27,6 @@ public class OpportunityService
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.Opportunities
             .Include(o => o.Flags.Where(f => f.IsActive))
-            .Include(o => o.Quotes)
             .Where(o => !o.IsClosed)
             .OrderBy(o => o.UrgencyScore).ThenBy(o => o.UpdatedAt)
             .ToListAsync();
@@ -51,7 +53,73 @@ public class OpportunityService
             .Include(o => o.Tasks.Where(t => t.Status == "open"))
             .Include(o => o.Contacts)
             .Include(o => o.Documents)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(o => o.Id == id);
+    }
+
+    /// <summary>
+    /// Lean load — used by Dashboard urgent list, Task Center opportunity refs.
+    /// Does NOT include all navigation properties. Never use for workspace display.
+    /// </summary>
+    public async Task<Opportunity?> GetByIdLeanAsync(Guid id)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.Opportunities
+            .Include(o => o.Flags.Where(f => f.IsActive))
+            .FirstOrDefaultAsync(o => o.Id == id);
+    }
+
+    public const int PipelinePageSize = 25;
+
+    /// <summary>
+    /// Returns one page of opportunities for a single lifecycle stage.
+    /// Used by Pipeline board per-column pagination.
+    /// </summary>
+    public async Task<OpportunityPage> GetStagePageAsync(
+        LifecycleStage stage, int pageIndex, string? affinityId = null)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var query = db.Opportunities
+            .Include(o => o.Flags.Where(f => f.IsActive))
+            .Where(o => !o.IsClosed && o.LifecycleStage == stage);
+
+        if (!string.IsNullOrEmpty(affinityId))
+            query = query.Where(o => o.AffinityId == affinityId);
+
+        var total = await query.CountAsync();
+        var items = await query
+            .OrderByDescending(o => o.UrgencyScore)
+            .ThenByDescending(o => o.UpdatedAt)
+            .Skip(pageIndex * PipelinePageSize)
+            .Take(PipelinePageSize)
+            .ToListAsync();
+
+        return new OpportunityPage
+        {
+            Items      = items,
+            TotalCount = total,
+            PageIndex  = pageIndex,
+            PageSize   = PipelinePageSize,
+            HasMore    = (pageIndex + 1) * PipelinePageSize < total,
+        };
+    }
+
+    /// <summary>
+    /// Returns paginated stage counts for all pipeline columns (cheap query — counts only).
+    /// </summary>
+    public async Task<Dictionary<LifecycleStage, int>> GetStageSummaryAsync(string? affinityId = null)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var query = db.Opportunities.Where(o => !o.IsClosed);
+        if (!string.IsNullOrEmpty(affinityId))
+            query = query.Where(o => o.AffinityId == affinityId);
+
+        return await query
+            .GroupBy(o => o.LifecycleStage)
+            .Select(g => new { Stage = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Stage, x => x.Count);
     }
 
     public async Task<Guid> CreateOpportunityAsync(string name, string ownerUserId,
@@ -67,6 +135,7 @@ public class OpportunityService
             OwnerUserId          = ownerUserId,
             EstimatedPremium     = estimatedPremium,
             EffectiveDateTarget  = effectiveDateTarget,
+            AffinityId           = await _affinity.GetCurrentAffinityIdAsync(),
         };
         db.Opportunities.Add(opp);
 
@@ -86,50 +155,69 @@ public class OpportunityService
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        var query = db.Opportunities.AsQueryable();
-        if (!string.IsNullOrEmpty(ownerUserId))
-            query = query.Where(o => o.OwnerUserId == ownerUserId);
-
-        var all = await query
-            .Include(o => o.Flags)
-            .Where(o => !o.IsClosed)
-            .ToListAsync();
-
         var urgentSignals = new[]
         {
             DominantSignal.Urgent, DominantSignal.AtRisk, DominantSignal.TimeRisk
         };
 
-        var recent = await db.Activities
+        var baseQuery = db.Opportunities.Where(o => !o.IsClosed);
+        if (!string.IsNullOrEmpty(ownerUserId))
+            baseQuery = baseQuery.Where(o => o.OwnerUserId == ownerUserId);
+
+        // All aggregations as separate DB queries — each is cheap (indexed)
+        var totalActive     = await baseQuery.CountAsync();
+        var timeRiskCount   = await baseQuery.CountAsync(o => urgentSignals.Contains(o.DominantSignal));
+        var decisionNeeded  = await baseQuery.CountAsync(o =>
+            o.LifecycleStage == LifecycleStage.ClientDecision
+            || o.LifecycleStage == LifecycleStage.Binding);
+        var monthStart      = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        var boundThisMonth  = await db.Opportunities.CountAsync(o =>
+            o.LifecycleStage == LifecycleStage.Bound && o.UpdatedAt >= monthStart);
+        var totalPremium    = await baseQuery
+            .Where(o => o.EstimatedPremium.HasValue)
+            .SumAsync(o => o.EstimatedPremium!.Value);
+        var byStage         = await baseQuery
+            .GroupBy(o => o.LifecycleStage)
+            .Select(g => new { Stage = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Stage, x => x.Count);
+
+        // Urgent list: load only top 10, with flags
+        var urgentOpps = await baseQuery
+            .Where(o => urgentSignals.Contains(o.DominantSignal))
+            .Include(o => o.Flags.Where(f => f.IsActive))
+            .OrderByDescending(o =>
+                o.DominantSignal == DominantSignal.Urgent ? 2
+                : o.DominantSignal == DominantSignal.AtRisk ? 1 : 0)
+            .Take(10)
+            .ToListAsync();
+
+        // Recent activity: last 5, global (not filtered by owner)
+        var recentActivity = await db.Activities
             .OrderByDescending(a => a.OccurredAt)
             .Take(5)
             .ToListAsync();
 
-        var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
-
         return new DashboardSummary
         {
-            TotalActive      = all.Count,
-            TimeRiskCount    = all.Count(o => urgentSignals.Contains(o.DominantSignal)),
-            DecisionNeeded   = all.Count(o =>
-                o.LifecycleStage is LifecycleStage.ClientDecision or LifecycleStage.Binding),
-            BoundThisMonth   = await db.Opportunities
-                .CountAsync(o => o.LifecycleStage == LifecycleStage.Bound
-                    && o.UpdatedAt >= monthStart),
-            TotalPremiumAtRisk = all
-                .Where(o => o.EstimatedPremium.HasValue)
-                .Sum(o => o.EstimatedPremium!.Value),
-            UrgentOpportunities = all
-                .Where(o => urgentSignals.Contains(o.DominantSignal))
-                .OrderByDescending(o => o.DominantSignal == DominantSignal.Urgent ? 2
-                                      : o.DominantSignal == DominantSignal.AtRisk  ? 1 : 0)
-                .Take(10)
-                .ToList(),
-            ByStage        = all.GroupBy(o => o.LifecycleStage)
-                .ToDictionary(g => g.Key, g => g.Count()),
-            RecentActivity = recent,
+            TotalActive          = totalActive,
+            TimeRiskCount        = timeRiskCount,
+            DecisionNeeded       = decisionNeeded,
+            BoundThisMonth       = boundThisMonth,
+            TotalPremiumAtRisk   = totalPremium,
+            UrgentOpportunities  = urgentOpps,
+            ByStage              = byStage,
+            RecentActivity       = recentActivity,
         };
     }
+}
+
+public class OpportunityPage
+{
+    public List<Opportunity> Items      { get; init; } = new();
+    public int  TotalCount              { get; init; }
+    public int  PageIndex               { get; init; }
+    public int  PageSize                { get; init; }
+    public bool HasMore                 { get; init; }
 }
 
 public class DashboardSummary

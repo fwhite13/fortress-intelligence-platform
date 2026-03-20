@@ -120,6 +120,9 @@ builder.Services.AddScoped<LifecycleCommandService>();
 builder.Services.AddScoped<OpportunityService>();
 builder.Services.AddScoped<IAmsService, AmsServiceStub>();
 builder.Services.AddScoped<TaskService>();
+builder.Services.AddScoped<UserAffinityService>();
+builder.Services.AddSingleton<IAccountSyncService, AccountSyncService>();
+builder.Services.AddHostedService(sp => (AccountSyncService)sp.GetRequiredService<IAccountSyncService>());
 
 builder.Services.Configure<AffinityConfig>(
     builder.Configuration.GetSection("AffinityConfig"));
@@ -292,6 +295,27 @@ var logger = app.Logger;
         // Sprint 7 — opportunity bind tracking
         await TryAddColumnAsync("ALTER TABLE opportunities ADD COLUMN bind_confirmation_number VARCHAR(100) NULL");
         await TryAddColumnAsync("ALTER TABLE opportunities ADD COLUMN bind_request_submitted_at DATETIME NULL");
+
+        // Sprint 8 — affinity_id on opportunities
+        await TryAddColumnAsync("ALTER TABLE opportunities ADD COLUMN affinity_id VARCHAR(50) NOT NULL DEFAULT 'tig'");
+
+        // Sprint 8 — accounts cache table (CREATE TABLE IF NOT EXISTS — new table, no data)
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS accounts (
+                id              CHAR(36) NOT NULL PRIMARY KEY,
+                affinity_id     VARCHAR(50) NOT NULL DEFAULT '',
+                company_name    VARCHAR(255) NOT NULL DEFAULT '',
+                hubspot_id      VARCHAR(50) NULL,
+                city            VARCHAR(100) NULL,
+                state           VARCHAR(10) NULL,
+                active_opp_count INT NOT NULL DEFAULT 0,
+                last_synced_at  DATETIME NULL,
+                created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_accounts_affinity (affinity_id),
+                INDEX idx_accounts_name (company_name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
     }
     catch (Exception ex)
     {

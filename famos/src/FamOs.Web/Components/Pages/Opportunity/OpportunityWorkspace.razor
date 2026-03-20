@@ -87,28 +87,44 @@ else
     @switch (_opp.LifecycleStage)
     {
         case LifecycleStage.Intake:
-            <IntakePanel Opportunity="_opp" OnAdvanced="Reload" />
+            <PanelErrorBoundary>
+                <IntakePanel Opportunity="_opp" OnAdvanced="Reload" />
+            </PanelErrorBoundary>
             break;
         case LifecycleStage.UnderwritingPrep:
-            <UnderwritingPrepPanel Opportunity="_opp" OnAdvanced="Reload" />
+            <PanelErrorBoundary>
+                <UnderwritingPrepPanel Opportunity="_opp" OnAdvanced="Reload" />
+            </PanelErrorBoundary>
             break;
         case LifecycleStage.Marketed:
-            <MarketedPanel Opportunity="_opp" OnAdvanced="Reload" />
+            <PanelErrorBoundary>
+                <MarketedPanel Opportunity="_opp" OnAdvanced="Reload" />
+            </PanelErrorBoundary>
             break;
         case LifecycleStage.QuotesReceived:
-            <QuotesReceivedPanel Opportunity="_opp" OnAdvanced="Reload" />
+            <PanelErrorBoundary>
+                <QuotesReceivedPanel Opportunity="_opp" OnAdvanced="Reload" />
+            </PanelErrorBoundary>
             break;
         case LifecycleStage.ClientDecision:
-            <ClientDecisionPanel Opportunity="_opp" OnAdvanced="Reload" />
+            <PanelErrorBoundary>
+                <ClientDecisionPanel Opportunity="_opp" OnAdvanced="Reload" />
+            </PanelErrorBoundary>
             break;
         case LifecycleStage.Binding:
-            <BindingPanel Opportunity="_opp" OnAdvanced="Reload" />
+            <PanelErrorBoundary>
+                <BindingPanel Opportunity="_opp" OnAdvanced="Reload" />
+            </PanelErrorBoundary>
             break;
         case LifecycleStage.Bound:
-            <BoundPanel Opportunity="_opp" />
+            <PanelErrorBoundary>
+                <BoundPanel Opportunity="_opp" />
+            </PanelErrorBoundary>
             break;
         case LifecycleStage.ClosedNotBound:
-            <ClosedNotBoundPanel Opportunity="_opp" />
+            <PanelErrorBoundary>
+                <ClosedNotBoundPanel Opportunity="_opp" />
+            </PanelErrorBoundary>
             break;
         default:
             <MudAlert Severity="Severity.Info">
@@ -121,12 +137,13 @@ else
     <div class="famos-secondary-panels mt-4">
         @if (_opp.LifecycleStage is LifecycleStage.Marketed or LifecycleStage.QuotesReceived)
         {
-            <QuoteScraperPanel Opportunity="_opp" OnUpdated="Reload" />
+            <PanelErrorBoundary>
+                <QuoteScraperPanel Opportunity="_opp" OnUpdated="Reload" />
+            </PanelErrorBoundary>
         }
-
-        <ContactsPanel  Opportunity="_opp" OnUpdated="Reload" />
-        <DocumentsPanel Opportunity="_opp" OnUpdated="Reload" />
-        <ActivityPanel  Opportunity="_opp" OnUpdated="Reload" />
+        <PanelErrorBoundary><ContactsPanel  Opportunity="_opp" OnUpdated="Reload" /></PanelErrorBoundary>
+        <PanelErrorBoundary><DocumentsPanel Opportunity="_opp" OnUpdated="Reload" /></PanelErrorBoundary>
+        <PanelErrorBoundary><ActivityPanel  Opportunity="_opp" OnUpdated="Reload" /></PanelErrorBoundary>
     </div>
 }
 

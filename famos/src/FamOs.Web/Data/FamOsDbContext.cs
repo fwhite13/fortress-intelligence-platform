@@ -20,6 +20,7 @@ public class FamOsDbContext : DbContext
     public DbSet<OutboxEvent>         OutboxEvents          => Set<OutboxEvent>();
     public DbSet<Contact>              Contacts              => Set<Contact>();
     public DbSet<OpportunityDocument>  Documents             => Set<OpportunityDocument>();
+    public DbSet<Account> Accounts => Set<Account>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -45,6 +46,9 @@ public class FamOsDbContext : DbContext
             // Sprint 7 column mappings
             e.Property(x => x.BindConfirmationNumber).HasMaxLength(100).HasColumnName("bind_confirmation_number");
             e.Property(x => x.BindRequestSubmittedAt).HasColumnType("datetime").HasColumnName("bind_request_submitted_at");
+            // Sprint 8 column mappings
+            e.Property(x => x.AffinityId).HasMaxLength(50).HasColumnName("affinity_id")
+                .HasDefaultValue("tig");
         });
 
         // Submission
@@ -174,6 +178,21 @@ public class FamOsDbContext : DbContext
             e.HasOne(x => x.Opportunity)
                 .WithMany(o => o.Documents)
                 .HasForeignKey(x => x.OpportunityId);
+        });
+
+        // Account — local cache of HubSpot companies; full snake_case column mapping
+        m.Entity<Account>(e => {
+            e.ToTable("accounts");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.AffinityId).HasMaxLength(50).HasColumnName("affinity_id");
+            e.Property(x => x.CompanyName).HasMaxLength(255).HasColumnName("company_name");
+            e.Property(x => x.HubSpotId).HasMaxLength(50).HasColumnName("hubspot_id");
+            e.Property(x => x.ActiveOppCount).HasColumnName("active_opp_count");
+            e.Property(x => x.LastSyncedAt).HasColumnName("last_synced_at");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.HasIndex(x => new { x.AffinityId, x.CompanyName });
         });
     }
 }

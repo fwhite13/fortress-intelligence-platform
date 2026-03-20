@@ -125,6 +125,90 @@ public class HubSpotService : IHubSpotService
         }
     }
 
+    public async Task SyncOwnerAsync(Guid opportunityId, string newOwnerUserId)
+    {
+        if (string.IsNullOrEmpty(ServiceKey)) return;
+        try
+        {
+            var client = _factory.CreateClient("HubSpot");
+            var dealId = await FindDealByOpportunityIdAsync(client, opportunityId);
+            if (dealId == null)
+            {
+                _logger.LogWarning("[HubSpot] No deal for {Id} — skipping owner sync", opportunityId);
+                return;
+            }
+
+            var hubspotOwnerId = await ResolveHubSpotUserIdAsync(client, newOwnerUserId);
+            if (hubspotOwnerId == null)
+            {
+                _logger.LogInformation("[HubSpot] No HubSpot user found for {Email} — skipping owner sync", newOwnerUserId);
+                return;
+            }
+
+            var props = new Dictionary<string, object> { ["hubspot_owner_id"] = hubspotOwnerId };
+            await PatchDealAsync(client, dealId, props);
+            _logger.LogInformation("[HubSpot] Deal {DealId} owner → {Owner}", dealId, newOwnerUserId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[HubSpot] SyncOwner failed for {Id}", opportunityId);
+        }
+    }
+
+    public async Task SyncClosedAsync(Guid opportunityId, CloseReason reason)
+    {
+        if (string.IsNullOrEmpty(ServiceKey)) return;
+        try
+        {
+            var client = _factory.CreateClient("HubSpot");
+            var dealId = await FindDealByOpportunityIdAsync(client, opportunityId);
+            if (dealId == null) return;
+
+            var props = new Dictionary<string, object>
+            {
+                ["dealstage"]                 = "closedlost",
+                ["closedate"]                 = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                ["hs_deal_stage_probability"] = 0,
+                ["closed_lost_reason"]        = reason.ToString(),
+            };
+            await PatchDealAsync(client, dealId, props);
+            _logger.LogInformation("[HubSpot] Deal {DealId} closed-lost — {Reason}", dealId, reason);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[HubSpot] SyncClosed failed for {Id}", opportunityId);
+        }
+    }
+
+    private async Task<string?> ResolveHubSpotUserIdAsync(HttpClient client, string email)
+    {
+        try
+        {
+            var resp = await client.GetAsync($"/settings/v3/users?email={Uri.EscapeDataString(email)}");
+            if (!resp.IsSuccessStatusCode) return null;
+
+            var json = await resp.Content.ReadAsStringAsync();
+            var result = JsonSerializer.Deserialize<HsUsersResult>(json, Opts);
+            return result?.Results?.FirstOrDefault(u =>
+                string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase))?.Id;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private class HsUsersResult
+    {
+        public List<HsUser>? Results { get; set; }
+    }
+
+    private class HsUser
+    {
+        public string? Id    { get; set; }
+        public string? Email { get; set; }
+    }
+
     // ── HubSpot API helpers ────────────────────────────────────────────────
 
     /// <summary>

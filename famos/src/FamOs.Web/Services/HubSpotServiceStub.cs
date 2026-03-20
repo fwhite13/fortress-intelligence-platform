@@ -7,6 +7,8 @@ public interface IHubSpotService
 {
     Task SyncLifecycleAsync(Guid opportunityId, LifecycleStage stage);
     Task SyncBoundAsync(Guid opportunityId, PolicyShadowRecord shadow);
+    Task SyncOwnerAsync(Guid opportunityId, string newOwnerUserId);
+    Task SyncClosedAsync(Guid opportunityId, CloseReason reason);
 }
 
 public class HubSpotServiceStub : IHubSpotService
@@ -23,6 +25,18 @@ public class HubSpotServiceStub : IHubSpotService
     public Task SyncBoundAsync(Guid opportunityId, PolicyShadowRecord shadow)
     {
         _logger.LogInformation("[HubSpot stub] Policy shadow: {Id}", shadow.Id);
+        return Task.CompletedTask;
+    }
+
+    public Task SyncOwnerAsync(Guid opportunityId, string newOwnerUserId)
+    {
+        _logger.LogInformation("[HubSpot stub] Owner sync: {Id} → {Owner}", opportunityId, newOwnerUserId);
+        return Task.CompletedTask;
+    }
+
+    public Task SyncClosedAsync(Guid opportunityId, CloseReason reason)
+    {
+        _logger.LogInformation("[HubSpot stub] Closed sync: {Id} — {Reason}", opportunityId, reason);
         return Task.CompletedTask;
     }
 }

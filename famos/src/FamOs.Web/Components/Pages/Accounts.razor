@@ -1,0 +1,176 @@
+@page "/accounts"
+@attribute [Authorize]
+@inject IAccountSyncService AccountSync
+@inject UserAffinityService AffinitySvc
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDbContextFactory<FamOs.Web.Data.FamOsDbContext> DbFactory
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Services
+@using FamOs.Web.Theme
+@using Microsoft.EntityFrameworkCore
+
+<PageTitle>Accounts — FAM OS</PageTitle>
+
+<div class="famos-page-header famos-page-header-row mb-4">
+    <div>
+        <h2 class="famos-page-h2">Accounts</h2>
+        <p class="famos-page-sub">@_filteredAccounts.Count of @_accounts.Count member companies</p>
+    </div>
+    <div style="display:flex; gap:8px;">
+        <MudTextField Class="famos-input-filter"
+                      @bind-Value="_search" @bind-Value:event="oninput"
+                      Placeholder="Search accounts..."
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@FamosIcons.Search"
+                      Clearable="true" />
+        <MudButton Class="famos-btn-outline-sm"
+                   StartIcon="@FamosIcons.Download"
+                   OnClick="SyncNow"
+                   Disabled="_syncing">
+            @(_syncing ? "Syncing..." : "Sync from HubSpot")
+        </MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (!_accounts.Any())
+{
+    <div class="famos-empty-state" style="margin-top:40px;">
+        <MudIcon Icon="@FamosIcons.Accounts" Class="famos-empty-icon" />
+        <div>No accounts synced yet.</div>
+        <div style="margin-top:8px;">
+            <MudButton Class="famos-btn-primary" OnClick="SyncNow" Disabled="_syncing">
+                Sync from HubSpot
+            </MudButton>
+        </div>
+    </div>
+}
+else
+{
+    <MudPaper Elevation="0" Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+
+        @* Header row *@
+        <div class="famos-account-table-header">
+            <div class="famos-account-col-name">Company</div>
+            <div class="famos-account-col-location">Location</div>
+            <div class="famos-account-col-opps">Active Opps</div>
+            <div class="famos-account-col-sync">Last Synced</div>
+            <div class="famos-account-col-action"></div>
+        </div>
+
+        @foreach (var account in _filteredAccounts)
+        {
+            <div class="famos-account-row"
+                 @onclick="() => GoToPipeline(account.CompanyName)">
+                <div class="famos-account-col-name">
+                    <span style="font-weight:600; color:var(--navy);">@account.CompanyName</span>
+                </div>
+                <div class="famos-account-col-location">
+                    @if (!string.IsNullOrEmpty(account.City) || !string.IsNullOrEmpty(account.State))
+                    {
+                        <span class="famos-meta-text">
+                            @(account.City)@(account.City != null && account.State != null ? ", " : "")@(account.State)
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="famos-meta-text">—</span>
+                    }
+                </div>
+                <div class="famos-account-col-opps">
+                    @if (account.ActiveOppCount > 0)
+                    {
+                        <MudChip T="string" Size="Size.Small"
+                                 Style="background:rgba(0,144,208,0.1); color:var(--sky); font-weight:600; font-size:11px;">
+                            @account.ActiveOppCount active
+                        </MudChip>
+                    }
+                    else
+                    {
+                        <span class="famos-meta-text">No active opps</span>
+                    }
+                </div>
+                <div class="famos-account-col-sync">
+                    <span class="famos-meta-text">
+                        @(account.LastSyncedAt.HasValue
+                            ? account.LastSyncedAt.Value.ToLocalTime().ToString("MMM d, h:mm tt")
+                            : "Never")
+                    </span>
+                </div>
+                <div class="famos-account-col-action">
+                    <MudIcon Icon="@FamosIcons.ChevronRight"
+                             Style="font-size:16px; color:var(--muted);" />
+                </div>
+            </div>
+        }
+
+    </MudPaper>
+
+    @if (_lastSyncTime.HasValue)
+    {
+        <div class="famos-meta-text" style="margin-top:8px; text-align:right;">
+            Last HubSpot sync: @_lastSyncTime.Value.ToLocalTime().ToString("MMM d, yyyy 'at' h:mm tt")
+        </div>
+    }
+}
+
+@code {
+    private List<Account> _accounts         = new();
+    private bool          _loading          = true;
+    private bool          _syncing          = false;
+    private string        _search           = "";
+    private DateTime?     _lastSyncTime;
+
+    private List<Account> _filteredAccounts =>
+        string.IsNullOrWhiteSpace(_search)
+            ? _accounts
+            : _accounts.Where(a =>
+                a.CompanyName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                (a.City?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (a.State?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false))
+            .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var affinityId = await AffinitySvc.GetCurrentAffinityIdAsync();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _accounts = await db.Accounts
+            .Where(a => a.AffinityId == affinityId)
+            .OrderBy(a => a.CompanyName)
+            .ToListAsync();
+        _lastSyncTime = _accounts.Any() ? _accounts.Max(a => a.LastSyncedAt) : null;
+        _loading = false;
+    }
+
+    private async Task SyncNow()
+    {
+        _syncing = true;
+        try
+        {
+            var affinityId = await AffinitySvc.GetCurrentAffinityIdAsync();
+            await AccountSync.SyncAsync(affinityId);
+            await LoadAsync();
+            Snackbar.Add("Accounts synced from HubSpot.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Sync failed: {ex.Message}", Severity.Error);
+        }
+        finally { _syncing = false; }
+    }
+
+    private void GoToPipeline(string companyName)
+    {
+        Nav.NavigateTo($"/pipeline?company={Uri.EscapeDataString(companyName)}");
+    }
+}

@@ -17,6 +17,9 @@ public class Opportunity
     // Ownership
     public string  OwnerUserId          { get; set; } = "";
 
+    /// <summary>Affinity program this opportunity belongs to (e.g. "tig", "iaapa", "nbais").</summary>
+    public string AffinityId { get; set; } = "tig";
+
     // Financials
     public decimal? EstimatedPremium    { get; set; }
     public DateOnly? EffectiveDateTarget { get; set; }

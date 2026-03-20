@@ -3,18 +3,22 @@
 @inject OpportunityService OppService
 @inject IDialogService DialogService
 @inject NavigationManager Nav
+@inject UserAffinityService AffinitySvc
 @using FamOs.Web.Data.Entities
 @using FamOs.Web.Services
+@using FamOs.Web.Domain
+@using FamOs.Web.Theme
 
 <PageTitle>Pipeline — FAM OS</PageTitle>
 
 <div class="famos-page-header famos-page-header-row mb-4">
     <div>
         <h2 class="famos-page-h2">Pipeline</h2>
-        <p class="famos-page-sub">@(_byStage.Values.Sum(l => l.Count)) active opportunities</p>
+        <p class="famos-page-sub">@_stageSummary.Values.Sum() active opportunities</p>
     </div>
-    <MudButton Class="famos-btn-primary" OnClick="OpenCreateDialog">
-        + New Opportunity
+    <MudButton Class="famos-btn-primary" OnClick="OpenCreateDialog"
+               StartIcon="@FamosIcons.Add">
+        New Opportunity
     </MudButton>
 </div>
 
@@ -27,22 +31,36 @@ else
     <div class="famos-pipeline-board">
         @foreach (var col in _columns)
         {
+            var page = _pages.TryGetValue(col.Stage, out var p) ? p : null;
             <div class="famos-pipeline-column">
                 <div class="famos-pipeline-column-header">
-                    <span class="famos-kcol-dot" style="background: @GetStageColor(col.Stage);"></span>
+                    <span class="famos-kcol-dot" style="background:@GetStageColor(col.Stage);"></span>
                     <span class="famos-kcol-label">@col.DisplayName</span>
-                    <span class="famos-kcol-count">@GetStageCount(col.Stage)</span>
+                    <span class="famos-kcol-count">
+                        @(_stageSummary.TryGetValue(col.Stage, out var cnt) ? cnt : 0)
+                    </span>
                 </div>
                 <div style="padding:8px;">
-                    @foreach (var opp in GetStageOpportunities(col.Stage))
+                    @if (page == null || !page.Items.Any())
                     {
-                        <OpportunityCard Opportunity="opp" />
+                        <div class="famos-pipeline-empty">No opportunities in this stage.</div>
                     }
-                    @if (!GetStageOpportunities(col.Stage).Any())
+                    else
                     {
-                        <div style="padding:16px;text-align:center;color:var(--color-text-muted);font-size:12px;">
-                            No opportunities
-                        </div>
+                        @foreach (var opp in page.Items)
+                        {
+                            <OpportunityCard Opportunity="opp" />
+                        }
+                        @if (page.HasMore)
+                        {
+                            <div style="text-align:center; margin-top:6px;">
+                                <MudButton Class="famos-btn-outline-sm"
+                                           OnClick="() => LoadMoreStage(col.Stage)"
+                                           Disabled="_loadingMore.Contains(col.Stage)">
+                                    @(_loadingMore.Contains(col.Stage) ? "Loading..." : $"Load more ({page.TotalCount - page.Items.Count} remaining)")
+                                </MudButton>
+                            </div>
+                        }
                     }
                 </div>
             </div>
@@ -52,7 +70,9 @@ else
 
 @code {
     private bool _loading = true;
-    private Dictionary<LifecycleStage, List<Opportunity>> _byStage = new();
+    private Dictionary<LifecycleStage, int>              _stageSummary = new();
+    private Dictionary<LifecycleStage, OpportunityPage>  _pages        = new();
+    private HashSet<LifecycleStage>                      _loadingMore  = new();
 
     private static readonly (LifecycleStage Stage, string DisplayName)[] _columns =
     {
@@ -65,23 +85,63 @@ else
         (LifecycleStage.Bound,            "Bound"),
     };
 
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadAsync();
-    }
+    protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
     {
         _loading = true;
-        _byStage = await OppService.GetPipelineByStageAsync();
+        var affinityId = await AffinitySvc.GetCurrentAffinityIdAsync();
+
+        // Load counts first (cheap) — one query
+        _stageSummary = await OppService.GetStageSummaryAsync(affinityId);
+
+        // Load page 0 of each stage in parallel
+        var tasks = _columns
+            .Select(col => OppService.GetStagePageAsync(col.Stage, 0, affinityId))
+            .ToArray();
+        var pages = await Task.WhenAll(tasks);
+
+        _pages = _columns
+            .Zip(pages, (col, page) => (col.Stage, page))
+            .ToDictionary(x => x.Stage, x => x.page);
+
         _loading = false;
     }
 
-    private List<Opportunity> GetStageOpportunities(LifecycleStage stage)
-        => _byStage.TryGetValue(stage, out var list) ? list : new();
+    private async Task LoadMoreStage(LifecycleStage stage)
+    {
+        if (!_pages.TryGetValue(stage, out var current)) return;
+        _loadingMore.Add(stage);
+        StateHasChanged();
 
-    private int GetStageCount(LifecycleStage stage)
-        => _byStage.TryGetValue(stage, out var list) ? list.Count : 0;
+        var affinityId = await AffinitySvc.GetCurrentAffinityIdAsync();
+        var nextPage = await OppService.GetStagePageAsync(
+            stage, current.PageIndex + 1, affinityId);
+
+        // Append new items to existing page
+        _pages[stage] = new OpportunityPage
+        {
+            Items      = current.Items.Concat(nextPage.Items).ToList(),
+            TotalCount = nextPage.TotalCount,
+            PageIndex  = nextPage.PageIndex,
+            PageSize   = nextPage.PageSize,
+            HasMore    = nextPage.HasMore,
+        };
+
+        _loadingMore.Remove(stage);
+        StateHasChanged();
+    }
+
+    private async Task OpenCreateDialog()
+    {
+        var dialog = await DialogService.ShowAsync<OpportunityCreateDialog>("New Opportunity");
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            var oppId = (Guid)result.Data!;
+            Nav.NavigateTo($"/opportunity/{oppId}");
+        }
+    }
 
     private static string GetStageColor(LifecycleStage stage) => stage switch
     {
@@ -94,15 +154,4 @@ else
         LifecycleStage.Bound            => "#059669",
         _                               => "#6b7585",
     };
-
-    private async Task OpenCreateDialog()
-    {
-        var dialog = await DialogService.ShowAsync<OpportunityCreateDialog>("New Opportunity");
-        var result = await dialog.Result;
-        if (result != null && !result.Canceled)
-        {
-            var oppId = (Guid)result.Data!;
-            Nav.NavigateTo($"/opportunity/{oppId}");
-        }
-    }
 }

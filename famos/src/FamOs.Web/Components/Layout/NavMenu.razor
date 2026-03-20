@@ -36,17 +36,13 @@
 
     <div class="famos-nav-divider"></div>
 
-    <div class="famos-nav-section-label famos-nav-section-label--spaced">
-        Coming Soon
-    </div>
-
-    <span class="famos-nav-item famos-nav-item--disabled">
+    <NavLink href="/accounts" Match="NavLinkMatch.Prefix"
+             class="famos-nav-item" ActiveClass="famos-nav-item--active">
         <span class="famos-nav-icon">
             <MudIcon Icon="@FamosIcons.Accounts" Size="Size.Small" />
         </span>
         Accounts
-        <span class="famos-nav-badge">Soon</span>
-    </span>
+    </NavLink>
 
     <span class="famos-nav-item famos-nav-item--disabled">
         <span class="famos-nav-icon">

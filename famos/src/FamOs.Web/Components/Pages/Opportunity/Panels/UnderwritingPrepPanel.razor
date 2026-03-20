@@ -3,6 +3,7 @@
 @inject UserSessionService UserSession
 @inject ISnackbar Snackbar
 @using FamOs.Web.Data.Entities
+@using FamOs.Web.Theme
 
 <div class="intake-form-container">
 
@@ -14,7 +15,14 @@
     </div>
 
     @* Existing submission list *@
-    @if (Opportunity.Submissions.Any())
+    @if (!Opportunity.Submissions.Any())
+    {
+        <div class="famos-empty-state mb-3">
+            <MudIcon Icon="@FamosIcons.Document" Class="famos-empty-icon" />
+            <div>No submissions yet — add carriers below to get started.</div>
+        </div>
+    }
+    else
     {
         <div class="mb-4">
             <div class="intake-section-label mb-2">Current Submissions</div>

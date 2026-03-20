@@ -79,6 +79,39 @@ public class TaskService
         return task.Id;
     }
 
+    public const int TaskPageSize = 25;
+
+    /// <summary>Returns one page of open tasks for a user, sorted by due-date urgency.</summary>
+    public async Task<TaskPage> GetOpenTasksPagedAsync(string userId, int pageIndex)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var query = db.Tasks
+            .Include(t => t.Opportunity)
+            .Where(t => t.Status == "open"
+                && t.Opportunity.OwnerUserId == userId
+                && !t.Opportunity.IsClosed);
+
+        var total = await query.CountAsync();
+        var items = await query
+            .OrderBy(t => t.DueAt.HasValue ? 0 : 1)
+            .ThenBy(t => t.DueAt)
+            .ThenBy(t => t.CreatedAt)
+            .Skip(pageIndex * TaskPageSize)
+            .Take(TaskPageSize)
+            .Select(t => new TaskWithOpportunity(t, t.Opportunity))
+            .ToListAsync();
+
+        return new TaskPage
+        {
+            Items      = items,
+            TotalCount = total,
+            PageIndex  = pageIndex,
+            PageSize   = TaskPageSize,
+            HasMore    = (pageIndex + 1) * TaskPageSize < total,
+        };
+    }
+
     /// <summary>Count of open tasks for a user — for nav badge.</summary>
     public async Task<int> GetOpenTaskCountForUserAsync(string userId)
     {
@@ -92,3 +125,12 @@ public class TaskService
 }
 
 public record TaskWithOpportunity(FamOsTask Task, Opportunity Opportunity);
+
+public class TaskPage
+{
+    public List<TaskWithOpportunity> Items { get; init; } = new();
+    public int  TotalCount { get; init; }
+    public int  PageIndex  { get; init; }
+    public int  PageSize   { get; init; }
+    public bool HasMore    { get; init; }
+}
