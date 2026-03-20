@@ -14,4 +14,4 @@ public class KbEntry
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
-public enum KbTier { Personal = 0, Team = 1, Corporate = 2 }
+public enum KbTier { Personal = 0, Team = 1, Corporate = 2, Developer = 3 }

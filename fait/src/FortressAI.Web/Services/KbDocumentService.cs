@@ -25,12 +25,14 @@ public class KbDocumentService
     private string PersonalKbId => _config["KnowledgeBase:PersonalKbId"] ?? "";
     private string TeamKbId => _config["KnowledgeBase:TeamKbId"] ?? "";
     private string ProjectKbId => _config["KnowledgeBase:ProjectKbId"] ?? "";
+    private string DevKbId => _config["KnowledgeBase:DevKbId"] ?? "";
 
     // Data source IDs per KB (Fred will provide these; empty = skip ingestion trigger)
     private string PersonalDataSourceId => _config["KnowledgeBase:PersonalDataSourceId"] ?? "";
     private string TeamDataSourceId => _config["KnowledgeBase:TeamDataSourceId"] ?? "";
     private string ProjectDataSourceId => _config["KnowledgeBase:ProjectDataSourceId"] ?? "";
     private string CorpDataSourceId => _config["KnowledgeBase:CorpDataSourceId"] ?? "";
+    private string DevDataSourceId => _config["KnowledgeBase:DevDataSourceId"] ?? "";
 
     public KbDocumentService(IAmazonS3 s3, IAmazonBedrockAgent bedrockAgent, IConfiguration config, ILogger<KbDocumentService> logger, KbSyncRetryService syncRetryService, IDbContextFactory<AppDbContext> dbContextFactory)
     {
@@ -75,6 +77,7 @@ public class KbDocumentService
         {
             KbTier.Team      => $"kb-docs/teams/{teamId}/{safeFilename}",
             KbTier.Corporate => $"kb-docs/fortress/{safeFilename}",
+            KbTier.Developer => $"kb-docs/dev/{safeFilename}",
             _                => $"kb-docs/personal/{userId}/{safeFilename}"
         };
 
@@ -227,6 +230,7 @@ public class KbDocumentService
             KbTier.Personal   => (PersonalKbId, PersonalDataSourceId),
             KbTier.Team       => (TeamKbId, TeamDataSourceId),
             KbTier.Corporate  => (CorpKbId, CorpDataSourceId),
+            KbTier.Developer  => (DevKbId, DevDataSourceId),
             _                 => (PersonalKbId, PersonalDataSourceId)
         };
 
@@ -340,9 +344,12 @@ public class KbDocumentService
         // Guard: avoid pointless S3 call with empty userId for Personal tier
         if (userId == Guid.Empty && tier == KbTier.Personal) return new();
 
-        var prefix = tier == KbTier.Team
-            ? $"kb-docs/teams/{teamId}/"
-            : $"kb-docs/personal/{userId}/";
+        var prefix = tier switch
+        {
+            KbTier.Team      => $"kb-docs/teams/{teamId}/",
+            KbTier.Developer => "kb-docs/dev/",
+            _                => $"kb-docs/personal/{userId}/"
+        };
 
         var listReq = new ListObjectsV2Request
         {

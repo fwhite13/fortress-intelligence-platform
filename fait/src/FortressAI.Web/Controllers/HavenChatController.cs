@@ -128,6 +128,20 @@ public class HavenChatController : ControllerBase
                         _logger.LogWarning("[Haven] Team KB requested but teamId is not available in Haven context — skipping");
                         break;
 
+                    case "dev":
+                        // Developer KB — retrieve from FORGE-DevTeam-Shared
+                        try
+                        {
+                            var chunks = await _kbService.RetrieveDevAsync(request.Message);
+                            kbChunks.AddRange(chunks);
+                            _logger.LogInformation("[Haven] Dev KB returned {Count} chunks", chunks.Count);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "[Haven] Dev KB retrieval failed");
+                        }
+                        break;
+
                     default:
                         _logger.LogWarning("[Haven] Unknown KB type requested: {KbType}", kbType);
                         break;
@@ -334,6 +348,19 @@ public class HavenChatController : ControllerBase
                     case "team":
                         _logger.LogWarning("[Haven] KbSearch: Team KB requested but teamId not available — skipping");
                         break;
+
+                    case "dev":
+                        // Developer KB — retrieve from FORGE-DevTeam-Shared
+                        try
+                        {
+                            var c = await _kbService.RetrieveDevAsync(request.Query);
+                            chunks.AddRange(c);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "[Haven] KbSearch dev retrieval failed");
+                        }
+                        break;
                 }
             }
         }
@@ -412,6 +439,14 @@ public class HavenChatController : ControllerBase
                 type     = "team",
                 alwaysOn = false,
                 available = !string.IsNullOrEmpty(_configuration["KnowledgeBase:TeamKbId"])
+            },
+            new
+            {
+                id       = "dev",
+                name     = "Developer Knowledge Base",
+                type     = "dev",
+                alwaysOn = false,
+                available = !string.IsNullOrEmpty(_configuration["KnowledgeBase:DevKbId"])
             },
         };
 

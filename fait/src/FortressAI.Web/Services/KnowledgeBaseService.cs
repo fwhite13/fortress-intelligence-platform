@@ -10,6 +10,7 @@ public class KnowledgeBaseService
     private readonly string _personalKbId;
     private readonly string _teamKbId;
     private readonly string _projectKbId;
+    private readonly string _devKbId;
     private readonly ILogger<KnowledgeBaseService> _logger;
 
     public KnowledgeBaseService(IAmazonBedrockAgentRuntime client, IConfiguration config, ILogger<KnowledgeBaseService> logger)
@@ -19,6 +20,7 @@ public class KnowledgeBaseService
         _personalKbId = config["KnowledgeBase:PersonalKbId"] ?? "";
         _teamKbId    = config["KnowledgeBase:TeamKbId"] ?? "";
         _projectKbId = config["KnowledgeBase:ProjectKbId"] ?? "";
+        _devKbId     = config["KnowledgeBase:DevKbId"] ?? "";
         _logger = logger;
     }
 
@@ -56,6 +58,44 @@ public class KnowledgeBaseService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Corp KB retrieval failed — continuing without KB context");
+            return new();
+        }
+    }
+
+    /// <summary>Retrieve from Developer KB (FORGE-DevTeam-Shared). No filter — entire KB is Dev-team-scoped (structural isolation).</summary>
+    public async Task<List<KbChunk>> RetrieveDevAsync(string query)
+    {
+        if (string.IsNullOrEmpty(_devKbId)) return new();
+
+        try
+        {
+            var response = await _client.RetrieveAsync(new RetrieveRequest
+            {
+                KnowledgeBaseId = _devKbId,
+                RetrievalQuery = new KnowledgeBaseQuery { Text = query },
+                RetrievalConfiguration = new KnowledgeBaseRetrievalConfiguration
+                {
+                    VectorSearchConfiguration = new KnowledgeBaseVectorSearchConfiguration { NumberOfResults = 3 }
+                }
+            });
+
+            _logger.LogInformation("Dev KB retrieval: raw={RawCount} results, query='{Query}'",
+                response.RetrievalResults.Count, query.Length > 50 ? query[..50] + "..." : query);
+
+            return response.RetrievalResults
+                .Where(r => r.Score > 0.3)
+                .Select(r => new KbChunk
+                {
+                    Content = r.Content.Text,
+                    Source = r.Location?.S3Location?.Uri ?? "Dev KB",
+                    Score = r.Score,
+                    KbType = "Developer"
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Dev KB retrieval failed — continuing without Dev KB context");
             return new();
         }
     }
