@@ -187,14 +187,22 @@ else
 
     private async Task CloseOpportunity()
     {
-        var dialog = await DialogService.ShowAsync<CloseOpportunityDialog>(
-            "Close Opportunity",
-            new DialogParameters { ["OpportunityId"] = Id });
-        var result = await dialog.Result;
-        if (result != null && !result.Canceled)
+        try
         {
-            Snackbar.Add("Opportunity closed.", Severity.Info);
-            Nav.NavigateTo("/pipeline");
+            var dialog = await DialogService.ShowAsync<CloseOpportunityDialog>(
+                "Close Opportunity",
+                new DialogParameters { ["OpportunityId"] = Id });
+            var result = await dialog.Result;
+            if (result != null && !result.Canceled)
+            {
+                Snackbar.Add("Opportunity closed.", Severity.Info);
+                Nav.NavigateTo("/pipeline");
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not open Close dialog: {ex.Message}", Severity.Error);
+            StateHasChanged();
         }
     }
 

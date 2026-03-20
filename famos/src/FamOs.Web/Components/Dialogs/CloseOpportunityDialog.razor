@@ -8,13 +8,13 @@
         <MudText Typo="Typo.body2" Class="mb-3">
             Select the reason this opportunity is closing without binding.
         </MudText>
-        <MudSelect @bind-Value="_reason" Label="Close Reason *" Required="true" Class="mb-3">
-            <MudSelectItem Value="CloseReason.NotQuoted">Not Quoted — carrier(s) declined</MudSelectItem>
-            <MudSelectItem Value="CloseReason.PriceTooHigh">Price Too High — client declined on premium</MudSelectItem>
-            <MudSelectItem Value="CloseReason.LostToCompetitor">Lost to Competitor</MudSelectItem>
-            <MudSelectItem Value="CloseReason.ClientDeclinedCoverage">Client Declined Coverage</MudSelectItem>
-            <MudSelectItem Value="CloseReason.PolicyLapsed">Policy Lapsed — missed renewal window</MudSelectItem>
-            <MudSelectItem Value="CloseReason.Other">Other</MudSelectItem>
+        <MudSelect T="CloseReason?" @bind-Value="_reason" Label="Close Reason *" Required="true" Class="mb-3">
+            <MudSelectItem T="CloseReason?" Value="@((CloseReason?)CloseReason.NotQuoted)">Not Quoted — carrier(s) declined</MudSelectItem>
+            <MudSelectItem T="CloseReason?" Value="@((CloseReason?)CloseReason.PriceTooHigh)">Price Too High — client declined on premium</MudSelectItem>
+            <MudSelectItem T="CloseReason?" Value="@((CloseReason?)CloseReason.LostToCompetitor)">Lost to Competitor</MudSelectItem>
+            <MudSelectItem T="CloseReason?" Value="@((CloseReason?)CloseReason.ClientDeclinedCoverage)">Client Declined Coverage</MudSelectItem>
+            <MudSelectItem T="CloseReason?" Value="@((CloseReason?)CloseReason.PolicyLapsed)">Policy Lapsed — missed renewal window</MudSelectItem>
+            <MudSelectItem T="CloseReason?" Value="@((CloseReason?)CloseReason.Other)">Other</MudSelectItem>
         </MudSelect>
         <MudTextField @bind-Value="_notes"
                       Label="Notes (optional)"
@@ -43,9 +43,9 @@
     private async Task Submit()
     {
         if (_reason == null) return;
-        var userId = await UserSession.GetUserIdAsync();
         try
         {
+            var userId = await UserSession.GetUserIdAsync();
             await Lifecycle.CloseOpportunityAsync(
                 OpportunityId, _reason.Value, _notes.Trim(), userId);
             MudDialog.Close(DialogResult.Ok(true));
@@ -53,6 +53,10 @@
         catch (LifecycleValidationException ex)
         {
             Snackbar.Add(ex.Message, Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to close opportunity: {ex.Message}", Severity.Error);
         }
     }
 }
