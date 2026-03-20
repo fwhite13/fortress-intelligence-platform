@@ -1,0 +1,61 @@
+@page "/agents/{AgentId}"
+@attribute [Authorize]
+@inject AgentApiClient AgentApi
+@inject NavigationManager Nav
+@using CoworkWeb.Components.Pages.Agents.Workspaces
+
+<PageTitle>@_agentName &mdash; Cowork</PageTitle>
+
+<div class="agent-page">
+
+    @switch (AgentId)
+    {
+        case "design":
+            <DesignWorkspace OrgId="@_orgId" />
+            break;
+
+        case "marketing":
+            <MarketingWorkspace />
+            break;
+
+        case "analyst":
+            <AnalystWorkspace />
+            break;
+
+        case "techwriter":
+            <TechWriterWorkspace />
+            break;
+
+        case "ops":
+            <OpsWorkspace />
+            break;
+
+        default:
+            <div style="padding:40px; text-align:center; color:#9ca3af;">
+                Agent "@AgentId" not found.
+                <a href="/agents">&#x2190; Back to agents</a>
+            </div>
+            break;
+    }
+
+</div>
+
+@code {
+    [Parameter] public string AgentId { get; set; } = "";
+
+    private string _agentName = "";
+    private string _orgId     = "fortress-am";  // Phase 2: resolve from user session
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            var meta   = await AgentApi.GetAgentMetaAsync(AgentId);
+            _agentName = meta?.Name ?? AgentId;
+        }
+        catch
+        {
+            _agentName = AgentId;
+        }
+    }
+}

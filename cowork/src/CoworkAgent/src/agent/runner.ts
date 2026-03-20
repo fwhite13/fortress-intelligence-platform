@@ -26,13 +26,14 @@ export interface SseChunk {
 }
 
 interface TaskParams {
-  taskId:       string;
-  userId:       string;
-  userEmail:    string;
-  prompt:       string;
-  workingDir:   string;
-  maxBudgetUsd: number;
-  maxTurns:     number;
+  taskId:                string;
+  userId:                string;
+  userEmail:             string;
+  prompt:                string;
+  workingDir:            string;
+  maxBudgetUsd:          number;
+  maxTurns:              number;
+  systemPromptOverride?: string;  // Optional: use instead of default SYSTEM_PROMPT when provided
 }
 
 // Patterns that require user approval before execution
@@ -112,8 +113,12 @@ export async function* runTask(params: TaskParams): AsyncGenerator<SseChunk> {
     // Non-fatal — task runs without FORGE context if fetch fails
   }
 
+  const effectiveSystemPrompt = params.systemPromptOverride?.trim()
+    ? params.systemPromptOverride
+    : SYSTEM_PROMPT;
+
   const systemPrompt = [
-    SYSTEM_PROMPT,
+    effectiveSystemPrompt,
     persistentInstructions
       ? `## Your Standing Instructions\n${persistentInstructions}`
       : '',

@@ -1,0 +1,500 @@
+@namespace CoworkWeb.Components.Pages.Agents.Workspaces
+@inject AgentApiClient AgentApi
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<div class="design-workspace">
+
+    @* ── Left: History ──────────────────────────────────────────────── *@
+    <div class="design-panel design-panel--history">
+        <div class="design-panel-header">
+            <span>Project History</span>
+            <MudButton Size="Size.Small" Variant="Variant.Text"
+                       OnClick="NewProject">+ New Project</MudButton>
+        </div>
+
+        @if (!_screens.Any())
+        {
+            <div class="design-history-empty">
+                No screens yet. Describe a UI to generate your first design.
+            </div>
+        }
+        else
+        {
+            <div class="design-history-list">
+                @foreach (var screen in _screens.OrderByDescending(s => s.CreatedAt))
+                {
+                    var isActive = screen.ScreenId == _activeScreenId;
+                    <div class="@($"design-history-item{(isActive ? " design-history-item--active" : "")}")"
+                         @onclick="() => LoadScreen(screen)">
+                        <div class="design-history-prompt">@TruncatePrompt(screen.Prompt)</div>
+                        <div class="design-history-meta">
+                            v@(screen.Version) &middot; @screen.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    @* ── Center: Preview ────────────────────────────────────────────── *@
+    <div class="design-panel design-panel--preview">
+
+        <div class="design-preview-toolbar">
+            @* Device size toggle *@
+            <div class="design-device-toggle">
+                <MudButtonGroup Size="Size.Small">
+                    <MudButton Class="@DeviceClass("mobile")"
+                               StartIcon="@Icons.Material.Outlined.PhoneAndroid"
+                               OnClick='() => SetDevice("mobile")'>Mobile</MudButton>
+                    <MudButton Class="@DeviceClass("desktop")"
+                               StartIcon="@Icons.Material.Outlined.DesktopWindows"
+                               OnClick='() => SetDevice("desktop")'>Desktop</MudButton>
+                    <MudButton Class="@DeviceClass("responsive")"
+                               StartIcon="@Icons.Material.Outlined.Devices"
+                               OnClick='() => SetDevice("responsive")'>Full</MudButton>
+                </MudButtonGroup>
+            </div>
+
+            @* Variant tabs (shown only when 3 variants generated) *@
+            @if (_variants.Count > 1)
+            {
+                <div class="design-variant-tabs">
+                    @foreach (var v in _variants)
+                    {
+                        <span class="@($"design-variant-tab{(_activeVariant == v.Suffix ? " active" : "")}")"
+                              @onclick="() => SelectVariant(v)">
+                            @v.Label
+                        </span>
+                    }
+                </div>
+            }
+
+            @* Export buttons *@
+            <div style="display:flex; gap:6px; margin-left:auto;">
+                @if (!string.IsNullOrEmpty(_activeDownloadUrl))
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                               StartIcon="@Icons.Material.Outlined.Download"
+                               Href="@_activeDownloadUrl" Target="_blank">
+                        HTML
+                    </MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                               StartIcon="@Icons.Material.Outlined.ContentCopy"
+                               OnClick="CopyCode">
+                        Copy Code
+                    </MudButton>
+                }
+            </div>
+        </div>
+
+        @* Preview iframe *@
+        <div class="design-preview-frame-container @GetFrameClass()">
+            @if (_generating)
+            {
+                <div class="design-generating-overlay">
+                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                    <div class="design-generating-text">@_generatingStatus</div>
+                </div>
+            }
+            else if (string.IsNullOrEmpty(_activeDownloadUrl))
+            {
+                <div class="design-empty-preview">
+                    <MudIcon Icon="@Icons.Material.Outlined.Palette"
+                             Style="font-size:48px; color:#d1d5db;" />
+                    <div>Describe a screen to generate your first design</div>
+                </div>
+            }
+            else
+            {
+                <iframe src="@_activeDownloadUrl"
+                        class="design-preview-iframe"
+                        sandbox="allow-scripts"
+                        title="Design preview" />
+            }
+        </div>
+
+        @* Version history strip (shown when editing existing screen) *@
+        @if (_versions.Count > 1)
+        {
+            <div class="design-version-strip">
+                @foreach (var ver in _versions)
+                {
+                    <span class="@($"design-version-dot{(ver.Version == _activeVersion ? " active" : "")}")"
+                          title="v@(ver.Version) &mdash; @ver.CreatedAt.ToLocalTime().ToString("MMM d h:mm tt")"
+                          @onclick="() => RestoreVersion(ver)">
+                        v@(ver.Version)
+                    </span>
+                }
+            </div>
+        }
+
+        @* Blazor component download (shown after conversion) *@
+        @if (!string.IsNullOrEmpty(_blazorDownloadUrl))
+        {
+            <div class="design-blazor-badge">
+                <MudIcon Icon="@Icons.Material.Outlined.Code" Style="font-size:14px;" />
+                <span>Blazor component ready</span>
+                <MudButton Size="Size.Small" Variant="Variant.Text"
+                           Href="@_blazorDownloadUrl" Target="_blank">
+                    Download .razor
+                </MudButton>
+            </div>
+        }
+
+    </div>
+
+    @* ── Right: Prompt & Controls ────────────────────────────────────── *@
+    <div class="design-panel design-panel--controls">
+
+        @* Brand indicator *@
+        <div class="design-brand-indicator">
+            <div class="design-brand-swatch"
+                 style="background:@_brandPrimary;"></div>
+            <span class="design-brand-name">@_brandName brand</span>
+        </div>
+
+        @* Prompt input *@
+        <div class="design-prompt-section">
+            <MudTextField @bind-Value="_prompt"
+                          Label="Describe your design"
+                          Lines="4"
+                          Placeholder="A dashboard page with a sidebar nav, KPI cards at the top, and a data table below. Use the Fortress Navy color scheme."
+                          Variant="Variant.Outlined" />
+        </div>
+
+        @* Options row *@
+        <div class="design-options-row">
+            <MudSelect @bind-Value="_deviceTarget" Label="Device" Dense="true"
+                       Variant="Variant.Outlined" Style="max-width:110px;">
+                <MudSelectItem Value="@("responsive")">Responsive</MudSelectItem>
+                <MudSelectItem Value="@("desktop")">Desktop</MudSelectItem>
+                <MudSelectItem Value="@("mobile")">Mobile</MudSelectItem>
+            </MudSelect>
+
+            <MudCheckBox @bind-Value="_generateVariants" Label="3 variants" Dense="true" />
+            <MudCheckBox @bind-Value="_convertToBlazor"  Label="+ Blazor"   Dense="true" />
+        </div>
+
+        @* Reference image upload *@
+        <div class="design-ref-upload">
+            <InputFile id="design-ref-input" OnChange="OnRefImageSelected"
+                       accept="image/*" style="display:none;" multiple />
+            <MudButton Size="Size.Small" Variant="Variant.Text"
+                       StartIcon="@Icons.Material.Outlined.Image"
+                       OnClick="OpenRefPicker">
+                Add reference images
+            </MudButton>
+            @if (_refImages.Any())
+            {
+                <div class="design-ref-thumbnails">
+                    @foreach (var img in _refImages)
+                    {
+                        <span class="design-ref-thumb">
+                            @img.Name
+                            <span @onclick="() => RemoveRef(img)">&#x00D7;</span>
+                        </span>
+                    }
+                </div>
+            }
+        </div>
+
+        @* Generate button *@
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   FullWidth="true"
+                   StartIcon="@Icons.Material.Outlined.AutoAwesome"
+                   OnClick="@(string.IsNullOrEmpty(_activeDownloadUrl) ? Generate : EditCurrent)"
+                   Disabled="@(_generating || string.IsNullOrWhiteSpace(_prompt))">
+            @if (_generating)
+            {
+                <span>Generating...</span>
+            }
+            else if (!string.IsNullOrEmpty(_activeDownloadUrl))
+            {
+                <span>Apply Changes</span>
+            }
+            else
+            {
+                <span>Generate Design</span>
+            }
+        </MudButton>
+
+        @if (!string.IsNullOrEmpty(_activeDownloadUrl))
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                       FullWidth="true"
+                       OnClick="GenerateNew">
+                New Screen
+            </MudButton>
+        }
+
+        @* Step log (live generation feedback) *@
+        @if (_stepLog.Any())
+        {
+            <div class="design-step-log">
+                @foreach (var step in _stepLog.TakeLast(4))
+                {
+                    <div class="design-step-entry">@step</div>
+                }
+            </div>
+        }
+
+    </div>
+
+</div>
+
+@code {
+    [Parameter] public string OrgId { get; set; } = "fortress-am";
+
+    private string _prompt           = "";
+    private string _deviceTarget     = "responsive";
+    private bool   _generateVariants = false;
+    private bool   _convertToBlazor  = false;
+    private bool   _generating       = false;
+    private string _generatingStatus = "Generating design...";
+
+    private string _activeDownloadUrl = "";
+    private string _blazorDownloadUrl = "";
+    private string _activeScreenId    = "";
+    private string _activeProjectId   = "";
+    private int    _activeVersion     = 1;
+    private string _activeVariant     = "";
+    private string _activeHtmlSource  = "";
+
+    private List<string>            _stepLog    = new();
+    private List<ScreenHistoryItem> _screens    = new();
+    private List<VersionInfo>       _versions   = new();
+    private List<VariantInfo>       _variants   = new();
+    private List<IBrowserFile>      _refImages  = new();
+
+    private string _brandPrimary = "#1a2332";
+    private string _brandName    = "Fortress AM";
+
+    protected override void OnInitialized()
+    {
+        _activeProjectId = Guid.NewGuid().ToString();
+    }
+
+    private async Task Generate()
+    {
+        if (string.IsNullOrWhiteSpace(_prompt)) return;
+        _generating       = true;
+        _generatingStatus = _generateVariants ? "Generating 3 variants..." : "Starting...";
+        _variants.Clear();
+        _stepLog.Clear();
+        _blazorDownloadUrl = "";
+
+        try
+        {
+            // Use AgentApiClient (injects internal JWT) instead of raw HttpClient
+            var files = new List<(string Name, Stream Data, string ContentType)>();
+            foreach (var img in _refImages)
+                files.Add((img.Name, img.OpenReadStream(10 * 1024 * 1024), img.ContentType ?? "image/png"));
+
+            var (taskId, screenId) = await AgentApi.StartDesignScreenAsync(
+                _activeProjectId, _prompt, _deviceTarget,
+                _generateVariants ? 3 : 1, _convertToBlazor, OrgId, files);
+
+            _activeScreenId = screenId;
+            await StreamTask(taskId);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Generation failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _generating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task EditCurrent()
+    {
+        if (string.IsNullOrWhiteSpace(_prompt) || string.IsNullOrEmpty(_activeHtmlSource)) return;
+        _generating       = true;
+        _generatingStatus = "Applying changes...";
+        _stepLog.Clear();
+        _blazorDownloadUrl = "";
+
+        try
+        {
+            // Use AgentApiClient for auth-carrying HTTP
+            var taskId = await AgentApi.EditDesignScreenAsync(
+                _activeProjectId, _activeScreenId, _prompt,
+                _activeHtmlSource, OrgId, _deviceTarget);
+            await StreamTask(taskId);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Edit failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _generating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StreamTask(string taskId)
+    {
+        using var cts    = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        // AgentApiClient.OpenDesignStreamAsync carries internal JWT
+        using var stream = await AgentApi.OpenDesignStreamAsync(taskId, cts.Token);
+        using var reader = new System.IO.StreamReader(stream);
+
+        while (!reader.EndOfStream && !cts.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(cts.Token);
+            if (string.IsNullOrEmpty(line) || !line.StartsWith("data: ")) continue;
+
+            var json  = line[6..];
+            var chunk = System.Text.Json.JsonSerializer.Deserialize<SseChunkDto>(json,
+                new System.Text.Json.JsonSerializerOptions
+                    { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
+
+            if (chunk == null) continue;
+
+            switch (chunk.Type)
+            {
+                case "step":
+                    _generatingStatus = chunk.Text ?? "";
+                    _stepLog.Add(chunk.Text ?? "");
+                    StateHasChanged();
+                    break;
+
+                case "file_output" when chunk.OutputType == "html":
+                    _activeDownloadUrl = chunk.DownloadUrl ?? "";
+                    _activeVersion++;
+                    _screens.Insert(0, new ScreenHistoryItem(
+                        _activeScreenId, _prompt, _activeVersion,
+                        DateTime.UtcNow, _activeDownloadUrl));
+                    StateHasChanged();
+                    break;
+
+                case "file_output" when chunk.FileName?.EndsWith(".razor") == true:
+                    _blazorDownloadUrl = chunk.DownloadUrl ?? "";
+                    StateHasChanged();
+                    break;
+
+                case "result":
+                    HandleResultChunk(chunk.Text ?? "");
+                    break;
+
+                case "error":
+                    Snackbar.Add(chunk.Text ?? "Generation error", Severity.Error);
+                    break;
+            }
+        }
+    }
+
+    private void HandleResultChunk(string json)
+    {
+        try
+        {
+            var opts = new System.Text.Json.JsonSerializerOptions
+                { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
+            var result = System.Text.Json.JsonSerializer.Deserialize<ScreenResult>(json, opts);
+            if (result == null) return;
+
+            _activeHtmlSource = result.HtmlSource ?? "";
+
+            if (result.IsVariants && result.Variants != null)
+            {
+                _variants = result.Variants.Select(v =>
+                    new VariantInfo(v.Label, v.Suffix, v.DownloadUrl)).ToList();
+                if (_variants.Any())
+                {
+                    _activeVariant     = _variants[0].Suffix;
+                    _activeDownloadUrl = _variants[0].DownloadUrl;
+                }
+            }
+        }
+        catch { /* ignore malformed result */ }
+    }
+
+    private void SelectVariant(VariantInfo v)
+    {
+        _activeVariant     = v.Suffix;
+        _activeDownloadUrl = v.DownloadUrl;
+    }
+
+    private async Task CopyCode()
+    {
+        if (!string.IsNullOrEmpty(_activeHtmlSource))
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _activeHtmlSource);
+            Snackbar.Add("HTML copied to clipboard.", Severity.Success);
+        }
+    }
+
+    private void GenerateNew()
+    {
+        _activeScreenId    = Guid.NewGuid().ToString();
+        _activeDownloadUrl = "";
+        _activeHtmlSource  = "";
+        _blazorDownloadUrl = "";
+        _activeVersion     = 0;
+        _variants.Clear();
+        _stepLog.Clear();
+        _prompt = "";
+    }
+
+    private void NewProject()
+    {
+        _activeProjectId = Guid.NewGuid().ToString();
+        _screens.Clear();
+        GenerateNew();
+    }
+
+    private void LoadScreen(ScreenHistoryItem screen)
+    {
+        _activeScreenId    = screen.ScreenId;
+        _activeDownloadUrl = screen.DownloadUrl;
+        _activeVersion     = screen.Version;
+    }
+
+    private Task RestoreVersion(VersionInfo ver)
+    {
+        _activeDownloadUrl = ver.DownloadUrl;
+        _activeVersion     = ver.Version;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void SetDevice(string device)   => _deviceTarget = device;
+    private string DeviceClass(string d)    => d == _deviceTarget ? "mud-button-filled" : "";
+    private string GetFrameClass()          => _deviceTarget switch
+    {
+        "mobile"  => "design-frame--mobile",
+        "desktop" => "design-frame--desktop",
+        _         => "design-frame--responsive",
+    };
+
+    private void OnRefImageSelected(InputFileChangeEventArgs e)
+        => _refImages.AddRange(e.GetMultipleFiles(3));
+    private void RemoveRef(IBrowserFile f)  => _refImages.Remove(f);
+    private void OpenRefPicker()
+        => JS.InvokeVoidAsync("triggerElementClick", "design-ref-input");
+
+    private static string TruncatePrompt(string p)
+        => p.Length > 50 ? p[..47] + "..." : p;
+
+    // ── DTOs ─────────────────────────────────────────────────────────────
+    record ScreenHistoryItem(string ScreenId, string Prompt, int Version,
+        DateTime CreatedAt, string DownloadUrl);
+    record VersionInfo(int Version, string S3Key, string DownloadUrl, DateTime CreatedAt, string Prompt);
+    record VariantInfo(string Label, string Suffix, string DownloadUrl);
+    record ScreenResult(string? ScreenId, string? ProjectId, string? HtmlSource,
+        string? DownloadUrl, bool IsVariants, List<VariantResultItem>? Variants);
+    record VariantResultItem(string Label, string Suffix, string DownloadUrl, string S3Key);
+
+    class SseChunkDto
+    {
+        public string? Type        { get; set; }
+        public string? Text        { get; set; }
+        public string? OutputType  { get; set; }
+        public string? FileName    { get; set; }
+        public string? DownloadUrl { get; set; }
+    }
+}

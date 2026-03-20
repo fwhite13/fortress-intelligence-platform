@@ -21,6 +21,7 @@ interface TaskParams {
     workingDir: string;
     maxBudgetUsd: number;
     maxTurns: number;
+    systemPromptOverride?: string;
 }
 export declare function runTask(params: TaskParams): AsyncGenerator<SseChunk>;
 export {};

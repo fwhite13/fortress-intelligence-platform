@@ -109,6 +109,84 @@ public sealed class AgentApiClient
         resp.EnsureSuccessStatusCode();
     }
 
+    // ── Agent metadata ────────────────────────────────────────────────────────
+
+    /// <summary>Get metadata for a single agent by ID (returns null if not found).</summary>
+    public async Task<AgentMeta?> GetAgentMetaAsync(string agentId, CancellationToken ct = default)
+    {
+        var client = CreateClient();
+        var resp   = await client.GetAsync($"/agents/{agentId}", ct);
+        if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<AgentMeta>(cancellationToken: ct);
+    }
+
+    // ── Design Agent ──────────────────────────────────────────────────────────
+
+    /// <summary>Start a new design screen generation task. Returns (taskId, screenId).</summary>
+    public async Task<(string TaskId, string ScreenId)> StartDesignScreenAsync(
+        string projectId, string prompt, string deviceTarget,
+        int variantCount, bool convertToBlazor, string orgId,
+        IEnumerable<(string Name, Stream Data, string ContentType)> refs,
+        CancellationToken ct = default)
+    {
+        var client = CreateClient();
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(prompt),                                     "prompt");
+        form.Add(new StringContent(deviceTarget),                               "deviceTarget");
+        form.Add(new StringContent(variantCount.ToString()),                    "variantCount");
+        form.Add(new StringContent(convertToBlazor ? "true" : "false"),         "convertToBlazor");
+        form.Add(new StringContent(orgId),                                      "orgId");
+
+        foreach (var (name, data, contentType) in refs)
+        {
+            var fc = new StreamContent(data);
+            fc.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+            form.Add(fc, "refs", name);
+        }
+
+        var resp = await client.PostAsync(
+            $"/agents/design/projects/{projectId}/screens", form, ct);
+        resp.EnsureSuccessStatusCode();
+
+        var body = await resp.Content.ReadFromJsonAsync<DesignScreenResponse>(cancellationToken: ct)
+            ?? throw new InvalidOperationException("No response from design API");
+        return (body.TaskId, body.ScreenId);
+    }
+
+    /// <summary>Submit an edit to an existing screen. Returns the new taskId.</summary>
+    public async Task<string> EditDesignScreenAsync(
+        string projectId, string screenId, string prompt,
+        string priorHtml, string orgId, string deviceTarget,
+        CancellationToken ct = default)
+    {
+        var client = CreateClient();
+        var resp = await client.PostAsJsonAsync(
+            $"/agents/design/projects/{projectId}/screens/{screenId}/edit",
+            new { prompt, priorHtml, orgId, deviceTarget }, ct);
+        resp.EnsureSuccessStatusCode();
+
+        var body = await resp.Content.ReadFromJsonAsync<DesignScreenResponse>(cancellationToken: ct)
+            ?? throw new InvalidOperationException("No response from design edit API");
+        return body.TaskId;
+    }
+
+    /// <summary>Open SSE stream for a design task (carries internal JWT same as OpenStreamAsync).</summary>
+    public async Task<Stream> OpenDesignStreamAsync(string taskId, CancellationToken ct = default)
+    {
+        var client  = CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Get,
+            $"/agents/design/tasks/{taskId}/stream");
+        request.Headers.Accept.Add(
+            new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("text/event-stream"));
+        var resp = await client.SendAsync(request,
+            HttpCompletionOption.ResponseHeadersRead, ct);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadAsStreamAsync(ct);
+    }
+
+    private record DesignScreenResponse(string TaskId, string ScreenId);
+
     private HttpClient CreateClient()
     {
         var client = _httpClientFactory.CreateClient("cowork-agent");
@@ -120,6 +198,8 @@ public sealed class AgentApiClient
     private record StartTaskResponse(string TaskId);
     private record InstructionsResponse(string Text, string? UpdatedAt);
 }
+
+public record AgentMeta(string Id, string Name, string Description, string Icon, string Color);
 
 public record OutputFileSummary(string Name, string Type, string DownloadUrl);
 

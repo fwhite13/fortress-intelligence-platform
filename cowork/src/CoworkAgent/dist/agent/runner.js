@@ -85,8 +85,11 @@ async function* runTask(params) {
     catch {
         // Non-fatal — task runs without FORGE context if fetch fails
     }
+    const effectiveSystemPrompt = params.systemPromptOverride?.trim()
+        ? params.systemPromptOverride
+        : SYSTEM_PROMPT;
     const systemPrompt = [
-        SYSTEM_PROMPT,
+        effectiveSystemPrompt,
         persistentInstructions
             ? `## Your Standing Instructions\n${persistentInstructions}`
             : '',
