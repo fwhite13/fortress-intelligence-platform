@@ -82,8 +82,8 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.RecommendedQuoteId).HasColumnType("char(36)");
             // Sprint 7 column mappings
             e.Property(x => x.Notes).HasColumnType("longtext");
-            e.Property(x => x.CarrierName).HasMaxLength(200);
-            e.Property(x => x.CoverageTypes).HasMaxLength(200);
+            e.Property(x => x.CarrierName).HasMaxLength(200).HasColumnName("carrier_name");
+            e.Property(x => x.CoverageTypes).HasMaxLength(200).HasColumnName("coverage_types");
             e.Property(x => x.ProposalDate).HasColumnName("proposal_date");
             e.HasOne(x => x.Opportunity).WithMany(o => o.Proposals).HasForeignKey(x => x.OpportunityId);
         });
