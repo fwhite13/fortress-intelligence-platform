@@ -234,10 +234,11 @@ var logger = app.Logger;
         catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("UpdatedAt column already exists"); }
 
         // Sprint 6 — new tables (contacts, opportunity_documents)
+        // Note: CHAR(36) FK columns must use ascii/ascii_general_ci to match opportunities.Id collation (Aurora MySQL 5.7-compat)
         await db.Database.ExecuteSqlRawAsync("""
             CREATE TABLE IF NOT EXISTS contacts (
-                id            CHAR(36) NOT NULL PRIMARY KEY,
-                opportunity_id CHAR(36) NOT NULL,
+                id            CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                opportunity_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
                 first_name    VARCHAR(100) NOT NULL DEFAULT '',
                 last_name     VARCHAR(100) NOT NULL DEFAULT '',
                 title         VARCHAR(100) NULL,
@@ -248,14 +249,14 @@ var logger = app.Logger;
                 created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX idx_contacts_opp (opportunity_id),
-                FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE CASCADE
+                FOREIGN KEY (opportunity_id) REFERENCES opportunities(Id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """);
 
         await db.Database.ExecuteSqlRawAsync("""
             CREATE TABLE IF NOT EXISTS opportunity_documents (
-                id              CHAR(36) NOT NULL PRIMARY KEY,
-                opportunity_id  CHAR(36) NOT NULL,
+                id              CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                opportunity_id  CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
                 file_name       VARCHAR(255) NOT NULL DEFAULT '',
                 file_type       VARCHAR(100) NULL,
                 s3_key          VARCHAR(500) NOT NULL DEFAULT '',
@@ -263,7 +264,7 @@ var logger = app.Logger;
                 uploaded_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 uploaded_by     VARCHAR(200) NULL,
                 INDEX idx_docs_opp (opportunity_id),
-                FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE CASCADE
+                FOREIGN KEY (opportunity_id) REFERENCES opportunities(Id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """);
 
