@@ -1,6 +1,6 @@
 @page "/meetings"
 @attribute [Authorize]
-@inject HttpClient Http
+@inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthStateProvider
 @inject MeetingService MeetingService
@@ -213,8 +213,9 @@
         StateHasChanged();
         try
         {
-            var response = await Http.PostAsJsonAsync("/api/meetings/join",
-                new { meetingUrl = meetingUrl, title = meetingTitle });
+            var http = HttpClientFactory.CreateClient();
+            var uri = Navigation.ToAbsoluteUri("/api/meetings/join");
+            var response = await http.PostAsJsonAsync(uri, new { meetingUrl = meetingUrl, title = meetingTitle });
             if (response.IsSuccessStatusCode)
             {
                 Snackbar.Add("Bot is joining the meeting!", Severity.Success);
