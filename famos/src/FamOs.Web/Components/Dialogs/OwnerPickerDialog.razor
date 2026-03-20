@@ -1,0 +1,62 @@
+@inject Microsoft.Extensions.Options.IOptions<AffinityConfig> AffinityOptions
+@using FamOs.Web.Theme
+
+<MudDialog>
+    <TitleContent>Assign Owner</TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            Select the ER responsible for this opportunity.
+        </MudText>
+        <div class="famos-owner-list">
+            @foreach (var user in _users)
+            {
+                var isSelected = _selectedId == user.UserId;
+                <div class="@($"famos-owner-row{(isSelected ? " famos-owner-row--selected" : "")}")"
+                     @onclick="() => SelectUser(user.UserId)">
+                    <div class="famos-contact-avatar" style="@(isSelected ? "background:var(--sky);" : "background:var(--navy-mid);")">
+                        @user.Initials
+                    </div>
+                    <div class="famos-contact-info">
+                        <div class="famos-contact-name">@user.DisplayName</div>
+                        <div class="famos-contact-meta">@user.UserId</div>
+                    </div>
+                    @if (isSelected)
+                    {
+                        <MudIcon Icon="@FamosIcons.Check" Style="color:var(--sky); font-size:18px;" />
+                    }
+                </div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Class="famos-btn-outline" OnClick="Cancel">Cancel</MudButton>
+        <MudButton Class="famos-btn-primary" OnClick="Submit"
+                   Disabled="@string.IsNullOrEmpty(_selectedId)">
+            Assign
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string CurrentOwnerId { get; set; } = "";
+
+    private List<AffinityUser> _users = new();
+    private string _selectedId = "";
+
+    protected override void OnInitialized()
+    {
+        _users      = AffinityOptions.Value.Users;
+        _selectedId = CurrentOwnerId;
+    }
+
+    private void SelectUser(string userId) => _selectedId = userId;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit()
+    {
+        if (string.IsNullOrEmpty(_selectedId)) return;
+        MudDialog.Close(DialogResult.Ok(_selectedId));
+    }
+}

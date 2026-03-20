@@ -1,0 +1,117 @@
+@namespace FamOs.Web.Components.Panels
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Theme
+
+<div class="famos-panel">
+
+    <div class="famos-panel-header">
+        <span class="famos-panel-title">Activity</span>
+    </div>
+
+    @if (!Opportunity.IsClosed)
+    {
+        <div class="famos-note-entry mb-4">
+            <MudTextField Class="famos-input"
+                          @bind-Value="_noteText"
+                          Placeholder="Add a note..."
+                          Lines="2" />
+            <div style="margin-top: 6px; text-align: right;">
+                <MudButton Class="famos-btn-outline-sm"
+                           OnClick="AddNote"
+                           Disabled="@(string.IsNullOrWhiteSpace(_noteText) || _saving)">
+                    Add Note
+                </MudButton>
+            </div>
+        </div>
+    }
+
+    @if (!Opportunity.Activities.Any())
+    {
+        <div class="famos-empty-state">
+            <MudIcon Icon="@FamosIcons.Note" Class="famos-empty-icon" />
+            <div>No activity yet. Activity is recorded automatically as the opportunity progresses.</div>
+        </div>
+    }
+    else
+    {
+        <div class="famos-activity-list">
+            @foreach (var act in Opportunity.Activities)
+            {
+                <div class="famos-activity-row">
+                    <div class="famos-activity-dot @GetDotClass(act.EventType)"></div>
+                    <div class="famos-activity-body">
+                        <div class="famos-activity-desc">@act.Description</div>
+                        <div class="famos-activity-meta">
+                            @act.OccurredAt.ToLocalTime().ToString("MMM d, yyyy 'at' h:mm tt")
+                            @if (!string.IsNullOrEmpty(act.ActorUserId))
+                            {
+                                <span> · @GetActorDisplay(act.ActorUserId)</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback OnUpdated { get; set; }
+
+    private string _noteText = "";
+    private bool   _saving;
+
+    private async Task AddNote()
+    {
+        if (string.IsNullOrWhiteSpace(_noteText)) return;
+        _saving = true;
+        try
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.AddNoteAsync(Opportunity.Id, _noteText, userId);
+
+            Opportunity.Activities.Insert(0, new Activity
+            {
+                EventType   = "note",
+                Description = _noteText.Trim(),
+                ActorUserId = userId,
+                OccurredAt  = DateTime.UtcNow,
+            });
+
+            _noteText = "";
+            Snackbar.Add("Note added.", Severity.Success);
+            await OnUpdated.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private static string GetDotClass(string eventType) => eventType switch
+    {
+        "note"               => "dot-note",
+        "opportunity_closed" => "dot-closed",
+        _                    => "dot-default"
+    };
+
+    private static string GetActorDisplay(string userId)
+    {
+        var atIdx = userId.IndexOf('@');
+        var local = atIdx > 0 ? userId[..atIdx] : userId;
+        var parts = local.Split(new[] { '.', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2
+            ? $"{char.ToUpper(parts[0][0])}{char.ToUpper(parts[1][0])}"
+            : local.Length > 0 ? local[..Math.Min(local.Length, 2)].ToUpper() : "?";
+    }
+}

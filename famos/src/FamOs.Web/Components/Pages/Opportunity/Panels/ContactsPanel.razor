@@ -1,0 +1,100 @@
+@namespace FamOs.Web.Components.Panels
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Theme
+
+<div class="famos-panel">
+
+    <div class="famos-panel-header">
+        <span class="famos-panel-title">Contacts</span>
+        @if (!Opportunity.IsClosed)
+        {
+            <MudButton Class="famos-btn-outline-sm"
+                       StartIcon="@FamosIcons.Add"
+                       OnClick="OpenAddDialog">
+                Add Contact
+            </MudButton>
+        }
+    </div>
+
+    @if (!Opportunity.Contacts.Any())
+    {
+        <div class="famos-empty-state">
+            <MudIcon Icon="@FamosIcons.Person" Class="famos-empty-icon" />
+            <div>No contacts yet. Add a primary contact to complete intake.</div>
+        </div>
+    }
+    else
+    {
+        <div class="famos-contact-list">
+            @foreach (var contact in Opportunity.Contacts
+                .OrderBy(c => c.ContactType == ContactType.Primary ? 0 : 1)
+                .ThenBy(c => c.LastName))
+            {
+                <div class="famos-contact-row">
+                    <div class="famos-contact-avatar">
+                        @(contact.FirstName.Length > 0 ? contact.FirstName[0].ToString().ToUpper() : "?")
+                    </div>
+                    <div class="famos-contact-info">
+                        <div class="famos-contact-name">
+                            @contact.FullName
+                            @if (contact.ContactType == ContactType.Primary)
+                            {
+                                <span class="famos-contact-badge-primary">Primary</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(contact.Title))
+                        {
+                            <div class="famos-contact-meta">@contact.Title</div>
+                        }
+                        <div class="famos-contact-meta">
+                            @if (!string.IsNullOrEmpty(contact.Email))
+                            {
+                                <span>@contact.Email</span>
+                            }
+                            @if (!string.IsNullOrEmpty(contact.Phone))
+                            {
+                                <span> · @contact.Phone</span>
+                            }
+                        </div>
+                    </div>
+                    @if (!Opportunity.IsClosed)
+                    {
+                        <MudButton Class="famos-btn-icon-sm"
+                                   StartIcon="@FamosIcons.Delete"
+                                   OnClick="() => RemoveContactById(contact.Id)">
+                        </MudButton>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback OnUpdated { get; set; }
+
+    private async Task OpenAddDialog()
+    {
+        var dialog = await DialogService.ShowAsync<AddContactDialog>(
+            "Add Contact",
+            new DialogParameters { ["OpportunityId"] = Opportunity.Id });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+            await OnUpdated.InvokeAsync();
+    }
+
+    private async Task RemoveContactById(Guid contactId)
+    {
+        var userId = await UserSession.GetUserIdAsync();
+        await Lifecycle.RemoveContactAsync(contactId, userId);
+        Opportunity.Contacts.RemoveAll(c => c.Id == contactId);
+        Snackbar.Add("Contact removed.", Severity.Info);
+        StateHasChanged();
+    }
+}

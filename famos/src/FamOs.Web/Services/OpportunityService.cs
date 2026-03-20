@@ -49,6 +49,8 @@ public class OpportunityService
             .Include(o => o.PolicyShadow)
             .Include(o => o.Activities.OrderByDescending(a => a.OccurredAt).Take(50))
             .Include(o => o.Tasks.Where(t => t.Status == "open"))
+            .Include(o => o.Contacts)
+            .Include(o => o.Documents)
             .FirstOrDefaultAsync(o => o.Id == id);
     }
 

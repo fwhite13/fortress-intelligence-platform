@@ -1,0 +1,165 @@
+@namespace FamOs.Web.Components.Panels
+@inject IDocumentService DocSvc
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Theme
+
+<div class="famos-panel">
+
+    <div class="famos-panel-header">
+        <span class="famos-panel-title">Documents</span>
+        @if (!Opportunity.IsClosed)
+        {
+            <MudButton Class="famos-btn-outline-sm"
+                       StartIcon="@FamosIcons.Upload"
+                       OnClick="OpenFilePicker">
+                Upload
+            </MudButton>
+        }
+    </div>
+
+    <InputFile id="doc-file-input" OnChange="OnFileSelected" style="display:none;" />
+
+    @if (_uploading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+        <div class="famos-meta-text">Uploading @_uploadingName...</div>
+    }
+
+    @if (!Opportunity.Documents.Any() && !_uploading)
+    {
+        <div class="famos-empty-state">
+            <MudIcon Icon="@FamosIcons.Document" Class="famos-empty-icon" />
+            <div>No documents uploaded yet.</div>
+        </div>
+    }
+    else if (Opportunity.Documents.Any())
+    {
+        <div class="famos-doc-list">
+            @foreach (var doc in Opportunity.Documents.OrderByDescending(d => d.UploadedAt))
+            {
+                <div class="famos-doc-row">
+                    <MudIcon Icon="@FamosIcons.Document"
+                             Style="font-size:16px; color:var(--muted); flex-shrink:0;" />
+                    <div class="famos-contact-info">
+                        <div class="famos-contact-name">@doc.FileName</div>
+                        <div class="famos-contact-meta">
+                            @doc.DocumentCategory · @doc.UploadedAt.ToLocalTime().ToString("MMM d, yyyy")
+                            @if (!string.IsNullOrEmpty(doc.UploadedBy))
+                            {
+                                <span> · @doc.UploadedBy</span>
+                            }
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:4px;">
+                        <MudButton Class="famos-btn-icon-sm"
+                                   StartIcon="@FamosIcons.Download"
+                                   OnClick="() => DownloadDocByKey(doc.S3Key)">
+                        </MudButton>
+                        @if (!Opportunity.IsClosed)
+                        {
+                            <MudButton Class="famos-btn-icon-sm"
+                                       StartIcon="@FamosIcons.Delete"
+                                       OnClick="() => DeleteDocById(doc.Id)">
+                            </MudButton>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_uploadError != null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mt-2">@_uploadError</MudAlert>
+    }
+
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback OnUpdated { get; set; }
+
+    private bool _uploading;
+    private string _uploadingName = "";
+    private string? _uploadError;
+    private DocumentCategory _uploadCategory = DocumentCategory.Other;
+
+    private async Task OpenFilePicker()
+    {
+        await JS.InvokeVoidAsync("eval", "document.getElementById('doc-file-input').click()");
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        _uploadError = null;
+        _uploading   = true;
+        _uploadingName = e.File.Name;
+        StateHasChanged();
+
+        try
+        {
+            const long maxSize = 25 * 1024 * 1024; // 25MB
+            if (e.File.Size > maxSize)
+            {
+                _uploadError = $"File too large. Maximum size is 25MB.";
+                return;
+            }
+
+            using var stream = e.File.OpenReadStream(maxSize);
+            var bytes = new byte[e.File.Size];
+            _ = await stream.ReadAsync(bytes);
+
+            var userId = await UserSession.GetUserIdAsync();
+            var s3Key  = $"famos/documents/{Opportunity.Id}/{e.File.Name}";
+
+            using var s3Stream = new MemoryStream(bytes);
+            await DocSvc.UploadRawAsync(s3Key, s3Stream, e.File.ContentType);
+
+            var docId = await DocSvc.RecordUploadAsync(
+                Opportunity.Id, e.File.Name, e.File.ContentType,
+                s3Key, _uploadCategory, userId);
+
+            Opportunity.Documents.Add(new OpportunityDocument
+            {
+                Id               = docId,
+                OpportunityId    = Opportunity.Id,
+                FileName         = e.File.Name,
+                FileType         = e.File.ContentType,
+                S3Key            = s3Key,
+                DocumentCategory = _uploadCategory,
+                UploadedAt       = DateTime.UtcNow,
+                UploadedBy       = userId,
+            });
+
+            Snackbar.Add($"{e.File.Name} uploaded.", Severity.Success);
+            await OnUpdated.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            _uploadError = $"Upload failed: {ex.Message}";
+        }
+        finally
+        {
+            _uploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DownloadDocByKey(string s3Key)
+    {
+        var url = await DocSvc.GetDownloadUrlAsync(s3Key);
+        await JS.InvokeVoidAsync("open", url, "_blank");
+    }
+
+    private async Task DeleteDocById(Guid docId)
+    {
+        var userId = await UserSession.GetUserIdAsync();
+        await DocSvc.DeleteAsync(docId, userId);
+        Opportunity.Documents.RemoveAll(d => d.Id == docId);
+        Snackbar.Add("Document deleted.", Severity.Info);
+        StateHasChanged();
+    }
+}

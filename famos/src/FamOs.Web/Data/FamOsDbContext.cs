@@ -18,6 +18,8 @@ public class FamOsDbContext : DbContext
     public DbSet<FamOsTask>           Tasks                 => Set<FamOsTask>();
     public DbSet<OpportunityFlag>     OpportunityFlags      => Set<OpportunityFlag>();
     public DbSet<OutboxEvent>         OutboxEvents          => Set<OutboxEvent>();
+    public DbSet<Contact>              Contacts              => Set<Contact>();
+    public DbSet<OpportunityDocument>  Documents             => Set<OpportunityDocument>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -39,6 +41,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.CloseReason).HasConversion<int?>();
             e.Property(x => x.CloseNotes).HasColumnType("longtext");
             e.Property(x => x.LastStageTransitionAt).HasColumnType("datetime");
+            e.Property(x => x.PrimaryContactId).HasColumnType("char(36)");
         });
 
         // Submission
@@ -124,6 +127,31 @@ public class FamOsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnType("char(36)");
             e.HasIndex(x => new { x.Processed, x.OccurredAt }).HasDatabaseName("idx_outbox_pending");
+        });
+
+        // Contact
+        m.Entity<Contact>(e => {
+            e.ToTable("contacts");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.OpportunityId).HasColumnType("char(36)");
+            e.Property(x => x.ContactType).HasConversion<int>();
+            e.Property(x => x.Notes).HasColumnType("longtext");
+            e.HasOne(x => x.Opportunity)
+                .WithMany(o => o.Contacts)
+                .HasForeignKey(x => x.OpportunityId);
+        });
+
+        // OpportunityDocument
+        m.Entity<OpportunityDocument>(e => {
+            e.ToTable("opportunity_documents");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.OpportunityId).HasColumnType("char(36)");
+            e.Property(x => x.DocumentCategory).HasConversion<int>();
+            e.HasOne(x => x.Opportunity)
+                .WithMany(o => o.Documents)
+                .HasForeignKey(x => x.OpportunityId);
         });
     }
 }

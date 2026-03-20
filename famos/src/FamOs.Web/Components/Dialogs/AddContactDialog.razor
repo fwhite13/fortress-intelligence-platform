@@ -1,0 +1,91 @@
+@inject LifecycleCommandService Lifecycle
+@inject UserSessionService UserSession
+@inject ISnackbar Snackbar
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Theme
+
+<MudDialog>
+    <TitleContent>Add Contact</TitleContent>
+    <DialogContent>
+        <MudGrid Spacing="2">
+            <MudItem xs="12" sm="6">
+                <MudTextField Class="famos-input" @bind-Value="_firstName"
+                    Label="First Name *" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField Class="famos-input" @bind-Value="_lastName"
+                    Label="Last Name *" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField Class="famos-input" @bind-Value="_title"
+                    Label="Title / Role" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect Class="famos-select" @bind-Value="_contactType"
+                    Label="Contact Type">
+                    <MudSelectItem Value="ContactType.Primary">Primary</MudSelectItem>
+                    <MudSelectItem Value="ContactType.Billing">Billing</MudSelectItem>
+                    <MudSelectItem Value="ContactType.DecisionMaker">Decision Maker</MudSelectItem>
+                    <MudSelectItem Value="ContactType.TechnicalContact">Technical Contact</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField Class="famos-input" @bind-Value="_email"
+                    Label="Email" InputType="InputType.Email" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField Class="famos-input" @bind-Value="_phone"
+                    Label="Phone" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField Class="famos-input" @bind-Value="_notes"
+                    Label="Notes" Lines="2" />
+            </MudItem>
+        </MudGrid>
+        @if (_error != null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Class="famos-btn-outline" OnClick="Cancel">Cancel</MudButton>
+        <MudButton Class="famos-btn-primary" OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName))">
+            Add Contact
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public Guid OpportunityId { get; set; }
+
+    private string _firstName  = "";
+    private string _lastName   = "";
+    private string _title      = "";
+    private string _email      = "";
+    private string _phone      = "";
+    private string _notes      = "";
+    private ContactType _contactType = ContactType.Primary;
+    private string? _error;
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName)) return;
+        _error = null;
+        try
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.AddContactAsync(
+                OpportunityId, _firstName, _lastName, _title,
+                _email, _phone, _contactType, _notes, userId);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (LifecycleValidationException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

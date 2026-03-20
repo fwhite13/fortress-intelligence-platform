@@ -70,6 +70,17 @@ public class LifecycleCommandService
                 throw new LifecycleValidationException(
                     "At least one carrier submission must be created before routing to market.");
 
+            // UW completeness gate: requires >= 60%
+            var completer = new FamOs.Web.Services.UwCompletenessService();
+            var uwResult  = completer.Evaluate(opp);
+            if (!uwResult.CanRouteToMarket)
+            {
+                var missing = string.Join("; ", uwResult.UnmetItems);
+                throw new LifecycleValidationException(
+                    $"UW completeness is {uwResult.Score}% — must reach 60% before routing to market. " +
+                    $"Incomplete: {missing}");
+            }
+
             var from = opp.LifecycleStage;
             opp.LifecycleStage          = LifecycleStage.Marketed;
             opp.MarketedAt              = DateTime.UtcNow;
@@ -469,12 +480,124 @@ public class LifecycleCommandService
         });
     }
 
+    /// <summary>Add a contact to an opportunity. Only one Primary allowed per opportunity.</summary>
+    public async Task<Guid> AddContactAsync(
+        Guid opportunityId, string firstName, string lastName,
+        string? title, string? email, string? phone,
+        FamOs.Web.Data.Entities.ContactType contactType, string? notes, string actorUserId)
+    {
+        return await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var opp = await LoadOpportunityAsync(opportunityId);
+            Validate(!opp.IsClosed, "Cannot add contacts to a closed opportunity");
+
+            if (contactType == FamOs.Web.Data.Entities.ContactType.Primary
+                && opp.Contacts.Any(c => c.ContactType == FamOs.Web.Data.Entities.ContactType.Primary))
+            {
+                throw new LifecycleValidationException(
+                    "This opportunity already has a primary contact. " +
+                    "Update the existing primary contact or use a different contact type.");
+            }
+
+            var contact = new FamOs.Web.Data.Entities.Contact
+            {
+                OpportunityId = opportunityId,
+                FirstName     = firstName.Trim(),
+                LastName      = lastName.Trim(),
+                Title         = title?.Trim(),
+                Email         = email?.Trim(),
+                Phone         = phone?.Trim(),
+                ContactType   = contactType,
+                Notes         = notes?.Trim(),
+            };
+            _db.Contacts.Add(contact);
+
+            if (contactType == FamOs.Web.Data.Entities.ContactType.Primary)
+                opp.PrimaryContactId = contact.Id;
+
+            opp.UpdatedAt = DateTime.UtcNow;
+            await WriteActivityAsync(opp.Id, "contact_added",
+                $"Contact added: {firstName} {lastName} ({contactType})", actorUserId);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+            return contact.Id;
+        });
+    }
+
+    /// <summary>Remove a contact from an opportunity.</summary>
+    public async Task RemoveContactAsync(Guid contactId, string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var contact = await _db.Contacts
+                .Include(c => c.Opportunity)
+                .FirstOrDefaultAsync(c => c.Id == contactId)
+                ?? throw new NotFoundException($"Contact {contactId} not found");
+
+            var opp = contact.Opportunity;
+            _db.Contacts.Remove(contact);
+
+            if (opp.PrimaryContactId == contactId)
+                opp.PrimaryContactId = null;
+
+            opp.UpdatedAt = DateTime.UtcNow;
+            await WriteActivityAsync(opp.Id, "contact_removed",
+                $"Contact removed: {contact.FullName}", actorUserId);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+    }
+
+    /// <summary>Assign a new owner to an opportunity.</summary>
+    public async Task AssignOwnerAsync(Guid opportunityId, string newOwnerUserId, string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var opp = await LoadOpportunityAsync(opportunityId);
+            Validate(!opp.IsClosed, "Cannot reassign owner of a closed opportunity");
+
+            var previous      = opp.OwnerUserId;
+            opp.OwnerUserId   = newOwnerUserId;
+            opp.UpdatedAt     = DateTime.UtcNow;
+
+            await WriteActivityAsync(opp.Id, "owner_assigned",
+                $"Owner changed from {previous} to {newOwnerUserId}", actorUserId);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+    }
+
+    /// <summary>Adds a manual note to the opportunity activity log.</summary>
+    public async Task AddNoteAsync(Guid opportunityId, string noteText, string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var opp = await LoadOpportunityAsync(opportunityId);
+            Validate(!opp.IsClosed, "Cannot add notes to a closed opportunity");
+            Validate(!string.IsNullOrWhiteSpace(noteText), "Note text cannot be empty");
+
+            await WriteActivityAsync(opp.Id, "note", noteText.Trim(), actorUserId);
+            opp.UpdatedAt = DateTime.UtcNow;
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private async Task<Opportunity> LoadOpportunityAsync(Guid id)
     {
         var opp = await _db.Opportunities
             .Include(o => o.Flags.Where(f => f.IsActive))
+            .Include(o => o.Contacts)
             .FirstOrDefaultAsync(o => o.Id == id)
             ?? throw new NotFoundException($"Opportunity {id} not found");
         return opp;
@@ -487,6 +610,7 @@ public class LifecycleCommandService
             .Include(o => o.Quotes)
             .Include(o => o.Submissions)
             .Include(o => o.Proposals)
+            .Include(o => o.Contacts)
             .FirstOrDefaultAsync(o => o.Id == id)
             ?? throw new NotFoundException($"Opportunity {id} not found");
         return opp;

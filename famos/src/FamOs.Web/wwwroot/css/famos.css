@@ -633,3 +633,162 @@
 .famos-signal-carrier-waiting { background: #ede9fe; color: #5b21b6; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; }
 .famos-signal-at-risk         { background: #fee2e2; color: #991b1b; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; }
 .famos-signal-urgent          { background: #DC2626; color: #ffffff; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; font-weight: 600; }
+
+/* ── Sprint 6 ── Panels shared */
+.famos-panel { margin-bottom: 16px; }
+.famos-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.famos-panel-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--navy);
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+.famos-empty-state {
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+}
+.famos-empty-icon {
+    font-size: 32px;
+    color: var(--border);
+    display: block;
+    margin: 0 auto 8px;
+}
+
+/* Contacts Panel */
+.famos-contact-list { display: flex; flex-direction: column; gap: 6px; }
+.famos-contact-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--white);
+}
+.famos-contact-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--sky); color: #fff;
+    font-size: 13px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.famos-contact-info { flex: 1; min-width: 0; }
+.famos-contact-name { font-size: 13px; font-weight: 600; color: var(--navy); }
+.famos-contact-meta { font-size: 11.5px; color: var(--muted); margin-top: 1px; }
+.famos-contact-badge-primary {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 20px;
+    background: rgba(0, 144, 208, 0.12);
+    color: var(--sky);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    vertical-align: middle;
+}
+.famos-btn-icon-sm {
+    min-width: 28px; width: 28px; height: 28px;
+    padding: 0;
+    border-radius: 6px;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+}
+.famos-btn-icon-sm:hover { color: var(--red); background: rgba(220,38,38,0.07); }
+
+/* Documents Panel */
+.famos-doc-list { display: flex; flex-direction: column; gap: 6px; }
+.famos-doc-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--white);
+}
+.famos-meta-text { font-size: 11.5px; color: var(--muted); }
+
+/* UW Completeness Bar */
+.famos-completeness-bar {
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--cream);
+}
+
+/* Owner Picker */
+.famos-owner-list { display: flex; flex-direction: column; gap: 4px; }
+.famos-owner-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+.famos-owner-row:hover { border-color: var(--sky); }
+.famos-owner-row--selected { border-color: var(--sky); background: rgba(0,144,208,0.05); }
+
+/* Search Dropdown */
+.famos-topbar-search--interactive { position: relative; }
+.famos-search-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    z-index: 9999;
+    overflow: hidden;
+    min-width: 280px;
+}
+.famos-search-result {
+    padding: 9px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+}
+.famos-search-result:last-child { border-bottom: none; }
+.famos-search-result:hover { background: var(--cream); }
+
+/* Activity Panel */
+.famos-note-entry { /* container for note input + button */ }
+.famos-activity-list { display: flex; flex-direction: column; gap: 0; }
+.famos-activity-row {
+    display: flex;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    align-items: flex-start;
+}
+.famos-activity-row:last-child { border-bottom: none; }
+.famos-activity-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    flex-shrink: 0; margin-top: 5px;
+}
+.dot-default  { background: var(--sky); }
+.dot-info     { background: var(--sky); }
+.dot-note     { background: var(--amber); }
+.dot-closed   { background: var(--red); }
+.famos-activity-body { flex: 1; min-width: 0; }
+.famos-activity-desc { font-size: 13px; color: var(--text); }
+.famos-activity-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* Secondary panels container */
+.famos-secondary-panels { display: flex; flex-direction: column; gap: 0; }

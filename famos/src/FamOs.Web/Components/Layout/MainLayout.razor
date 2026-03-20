@@ -1,8 +1,11 @@
 @inherits LayoutComponentBase
 @using FamOs.Web.Theme
 @using System.Security.Claims
+@using FamOs.Web.Services
+@using FamOs.Web.Domain
 @inject NavigationManager _nav
 @inject Microsoft.Extensions.Options.IOptions<AffinityConfig> AffinityOptions
+@inject OpportunitySearchService SearchSvc
 
 <MudThemeProvider Theme="_theme" />
 <MudPopoverProvider />
@@ -46,13 +49,36 @@
                 <strong>Dashboard</strong>
             </span>
             <div class="famos-topbar-right">
-                <div class="famos-topbar-search">
+                <div class="famos-topbar-search famos-topbar-search--interactive"
+                     @onfocusout="HandleFocusOut">
                     <span class="famos-topbar-search-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                        </svg>
+                        <MudIcon Icon="@FamosIcons.Search" Style="font-size:13px; color:#9ca3af;" />
                     </span>
-                    <input type="text" placeholder="Search opportunities..." />
+                    <input type="text"
+                           placeholder="Search opportunities..."
+                           @bind="_searchText"
+                           @bind:event="oninput"
+                           @oninput="OnSearchInput"
+                           @onkeydown="OnKeyDown"
+                           @onfocus="() => _searchFocused = true" />
+
+                    @if (_searchResults.Any() && _searchFocused)
+                    {
+                        <div class="famos-search-dropdown">
+                            @foreach (var result in _searchResults)
+                            {
+                                <div class="famos-search-result"
+                                     @onmousedown:preventDefault="true"
+                                     @onclick="() => NavigateToResult(result)">
+                                    <div class="famos-contact-name">@result.Name</div>
+                                    <div class="famos-contact-meta">
+                                        @GetStageLabel(result.Stage)
+                                        @(result.Premium.HasValue ? $" · ${result.Premium:N0}" : "")
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
                 </div>
                 <div class="famos-topbar-user">
                     <div class="famos-topbar-avatar">@_userInitial</div>
@@ -74,6 +100,11 @@
     private AffinityConfig _affinity = new();
 
     private MudTheme _theme = FipTheme.Create();
+
+    private string _searchText    = "";
+    private bool   _searchFocused = false;
+    private List<OpportunitySearchResult> _searchResults = new();
+    private CancellationTokenSource? _searchCts;
 
     [Inject] private IServiceProvider ServiceProvider { get; set; } = default!;
 
@@ -105,5 +136,58 @@
         }
     }
 
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        _searchText = e.Value?.ToString() ?? "";
+        _searchCts?.Cancel();
+        _searchCts = new CancellationTokenSource();
+        var ct = _searchCts.Token;
 
+        try
+        {
+            await Task.Delay(300, ct);
+            _searchResults = await SearchSvc.SearchAsync(_searchText);
+            StateHasChanged();
+        }
+        catch (OperationCanceledException) { /* debounced */ }
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            _searchText    = "";
+            _searchResults = new();
+            _searchFocused = false;
+        }
+    }
+
+    private void HandleFocusOut()
+    {
+        Task.Delay(150).ContinueWith(_ =>
+        {
+            _searchFocused = false;
+            InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private void NavigateToResult(OpportunitySearchResult result)
+    {
+        _searchText    = "";
+        _searchResults = new();
+        _searchFocused = false;
+        _nav.NavigateTo($"/opportunity/{result.Id}");
+    }
+
+    private static string GetStageLabel(LifecycleStage stage) => stage switch
+    {
+        LifecycleStage.Intake           => "Intake",
+        LifecycleStage.UnderwritingPrep => "App Review",
+        LifecycleStage.Marketed         => "Submitted",
+        LifecycleStage.QuotesReceived   => "Quotes In",
+        LifecycleStage.ClientDecision   => "Proposal",
+        LifecycleStage.Binding          => "Binding",
+        LifecycleStage.Bound            => "Bound",
+        _                               => stage.ToString()
+    };
 }

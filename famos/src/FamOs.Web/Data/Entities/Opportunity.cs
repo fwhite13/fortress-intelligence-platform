@@ -53,4 +53,7 @@ public class Opportunity
     public List<FamOsTask>          Tasks          { get; set; } = new();
     public List<OpportunityFlag>    Flags          { get; set; } = new();
     public PolicyShadowRecord?      PolicyShadow   { get; set; }
+    public List<Contact>           Contacts          { get; set; } = new();
+    public Guid?                   PrimaryContactId  { get; set; }
+    public List<OpportunityDocument> Documents { get; set; } = new();
 }

@@ -7,8 +7,11 @@
 @inject NavigationManager Nav
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
+@inject UwCompletenessService UwCompleteness
+@inject Microsoft.Extensions.Options.IOptions<AffinityConfig> AffinityOptions
 @using FamOs.Web.Data.Entities
 @using FamOs.Web.Services
+@using FamOs.Web.Components.Panels
 
 <PageTitle>@(_opp?.Name ?? "Opportunity") — FAM OS</PageTitle>
 
@@ -39,11 +42,47 @@ else
         @if (!_opp.IsClosed)
         {
             <div style="display: flex; gap: 8px;">
+                <MudButton Class="famos-btn-outline-sm" OnClick="OpenOwnerPicker">
+                    @if (!string.IsNullOrEmpty(_opp.OwnerUserId))
+                    {
+                        <span>Owner: @GetOwnerDisplay(_opp.OwnerUserId)</span>
+                    }
+                    else
+                    {
+                        <span>Assign Owner</span>
+                    }
+                </MudButton>
                 <MudButton Class="famos-btn-outline-sm" OnClick="ParkOpportunity">Park</MudButton>
                 <MudButton Class="famos-btn-danger" OnClick="CloseOpportunity">Close</MudButton>
             </div>
         }
     </div>
+
+    @if (_opp.LifecycleStage == LifecycleStage.UnderwritingPrep)
+    {
+        var completeness = UwCompleteness.Evaluate(_opp);
+        var meterColor   = completeness.Score >= 80 ? "var(--green)"
+                         : completeness.Score >= 50 ? "var(--amber)"
+                         : "var(--red)";
+        <div class="famos-completeness-bar mb-4">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                <span class="famos-meta-text">UW Completeness</span>
+                <span style="font-size:13px; font-weight:700; color:@meterColor;">
+                    @completeness.Score%
+                </span>
+            </div>
+            <div style="height:6px; background:var(--border); border-radius:3px;">
+                <div style="@($"height:6px; width:{completeness.Score}%; background:{meterColor}; border-radius:3px; transition:width 0.4s;")">
+                </div>
+            </div>
+            @if (completeness.UnmetItems.Any())
+            {
+                <div class="famos-meta-text mt-1">
+                    Missing: @string.Join(" · ", completeness.UnmetItems)
+                </div>
+            }
+        </div>
+    }
 
     @switch (_opp.LifecycleStage)
     {
@@ -75,21 +114,17 @@ else
             break;
     }
 
-    @if (_opp.Activities.Any())
-    {
-        <div class="famos-card-title mt-5 mb-3">Activity</div>
-        <MudTimeline TimelinePosition="TimelinePosition.Left">
-            @foreach (var act in _opp.Activities.OrderByDescending(a => a.OccurredAt).Take(20))
-            {
-                <MudTimelineItem Color="Color.Primary" Size="Size.Small">
-                    <MudText Typo="Typo.body2">@act.Description</MudText>
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">
-                        @act.OccurredAt.ToLocalTime().ToString("MMM d, h:mm tt")
-                    </MudText>
-                </MudTimelineItem>
-            }
-        </MudTimeline>
-    }
+    @* ── Always-visible secondary panels ─────────────────────── *@
+    <div class="famos-secondary-panels mt-4">
+        @if (_opp.LifecycleStage is LifecycleStage.Marketed or LifecycleStage.QuotesReceived)
+        {
+            <QuoteScraperPanel Opportunity="_opp" OnUpdated="Reload" />
+        }
+
+        <ContactsPanel  Opportunity="_opp" OnUpdated="Reload" />
+        <DocumentsPanel Opportunity="_opp" OnUpdated="Reload" />
+        <ActivityPanel  Opportunity="_opp" OnUpdated="Reload" />
+    </div>
 }
 
 @code {
@@ -155,6 +190,27 @@ else
         LifecycleStage.ClosedNotBound   => "Closed",
         _                               => stage.ToString()
     };
+
+    private async Task OpenOwnerPicker()
+    {
+        var dialog = await DialogService.ShowAsync<OwnerPickerDialog>(
+            "Assign Owner",
+            new DialogParameters { ["CurrentOwnerId"] = _opp?.OwnerUserId ?? "" });
+        var result = await dialog.Result;
+        if (result is { Canceled: false } && result.Data is string newOwner)
+        {
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.AssignOwnerAsync(_opp!.Id, newOwner, userId);
+            Snackbar.Add("Owner assigned.", Severity.Success);
+            await Reload();
+        }
+    }
+
+    private string GetOwnerDisplay(string ownerUserId)
+    {
+        var user = AffinityOptions.Value.Users.FirstOrDefault(u => u.UserId == ownerUserId);
+        return user?.DisplayName ?? ownerUserId.Split('@')[0];
+    }
 
     private static string GetStagePillClass(LifecycleStage stage) => stage switch
     {

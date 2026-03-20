@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.AspNetCore.DataProtection;
 using MySqlConnector;
+using Amazon.S3;
+using Amazon.Extensions.NETCore.Setup;
 using FamOs.Web;
 using FamOs.Web.Data;
 using FamOs.Web.Domain;
@@ -103,6 +105,13 @@ builder.Services.AddDataProtection()
     .PersistKeysToDbContext<SharedKeyRingDbContext>()
     .SetApplicationName("FortressAI")
     .DisableAutomaticKeyGeneration();
+
+// AWS S3 — uses ECS task role (no explicit credentials needed)
+builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
+builder.Services.AddAWSService<IAmazonS3>();
+builder.Services.AddScoped<IDocumentService, DocumentService>();
+builder.Services.AddScoped<UwCompletenessService>();
+builder.Services.AddScoped<OpportunitySearchService>();
 
 // ── Application Services ──
 builder.Services.AddScoped<UserSessionService>();
@@ -223,6 +232,44 @@ var logger = app.Logger;
         catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("Notes column already exists"); }
         try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN UpdatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"); }
         catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("UpdatedAt column already exists"); }
+
+        // Sprint 6 — new tables (contacts, opportunity_documents)
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS contacts (
+                id            CHAR(36) NOT NULL PRIMARY KEY,
+                opportunity_id CHAR(36) NOT NULL,
+                first_name    VARCHAR(100) NOT NULL DEFAULT '',
+                last_name     VARCHAR(100) NOT NULL DEFAULT '',
+                title         VARCHAR(100) NULL,
+                email         VARCHAR(200) NULL,
+                phone         VARCHAR(50) NULL,
+                contact_type  INT NOT NULL DEFAULT 0,
+                notes         LONGTEXT NULL,
+                created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_contacts_opp (opportunity_id),
+                FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS opportunity_documents (
+                id              CHAR(36) NOT NULL PRIMARY KEY,
+                opportunity_id  CHAR(36) NOT NULL,
+                file_name       VARCHAR(255) NOT NULL DEFAULT '',
+                file_type       VARCHAR(100) NULL,
+                s3_key          VARCHAR(500) NOT NULL DEFAULT '',
+                document_category INT NOT NULL DEFAULT 6,
+                uploaded_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                uploaded_by     VARCHAR(200) NULL,
+                INDEX idx_docs_opp (opportunity_id),
+                FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        // Sprint 6 — new column on opportunities (PascalCase for existing table)
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE opportunities ADD COLUMN PrimaryContactId CHAR(36) NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("PrimaryContactId column already exists"); }
     }
     catch (Exception ex)
     {

@@ -50,6 +50,10 @@ public static class FamosIcons
     public const string Person = Icons.Material.Outlined.Person;
     public const string Document = Icons.Material.Outlined.Description;
     public const string Note = Icons.Material.Outlined.Notes;
+    public const string Contacts   = Icons.Material.Outlined.Contacts;
+    public const string Attach     = Icons.Material.Outlined.AttachFile;
+    public const string NoteAlt    = Icons.Material.Outlined.NoteAlt;
+    public const string AssignUser = Icons.Material.Outlined.AssignmentInd;
 
     // Data Viz
     public const string BarChart = Icons.Material.Outlined.BarChart;
