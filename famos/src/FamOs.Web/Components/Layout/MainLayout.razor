@@ -56,8 +56,7 @@
                     </span>
                     <input type="text"
                            placeholder="Search opportunities..."
-                           @bind="_searchText"
-                           @bind:event="oninput"
+                           value="@_searchText"
                            @oninput="OnSearchInput"
                            @onkeydown="OnKeyDown"
                            @onfocus="() => _searchFocused = true" />

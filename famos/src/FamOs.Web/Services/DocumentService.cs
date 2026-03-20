@@ -2,6 +2,7 @@ using Amazon.S3;
 using Amazon.S3.Model;
 using FamOs.Web.Data;
 using FamOs.Web.Data.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace FamOs.Web.Services;
 
