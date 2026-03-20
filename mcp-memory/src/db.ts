@@ -25,8 +25,15 @@ async function getDbCredentials(): Promise<{
   const sm = new SecretsManagerClient({ region: process.env.AWS_REGION ?? 'us-east-1' });
   const secretId = process.env.DB_SECRET_ARN ?? 'mcp-memory/db-credentials';
   const resp = await sm.send(new GetSecretValueCommand({ SecretId: secretId }));
-  return JSON.parse(resp.SecretString!) as {
-    host: string; port: number; database: string; user: string; password: string;
+  const raw = JSON.parse(resp.SecretString!) as {
+    host: string; port: number; database: string; username: string; password: string;
+  };
+  return {
+    host:     raw.host,
+    port:     raw.port ?? 5432,
+    database: raw.database ?? 'mcp_memory',
+    user:     raw.username, // RDS Secrets Manager uses 'username'; pg Pool needs 'user'
+    password: raw.password,
   };
 }
 
@@ -40,6 +47,8 @@ export async function initDb(): Promise<void> {
     database: creds.database,
     user:     creds.user,
     password: creds.password,
+    // rds-ca-rsa2048-g1 is included in Node 22's Mozilla trust store — no cert file needed.
+    // Only set ca: fs.readFileSync(...) if using the legacy rds-ca-2019 bundle.
     ssl:      process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false,
     max:      5,
     idleTimeoutMillis: 30_000,
