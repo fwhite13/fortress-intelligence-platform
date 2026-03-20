@@ -1,7 +1,9 @@
-# Debian-based Dockerfile for local WSL2 builds (MCR-free)
+# Debian-based Dockerfile for local WSL2 builds and AWS CodeBuild (MCR-free)
 # Build context: ~/projects/fip/ (repo root — needed for shared/FipShared reference)
+# Uses ECR-mirrored debian:bookworm-slim to avoid Docker Hub rate limits in CodeBuild
 # Build stage - uses Debian + dotnet-install script
-FROM debian:bookworm-slim AS build
+ARG DEBIAN_IMAGE=742932328420.dkr.ecr.us-east-1.amazonaws.com/debian:bookworm-slim
+FROM ${DEBIAN_IMAGE} AS build
 WORKDIR /src
 
 # Install .NET 8 SDK dependencies + curl
@@ -38,7 +40,8 @@ WORKDIR /src/firm/src/FortressIntelligenceRM.Web
 RUN dotnet publish "FortressIntelligenceRM.Web.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
 # Runtime stage - uses Debian + ASP.NET Core runtime only
-FROM debian:bookworm-slim AS final
+ARG DEBIAN_IMAGE=742932328420.dkr.ecr.us-east-1.amazonaws.com/debian:bookworm-slim
+FROM ${DEBIAN_IMAGE} AS final
 WORKDIR /app
 EXPOSE 8080
 
