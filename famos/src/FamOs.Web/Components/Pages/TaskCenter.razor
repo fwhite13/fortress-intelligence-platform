@@ -35,19 +35,15 @@
 }
 else if (!FilteredTasks.Any())
 {
-    <MudPaper Class="pa-6 text-center" Elevation="0"
-              Style="border:1px solid var(--border); border-radius:12px;">
-        <MudIcon Icon="@FamosIcons.CheckCircle"
-                 Style="font-size:48px; color:var(--green); margin-bottom:12px;" />
-        <MudText Typo="Typo.h6">
-            @(string.IsNullOrEmpty(_filterText) ? "All clear — no open tasks" : "No tasks match your filter")
-        </MudText>
-        <MudText Typo="Typo.body2" Color="Color.Secondary">
+    <div class="famos-empty-state">
+        <MudIcon Icon="@FamosIcons.CheckCircle" Class="famos-empty-icon" />
+        <div>@(string.IsNullOrEmpty(_filterText) ? "All clear — no open tasks" : "No tasks match your filter")</div>
+        <div class="famos-meta-text">
             @(string.IsNullOrEmpty(_filterText)
                 ? "New tasks are auto-generated when opportunities advance through the pipeline."
                 : "Try clearing the filter to see all tasks.")
-        </MudText>
-    </MudPaper>
+        </div>
+    </div>
 }
 else
 {

@@ -188,6 +188,8 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.AffinityId).HasMaxLength(50).HasColumnName("affinity_id");
             e.Property(x => x.CompanyName).HasMaxLength(255).HasColumnName("company_name");
             e.Property(x => x.HubSpotId).HasMaxLength(50).HasColumnName("hubspot_id");
+            e.Property(x => x.City).HasMaxLength(100).HasColumnName("city");
+            e.Property(x => x.State).HasMaxLength(10).HasColumnName("state");
             e.Property(x => x.ActiveOppCount).HasColumnName("active_opp_count");
             e.Property(x => x.LastSyncedAt).HasColumnName("last_synced_at");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");

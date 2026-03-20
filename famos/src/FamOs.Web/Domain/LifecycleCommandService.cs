@@ -557,14 +557,14 @@ public class LifecycleCommandService
 
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
-
-            // Fire-and-forget: push close to HubSpot after commit
-            _ = _hubspot.SyncClosedAsync(opportunityId, reason)
-                .ContinueWith(t => {
-                    if (t.IsFaulted)
-                        _logger.LogError(t.Exception, "[HubSpot] SyncClosed fire-and-forget failed");
-                });
         });
+
+        // Fire-and-forget: push close to HubSpot after transaction commits
+        _ = _hubspot.SyncClosedAsync(opportunityId, reason)
+            .ContinueWith(t => {
+                if (t.IsFaulted)
+                    _logger.LogError(t.Exception, "[HubSpot] SyncClosed fire-and-forget failed");
+            });
     }
 
     /// <summary>
@@ -779,14 +779,14 @@ public class LifecycleCommandService
 
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
-
-            // Fire-and-forget: push owner change to HubSpot after commit
-            _ = _hubspot.SyncOwnerAsync(opportunityId, newOwnerUserId)
-                .ContinueWith(t => {
-                    if (t.IsFaulted)
-                        _logger.LogError(t.Exception, "[HubSpot] SyncOwner fire-and-forget failed");
-                });
         });
+
+        // Fire-and-forget: push owner change to HubSpot after transaction commits
+        _ = _hubspot.SyncOwnerAsync(opportunityId, newOwnerUserId)
+            .ContinueWith(t => {
+                if (t.IsFaulted)
+                    _logger.LogError(t.Exception, "[HubSpot] SyncOwner fire-and-forget failed");
+            });
     }
 
     /// <summary>Adds a manual note to the opportunity activity log.</summary>
