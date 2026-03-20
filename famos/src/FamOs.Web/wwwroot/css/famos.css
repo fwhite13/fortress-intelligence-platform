@@ -602,6 +602,13 @@
 .famos-fw-600 { font-weight: 600; }
 .famos-fw-700 { font-weight: 700; }
 
+/* Chip utilities */
+.famos-chip-stage {
+    background-color: var(--border) !important;
+    color: var(--text) !important;
+    font-weight: 600;
+}
+
 /* Icon button */
 .famos-btn-icon {
   min-width: 32px !important;

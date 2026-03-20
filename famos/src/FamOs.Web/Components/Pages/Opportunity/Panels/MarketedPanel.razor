@@ -33,7 +33,7 @@
                             padding:10px 14px; cursor:pointer; background:var(--cream);"
                      @onclick="() => ToggleExpand(sub.Id)">
                     <div>
-                        <MudText Typo="Typo.body2" Style="font-weight:600;">@sub.CarrierName</MudText>
+                        <MudText Typo="Typo.body2" Class="famos-fw-600">@sub.CarrierName</MudText>
                         @if (sub.SubmittedAt.HasValue)
                         {
                             <MudText Typo="Typo.caption" Color="Color.Secondary">

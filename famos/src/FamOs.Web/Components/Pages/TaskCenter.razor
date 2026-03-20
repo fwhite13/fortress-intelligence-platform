@@ -63,10 +63,10 @@ else
                         cursor:pointer;"
                  @onclick="() => NavigateToOpportunity(opp.Id)">
                 <div style="display:flex; align-items:center; gap:10px;">
-                    <MudText Typo="Typo.subtitle2" Style="color:var(--navy); font-weight:600;">
+                    <MudText Typo="Typo.subtitle2" Class="famos-text-navy famos-fw-600">
                         @opp.Name
                     </MudText>
-                    <MudChip T="string" Size="Size.Small" Color="Color.Primary"
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="famos-chip-stage"
                              Style="font-size:10px; height:18px;">
                         @GetStageLabel(opp.LifecycleStage)
                     </MudChip>
