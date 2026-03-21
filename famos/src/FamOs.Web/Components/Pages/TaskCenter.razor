@@ -118,13 +118,7 @@ else
     }
 
     @* General tasks — ungrouped, under "General Tasks" header *@
-    @{
-        var generalTasks = FilteredTasks.Where(t => t.Opportunity == null)
-            .OrderBy(t => t.Task.DueAt.HasValue ? 0 : 1)
-            .ThenBy(t => t.Task.DueAt)
-            .ToList();
-    }
-    @if (generalTasks.Any())
+    @if (GeneralTasks.Any())
     {
         <MudPaper Class="mb-3" Elevation="0"
                   Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
@@ -140,11 +134,11 @@ else
                     </MudChip>
                 </div>
                 <div style="color:var(--muted); font-size:12px;">
-                    @generalTasks.Count task@(generalTasks.Count == 1 ? "" : "s")
+                    @GeneralTasks.Count task@(GeneralTasks.Count == 1 ? "" : "s")
                 </div>
             </div>
 
-            @foreach (var item in generalTasks)
+            @foreach (var item in GeneralTasks)
             {
                 var isOverdue = item.Task.DueAt.HasValue && item.Task.DueAt.Value < DateTime.UtcNow;
                 <div style="display:flex; align-items:center; padding:10px 16px;
@@ -191,6 +185,12 @@ else
     private int    _page       = 0;
     private int    _totalCount = 0;
     private bool   _hasMore    = false;
+
+    private List<TaskWithOpportunity> GeneralTasks =>
+        FilteredTasks.Where(t => t.Opportunity == null)
+            .OrderBy(t => t.Task.DueAt.HasValue ? 0 : 1)
+            .ThenBy(t => t.Task.DueAt)
+            .ToList();
 
     private IEnumerable<TaskWithOpportunity> FilteredTasks
     {
