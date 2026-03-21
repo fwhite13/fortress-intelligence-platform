@@ -76,7 +76,7 @@ public class OpportunityService
     /// Used by Pipeline board per-column pagination.
     /// </summary>
     public async Task<OpportunityPage> GetStagePageAsync(
-        LifecycleStage stage, int pageIndex, string? affinityId = null)
+        LifecycleStage stage, int pageIndex, string? affinityId = null, string? search = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -86,6 +86,9 @@ public class OpportunityService
 
         if (!string.IsNullOrEmpty(affinityId))
             query = query.Where(o => o.AffinityId == affinityId);
+
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(o => o.Name.Contains(search));
 
         var total = await query.CountAsync();
         var items = await query
@@ -108,13 +111,16 @@ public class OpportunityService
     /// <summary>
     /// Returns paginated stage counts for all pipeline columns (cheap query — counts only).
     /// </summary>
-    public async Task<Dictionary<LifecycleStage, int>> GetStageSummaryAsync(string? affinityId = null)
+    public async Task<Dictionary<LifecycleStage, int>> GetStageSummaryAsync(string? affinityId = null, string? search = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var query = db.Opportunities.Where(o => !o.IsClosed);
         if (!string.IsNullOrEmpty(affinityId))
             query = query.Where(o => o.AffinityId == affinityId);
+
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(o => o.Name.Contains(search));
 
         return await query
             .GroupBy(o => o.LifecycleStage)

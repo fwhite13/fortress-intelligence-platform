@@ -16,10 +16,20 @@
         <h2 class="famos-page-h2">Pipeline</h2>
         <p class="famos-page-sub">@_stageSummary.Values.Sum() active opportunities</p>
     </div>
-    <MudButton Class="famos-btn-primary" OnClick="OpenCreateDialog"
-               StartIcon="@FamosIcons.Add">
-        New Opportunity
-    </MudButton>
+    <div style="display:flex; gap:8px; align-items:center;">
+        <MudTextField Class="famos-input-filter"
+                      Value="_search"
+                      ValueChanged="@((string v) => OnSearchChanged(v))"
+                      Placeholder="Search pipeline..."
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@FamosIcons.Search"
+                      Clearable="true"
+                      Style="min-width:220px;" />
+        <MudButton Class="famos-btn-primary" OnClick="OpenCreateDialog"
+                   StartIcon="@FamosIcons.Add">
+            New Opportunity
+        </MudButton>
+    </div>
 </div>
 
 @if (_loading)
@@ -73,6 +83,7 @@ else
     private Dictionary<LifecycleStage, int>              _stageSummary = new();
     private Dictionary<LifecycleStage, OpportunityPage>  _pages        = new();
     private HashSet<LifecycleStage>                      _loadingMore  = new();
+    private string _search = "";
 
     private static readonly (LifecycleStage Stage, string DisplayName)[] _columns =
     {
@@ -87,17 +98,23 @@ else
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
+    private async Task OnSearchChanged(string value)
+    {
+        _search = value ?? "";
+        await LoadAsync();
+    }
+
     private async Task LoadAsync()
     {
         _loading = true;
         var affinityId = await AffinitySvc.GetCurrentAffinityIdAsync();
 
         // Load counts first (cheap) — one query
-        _stageSummary = await OppService.GetStageSummaryAsync(affinityId);
+        _stageSummary = await OppService.GetStageSummaryAsync(affinityId, _search);
 
         // Load page 0 of each stage in parallel
         var tasks = _columns
-            .Select(col => OppService.GetStagePageAsync(col.Stage, 0, affinityId))
+            .Select(col => OppService.GetStagePageAsync(col.Stage, 0, affinityId, _search))
             .ToArray();
         var pages = await Task.WhenAll(tasks);
 
@@ -116,7 +133,7 @@ else
 
         var affinityId = await AffinitySvc.GetCurrentAffinityIdAsync();
         var nextPage = await OppService.GetStagePageAsync(
-            stage, current.PageIndex + 1, affinityId);
+            stage, current.PageIndex + 1, affinityId, _search);
 
         // Append new items to existing page
         _pages[stage] = new OpportunityPage
@@ -150,7 +167,7 @@ else
         LifecycleStage.Marketed         => "#d97706",
         LifecycleStage.QuotesReceived   => "#0369a1",
         LifecycleStage.ClientDecision   => "#9333ea",
-        LifecycleStage.Binding          => "#0090d0",
+        LifecycleStage.Binding          => "#C0272D",
         LifecycleStage.Bound            => "#059669",
         _                               => "#6b7585",
     };
