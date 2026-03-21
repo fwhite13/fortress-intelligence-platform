@@ -190,7 +190,7 @@
             _ = await stream.ReadAsync(bytes);
 
             _statusMessage = "Submitting to scraper...";
-            var refId     = $"famos-opp-{Opportunity.Id:N}";
+            var refId     = $"famos-sub-{_selectedSubId:N}";
             var requestId = await Scraper.SubmitQuotePdfAsync(
                 refId, _selectedFile.Name, bytes);
 
