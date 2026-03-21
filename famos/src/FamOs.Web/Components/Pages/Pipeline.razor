@@ -199,20 +199,27 @@ else
                 }
             </div>
 
-            @if (!_drawerLoading && _detailOpp != null && _detailOpp.Activities.Any())
+            @if (!_drawerLoading && _detailOpp != null)
             {
                 <div class="famos-drawer-section">
                     <div class="famos-drawer-section-title" style="padding: 0 20px 6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--famos-text-muted, #6b7585);">Recent Activity</div>
-                    @foreach (var act in _detailOpp.Activities.Take(3))
+                    @if (_detailOpp.Activities.Any())
                     {
-                        <div class="famos-drawer-row" style="align-items:flex-start; flex-direction:column; gap:2px; padding: 6px 20px;">
-                            <span class="famos-drawer-value" style="font-size:13px;">
-                                @(act.Description != null && act.Description.Length > 60
-                                    ? act.Description.Substring(0, 60) + "…"
-                                    : (act.Description ?? act.EventType))
-                            </span>
-                            <span style="font-size:11px; color:var(--famos-text-muted, #6b7585);">@act.OccurredAt.ToLocalTime().ToString("MMM d, yyyy")</span>
-                        </div>
+                        @foreach (var act in _detailOpp.Activities.Take(3))
+                        {
+                            <div class="famos-drawer-row" style="align-items:flex-start; flex-direction:column; gap:2px; padding: 6px 20px;">
+                                <span class="famos-drawer-value" style="font-size:13px;">
+                                    @(act.Description != null && act.Description.Length > 60
+                                        ? act.Description.Substring(0, 60) + "…"
+                                        : (act.Description ?? act.EventType))
+                                </span>
+                                <span style="font-size:11px; color:var(--famos-text-muted, #6b7585);">@act.OccurredAt.ToLocalTime().ToString("MMM d, yyyy")</span>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div style="padding: 6px 20px; color:var(--famos-text-muted, #6b7585); font-size:13px;">No recent activity</div>
                     }
                 </div>
             }
