@@ -112,7 +112,7 @@ else if (_summary != null)
                         var color   = GetStageColor(stage);
                         var label   = GetStageLabel(stage);
                         <div style="margin-bottom:10px; cursor:pointer;"
-                             @onclick="() => Nav.NavigateTo($"/pipeline")">
+                             @onclick="GoToPipeline">
                             <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:3px;">
                                 <span style="color:var(--text);">@label</span>
                                 <span style="color:var(--muted);">
