@@ -6,7 +6,9 @@
 @inject NavigationManager Nav
 @inject UserAffinityService AffinitySvc
 @inject IJSRuntime JS
+@inject IOptions<AffinityConfig> AffinityOptions
 @using FamOs.Web.Data.Entities
+@using Microsoft.Extensions.Options
 @using FamOs.Web.Services
 @using FamOs.Web.Domain
 @using FamOs.Web.Theme
@@ -123,7 +125,9 @@ else
                 {
                     <div class="famos-drawer-row">
                         <span class="famos-drawer-label">Account Manager</span>
-                        <span class="famos-drawer-value">@_selectedOpp.OwnerUserId</span>
+                        <span class="famos-drawer-value">
+                            @(AffinityOptions.Value.Users.FirstOrDefault(u => u.UserId == _selectedOpp.OwnerUserId)?.DisplayName ?? _selectedOpp.OwnerUserId)
+                        </span>
                     </div>
                 }
                 <div class="famos-drawer-row">
@@ -142,6 +146,82 @@ else
                     </div>
                 }
             </div>
+
+            <div class="famos-drawer-section">
+                <div class="famos-drawer-section-title" style="padding: 0 20px 6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--famos-text-muted, #6b7585);">Pipeline Activity</div>
+                @if (_drawerLoading)
+                {
+                    <div style="padding:12px 20px;">
+                        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                    </div>
+                }
+                else if (_detailOpp != null)
+                {
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Carriers Submitted</span>
+                        <span class="famos-drawer-value">@(_detailOpp.Submissions.Count > 0 ? _detailOpp.Submissions.Count.ToString() : "—")</span>
+                    </div>
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Quotes Received</span>
+                        <span class="famos-drawer-value">@(_detailOpp.Quotes.Count > 0 ? _detailOpp.Quotes.Count.ToString() : "—")</span>
+                    </div>
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Open Tasks</span>
+                        <span class="famos-drawer-value">@(_detailOpp.Tasks.Count > 0 ? _detailOpp.Tasks.Count.ToString() : "—")</span>
+                    </div>
+                }
+            </div>
+
+            <div class="famos-drawer-section">
+                <div class="famos-drawer-section-title" style="padding: 0 20px 6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--famos-text-muted, #6b7585);">Contacts</div>
+                @if (_drawerLoading)
+                {
+                    <div style="padding:12px 20px;">
+                        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                    </div>
+                }
+                else if (_detailOpp != null)
+                {
+                    @if (!_detailOpp.Contacts.Any())
+                    {
+                        <div style="padding: 6px 20px; color:var(--famos-text-muted, #6b7585); font-size:13px;">No contacts on record</div>
+                    }
+                    else
+                    {
+                        @foreach (var contact in _detailOpp.Contacts.Take(3))
+                        {
+                            <div class="famos-drawer-row">
+                                <span class="famos-drawer-label">@contact.FullName</span>
+                                <span class="famos-drawer-value" style="font-size:12px; color:var(--famos-text-muted, #6b7585);">@contact.ContactType.ToString()</span>
+                            </div>
+                        }
+                    }
+                }
+            </div>
+
+            @if (!_drawerLoading && _detailOpp != null && _detailOpp.Activities.Any())
+            {
+                <div class="famos-drawer-section">
+                    <div class="famos-drawer-section-title" style="padding: 0 20px 6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--famos-text-muted, #6b7585);">Recent Activity</div>
+                    @foreach (var act in _detailOpp.Activities.Take(3))
+                    {
+                        <div class="famos-drawer-row" style="align-items:flex-start; flex-direction:column; gap:2px; padding: 6px 20px;">
+                            <span class="famos-drawer-value" style="font-size:13px;">
+                                @(act.Description != null && act.Description.Length > 60
+                                    ? act.Description.Substring(0, 60) + "…"
+                                    : (act.Description ?? act.EventType))
+                            </span>
+                            <span style="font-size:11px; color:var(--famos-text-muted, #6b7585);">@act.OccurredAt.ToLocalTime().ToString("MMM d, yyyy")</span>
+                        </div>
+                    }
+                </div>
+            }
+            else if (_drawerLoading)
+            {
+                <div style="padding:12px 20px;">
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                </div>
+            }
 
             <div style="padding: 16px 20px 20px;">
                 <MudButton Class="famos-btn-primary"
@@ -163,8 +243,10 @@ else
     private HashSet<LifecycleStage>                      _loadingMore  = new();
     private string _search = "";
 
-    private Opportunity? _selectedOpp = null;
-    private bool         _drawerOpen  = false;
+    private Opportunity? _selectedOpp   = null;
+    private bool         _drawerOpen    = false;
+    private Opportunity? _detailOpp     = null;
+    private bool         _drawerLoading = false;
 
     private static readonly (LifecycleStage Stage, string DisplayName)[] _columns =
     {
@@ -241,16 +323,23 @@ else
         }
     }
 
-    private void OpenDrawer(Opportunity opp)
+    private async Task OpenDrawer(Opportunity opp)
     {
-        _selectedOpp = opp;
-        _drawerOpen  = true;
+        _selectedOpp   = opp;
+        _drawerOpen    = true;
+        _drawerLoading = true;
+        StateHasChanged();
+        _detailOpp     = await OppService.GetByIdAsync(opp.Id);
+        _drawerLoading = false;
+        StateHasChanged();
     }
 
     private void CloseDrawer()
     {
-        _drawerOpen  = false;
-        _selectedOpp = null;
+        _drawerOpen    = false;
+        _selectedOpp   = null;
+        _detailOpp     = null;
+        _drawerLoading = false;
     }
 
     private static string GetStageDisplayName(LifecycleStage stage) => stage switch
