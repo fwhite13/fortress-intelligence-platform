@@ -16,7 +16,7 @@ public static class FipTheme
             // --- Core Brand ---
             Primary           = "#002050",      // navy — sidebar, appbar, primary buttons
             PrimaryContrastText = "#ffffff",
-            Secondary         = "#0090d0",      // sky-blue — active states, highlights
+            Secondary         = "#C0272D",      // TIG red — active states, highlights
             SecondaryContrastText = "#ffffff",
             Tertiary          = "#f0a010",      // amber — warnings
 
@@ -29,7 +29,7 @@ public static class FipTheme
             // --- Drawer/Sidebar ---
             DrawerBackground  = "#002050",
             DrawerText        = "rgba(255,255,255,0.85)",
-            DrawerIcon        = "#0090d0",      // sky accent for nav icons
+            DrawerIcon        = "#C0272D",      // TIG red
 
             // --- Text ---
             TextPrimary       = "#3a4250",      // --text body color

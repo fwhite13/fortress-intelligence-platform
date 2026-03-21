@@ -57,7 +57,7 @@
 }
 
 .kpi-navy::before   { background: #002050; }
-.kpi-sky::before    { background: #0090d0; }
+.kpi-sky::before    { background: #C0272D; }
 .kpi-green::before  { background: #059669; }
 .kpi-amber::before  { background: #f0a010; }
 .kpi-red::before    { background: #DC2626; }
@@ -180,7 +180,7 @@
 }
 
 .famos-kcard:hover {
-    border-color: #0090d0;
+    border-color: #C0272D;
     box-shadow: 0 4px 12px rgba(0,144,208,0.10);
 }
 
@@ -244,7 +244,7 @@
 .famos-pill-sub      { background: #fef3c7; color: #92400e; }
 .famos-pill-quotes   { background: #e0f2fe; color: #0369a1; }
 .famos-pill-prop     { background: #fdf4ff; color: #9333ea; }
-.famos-pill-binding  { background: #e0f2fe; color: #0090d0; }
+.famos-pill-binding  { background: #fde8e8; color: #C0272D; }
 .famos-pill-bound    { background: #d1fae5; color: #065f46; }
 .famos-pill-default  { background: #f3f4f6; color: #4b5563; }
 
@@ -276,7 +276,7 @@
 .famos-nav-item.active {
     background: rgba(0,144,208,0.13);
     color: #ffffff !important;
-    border-left-color: #0090d0;
+    border-left-color: #C0272D;
 }
 
 .famos-nav-item--disabled {
@@ -305,7 +305,7 @@
     margin-left: auto;
     font-size: 9.5px;
     font-weight: 700;
-    background: #0090d0;
+    background: #C0272D;
     color: #fff;
     padding: 1px 7px;
     border-radius: 10px;
@@ -537,7 +537,7 @@
     width: 30px;
     height: 30px;
     border-radius: 9px;
-    background: linear-gradient(135deg, #0090d0, #10b0f0);
+    background: linear-gradient(135deg, #C0272D, #10b0f0);
     color: white;
     display: flex;
     align-items: center;
