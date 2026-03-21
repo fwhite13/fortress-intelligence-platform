@@ -20,7 +20,8 @@ public class FamOsDbContext : DbContext
     public DbSet<OutboxEvent>         OutboxEvents          => Set<OutboxEvent>();
     public DbSet<Contact>              Contacts              => Set<Contact>();
     public DbSet<OpportunityDocument>  Documents             => Set<OpportunityDocument>();
-    public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<Account>    Accounts   => Set<Account>();
+    public DbSet<TeamNote>   TeamNotes  => Set<TeamNote>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -178,6 +179,19 @@ public class FamOsDbContext : DbContext
             e.HasOne(x => x.Opportunity)
                 .WithMany(o => o.Documents)
                 .HasForeignKey(x => x.OpportunityId);
+        });
+
+        // TeamNote
+        m.Entity<TeamNote>(e =>
+        {
+            e.ToTable("team_notes");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            e.Property(x => x.AuthorId).HasColumnName("author_id").HasMaxLength(255).IsRequired();
+            e.Property(x => x.NoteText).HasColumnName("note_text").HasColumnType("text").IsRequired();
+            e.Property(x => x.OpportunityId).HasColumnName("opportunity_id");
+            e.Property(x => x.TeamTag).HasColumnName("team_tag").HasMaxLength(20).HasDefaultValue("TIG");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
         });
 
         // Account — local cache of HubSpot companies; full snake_case column mapping

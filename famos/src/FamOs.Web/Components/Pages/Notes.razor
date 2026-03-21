@@ -1,0 +1,150 @@
+@page "/notes"
+@attribute [Authorize]
+@inject TeamNoteService NoteService
+@inject UserSessionService UserSession
+@using FamOs.Web.Services
+@using FamOs.Web.Data.Entities
+
+<PageTitle>Team Notes — FAM OS</PageTitle>
+
+<div class="famos-page-header">
+    <h2 class="famos-page-h2">Team Notes</h2>
+    <p class="famos-page-sub">Shared notes and account updates</p>
+</div>
+
+@* ── Compose ── *@
+<MudPaper Elevation="0" Class="mb-4" Style="border:1px solid var(--border); border-radius:12px; padding:16px 20px;">
+    <MudText Typo="Typo.subtitle2" Class="famos-text-navy mb-2">Post a Note</MudText>
+    <MudSelect T="Guid?" @bind-Value="_selectedOppId" Label="Link to Account (optional)"
+               Clearable="true" Dense="true" Margin="Margin.Dense" Class="mb-2">
+        <MudSelectItem T="Guid?" Value="null">— No account —</MudSelectItem>
+        @foreach (var opp in _accounts)
+        {
+            <MudSelectItem T="Guid?" Value="opp.Id">@opp.Name</MudSelectItem>
+        }
+    </MudSelect>
+    <MudTextField @bind-Value="_noteText" Placeholder="Write a note..." Lines="3"
+                  Variant="Variant.Outlined" FullWidth="true" Class="mb-2" />
+    <MudButton Class="famos-btn-primary" OnClick="PostNoteAsync" Disabled="_posting">
+        @(_posting ? "Posting…" : "Post Note")
+    </MudButton>
+</MudPaper>
+
+@* ── Filter ── *@
+<div style="display:flex; gap:12px; margin-bottom:16px; align-items:center;">
+    <MudSelect T="Guid?" Value="_filterOppId" ValueChanged="OnFilterChanged"
+               Label="Filter by Account" Clearable="true" Dense="true" Margin="Margin.Dense"
+               Style="max-width:280px;">
+        <MudSelectItem T="Guid?" Value="null">All Accounts</MudSelectItem>
+        @foreach (var opp in _accounts)
+        {
+            <MudSelectItem T="Guid?" Value="opp.Id">@opp.Name</MudSelectItem>
+        }
+    </MudSelect>
+</div>
+
+@* ── Notes list ── *@
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (!_notes.Any())
+{
+    <div class="famos-empty-state">
+        <MudIcon Icon="@Icons.Material.Outlined.StickyNote2" Style="font-size:40px; color:var(--muted);" />
+        <p>No notes yet. Be the first to post one.</p>
+    </div>
+}
+else
+{
+    @foreach (var note in _notes)
+    {
+        var isOpp = note.OpportunityId.HasValue;
+        <MudPaper Elevation="0" Class="mb-2"
+                  Style="@($"border:1px solid var(--border); border-radius:10px; padding:12px 16px; background:{(note.TeamTag == "Higg" ? "#fffbeb" : "#f0fdf4")};")">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="width:26px; height:26px; border-radius:6px; background:#C0272D;
+                                color:#fff; font-size:10px; font-weight:700;
+                                display:flex; align-items:center; justify-content:center;">
+                        @GetInitials(note.AuthorId)
+                    </div>
+                    <div>
+                        <span style="font-size:12px; font-weight:600; color:#002050;">@note.AuthorId</span>
+                        <span class="famos-note-team-tag @(note.TeamTag == "Higg" ? "famos-tag-higg" : "famos-tag-tig")">@note.TeamTag</span>
+                    </div>
+                </div>
+                <span style="font-size:10px; color:var(--muted);">
+                    @note.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")
+                </span>
+            </div>
+            <p style="font-size:12px; color:var(--text); margin:0; white-space:pre-wrap;">@note.NoteText</p>
+            @if (isOpp)
+            {
+                var oppName = _accounts.FirstOrDefault(a => a.Id == note.OpportunityId)?.Name ?? "Account";
+                <div style="margin-top:6px; font-size:10px; color:var(--muted);">📎 @oppName</div>
+            }
+        </MudPaper>
+    }
+}
+
+@code {
+    private List<TeamNote>    _notes    = new();
+    private List<Opportunity> _accounts = new();
+    private string  _noteText      = "";
+    private Guid?   _selectedOppId;
+    private Guid?   _filterOppId;
+    private bool    _loading = true;
+    private bool    _posting = false;
+    private string  _userId  = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _userId   = await UserSession.GetUserIdAsync() ?? "";
+        _accounts = await NoteService.GetAccountsForDropdownAsync();
+        await LoadNotesAsync();
+        _loading  = false;
+    }
+
+    private async Task LoadNotesAsync()
+    {
+        _notes = await NoteService.GetNotesAsync(_filterOppId);
+    }
+
+    private async Task PostNoteAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_noteText)) return;
+        try
+        {
+            _posting = true;
+            await NoteService.PostNoteAsync(_userId, _noteText.Trim(), _selectedOppId);
+            _noteText      = "";
+            _selectedOppId = null;
+            await LoadNotesAsync();
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal — could add snackbar later
+        }
+        finally
+        {
+            _posting = false;
+        }
+    }
+
+    private async Task OnFilterChanged(Guid? value)
+    {
+        _filterOppId = value;
+        await LoadNotesAsync();
+    }
+
+    private static string GetInitials(string userId)
+    {
+        var atIdx = userId.IndexOf('@');
+        var local = atIdx > 0 ? userId[..atIdx] : userId;
+        var parts = local.Split(new[] { '.', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2
+            ? $"{parts[0][0]}{parts[1][0]}".ToUpper()
+            : (local.Length >= 2 ? local[..2].ToUpper() : local.ToUpper());
+    }
+}

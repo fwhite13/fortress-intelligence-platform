@@ -1099,3 +1099,15 @@
 }
 .famos-stale-warn   { background: #fef3c7; color: #92400e; }
 .famos-stale-urgent { background: #fee2e2; color: #991b1b; }
+
+/* ── Team Notes ── */
+.famos-note-team-tag {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 8px;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+.famos-tag-tig  { background: #d1fae5; color: #065f46; }
+.famos-tag-higg { background: #fef3c7; color: #92400e; }

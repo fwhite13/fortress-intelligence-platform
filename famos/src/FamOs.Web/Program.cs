@@ -121,6 +121,7 @@ builder.Services.AddScoped<OpportunityService>();
 builder.Services.AddScoped<IAmsService, AmsServiceStub>();
 builder.Services.AddScoped<TaskService>();
 builder.Services.AddScoped<UserAffinityService>();
+builder.Services.AddScoped<TeamNoteService>();
 builder.Services.AddSingleton<IAccountSyncService, AccountSyncService>();
 builder.Services.AddHostedService(sp => (AccountSyncService)sp.GetRequiredService<IAccountSyncService>());
 
@@ -331,6 +332,19 @@ var logger = app.Logger;
                 updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX idx_accounts_affinity (affinity_id),
                 INDEX idx_accounts_name (company_name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        // ADO#986 — team notes table
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS team_notes (
+                id             INT AUTO_INCREMENT PRIMARY KEY,
+                author_id      VARCHAR(255) NOT NULL,
+                note_text      TEXT NOT NULL,
+                opportunity_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL,
+                team_tag       VARCHAR(20) NOT NULL DEFAULT 'TIG',
+                created_at     DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                INDEX idx_team_notes_opp (opportunity_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """);
     }
