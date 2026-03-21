@@ -994,3 +994,28 @@
     font-family: monospace;
     word-break: break-all;
 }
+
+/* ── Accounts Filter Panel ── */
+.famos-filter-panel {
+    background: #f2f4f7;
+    border: 1px solid #e2e6ed;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+}
+
+/* ── Sort Headers ── */
+.famos-sort-header {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.famos-sort-header:hover {
+    color: #C0272D;
+}

@@ -20,12 +20,11 @@
         <p class="famos-page-sub">@_filteredAccounts.Count of @_accounts.Count member companies</p>
     </div>
     <div style="display:flex; gap:8px;">
-        <MudTextField Class="famos-input-filter"
-                      @bind-Value="_search" @bind-Value:event="oninput"
-                      Placeholder="Search accounts..."
-                      Adornment="Adornment.Start"
-                      AdornmentIcon="@FamosIcons.Search"
-                      Clearable="true" />
+        <MudButton Class="famos-btn-outline-sm"
+                   StartIcon="@Icons.Material.Filled.FilterList"
+                   OnClick="@(() => _showFilters = !_showFilters)">
+            @(_showFilters ? "Hide Filters" : "Filters")
+        </MudButton>
         <MudButton Class="famos-btn-outline-sm"
                    StartIcon="@FamosIcons.Download"
                    OnClick="SyncNow"
@@ -34,6 +33,42 @@
         </MudButton>
     </div>
 </div>
+
+@if (_showFilters)
+{
+    <div class="famos-filter-panel">
+        <MudTextField Class="famos-input-filter"
+                      @bind-Value="_search" @bind-Value:event="oninput"
+                      Placeholder="Search accounts..."
+                      Adornment="Adornment.Start"
+                      AdornmentIcon="@FamosIcons.Search"
+                      Clearable="true"
+                      Style="min-width:220px;" />
+
+        <MudSelect T="string"
+                   @bind-Value="_filterState"
+                   Label="State"
+                   Clearable="true"
+                   Style="min-width:140px;">
+            @foreach (var state in _distinctStates)
+            {
+                <MudSelectItem T="string" Value="@state">@state</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudSelect T="string"
+                   @bind-Value="_filterOpps"
+                   Label="Active Opps"
+                   Style="min-width:140px;">
+            <MudSelectItem T="string" Value="@("All")">All</MudSelectItem>
+            <MudSelectItem T="string" Value="@("HasOpps")">Has Opps</MudSelectItem>
+            <MudSelectItem T="string" Value="@("NoOpps")">No Opps</MudSelectItem>
+        </MudSelect>
+
+        <MudButton Class="famos-btn-primary-sm" OnClick="ApplyFilters">Apply</MudButton>
+        <MudButton Class="famos-btn-outline-sm" OnClick="ClearFilters">Clear</MudButton>
+    </div>
+}
 
 @if (_loading)
 {
@@ -57,10 +92,18 @@ else
 
         @* Header row *@
         <div class="famos-account-table-header">
-            <div class="famos-account-col-name">Company</div>
-            <div class="famos-account-col-location">Location</div>
-            <div class="famos-account-col-opps">Active Opps</div>
-            <div class="famos-account-col-sync">Last Synced</div>
+            <div class="famos-account-col-name famos-sort-header" @onclick='() => SortBy("Company")'>
+                Company @SortIcon("Company")
+            </div>
+            <div class="famos-account-col-location famos-sort-header" @onclick='() => SortBy("Location")'>
+                Location @SortIcon("Location")
+            </div>
+            <div class="famos-account-col-opps famos-sort-header" @onclick='() => SortBy("ActiveOpps")'>
+                Active Opps @SortIcon("ActiveOpps")
+            </div>
+            <div class="famos-account-col-sync famos-sort-header" @onclick='() => SortBy("LastSynced")'>
+                Last Synced @SortIcon("LastSynced")
+            </div>
             <div class="famos-account-col-action"></div>
         </div>
 
@@ -87,7 +130,7 @@ else
                     @if (account.ActiveOppCount > 0)
                     {
                         <MudChip T="string" Size="Size.Small"
-                                 Style="background:rgba(0,144,208,0.1); color:var(--sky); font-weight:600; font-size:11px;">
+                                 Style="background:rgba(192,39,45,0.1); color:#C0272D; font-weight:600; font-size:11px;">
                             @account.ActiveOppCount active
                         </MudChip>
                     }
@@ -126,15 +169,78 @@ else
     private bool          _syncing          = false;
     private string        _search           = "";
     private DateTime?     _lastSyncTime;
+    private bool          _showFilters      = false;
+    private string        _filterState      = "";
+    private string        _filterOpps       = "All";
+    private string        _sortColumn       = "Company";
+    private bool          _sortAsc          = true;
 
-    private List<Account> _filteredAccounts =>
-        string.IsNullOrWhiteSpace(_search)
-            ? _accounts
-            : _accounts.Where(a =>
-                a.CompanyName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
-                (a.City?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (a.State?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false))
-            .ToList();
+    private IEnumerable<string> _distinctStates =>
+        _accounts
+            .Where(a => !string.IsNullOrEmpty(a.State))
+            .Select(a => a.State!)
+            .Distinct()
+            .OrderBy(s => s);
+
+    private List<Account> _filteredAccounts
+    {
+        get
+        {
+            var query = _accounts.AsEnumerable();
+
+            // Text search
+            if (!string.IsNullOrWhiteSpace(_search))
+                query = query.Where(a =>
+                    a.CompanyName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                    (a.City?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (a.State?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false));
+
+            // State filter
+            if (!string.IsNullOrWhiteSpace(_filterState))
+                query = query.Where(a => a.State == _filterState);
+
+            // Active opps filter
+            if (_filterOpps == "HasOpps")
+                query = query.Where(a => a.ActiveOppCount > 0);
+            else if (_filterOpps == "NoOpps")
+                query = query.Where(a => a.ActiveOppCount == 0);
+
+            // Sort
+            query = _sortColumn switch
+            {
+                "Company"    => _sortAsc ? query.OrderBy(a => a.CompanyName)    : query.OrderByDescending(a => a.CompanyName),
+                "Location"   => _sortAsc ? query.OrderBy(a => a.State).ThenBy(a => a.City) : query.OrderByDescending(a => a.State).ThenByDescending(a => a.City),
+                "ActiveOpps" => _sortAsc ? query.OrderBy(a => a.ActiveOppCount) : query.OrderByDescending(a => a.ActiveOppCount),
+                "LastSynced" => _sortAsc ? query.OrderBy(a => a.LastSyncedAt)   : query.OrderByDescending(a => a.LastSyncedAt),
+                _            => query.OrderBy(a => a.CompanyName),
+            };
+
+            return query.ToList();
+        }
+    }
+
+    private void SortBy(string column)
+    {
+        if (_sortColumn == column) _sortAsc = !_sortAsc;
+        else { _sortColumn = column; _sortAsc = true; }
+    }
+
+    private RenderFragment SortIcon(string column) => builder =>
+    {
+        if (_sortColumn != column) return;
+        builder.OpenElement(0, "span");
+        builder.AddContent(1, _sortAsc ? " ▲" : " ▼");
+        builder.CloseElement();
+    };
+
+    private void ApplyFilters() { /* filters are reactive via _filteredAccounts */ }
+
+    private void ClearFilters()
+    {
+        _search      = "";
+        _filterState = "";
+        _filterOpps  = "All";
+    }
 
     protected override async Task OnInitializedAsync()
     {
