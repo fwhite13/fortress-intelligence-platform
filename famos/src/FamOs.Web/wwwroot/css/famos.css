@@ -181,7 +181,7 @@
 
 .famos-kcard:hover {
     border-color: #C0272D;
-    box-shadow: 0 4px 12px rgba(0,144,208,0.10);
+    box-shadow: 0 4px 12px rgba(192,39,45,0.10);
 }
 
 .famos-kcard-name {
@@ -274,7 +274,7 @@
 
 .famos-nav-item--active,
 .famos-nav-item.active {
-    background: rgba(0,144,208,0.13);
+    background: rgba(192,39,45,0.13);
     color: #ffffff !important;
     border-left-color: #C0272D;
 }
@@ -725,7 +725,7 @@
     margin-left: 6px;
     padding: 1px 7px;
     border-radius: 20px;
-    background: rgba(0, 144, 208, 0.12);
+    background: rgba(192,39,45, 0.12);
     color: var(--sky);
     font-size: 10px;
     font-weight: 700;
@@ -777,7 +777,7 @@
     transition: border-color 0.15s;
 }
 .famos-owner-row:hover { border-color: var(--sky); }
-.famos-owner-row--selected { border-color: var(--sky); background: rgba(0,144,208,0.05); }
+.famos-owner-row--selected { border-color: var(--sky); background: rgba(192,39,45,0.05); }
 
 /* Search Dropdown */
 .famos-topbar-search--interactive { position: relative; }
@@ -854,7 +854,7 @@
 }
 .famos-quote-row:last-child { border-bottom: none; }
 .famos-quote-row:hover { background: var(--cream); }
-.famos-quote-row--selected { background: rgba(0,144,208,0.05); border-left: 3px solid var(--sky); }
+.famos-quote-row--selected { background: rgba(192,39,45,0.05); border-left: 3px solid var(--sky); }
 .famos-quote-premium { font-size: 14px; font-weight: 700; color: var(--green); }
 
 .famos-radio-circle {
@@ -870,7 +870,7 @@
     padding: 14px;
     border: 1px solid var(--sky);
     border-radius: 8px;
-    background: rgba(0,144,208,0.03);
+    background: rgba(192,39,45,0.03);
     display: flex;
     flex-direction: column;
     gap: 10px;
