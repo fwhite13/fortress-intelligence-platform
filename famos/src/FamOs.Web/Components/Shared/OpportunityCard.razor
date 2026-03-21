@@ -1,6 +1,6 @@
 @using FamOs.Web.Data.Entities
 
-<div class="famos-kcard @(IsUrgent ? "famos-kcard--urgent" : "")"
+<div class="famos-kcard @(IsUrgent ? "famos-kcard--urgent" : "") @(IsStaleUrgent ? "famos-kcard--stale-urgent" : IsStaleWarn ? "famos-kcard--stale-warn" : "")"
      @onclick="OnCardClick">
     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
         <div class="famos-kcard-name" style="flex:1; min-width:0;">@Opportunity.Name</div>
@@ -25,6 +25,14 @@
     }
     <div class="famos-kcard-footer">
         <SignalChip Signal="Opportunity.DominantSignal" />
+        @if (IsStaleUrgent)
+        {
+            <span class="famos-stale-badge famos-stale-urgent">@DaysStale&#x202F;d stale</span>
+        }
+        else if (IsStaleWarn)
+        {
+            <span class="famos-stale-badge famos-stale-warn">@DaysStale&#x202F;d stale</span>
+        }
     </div>
 </div>
 
@@ -36,6 +44,15 @@
         FamOs.Web.Domain.DominantSignal.TimeRisk or
         FamOs.Web.Domain.DominantSignal.Urgent or
         FamOs.Web.Domain.DominantSignal.AtRisk;
+
+    private DateTime StaleReference =>
+        Opportunity.LastStageTransitionAt ?? Opportunity.UpdatedAt;
+
+    private int DaysStale => (int)(DateTime.UtcNow - StaleReference).TotalDays;
+
+    private bool IsStaleWarn   => DaysStale >= 14 && DaysStale < 21;
+    private bool IsStaleUrgent => DaysStale >= 21;
+    private bool IsAnyStale    => IsStaleWarn || IsStaleUrgent;
 
     private async Task OnCardClick() => await OnClick.InvokeAsync(Opportunity);
 

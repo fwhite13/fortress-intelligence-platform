@@ -202,6 +202,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 6px;
     margin-top: 7px;
 }
 
@@ -660,6 +661,16 @@
 .famos-kcard--urgent {
     border-left: 3px solid var(--red);
     background: rgba(220, 38, 38, 0.03);
+}
+
+/* ── Kanban Card Stale States ── */
+.famos-kcard--stale-warn {
+    border-left: 3px solid #d97706;
+    background: #fffdf5;
+}
+.famos-kcard--stale-urgent {
+    border-left: 3px solid #C0272D;
+    background: #fff5f5;
 }
 
 /* Signal chip — aging signals (Sprint 5) */
