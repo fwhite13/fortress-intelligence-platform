@@ -1,14 +1,13 @@
 @using FamOs.Web.Data.Entities
-@inject NavigationManager Nav
 
 <div class="famos-kcard @(IsUrgent ? "famos-kcard--urgent" : "")"
-     @onclick="NavigateToOpportunity">
+     @onclick="OnCardClick">
     <div style="display:flex; justify-content:space-between; align-items:flex-start;">
         <div class="famos-kcard-name" style="flex:1; min-width:0;">@Opportunity.Name</div>
         @if (!string.IsNullOrEmpty(Opportunity.OwnerUserId))
         {
             var initials = GetInitials(Opportunity.OwnerUserId);
-            <div style="width:24px; height:24px; border-radius:50%; background:var(--sky);
+            <div style="width:24px; height:24px; border-radius:50%; background:#C0272D;
                         color:#fff; font-size:10px; font-weight:700; flex-shrink:0;
                         display:flex; align-items:center; justify-content:center;
                         margin-left:6px;">
@@ -31,13 +30,14 @@
 
 @code {
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
+    [Parameter] public EventCallback<Opportunity> OnClick { get; set; }
 
     private bool IsUrgent => Opportunity.DominantSignal is
         FamOs.Web.Domain.DominantSignal.TimeRisk or
         FamOs.Web.Domain.DominantSignal.Urgent or
         FamOs.Web.Domain.DominantSignal.AtRisk;
 
-    private void NavigateToOpportunity() => Nav.NavigateTo("/opportunity/" + Opportunity.Id);
+    private async Task OnCardClick() => await OnClick.InvokeAsync(Opportunity);
 
     private static string GetInitials(string userId)
     {

@@ -59,7 +59,7 @@ else
                     {
                         @foreach (var opp in page.Items)
                         {
-                            <OpportunityCard Opportunity="opp" />
+                            <OpportunityCard Opportunity="opp" OnClick="OpenDrawer" />
                         }
                         @if (page.HasMore)
                         {
@@ -78,12 +78,91 @@ else
     </div>
 }
 
+<MudDrawer @bind-Open="_drawerOpen"
+           Anchor="Anchor.End"
+           Variant="DrawerVariant.Temporary"
+           Width="420px"
+           Elevation="2"
+           CloseOnEscapeKey="true"
+           Class="famos-side-drawer">
+
+    @if (_selectedOpp != null)
+    {
+        <div class="famos-drawer-header">
+            <div style="flex:1; min-width:0;">
+                <div class="famos-drawer-title">@_selectedOpp.Name</div>
+                <div class="famos-drawer-stage">
+                    @GetStageDisplayName(_selectedOpp.LifecycleStage)
+                </div>
+            </div>
+            <MudIconButton Icon="@Icons.Material.Filled.Close"
+                           OnClick="CloseDrawer"
+                           Size="Size.Small" />
+        </div>
+
+        <div class="famos-drawer-body">
+
+            <div class="famos-drawer-section">
+                @if (_selectedOpp.EstimatedPremium.HasValue)
+                {
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Est. Premium</span>
+                        <span class="famos-drawer-value">$@_selectedOpp.EstimatedPremium.Value.ToString("N0")</span>
+                    </div>
+                }
+                @if (_selectedOpp.EffectiveDateTarget.HasValue)
+                {
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Effective Date</span>
+                        <span class="famos-drawer-value">@_selectedOpp.EffectiveDateTarget.Value.ToString("MMM d, yyyy")</span>
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(_selectedOpp.OwnerUserId))
+                {
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Account Manager</span>
+                        <span class="famos-drawer-value">@_selectedOpp.OwnerUserId</span>
+                    </div>
+                }
+                <div class="famos-drawer-row">
+                    <span class="famos-drawer-label">Status</span>
+                    <span class="famos-drawer-value">
+                        <SignalChip Signal="_selectedOpp.DominantSignal" />
+                    </span>
+                </div>
+                @if (_selectedOpp.LastStageTransitionAt.HasValue)
+                {
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">In Stage Since</span>
+                        <span class="famos-drawer-value">
+                            @_selectedOpp.LastStageTransitionAt.Value.ToLocalTime().ToString("MMM d, yyyy")
+                        </span>
+                    </div>
+                }
+            </div>
+
+            <div style="padding: 16px 20px 20px;">
+                <MudButton Class="famos-btn-primary"
+                           FullWidth="true"
+                           OnClick="@(() => { Nav.NavigateTo($"/opportunity/{_selectedOpp.Id}"); CloseDrawer(); })">
+                    View Full Details
+                </MudButton>
+            </div>
+
+        </div>
+    }
+
+</MudDrawer>
+
 @code {
     private bool _loading = true;
     private Dictionary<LifecycleStage, int>              _stageSummary = new();
     private Dictionary<LifecycleStage, OpportunityPage>  _pages        = new();
     private HashSet<LifecycleStage>                      _loadingMore  = new();
     private string _search = "";
+
+    private Opportunity? _selectedOpp = null;
+    private bool         _drawerOpen  = false;
 
     private static readonly (LifecycleStage Stage, string DisplayName)[] _columns =
     {
@@ -159,6 +238,30 @@ else
             Nav.NavigateTo($"/opportunity/{oppId}");
         }
     }
+
+    private void OpenDrawer(Opportunity opp)
+    {
+        _selectedOpp = opp;
+        _drawerOpen  = true;
+    }
+
+    private void CloseDrawer()
+    {
+        _drawerOpen  = false;
+        _selectedOpp = null;
+    }
+
+    private static string GetStageDisplayName(LifecycleStage stage) => stage switch
+    {
+        LifecycleStage.Intake           => "Intake",
+        LifecycleStage.UnderwritingPrep => "App Review",
+        LifecycleStage.Marketed         => "Submitted",
+        LifecycleStage.QuotesReceived   => "Quotes In",
+        LifecycleStage.ClientDecision   => "Proposal",
+        LifecycleStage.Binding          => "Binding",
+        LifecycleStage.Bound            => "Bound",
+        _                               => stage.ToString(),
+    };
 
     private static string GetStageColor(LifecycleStage stage) => stage switch
     {
