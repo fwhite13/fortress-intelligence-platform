@@ -1,9 +1,11 @@
 @page "/pipeline"
 @attribute [Authorize]
+@implements IAsyncDisposable
 @inject OpportunityService OppService
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject UserAffinityService AffinitySvc
+@inject IJSRuntime JS
 @using FamOs.Web.Data.Entities
 @using FamOs.Web.Services
 @using FamOs.Web.Domain
@@ -274,4 +276,28 @@ else
         LifecycleStage.Bound            => "#059669",
         _                               => "#6b7585",
     };
+
+    private DotNetObjectReference<Pipeline>? _dotNetRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("registerDrawerEscape", _dotNetRef);
+        }
+    }
+
+    [JSInvokable]
+    public void CloseDrawerFromJs()
+    {
+        CloseDrawer();
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await JS.InvokeVoidAsync("unregisterDrawerEscape");
+        _dotNetRef?.Dispose();
+    }
 }
