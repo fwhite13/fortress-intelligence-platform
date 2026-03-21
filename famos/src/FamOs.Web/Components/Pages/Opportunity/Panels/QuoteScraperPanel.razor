@@ -70,14 +70,30 @@
                 </MudText>
             }
 
-            @if (!string.IsNullOrEmpty(_resultJson))
+            @if (_autoRecordedPremium.HasValue)
             {
                 <MudDivider Class="my-3" />
-                <div class="intake-section-label mb-2">Extracted Coverages</div>
-                <MudTextField Value="_resultJson"
-                              Lines="6" ReadOnly="true"
-                              Class="famos-input"
-                              Style="font-family:monospace; font-size:12px;" />
+                <MudAlert Severity="Severity.Success" Class="mt-2">
+                    Quote recorded: <strong>$@_autoRecordedPremium.Value.ToString("N0")</strong> premium.
+                    The opportunity has advanced to Quotes Received.
+                </MudAlert>
+            }
+
+            @if (_showManualEntry)
+            {
+                <MudDivider Class="my-3" />
+                <div class="intake-section-label mb-2">Enter Premium to Record Quote</div>
+                <MudGrid Spacing="2">
+                    <MudItem xs="8">
+                        <MudNumericField @bind-Value="_manualPremium" Label="Premium ($)" Class="famos-input" />
+                    </MudItem>
+                    <MudItem xs="4">
+                        <MudButton Class="famos-btn-primary" OnClick="@(async () => await RecordManually())"
+                                   Disabled="@(!_manualPremium.HasValue || _manualPremium <= 0)">
+                            Record Quote
+                        </MudButton>
+                    </MudItem>
+                </MudGrid>
             }
 
             @if (_scrapeError != null)
@@ -99,12 +115,61 @@
     private string _statusMessage = "";
     private string _resultJson    = "";
     private string? _scrapeError;
+    private decimal? _manualPremium;
+    private decimal? _autoRecordedPremium;
+    private bool     _showManualEntry;
 
     private void OnFileSelected(IBrowserFile file)
     {
         _selectedFile = file;
         _scrapeError  = null;
         StateHasChanged();
+    }
+
+    private static decimal? TryParsePremium(string rawJson)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(rawJson);
+            var root = doc.RootElement;
+            foreach (var path in new[] { "results", "data", "coverages" })
+            {
+                if (root.TryGetProperty(path, out var node))
+                {
+                    if (node.ValueKind == System.Text.Json.JsonValueKind.Array && node.GetArrayLength() > 0)
+                        node = node[0];
+                    foreach (var premKey in new[] { "premium", "totalPremium", "annualPremium", "total_premium" })
+                    {
+                        if (node.TryGetProperty(premKey, out var premNode))
+                        {
+                            if (premNode.TryGetDecimal(out var d)) return d;
+                            if (decimal.TryParse(premNode.GetString(), out var s)) return s;
+                        }
+                    }
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private async Task RecordManually()
+    {
+        if (!_manualPremium.HasValue) return;
+        var sub = Opportunity.Submissions.First(s => s.Id == _selectedSubId);
+        var userId = await UserSession.GetUserIdAsync();
+        try
+        {
+            await Lifecycle.RecordQuoteAsync(Opportunity.Id, _selectedSubId, sub.CarrierName,
+                _manualPremium.Value, null, userId);
+            Snackbar.Add($"Quote from {sub.CarrierName} recorded — ${_manualPremium.Value:N0}.", Severity.Success);
+            _showManualEntry = false;
+            await OnUpdated.InvokeAsync();
+        }
+        catch (LifecycleValidationException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
     }
 
     private async Task UploadAndSubmit()
@@ -158,7 +223,30 @@
             // Persist result JSON on the Submission
             var userId = await UserSession.GetUserIdAsync();
             await Lifecycle.SaveSubmissionScraperResultAsync(_selectedSubId, result.RawJson, userId);
-            Snackbar.Add("Quote data extracted and saved.", Severity.Success);
+
+            var parsedPremium = TryParsePremium(result.RawJson);
+            if (parsedPremium.HasValue && parsedPremium.Value > 0)
+            {
+                var sub = Opportunity.Submissions.First(s => s.Id == _selectedSubId);
+                try
+                {
+                    await Lifecycle.RecordQuoteAsync(
+                        Opportunity.Id, _selectedSubId, sub.CarrierName,
+                        parsedPremium.Value, null, userId);
+                    Snackbar.Add($"Quote from {sub.CarrierName} recorded — ${parsedPremium.Value:N0}.", Severity.Success);
+                    _autoRecordedPremium = parsedPremium;
+                }
+                catch (LifecycleValidationException ex)
+                {
+                    Snackbar.Add(ex.Message, Severity.Error);
+                    _showManualEntry = true;
+                }
+            }
+            else
+            {
+                Snackbar.Add("Quote data extracted. Enter premium manually below to record the quote.", Severity.Warning);
+                _showManualEntry = true;
+            }
             await OnUpdated.InvokeAsync();
         }
         catch (Exception ex)
