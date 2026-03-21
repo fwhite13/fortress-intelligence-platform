@@ -213,19 +213,21 @@ public class OpportunityService
         // Stale deals — based on UpdatedAt
         var staleThreshold  = DateTime.UtcNow.AddDays(-14);
         var urgentThreshold = DateTime.UtcNow.AddDays(-21);
-        var staleOpps = await baseQuery
+        var now = DateTime.UtcNow;
+        var staleRaw = await baseQuery
             .Where(o => o.UpdatedAt < staleThreshold)
             .OrderBy(o => o.UpdatedAt)
             .Take(8)
-            .Select(o => new StaleOpportunity
-            {
-                Id        = o.Id,
-                Name      = o.Name,
-                Stage     = o.LifecycleStage,
-                DaysStale = (int)(DateTime.UtcNow - o.UpdatedAt).TotalDays,
-                IsUrgent  = o.UpdatedAt < urgentThreshold,
-            })
+            .Select(o => new { o.Id, o.Name, o.LifecycleStage, o.UpdatedAt })
             .ToListAsync();
+        var staleOpps = staleRaw.Select(o => new StaleOpportunity
+        {
+            Id        = o.Id,
+            Name      = o.Name,
+            Stage     = o.LifecycleStage,
+            DaysStale = (int)(now - o.UpdatedAt).TotalDays,
+            IsUrgent  = o.UpdatedAt < urgentThreshold,
+        }).ToList();
 
         return new DashboardSummary
         {
