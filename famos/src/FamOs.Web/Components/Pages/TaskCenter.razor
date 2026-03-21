@@ -14,7 +14,7 @@
 <div class="famos-page-header famos-page-header-row mb-4">
     <div>
         <h2 class="famos-page-h2">Task Center</h2>
-        <p class="famos-page-sub">@_totalCount open task@(_totalCount == 1 ? "" : "s") across @_tasks.Select(t => t.Opportunity.Id).Distinct().Count() opportunities</p>
+        <p class="famos-page-sub">@_totalCount open task@(_totalCount == 1 ? "" : "s") across @_tasks.Where(t => t.Opportunity != null).Select(t => t.Opportunity!.Id).Distinct().Count() opportunities</p>
     </div>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <MudTextField Class="famos-input-filter" @bind-Value="_filterText"
@@ -27,6 +27,16 @@
             Add Task
         </MudButton>
     </div>
+</div>
+
+@* Filter chips *@
+<div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+    <MudChip T="string" Color="@(_taskFilter == "all" ? Color.Primary : Color.Default)"
+             OnClick="@(() => _taskFilter = "all")" Size="Size.Small">All</MudChip>
+    <MudChip T="string" Color="@(_taskFilter == "linked" ? Color.Primary : Color.Default)"
+             OnClick="@(() => _taskFilter = "linked")" Size="Size.Small">Account-linked</MudChip>
+    <MudChip T="string" Color="@(_taskFilter == "general" ? Color.Primary : Color.Default)"
+             OnClick="@(() => _taskFilter = "general")" Size="Size.Small">General</MudChip>
 </div>
 
 @if (_loading)
@@ -47,13 +57,14 @@ else if (!FilteredTasks.Any())
 }
 else
 {
-    @* Group tasks by opportunity *@
+    @* Account-linked tasks — grouped by opportunity *@
     @foreach (var group in FilteredTasks
-        .GroupBy(t => t.Opportunity.Id)
+        .Where(t => t.Opportunity != null)
+        .GroupBy(t => t.Opportunity!.Id)
         .OrderBy(g => g.Min(t => t.Task.DueAt.HasValue ? 0 : 1))
         .ThenBy(g => g.Min(t => t.Task.DueAt)))
     {
-        var opp = group.First().Opportunity;
+        var opp = group.First().Opportunity!;
 
         <MudPaper Class="mb-3" Elevation="0"
                   Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
@@ -106,6 +117,60 @@ else
         </MudPaper>
     }
 
+    @* General tasks — ungrouped, under "General Tasks" header *@
+    @{
+        var generalTasks = FilteredTasks.Where(t => t.Opportunity == null)
+            .OrderBy(t => t.Task.DueAt.HasValue ? 0 : 1)
+            .ThenBy(t => t.Task.DueAt)
+            .ToList();
+    }
+    @if (generalTasks.Any())
+    {
+        <MudPaper Class="mb-3" Elevation="0"
+                  Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:center;
+                        padding:10px 16px; background:var(--cream); border-bottom:1px solid var(--border);">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <MudText Typo="Typo.subtitle2" Class="famos-text-navy famos-fw-600">
+                        General Tasks
+                    </MudText>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="famos-chip-stage"
+                             Style="font-size:10px; height:18px;">
+                        General
+                    </MudChip>
+                </div>
+                <div style="color:var(--muted); font-size:12px;">
+                    @generalTasks.Count task@(generalTasks.Count == 1 ? "" : "s")
+                </div>
+            </div>
+
+            @foreach (var item in generalTasks)
+            {
+                var isOverdue = item.Task.DueAt.HasValue && item.Task.DueAt.Value < DateTime.UtcNow;
+                <div style="display:flex; align-items:center; padding:10px 16px;
+                            border-bottom:1px solid var(--border); gap:10px;"
+                     class="task-row">
+                    <MudCheckBox T="bool" Value="false"
+                                 ValueChanged="@(async _ => await CompleteTask(item.Task.Id))"
+                                 Color="Color.Primary" />
+                    <div style="flex:1; min-width:0;">
+                        <MudText Typo="Typo.body2"
+                                 Style="@(isOverdue ? "color: var(--red);" : "")">
+                            @item.Task.Title
+                        </MudText>
+                    </div>
+                    @if (item.Task.DueAt.HasValue)
+                    {
+                        <MudText Typo="Typo.caption"
+                                 Style="@($"color:{(isOverdue ? "var(--red)" : "var(--muted)")}; white-space:nowrap;")">
+                            @(isOverdue ? "Overdue · " : "")@item.Task.DueAt.Value.ToLocalTime().ToString("MMM d")
+                        </MudText>
+                    }
+                </div>
+            }
+        </MudPaper>
+    }
+
     @if (_hasMore)
     {
         <div style="text-align:center; margin-top:12px;">
@@ -122,16 +187,29 @@ else
     private List<TaskWithOpportunity> _tasks     = new();
     private bool   _loading    = true;
     private string _filterText = "";
+    private string _taskFilter = "all";
     private int    _page       = 0;
     private int    _totalCount = 0;
     private bool   _hasMore    = false;
 
-    private IEnumerable<TaskWithOpportunity> FilteredTasks =>
-        string.IsNullOrWhiteSpace(_filterText)
-            ? _tasks
-            : _tasks.Where(t =>
-                t.Opportunity.Name.Contains(_filterText, StringComparison.OrdinalIgnoreCase) ||
-                t.Task.Title.Contains(_filterText, StringComparison.OrdinalIgnoreCase));
+    private IEnumerable<TaskWithOpportunity> FilteredTasks
+    {
+        get
+        {
+            var tasks = string.IsNullOrWhiteSpace(_filterText)
+                ? _tasks
+                : _tasks.Where(t =>
+                    (t.Opportunity != null && t.Opportunity.Name.Contains(_filterText, StringComparison.OrdinalIgnoreCase)) ||
+                    t.Task.Title.Contains(_filterText, StringComparison.OrdinalIgnoreCase));
+
+            return _taskFilter switch
+            {
+                "linked"  => tasks.Where(t => t.Opportunity != null),
+                "general" => tasks.Where(t => t.Opportunity == null),
+                _         => tasks,
+            };
+        }
+    }
 
     protected override async Task OnInitializedAsync() => await LoadPageAsync(0);
 
@@ -169,7 +247,6 @@ else
         var result = await dialog.Result;
         if (result is { Canceled: false })
         {
-            // Reload to show newly created task
             _tasks.Clear();
             await LoadPageAsync(0);
             StateHasChanged();

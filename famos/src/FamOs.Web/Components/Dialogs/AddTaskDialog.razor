@@ -1,31 +1,48 @@
 @inject TaskService TaskSvc
 @inject OpportunityService OppService
 @inject UserSessionService UserSession
+@inject Microsoft.Extensions.Options.IOptions<AffinityConfig> AffinityOptions
 @using FamOs.Web.Data.Entities
 @using FamOs.Web.Services
+@using FamOs.Web
 
 <MudDialog>
     <TitleContent>Add Task</TitleContent>
     <DialogContent>
-        <MudAutocomplete T="Opportunity"
-            Label="Opportunity *"
-            @bind-Value="_selectedOpp"
-            SearchFunc="SearchOpps"
-            ToStringFunc="@(o => o?.Name ?? "")"
-            Variant="Variant.Outlined" Dense="true" Class="mb-3" />
+        <MudSwitch @bind-Value="_isGeneral" Label="General task (no account)" Color="Color.Primary" Class="mb-2" />
+
+        @if (!_isGeneral)
+        {
+            <MudAutocomplete T="Opportunity"
+                Label="Opportunity (optional)"
+                @bind-Value="_selectedOpp"
+                SearchFunc="SearchOpps"
+                ToStringFunc="@(o => o?.Name ?? "")"
+                Variant="Variant.Outlined" Dense="true" Class="mb-3" />
+        }
+
         <MudTextField @bind-Value="_title"
             Label="Task *"
             Placeholder="What needs to be done?"
             Variant="Variant.Outlined" Class="mb-3" />
+
         <MudDatePicker @bind-Date="_dueDate"
             Label="Due Date (optional)"
             Variant="Variant.Outlined" Class="mb-3" />
+
+        <MudSelect T="string" @bind-Value="_assignToUserId" Label="Assign to" Dense="true" Variant="Variant.Outlined" Class="mb-3">
+            <MudSelectItem T="string" Value="@_currentUserId">Myself</MudSelectItem>
+            @foreach (var user in _otherUsers)
+            {
+                <MudSelectItem T="string" Value="@user.UserId">@user.DisplayName</MudSelectItem>
+            }
+        </MudSelect>
     </DialogContent>
     <DialogActions>
         <MudButton Class="famos-btn-outline" OnClick="Cancel">Cancel</MudButton>
         <MudButton Class="famos-btn-primary"
-                   OnClick="Submit"
-                   Disabled="@(_selectedOpp == null || string.IsNullOrWhiteSpace(_title))">
+                   OnClick="@(async () => await Submit())"
+                   Disabled="@(string.IsNullOrWhiteSpace(_title))">
             Add Task
         </MudButton>
     </DialogActions>
@@ -37,12 +54,23 @@
     private Opportunity? _selectedOpp;
     private string _title = "";
     private DateTime? _dueDate;
+    private bool _isGeneral = false;
     private List<Opportunity> _allOpps = new();
+
+    private string _currentUserId = "";
+    private string _assignToUserId = "";
+    private List<AffinityUser> _otherUsers = new();
 
     protected override async Task OnInitializedAsync()
     {
         var pipeline = await OppService.GetPipelineAsync();
         _allOpps = pipeline;
+
+        _currentUserId = await UserSession.GetUserIdAsync();
+        _assignToUserId = _currentUserId;
+        _otherUsers = AffinityOptions.Value.Users
+            .Where(u => u.UserId != _currentUserId)
+            .ToList();
     }
 
     private Task<IEnumerable<Opportunity>> SearchOpps(string text, CancellationToken ct)
@@ -57,9 +85,10 @@
 
     private async Task Submit()
     {
-        if (_selectedOpp == null || string.IsNullOrWhiteSpace(_title)) return;
+        if (string.IsNullOrWhiteSpace(_title)) return;
+        if (_isGeneral) _selectedOpp = null;
         var dueAt = _dueDate.HasValue ? (DateTime?)_dueDate.Value : null;
-        await TaskSvc.CreateTaskAsync(_selectedOpp.Id, _title.Trim(), dueAt, null);
+        await TaskSvc.CreateTaskAsync(_selectedOpp?.Id, _title.Trim(), dueAt, _assignToUserId);
         MudDialog.Close(DialogResult.Ok(true));
     }
 }

@@ -24,9 +24,10 @@ public class TaskService
         var results = await db.Tasks
             .Include(t => t.Opportunity)
             .Where(t => t.Status == "open"
-                && t.Opportunity.OwnerUserId != null
-                && t.Opportunity.OwnerUserId == userId
-                && !t.Opportunity.IsClosed)
+                && (
+                    (t.OpportunityId != null && t.Opportunity.OwnerUserId != null && t.Opportunity.OwnerUserId == userId && !t.Opportunity.IsClosed)
+                    || (t.OpportunityId == null && t.AssignedToUserId == userId)
+                ))
             .OrderBy(t => t.DueAt.HasValue ? 0 : 1)
             .ThenBy(t => t.DueAt)
             .ThenBy(t => t.CreatedAt)
@@ -41,7 +42,8 @@ public class TaskService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var results = await db.Tasks
             .Include(t => t.Opportunity)
-            .Where(t => t.Status == "open" && !t.Opportunity.IsClosed)
+            .Where(t => t.Status == "open"
+                && (t.OpportunityId == null || !t.Opportunity!.IsClosed))
             .OrderBy(t => t.DueAt.HasValue ? 0 : 1)
             .ThenBy(t => t.DueAt)
             .ThenBy(t => t.CreatedAt)
@@ -62,9 +64,9 @@ public class TaskService
         _logger.LogInformation("[Task] Completed {TaskId} by {User}", taskId, actorUserId);
     }
 
-    /// <summary>Create a manual task on an opportunity.</summary>
+    /// <summary>Create a manual task, optionally linked to an opportunity.</summary>
     public async Task<Guid> CreateTaskAsync(
-        Guid opportunityId, string title, DateTime? dueAt, string? assignedToUserId)
+        Guid? opportunityId, string title, DateTime? dueAt, string? assignedToUserId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var task = new FamOsTask
@@ -90,9 +92,10 @@ public class TaskService
         var query = db.Tasks
             .Include(t => t.Opportunity)
             .Where(t => t.Status == "open"
-                && t.Opportunity.OwnerUserId != null
-                && t.Opportunity.OwnerUserId == userId
-                && !t.Opportunity.IsClosed);
+                && (
+                    (t.OpportunityId != null && t.Opportunity.OwnerUserId != null && t.Opportunity.OwnerUserId == userId && !t.Opportunity.IsClosed)
+                    || (t.OpportunityId == null && t.AssignedToUserId == userId)
+                ));
 
         var total = await query.CountAsync();
         var items = await query
@@ -120,14 +123,15 @@ public class TaskService
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.Tasks
             .Where(t => t.Status == "open"
-                && t.Opportunity.OwnerUserId != null
-                && t.Opportunity.OwnerUserId == userId
-                && !t.Opportunity.IsClosed)
+                && (
+                    (t.OpportunityId != null && t.Opportunity.OwnerUserId != null && t.Opportunity.OwnerUserId == userId && !t.Opportunity.IsClosed)
+                    || (t.OpportunityId == null && t.AssignedToUserId == userId)
+                ))
             .CountAsync();
     }
 }
 
-public record TaskWithOpportunity(FamOsTask Task, Opportunity Opportunity);
+public record TaskWithOpportunity(FamOsTask Task, Opportunity? Opportunity);
 
 public class TaskPage
 {

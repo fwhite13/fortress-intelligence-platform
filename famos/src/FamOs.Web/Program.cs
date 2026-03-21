@@ -347,6 +347,18 @@ var logger = app.Logger;
                 INDEX idx_team_notes_opp (opportunity_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """);
+
+        // ADO#979 — make tasks.OpportunityId nullable (general tasks)
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE tasks MODIFY COLUMN OpportunityId CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL");
+            logger.LogInformation("ADO#979: tasks.OpportunityId made nullable");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("ADO#979: tasks OpportunityId MODIFY skipped: {Msg}", ex.Message);
+        }
     }
     catch (Exception ex)
     {

@@ -126,7 +126,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.Id).HasColumnType("char(36)");
             e.Property(x => x.OpportunityId).HasColumnType("char(36)");
             e.HasIndex(x => x.OpportunityId).HasDatabaseName("idx_task_opp");
-            e.HasOne(x => x.Opportunity).WithMany(o => o.Tasks).HasForeignKey(x => x.OpportunityId);
+            e.HasOne(x => x.Opportunity).WithMany(o => o.Tasks).HasForeignKey(x => x.OpportunityId).IsRequired(false);
         });
 
         // OpportunityFlag
