@@ -190,7 +190,9 @@
             _ = await stream.ReadAsync(bytes);
 
             _statusMessage = "Submitting to scraper...";
-            var refId     = $"famos-sub-{_selectedSubId:N}";
+            // Include a timestamp so each upload attempt gets a unique clientReferenceId.
+            // The Fortress API returns 409 if the same clientReferenceId is reused across requests.
+            var refId     = $"famos-sub-{_selectedSubId:N}-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
             var requestId = await Scraper.SubmitQuotePdfAsync(
                 refId, _selectedFile.Name, bytes);
 
