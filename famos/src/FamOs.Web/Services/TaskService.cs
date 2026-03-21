@@ -25,7 +25,7 @@ public class TaskService
             .Include(t => t.Opportunity)
             .Where(t => t.Status == "open"
                 && (
-                    (t.OpportunityId != null && t.Opportunity.OwnerUserId != null && t.Opportunity.OwnerUserId == userId && !t.Opportunity.IsClosed)
+                    (t.OpportunityId != null && !t.Opportunity!.IsClosed && (t.Opportunity.OwnerUserId == userId || t.AssignedToUserId == userId))
                     || (t.OpportunityId == null && t.AssignedToUserId == userId)
                 ))
             .OrderBy(t => t.DueAt.HasValue ? 0 : 1)
@@ -93,7 +93,7 @@ public class TaskService
             .Include(t => t.Opportunity)
             .Where(t => t.Status == "open"
                 && (
-                    (t.OpportunityId != null && t.Opportunity.OwnerUserId != null && t.Opportunity.OwnerUserId == userId && !t.Opportunity.IsClosed)
+                    (t.OpportunityId != null && !t.Opportunity!.IsClosed && (t.Opportunity.OwnerUserId == userId || t.AssignedToUserId == userId))
                     || (t.OpportunityId == null && t.AssignedToUserId == userId)
                 ));
 
@@ -124,7 +124,7 @@ public class TaskService
         return await db.Tasks
             .Where(t => t.Status == "open"
                 && (
-                    (t.OpportunityId != null && t.Opportunity.OwnerUserId != null && t.Opportunity.OwnerUserId == userId && !t.Opportunity.IsClosed)
+                    (t.OpportunityId != null && !t.Opportunity!.IsClosed && (t.Opportunity.OwnerUserId == userId || t.AssignedToUserId == userId))
                     || (t.OpportunityId == null && t.AssignedToUserId == userId)
                 ))
             .CountAsync();
