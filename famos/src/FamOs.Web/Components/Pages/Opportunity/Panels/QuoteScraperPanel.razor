@@ -246,6 +246,9 @@
             {
                 Snackbar.Add("Quote data extracted. Enter premium manually below to record the quote.", Severity.Warning);
                 _showManualEntry = true;
+                // Do NOT invoke OnUpdated here — that reloads the parent and resets this component,
+                // wiping _showManualEntry. OnUpdated is called from RecordManually() after user submits premium.
+                return;
             }
             await OnUpdated.InvokeAsync();
         }
