@@ -1,0 +1,40 @@
+@page "/submission-queue"
+@attribute [Authorize]
+
+<PageTitle>Submission Queue — FAM OS</PageTitle>
+
+<div class="famos-page-header">
+    <h2 class="famos-page-h2">Submission Queue</h2>
+    <p class="famos-page-sub">Accounts with completed intake ready for submission</p>
+</div>
+
+<div class="famos-empty-state" style="margin-top:48px;">
+    <MudIcon Icon="@Icons.Material.Outlined.OutboxRounded" Style="font-size:48px; color:var(--muted);" />
+    <div style="font-size:16px; font-weight:600; color:#002050;">Full workflow coming soon</div>
+    <p style="max-width:400px; font-size:13px; color:var(--muted); text-align:center;">
+        The Submission Queue will cover DGT export, Epic entry tracking, carrier marketing workflow,
+        and Higg handoff. Jay Jernigan is spec'ing the full workflow.
+    </p>
+    <div style="display:flex; flex-direction:column; gap:8px; width:100%; max-width:480px; margin-top:16px;">
+        @foreach (var item in _placeholderItems)
+        {
+            <div style="border:1px solid var(--border); border-radius:10px; padding:12px 16px;
+                        background:#f8f9fa; opacity:0.6; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <div style="font-size:13px; font-weight:600; color:#002050;">@item.Name</div>
+                    <div style="font-size:11px; color:var(--muted);">@item.Stage · Ready for submission</div>
+                </div>
+                <span style="font-size:10px; background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:8px; font-weight:600;">DGT Complete</span>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private record PlaceholderItem(string Name, string Stage);
+    private readonly List<PlaceholderItem> _placeholderItems =
+    [
+        new("Meridian Construction Group", "App Review"),
+        new("Suncoast Logistics LLC", "Intake"),
+    ];
+}
