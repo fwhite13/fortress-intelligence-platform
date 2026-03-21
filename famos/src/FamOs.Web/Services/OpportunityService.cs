@@ -203,6 +203,30 @@ public class OpportunityService
             .Take(5)
             .ToListAsync();
 
+        // Premium by stage
+        var premiumByStage = await baseQuery
+            .Where(o => o.EstimatedPremium.HasValue)
+            .GroupBy(o => o.LifecycleStage)
+            .Select(g => new { Stage = g.Key, Total = g.Sum(o => o.EstimatedPremium!.Value) })
+            .ToDictionaryAsync(x => x.Stage, x => x.Total);
+
+        // Stale deals — based on UpdatedAt
+        var staleThreshold  = DateTime.UtcNow.AddDays(-14);
+        var urgentThreshold = DateTime.UtcNow.AddDays(-21);
+        var staleOpps = await baseQuery
+            .Where(o => o.UpdatedAt < staleThreshold)
+            .OrderBy(o => o.UpdatedAt)
+            .Take(8)
+            .Select(o => new StaleOpportunity
+            {
+                Id        = o.Id,
+                Name      = o.Name,
+                Stage     = o.LifecycleStage,
+                DaysStale = (int)(DateTime.UtcNow - o.UpdatedAt).TotalDays,
+                IsUrgent  = o.UpdatedAt < urgentThreshold,
+            })
+            .ToListAsync();
+
         return new DashboardSummary
         {
             TotalActive          = totalActive,
@@ -213,6 +237,8 @@ public class OpportunityService
             UrgentOpportunities  = urgentOpps,
             ByStage              = byStage,
             RecentActivity       = recentActivity,
+            PremiumByStage       = premiumByStage,
+            StaleDeals           = staleOpps,
         };
     }
 }
@@ -242,4 +268,19 @@ public class DashboardSummary
 
     // Recent activity
     public List<Activity> RecentActivity { get; set; } = new();
+
+    // Premium by stage
+    public Dictionary<LifecycleStage, decimal> PremiumByStage { get; set; } = new();
+
+    // Stale deals
+    public List<StaleOpportunity> StaleDeals { get; set; } = new();
+}
+
+public class StaleOpportunity
+{
+    public Guid   Id        { get; set; }
+    public string Name      { get; set; } = "";
+    public LifecycleStage Stage { get; set; }
+    public int    DaysStale { get; set; }
+    public bool   IsUrgent  { get; set; }  // true if 21+ days stale
 }

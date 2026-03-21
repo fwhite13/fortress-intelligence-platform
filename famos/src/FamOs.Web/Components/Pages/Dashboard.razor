@@ -96,27 +96,31 @@ else if (_summary != null)
 
         @* ── Pipeline Distribution + Recent Activity ──────────────────── *@
         <MudItem xs="12" md="5">
-            <MudPaper Elevation="0"
-                      Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
-                <div style="padding:14px 16px; border-bottom:1px solid var(--border);">
-                    <MudText Typo="Typo.subtitle2" Class="famos-text-navy">Pipeline Distribution</MudText>
+            @* ── Pipeline Distribution ──────────────────────────────────── *@
+            <MudPaper Elevation="0" Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+                <div style="padding:14px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+                    <MudText Typo="Typo.subtitle2" Class="famos-text-navy">Pipeline by Stage</MudText>
+                    <MudButton Class="famos-btn-outline-sm" OnClick="GoToPipeline">Full View →</MudButton>
                 </div>
                 <div style="padding:12px 16px;">
                     @foreach (var stage in Enum.GetValues<LifecycleStage>()
-                        .Where(s => s != LifecycleStage.ClosedNotBound))
+                        .Where(s => s != LifecycleStage.ClosedNotBound && s != LifecycleStage.Bound))
                     {
-                        var count = _summary.ByStage.GetValueOrDefault(stage, 0);
-                        var pct   = _summary.TotalActive > 0
-                            ? (double)count / _summary.TotalActive * 100
-                            : 0;
-                        <div style="margin-bottom:8px;">
-                            <div style="display:flex; justify-content:space-between;
-                                        font-size:12px; margin-bottom:3px;">
-                                <span style="color:var(--text);">@GetStageLabel(stage)</span>
-                                <span style="color:var(--muted); font-weight:600;">@count</span>
+                        var count   = _summary!.ByStage.GetValueOrDefault(stage, 0);
+                        var premium = _summary.PremiumByStage.GetValueOrDefault(stage, 0);
+                        var pct     = _summary.TotalActive > 0 ? (double)count / _summary.TotalActive * 100 : 0;
+                        var color   = GetStageColor(stage);
+                        var label   = GetStageLabel(stage);
+                        <div style="margin-bottom:10px; cursor:pointer;"
+                             @onclick="() => Nav.NavigateTo($"/pipeline")">
+                            <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:3px;">
+                                <span style="color:var(--text);">@label</span>
+                                <span style="color:var(--muted);">
+                                    @count @(premium > 0 ? $"· ${FormatPremium(premium)}" : "")
+                                </span>
                             </div>
-                            <div style="height:6px; background:var(--border); border-radius:3px;">
-                                <div style="@($"height:6px; width:{pct:F0}%; background:var(--sky); border-radius:3px; transition:width 0.4s;")"></div>
+                            <div style="height:8px; background:var(--border); border-radius:4px;">
+                                <div style="@($"height:8px; width:{pct:F0}%; background:{color}; border-radius:4px; transition:width 0.4s;")"></div>
                             </div>
                         </div>
                     }
@@ -143,6 +147,35 @@ else if (_summary != null)
                 </MudPaper>
             }
         </MudItem>
+        @* ── Stale Deal Alerts ──────────────────────────────────────── *@
+        @if (_summary!.StaleDeals.Any())
+        {
+            <MudItem xs="12">
+                <MudPaper Elevation="0" Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+                    <div style="padding:14px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+                        <MudText Typo="Typo.subtitle2" Class="famos-text-navy">⚠ Stale Deal Alerts</MudText>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">@_summary.StaleDeals.Count</MudChip>
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:0; overflow:hidden;">
+                        @foreach (var deal in _summary.StaleDeals)
+                        {
+                            <div style="display:flex; justify-content:space-between; align-items:center;
+                                        padding:10px 16px; border-bottom:1px solid var(--border); width:100%;
+                                        cursor:pointer; @(deal.IsUrgent ? "background:#fff5f5;" : "background:#fffdf5;")"
+                                 @onclick="() => GoToOpportunity(deal.Id)">
+                                <div>
+                                    <div style="font-size:13px; font-weight:600; color:#002050;">@deal.Name</div>
+                                    <div style="font-size:11px; color:#6b7585;">@GetStageLabel(deal.Stage)</div>
+                                </div>
+                                <div class="famos-stale-badge @(deal.IsUrgent ? "famos-stale-urgent" : "famos-stale-warn")">
+                                    @deal.DaysStale&#x202F;d stale
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </MudPaper>
+            </MudItem>
+        }
     </MudGrid>
 }
 
@@ -171,4 +204,21 @@ else if (_summary != null)
     private void GoToPipeline() => Nav.NavigateTo("/pipeline");
     private void GoToTasks() => Nav.NavigateTo("/tasks");
     private void GoToOpportunity(Guid id) => Nav.NavigateTo($"/opportunity/{id}");
+
+    private static string GetStageColor(LifecycleStage stage) => stage switch
+    {
+        LifecycleStage.Intake           => "#1d4ed8",
+        LifecycleStage.UnderwritingPrep => "#6d28d9",
+        LifecycleStage.Marketed         => "#d97706",
+        LifecycleStage.QuotesReceived   => "#0369a1",
+        LifecycleStage.ClientDecision   => "#9333ea",
+        LifecycleStage.Binding          => "#C0272D",
+        LifecycleStage.Bound            => "#059669",
+        _                               => "#6b7585",
+    };
+
+    private static string FormatPremium(decimal value) =>
+        value >= 1_000_000 ? $"{value / 1_000_000:F1}M"
+        : value >= 1_000   ? $"{value / 1_000:F0}K"
+        : value.ToString("N0");
 }

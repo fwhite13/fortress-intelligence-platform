@@ -72,7 +72,7 @@
 }
 
 .famos-kpi-value {
-    font-family: 'Fraunces', Georgia, serif;
+    font-family: var(--font-display);
     font-size: 30px;
     color: #002050;
     line-height: 1.1;
@@ -1077,3 +1077,14 @@
 .font-display {
     font-family: var(--font-display);
 }
+
+/* ── Stale Deal Badges ── */
+.famos-stale-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+.famos-stale-warn   { background: #fef3c7; color: #92400e; }
+.famos-stale-urgent { background: #fee2e2; color: #991b1b; }
