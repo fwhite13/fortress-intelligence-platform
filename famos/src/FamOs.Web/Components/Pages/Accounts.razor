@@ -38,7 +38,8 @@
 {
     <div class="famos-filter-panel">
         <MudTextField Class="famos-input-filter"
-                      @bind-Value="_search" @bind-Value:event="oninput"
+                      Value="_search"
+                      ValueChanged="@((string v) => { _search = v; RebuildFiltered(); })"
                       Placeholder="Search accounts..."
                       Adornment="Adornment.Start"
                       AdornmentIcon="@FamosIcons.Search"
@@ -46,7 +47,8 @@
                       Style="min-width:220px;" />
 
         <MudSelect T="string"
-                   @bind-Value="_filterState"
+                   Value="_filterState"
+                   ValueChanged="@((string v) => { _filterState = v; RebuildFiltered(); })"
                    Label="State"
                    Clearable="true"
                    Style="min-width:140px;">
@@ -57,7 +59,8 @@
         </MudSelect>
 
         <MudSelect T="string"
-                   @bind-Value="_filterOpps"
+                   Value="_filterOpps"
+                   ValueChanged="@((string v) => { _filterOpps = v ?? "All"; RebuildFiltered(); })"
                    Label="Active Opps"
                    Style="min-width:140px;">
             <MudSelectItem T="string" Value="@("All")">All</MudSelectItem>
@@ -165,6 +168,7 @@ else
 
 @code {
     private List<Account> _accounts         = new();
+    private List<Account> _filteredAccounts = new();
     private bool          _loading          = true;
     private bool          _syncing          = false;
     private string        _search           = "";
@@ -182,47 +186,11 @@ else
             .Distinct()
             .OrderBy(s => s);
 
-    private List<Account> _filteredAccounts
-    {
-        get
-        {
-            var query = _accounts.AsEnumerable();
-
-            // Text search
-            if (!string.IsNullOrWhiteSpace(_search))
-                query = query.Where(a =>
-                    a.CompanyName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
-                    (a.City?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (a.State?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false));
-
-            // State filter
-            if (!string.IsNullOrWhiteSpace(_filterState))
-                query = query.Where(a => a.State == _filterState);
-
-            // Active opps filter
-            if (_filterOpps == "HasOpps")
-                query = query.Where(a => a.ActiveOppCount > 0);
-            else if (_filterOpps == "NoOpps")
-                query = query.Where(a => a.ActiveOppCount == 0);
-
-            // Sort
-            query = _sortColumn switch
-            {
-                "Company"    => _sortAsc ? query.OrderBy(a => a.CompanyName)    : query.OrderByDescending(a => a.CompanyName),
-                "Location"   => _sortAsc ? query.OrderBy(a => a.State).ThenBy(a => a.City) : query.OrderByDescending(a => a.State).ThenByDescending(a => a.City),
-                "ActiveOpps" => _sortAsc ? query.OrderBy(a => a.ActiveOppCount) : query.OrderByDescending(a => a.ActiveOppCount),
-                "LastSynced" => _sortAsc ? query.OrderBy(a => a.LastSyncedAt)   : query.OrderByDescending(a => a.LastSyncedAt),
-                _            => query.OrderBy(a => a.CompanyName),
-            };
-
-            return query.ToList();
-        }
-    }
-
     private void SortBy(string column)
     {
         if (_sortColumn == column) _sortAsc = !_sortAsc;
         else { _sortColumn = column; _sortAsc = true; }
+        RebuildFiltered();
     }
 
     private RenderFragment SortIcon(string column) => builder =>
@@ -233,13 +201,39 @@ else
         builder.CloseElement();
     };
 
-    private void ApplyFilters() { /* filters are reactive via _filteredAccounts */ }
+    private void RebuildFiltered()
+    {
+        var query = _accounts.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(_search))
+            query = query.Where(a =>
+                a.CompanyName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                (a.City?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (a.State?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false));
+        if (!string.IsNullOrWhiteSpace(_filterState))
+            query = query.Where(a => a.State == _filterState);
+        if (_filterOpps == "HasOpps")
+            query = query.Where(a => a.ActiveOppCount > 0);
+        else if (_filterOpps == "NoOpps")
+            query = query.Where(a => a.ActiveOppCount == 0);
+        query = _sortColumn switch
+        {
+            "Company"    => _sortAsc ? query.OrderBy(a => a.CompanyName)    : query.OrderByDescending(a => a.CompanyName),
+            "Location"   => _sortAsc ? query.OrderBy(a => a.State).ThenBy(a => a.City) : query.OrderByDescending(a => a.State).ThenByDescending(a => a.City),
+            "ActiveOpps" => _sortAsc ? query.OrderBy(a => a.ActiveOppCount) : query.OrderByDescending(a => a.ActiveOppCount),
+            "LastSynced" => _sortAsc ? query.OrderBy(a => a.LastSyncedAt)   : query.OrderByDescending(a => a.LastSyncedAt),
+            _            => query.OrderBy(a => a.CompanyName),
+        };
+        _filteredAccounts = query.ToList();
+    }
+
+    private void ApplyFilters() => RebuildFiltered();
 
     private void ClearFilters()
     {
         _search      = "";
         _filterState = "";
         _filterOpps  = "All";
+        RebuildFiltered();
     }
 
     protected override async Task OnInitializedAsync()
@@ -257,6 +251,7 @@ else
             .OrderBy(a => a.CompanyName)
             .ToListAsync();
         _lastSyncTime = _accounts.Any() ? _accounts.Max(a => a.LastSyncedAt) : null;
+        RebuildFiltered();
         _loading = false;
     }
 
