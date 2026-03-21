@@ -6,157 +6,244 @@
 @inject ISnackbar Snackbar
 @inject IDbContextFactory<FamOs.Web.Data.FamOsDbContext> DbFactory
 @inject IDialogService DialogService
+@inject OpportunityService OppService
+@inject IOptions<AffinityConfig> AffinityOptions
 @using FamOs.Web.Data.Entities
 @using FamOs.Web.Services
 @using FamOs.Web.Theme
+@using FamOs.Web.Domain
 @using Microsoft.EntityFrameworkCore
 @using FamOs.Web.Components.Dialogs
+@using Microsoft.Extensions.Options
+@using Microsoft.AspNetCore.Components.Rendering
 
-<PageTitle>Accounts — FAM OS</PageTitle>
+<PageTitle>All Accounts — FAM OS</PageTitle>
 
 <div class="famos-page-header famos-page-header-row mb-4">
     <div>
-        <h2 class="famos-page-h2">Accounts</h2>
-        <p class="famos-page-sub">@_filteredAccounts.Count of @_accounts.Count member companies</p>
+        <h2 class="famos-page-h2">All Accounts</h2>
+        <p class="famos-page-sub">@_filteredRows.Count rows · @_accounts.Count member companies</p>
     </div>
-    <div style="display:flex; gap:8px;">
-        <MudButton Class="famos-btn-outline-sm"
-                   StartIcon="@Icons.Material.Filled.FilterList"
-                   OnClick="@(() => _showFilters = !_showFilters)">
-            @(_showFilters ? "Hide Filters" : "Filters")
+    <div style="display:flex; gap:8px; align-items:center;">
+        <MudChip T="string" Size="Size.Small"
+                 Style="background:rgba(14,53,107,0.08); color:var(--navy); font-size:11px; font-weight:600;">
+            TIG Full Access
+        </MudChip>
+        <MudButton Class="famos-btn-outline-sm" StartIcon="@Icons.Material.Outlined.Sync"
+                   OnClick="@(async () => await SyncNow())" Disabled="_syncing">
+            @(_syncing ? "Syncing..." : "Sync")
         </MudButton>
-        <MudButton Class="famos-btn-outline-sm"
-                   StartIcon="@FamosIcons.Download"
-                   OnClick="SyncNow"
-                   Disabled="_syncing">
-            @(_syncing ? "Syncing..." : "Sync from HubSpot")
+        <MudButton Class="famos-btn-outline-sm" StartIcon="@Icons.Material.Outlined.Download"
+                   OnClick="ExportCsv">
+            Export CSV
+        </MudButton>
+        <MudButton Class="famos-btn-primary" StartIcon="@Icons.Material.Outlined.Add"
+                   OnClick="ShowNewProspectStub">
+            + New Prospect
         </MudButton>
     </div>
 </div>
 
-@if (_showFilters)
-{
-    <div class="famos-filter-panel">
-        <MudTextField Class="famos-input-filter"
-                      Value="_search"
-                      ValueChanged="@((string v) => { _search = v; RebuildFiltered(); })"
-                      Placeholder="Search accounts..."
-                      Adornment="Adornment.Start"
-                      AdornmentIcon="@FamosIcons.Search"
-                      Clearable="true"
-                      Style="min-width:220px;" />
+<div class="famos-filter-panel mb-3">
+    <MudTextField Value="_search"
+                  ValueChanged="@((string v) => { _search = v; RebuildFiltered(); })"
+                  Placeholder="Search members..."
+                  Adornment="Adornment.Start"
+                  AdornmentIcon="@FamosIcons.Search"
+                  Clearable="true"
+                  Class="famos-input-filter"
+                  Style="min-width:200px;" />
 
-        <MudSelect T="string"
-                   Value="_filterState"
-                   ValueChanged="@((string v) => { _filterState = v; RebuildFiltered(); })"
-                   Label="State"
-                   Clearable="true"
-                   Style="min-width:140px;">
-            @foreach (var state in _distinctStates)
-            {
-                <MudSelectItem T="string" Value="@state">@state</MudSelectItem>
-            }
-        </MudSelect>
+    <MudSelect T="string" Value="_filterAccountStatus"
+               ValueChanged="@((string v) => { _filterAccountStatus = v ?? ""; RebuildFiltered(); })"
+               Label="Account Status" Clearable="true" Style="min-width:140px;">
+        <MudSelectItem T="string" Value="@("Active")">Active</MudSelectItem>
+        <MudSelectItem T="string" Value="@("Prospect")">Prospect</MudSelectItem>
+        <MudSelectItem T="string" Value="@("Inactive")">Inactive</MudSelectItem>
+    </MudSelect>
 
-        <MudSelect T="string"
-                   Value="_filterOpps"
-                   ValueChanged="@((string v) => { _filterOpps = v ?? "All"; RebuildFiltered(); })"
-                   Label="Active Opps"
-                   Style="min-width:140px;">
-            <MudSelectItem T="string" Value="@("All")">All</MudSelectItem>
-            <MudSelectItem T="string" Value="@("HasOpps")">Has Opps</MudSelectItem>
-            <MudSelectItem T="string" Value="@("NoOpps")">No Opps</MudSelectItem>
-        </MudSelect>
+    <MudSelect T="string" Value="_filterOppStatus"
+               ValueChanged="@((string v) => { _filterOppStatus = v ?? ""; RebuildFiltered(); })"
+               Label="Opp Status" Clearable="true" Style="min-width:140px;">
+        <MudSelectItem T="string" Value="@("In Pipeline")">In Pipeline</MudSelectItem>
+        <MudSelectItem T="string" Value="@("Bound")">Bound</MudSelectItem>
+        <MudSelectItem T="string" Value="@("Not Working")">Not Working</MudSelectItem>
+    </MudSelect>
 
-        <MudButton Class="famos-btn-primary-sm" OnClick="ApplyFilters">Apply</MudButton>
-        <MudButton Class="famos-btn-outline-sm" OnClick="ClearFilters">Clear</MudButton>
-    </div>
-}
+    <MudSelect T="string" Value="_filterCoverage"
+               ValueChanged="@((string v) => { _filterCoverage = v ?? ""; RebuildFiltered(); })"
+               Label="Coverage Line" Clearable="true" Style="min-width:140px;">
+        @foreach (var c in _distinctCoverageLines)
+        {
+            <MudSelectItem T="string" Value="@c">@c</MudSelectItem>
+        }
+    </MudSelect>
+
+    <MudSelect T="string" Value="_filterState"
+               ValueChanged="@((string v) => { _filterState = v ?? ""; RebuildFiltered(); })"
+               Label="State" Clearable="true" Style="min-width:100px;">
+        @foreach (var s in _distinctStates)
+        {
+            <MudSelectItem T="string" Value="@s">@s</MudSelectItem>
+        }
+    </MudSelect>
+
+    <MudSelect T="string" Value="_filterExpWindow"
+               ValueChanged="@((string v) => { _filterExpWindow = v ?? ""; RebuildFiltered(); })"
+               Label="Exp Window" Clearable="true" Style="min-width:140px;">
+        <MudSelectItem T="string" Value="@("30")">≤ 30 days</MudSelectItem>
+        <MudSelectItem T="string" Value="@("90")">≤ 90 days</MudSelectItem>
+        <MudSelectItem T="string" Value="@("overdue")">Overdue</MudSelectItem>
+    </MudSelect>
+
+    <MudButton Class="famos-btn-outline-sm" OnClick="ClearFilters">Clear</MudButton>
+</div>
 
 @if (_loading)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
-else if (!_accounts.Any())
-{
-    <div class="famos-empty-state" style="margin-top:40px;">
-        <MudIcon Icon="@FamosIcons.Accounts" Class="famos-empty-icon" />
-        <div>No accounts synced yet.</div>
-        <div style="margin-top:8px;">
-            <MudButton Class="famos-btn-primary" OnClick="SyncNow" Disabled="_syncing">
-                Sync from HubSpot
-            </MudButton>
-        </div>
-    </div>
-}
 else
 {
-    <MudPaper Elevation="0" Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+    <div style="display:flex; gap:0; margin-bottom:12px; border:1px solid var(--border); border-radius:8px; overflow:hidden; width:fit-content;">
+        <MudButton Class="@(_viewMode == "opportunity" ? "famos-btn-primary" : "famos-btn-outline")"
+                   Style="border-radius:0; border:none;"
+                   OnClick="@(() => { _viewMode = "opportunity"; RebuildFiltered(); })">
+            By Opportunity
+        </MudButton>
+        <MudButton Class="@(_viewMode == "company" ? "famos-btn-primary" : "famos-btn-outline")"
+                   Style="border-radius:0; border:none; border-left:1px solid var(--border);"
+                   OnClick="@(() => { _viewMode = "company"; RebuildFiltered(); })">
+            By Company
+        </MudButton>
+    </div>
 
-        @* Header row *@
-        <div class="famos-account-table-header">
-            <div class="famos-account-col-name famos-sort-header" @onclick='() => SortBy("Company")'>
-                Company @SortIcon("Company")
+    @if (_viewMode == "opportunity")
+    {
+        <MudPaper Elevation="0" Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+            <div class="famos-account-table-header">
+                <div class="famos-account-col-member famos-sort-header" @onclick='() => SortBy("Name")'>
+                    Member Name @SortIcon("Name")
+                </div>
+                <div class="famos-account-col-status">Status</div>
+                <div class="famos-account-col-coverage famos-sort-header" @onclick='() => SortBy("Coverage")'>
+                    Coverage Line @SortIcon("Coverage")
+                </div>
+                <div class="famos-account-col-carrier famos-sort-header" @onclick='() => SortBy("Carrier")'>
+                    Carrier @SortIcon("Carrier")
+                </div>
+                <div class="famos-account-col-oppstatus">Opp Status</div>
+                <div class="famos-account-col-expdate famos-sort-header" @onclick='() => SortBy("ExpDate")'>
+                    Exp Date @SortIcon("ExpDate")
+                </div>
+                <div class="famos-account-col-premium famos-sort-header" @onclick='() => SortBy("Premium")'>
+                    Est. Premium @SortIcon("Premium")
+                </div>
             </div>
-            <div class="famos-account-col-location famos-sort-header" @onclick='() => SortBy("Location")'>
-                Location @SortIcon("Location")
-            </div>
-            <div class="famos-account-col-opps famos-sort-header" @onclick='() => SortBy("ActiveOpps")'>
-                Active Opps @SortIcon("ActiveOpps")
-            </div>
-            <div class="famos-account-col-sync famos-sort-header" @onclick='() => SortBy("LastSynced")'>
-                Last Synced @SortIcon("LastSynced")
-            </div>
-            <div class="famos-account-col-action"></div>
-        </div>
 
-        @foreach (var account in _filteredAccounts)
-        {
-            <div class="famos-account-row"
-                 @onclick="async () => await GoToAccount(account)">
-                <div class="famos-account-col-name">
-                    <span class="famos-text-navy famos-fw-600">@account.CompanyName</span>
+            @if (!_filteredRows.Any())
+            {
+                <div class="famos-empty-state" style="padding:40px;">
+                    <MudIcon Icon="@FamosIcons.Accounts" Class="famos-empty-icon" />
+                    <div>No accounts match the current filters.</div>
                 </div>
-                <div class="famos-account-col-location">
-                    @if (!string.IsNullOrEmpty(account.City) || !string.IsNullOrEmpty(account.State))
-                    {
-                        <span class="famos-meta-text">
-                            @(account.City)@(account.City != null && account.State != null ? ", " : "")@(account.State)
-                        </span>
-                    }
-                    else
-                    {
-                        <span class="famos-meta-text">—</span>
-                    }
-                </div>
-                <div class="famos-account-col-opps">
-                    @if (account.ActiveOppCount > 0)
-                    {
-                        <MudChip T="string" Size="Size.Small"
-                                 Style="background:rgba(192,39,45,0.1); color:#C0272D; font-weight:600; font-size:11px;">
-                            @account.ActiveOppCount active
-                        </MudChip>
-                    }
-                    else
-                    {
-                        <span class="famos-meta-text">No active opps</span>
-                    }
-                </div>
-                <div class="famos-account-col-sync">
-                    <span class="famos-meta-text">
-                        @(account.LastSyncedAt.HasValue
-                            ? account.LastSyncedAt.Value.ToLocalTime().ToString("MMM d, h:mm tt")
-                            : "Never")
-                    </span>
-                </div>
-                <div class="famos-account-col-action">
-                    <MudIcon Icon="@FamosIcons.ChevronRight"
-                             Style="font-size:16px; color:var(--muted);" />
-                </div>
+            }
+            else
+            {
+                @foreach (var row in _filteredRows)
+                {
+                    <div class="famos-account-row" @onclick="@(async () => await OpenDrawer(row))">
+                        <div class="famos-account-col-member">
+                            <span class="famos-text-navy famos-fw-600">@row.Account.CompanyName</span>
+                            @if (!string.IsNullOrEmpty(row.Account.City) || !string.IsNullOrEmpty(row.Account.State))
+                            {
+                                <div class="famos-meta-text" style="font-size:11px;">
+                                    @(row.Account.City)@(row.Account.City != null && row.Account.State != null ? ", " : "")@(row.Account.State)
+                                </div>
+                            }
+                        </div>
+                        <div class="famos-account-col-status">
+                            @AccountStatusBadge(row.AccountStatus)
+                        </div>
+                        <div class="famos-account-col-coverage">
+                            <span class="famos-meta-text">@(row.CoverageLine ?? "—")</span>
+                        </div>
+                        <div class="famos-account-col-carrier">
+                            <span class="famos-meta-text">@(row.Carrier ?? "—")</span>
+                        </div>
+                        <div class="famos-account-col-oppstatus">
+                            @OppStatusBadge(row.OppStatus)
+                        </div>
+                        <div class="famos-account-col-expdate">
+                            @ExpDateCell(row.ExpDate)
+                        </div>
+                        <div class="famos-account-col-premium">
+                            <span class="famos-meta-text">
+                                @(row.Premium.HasValue ? $"${row.Premium.Value:N0}" : "—")
+                            </span>
+                        </div>
+                    </div>
+                }
+            }
+        </MudPaper>
+    }
+    else
+    {
+        @* By Company view — one row per Account *@
+        <MudPaper Elevation="0" Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
+            <div class="famos-account-table-header">
+                <div class="famos-account-col-member">Company</div>
+                <div class="famos-account-col-status">Status</div>
+                <div class="famos-account-col-coverage"># In Pipeline</div>
+                <div class="famos-account-col-carrier"># Bound</div>
+                <div class="famos-account-col-expdate">Next Exp Date</div>
+                <div class="famos-account-col-premium">Total Premium</div>
             </div>
-        }
 
-    </MudPaper>
+            @if (!_companyRows.Any())
+            {
+                <div class="famos-empty-state" style="padding:40px;">
+                    <MudIcon Icon="@FamosIcons.Accounts" Class="famos-empty-icon" />
+                    <div>No accounts match the current filters.</div>
+                </div>
+            }
+            else
+            {
+                @foreach (var cr in _companyRows)
+                {
+                    <div class="famos-account-row"
+                         @onclick="@(() => Nav.NavigateTo($"/pipeline?company={Uri.EscapeDataString(cr.Account.CompanyName)}"))">
+                        <div class="famos-account-col-member">
+                            <span class="famos-text-navy famos-fw-600">@cr.Account.CompanyName</span>
+                            @if (!string.IsNullOrEmpty(cr.Account.City) || !string.IsNullOrEmpty(cr.Account.State))
+                            {
+                                <div class="famos-meta-text" style="font-size:11px;">
+                                    @(cr.Account.City)@(cr.Account.City != null && cr.Account.State != null ? ", " : "")@(cr.Account.State)
+                                </div>
+                            }
+                        </div>
+                        <div class="famos-account-col-status">
+                            @AccountStatusBadge(cr.AccountStatus)
+                        </div>
+                        <div class="famos-account-col-coverage">
+                            <span class="famos-meta-text">@(cr.InPipelineCount > 0 ? cr.InPipelineCount.ToString() : "—")</span>
+                        </div>
+                        <div class="famos-account-col-carrier">
+                            <span class="famos-meta-text">@(cr.BoundCount > 0 ? cr.BoundCount.ToString() : "—")</span>
+                        </div>
+                        <div class="famos-account-col-expdate">
+                            @ExpDateCell(cr.NextExpDate)
+                        </div>
+                        <div class="famos-account-col-premium">
+                            <span class="famos-meta-text">
+                                @(cr.TotalPremium > 0 ? $"${cr.TotalPremium:N0}" : "—")
+                            </span>
+                        </div>
+                    </div>
+                }
+            }
+        </MudPaper>
+    }
 
     @if (_lastSyncTime.HasValue)
     {
@@ -166,18 +253,233 @@ else
     }
 }
 
+<MudDrawer @bind-Open="_drawerOpen"
+           Anchor="Anchor.End"
+           Variant="DrawerVariant.Temporary"
+           Width="420px"
+           Elevation="2"
+           CloseOnEscapeKey="true"
+           Class="famos-side-drawer">
+
+    @if (_selectedOpp != null)
+    {
+        <div class="famos-drawer-header">
+            <div style="flex:1; min-width:0;">
+                <div class="famos-drawer-title">@_selectedOpp.Name</div>
+                <div class="famos-drawer-stage">
+                    @GetStageDisplayName(_selectedOpp.LifecycleStage)
+                </div>
+            </div>
+            <MudIconButton Icon="@Icons.Material.Filled.Close"
+                           OnClick="CloseDrawer"
+                           Size="Size.Small" />
+        </div>
+
+        <div class="famos-drawer-body">
+
+            <div class="famos-drawer-section">
+                @if (_selectedOpp.EstimatedPremium.HasValue)
+                {
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Est. Premium</span>
+                        <span class="famos-drawer-value">$@_selectedOpp.EstimatedPremium.Value.ToString("N0")</span>
+                    </div>
+                }
+                @if (_selectedOpp.EffectiveDateTarget.HasValue)
+                {
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Effective Date</span>
+                        <span class="famos-drawer-value">@_selectedOpp.EffectiveDateTarget.Value.ToString("MMM d, yyyy")</span>
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(_selectedOpp.OwnerUserId))
+                {
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Account Manager</span>
+                        <span class="famos-drawer-value">
+                            @(AffinityOptions.Value.Users.FirstOrDefault(u => u.UserId == _selectedOpp.OwnerUserId)?.DisplayName ?? _selectedOpp.OwnerUserId)
+                        </span>
+                    </div>
+                }
+                <div class="famos-drawer-row">
+                    <span class="famos-drawer-label">Status</span>
+                    <span class="famos-drawer-value">
+                        <SignalChip Signal="_selectedOpp.DominantSignal" />
+                    </span>
+                </div>
+                @if (_selectedOpp.LastStageTransitionAt.HasValue)
+                {
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">In Stage Since</span>
+                        <span class="famos-drawer-value">
+                            @_selectedOpp.LastStageTransitionAt.Value.ToLocalTime().ToString("MMM d, yyyy")
+                        </span>
+                    </div>
+                }
+            </div>
+
+            <div class="famos-drawer-section">
+                <div class="famos-drawer-section-title" style="padding: 0 20px 6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--famos-text-muted, #6b7585);">Pipeline Activity</div>
+                @if (_drawerLoading)
+                {
+                    <div style="padding:12px 20px;">
+                        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                    </div>
+                }
+                else if (_detailOpp != null)
+                {
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Carriers Submitted</span>
+                        <span class="famos-drawer-value">@(_detailOpp.Submissions.Count > 0 ? _detailOpp.Submissions.Count.ToString() : "—")</span>
+                    </div>
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Quotes Received</span>
+                        <span class="famos-drawer-value">@(_detailOpp.Quotes.Count > 0 ? _detailOpp.Quotes.Count.ToString() : "—")</span>
+                    </div>
+                    <div class="famos-drawer-row">
+                        <span class="famos-drawer-label">Open Tasks</span>
+                        <span class="famos-drawer-value">@(_detailOpp.Tasks.Count > 0 ? _detailOpp.Tasks.Count.ToString() : "—")</span>
+                    </div>
+                }
+            </div>
+
+            <div class="famos-drawer-section">
+                <div class="famos-drawer-section-title" style="padding: 0 20px 6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--famos-text-muted, #6b7585);">Contacts</div>
+                @if (_drawerLoading)
+                {
+                    <div style="padding:12px 20px;">
+                        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                    </div>
+                }
+                else if (_detailOpp != null)
+                {
+                    @if (!_detailOpp.Contacts.Any())
+                    {
+                        <div style="padding: 6px 20px; color:var(--famos-text-muted, #6b7585); font-size:13px;">No contacts on record</div>
+                    }
+                    else
+                    {
+                        @foreach (var contact in _detailOpp.Contacts.Take(3))
+                        {
+                            <div class="famos-drawer-row">
+                                <span class="famos-drawer-label">@contact.FullName</span>
+                                <span class="famos-drawer-value" style="font-size:12px; color:var(--famos-text-muted, #6b7585);">@contact.ContactType.ToString()</span>
+                            </div>
+                        }
+                    }
+                }
+            </div>
+
+            @if (!_drawerLoading && _detailOpp != null)
+            {
+                <div class="famos-drawer-section">
+                    <div class="famos-drawer-section-title" style="padding: 0 20px 6px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--famos-text-muted, #6b7585);">Recent Activity</div>
+                    @if (_detailOpp.Activities.Any())
+                    {
+                        @foreach (var act in _detailOpp.Activities.Take(3))
+                        {
+                            <div class="famos-drawer-row" style="align-items:flex-start; flex-direction:column; gap:2px; padding: 6px 20px;">
+                                <span class="famos-drawer-value" style="font-size:13px;">
+                                    @(act.Description != null && act.Description.Length > 60
+                                        ? act.Description.Substring(0, 60) + "…"
+                                        : (act.Description ?? act.EventType))
+                                </span>
+                                <span style="font-size:11px; color:var(--famos-text-muted, #6b7585);">@act.OccurredAt.ToLocalTime().ToString("MMM d, yyyy")</span>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div style="padding: 6px 20px; color:var(--famos-text-muted, #6b7585); font-size:13px;">No recent activity</div>
+                    }
+                </div>
+            }
+            else if (_drawerLoading)
+            {
+                <div style="padding:12px 20px;">
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                </div>
+            }
+
+            <div style="padding: 16px 20px 20px;">
+                <MudButton Class="famos-btn-primary"
+                           FullWidth="true"
+                           OnClick="@(() => { Nav.NavigateTo($"/opportunity/{_selectedOpp!.Id}"); CloseDrawer(); })">
+                    View Full Details
+                </MudButton>
+            </div>
+
+        </div>
+    }
+
+</MudDrawer>
+
 @code {
-    private List<Account> _accounts         = new();
-    private List<Account> _filteredAccounts = new();
-    private bool          _loading          = true;
-    private bool          _syncing          = false;
-    private string        _search           = "";
-    private DateTime?     _lastSyncTime;
-    private bool          _showFilters      = false;
-    private string        _filterState      = "";
-    private string        _filterOpps       = "All";
-    private string        _sortColumn       = "Company";
-    private bool          _sortAsc          = true;
+    // ── Data ────────────────────────────────────────────────────────────────
+    private List<Account>     _accounts      = new();
+    private List<Opportunity> _opps          = new();
+    private List<AccountRow>  _filteredRows  = new();
+    private List<CompanyRow>  _companyRows   = new();
+    private bool              _loading       = true;
+    private bool              _syncing       = false;
+    private DateTime?         _lastSyncTime;
+
+    // ── Filters ─────────────────────────────────────────────────────────────
+    private string _search              = "";
+    private string _filterAccountStatus = "";
+    private string _filterOppStatus     = "";
+    private string _filterCoverage      = "";
+    private string _filterState         = "";
+    private string _filterExpWindow     = "";
+
+    // ── Sort ────────────────────────────────────────────────────────────────
+    private string _sortColumn = "Name";
+    private bool   _sortAsc    = true;
+
+    // ── View toggle ─────────────────────────────────────────────────────────
+    private string _viewMode = "opportunity";
+
+    // ── Drawer ──────────────────────────────────────────────────────────────
+    private bool         _drawerOpen    = false;
+    private Opportunity? _selectedOpp   = null;
+    private Opportunity? _detailOpp     = null;
+    private bool         _drawerLoading = false;
+
+    // ── Records ─────────────────────────────────────────────────────────────
+    private record AccountRow(
+        Account      Account,
+        Opportunity? Opp,
+        string       OppStatus,
+        string       AccountStatus,
+        string?      CoverageLine,
+        string?      Carrier,
+        DateOnly?    ExpDate,
+        decimal?     Premium
+    );
+
+    private record CompanyRow(
+        Account   Account,
+        string    AccountStatus,
+        int       InPipelineCount,
+        int       BoundCount,
+        DateOnly? NextExpDate,
+        decimal   TotalPremium
+    );
+
+    // ── Distinct filter values ───────────────────────────────────────────────
+    private IEnumerable<string> _distinctCoverageLines =>
+        _opps
+            .SelectMany(o => {
+                var lines = new List<string>();
+                if (o.PolicyShadow?.CoverageType != null)
+                    lines.Add(o.PolicyShadow.CoverageType);
+                foreach (var s in o.Submissions)
+                    if (!string.IsNullOrEmpty(s.CoverageTypes))
+                        lines.AddRange(s.CoverageTypes.Split(',').Select(c => c.Trim()).Where(c => !string.IsNullOrEmpty(c)));
+                return lines;
+            })
+            .Distinct()
+            .OrderBy(c => c);
 
     private IEnumerable<string> _distinctStates =>
         _accounts
@@ -186,6 +488,59 @@ else
             .Distinct()
             .OrderBy(s => s);
 
+    // ── Lifecycle helpers ────────────────────────────────────────────────────
+    private static string GetOppStatus(Opportunity opp)
+    {
+        if (opp.IsClosed || opp.LifecycleStage == LifecycleStage.ClosedNotBound)
+            return "Not Working";
+        if (opp.LifecycleStage == LifecycleStage.Bound)
+            return "Bound";
+        return "In Pipeline";
+    }
+
+    private static string GetAccountStatus(Account account, IEnumerable<Opportunity> accountOpps)
+    {
+        var opps = accountOpps.ToList();
+        if (!opps.Any())
+            return "Inactive";
+        var hasActive = opps.Any(o =>
+            !o.IsClosed &&
+            o.LifecycleStage == LifecycleStage.Bound &&
+            o.PolicyShadow != null);
+        if (hasActive) return "Active";
+        var hasProspect = opps.Any(o =>
+            !o.IsClosed &&
+            o.LifecycleStage != LifecycleStage.ClosedNotBound &&
+            o.LifecycleStage < LifecycleStage.Bound);
+        if (hasProspect) return "Prospect";
+        return "Inactive";
+    }
+
+    // ── Coverage/Carrier helpers ─────────────────────────────────────────────
+    private static string? GetCoverageLine(Opportunity opp)
+    {
+        if (opp.PolicyShadow?.CoverageType != null)
+            return opp.PolicyShadow.CoverageType;
+        var first = opp.Submissions.FirstOrDefault();
+        return first?.CoverageTypes;
+    }
+
+    private static string? GetCarrier(Opportunity opp)
+    {
+        if (!string.IsNullOrEmpty(opp.PolicyShadow?.CarrierName))
+            return opp.PolicyShadow.CarrierName;
+        var first = opp.Submissions.FirstOrDefault();
+        return string.IsNullOrEmpty(first?.CarrierName) ? null : first.CarrierName;
+    }
+
+    private static DateOnly? GetExpDate(Opportunity opp)
+    {
+        if (opp.PolicyShadow?.ExpirationDate.HasValue == true)
+            return opp.PolicyShadow.ExpirationDate;
+        return opp.EffectiveDateTarget;
+    }
+
+    // ── Sort ─────────────────────────────────────────────────────────────────
     private void SortBy(string column)
     {
         if (_sortColumn == column) _sortAsc = !_sortAsc;
@@ -201,45 +556,131 @@ else
         builder.CloseElement();
     };
 
+    // ── RebuildFiltered ───────────────────────────────────────────────────────
     private void RebuildFiltered()
     {
-        var query = _accounts.AsEnumerable();
+        var today = DateOnly.FromDateTime(DateTime.Today);
+
+        // Build a lookup: accountId → all opps for that account
+        var accountOppMap = new Dictionary<Guid, List<Opportunity>>();
+        foreach (var acc in _accounts)
+            accountOppMap[acc.Id] = new List<Opportunity>();
+        foreach (var opp in _opps)
+        {
+            var acc = _accounts.FirstOrDefault(a =>
+                opp.Name.Contains(a.CompanyName, StringComparison.OrdinalIgnoreCase) ||
+                a.CompanyName.Contains(opp.Name, StringComparison.OrdinalIgnoreCase));
+            if (acc != null)
+                accountOppMap[acc.Id].Add(opp);
+        }
+
+        // Generate AccountRow for each opp
+        var allRows = new List<AccountRow>();
+        foreach (var acc in _accounts)
+        {
+            var accOpps = accountOppMap[acc.Id];
+            var accountStatus = GetAccountStatus(acc, accOpps);
+            if (!accOpps.Any())
+            {
+                allRows.Add(new AccountRow(acc, null, "Not Working", "Inactive", null, null, null, null));
+                continue;
+            }
+            foreach (var opp in accOpps)
+            {
+                allRows.Add(new AccountRow(
+                    Account:       acc,
+                    Opp:           opp,
+                    OppStatus:     GetOppStatus(opp),
+                    AccountStatus: accountStatus,
+                    CoverageLine:  GetCoverageLine(opp),
+                    Carrier:       GetCarrier(opp),
+                    ExpDate:       GetExpDate(opp),
+                    Premium:       opp.EstimatedPremium
+                ));
+            }
+        }
+
+        // Apply filters
+        var query = allRows.AsEnumerable();
         if (!string.IsNullOrWhiteSpace(_search))
-            query = query.Where(a =>
+            query = query.Where(r =>
+                r.Account.CompanyName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                (r.Opp?.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (r.Account.City?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (r.Account.State?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false));
+        if (!string.IsNullOrWhiteSpace(_filterAccountStatus))
+            query = query.Where(r => r.AccountStatus == _filterAccountStatus);
+        if (!string.IsNullOrWhiteSpace(_filterOppStatus))
+            query = query.Where(r => r.OppStatus == _filterOppStatus);
+        if (!string.IsNullOrWhiteSpace(_filterCoverage))
+            query = query.Where(r => r.CoverageLine != null &&
+                r.CoverageLine.Contains(_filterCoverage, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(_filterState))
+            query = query.Where(r => r.Account.State == _filterState);
+        if (!string.IsNullOrWhiteSpace(_filterExpWindow))
+        {
+            query = _filterExpWindow switch
+            {
+                "30"      => query.Where(r => r.ExpDate.HasValue && (r.ExpDate.Value.DayNumber - today.DayNumber) <= 30 && (r.ExpDate.Value.DayNumber - today.DayNumber) >= 0),
+                "90"      => query.Where(r => r.ExpDate.HasValue && (r.ExpDate.Value.DayNumber - today.DayNumber) <= 90 && (r.ExpDate.Value.DayNumber - today.DayNumber) >= 0),
+                "overdue" => query.Where(r => r.ExpDate.HasValue && r.ExpDate.Value < today),
+                _         => query
+            };
+        }
+
+        // Sort
+        query = _sortColumn switch
+        {
+            "Name"     => _sortAsc ? query.OrderBy(r => r.Account.CompanyName) : query.OrderByDescending(r => r.Account.CompanyName),
+            "Coverage" => _sortAsc ? query.OrderBy(r => r.CoverageLine) : query.OrderByDescending(r => r.CoverageLine),
+            "Carrier"  => _sortAsc ? query.OrderBy(r => r.Carrier) : query.OrderByDescending(r => r.Carrier),
+            "ExpDate"  => _sortAsc ? query.OrderBy(r => r.ExpDate) : query.OrderByDescending(r => r.ExpDate),
+            "Premium"  => _sortAsc ? query.OrderBy(r => r.Premium) : query.OrderByDescending(r => r.Premium),
+            _          => query.OrderBy(r => r.Account.CompanyName),
+        };
+
+        _filteredRows = query.ToList();
+
+        // Build company rows for "By Company" view
+        var companyQuery = _accounts.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(_search))
+            companyQuery = companyQuery.Where(a =>
                 a.CompanyName.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
                 (a.City?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (a.State?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false));
         if (!string.IsNullOrWhiteSpace(_filterState))
-            query = query.Where(a => a.State == _filterState);
-        if (_filterOpps == "HasOpps")
-            query = query.Where(a => a.ActiveOppCount > 0);
-        else if (_filterOpps == "NoOpps")
-            query = query.Where(a => a.ActiveOppCount == 0);
-        query = _sortColumn switch
-        {
-            "Company"    => _sortAsc ? query.OrderBy(a => a.CompanyName)    : query.OrderByDescending(a => a.CompanyName),
-            "Location"   => _sortAsc ? query.OrderBy(a => a.State).ThenBy(a => a.City) : query.OrderByDescending(a => a.State).ThenByDescending(a => a.City),
-            "ActiveOpps" => _sortAsc ? query.OrderBy(a => a.ActiveOppCount) : query.OrderByDescending(a => a.ActiveOppCount),
-            "LastSynced" => _sortAsc ? query.OrderBy(a => a.LastSyncedAt)   : query.OrderByDescending(a => a.LastSyncedAt),
-            _            => query.OrderBy(a => a.CompanyName),
-        };
-        _filteredAccounts = query.ToList();
-    }
+            companyQuery = companyQuery.Where(a => a.State == _filterState);
 
-    private void ApplyFilters() => RebuildFiltered();
+        _companyRows = companyQuery.Select(acc =>
+        {
+            var accOpps = accountOppMap[acc.Id];
+            var accountStatus = GetAccountStatus(acc, accOpps);
+            var inPipeline = accOpps.Count(o => !o.IsClosed && o.LifecycleStage < LifecycleStage.Bound && o.LifecycleStage != LifecycleStage.ClosedNotBound);
+            var bound = accOpps.Count(o => o.LifecycleStage == LifecycleStage.Bound && !o.IsClosed);
+            var nextExp = accOpps
+                .Where(o => GetExpDate(o).HasValue)
+                .Select(o => GetExpDate(o)!.Value)
+                .OrderBy(d => d)
+                .FirstOrDefault();
+            var totalPrem = accOpps.Sum(o => o.EstimatedPremium ?? 0m);
+            return new CompanyRow(acc, accountStatus, inPipeline, bound,
+                nextExp == default ? (DateOnly?)null : nextExp, totalPrem);
+        }).ToList();
+    }
 
     private void ClearFilters()
     {
-        _search      = "";
-        _filterState = "";
-        _filterOpps  = "All";
+        _search              = "";
+        _filterAccountStatus = "";
+        _filterOppStatus     = "";
+        _filterCoverage      = "";
+        _filterState         = "";
+        _filterExpWindow     = "";
         RebuildFiltered();
     }
 
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadAsync();
-    }
+    // ── Data loading ──────────────────────────────────────────────────────────
+    protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
     {
@@ -249,6 +690,11 @@ else
         _accounts = await db.Accounts
             .Where(a => a.AffinityId == affinityId)
             .OrderBy(a => a.CompanyName)
+            .ToListAsync();
+        _opps = await db.Opportunities
+            .Include(o => o.Submissions)
+            .Include(o => o.PolicyShadow)
+            .Where(o => o.AffinityId == affinityId)
             .ToListAsync();
         _lastSyncTime = _accounts.Any() ? _accounts.Max(a => a.LastSyncedAt) : null;
         RebuildFiltered();
@@ -272,35 +718,103 @@ else
         finally { _syncing = false; }
     }
 
-    private async Task GoToAccount(Account account)
+    private void ExportCsv() =>
+        Snackbar.Add("CSV export coming soon.", Severity.Info);
+
+    private void ShowNewProspectStub() =>
+        Snackbar.Add("Intake questionnaire coming via FORMS — stay tuned.", Severity.Info);
+
+    // ── Drawer ────────────────────────────────────────────────────────────────
+    private async Task OpenDrawer(AccountRow row)
     {
-        if (account.ActiveOppCount == 0)
+        if (row.Opp == null)
         {
-            var parameters = new DialogParameters<OpportunityCreateDialog>
-            {
-                { x => x.InitialCompanyName, account.CompanyName }
-            };
-            var options = new DialogOptions { CloseButton = true, MaxWidth = MaxWidth.Small, FullWidth = true };
-            await DialogService.ShowAsync<OpportunityCreateDialog>("New Opportunity", parameters, options);
+            Nav.NavigateTo($"/pipeline?company={Uri.EscapeDataString(row.Account.CompanyName)}");
+            return;
         }
-        else if (account.ActiveOppCount == 1)
-        {
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var affinityId = await AffinitySvc.GetCurrentAffinityIdAsync();
-            var opp = await db.Opportunities
-                .Where(o => !o.IsClosed
-                    && o.AffinityId == affinityId
-                    && EF.Functions.Like(o.Name, $"%{account.CompanyName}%"))
-                .Select(o => o.Id)
-                .FirstOrDefaultAsync();
-            if (opp != default)
-                Nav.NavigateTo($"/opportunity/{opp}");
-            else
-                Nav.NavigateTo($"/pipeline?company={Uri.EscapeDataString(account.CompanyName)}");
-        }
-        else
-        {
-            Nav.NavigateTo($"/pipeline?company={Uri.EscapeDataString(account.CompanyName)}");
-        }
+        _selectedOpp   = row.Opp;
+        _drawerOpen    = true;
+        _drawerLoading = true;
+        StateHasChanged();
+        _detailOpp     = await OppService.GetByIdAsync(row.Opp.Id);
+        _drawerLoading = false;
+        StateHasChanged();
     }
+
+    private void CloseDrawer()
+    {
+        _drawerOpen    = false;
+        _selectedOpp   = null;
+        _detailOpp     = null;
+        _drawerLoading = false;
+    }
+
+    private static string GetStageDisplayName(LifecycleStage stage) => stage switch
+    {
+        LifecycleStage.Intake           => "Intake",
+        LifecycleStage.UnderwritingPrep => "App Review",
+        LifecycleStage.Marketed         => "Submitted",
+        LifecycleStage.QuotesReceived   => "Quotes In",
+        LifecycleStage.ClientDecision   => "Proposal",
+        LifecycleStage.Binding          => "Binding",
+        LifecycleStage.Bound            => "Bound",
+        _                               => stage.ToString(),
+    };
+
+    // ── Render fragments ──────────────────────────────────────────────────────
+    private RenderFragment AccountStatusBadge(string status) => builder =>
+    {
+        var (bg, color, label) = status switch
+        {
+            "Active"   => ("rgba(34,197,94,0.12)",  "#16a34a", "Active"),
+            "Prospect" => ("transparent",            "var(--navy)", "Prospect"),
+            _          => ("rgba(239,68,68,0.1)",    "#dc2626", "Inactive")
+        };
+        var style = status == "Prospect"
+            ? $"background:transparent; color:{color}; border:1.5px solid var(--navy); font-size:11px; font-weight:600;"
+            : $"background:{bg}; color:{color}; font-size:11px; font-weight:600;";
+        builder.OpenComponent<MudChip<string>>(0);
+        builder.AddAttribute(1, "Size", Size.Small);
+        builder.AddAttribute(2, "Style", style);
+        builder.AddAttribute(3, "ChildContent", (RenderFragment)(b => b.AddContent(0, label)));
+        builder.CloseComponent();
+    };
+
+    private RenderFragment OppStatusBadge(string status) => builder =>
+    {
+        var (bg, color) = status switch
+        {
+            "In Pipeline" => ("rgba(14,53,107,0.10)", "var(--navy)"),
+            "Bound"       => ("rgba(34,197,94,0.12)", "#16a34a"),
+            _             => ("rgba(107,117,133,0.12)", "#6b7585")
+        };
+        builder.OpenComponent<MudChip<string>>(0);
+        builder.AddAttribute(1, "Size", Size.Small);
+        builder.AddAttribute(2, "Style", $"background:{bg}; color:{color}; font-size:11px; font-weight:600;");
+        builder.AddAttribute(3, "ChildContent", (RenderFragment)(b => b.AddContent(0, status)));
+        builder.CloseComponent();
+    };
+
+    private RenderFragment ExpDateCell(DateOnly? expDate) => builder =>
+    {
+        if (!expDate.HasValue)
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "famos-meta-text");
+            builder.AddContent(2, "—");
+            builder.CloseElement();
+            return;
+        }
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var days  = expDate.Value.DayNumber - today.DayNumber;
+        var (color, weight) = days <= 30
+            ? ("#dc2626", "700")
+            : days <= 90
+                ? ("#d97706", "600")
+                : ("inherit", "400");
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "style", $"color:{color}; font-weight:{weight}; font-size:13px;");
+        builder.AddContent(2, expDate.Value.ToString("MMM d, yyyy"));
+        builder.CloseElement();
+    };
 }
