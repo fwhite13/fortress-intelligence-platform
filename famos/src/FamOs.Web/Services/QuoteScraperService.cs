@@ -102,7 +102,9 @@ public class QuoteScraperService : IQuoteScraperService
         var status = JsonSerializer.Deserialize<StatusResponseDto>(raw, Opts);
 
         var reqStatus = status?.Request?.Status ?? "Unknown";
-        if (reqStatus is "Pending" or "Processing" or "Assembling")
+        // Treat all non-terminal statuses as in-progress
+        if (reqStatus is "Pending" or "Processing" or "Assembling" or "Queued"
+                        or "Submitted" or "Received" or "InProgress" or "In Progress")
             return null;  // still working
 
         return new QuoteScraperResult

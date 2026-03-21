@@ -64,10 +64,19 @@
 
             @if (_uploading)
             {
-                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-3" />
-                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
-                    @_statusMessage
-                </MudText>
+                <MudDivider Class="my-3" />
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Small" />
+                    <div>
+                        <div class="famos-text-navy famos-fw-600" style="font-size:13px;">
+                            Scraping quote data...
+                        </div>
+                        <div class="famos-meta-text" style="font-size:12px;">@_statusMessage</div>
+                    </div>
+                </div>
+                <MudAlert Severity="Severity.Info" Class="mt-3" Dense="true">
+                    Large carrier quotes may take 10–30 minutes. You can navigate away — the PDF has been submitted.
+                </MudAlert>
             }
 
             @if (_autoRecordedPremium.HasValue)
@@ -196,21 +205,35 @@
             var requestId = await Scraper.SubmitQuotePdfAsync(
                 refId, _selectedFile.Name, bytes);
 
-            // Poll until complete (max 60 seconds, 5s interval)
+            // Adaptive poll: 5s intervals for first 2 min, then 30s intervals up to 30 min total
             _statusMessage = "Scraping quote data...";
             QuoteScraperResult? result = null;
-            for (var i = 0; i < 12; i++)
+            var pollStart = DateTime.UtcNow;
+            var elapsed = TimeSpan.Zero;
+            var shortPhaseSecs = 120;   // 5s intervals for 2 min
+            var maxPollSecs = 1800;     // 30 min total timeout
+
+            while (elapsed.TotalSeconds < maxPollSecs)
             {
-                await Task.Delay(5000);
+                var intervalMs = elapsed.TotalSeconds < shortPhaseSecs ? 5000 : 30000;
+                await Task.Delay(intervalMs);
+                elapsed = DateTime.UtcNow - pollStart;
+
                 result = await Scraper.PollResultAsync(requestId);
                 if (result != null) break;
-                _statusMessage = $"Processing... ({(i + 1) * 5}s)";
+
+                var elapsedMin = (int)elapsed.TotalMinutes;
+                var elapsedSec = (int)elapsed.TotalSeconds % 60;
+                _statusMessage = elapsedMin > 0
+                    ? $"Processing... ({elapsedMin}m {elapsedSec}s)"
+                    : $"Processing... ({(int)elapsed.TotalSeconds}s)";
                 StateHasChanged();
             }
 
             if (result == null)
             {
-                _scrapeError = "Scraper timed out after 60 seconds. Try again shortly.";
+                _scrapeError = "Scraper is taking longer than expected. The PDF has been submitted — check back later or enter the premium manually.";
+                _showManualEntry = true;
                 return;
             }
 
