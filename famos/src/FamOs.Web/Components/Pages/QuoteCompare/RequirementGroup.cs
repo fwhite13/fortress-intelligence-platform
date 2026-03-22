@@ -1,6 +1,6 @@
 using FamOs.Web.Data.Entities;
 
-namespace FamOs.Web.Components.Pages.QuoteComparison;
+namespace FamOs.Web.Components.Pages.QuoteCompare;
 
 public class RequirementGroup
 {

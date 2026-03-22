@@ -1,6 +1,6 @@
 using FamOs.Web.Data.Dtos;
 
-namespace FamOs.Web.Components.Pages.QuoteComparison;
+namespace FamOs.Web.Components.Pages.QuoteCompare;
 
 /// <summary>
 /// Client-side UI state for the Quote Comparison page.
