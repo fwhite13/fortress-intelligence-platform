@@ -128,7 +128,7 @@
                                 <td style="padding:8px 12px; text-align:center; font-size:11px; color:@diffColor;">
                                     @if (diff != 0)
                                     {
-                                        @(diff > 0 ? "+" : "")@diff.ToString("F1")%
+                                        @((diff > 0 ? "+" : "") + diff.ToString("F1") + "%")
                                     }
                                 </td>
                             }
@@ -160,13 +160,13 @@
                                     <MudButton Variant="@(isSelectedA ? Variant.Filled : Variant.Outlined)"
                                                Color="Color.Primary"
                                                Size="Size.Small"
-                                               OnClick="async () => await HandleSelectQuote(quote.Id, \"A\")">
+                                               OnClick="@(async () => await HandleSelectQuoteA(quote.Id))">
                                         @(isSelectedA ? "✓ Pkg A" : "+ Pkg A")
                                     </MudButton>
                                     <MudButton Variant="@(isSelectedB ? Variant.Filled : Variant.Outlined)"
                                                Color="Color.Secondary"
                                                Size="Size.Small"
-                                               OnClick="async () => await HandleSelectQuote(quote.Id, \"B\")">
+                                               OnClick="@(async () => await HandleSelectQuoteB(quote.Id))">
                                         @(isSelectedB ? "✓ Pkg B" : "+ Pkg B")
                                     </MudButton>
                                 </div>
@@ -309,6 +309,9 @@
     {
         await OnQuoteSelected.InvokeAsync(new QuoteSelectionArgs(Lob.Slug, quoteId, package));
     }
+
+    private async Task HandleSelectQuoteA(Guid quoteId) => await HandleSelectQuote(quoteId, "A");
+    private async Task HandleSelectQuoteB(Guid quoteId) => await HandleSelectQuote(quoteId, "B");
 
     private void ToggleAiNotes() => _showAiNotes = !_showAiNotes;
     private void ToggleCarrierNotes() => _showCarrierNotes = !_showCarrierNotes;

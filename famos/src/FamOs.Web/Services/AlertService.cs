@@ -4,7 +4,7 @@ namespace FamOs.Web.Services;
 
 public class AlertService : IAlertService
 {
-    private const double PremiumDifferentialThreshold = 0.20;
+    private const decimal PremiumDifferentialThreshold = 0.20m;
 
     public List<AlertDto> EvaluateAlerts(
         ComparisonContextDto context,
