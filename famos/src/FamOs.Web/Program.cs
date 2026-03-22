@@ -614,10 +614,9 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// QA bypass — dev only (FAMOS_QA_BYPASS=true env var required)
+// QA bypass — FAMOS_QA_BYPASS=true env var required (works in any environment)
 // MUST be after UseAuthorization() so the bypass identity is not clobbered by the cookie auth check
-if (app.Environment.IsDevelopment() &&
-    Environment.GetEnvironmentVariable("FAMOS_QA_BYPASS") == "true")
+if (Environment.GetEnvironmentVariable("FAMOS_QA_BYPASS") == "true")
 {
     app.Use(async (context, next) =>
     {
@@ -660,8 +659,7 @@ app.MapGet("/qa/status", () => Results.Ok(new {
 // QA login — issues a real auth cookie for Blazor Server bypass
 app.MapGet("/qa/login", async (HttpContext ctx) =>
 {
-    if (!((app.Environment.IsDevelopment() &&
-           Environment.GetEnvironmentVariable("FAMOS_QA_BYPASS") == "true") &&
+    if (!(Environment.GetEnvironmentVariable("FAMOS_QA_BYPASS") == "true" &&
           ctx.Request.Query["token"] == "natasha-qa-token-famos-dev"))
     {
         return Results.Unauthorized();
