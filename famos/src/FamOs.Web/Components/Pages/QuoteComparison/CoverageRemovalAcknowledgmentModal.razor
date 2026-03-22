@@ -1,0 +1,113 @@
+@using FamOs.Web.Data.Dtos
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent>
+        <div style="display:flex; align-items:center; gap:8px;">
+            <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" />
+            <span>Coverage Changes Detected</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div style="margin-bottom:16px;">
+            <p style="color:var(--muted); font-size:13px;">
+                The following coverages have been removed or reduced compared to the incumbent policy. 
+                Please acknowledge each change to proceed with the proposal.
+            </p>
+        </div>
+
+        <div style="max-height:400px; overflow-y:auto;">
+            @foreach (var removal in Removals)
+            {
+                var isAcknowledged = _acknowledged.Contains(removal);
+                
+                <div style="display:flex; align-items:flex-start; gap:12px; padding:12px; margin-bottom:8px; border:1px solid @(isAcknowledged ? "#22c55e" : "var(--border)"); border-radius:8px; background:@(isAcknowledged ? "rgba(34,197,94,0.05)" : "#fff");">
+                    <MudCheckBox T="bool" 
+                                 Value="@isAcknowledged"
+                                 ValueChanged="@(v => ToggleAcknowledgment(removal))"
+                                 Color="Color.Success" />
+                    <div style="flex:1;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                            <span style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px; background:@GetChangeBadgeColor(removal.ChangeType); color:#fff;">
+                                @removal.ChangeType.ToUpper()
+                            </span>
+                            <span style="font-weight:600; color:#002050;">@removal.FieldLabel</span>
+                        </div>
+                        <div style="font-size:12px; color:var(--muted);">
+                            <span style="text-decoration:line-through;">@removal.IncumbentValue</span>
+                            @if (!string.IsNullOrEmpty(removal.ProposedValue))
+                            {
+                                <span> → @removal.ProposedValue</span>
+                            }
+                            else
+                            {
+                                <span> → Not covered</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (!_allAcknowledged)
+        {
+            <div style="margin-top:16px; padding:12px; background:rgba(245,158,11,0.1); border-radius:8px; font-size:12px; color:#b45309;">
+                <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small" Style="vertical-align:middle; margin-right:4px;" />
+                Please acknowledge all @Removals.Count coverage change(s) to continue.
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="HandleCancel" Color="Color.Default">Cancel</MudButton>
+        <MudButton OnClick="HandleProceed" 
+                   Color="Color.Primary" 
+                   Variant="Variant.Filled"
+                   Disabled="@(!_allAcknowledged)">
+            Proceed with Proposal
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public List<CoverageChangeDto> Removals { get; set; } = new();
+
+    private HashSet<CoverageChangeDto> _acknowledged = new();
+    private bool _allAcknowledged => _acknowledged.Count == Removals.Count;
+
+    private void ToggleAcknowledgment(CoverageChangeDto removal)
+    {
+        if (_acknowledged.Contains(removal))
+            _acknowledged.Remove(removal);
+        else
+            _acknowledged.Add(removal);
+    }
+
+    private void HandleCancel()
+    {
+        MudDialog.Cancel();
+    }
+
+    private void HandleProceed()
+    {
+        if (_allAcknowledged)
+        {
+            var acknowledgments = Removals.Select(r => new AcknowledgmentDto
+            {
+                LineOfBusinessId = r.LineOfBusinessId,
+                FieldKey = r.FieldKey,
+                ChangeType = r.ChangeType,
+                AcknowledgedAt = DateTime.UtcNow
+            }).ToList();
+
+            MudDialog.Close(DialogResult.Ok(acknowledgments));
+        }
+    }
+
+    private string GetChangeBadgeColor(string changeType) => changeType switch
+    {
+        "removed" => "#ef4444",
+        "reduced" => "#f59e0b",
+        _ => "#6b7280"
+    };
+}

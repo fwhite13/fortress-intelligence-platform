@@ -1,38 +1,466 @@
-@page "/quote-comparison"
+@page "/quote-comparison/{AccountId:guid}"
 @attribute [Authorize]
+@using FamOs.Web.Components.Pages.QuoteComparison
+@using FamOs.Web.Data.Dtos
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Services
+@using FamOs.Web.Theme
+@using MudBlazor
+@inject IQuoteComparisonService QuoteComparisonService
+@inject IPackageService PackageService
+@inject IAlertService AlertService
+@inject ICoverageGapService CoverageGapService
+@inject ICarrierNoteService CarrierNoteService
+@inject IIncumbentPolicyService IncumbentPolicyService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <PageTitle>Quote Comparison — FAM OS</PageTitle>
 
-<div class="famos-page-header">
-    <h2 class="famos-page-h2">Quote Comparison</h2>
-    <p class="famos-page-sub">Side-by-side carrier quote analysis</p>
-</div>
-
-<div class="famos-empty-state" style="margin-top:48px;">
-    <MudIcon Icon="@Icons.Material.Outlined.CompareArrows" Style="font-size:48px; color:var(--muted);" />
-    <div style="font-size:16px; font-weight:600; color:#002050;">Full workflow coming soon</div>
-    <p style="max-width:400px; font-size:13px; color:var(--muted); text-align:center;">
-        Quote Comparison will enable side-by-side carrier quote analysis, best-value selection,
-        and one-click proposal generation. Jay Jernigan is spec'ing the full workflow.
-    </p>
-    <div style="border:1px solid var(--border); border-radius:12px; overflow:hidden;
-                width:100%; max-width:560px; margin-top:16px; opacity:0.5;">
-        <div style="display:grid; grid-template-columns:140px 1fr 1fr 1fr;
-                    background:#f8f9fa; padding:10px 12px; font-size:11px; font-weight:700; color:var(--muted);">
-            <span>Coverage</span><span style="text-align:center;">Carrier A</span>
-            <span style="text-align:center;">Carrier B</span><span style="text-align:center;">Carrier C</span>
-        </div>
-        @foreach (var row in new[]{"GL Premium","WC Premium","Umbrella","Total"})
-        {
-            <div style="display:grid; grid-template-columns:140px 1fr 1fr 1fr;
-                        padding:8px 12px; font-size:12px; border-top:1px solid var(--border);">
-                <span style="color:var(--muted);">@row</span>
-                <span style="text-align:center; color:#002050;">—</span>
-                <span style="text-align:center; color:#002050;">—</span>
-                <span style="text-align:center; color:#002050;">—</span>
-            </div>
-        }
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else if (_context == null)
+{
+    <div class="famos-empty-state" style="margin-top:48px;">
+        <MudIcon Icon="@Icons.Material.Outlined.Error" Style="font-size:48px; color:var(--muted);" />
+        <div style="font-size:16px; font-weight:600; color:#002050;">Account Not Found</div>
+        <p style="font-size:13px; color:var(--muted);">Could not load comparison data for this account.</p>
     </div>
-</div>
+}
+else if (_state.ShowCompareView)
+{
+    <PackageCompareView
+        State="_state"
+        Context="_context"
+        GapResult="_gapResult"
+        OnBackToBuilder="HandleBackToBuilder" />
+}
+else
+{
+    @* Alert Zone *@
+    @if (_state.ActiveAlerts.Any())
+    {
+        <div class="qc-alert-zone" style="margin-bottom:16px;">
+            @foreach (var alert in _state.ActiveAlerts)
+            {
+                <MudAlert Severity="@GetAlertSeverity(alert.Type)" 
+                          Variant="Variant.Outlined"
+                          Dense="true"
+                          Class="mb-2">
+                    @if (!string.IsNullOrEmpty(alert.Package))
+                    {
+                        <strong>Pkg @alert.Package</strong>
+                        <span> · </span>
+                    }
+                    @alert.Message
+                </MudAlert>
+            }
+        </div>
+    }
 
-@code { }
+    @* Main 3-Column Layout *@
+    <div class="qc-layout" style="display:grid; grid-template-columns:260px 1fr 244px; gap:16px; min-height:calc(100vh - 160px);">
+        @* Left Column — Requirements Panel *@
+        <div class="qc-sidebar-left">
+            <RequirementsPanel
+                Groups="_requirementGroups"
+                State="_state"
+                GapResult="_gapResult"
+                OnRequirementToggled="HandleRequirementToggled"
+                OnRequirementsCleared="HandleRequirementsCleared" />
+        </div>
+
+        @* Center Column — Coverage Blocks *@
+        <div class="qc-main-content">
+            <div class="famos-page-header famos-page-header-row mb-4">
+                <div>
+                    <h2 class="famos-page-h2">@_context.Account.CompanyName</h2>
+                    <p class="famos-page-sub">Quote Comparison</p>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <MudSwitch T="bool"
+                               Value="_state.ShowIncumbent"
+                               ValueChanged="HandleToggleIncumbent"
+                               Color="Color.Warning"
+                               Label="Show Incumbent"
+                               Disabled="@(!_context.Account.IsRenewal)" />
+                </div>
+            </div>
+
+            @foreach (var lob in _context.Lines.OrderBy(l => l.DisplayOrder))
+            {
+                var quotesForLob = _context.Quotes.Where(q => q.LineOfBusinessId == lob.Id).ToList();
+                var incumbent = _context.Incumbents.GetValueOrDefault(lob.Id);
+                var benchmark = _context.Benchmarks.GetValueOrDefault(lob.Id);
+
+                <CoverageBlock
+                    Lob="lob"
+                    Quotes="quotesForLob"
+                    Incumbent="incumbent"
+                    State="_state"
+                    GapResult="_gapResult"
+                    Benchmark="benchmark"
+                    CarrierNotes="_carrierNotes"
+                    OnQuoteSelected="HandleQuoteSelected"
+                    OnBlockCollapsed="HandleBlockCollapsed"
+                    OnCarrierNoteUpdated="HandleCarrierNoteUpdated"
+                    OnEditIncumbent="HandleEditIncumbent" />
+            }
+        </div>
+
+        @* Right Column — Package Summary Panel *@
+        <div class="qc-sidebar-right">
+            <PackageSummaryPanel
+                State="_state"
+                Lobs="_context.Lines"
+                QuoteLookup="_quoteLookup"
+                IncumbentTotal="_incumbentTotal"
+                OnActivePackageChanged="HandleActivePackageChanged"
+                OnBuildProposalClicked="HandleBuildProposal"
+                OnComparePkgsClicked="HandleComparePkgs"
+                OnSaveDraftClicked="HandleSaveDraft"
+                OnClearPackageClicked="HandleClearPackage" />
+
+            <FaitSidebarWidget
+                State="_state"
+                Context="_context" />
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid AccountId { get; set; }
+
+    private bool _loading = true;
+    private ComparisonContextDto? _context;
+    private ComparisonPageState _state = new();
+    private GapEvaluationResult _gapResult = new();
+    private Dictionary<Guid, string> _carrierNotes = new();
+    private Dictionary<Guid, CoverageDetailsDto> _quoteLookup = new();
+    private List<RequirementGroup> _requirementGroups = new();
+    private decimal _incumbentTotal;
+
+    // Hardcoded for now — will integrate with auth
+    private Guid _userId = Guid.NewGuid();
+    private int _tenantId = 1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _context = await QuoteComparisonService.GetComparisonContextAsync(AccountId, _userId, _tenantId);
+            
+            if (_context != null)
+            {
+                _carrierNotes = await CarrierNoteService.GetNotesForAccountAsync(AccountId, _tenantId);
+                
+                BuildQuoteLookup();
+                BuildRequirementGroups();
+                CalculateIncumbentTotal();
+
+                // Restore draft if exists
+                if (_context.SavedDraft != null)
+                {
+                    RestoreFromDraft(_context.SavedDraft);
+                }
+
+                await ReevaluateGapsAndAlerts();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading comparison: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void BuildQuoteLookup()
+    {
+        _quoteLookup.Clear();
+        foreach (var quote in _context!.Quotes)
+        {
+            if (quote.CoverageDetails != null && Guid.TryParse(quote.CoverageDetails.Id, out var detailsId))
+            {
+                _quoteLookup[detailsId] = quote.CoverageDetails;
+            }
+            _quoteLookup[quote.Id] = quote.CoverageDetails ?? new CoverageDetailsDto();
+        }
+    }
+
+    private void BuildRequirementGroups()
+    {
+        _requirementGroups = _context!.Requirements
+            .GroupBy(r => r.GroupName)
+            .Select(g => new RequirementGroup
+            {
+                Name = g.Key,
+                Requirements = g.OrderBy(r => r.DisplayOrder).ToList()
+            })
+            .OrderBy(g => g.Name)
+            .ToList();
+    }
+
+    private void CalculateIncumbentTotal()
+    {
+        _incumbentTotal = _context!.Incumbents.Values.Sum(i => i.AnnualPremium);
+    }
+
+    private void RestoreFromDraft(DraftStateDto draft)
+    {
+        _state.CheckedRequirements = draft.CheckedRequirements;
+        _state.PackageASelections = draft.PackageASelections;
+        _state.PackageBSelections = draft.PackageBSelections;
+        _state.ShowIncumbent = draft.ShowIncumbent;
+        _state.CollapsedBlocks = draft.CollapsedBlocks;
+    }
+
+    private async Task ReevaluateGapsAndAlerts()
+    {
+        if (_context == null) return;
+
+        _gapResult = CoverageGapService.EvaluateGaps(
+            _state.CheckedRequirements,
+            _context.Quotes,
+            _state.PackageASelections,
+            _state.PackageBSelections,
+            _context.Requirements,
+            _context.Lines);
+
+        var alertState = new Services.ComparisonState
+        {
+            PackageASelections = _state.PackageASelections,
+            PackageBSelections = _state.PackageBSelections
+        };
+
+        _state.ActiveAlerts = AlertService.EvaluateAlerts(_context, alertState, _gapResult);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Event Handlers — All state mutations go through these
+    // ─────────────────────────────────────────────────────────────
+
+    private async Task HandleRequirementToggled(string slug)
+    {
+        if (_state.CheckedRequirements.Contains(slug))
+            _state.CheckedRequirements.Remove(slug);
+        else
+            _state.CheckedRequirements.Add(slug);
+
+        await ReevaluateGapsAndAlerts();
+        StateHasChanged();
+    }
+
+    private async Task HandleRequirementsCleared()
+    {
+        _state.CheckedRequirements.Clear();
+        await ReevaluateGapsAndAlerts();
+        StateHasChanged();
+    }
+
+    private async Task HandleQuoteSelected(QuoteSelectionArgs args)
+    {
+        var selections = args.Package == "A" ? _state.PackageASelections : _state.PackageBSelections;
+        var autoBundled = args.Package == "A" ? _state.AutoBundledA : _state.AutoBundledB;
+
+        // Set the selection
+        selections[args.LineSlug] = args.QuoteId;
+
+        // Check for bundle rules and auto-select bundled lines
+        var quote = _context!.Quotes.FirstOrDefault(q => q.Id == args.QuoteId);
+        if (quote?.CoverageDetails?.BundleLines?.Any() == true)
+        {
+            foreach (var bundledLineSlug in quote.CoverageDetails.BundleLines)
+            {
+                // Find matching quote from same carrier on bundled line
+                var bundledLine = _context.Lines.FirstOrDefault(l => l.Slug == bundledLineSlug);
+                if (bundledLine != null)
+                {
+                    var bundledQuote = _context.Quotes
+                        .FirstOrDefault(q => q.LineOfBusinessId == bundledLine.Id 
+                                           && q.CarrierName == quote.CarrierName);
+                    if (bundledQuote != null && !selections.ContainsKey(bundledLineSlug))
+                    {
+                        selections[bundledLineSlug] = bundledQuote.Id;
+                        autoBundled.Add(bundledLineSlug);
+                    }
+                }
+            }
+        }
+
+        await ReevaluateGapsAndAlerts();
+        StateHasChanged();
+    }
+
+    private void HandleBlockCollapsed(string lineSlug)
+    {
+        if (_state.CollapsedBlocks.Contains(lineSlug))
+            _state.CollapsedBlocks.Remove(lineSlug);
+        else
+            _state.CollapsedBlocks.Add(lineSlug);
+        StateHasChanged();
+    }
+
+    private void HandleToggleIncumbent(bool value)
+    {
+        _state.ShowIncumbent = value;
+        StateHasChanged();
+    }
+
+    private void HandleActivePackageChanged(string package)
+    {
+        _state.ActivePackage = package;
+        StateHasChanged();
+    }
+
+    private async Task HandleSaveDraft()
+    {
+        var draft = new DraftStateDto
+        {
+            CheckedRequirements = _state.CheckedRequirements,
+            PackageASelections = _state.PackageASelections,
+            PackageBSelections = _state.PackageBSelections,
+            ShowIncumbent = _state.ShowIncumbent,
+            CollapsedBlocks = _state.CollapsedBlocks
+        };
+
+        await QuoteComparisonService.SaveDraftAsync(AccountId, _userId, _tenantId, draft);
+        Snackbar.Add("Draft saved", Severity.Success);
+    }
+
+    private void HandleComparePkgs()
+    {
+        _state.ShowCompareView = true;
+        StateHasChanged();
+    }
+
+    private void HandleBackToBuilder()
+    {
+        _state.ShowCompareView = false;
+        StateHasChanged();
+    }
+
+    private async Task HandleBuildProposal()
+    {
+        // Check for coverage removals vs incumbent
+        if (_context!.Account.IsRenewal && _state.ShowIncumbent)
+        {
+            var allRemovals = new List<CoverageChangeDto>();
+            
+            var selections = _state.ActivePackage == "A" 
+                ? _state.PackageASelections 
+                : _state.PackageBSelections;
+
+            foreach (var (lineSlug, quoteId) in selections)
+            {
+                var lob = _context.Lines.FirstOrDefault(l => l.Slug == lineSlug);
+                if (lob == null) continue;
+
+                var incumbent = _context.Incumbents.GetValueOrDefault(lob.Id);
+                if (incumbent == null) continue;
+
+                var quote = _context.Quotes.FirstOrDefault(q => q.Id == quoteId);
+                if (quote == null) continue;
+
+                var removals = CoverageGapService.DetectCoverageRemovals(incumbent, quote, lob);
+                allRemovals.AddRange(removals);
+            }
+
+            if (allRemovals.Any())
+            {
+                var parameters = new DialogParameters<CoverageRemovalAcknowledgmentModal>
+                {
+                    { x => x.Removals, allRemovals }
+                };
+
+                var dialog = await DialogService.ShowAsync<CoverageRemovalAcknowledgmentModal>(
+                    "Coverage Changes Detected",
+                    parameters,
+                    new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+
+                var result = await dialog.Result;
+                if (result?.Canceled == true)
+                {
+                    return;
+                }
+            }
+        }
+
+        // Build the proposal
+        try
+        {
+            var proposalId = await QuoteComparisonService.BuildProposalAsync(
+                AccountId, _userId, Guid.NewGuid(), _tenantId);
+            Snackbar.Add("Proposal created successfully", Severity.Success);
+            // TODO: Navigate to proposal view
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error building proposal: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void HandleClearPackage(string package)
+    {
+        if (package == "A")
+        {
+            _state.PackageASelections.Clear();
+            _state.AutoBundledA.Clear();
+        }
+        else
+        {
+            _state.PackageBSelections.Clear();
+            _state.AutoBundledB.Clear();
+        }
+        StateHasChanged();
+    }
+
+    private async Task HandleCarrierNoteUpdated(CarrierNoteArgs args)
+    {
+        await CarrierNoteService.SaveNoteAsync(AccountId, args.QuoteId, _userId, _tenantId, args.NoteText);
+        _carrierNotes[args.QuoteId] = args.NoteText;
+        Snackbar.Add("Note saved", Severity.Success);
+        StateHasChanged();
+    }
+
+    private async Task HandleEditIncumbent(Guid lineOfBusinessId)
+    {
+        var lob = _context!.Lines.FirstOrDefault(l => l.Id == lineOfBusinessId);
+        if (lob == null) return;
+
+        var existing = _context.Incumbents.GetValueOrDefault(lineOfBusinessId);
+
+        var parameters = new DialogParameters<IncumbentManualEntryPanel>
+        {
+            { x => x.Lob, lob },
+            { x => x.Existing, existing }
+        };
+
+        var dialog = await DialogService.ShowAsync<IncumbentManualEntryPanel>(
+            $"Edit Incumbent — {lob.Name}",
+            parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+
+        var result = await dialog.Result;
+        if (result?.Data is IncumbentUpsertDto dto)
+        {
+            var saved = await IncumbentPolicyService.UpsertIncumbentAsync(dto);
+            _context.Incumbents[lineOfBusinessId] = saved;
+            CalculateIncumbentTotal();
+            await ReevaluateGapsAndAlerts();
+            StateHasChanged();
+            Snackbar.Add("Incumbent policy updated", Severity.Success);
+        }
+    }
+
+    private Severity GetAlertSeverity(string type) => type switch
+    {
+        "danger" => Severity.Error,
+        "warning" => Severity.Warning,
+        _ => Severity.Info
+    };
+}

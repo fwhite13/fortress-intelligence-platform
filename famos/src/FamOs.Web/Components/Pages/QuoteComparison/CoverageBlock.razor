@@ -1,0 +1,335 @@
+@using FamOs.Web.Data.Dtos
+@using FamOs.Web.Data.Entities
+@using System.Text.Json
+
+<div class="qc-coverage-block" style="background:#fff; border:1px solid var(--border); border-radius:12px; margin-bottom:16px; overflow:hidden;">
+    @* Block Header *@
+    <div class="qc-block-header" 
+         style="display:flex; align-items:center; gap:12px; padding:12px 16px; background:#f8f9fa; cursor:pointer; @(_isCollapsed ? "" : "border-bottom:1px solid var(--border);")"
+         @onclick="HandleToggleCollapse">
+        <span style="font-size:20px;">@Lob.Icon</span>
+        <span style="font-size:14px; font-weight:600; color:#002050; flex:1;">@Lob.Name</span>
+        
+        @* Gap Count Pills *@
+        @{
+            var gapsA = GapResult.PackageAGapsByLine.GetValueOrDefault(Lob.Slug, 0);
+            var gapsB = GapResult.PackageBGapsByLine.GetValueOrDefault(Lob.Slug, 0);
+        }
+        @if (gapsA > 0)
+        {
+            <span style="background:#f59e0b; color:#fff; font-size:10px; font-weight:600; padding:2px 6px; border-radius:10px;">
+                A: @gapsA gap@(gapsA > 1 ? "s" : "")
+            </span>
+        }
+        @if (gapsB > 0)
+        {
+            <span style="background:#f59e0b; color:#fff; font-size:10px; font-weight:600; padding:2px 6px; border-radius:10px;">
+                B: @gapsB gap@(gapsB > 1 ? "s" : "")
+            </span>
+        }
+        
+        <MudIconButton Icon="@(_isCollapsed ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ExpandLess)"
+                       Size="Size.Small"
+                       OnClick="HandleToggleCollapse" />
+    </div>
+
+    @if (!_isCollapsed)
+    {
+        <div class="qc-block-content" style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                <thead>
+                    <tr style="background:#f8f9fa;">
+                        <th style="padding:8px 12px; text-align:left; font-weight:600; color:var(--muted); min-width:140px;">Coverage</th>
+                        @if (State.ShowIncumbent && Incumbent != null)
+                        {
+                            <th style="padding:8px 12px; text-align:center; font-weight:600; min-width:140px; background:rgba(245,158,11,0.1); color:#b45309;">
+                                @Incumbent.CarrierName
+                                <div style="font-size:10px; font-weight:400;">(Incumbent)</div>
+                            </th>
+                        }
+                        @foreach (var quote in Quotes)
+                        {
+                            var isSelectedA = State.PackageASelections.GetValueOrDefault(Lob.Slug) == quote.Id;
+                            var isSelectedB = State.PackageBSelections.GetValueOrDefault(Lob.Slug) == quote.Id;
+                            var isAutoBundledA = State.AutoBundledA.Contains(Lob.Slug) && isSelectedA;
+                            var isAutoBundledB = State.AutoBundledB.Contains(Lob.Slug) && isSelectedB;
+                            
+                            <th style="padding:8px 12px; text-align:center; font-weight:600; min-width:140px; @GetColumnHighlight(isSelectedA, isSelectedB)">
+                                @quote.CarrierName
+                                @if (isSelectedA || isSelectedB)
+                                {
+                                    <div style="font-size:10px; font-weight:400; color:#0066cc;">
+                                        @if (isSelectedA && isSelectedB) { <span>Pkg A+B</span> }
+                                        else if (isSelectedA) { <span>Pkg A @(isAutoBundledA ? "(bundled)" : "")</span> }
+                                        else { <span>Pkg B @(isAutoBundledB ? "(bundled)" : "")</span> }
+                                    </div>
+                                }
+                            </th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @* Field Rows *@
+                    @foreach (var field in _fieldDefinitions)
+                    {
+                        <tr>
+                            <td style="padding:8px 12px; color:var(--muted); border-top:1px solid var(--border);">@field.Label</td>
+                            @if (State.ShowIncumbent && Incumbent != null)
+                            {
+                                <td style="padding:8px 12px; text-align:center; border-top:1px solid var(--border); background:rgba(245,158,11,0.05);">
+                                    @(Incumbent.Vals.GetValueOrDefault(field.Key, "—"))
+                                </td>
+                            }
+                            @foreach (var quote in Quotes)
+                            {
+                                var val = quote.CoverageDetails?.Vals.GetValueOrDefault(field.Key, "—") ?? "—";
+                                var isExcluded = val.Equals("EXCLUDED", StringComparison.OrdinalIgnoreCase);
+                                
+                                <td style="padding:8px 12px; text-align:center; border-top:1px solid var(--border);">
+                                    @if (isExcluded)
+                                    {
+                                        <span style="color:#ef4444; font-weight:500;">Excluded</span>
+                                    }
+                                    else
+                                    {
+                                        @val
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+
+                    @* Benchmark Divider Row *@
+                    @if (Benchmark > 0)
+                    {
+                        <tr style="background:#f8f9fa;">
+                            <td style="padding:6px 12px; font-size:11px; color:var(--muted); font-weight:600;" 
+                                colspan="@(1 + (State.ShowIncumbent && Incumbent != null ? 1 : 0) + Quotes.Count)">
+                                Market Benchmark: @Benchmark.ToString("C0")
+                            </td>
+                        </tr>
+                    }
+
+                    @* Incumbent Premium Row *@
+                    @if (State.ShowIncumbent && Incumbent != null)
+                    {
+                        <tr style="background:rgba(245,158,11,0.05);">
+                            <td style="padding:8px 12px; color:#b45309; font-weight:500;">Incumbent Premium</td>
+                            <td style="padding:8px 12px; text-align:center; font-weight:600; color:#b45309;">
+                                @Incumbent.AnnualPremium.ToString("C0")
+                            </td>
+                            @foreach (var quote in Quotes)
+                            {
+                                var diff = Incumbent.AnnualPremium > 0 
+                                    ? ((quote.PremiumAmount - Incumbent.AnnualPremium) / Incumbent.AnnualPremium * 100) 
+                                    : 0;
+                                var diffColor = diff > 0 ? "#ef4444" : (diff < 0 ? "#22c55e" : "var(--muted)");
+                                
+                                <td style="padding:8px 12px; text-align:center; font-size:11px; color:@diffColor;">
+                                    @if (diff != 0)
+                                    {
+                                        @(diff > 0 ? "+" : "")@diff.ToString("F1")%
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+
+                    @* Premium & Selection Row *@
+                    <tr style="background:#f0f7ff;">
+                        <td style="padding:10px 12px; font-weight:600; color:#002050;">Annual Premium</td>
+                        @if (State.ShowIncumbent && Incumbent != null)
+                        {
+                            <td style="padding:10px 12px; text-align:center;">
+                                <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Warning"
+                                           OnClick="async () => await OnEditIncumbent.InvokeAsync(Lob.Id)">
+                                    Edit
+                                </MudButton>
+                            </td>
+                        }
+                        @foreach (var quote in Quotes)
+                        {
+                            var isSelectedA = State.PackageASelections.GetValueOrDefault(Lob.Slug) == quote.Id;
+                            var isSelectedB = State.PackageBSelections.GetValueOrDefault(Lob.Slug) == quote.Id;
+                            
+                            <td style="padding:10px 12px; text-align:center;">
+                                <div style="font-size:16px; font-weight:700; color:#002050; margin-bottom:6px;">
+                                    @quote.PremiumAmount.ToString("C0")
+                                </div>
+                                <div style="display:flex; gap:4px; justify-content:center;">
+                                    <MudButton Variant="@(isSelectedA ? Variant.Filled : Variant.Outlined)"
+                                               Color="Color.Primary"
+                                               Size="Size.Small"
+                                               OnClick="async () => await HandleSelectQuote(quote.Id, \"A\")">
+                                        @(isSelectedA ? "✓ Pkg A" : "+ Pkg A")
+                                    </MudButton>
+                                    <MudButton Variant="@(isSelectedB ? Variant.Filled : Variant.Outlined)"
+                                               Color="Color.Secondary"
+                                               Size="Size.Small"
+                                               OnClick="async () => await HandleSelectQuote(quote.Id, \"B\")">
+                                        @(isSelectedB ? "✓ Pkg B" : "+ Pkg B")
+                                    </MudButton>
+                                </div>
+                            </td>
+                        }
+                    </tr>
+
+                    @* AI Scraper Notes Row *@
+                    <tr>
+                        <td colspan="@(1 + (State.ShowIncumbent && Incumbent != null ? 1 : 0) + Quotes.Count)" 
+                            style="padding:0;">
+                            <div style="border-top:1px solid var(--border);">
+                                <div style="padding:8px 12px; cursor:pointer; display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px;"
+                                     @onclick="ToggleAiNotes">
+                                    <MudIcon Icon="@(_showAiNotes ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
+                                    AI Scraper Notes
+                                </div>
+                                @if (_showAiNotes)
+                                {
+                                    <div style="padding:0 12px 12px; display:grid; grid-template-columns:repeat(@(Quotes.Count + (State.ShowIncumbent && Incumbent != null ? 1 : 0)), 1fr); gap:12px;">
+                                        @if (State.ShowIncumbent && Incumbent != null)
+                                        {
+                                            <div style="background:#f8f9fa; padding:8px; border-radius:6px; font-size:11px; color:var(--muted);">
+                                                No AI notes for incumbent
+                                            </div>
+                                        }
+                                        @foreach (var quote in Quotes)
+                                        {
+                                            var notes = quote.CoverageDetails?.AiNotes ?? "";
+                                            <div style="background:#f8f9fa; padding:8px; border-radius:6px; font-size:11px; color:#002050; white-space:pre-wrap;">
+                                                @(string.IsNullOrEmpty(notes) ? "No AI notes available" : notes)
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+
+                    @* Carrier Notes Row *@
+                    <tr>
+                        <td colspan="@(1 + (State.ShowIncumbent && Incumbent != null ? 1 : 0) + Quotes.Count)" 
+                            style="padding:0;">
+                            <div style="border-top:1px solid var(--border);">
+                                <div style="padding:8px 12px; cursor:pointer; display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px;"
+                                     @onclick="ToggleCarrierNotes">
+                                    <MudIcon Icon="@(_showCarrierNotes ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" Size="Size.Small" />
+                                    Carrier Notes
+                                </div>
+                                @if (_showCarrierNotes)
+                                {
+                                    <div style="padding:0 12px 12px; display:grid; grid-template-columns:140px repeat(@(Quotes.Count + (State.ShowIncumbent && Incumbent != null ? 1 : 0)), 1fr); gap:12px;">
+                                        <div></div>
+                                        @if (State.ShowIncumbent && Incumbent != null)
+                                        {
+                                            <div style="text-align:center; color:var(--muted); font-size:11px;">—</div>
+                                        }
+                                        @foreach (var quote in Quotes)
+                                        {
+                                            var existingNote = CarrierNotes.GetValueOrDefault(quote.Id, "");
+                                            <div>
+                                                <MudTextField T="string"
+                                                              Value="@existingNote"
+                                                              ValueChanged="async (v) => await HandleNoteChanged(quote.Id, v)"
+                                                              Placeholder="Add note..."
+                                                              Variant="Variant.Outlined"
+                                                              Lines="2"
+                                                              Style="font-size:11px;" />
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public LineOfBusiness Lob { get; set; } = default!;
+    [Parameter] public List<QuoteWithCoverageDto> Quotes { get; set; } = new();
+    [Parameter] public IncumbentPolicyDto? Incumbent { get; set; }
+    [Parameter] public ComparisonPageState State { get; set; } = new();
+    [Parameter] public GapEvaluationResult GapResult { get; set; } = new();
+    [Parameter] public decimal Benchmark { get; set; }
+    [Parameter] public Dictionary<Guid, string> CarrierNotes { get; set; } = new();
+    [Parameter] public EventCallback<QuoteSelectionArgs> OnQuoteSelected { get; set; }
+    [Parameter] public EventCallback<string> OnBlockCollapsed { get; set; }
+    [Parameter] public EventCallback<CarrierNoteArgs> OnCarrierNoteUpdated { get; set; }
+    [Parameter] public EventCallback<Guid> OnEditIncumbent { get; set; }
+
+    private bool _isCollapsed => State.CollapsedBlocks.Contains(Lob.Slug);
+    private bool _showAiNotes = false;
+    private bool _showCarrierNotes = false;
+    private List<FieldDef> _fieldDefinitions = new();
+
+    protected override void OnParametersSet()
+    {
+        ParseFieldDefinitions();
+    }
+
+    private void ParseFieldDefinitions()
+    {
+        _fieldDefinitions.Clear();
+        if (!string.IsNullOrEmpty(Lob.FieldDefinitions))
+        {
+            try
+            {
+                var fields = JsonSerializer.Deserialize<List<FieldDef>>(Lob.FieldDefinitions);
+                if (fields != null)
+                {
+                    _fieldDefinitions = fields.OrderBy(f => f.Order).ToList();
+                }
+            }
+            catch { /* ignore parse errors */ }
+        }
+
+        // Fallback: extract keys from quotes if no field definitions
+        if (!_fieldDefinitions.Any())
+        {
+            var allKeys = Quotes
+                .Where(q => q.CoverageDetails?.Vals != null)
+                .SelectMany(q => q.CoverageDetails!.Vals.Keys)
+                .Distinct()
+                .ToList();
+            
+            _fieldDefinitions = allKeys.Select((k, i) => new FieldDef { Key = k, Label = k, Order = i }).ToList();
+        }
+    }
+
+    private void HandleToggleCollapse()
+    {
+        OnBlockCollapsed.InvokeAsync(Lob.Slug);
+    }
+
+    private async Task HandleSelectQuote(Guid quoteId, string package)
+    {
+        await OnQuoteSelected.InvokeAsync(new QuoteSelectionArgs(Lob.Slug, quoteId, package));
+    }
+
+    private void ToggleAiNotes() => _showAiNotes = !_showAiNotes;
+    private void ToggleCarrierNotes() => _showCarrierNotes = !_showCarrierNotes;
+
+    private async Task HandleNoteChanged(Guid quoteId, string noteText)
+    {
+        await OnCarrierNoteUpdated.InvokeAsync(new CarrierNoteArgs(quoteId, noteText));
+    }
+
+    private string GetColumnHighlight(bool isA, bool isB)
+    {
+        if (isA && isB) return "background:linear-gradient(135deg, rgba(0,102,204,0.1), rgba(139,92,246,0.1));";
+        if (isA) return "background:rgba(0,102,204,0.1);";
+        if (isB) return "background:rgba(139,92,246,0.1);";
+        return "";
+    }
+
+    private class FieldDef
+    {
+        public string Key { get; set; } = "";
+        public string Label { get; set; } = "";
+        public int Order { get; set; }
+    }
+}

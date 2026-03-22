@@ -1,0 +1,157 @@
+@using FamOs.Web.Data.Dtos
+@using FamOs.Web.Data.Entities
+@using System.Text.Json
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent>
+        <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:20px;">@Lob.Icon</span>
+            <span>@Lob.Name — Incumbent Policy</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div style="display:flex; flex-direction:column; gap:16px;">
+            <MudTextField T="string"
+                          @bind-Value="_carrierName"
+                          Label="Carrier Name"
+                          Variant="Variant.Outlined"
+                          Required="true" />
+
+            <MudTextField T="string"
+                          @bind-Value="_policyNumber"
+                          Label="Policy Number"
+                          Variant="Variant.Outlined" />
+
+            <MudNumericField T="decimal"
+                             @bind-Value="_annualPremium"
+                             Label="Annual Premium"
+                             Variant="Variant.Outlined"
+                             Adornment="Adornment.Start"
+                             AdornmentText="$"
+                             Format="N2"
+                             Required="true" />
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                <MudDatePicker @bind-Date="_effectiveDate"
+                               Label="Effective Date"
+                               Variant="Variant.Outlined" />
+                <MudDatePicker @bind-Date="_expirationDate"
+                               Label="Expiration Date"
+                               Variant="Variant.Outlined" />
+            </div>
+
+            @if (_fieldDefinitions.Any())
+            {
+                <MudDivider Class="my-2" />
+                <div style="font-size:13px; font-weight:600; color:var(--muted); margin-bottom:8px;">Coverage Details</div>
+                
+                @foreach (var field in _fieldDefinitions)
+                {
+                    <MudTextField T="string"
+                                  Value="@GetFieldValue(field.Key)"
+                                  ValueChanged="@(v => SetFieldValue(field.Key, v))"
+                                  Label="@field.Label"
+                                  Variant="Variant.Outlined" />
+                }
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="HandleCancel" Color="Color.Default">Cancel</MudButton>
+        <MudButton OnClick="HandleSave" 
+                   Color="Color.Primary" 
+                   Variant="Variant.Filled"
+                   Disabled="@(!_isValid)">
+            Save Incumbent
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public LineOfBusiness Lob { get; set; } = default!;
+    [Parameter] public IncumbentPolicyDto? Existing { get; set; }
+
+    private string _carrierName = "";
+    private string? _policyNumber;
+    private decimal _annualPremium;
+    private DateTime? _effectiveDate;
+    private DateTime? _expirationDate;
+    private Dictionary<string, string> _vals = new();
+    private List<FieldDef> _fieldDefinitions = new();
+
+    private bool _isValid => !string.IsNullOrWhiteSpace(_carrierName) && _annualPremium > 0;
+
+    protected override void OnParametersSet()
+    {
+        ParseFieldDefinitions();
+
+        if (Existing != null)
+        {
+            _carrierName = Existing.CarrierName;
+            _policyNumber = Existing.PolicyNumber;
+            _annualPremium = Existing.AnnualPremium;
+            _effectiveDate = Existing.EffectiveDate?.ToDateTime(TimeOnly.MinValue);
+            _expirationDate = Existing.ExpirationDate?.ToDateTime(TimeOnly.MinValue);
+            _vals = new Dictionary<string, string>(Existing.Vals);
+        }
+    }
+
+    private void ParseFieldDefinitions()
+    {
+        _fieldDefinitions.Clear();
+        if (!string.IsNullOrEmpty(Lob.FieldDefinitions))
+        {
+            try
+            {
+                var fields = JsonSerializer.Deserialize<List<FieldDef>>(Lob.FieldDefinitions);
+                if (fields != null)
+                {
+                    _fieldDefinitions = fields.OrderBy(f => f.Order).ToList();
+                }
+            }
+            catch { /* ignore parse errors */ }
+        }
+    }
+
+    private string GetFieldValue(string key) => _vals.GetValueOrDefault(key, "");
+
+    private void SetFieldValue(string key, string value)
+    {
+        _vals[key] = value;
+    }
+
+    private void HandleCancel()
+    {
+        MudDialog.Cancel();
+    }
+
+    private void HandleSave()
+    {
+        if (!_isValid) return;
+
+        var dto = new IncumbentUpsertDto
+        {
+            AccountId = Existing?.AccountId ?? Guid.Empty,
+            LineOfBusinessId = Lob.Id,
+            TenantId = 1, // Will be set by caller
+            CarrierName = _carrierName,
+            PolicyNumber = _policyNumber,
+            AnnualPremium = _annualPremium,
+            EffectiveDate = _effectiveDate.HasValue ? DateOnly.FromDateTime(_effectiveDate.Value) : null,
+            ExpirationDate = _expirationDate.HasValue ? DateOnly.FromDateTime(_expirationDate.Value) : null,
+            Vals = _vals,
+            SourceType = "manual"
+        };
+
+        MudDialog.Close(DialogResult.Ok(dto));
+    }
+
+    private class FieldDef
+    {
+        public string Key { get; set; } = "";
+        public string Label { get; set; } = "";
+        public int Order { get; set; }
+    }
+}

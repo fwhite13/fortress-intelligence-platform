@@ -16,4 +16,6 @@ public class Account
     public DateTime? LastSyncedAt  { get; set; }
     public DateTime  CreatedAt     { get; set; } = DateTime.UtcNow;
     public DateTime  UpdatedAt     { get; set; } = DateTime.UtcNow;
+    public bool      IsRenewal     { get; set; } = false;
+    public Guid?     ProgramVerticalId { get; set; }
 }

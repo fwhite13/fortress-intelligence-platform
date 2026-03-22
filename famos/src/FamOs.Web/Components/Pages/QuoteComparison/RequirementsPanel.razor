@@ -1,0 +1,155 @@
+@using FamOs.Web.Data.Dtos
+@using FamOs.Web.Data.Entities
+
+<div class="qc-requirements-panel" style="background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="font-size:14px; font-weight:600; color:#002050; margin:0;">Requirements Checklist</h3>
+        @if (State.CheckedRequirements.Any())
+        {
+            <MudButton Size="Size.Small" 
+                       Variant="Variant.Text" 
+                       Color="Color.Secondary"
+                       OnClick="HandleClearAll">
+                Clear All
+            </MudButton>
+        }
+    </div>
+
+    @* Progress Bar *@
+    <div style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-bottom:4px;">
+            <span>@_checkedCount of @_totalCount checked</span>
+            <span>@_progressPercent%</span>
+        </div>
+        <MudProgressLinear Value="@_progressPercent" 
+                           Color="@(_hasGaps ? Color.Warning : Color.Success)" 
+                           Rounded="true" 
+                           Size="Size.Small" />
+    </div>
+
+    @* Requirement Groups *@
+    @foreach (var group in Groups)
+    {
+        <div class="qc-req-group" style="margin-bottom:16px;">
+            <div style="font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">
+                @group.Name
+            </div>
+            @foreach (var req in group.Requirements)
+            {
+                var status = GapResult.RequirementStatus.GetValueOrDefault(req.Slug, GapStatus.Unchecked);
+                var isChecked = State.CheckedRequirements.Contains(req.Slug);
+                
+                <div class="qc-req-item @GetStatusClass(status, isChecked)" 
+                     style="display:flex; align-items:flex-start; gap:8px; padding:6px 8px; margin-bottom:4px; border-radius:6px; cursor:pointer; @GetStatusBorderStyle(status, isChecked)"
+                     @onclick="async () => await HandleToggle(req.Slug)">
+                    <MudCheckBox T="bool" 
+                                 Value="@isChecked"
+                                 ValueChanged="async (v) => await HandleToggle(req.Slug)"
+                                 Color="@GetCheckboxColor(status)"
+                                 Dense="true"
+                                 DisableRipple="true"
+                                 Style="margin:0; padding:0;" />
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:13px; color:#002050; line-height:1.3;">@req.Label</div>
+                        @if (isChecked)
+                        {
+                            <div style="font-size:11px; margin-top:2px; @GetStatusTextStyle(status)">
+                                @GetStatusLabel(status)
+                            </div>
+                        }
+                    </div>
+                    @if (isChecked)
+                    {
+                        <span style="font-size:14px;">@GetStatusIcon(status)</span>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (!Groups.Any())
+    {
+        <div style="text-align:center; padding:24px; color:var(--muted); font-size:13px;">
+            No requirements configured for this program.
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public List<RequirementGroup> Groups { get; set; } = new();
+    [Parameter] public ComparisonPageState State { get; set; } = new();
+    [Parameter] public GapEvaluationResult GapResult { get; set; } = new();
+    [Parameter] public EventCallback<string> OnRequirementToggled { get; set; }
+    [Parameter] public EventCallback OnRequirementsCleared { get; set; }
+
+    private int _checkedCount => State.CheckedRequirements.Count;
+    private int _totalCount => Groups.SelectMany(g => g.Requirements).Count();
+    private int _progressPercent => _totalCount > 0 ? (int)((_checkedCount * 100.0) / _totalCount) : 0;
+    private bool _hasGaps => GapResult.RequirementStatus.Values.Any(s => s == GapStatus.Gap || s == GapStatus.Unsatisfiable);
+
+    private async Task HandleToggle(string slug)
+    {
+        await OnRequirementToggled.InvokeAsync(slug);
+    }
+
+    private async Task HandleClearAll()
+    {
+        await OnRequirementsCleared.InvokeAsync();
+    }
+
+    private string GetStatusClass(GapStatus status, bool isChecked)
+    {
+        if (!isChecked) return "";
+        return status switch
+        {
+            GapStatus.Covered => "qc-req-covered",
+            GapStatus.Gap => "qc-req-gap",
+            GapStatus.Unsatisfiable => "qc-req-unsatisfiable",
+            _ => ""
+        };
+    }
+
+    private string GetStatusBorderStyle(GapStatus status, bool isChecked)
+    {
+        if (!isChecked) return "border:1px solid transparent;";
+        return status switch
+        {
+            GapStatus.Covered => "border:1px solid #22c55e; background:rgba(34,197,94,0.05);",
+            GapStatus.Gap => "border:1px solid #f59e0b; background:rgba(245,158,11,0.05);",
+            GapStatus.Unsatisfiable => "border:1px solid #ef4444; background:rgba(239,68,68,0.05);",
+            _ => "border:1px solid transparent;"
+        };
+    }
+
+    private string GetStatusTextStyle(GapStatus status) => status switch
+    {
+        GapStatus.Covered => "color:#22c55e;",
+        GapStatus.Gap => "color:#f59e0b;",
+        GapStatus.Unsatisfiable => "color:#ef4444;",
+        _ => "color:var(--muted);"
+    };
+
+    private Color GetCheckboxColor(GapStatus status) => status switch
+    {
+        GapStatus.Covered => Color.Success,
+        GapStatus.Gap => Color.Warning,
+        GapStatus.Unsatisfiable => Color.Error,
+        _ => Color.Default
+    };
+
+    private string GetStatusIcon(GapStatus status) => status switch
+    {
+        GapStatus.Covered => "✓",
+        GapStatus.Gap => "⚠",
+        GapStatus.Unsatisfiable => "🚫",
+        _ => ""
+    };
+
+    private string GetStatusLabel(GapStatus status) => status switch
+    {
+        GapStatus.Covered => "Covered",
+        GapStatus.Gap => "Gap in selection",
+        GapStatus.Unsatisfiable => "No carrier covers this",
+        _ => ""
+    };
+}

@@ -1,0 +1,194 @@
+@using FamOs.Web.Data.Dtos
+@using FamOs.Web.Data.Entities
+
+<div class="qc-summary-panel" style="background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px;">
+    @* Package A & B Summary Boxes *@
+    <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+        @* Package A Box *@
+        <div class="qc-pkg-box @(State.ActivePackage == "A" ? "active" : "")"
+             style="padding:12px; border-radius:8px; cursor:pointer; border:2px solid @(State.ActivePackage == "A" ? "#0066cc" : "var(--border)"); background:@(State.ActivePackage == "A" ? "rgba(0,102,204,0.05)" : "#fff");"
+             @onclick='() => OnActivePackageChanged.InvokeAsync("A")'>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:12px; font-weight:600; color:#0066cc;">Package A</span>
+                <span style="font-size:10px; color:var(--muted);">@_pkgALineCount lines</span>
+            </div>
+            <div style="font-size:20px; font-weight:700; color:#002050; margin-top:4px;">
+                @_pkgATotal.ToString("C0")
+            </div>
+        </div>
+
+        @* Package B Box *@
+        <div class="qc-pkg-box @(State.ActivePackage == "B" ? "active" : "")"
+             style="padding:12px; border-radius:8px; cursor:pointer; border:2px solid @(State.ActivePackage == "B" ? "#8b5cf6" : "var(--border)"); background:@(State.ActivePackage == "B" ? "rgba(139,92,246,0.05)" : "#fff");"
+             @onclick='() => OnActivePackageChanged.InvokeAsync("B")'>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:12px; font-weight:600; color:#8b5cf6;">Package B</span>
+                <span style="font-size:10px; color:var(--muted);">@_pkgBLineCount lines</span>
+            </div>
+            <div style="font-size:20px; font-weight:700; color:#002050; margin-top:4px;">
+                @_pkgBTotal.ToString("C0")
+            </div>
+        </div>
+
+        @* Incumbent Row (only when ShowIncumbent) *@
+        @if (State.ShowIncumbent && IncumbentTotal > 0)
+        {
+            <div style="padding:10px 12px; border-radius:8px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3);">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:12px; font-weight:600; color:#b45309;">📋 Incumbent</span>
+                </div>
+                <div style="font-size:18px; font-weight:700; color:#b45309; margin-top:4px;">
+                    @IncumbentTotal.ToString("C0")
+                </div>
+            </div>
+        }
+    </div>
+
+    <MudDivider Class="my-3" />
+
+    @* Package A Line Breakdown *@
+    <div style="margin-bottom:16px;">
+        <div style="font-size:11px; font-weight:600; color:#0066cc; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">
+            ● Package A — Lines
+        </div>
+        @foreach (var lob in Lobs.OrderBy(l => l.DisplayOrder))
+        {
+            var selectedQuoteId = State.PackageASelections.GetValueOrDefault(lob.Slug);
+            var quote = selectedQuoteId != default ? QuoteLookup.GetValueOrDefault(selectedQuoteId) : null;
+            var isAutoBundled = State.AutoBundledA.Contains(lob.Slug);
+            
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:12px;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span>@lob.Icon</span>
+                    <span style="color:#002050;">@lob.Name</span>
+                    @if (isAutoBundled)
+                    {
+                        <span style="font-size:9px; background:#e0e7ff; color:#4338ca; padding:1px 4px; border-radius:3px;">bundled</span>
+                    }
+                </div>
+                @if (quote != null)
+                {
+                    <div style="text-align:right;">
+                        <div style="font-weight:600; color:#002050;">@quote.Premium.ToString("C0")</div>
+                        <div style="font-size:10px; color:var(--muted);">@quote.Carrier</div>
+                    </div>
+                }
+                else
+                {
+                    <span style="color:var(--muted); font-style:italic;">Not selected</span>
+                }
+            </div>
+        }
+    </div>
+
+    <MudDivider Class="my-3" />
+
+    @* Package B Line Breakdown *@
+    <div style="margin-bottom:16px;">
+        <div style="font-size:11px; font-weight:600; color:#8b5cf6; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">
+            ● Package B — Lines
+        </div>
+        @foreach (var lob in Lobs.OrderBy(l => l.DisplayOrder))
+        {
+            var selectedQuoteId = State.PackageBSelections.GetValueOrDefault(lob.Slug);
+            var quote = selectedQuoteId != default ? QuoteLookup.GetValueOrDefault(selectedQuoteId) : null;
+            var isAutoBundled = State.AutoBundledB.Contains(lob.Slug);
+            
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:12px;">
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span>@lob.Icon</span>
+                    <span style="color:#002050;">@lob.Name</span>
+                    @if (isAutoBundled)
+                    {
+                        <span style="font-size:9px; background:#f3e8ff; color:#7c3aed; padding:1px 4px; border-radius:3px;">bundled</span>
+                    }
+                </div>
+                @if (quote != null)
+                {
+                    <div style="text-align:right;">
+                        <div style="font-weight:600; color:#002050;">@quote.Premium.ToString("C0")</div>
+                        <div style="font-size:10px; color:var(--muted);">@quote.Carrier</div>
+                    </div>
+                }
+                else
+                {
+                    <span style="color:var(--muted); font-style:italic;">Not selected</span>
+                }
+            </div>
+        }
+    </div>
+
+    <MudDivider Class="my-3" />
+
+    @* Action Buttons *@
+    <div style="display:flex; flex-direction:column; gap:8px;">
+        <MudButton Variant="Variant.Outlined"
+                   Color="Color.Default"
+                   FullWidth="true"
+                   OnClick="() => OnSaveDraftClicked.InvokeAsync()">
+            Save Draft
+        </MudButton>
+        <MudButton Variant="Variant.Outlined"
+                   Color="Color.Primary"
+                   FullWidth="true"
+                   OnClick="() => OnComparePkgsClicked.InvokeAsync()">
+            Compare Packages
+        </MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   FullWidth="true"
+                   Disabled="@(!_hasAnySelection)"
+                   OnClick="() => OnBuildProposalClicked.InvokeAsync()">
+            Build Proposal
+        </MudButton>
+
+        @if (_hasAnySelection)
+        {
+            <div style="display:flex; gap:8px; margin-top:4px;">
+                <MudButton Variant="Variant.Text"
+                           Color="Color.Error"
+                           Size="Size.Small"
+                           OnClick='() => OnClearPackageClicked.InvokeAsync("A")'>
+                    Clear A
+                </MudButton>
+                <MudButton Variant="Variant.Text"
+                           Color="Color.Error"
+                           Size="Size.Small"
+                           OnClick='() => OnClearPackageClicked.InvokeAsync("B")'>
+                    Clear B
+                </MudButton>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public ComparisonPageState State { get; set; } = new();
+    [Parameter] public List<LineOfBusiness> Lobs { get; set; } = new();
+    [Parameter] public Dictionary<Guid, CoverageDetailsDto> QuoteLookup { get; set; } = new();
+    [Parameter] public decimal IncumbentTotal { get; set; }
+    [Parameter] public EventCallback<string> OnActivePackageChanged { get; set; }
+    [Parameter] public EventCallback OnBuildProposalClicked { get; set; }
+    [Parameter] public EventCallback OnComparePkgsClicked { get; set; }
+    [Parameter] public EventCallback OnSaveDraftClicked { get; set; }
+    [Parameter] public EventCallback<string> OnClearPackageClicked { get; set; }
+
+    private decimal _pkgATotal => CalculatePackageTotal(State.PackageASelections);
+    private decimal _pkgBTotal => CalculatePackageTotal(State.PackageBSelections);
+    private int _pkgALineCount => State.PackageASelections.Count;
+    private int _pkgBLineCount => State.PackageBSelections.Count;
+    private bool _hasAnySelection => State.PackageASelections.Any() || State.PackageBSelections.Any();
+
+    private decimal CalculatePackageTotal(Dictionary<string, Guid> selections)
+    {
+        decimal total = 0;
+        foreach (var (_, quoteId) in selections)
+        {
+            if (QuoteLookup.TryGetValue(quoteId, out var quote))
+            {
+                total += quote.Premium;
+            }
+        }
+        return total;
+    }
+}

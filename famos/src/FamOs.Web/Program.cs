@@ -125,6 +125,14 @@ builder.Services.AddScoped<TeamNoteService>();
 builder.Services.AddSingleton<IAccountSyncService, AccountSyncService>();
 builder.Services.AddHostedService(sp => (AccountSyncService)sp.GetRequiredService<IAccountSyncService>());
 
+// Quote Comparison services
+builder.Services.AddScoped<IQuoteComparisonService, QuoteComparisonService>();
+builder.Services.AddScoped<IPackageService, PackageService>();
+builder.Services.AddScoped<ICoverageGapService, CoverageGapService>();
+builder.Services.AddScoped<IAlertService, AlertService>();
+builder.Services.AddScoped<ICarrierNoteService, CarrierNoteService>();
+builder.Services.AddScoped<IIncumbentPolicyService, IncumbentPolicyService>();
+
 builder.Services.Configure<AffinityConfig>(
     builder.Configuration.GetSection("AffinityConfig"));
 
@@ -345,6 +353,194 @@ var logger = app.Logger;
                 team_tag       VARCHAR(20) NOT NULL DEFAULT 'TIG',
                 created_at     DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
                 INDEX idx_team_notes_opp (opportunity_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        // Quote Comparison — ALTER TABLE for quotes and accounts
+        await TryAddColumnAsync("ALTER TABLE quotes ADD COLUMN line_of_business_id CHAR(36) NULL");
+        await TryAddColumnAsync("ALTER TABLE quotes ADD COLUMN tenant_id INT NOT NULL DEFAULT 0");
+        await TryAddColumnAsync("ALTER TABLE accounts ADD COLUMN is_renewal TINYINT(1) NOT NULL DEFAULT 0");
+        await TryAddColumnAsync("ALTER TABLE accounts ADD COLUMN program_vertical_id CHAR(36) NULL");
+
+        // Quote Comparison — new tables
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS program_verticals (
+                id                CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                tenant_id         INT NOT NULL DEFAULT 0,
+                name              VARCHAR(100) NOT NULL DEFAULT '',
+                slug              VARCHAR(50) NOT NULL DEFAULT '',
+                is_active         TINYINT(1) NOT NULL DEFAULT 1,
+                fait_preset_chips LONGTEXT NULL,
+                created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE INDEX idx_pv_tenant_slug (tenant_id, slug)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS lines_of_business (
+                id                   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                program_vertical_id  CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                tenant_id            INT NOT NULL DEFAULT 0,
+                slug                 VARCHAR(50) NOT NULL DEFAULT '',
+                name                 VARCHAR(100) NOT NULL DEFAULT '',
+                icon                 VARCHAR(20) NOT NULL DEFAULT '',
+                meta_description     VARCHAR(255) NULL,
+                display_order        INT NOT NULL DEFAULT 0,
+                is_active            TINYINT(1) NOT NULL DEFAULT 1,
+                field_definitions    LONGTEXT NULL,
+                created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE INDEX idx_lob_tenant_slug (tenant_id, slug),
+                INDEX idx_lob_vertical (program_vertical_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS requirements (
+                id                   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                program_vertical_id  CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                tenant_id            INT NOT NULL DEFAULT 0,
+                slug                 VARCHAR(100) NOT NULL DEFAULT '',
+                label                VARCHAR(255) NOT NULL DEFAULT '',
+                group_name           VARCHAR(100) NOT NULL DEFAULT '',
+                line_of_business_id  CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                display_order        INT NOT NULL DEFAULT 0,
+                is_active            TINYINT(1) NOT NULL DEFAULT 1,
+                created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE INDEX idx_req_tenant_slug (tenant_id, slug),
+                INDEX idx_req_vertical (program_vertical_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS packages (
+                id                       CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                account_id               CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                tenant_id                INT NOT NULL DEFAULT 0,
+                label                    VARCHAR(10) NOT NULL DEFAULT 'A',
+                status                   VARCHAR(20) NOT NULL DEFAULT 'draft',
+                total_premium            DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                created_by_user_id       CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                last_modified_by_user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL,
+                created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_pkg_account (account_id, tenant_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS package_selections (
+                id                   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                package_id           CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                line_of_business_id  CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                quote_id             CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                is_auto_bundle       TINYINT(1) NOT NULL DEFAULT 0,
+                tenant_id            INT NOT NULL DEFAULT 0,
+                created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE INDEX idx_pkgsel_pkg_lob (package_id, line_of_business_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS incumbent_policies (
+                id                   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                account_id           CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                line_of_business_id  CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                tenant_id            INT NOT NULL DEFAULT 0,
+                carrier_name         VARCHAR(191) NOT NULL DEFAULT '',
+                policy_number        VARCHAR(100) NULL,
+                annual_premium       DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                effective_date       DATE NULL,
+                expiration_date      DATE NULL,
+                vals                 LONGTEXT NULL,
+                source_type          VARCHAR(20) NOT NULL DEFAULT 'manual',
+                scraper_run_id       VARCHAR(100) NULL,
+                is_overridden        TINYINT(1) NOT NULL DEFAULT 0,
+                overridden_by_user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL,
+                overridden_at        DATETIME NULL,
+                created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE INDEX idx_ip_account_lob (account_id, line_of_business_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS coverage_removal_acknowledgments (
+                id                       CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                account_id               CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                package_id               CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                tenant_id                INT NOT NULL DEFAULT 0,
+                acknowledged_by_user_id  CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                acknowledged_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                coverage_description     VARCHAR(255) NOT NULL DEFAULT '',
+                line_of_business_id      CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                incumbent_field_key      VARCHAR(100) NOT NULL DEFAULT '',
+                incumbent_value          VARCHAR(255) NOT NULL DEFAULT '',
+                proposed_value           VARCHAR(255) NULL,
+                change_type              VARCHAR(20) NOT NULL DEFAULT 'removed',
+                INDEX idx_cra_account_at (account_id, acknowledged_at),
+                INDEX idx_cra_user_at (acknowledged_by_user_id, acknowledged_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS carrier_notes (
+                id                   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                account_id           CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                quote_id             CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                tenant_id            INT NOT NULL DEFAULT 0,
+                note_text            LONGTEXT NOT NULL,
+                created_by_user_id   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                updated_by_user_id   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL,
+                created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_cn_account_quote (account_id, quote_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS comparison_drafts (
+                id                        CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                account_id                CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                tenant_id                 INT NOT NULL DEFAULT 0,
+                user_id                   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                active_requirement_slugs  LONGTEXT NULL,
+                package_a_selections      LONGTEXT NULL,
+                package_b_selections      LONGTEXT NULL,
+                show_incumbent            TINYINT(1) NOT NULL DEFAULT 0,
+                collapsed_blocks          LONGTEXT NULL,
+                saved_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE INDEX idx_cd_account_user (account_id, user_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS benchmark_premiums (
+                id                   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                program_vertical_id  CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                line_of_business_id  CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                tenant_id            INT NOT NULL DEFAULT 0,
+                annual_premium       DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                effective_date       DATE NOT NULL,
+                source               VARCHAR(50) NOT NULL DEFAULT 'manual',
+                notes                LONGTEXT NULL,
+                updated_by_user_id   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL,
+                updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_bp_tenant_vertical_lob (tenant_id, program_vertical_id, line_of_business_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """);
+
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS carrier_bundle_rules (
+                id                   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                tenant_id            INT NOT NULL DEFAULT 0,
+                carrier_name         VARCHAR(191) NOT NULL DEFAULT '',
+                primary_line_slug    VARCHAR(50) NOT NULL DEFAULT '',
+                required_line_slug   VARCHAR(50) NOT NULL DEFAULT '',
+                is_active            TINYINT(1) NOT NULL DEFAULT 1,
+                notes                LONGTEXT NULL,
+                INDEX idx_cbr_tenant_carrier (tenant_id, carrier_name, primary_line_slug)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """);
 

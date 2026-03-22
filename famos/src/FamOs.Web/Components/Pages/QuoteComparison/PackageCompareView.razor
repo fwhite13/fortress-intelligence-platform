@@ -1,0 +1,356 @@
+@using FamOs.Web.Data.Dtos
+@using FamOs.Web.Data.Entities
+@using FamOs.Web.Services
+@inject ICoverageGapService CoverageGapService
+
+<div class="qc-compare-view" style="position:fixed; inset:0; background:#fff; z-index:1000; overflow-y:auto;">
+    <div style="max-width:1200px; margin:0 auto; padding:24px;">
+        @* Header *@
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+            <div>
+                <h2 style="font-size:20px; font-weight:700; color:#002050; margin:0;">Package Comparison</h2>
+                <p style="font-size:13px; color:var(--muted); margin:4px 0 0;">@Context.Account.CompanyName</p>
+            </div>
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Default"
+                       StartIcon="@Icons.Material.Filled.ArrowBack"
+                       OnClick="() => OnBackToBuilder.InvokeAsync()">
+                Back to Builder
+            </MudButton>
+        </div>
+
+        @* Alert Banners for Large Differentials *@
+        @if (_hasLargeDifferential)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-4">
+                One or more packages differ from incumbent by more than 20%. Review carefully before proceeding.
+            </MudAlert>
+        }
+
+        @* Main Comparison Table *@
+        <div style="background:#fff; border:1px solid var(--border); border-radius:12px; overflow:hidden; margin-bottom:24px;">
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead>
+                    <tr style="background:#f8f9fa;">
+                        <th style="padding:12px 16px; text-align:left; font-weight:600; color:var(--muted); width:200px;">Coverage</th>
+                        <th style="padding:12px 16px; text-align:center; font-weight:600; color:#0066cc; min-width:180px;">Package A</th>
+                        <th style="padding:12px 16px; text-align:center; font-weight:600; color:#8b5cf6; min-width:180px;">Package B</th>
+                        @if (_showIncumbent)
+                        {
+                            <th style="padding:12px 16px; text-align:center; font-weight:600; color:#b45309; min-width:180px; background:rgba(245,158,11,0.1);">Incumbent</th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var lob in Context.Lines.OrderBy(l => l.DisplayOrder))
+                    {
+                        var quoteA = GetSelectedQuote(State.PackageASelections, lob);
+                        var quoteB = GetSelectedQuote(State.PackageBSelections, lob);
+                        var incumbent = Context.Incumbents.GetValueOrDefault(lob.Id);
+
+                        <tr style="background:#f0f7ff;">
+                            <td colspan="@(3 + (_showIncumbent ? 1 : 0))" style="padding:10px 16px; font-weight:600; color:#002050;">
+                                @lob.Icon @lob.Name
+                            </td>
+                        </tr>
+
+                        @* Carrier Row *@
+                        <tr>
+                            <td style="padding:8px 16px; color:var(--muted); border-top:1px solid var(--border);">Carrier</td>
+                            <td style="padding:8px 16px; text-align:center; border-top:1px solid var(--border);">
+                                @(quoteA?.CarrierName ?? "—")
+                            </td>
+                            <td style="padding:8px 16px; text-align:center; border-top:1px solid var(--border);">
+                                @(quoteB?.CarrierName ?? "—")
+                            </td>
+                            @if (_showIncumbent)
+                            {
+                                <td style="padding:8px 16px; text-align:center; border-top:1px solid var(--border); background:rgba(245,158,11,0.05);">
+                                    @(incumbent?.CarrierName ?? "—")
+                                </td>
+                            }
+                        </tr>
+
+                        @* Premium Row with % Diff *@
+                        <tr>
+                            <td style="padding:8px 16px; color:var(--muted); border-top:1px solid var(--border);">Premium</td>
+                            <td style="padding:8px 16px; text-align:center; border-top:1px solid var(--border);">
+                                @if (quoteA != null)
+                                {
+                                    <div style="font-weight:600;">@quoteA.PremiumAmount.ToString("C0")</div>
+                                    @if (_showIncumbent && incumbent != null)
+                                    {
+                                        var diff = CalculateDiff(quoteA.PremiumAmount, incumbent.AnnualPremium);
+                                        <div style="font-size:11px; color:@GetDiffColor(diff);">@FormatDiff(diff)</div>
+                                    }
+                                }
+                                else
+                                {
+                                    <span style="color:var(--muted);">—</span>
+                                }
+                            </td>
+                            <td style="padding:8px 16px; text-align:center; border-top:1px solid var(--border);">
+                                @if (quoteB != null)
+                                {
+                                    <div style="font-weight:600;">@quoteB.PremiumAmount.ToString("C0")</div>
+                                    @if (_showIncumbent && incumbent != null)
+                                    {
+                                        var diff = CalculateDiff(quoteB.PremiumAmount, incumbent.AnnualPremium);
+                                        <div style="font-size:11px; color:@GetDiffColor(diff);">@FormatDiff(diff)</div>
+                                    }
+                                }
+                                else
+                                {
+                                    <span style="color:var(--muted);">—</span>
+                                }
+                            </td>
+                            @if (_showIncumbent)
+                            {
+                                <td style="padding:8px 16px; text-align:center; border-top:1px solid var(--border); background:rgba(245,158,11,0.05); font-weight:600;">
+                                    @(incumbent?.AnnualPremium.ToString("C0") ?? "—")
+                                </td>
+                            }
+                        </tr>
+
+                        @* Requirements Coverage *@
+                        @foreach (var req in Context.Requirements.Where(r => r.LineOfBusinessId == lob.Id))
+                        {
+                            var statusA = GetReqCoverage(quoteA, req.Slug);
+                            var statusB = GetReqCoverage(quoteB, req.Slug);
+                            
+                            <tr>
+                                <td style="padding:6px 16px; color:var(--muted); font-size:12px; border-top:1px solid var(--border);">@req.Label</td>
+                                <td style="padding:6px 16px; text-align:center; border-top:1px solid var(--border);">
+                                    @if (quoteA != null)
+                                    {
+                                        <span style="color:@(statusA ? "#22c55e" : "#ef4444");">@(statusA ? "✓ Covered" : "✗ Gap")</span>
+                                    }
+                                </td>
+                                <td style="padding:6px 16px; text-align:center; border-top:1px solid var(--border);">
+                                    @if (quoteB != null)
+                                    {
+                                        <span style="color:@(statusB ? "#22c55e" : "#ef4444");">@(statusB ? "✓ Covered" : "✗ Gap")</span>
+                                    }
+                                </td>
+                                @if (_showIncumbent)
+                                {
+                                    <td style="padding:6px 16px; text-align:center; border-top:1px solid var(--border); background:rgba(245,158,11,0.05);">
+                                        —
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    }
+
+                    @* Totals Row *@
+                    <tr style="background:#002050; color:#fff;">
+                        <td style="padding:12px 16px; font-weight:700;">TOTAL</td>
+                        <td style="padding:12px 16px; text-align:center; font-weight:700; font-size:18px;">
+                            @_pkgATotal.ToString("C0")
+                            @if (_showIncumbent && _incumbentTotal > 0)
+                            {
+                                var totalDiff = CalculateDiff(_pkgATotal, _incumbentTotal);
+                                <div style="font-size:12px; font-weight:400; color:@GetDiffColorLight(totalDiff);">@FormatDiff(totalDiff)</div>
+                            }
+                        </td>
+                        <td style="padding:12px 16px; text-align:center; font-weight:700; font-size:18px;">
+                            @_pkgBTotal.ToString("C0")
+                            @if (_showIncumbent && _incumbentTotal > 0)
+                            {
+                                var totalDiff = CalculateDiff(_pkgBTotal, _incumbentTotal);
+                                <div style="font-size:12px; font-weight:400; color:@GetDiffColorLight(totalDiff);">@FormatDiff(totalDiff)</div>
+                            }
+                        </td>
+                        @if (_showIncumbent)
+                        {
+                            <td style="padding:12px 16px; text-align:center; font-weight:700; font-size:18px; background:rgba(245,158,11,0.2);">
+                                @_incumbentTotal.ToString("C0")
+                            </td>
+                        }
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        @* Coverage Changes vs Incumbent *@
+        @if (_showIncumbent && _coverageChanges.Any())
+        {
+            <div style="background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:24px;">
+                <h3 style="font-size:14px; font-weight:600; color:#002050; margin:0 0 12px;">Coverage Changes vs Incumbent</h3>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                    @* Package A Changes *@
+                    <div>
+                        <div style="font-size:12px; font-weight:600; color:#0066cc; margin-bottom:8px;">Package A</div>
+                        @foreach (var change in _coverageChangesA)
+                        {
+                            <div style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:12px; border-bottom:1px solid var(--border);">
+                                <span style="color:@GetChangeColor(change.ChangeType);">@GetChangeIcon(change.ChangeType)</span>
+                                <span style="color:#002050;">@change.FieldLabel</span>
+                                <span style="color:var(--muted); margin-left:auto;">@change.IncumbentValue → @(change.ProposedValue ?? "N/A")</span>
+                            </div>
+                        }
+                        @if (!_coverageChangesA.Any())
+                        {
+                            <div style="color:var(--muted); font-size:12px;">No changes detected</div>
+                        }
+                    </div>
+
+                    @* Package B Changes *@
+                    <div>
+                        <div style="font-size:12px; font-weight:600; color:#8b5cf6; margin-bottom:8px;">Package B</div>
+                        @foreach (var change in _coverageChangesB)
+                        {
+                            <div style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:12px; border-bottom:1px solid var(--border);">
+                                <span style="color:@GetChangeColor(change.ChangeType);">@GetChangeIcon(change.ChangeType)</span>
+                                <span style="color:#002050;">@change.FieldLabel</span>
+                                <span style="color:var(--muted); margin-left:auto;">@change.IncumbentValue → @(change.ProposedValue ?? "N/A")</span>
+                            </div>
+                        }
+                        @if (!_coverageChangesB.Any())
+                        {
+                            <div style="color:var(--muted); font-size:12px;">No changes detected</div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public ComparisonPageState State { get; set; } = new();
+    [Parameter] public ComparisonContextDto Context { get; set; } = default!;
+    [Parameter] public GapEvaluationResult GapResult { get; set; } = new();
+    [Parameter] public EventCallback OnBackToBuilder { get; set; }
+
+    private bool _showIncumbent => State.ShowIncumbent && Context.Incumbents.Any();
+    private decimal _pkgATotal;
+    private decimal _pkgBTotal;
+    private decimal _incumbentTotal;
+    private bool _hasLargeDifferential;
+    private List<CoverageChangeDto> _coverageChanges = new();
+    private List<CoverageChangeDto> _coverageChangesA = new();
+    private List<CoverageChangeDto> _coverageChangesB = new();
+
+    protected override void OnParametersSet()
+    {
+        CalculateTotals();
+        DetectCoverageChanges();
+        CheckForLargeDifferentials();
+    }
+
+    private void CalculateTotals()
+    {
+        _pkgATotal = 0;
+        _pkgBTotal = 0;
+        _incumbentTotal = 0;
+
+        foreach (var lob in Context.Lines)
+        {
+            var quoteA = GetSelectedQuote(State.PackageASelections, lob);
+            var quoteB = GetSelectedQuote(State.PackageBSelections, lob);
+            var incumbent = Context.Incumbents.GetValueOrDefault(lob.Id);
+
+            if (quoteA != null) _pkgATotal += quoteA.PremiumAmount;
+            if (quoteB != null) _pkgBTotal += quoteB.PremiumAmount;
+            if (incumbent != null) _incumbentTotal += incumbent.AnnualPremium;
+        }
+    }
+
+    private void DetectCoverageChanges()
+    {
+        _coverageChangesA.Clear();
+        _coverageChangesB.Clear();
+
+        foreach (var lob in Context.Lines)
+        {
+            var incumbent = Context.Incumbents.GetValueOrDefault(lob.Id);
+            if (incumbent == null) continue;
+
+            var quoteA = GetSelectedQuote(State.PackageASelections, lob);
+            var quoteB = GetSelectedQuote(State.PackageBSelections, lob);
+
+            if (quoteA != null)
+            {
+                var changes = CoverageGapService.DetectCoverageRemovals(incumbent, quoteA, lob);
+                _coverageChangesA.AddRange(changes);
+            }
+
+            if (quoteB != null)
+            {
+                var changes = CoverageGapService.DetectCoverageRemovals(incumbent, quoteB, lob);
+                _coverageChangesB.AddRange(changes);
+            }
+        }
+
+        _coverageChanges = _coverageChangesA.Concat(_coverageChangesB).ToList();
+    }
+
+    private void CheckForLargeDifferentials()
+    {
+        if (_incumbentTotal <= 0)
+        {
+            _hasLargeDifferential = false;
+            return;
+        }
+
+        var diffA = Math.Abs(CalculateDiff(_pkgATotal, _incumbentTotal));
+        var diffB = Math.Abs(CalculateDiff(_pkgBTotal, _incumbentTotal));
+        _hasLargeDifferential = diffA > 20 || diffB > 20;
+    }
+
+    private QuoteWithCoverageDto? GetSelectedQuote(Dictionary<string, Guid> selections, LineOfBusiness lob)
+    {
+        if (!selections.TryGetValue(lob.Slug, out var quoteId)) return null;
+        return Context.Quotes.FirstOrDefault(q => q.Id == quoteId);
+    }
+
+    private bool GetReqCoverage(QuoteWithCoverageDto? quote, string reqSlug)
+    {
+        if (quote?.CoverageDetails == null) return false;
+        return quote.CoverageDetails.Includes.Contains(reqSlug) 
+            && !quote.CoverageDetails.Excludes.Contains(reqSlug);
+    }
+
+    private decimal CalculateDiff(decimal proposed, decimal incumbent)
+    {
+        if (incumbent == 0) return 0;
+        return ((proposed - incumbent) / incumbent) * 100;
+    }
+
+    private string FormatDiff(decimal diff)
+    {
+        if (diff == 0) return "—";
+        return $"{(diff > 0 ? "+" : "")}{diff:F1}% vs incumbent";
+    }
+
+    private string GetDiffColor(decimal diff)
+    {
+        if (diff > 0) return "#ef4444";
+        if (diff < 0) return "#22c55e";
+        return "var(--muted)";
+    }
+
+    private string GetDiffColorLight(decimal diff)
+    {
+        if (diff > 0) return "#fca5a5";
+        if (diff < 0) return "#86efac";
+        return "#94a3b8";
+    }
+
+    private string GetChangeIcon(string changeType) => changeType switch
+    {
+        "added" => "✓",
+        "removed" => "✗",
+        "reduced" => "↓",
+        _ => "•"
+    };
+
+    private string GetChangeColor(string changeType) => changeType switch
+    {
+        "added" => "#22c55e",
+        "removed" => "#ef4444",
+        "reduced" => "#f59e0b",
+        _ => "var(--muted)"
+    };
+}

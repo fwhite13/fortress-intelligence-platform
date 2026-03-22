@@ -1,0 +1,181 @@
+@using FamOs.Web.Data.Dtos
+@using System.Text.Json
+@using System.Net.Http.Json
+@inject HttpClient Http
+
+<div class="qc-fait-widget" style="background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; margin-top:16px;">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+        <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Primary" Size="Size.Small" />
+        <span style="font-size:14px; font-weight:600; color:#002050;">FAIT Assistant</span>
+    </div>
+
+    @* Preset Chips *@
+    @if (_presetChips.Any())
+    {
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">
+            @foreach (var chip in _presetChips)
+            {
+                <MudChip T="string"
+                         Size="Size.Small"
+                         Variant="Variant.Outlined"
+                         Color="Color.Primary"
+                         OnClick="async () => await AskQuestion(chip.Prompt)">
+                    @chip.Label
+                </MudChip>
+            }
+        </div>
+    }
+
+    @* Custom Question Input *@
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <MudTextField T="string"
+                      @bind-Value="_customQuestion"
+                      Placeholder="Ask about this comparison..."
+                      Variant="Variant.Outlined"
+                      Style="flex:1;"
+                      Disabled="_isLoading"
+                      OnKeyDown="HandleKeyDown" />
+        <MudIconButton Icon="@Icons.Material.Filled.Send"
+                       Color="Color.Primary"
+                       Disabled="@(_isLoading || string.IsNullOrWhiteSpace(_customQuestion))"
+                       OnClick="async () => await AskQuestion(_customQuestion)" />
+    </div>
+
+    @* Response Area *@
+    @if (_isLoading)
+    {
+        <div style="display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px;">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+            <span>Thinking...</span>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(_response))
+    {
+        <div style="background:#f8f9fa; border-radius:8px; padding:12px; font-size:13px; color:#002050; white-space:pre-wrap; max-height:300px; overflow-y:auto;">
+            @_response
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">
+            @_error
+        </MudAlert>
+    }
+</div>
+
+@code {
+    [Parameter] public ComparisonPageState State { get; set; } = new();
+    [Parameter] public ComparisonContextDto Context { get; set; } = default!;
+
+    private List<PresetChip> _presetChips = new();
+    private string _customQuestion = "";
+    private string _response = "";
+    private string _error = "";
+    private bool _isLoading = false;
+
+    protected override void OnParametersSet()
+    {
+        ParsePresetChips();
+    }
+
+    private void ParsePresetChips()
+    {
+        _presetChips.Clear();
+        if (!string.IsNullOrEmpty(Context.ProgramVertical.FaitPresetChips))
+        {
+            try
+            {
+                var chips = JsonSerializer.Deserialize<List<PresetChip>>(Context.ProgramVertical.FaitPresetChips);
+                if (chips != null)
+                {
+                    _presetChips = chips;
+                }
+            }
+            catch { /* ignore parse errors */ }
+        }
+
+        // Fallback defaults if no presets configured
+        if (!_presetChips.Any())
+        {
+            _presetChips = new List<PresetChip>
+            {
+                new PresetChip { Label = "Coverage gaps", Prompt = "What coverage gaps should I be aware of with my current selections?" },
+                new PresetChip { Label = "Best value", Prompt = "Which package offers the best value for this account?" },
+                new PresetChip { Label = "Risk analysis", Prompt = "What are the key risks I should consider for this account's industry?" }
+            };
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_customQuestion))
+        {
+            await AskQuestion(_customQuestion);
+        }
+    }
+
+    private async Task AskQuestion(string question)
+    {
+        if (string.IsNullOrWhiteSpace(question)) return;
+
+        _isLoading = true;
+        _error = "";
+        _response = "";
+        StateHasChanged();
+
+        try
+        {
+            var request = new FaitAskRequest
+            {
+                Question = question,
+                AccountId = Context.Account.Id,
+                SelectedPackageA = State.PackageASelections,
+                SelectedPackageB = State.PackageBSelections,
+                CheckedRequirements = State.CheckedRequirements.ToList()
+            };
+
+            var response = await Http.PostAsJsonAsync("/api/fait/ask", request);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<FaitAskResponse>();
+                _response = result?.Answer ?? "No response received.";
+            }
+            else
+            {
+                _error = $"FAIT request failed: {response.StatusCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
+            _customQuestion = "";
+            StateHasChanged();
+        }
+    }
+
+    private class PresetChip
+    {
+        public string Label { get; set; } = "";
+        public string Prompt { get; set; } = "";
+    }
+
+    private class FaitAskRequest
+    {
+        public string Question { get; set; } = "";
+        public Guid AccountId { get; set; }
+        public Dictionary<string, Guid> SelectedPackageA { get; set; } = new();
+        public Dictionary<string, Guid> SelectedPackageB { get; set; } = new();
+        public List<string> CheckedRequirements { get; set; } = new();
+    }
+
+    private class FaitAskResponse
+    {
+        public string Answer { get; set; } = "";
+    }
+}

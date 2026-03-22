@@ -10,6 +10,8 @@ public class Quote
     public string?  CoverageDetails     { get; set; }   // JSON string
     public bool     IsRecommended       { get; set; } = false;
     public DateTime ReceivedAt          { get; set; } = DateTime.UtcNow;
+    public Guid?    LineOfBusinessId    { get; set; }
+    public int      TenantId            { get; set; }
 
     public Opportunity Opportunity      { get; set; } = default!;
     public Submission  Submission       { get; set; } = default!;

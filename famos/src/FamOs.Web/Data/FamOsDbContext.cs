@@ -23,6 +23,18 @@ public class FamOsDbContext : DbContext
     public DbSet<Account>    Accounts   => Set<Account>();
     public DbSet<TeamNote>   TeamNotes  => Set<TeamNote>();
 
+    public DbSet<ProgramVertical>               ProgramVerticals               => Set<ProgramVertical>();
+    public DbSet<LineOfBusiness>                LinesOfBusiness                => Set<LineOfBusiness>();
+    public DbSet<Requirement>                   Requirements                   => Set<Requirement>();
+    public DbSet<Package>                       Packages                       => Set<Package>();
+    public DbSet<PackageSelection>              PackageSelections              => Set<PackageSelection>();
+    public DbSet<IncumbentPolicy>               IncumbentPolicies              => Set<IncumbentPolicy>();
+    public DbSet<CoverageRemovalAcknowledgment> CoverageRemovalAcknowledgments => Set<CoverageRemovalAcknowledgment>();
+    public DbSet<CarrierNote>                   CarrierNotes                   => Set<CarrierNote>();
+    public DbSet<ComparisonDraft>               ComparisonDrafts               => Set<ComparisonDraft>();
+    public DbSet<BenchmarkPremium>              BenchmarkPremiums              => Set<BenchmarkPremium>();
+    public DbSet<CarrierBundleRule>             CarrierBundleRules             => Set<CarrierBundleRule>();
+
     protected override void OnModelCreating(ModelBuilder m)
     {
         // Opportunity
@@ -208,7 +220,205 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.LastSyncedAt).HasColumnName("last_synced_at");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.IsRenewal).HasColumnName("is_renewal");
+            e.Property(x => x.ProgramVerticalId).HasColumnType("char(36)").HasColumnName("program_vertical_id");
             e.HasIndex(x => new { x.AffinityId, x.CompanyName });
+        });
+
+        // Quote — add new Quote Comparison fields
+        m.Entity<Quote>(e => {
+            e.Property(x => x.LineOfBusinessId).HasColumnType("char(36)").HasColumnName("line_of_business_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+        });
+
+        // ProgramVertical
+        m.Entity<ProgramVertical>(e => {
+            e.ToTable("program_verticals");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Name).HasMaxLength(100).HasColumnName("name");
+            e.Property(x => x.Slug).HasMaxLength(50).HasColumnName("slug");
+            e.Property(x => x.IsActive).HasColumnName("is_active");
+            e.Property(x => x.FaitPresetChips).HasColumnType("longtext").HasColumnName("fait_preset_chips");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
+        });
+
+        // LineOfBusiness
+        m.Entity<LineOfBusiness>(e => {
+            e.ToTable("lines_of_business");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.ProgramVerticalId).HasColumnType("char(36)").HasColumnName("program_vertical_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Slug).HasMaxLength(50).HasColumnName("slug");
+            e.Property(x => x.Name).HasMaxLength(100).HasColumnName("name");
+            e.Property(x => x.Icon).HasMaxLength(20).HasColumnName("icon");
+            e.Property(x => x.MetaDescription).HasMaxLength(255).HasColumnName("meta_description");
+            e.Property(x => x.DisplayOrder).HasColumnName("display_order");
+            e.Property(x => x.IsActive).HasColumnName("is_active");
+            e.Property(x => x.FieldDefinitions).HasColumnType("longtext").HasColumnName("field_definitions");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
+        });
+
+        // Requirement
+        m.Entity<Requirement>(e => {
+            e.ToTable("requirements");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.ProgramVerticalId).HasColumnType("char(36)").HasColumnName("program_vertical_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Slug).HasMaxLength(100).HasColumnName("slug");
+            e.Property(x => x.Label).HasMaxLength(255).HasColumnName("label");
+            e.Property(x => x.GroupName).HasMaxLength(100).HasColumnName("group_name");
+            e.Property(x => x.LineOfBusinessId).HasColumnType("char(36)").HasColumnName("line_of_business_id");
+            e.Property(x => x.DisplayOrder).HasColumnName("display_order");
+            e.Property(x => x.IsActive).HasColumnName("is_active");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
+        });
+
+        // Package
+        m.Entity<Package>(e => {
+            e.ToTable("packages");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.AccountId).HasColumnType("char(36)").HasColumnName("account_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.Label).HasMaxLength(10).HasColumnName("label");
+            e.Property(x => x.Status).HasMaxLength(20).HasColumnName("status");
+            e.Property(x => x.TotalPremium).HasColumnType("decimal(12,2)").HasColumnName("total_premium");
+            e.Property(x => x.CreatedByUserId).HasColumnType("char(36)").HasColumnName("created_by_user_id");
+            e.Property(x => x.LastModifiedByUserId).HasColumnType("char(36)").HasColumnName("last_modified_by_user_id");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.HasIndex(x => new { x.AccountId, x.TenantId });
+        });
+
+        // PackageSelection
+        m.Entity<PackageSelection>(e => {
+            e.ToTable("package_selections");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.PackageId).HasColumnType("char(36)").HasColumnName("package_id");
+            e.Property(x => x.LineOfBusinessId).HasColumnType("char(36)").HasColumnName("line_of_business_id");
+            e.Property(x => x.QuoteId).HasColumnType("char(36)").HasColumnName("quote_id");
+            e.Property(x => x.IsAutoBundle).HasColumnName("is_auto_bundle");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.HasIndex(x => new { x.PackageId, x.LineOfBusinessId }).IsUnique();
+        });
+
+        // IncumbentPolicy
+        m.Entity<IncumbentPolicy>(e => {
+            e.ToTable("incumbent_policies");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.AccountId).HasColumnType("char(36)").HasColumnName("account_id");
+            e.Property(x => x.LineOfBusinessId).HasColumnType("char(36)").HasColumnName("line_of_business_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.CarrierName).HasMaxLength(191).HasColumnName("carrier_name");
+            e.Property(x => x.PolicyNumber).HasMaxLength(100).HasColumnName("policy_number");
+            e.Property(x => x.AnnualPremium).HasColumnType("decimal(12,2)").HasColumnName("annual_premium");
+            e.Property(x => x.EffectiveDate).HasColumnName("effective_date");
+            e.Property(x => x.ExpirationDate).HasColumnName("expiration_date");
+            e.Property(x => x.Vals).HasColumnType("longtext").HasColumnName("vals");
+            e.Property(x => x.SourceType).HasMaxLength(20).HasColumnName("source_type");
+            e.Property(x => x.ScraperRunId).HasMaxLength(100).HasColumnName("scraper_run_id");
+            e.Property(x => x.IsOverridden).HasColumnName("is_overridden");
+            e.Property(x => x.OverriddenByUserId).HasColumnType("char(36)").HasColumnName("overridden_by_user_id");
+            e.Property(x => x.OverriddenAt).HasColumnName("overridden_at");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.HasIndex(x => new { x.AccountId, x.LineOfBusinessId }).IsUnique();
+        });
+
+        // CoverageRemovalAcknowledgment
+        m.Entity<CoverageRemovalAcknowledgment>(e => {
+            e.ToTable("coverage_removal_acknowledgments");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.AccountId).HasColumnType("char(36)").HasColumnName("account_id");
+            e.Property(x => x.PackageId).HasColumnType("char(36)").HasColumnName("package_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.AcknowledgedByUserId).HasColumnType("char(36)").HasColumnName("acknowledged_by_user_id");
+            e.Property(x => x.AcknowledgedAt).HasColumnName("acknowledged_at");
+            e.Property(x => x.CoverageDescription).HasMaxLength(255).HasColumnName("coverage_description");
+            e.Property(x => x.LineOfBusinessId).HasColumnType("char(36)").HasColumnName("line_of_business_id");
+            e.Property(x => x.IncumbentFieldKey).HasMaxLength(100).HasColumnName("incumbent_field_key");
+            e.Property(x => x.IncumbentValue).HasMaxLength(255).HasColumnName("incumbent_value");
+            e.Property(x => x.ProposedValue).HasMaxLength(255).HasColumnName("proposed_value");
+            e.Property(x => x.ChangeType).HasMaxLength(20).HasColumnName("change_type");
+            e.HasIndex(x => new { x.AccountId, x.AcknowledgedAt });
+            e.HasIndex(x => new { x.AcknowledgedByUserId, x.AcknowledgedAt });
+        });
+
+        // CarrierNote
+        m.Entity<CarrierNote>(e => {
+            e.ToTable("carrier_notes");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.AccountId).HasColumnType("char(36)").HasColumnName("account_id");
+            e.Property(x => x.QuoteId).HasColumnType("char(36)").HasColumnName("quote_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.NoteText).HasColumnType("longtext").HasColumnName("note_text");
+            e.Property(x => x.CreatedByUserId).HasColumnType("char(36)").HasColumnName("created_by_user_id");
+            e.Property(x => x.UpdatedByUserId).HasColumnType("char(36)").HasColumnName("updated_by_user_id");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.HasIndex(x => new { x.AccountId, x.QuoteId });
+        });
+
+        // ComparisonDraft
+        m.Entity<ComparisonDraft>(e => {
+            e.ToTable("comparison_drafts");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.AccountId).HasColumnType("char(36)").HasColumnName("account_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.UserId).HasColumnType("char(36)").HasColumnName("user_id");
+            e.Property(x => x.ActiveRequirementSlugs).HasColumnType("longtext").HasColumnName("active_requirement_slugs");
+            e.Property(x => x.PackageASelections).HasColumnType("longtext").HasColumnName("package_a_selections");
+            e.Property(x => x.PackageBSelections).HasColumnType("longtext").HasColumnName("package_b_selections");
+            e.Property(x => x.ShowIncumbent).HasColumnName("show_incumbent");
+            e.Property(x => x.CollapsedBlocks).HasColumnType("longtext").HasColumnName("collapsed_blocks");
+            e.Property(x => x.SavedAt).HasColumnName("saved_at");
+            e.HasIndex(x => new { x.AccountId, x.UserId }).IsUnique();
+        });
+
+        // BenchmarkPremium
+        m.Entity<BenchmarkPremium>(e => {
+            e.ToTable("benchmark_premiums");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.ProgramVerticalId).HasColumnType("char(36)").HasColumnName("program_vertical_id");
+            e.Property(x => x.LineOfBusinessId).HasColumnType("char(36)").HasColumnName("line_of_business_id");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.AnnualPremium).HasColumnType("decimal(12,2)").HasColumnName("annual_premium");
+            e.Property(x => x.EffectiveDate).HasColumnName("effective_date");
+            e.Property(x => x.Source).HasMaxLength(50).HasColumnName("source");
+            e.Property(x => x.Notes).HasColumnType("longtext").HasColumnName("notes");
+            e.Property(x => x.UpdatedByUserId).HasColumnType("char(36)").HasColumnName("updated_by_user_id");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.HasIndex(x => new { x.TenantId, x.ProgramVerticalId, x.LineOfBusinessId });
+        });
+
+        // CarrierBundleRule
+        m.Entity<CarrierBundleRule>(e => {
+            e.ToTable("carrier_bundle_rules");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnType("char(36)");
+            e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.CarrierName).HasMaxLength(191).HasColumnName("carrier_name");
+            e.Property(x => x.PrimaryLineSlug).HasMaxLength(50).HasColumnName("primary_line_slug");
+            e.Property(x => x.RequiredLineSlug).HasMaxLength(50).HasColumnName("required_line_slug");
+            e.Property(x => x.IsActive).HasColumnName("is_active");
+            e.Property(x => x.Notes).HasColumnType("longtext").HasColumnName("notes");
+            e.HasIndex(x => new { x.TenantId, x.CarrierName, x.PrimaryLineSlug });
         });
     }
 }
