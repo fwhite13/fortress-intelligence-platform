@@ -466,10 +466,12 @@ else
         decimal   TotalPremium
     );
 
-    // ── Distinct filter values ───────────────────────────────────────────────
+    // ── Distinct filter values (ADO#1016: include HubSpot-synced coverages) ──
     private IEnumerable<string> _distinctCoverageLines =>
-        _opps
-            .SelectMany(o => {
+        _accounts
+            .Where(a => !string.IsNullOrEmpty(a.PrimaryCoverage))
+            .Select(a => a.PrimaryCoverage!)
+            .Concat(_opps.SelectMany(o => {
                 var lines = new List<string>();
                 if (o.PolicyShadow?.CoverageType != null)
                     lines.Add(o.PolicyShadow.CoverageType);
@@ -477,7 +479,7 @@ else
                     if (!string.IsNullOrEmpty(s.CoverageTypes))
                         lines.AddRange(s.CoverageTypes.Split(',').Select(c => c.Trim()).Where(c => !string.IsNullOrEmpty(c)));
                 return lines;
-            })
+            }))
             .Distinct()
             .OrderBy(c => c);
 
@@ -498,8 +500,14 @@ else
         return "In Pipeline";
     }
 
+    // ADO#1016: Prefer stored Account fields from HubSpot sync, fall back to derived
     private static string GetAccountStatus(Account account, IEnumerable<Opportunity> accountOpps)
     {
+        // Prefer HubSpot-synced status if available
+        if (!string.IsNullOrEmpty(account.AccountStatus))
+            return account.AccountStatus;
+
+        // Fallback: derive from local opportunities
         var opps = accountOpps.ToList();
         if (!opps.Any())
             return "Inactive";
@@ -516,28 +524,40 @@ else
         return "Inactive";
     }
 
-    // ── Coverage/Carrier helpers ─────────────────────────────────────────────
-    private static string? GetCoverageLine(Opportunity opp)
+    // ── Coverage/Carrier helpers (ADO#1016: prefer stored, fallback to derived) ──
+    private static string? GetCoverageLine(Account account, Opportunity? opp)
     {
-        if (opp.PolicyShadow?.CoverageType != null)
+        // Prefer HubSpot-synced coverage if available
+        if (!string.IsNullOrEmpty(account.PrimaryCoverage))
+            return account.PrimaryCoverage;
+        // Fallback to opportunity data
+        if (opp?.PolicyShadow?.CoverageType != null)
             return opp.PolicyShadow.CoverageType;
-        var first = opp.Submissions.FirstOrDefault();
+        var first = opp?.Submissions.FirstOrDefault();
         return first?.CoverageTypes;
     }
 
-    private static string? GetCarrier(Opportunity opp)
+    private static string? GetCarrier(Account account, Opportunity? opp)
     {
-        if (!string.IsNullOrEmpty(opp.PolicyShadow?.CarrierName))
+        // Prefer HubSpot-synced carrier if available
+        if (!string.IsNullOrEmpty(account.PrimaryCarrier))
+            return account.PrimaryCarrier;
+        // Fallback to opportunity data
+        if (!string.IsNullOrEmpty(opp?.PolicyShadow?.CarrierName))
             return opp.PolicyShadow.CarrierName;
-        var first = opp.Submissions.FirstOrDefault();
+        var first = opp?.Submissions.FirstOrDefault();
         return string.IsNullOrEmpty(first?.CarrierName) ? null : first.CarrierName;
     }
 
-    private static DateOnly? GetExpDate(Opportunity opp)
+    private static DateOnly? GetExpDate(Account account, Opportunity? opp)
     {
-        if (opp.PolicyShadow?.ExpirationDate.HasValue == true)
+        // Prefer HubSpot-synced expiration if available
+        if (account.PolicyExpiresAt.HasValue)
+            return DateOnly.FromDateTime(account.PolicyExpiresAt.Value);
+        // Fallback to opportunity data
+        if (opp?.PolicyShadow?.ExpirationDate.HasValue == true)
             return opp.PolicyShadow.ExpirationDate;
-        return opp.EffectiveDateTarget;
+        return opp?.EffectiveDateTarget;
     }
 
     // ── Sort ─────────────────────────────────────────────────────────────────
@@ -574,7 +594,7 @@ else
                 accountOppMap[acc.Id].Add(opp);
         }
 
-        // Generate AccountRow for each opp
+        // Generate AccountRow for each opp (ADO#1016: use stored HubSpot fields with fallback)
         var allRows = new List<AccountRow>();
         foreach (var acc in _accounts)
         {
@@ -582,7 +602,17 @@ else
             var accountStatus = GetAccountStatus(acc, accOpps);
             if (!accOpps.Any())
             {
-                allRows.Add(new AccountRow(acc, null, "Not Working", "Inactive", null, null, null, null));
+                // No opps: use stored HubSpot fields for coverage/carrier/expiry
+                allRows.Add(new AccountRow(
+                    Account:       acc,
+                    Opp:           null,
+                    OppStatus:     "Not Working",
+                    AccountStatus: accountStatus,
+                    CoverageLine:  GetCoverageLine(acc, null),
+                    Carrier:       GetCarrier(acc, null),
+                    ExpDate:       GetExpDate(acc, null),
+                    Premium:       null
+                ));
                 continue;
             }
             foreach (var opp in accOpps)
@@ -592,9 +622,9 @@ else
                     Opp:           opp,
                     OppStatus:     GetOppStatus(opp),
                     AccountStatus: accountStatus,
-                    CoverageLine:  GetCoverageLine(opp),
-                    Carrier:       GetCarrier(opp),
-                    ExpDate:       GetExpDate(opp),
+                    CoverageLine:  GetCoverageLine(acc, opp),
+                    Carrier:       GetCarrier(acc, opp),
+                    ExpDate:       GetExpDate(acc, opp),
                     Premium:       opp.EstimatedPremium
                 ));
             }
@@ -657,14 +687,23 @@ else
             var accountStatus = GetAccountStatus(acc, accOpps);
             var inPipeline = accOpps.Count(o => !o.IsClosed && o.LifecycleStage < LifecycleStage.Bound && o.LifecycleStage != LifecycleStage.ClosedNotBound);
             var bound = accOpps.Count(o => o.LifecycleStage == LifecycleStage.Bound && !o.IsClosed);
-            var nextExp = accOpps
-                .Where(o => GetExpDate(o).HasValue)
-                .Select(o => GetExpDate(o)!.Value)
-                .OrderBy(d => d)
-                .FirstOrDefault();
+            // ADO#1016: prefer stored HubSpot expiry, fallback to opp-derived
+            DateOnly? nextExp = null;
+            if (acc.PolicyExpiresAt.HasValue)
+            {
+                nextExp = DateOnly.FromDateTime(acc.PolicyExpiresAt.Value);
+            }
+            else if (accOpps.Any())
+            {
+                var oppExp = accOpps
+                    .Select(o => GetExpDate(acc, o))
+                    .Where(d => d.HasValue)
+                    .OrderBy(d => d)
+                    .FirstOrDefault();
+                nextExp = oppExp;
+            }
             var totalPrem = accOpps.Sum(o => o.EstimatedPremium ?? 0m);
-            return new CompanyRow(acc, accountStatus, inPipeline, bound,
-                nextExp == default ? (DateOnly?)null : nextExp, totalPrem);
+            return new CompanyRow(acc, accountStatus, inPipeline, bound, nextExp, totalPrem);
         }).ToList();
     }
 

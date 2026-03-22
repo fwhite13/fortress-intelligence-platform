@@ -226,6 +226,12 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.Property(x => x.IsRenewal).HasColumnName("is_renewal");
             e.Property(x => x.ProgramVerticalId).HasColumnType("char(36)").HasColumnName("program_vertical_id");
+            // ADO#1016 — HubSpot field mapping columns
+            e.Property(x => x.AccountStatus).HasMaxLength(20).HasColumnName("account_status");
+            e.Property(x => x.PrimaryCoverage).HasMaxLength(100).HasColumnName("primary_coverage");
+            e.Property(x => x.PrimaryCarrier).HasMaxLength(100).HasColumnName("primary_carrier");
+            e.Property(x => x.PolicyExpiresAt).HasColumnName("policy_expires_at");
+            e.Property(x => x.PrimaryDealId).HasMaxLength(50).HasColumnName("primary_deal_id");
             e.HasIndex(x => new { x.AffinityId, x.CompanyName });
         });
 

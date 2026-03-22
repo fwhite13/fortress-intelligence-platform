@@ -367,6 +367,13 @@ var logger = app.Logger;
         await TryAddColumnAsync("ALTER TABLE accounts ADD COLUMN is_renewal TINYINT(1) NOT NULL DEFAULT 0");
         await TryAddColumnAsync("ALTER TABLE accounts ADD COLUMN program_vertical_id CHAR(36) NULL");
 
+        // ADO#1016 — HubSpot field mapping columns
+        await TryAddColumnAsync("ALTER TABLE accounts ADD COLUMN account_status VARCHAR(20) NULL");
+        await TryAddColumnAsync("ALTER TABLE accounts ADD COLUMN primary_coverage VARCHAR(100) NULL");
+        await TryAddColumnAsync("ALTER TABLE accounts ADD COLUMN primary_carrier VARCHAR(100) NULL");
+        await TryAddColumnAsync("ALTER TABLE accounts ADD COLUMN policy_expires_at DATETIME NULL");
+        await TryAddColumnAsync("ALTER TABLE accounts ADD COLUMN primary_deal_id VARCHAR(50) NULL");
+
         // Quote Comparison — new tables
         await db.Database.ExecuteSqlRawAsync("""
             CREATE TABLE IF NOT EXISTS program_verticals (

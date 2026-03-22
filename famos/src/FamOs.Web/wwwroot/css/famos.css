@@ -962,14 +962,24 @@
 }
 
 /* ── Sprint 8: Accounts table ────────────────────────────── */
+/* ADO#1016: Fixed 7-column grid layout with nowrap to prevent overflow */
 .famos-account-table-header,
 .famos-account-row {
     display: grid;
-    grid-template-columns: 2fr 1fr 120px 140px 32px;
-    gap: 12px;
+    /* Member(25%) Status(10%) Coverage(12%) Carrier(12%) OppStatus(13%) ExpDate(10%) Premium(10%) */
+    grid-template-columns: minmax(180px, 2fr) 90px 110px 110px 110px 100px 100px;
+    gap: 8px;
     padding: 10px 16px;
     align-items: center;
 }
+.famos-account-table-header > div,
+.famos-account-row > div {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0; /* allow flex shrink */
+}
+.famos-account-col-member { overflow: visible; white-space: normal; } /* allow name wrap */
 .famos-account-table-header {
     background: var(--cream);
     font-size: 10px;
