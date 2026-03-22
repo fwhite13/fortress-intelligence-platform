@@ -8,6 +8,7 @@
 @inject IDialogService DialogService
 @inject OpportunityService OppService
 @inject IOptions<AffinityConfig> AffinityOptions
+@inject ILogger<Accounts> _logger
 @using FamOs.Web.Data.Entities
 @using FamOs.Web.Services
 @using FamOs.Web.Theme
@@ -98,6 +99,11 @@
 
     <MudButton Class="famos-btn-outline-sm" OnClick="ClearFilters">Clear</MudButton>
 </div>
+
+@if (_loadError != null)
+{
+    <MudAlert Severity="Severity.Error" Class="mb-3">@_loadError</MudAlert>
+}
 
 @if (_loading)
 {
@@ -423,6 +429,7 @@ else
     private bool              _loading       = true;
     private bool              _syncing       = false;
     private DateTime?         _lastSyncTime;
+    private string?           _loadError;
 
     // ── Filters ─────────────────────────────────────────────────────────────
     private string _search              = "";
@@ -723,21 +730,33 @@ else
 
     private async Task LoadAsync()
     {
-        _loading = true;
-        var affinityId = await AffinitySvc.GetCurrentAffinityIdAsync();
-        await using var db = await DbFactory.CreateDbContextAsync();
-        _accounts = await db.Accounts
-            .Where(a => a.AffinityId == affinityId)
-            .OrderBy(a => a.CompanyName)
-            .ToListAsync();
-        _opps = await db.Opportunities
-            .Include(o => o.Submissions)
-            .Include(o => o.PolicyShadow)
-            .Where(o => o.AffinityId == affinityId)
-            .ToListAsync();
-        _lastSyncTime = _accounts.Any() ? _accounts.Max(a => a.LastSyncedAt) : null;
-        RebuildFiltered();
-        _loading = false;
+        _loading   = true;
+        _loadError = null;
+        try
+        {
+            var affinityId = await AffinitySvc.GetCurrentAffinityIdAsync();
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _accounts = await db.Accounts
+                .Where(a => a.AffinityId == affinityId)
+                .OrderBy(a => a.CompanyName)
+                .ToListAsync();
+            _opps = await db.Opportunities
+                .Include(o => o.Submissions)
+                .Include(o => o.PolicyShadow)
+                .Where(o => o.AffinityId == affinityId)
+                .ToListAsync();
+            _lastSyncTime = _accounts.Any() ? _accounts.Max(a => a.LastSyncedAt) : null;
+            RebuildFiltered();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load accounts");
+            _loadError = "Failed to load accounts. Please refresh.";
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private async Task SyncNow()
@@ -847,9 +866,9 @@ else
         var today = DateOnly.FromDateTime(DateTime.Today);
         var days  = expDate.Value.DayNumber - today.DayNumber;
         var (color, weight) = days <= 30
-            ? ("#dc2626", "700")
+            ? ("#CC2200", "700")
             : days <= 90
-                ? ("#d97706", "600")
+                ? ("#E8A020", "600")
                 : ("inherit", "400");
         builder.OpenElement(0, "span");
         builder.AddAttribute(1, "style", $"color:{color}; font-weight:{weight}; font-size:13px;");

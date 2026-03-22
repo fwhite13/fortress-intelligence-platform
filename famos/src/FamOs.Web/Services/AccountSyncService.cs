@@ -137,52 +137,67 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
 
         // ── Step 4: Upsert accounts with mapped data ──────────────────────
         var now = DateTime.UtcNow;
+
+        // Pre-load all existing accounts for this affinityId to avoid N+1 queries
+        var existingAccounts = await db.Accounts
+            .Where(a => a.AffinityId == affinityId)
+            .ToDictionaryAsync(a => a.HubSpotId ?? "", a => a, ct);
+
         foreach (var company in companies)
         {
             if (string.IsNullOrEmpty(company.Properties?.Name)) continue;
 
-            // Find primary deal for this company
-            HsDeal? primaryDeal = null;
-            if (companyDeals.TryGetValue(company.Id ?? "", out var dealIds))
+            try
             {
-                primaryDeal = PickPrimaryDeal(dealIds, dealLookup);
-            }
-
-            var existing = await db.Accounts
-                .FirstOrDefaultAsync(a => a.HubSpotId == company.Id && a.AffinityId == affinityId, ct);
-
-            var accountStatus = MapLifecycleToStatus(company.Properties.Lifecyclestage);
-            var (coverage, carrier, expiresAt) = ExtractDealFields(primaryDeal);
-
-            if (existing == null)
-            {
-                db.Accounts.Add(new Account
+                // Find primary deal for this company
+                HsDeal? primaryDeal = null;
+                if (companyDeals.TryGetValue(company.Id ?? "", out var dealIds))
                 {
-                    AffinityId      = affinityId,
-                    CompanyName     = company.Properties.Name,
-                    HubSpotId       = company.Id,
-                    City            = company.Properties.City,
-                    State           = company.Properties.State,
-                    AccountStatus   = accountStatus,
-                    PrimaryCoverage = coverage,
-                    PrimaryCarrier  = carrier,
-                    PolicyExpiresAt = expiresAt,
-                    PrimaryDealId   = primaryDeal?.Id,
-                    LastSyncedAt    = now,
-                });
+                    primaryDeal = PickPrimaryDeal(dealIds, dealLookup);
+                }
+
+                existingAccounts.TryGetValue(company.Id ?? "", out var existing);
+
+                var accountStatus = MapLifecycleToStatus(company.Properties.Lifecyclestage);
+                var (coverage, carrier, expiresAt) = ExtractDealFields(primaryDeal);
+
+                if (existing == null)
+                {
+                    var account = new Account
+                    {
+                        AffinityId      = affinityId,
+                        CompanyName     = company.Properties.Name,
+                        HubSpotId       = company.Id,
+                        City            = company.Properties.City,
+                        State           = company.Properties.State,
+                        AccountStatus   = accountStatus,
+                        PrimaryCoverage = coverage,
+                        PrimaryCarrier  = carrier,
+                        PolicyExpiresAt = expiresAt,
+                        PrimaryDealId   = primaryDeal?.Id,
+                        LastSyncedAt    = now,
+                    };
+                    db.Accounts.Add(account);
+                    existingAccounts[company.Id ?? ""] = account;
+                }
+                else
+                {
+                    existing.CompanyName     = company.Properties.Name;
+                    existing.City            = company.Properties.City;
+                    existing.State           = company.Properties.State;
+                    existing.AccountStatus   = accountStatus;
+                    existing.PrimaryCoverage = coverage;
+                    existing.PrimaryCarrier  = carrier;
+                    existing.PolicyExpiresAt = expiresAt;
+                    existing.PrimaryDealId   = primaryDeal?.Id;
+                    existing.LastSyncedAt    = now;
+                    existing.UpdatedAt       = now;
+                }
             }
-            else
+            catch (Exception ex)
             {
-                existing.CompanyName     = company.Properties.Name;
-                existing.City            = company.Properties.City;
-                existing.State           = company.Properties.State;
-                existing.AccountStatus   = accountStatus;
-                existing.PrimaryCoverage = coverage;
-                existing.PrimaryCarrier  = carrier;
-                existing.PolicyExpiresAt = expiresAt;
-                existing.PrimaryDealId   = primaryDeal?.Id;
-                existing.LastSyncedAt    = now;
-                existing.UpdatedAt       = now;
+                _logger.LogError(ex, "Error processing company {CompanyId} — skipping", company.Id);
+                // continue to next company
             }
         }
 
@@ -334,12 +349,14 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
         {
             return openDeals
                 .OrderByDescending(d => ParseDate(d.Properties?.Closedate))
+                .ThenByDescending(d => d.Id)
                 .First();
         }
 
         // All closed — pick most recent
         return matchedDeals
             .OrderByDescending(d => ParseDate(d.Properties?.Closedate))
+            .ThenByDescending(d => d.Id)
             .First();
     }
 
@@ -365,8 +382,8 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
             "marketingqualifiedlead" => "Prospect",
             "salesqualifiedlead" => "Prospect",
             "opportunity" => "Prospect",
-            "evangelist" => "Active",  // long-term customer
-            "other" => "Prospect",
+            "evangelist" => "Prospect",
+            "other" => "Inactive",
             _ => "Inactive"
         };
     }
@@ -390,9 +407,9 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
             ?? props.Carrier;
 
         // Expiration: try multiple possible property names
+        // Note: closedate is the deal won/close date — NOT the policy expiration date, so it is not used as a fallback
         var expiresAt = ParseDate(props.PolicyExpirationDate)
-            ?? ParseDate(props.ExpirationDate)
-            ?? ParseDate(props.Closedate);
+            ?? ParseDate(props.ExpirationDate);
 
         return (coverage, carrier, expiresAt);
     }
