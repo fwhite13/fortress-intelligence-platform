@@ -14,6 +14,7 @@
 @inject IIncumbentPolicyService IncumbentPolicyService
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
+@inject ILogger<QuoteComparison> Logger
 
 <PageTitle>Quote Comparison — FAM OS</PageTitle>
 
@@ -246,24 +247,44 @@ else
 
     private async Task HandleRequirementToggled(string slug)
     {
-        if (_state.CheckedRequirements.Contains(slug))
-            _state.CheckedRequirements.Remove(slug);
-        else
-            _state.CheckedRequirements.Add(slug);
+        try
+        {
+            if (_state.CheckedRequirements.Contains(slug))
+                _state.CheckedRequirements.Remove(slug);
+            else
+                _state.CheckedRequirements.Add(slug);
 
-        await ReevaluateGapsAndAlerts();
-        StateHasChanged();
+            await ReevaluateGapsAndAlerts();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "HandleRequirementToggled failed");
+            Snackbar.Add("Failed to toggle requirement.", Severity.Error);
+            StateHasChanged();
+        }
     }
 
     private async Task HandleRequirementsCleared()
     {
-        _state.CheckedRequirements.Clear();
-        await ReevaluateGapsAndAlerts();
-        StateHasChanged();
+        try
+        {
+            _state.CheckedRequirements.Clear();
+            await ReevaluateGapsAndAlerts();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "HandleRequirementsCleared failed");
+            Snackbar.Add("Failed to clear requirements.", Severity.Error);
+            StateHasChanged();
+        }
     }
 
     private async Task HandleQuoteSelected(QuoteSelectionArgs args)
     {
+        try
+        {
         var selections = args.Package == "A" ? _state.PackageASelections : _state.PackageBSelections;
         var autoBundled = args.Package == "A" ? _state.AutoBundledA : _state.AutoBundledB;
 
@@ -294,6 +315,13 @@ else
 
         await ReevaluateGapsAndAlerts();
         StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "HandleQuoteSelected failed");
+            Snackbar.Add("Failed to update selection.", Severity.Error);
+            StateHasChanged();
+        }
     }
 
     private void HandleBlockCollapsed(string lineSlug)
@@ -319,17 +347,26 @@ else
 
     private async Task HandleSaveDraft()
     {
-        var draft = new DraftStateDto
+        try
         {
-            CheckedRequirements = _state.CheckedRequirements,
-            PackageASelections = _state.PackageASelections,
-            PackageBSelections = _state.PackageBSelections,
-            ShowIncumbent = _state.ShowIncumbent,
-            CollapsedBlocks = _state.CollapsedBlocks
-        };
+            var draft = new DraftStateDto
+            {
+                CheckedRequirements = _state.CheckedRequirements,
+                PackageASelections = _state.PackageASelections,
+                PackageBSelections = _state.PackageBSelections,
+                ShowIncumbent = _state.ShowIncumbent,
+                CollapsedBlocks = _state.CollapsedBlocks
+            };
 
-        await QuoteComparisonService.SaveDraftAsync(AccountId, _userId, _tenantId, draft);
-        Snackbar.Add("Draft saved", Severity.Success);
+            await QuoteComparisonService.SaveDraftAsync(AccountId, _userId, _tenantId, draft);
+            Snackbar.Add("Draft saved", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "HandleSaveDraft failed");
+            Snackbar.Add("Failed to save draft.", Severity.Error);
+            StateHasChanged();
+        }
     }
 
     private void HandleComparePkgs()
@@ -421,39 +458,57 @@ else
 
     private async Task HandleCarrierNoteUpdated(CarrierNoteArgs args)
     {
-        await CarrierNoteService.SaveNoteAsync(AccountId, args.QuoteId, _userId, _tenantId, args.NoteText);
-        _carrierNotes[args.QuoteId] = args.NoteText;
-        Snackbar.Add("Note saved", Severity.Success);
-        StateHasChanged();
+        try
+        {
+            await CarrierNoteService.SaveNoteAsync(AccountId, args.QuoteId, _userId, _tenantId, args.NoteText);
+            _carrierNotes[args.QuoteId] = args.NoteText;
+            Snackbar.Add("Note saved", Severity.Success);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "HandleCarrierNoteUpdated failed");
+            Snackbar.Add("Failed to save carrier note.", Severity.Error);
+            StateHasChanged();
+        }
     }
 
     private async Task HandleEditIncumbent(Guid lineOfBusinessId)
     {
-        var lob = _context!.Lines.FirstOrDefault(l => l.Id == lineOfBusinessId);
-        if (lob == null) return;
-
-        var existing = _context.Incumbents.GetValueOrDefault(lineOfBusinessId);
-
-        var parameters = new DialogParameters<IncumbentManualEntryPanel>
+        try
         {
-            { x => x.Lob, lob },
-            { x => x.Existing, existing }
-        };
+            var lob = _context!.Lines.FirstOrDefault(l => l.Id == lineOfBusinessId);
+            if (lob == null) return;
 
-        var dialog = await DialogService.ShowAsync<IncumbentManualEntryPanel>(
-            $"Edit Incumbent — {lob.Name}",
-            parameters,
-            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+            var existing = _context.Incumbents.GetValueOrDefault(lineOfBusinessId);
 
-        var result = await dialog.Result;
-        if (result?.Data is IncumbentUpsertDto dto)
+            var parameters = new DialogParameters<IncumbentManualEntryPanel>
+            {
+                { x => x.Lob, lob },
+                { x => x.Existing, existing }
+            };
+
+            var dialog = await DialogService.ShowAsync<IncumbentManualEntryPanel>(
+                $"Edit Incumbent — {lob.Name}",
+                parameters,
+                new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+
+            var result = await dialog.Result;
+            if (result?.Data is IncumbentUpsertDto dto)
+            {
+                var saved = await IncumbentPolicyService.UpsertIncumbentAsync(dto);
+                _context.Incumbents[lineOfBusinessId] = saved;
+                CalculateIncumbentTotal();
+                await ReevaluateGapsAndAlerts();
+                StateHasChanged();
+                Snackbar.Add("Incumbent policy updated", Severity.Success);
+            }
+        }
+        catch (Exception ex)
         {
-            var saved = await IncumbentPolicyService.UpsertIncumbentAsync(dto);
-            _context.Incumbents[lineOfBusinessId] = saved;
-            CalculateIncumbentTotal();
-            await ReevaluateGapsAndAlerts();
+            Logger.LogError(ex, "HandleEditIncumbent failed");
+            Snackbar.Add("Failed to update incumbent policy.", Severity.Error);
             StateHasChanged();
-            Snackbar.Add("Incumbent policy updated", Severity.Success);
         }
     }
 

@@ -3,9 +3,13 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.AspNetCore.DataProtection;
 using MySqlConnector;
 using Amazon.S3;
+using Amazon.BedrockRuntime;
 using Amazon.Extensions.NETCore.Setup;
+using System.Text;
+using System.Text.Json;
 using FamOs.Web;
 using FamOs.Web.Data;
+using FamOs.Web.Data.Seeds;
 using FamOs.Web.Domain;
 using FamOs.Web.Services;
 using FamOs.Web.Components;
@@ -109,6 +113,7 @@ builder.Services.AddDataProtection()
 // AWS S3 — uses ECS task role (no explicit credentials needed)
 builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
 builder.Services.AddAWSService<IAmazonS3>();
+builder.Services.AddAWSService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
 builder.Services.AddScoped<IDocumentService, DocumentService>();
 builder.Services.AddScoped<UwCompletenessService>();
 builder.Services.AddScoped<OpportunitySearchService>();
@@ -574,6 +579,22 @@ var logger = app.Logger;
     }
 }
 
+// Quote Comparison seed data
+{
+    using var seedScope = app.Services.CreateScope();
+    var seedFactory = seedScope.ServiceProvider.GetRequiredService<IDbContextFactory<FamOsDbContext>>();
+    await using var seedDb = await seedFactory.CreateDbContextAsync();
+    try
+    {
+        await QuoteComparisonSeed.SeedAsync(seedDb);
+        Console.WriteLine("[FAM OS] Quote comparison seed data checked.");
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Quote comparison seed failed (may be first run before tables exist)");
+    }
+}
+
 // ── Middleware pipeline ──
 if (!app.Environment.IsDevelopment())
 {
@@ -665,6 +686,53 @@ app.MapGet("/qa/login", async (HttpContext ctx) =>
     return Results.Redirect(returnUrl);
 }).AllowAnonymous().DisableAntiforgery();
 
+// ── FAIT AI Assistant endpoint ──
+app.MapPost("/api/fait/ask", async (FaitAskRequest req, IAmazonBedrockRuntime bedrock, ILogger<Program> log) =>
+{
+    try
+    {
+        var systemPrompt = BuildFaitSystemPrompt(req);
+        var payload = JsonSerializer.Serialize(new
+        {
+            anthropic_version = "bedrock-2023-05-31",
+            max_tokens = 1024,
+            system = systemPrompt,
+            messages = new[] { new { role = "user", content = req.Question } }
+        });
+        var invokeReq = new Amazon.BedrockRuntime.Model.InvokeModelRequest
+        {
+            ModelId = "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            Body = new MemoryStream(Encoding.UTF8.GetBytes(payload)),
+            ContentType = "application/json"
+        };
+        var response = await bedrock.InvokeModelAsync(invokeReq);
+        using var reader = new StreamReader(response.Body);
+        var raw = await reader.ReadToEndAsync();
+        var doc = JsonDocument.Parse(raw);
+        var text = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString() ?? "";
+        return Results.Ok(new { answer = text });
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "FAIT ask endpoint failed");
+        return Results.Problem("AI assistant temporarily unavailable.");
+    }
+}).RequireAuthorization().DisableAntiforgery();
+
+static string BuildFaitSystemPrompt(FaitAskRequest req)
+{
+    var sb = new StringBuilder();
+    sb.AppendLine("You are FAIT, an AI insurance assistant for FAM OS. You help agents analyze carrier quotes and make package decisions.");
+    sb.AppendLine("Be concise, specific, and actionable. Focus on coverage gaps, value, and risk.");
+    if (req.CheckedRequirements?.Any() == true)
+        sb.AppendLine($"Active requirements: {string.Join(", ", req.CheckedRequirements)}");
+    if (req.SelectedPackageA?.Any() == true)
+        sb.AppendLine($"Package A lines: {string.Join(", ", req.SelectedPackageA.Keys)}");
+    if (req.SelectedPackageB?.Any() == true)
+        sb.AppendLine($"Package B lines: {string.Join(", ", req.SelectedPackageB.Keys)}");
+    return sb.ToString();
+}
+
 // ── Auth redirect helper ──
 app.MapGet("/auth/redirect-to-login", (HttpContext ctx) =>
 {
@@ -680,8 +748,48 @@ app.MapGet("/auth/logout", async (HttpContext ctx) =>
     return Results.Redirect(faitUrl);
 }).AllowAnonymous().DisableAntiforgery();
 
+// ── FAIT AI Assistant endpoint ──
+app.MapPost("/api/fait/ask", async (FaitAskRequest req, Amazon.BedrockRuntime.IAmazonBedrockRuntime bedrock, ILogger<Program> log) =>
+{
+    try
+    {
+        var systemPrompt = req.SystemContext ?? "You are a helpful insurance AI assistant for FAM OS.";
+        var body = System.Text.Json.JsonSerializer.Serialize(new {
+            anthropic_version = "bedrock-2023-05-31",
+            max_tokens = 1024,
+            system = systemPrompt,
+            messages = new[] { new { role = "user", content = req.Question } }
+        });
+        var response = await bedrock.InvokeModelAsync(new Amazon.BedrockRuntime.Model.InvokeModelRequest {
+            ModelId = "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(body)),
+            ContentType = "application/json"
+        });
+        using var reader = new StreamReader(response.Body);
+        var raw = await reader.ReadToEndAsync();
+        var doc = System.Text.Json.JsonDocument.Parse(raw);
+        var text = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString() ?? "";
+        return Results.Ok(new { answer = text });
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "FAIT ask failed");
+        return Results.Problem("AI assistant temporarily unavailable.");
+    }
+});
+
 // ── Blazor Server ──
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+record FaitAskRequest(
+    string Question,
+    Guid AccountId,
+    Dictionary<string, Guid>? SelectedPackageA,
+    Dictionary<string, Guid>? SelectedPackageB,
+    List<string>? CheckedRequirements
+);
+
+record FaitAskRequest(string Question, string? SystemContext);

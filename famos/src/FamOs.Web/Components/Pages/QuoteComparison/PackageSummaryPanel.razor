@@ -7,7 +7,7 @@
         @* Package A Box *@
         <div class="qc-pkg-box @(State.ActivePackage == "A" ? "active" : "")"
              style="padding:12px; border-radius:8px; cursor:pointer; border:2px solid @(State.ActivePackage == "A" ? "#0066cc" : "var(--border)"); background:@(State.ActivePackage == "A" ? "rgba(0,102,204,0.05)" : "#fff");"
-             @onclick='() => OnActivePackageChanged.InvokeAsync("A")'>
+             @onclick='async () => await OnActivePackageChanged.InvokeAsync("A")'>
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-size:12px; font-weight:600; color:#0066cc;">Package A</span>
                 <span style="font-size:10px; color:var(--muted);">@_pkgALineCount lines</span>
@@ -20,7 +20,7 @@
         @* Package B Box *@
         <div class="qc-pkg-box @(State.ActivePackage == "B" ? "active" : "")"
              style="padding:12px; border-radius:8px; cursor:pointer; border:2px solid @(State.ActivePackage == "B" ? "#8b5cf6" : "var(--border)"); background:@(State.ActivePackage == "B" ? "rgba(139,92,246,0.05)" : "#fff");"
-             @onclick='() => OnActivePackageChanged.InvokeAsync("B")'>
+             @onclick='async () => await OnActivePackageChanged.InvokeAsync("B")'>
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-size:12px; font-weight:600; color:#8b5cf6;">Package B</span>
                 <span style="font-size:10px; color:var(--muted);">@_pkgBLineCount lines</span>
@@ -125,20 +125,20 @@
         <MudButton Variant="Variant.Outlined"
                    Color="Color.Default"
                    FullWidth="true"
-                   OnClick="() => OnSaveDraftClicked.InvokeAsync()">
+                   OnClick="async () => await OnSaveDraftClicked.InvokeAsync()">
             Save Draft
         </MudButton>
         <MudButton Variant="Variant.Outlined"
                    Color="Color.Primary"
                    FullWidth="true"
-                   OnClick="() => OnComparePkgsClicked.InvokeAsync()">
+                   OnClick="async () => await OnComparePkgsClicked.InvokeAsync()">
             Compare Packages
         </MudButton>
         <MudButton Variant="Variant.Filled"
                    Color="Color.Primary"
                    FullWidth="true"
                    Disabled="@(!_hasAnySelection)"
-                   OnClick="() => OnBuildProposalClicked.InvokeAsync()">
+                   OnClick="async () => await OnBuildProposalClicked.InvokeAsync()">
             Build Proposal
         </MudButton>
 
@@ -148,13 +148,13 @@
                 <MudButton Variant="Variant.Text"
                            Color="Color.Error"
                            Size="Size.Small"
-                           OnClick='() => OnClearPackageClicked.InvokeAsync("A")'>
+                           OnClick='async () => await OnClearPackageClicked.InvokeAsync("A")'>
                     Clear A
                 </MudButton>
                 <MudButton Variant="Variant.Text"
                            Color="Color.Error"
                            Size="Size.Small"
-                           OnClick='() => OnClearPackageClicked.InvokeAsync("B")'>
+                           OnClick='async () => await OnClearPackageClicked.InvokeAsync("B")'>
                     Clear B
                 </MudButton>
             </div>
