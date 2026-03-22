@@ -128,6 +128,11 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
         var deals = await FetchAllDealsAsync(client, ct);
         _logger.LogInformation("[AccountSync] Fetched {Count} deals", deals.Count);
 
+        if (!deals.Any())
+        {
+            _logger.LogWarning("[AccountSync] No deals found in HubSpot — coverage/carrier/expiration will be empty for all accounts");
+        }
+
         // ── Step 3: Fetch company→deal associations ───────────────────────
         var companyDeals = await FetchCompanyDealAssociationsAsync(client, companies, ct);
         _logger.LogInformation("[AccountSync] Fetched associations for {Count} companies", companyDeals.Count);
@@ -158,7 +163,7 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
 
                 existingAccounts.TryGetValue(company.Id ?? "", out var existing);
 
-                var accountStatus = MapLifecycleToStatus(company.Properties.Lifecyclestage);
+                var accountStatus = MapLifecycleToStatus(company.Properties.Lifecyclestage, company.Properties.HsLeadStatus);
                 var (coverage, carrier, expiresAt) = ExtractDealFields(primaryDeal);
 
                 if (existing == null)
@@ -203,6 +208,13 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
 
         await db.SaveChangesAsync(ct);
         await RefreshOppCountsAsync(affinityId);
+
+        var statusCounts = existingAccounts.Values
+            .GroupBy(a => a.AccountStatus ?? "NULL")
+            .ToDictionary(g => g.Key, g => g.Count());
+        _logger.LogInformation("[AccountSync] Status distribution: {Counts}",
+            string.Join(", ", statusCounts.Select(kv => $"{kv.Key}={kv.Value}")));
+
         _logger.LogInformation("[AccountSync] Sync complete for {Aff}", affinityId);
     }
 
@@ -369,23 +381,43 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
 
     // ── Map lifecyclestage to AccountStatus ───────────────────────────────
 
-    private string MapLifecycleToStatus(string? lifecyclestage)
+    private string MapLifecycleToStatus(string? lifecyclestage, string? hsLeadStatus = null)
     {
-        if (string.IsNullOrEmpty(lifecyclestage))
-            return "Inactive";
-
-        return lifecyclestage.ToLowerInvariant() switch
+        // Primary: use lifecyclestage
+        if (!string.IsNullOrEmpty(lifecyclestage))
         {
-            "customer" => "Active",
-            "lead" => "Prospect",
-            "subscriber" => "Prospect",
-            "marketingqualifiedlead" => "Prospect",
-            "salesqualifiedlead" => "Prospect",
-            "opportunity" => "Prospect",
-            "evangelist" => "Prospect",
-            "other" => "Inactive",
-            _ => "Inactive"
-        };
+            var mapped = lifecyclestage.ToLowerInvariant() switch
+            {
+                "customer"                => "Active",
+                "lead"                    => "Prospect",
+                "subscriber"              => "Prospect",
+                "marketingqualifiedlead"  => "Prospect",
+                "salesqualifiedlead"      => "Prospect",
+                "opportunity"             => "Prospect",
+                "evangelist"              => "Active",   // evangelists are happy customers
+                "other"                   => "Inactive",
+                _                         => (string?)null
+            };
+            if (mapped != null) return mapped;
+        }
+
+        // Secondary: check hs_lead_status for more specific info
+        if (!string.IsNullOrEmpty(hsLeadStatus))
+        {
+            return hsLeadStatus.ToUpperInvariant() switch
+            {
+                "OPEN_DEAL"   => "Active",    // has an open deal = active relationship
+                "CONNECTED"   => "Prospect",
+                "IN_PROGRESS" => "Prospect",
+                "OPEN"        => "Prospect",
+                "NEW"         => "Prospect",
+                "UNQUALIFIED" => "Inactive",
+                "BAD_TIMING"  => "Inactive",
+                _             => "Prospect"
+            };
+        }
+
+        return "Inactive";
     }
 
     // ── Extract deal fields ───────────────────────────────────────────────
