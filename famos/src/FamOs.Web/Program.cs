@@ -748,36 +748,6 @@ app.MapGet("/auth/logout", async (HttpContext ctx) =>
     return Results.Redirect(faitUrl);
 }).AllowAnonymous().DisableAntiforgery();
 
-// ── FAIT AI Assistant endpoint ──
-app.MapPost("/api/fait/ask", async (FaitAskRequest req, Amazon.BedrockRuntime.IAmazonBedrockRuntime bedrock, ILogger<Program> log) =>
-{
-    try
-    {
-        var systemPrompt = req.SystemContext ?? "You are a helpful insurance AI assistant for FAM OS.";
-        var body = System.Text.Json.JsonSerializer.Serialize(new {
-            anthropic_version = "bedrock-2023-05-31",
-            max_tokens = 1024,
-            system = systemPrompt,
-            messages = new[] { new { role = "user", content = req.Question } }
-        });
-        var response = await bedrock.InvokeModelAsync(new Amazon.BedrockRuntime.Model.InvokeModelRequest {
-            ModelId = "anthropic.claude-3-5-sonnet-20240620-v1:0",
-            Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(body)),
-            ContentType = "application/json"
-        });
-        using var reader = new StreamReader(response.Body);
-        var raw = await reader.ReadToEndAsync();
-        var doc = System.Text.Json.JsonDocument.Parse(raw);
-        var text = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString() ?? "";
-        return Results.Ok(new { answer = text });
-    }
-    catch (Exception ex)
-    {
-        log.LogError(ex, "FAIT ask failed");
-        return Results.Problem("AI assistant temporarily unavailable.");
-    }
-});
-
 // ── Blazor Server ──
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
@@ -792,4 +762,4 @@ record FaitAskRequest(
     List<string>? CheckedRequirements
 );
 
-record FaitAskRequest(string Question, string? SystemContext);
+
