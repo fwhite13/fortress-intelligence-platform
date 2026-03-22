@@ -12,6 +12,7 @@
     <PackageReference Include="MySqlConnector" Version="2.*" />
     <PackageReference Include="MudBlazor" Version="7.*" />
     <PackageReference Include="AWSSDK.S3" Version="3.7.*" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" Version="3.7.*" />
     <PackageReference Include="AWSSDK.Extensions.NETCore.Setup" Version="3.7.*" />
   </ItemGroup>
   <ItemGroup>
