@@ -285,6 +285,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.IsActive).HasColumnName("is_active");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
+            e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
 
         // Package
@@ -302,6 +303,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.HasIndex(x => new { x.AccountId, x.TenantId });
+            e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
 
         // PackageSelection
@@ -317,6 +319,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.HasIndex(x => new { x.PackageId, x.LineOfBusinessId }).IsUnique();
+            e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
 
         // IncumbentPolicy
@@ -341,6 +344,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.HasIndex(x => new { x.AccountId, x.LineOfBusinessId }).IsUnique();
+            e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
 
         // CoverageRemovalAcknowledgment
@@ -361,6 +365,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.ChangeType).HasMaxLength(20).HasColumnName("change_type");
             e.HasIndex(x => new { x.AccountId, x.AcknowledgedAt });
             e.HasIndex(x => new { x.AcknowledgedByUserId, x.AcknowledgedAt });
+            e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
 
         // CarrierNote
@@ -377,6 +382,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.HasIndex(x => new { x.AccountId, x.QuoteId });
+            e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
 
         // ComparisonDraft
@@ -394,6 +400,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.CollapsedBlocks).HasColumnType("longtext").HasColumnName("collapsed_blocks");
             e.Property(x => x.SavedAt).HasColumnName("saved_at");
             e.HasIndex(x => new { x.AccountId, x.UserId }).IsUnique();
+            e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
 
         // BenchmarkPremium
@@ -411,6 +418,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.UpdatedByUserId).HasColumnType("char(36)").HasColumnName("updated_by_user_id");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.HasIndex(x => new { x.TenantId, x.ProgramVerticalId, x.LineOfBusinessId });
+            e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
 
         // CarrierBundleRule
@@ -425,20 +433,8 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.IsActive).HasColumnName("is_active");
             e.Property(x => x.Notes).HasColumnType("longtext").HasColumnName("notes");
             e.HasIndex(x => new { x.TenantId, x.CarrierName, x.PrimaryLineSlug });
+            e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
-
-        // Global query filters — TenantId scoping for Quote Comparison entities
-        m.Entity<ProgramVertical>().HasQueryFilter(e => e.TenantId == _tenantId);
-        m.Entity<LineOfBusiness>().HasQueryFilter(e => e.TenantId == _tenantId);
-        m.Entity<Requirement>().HasQueryFilter(e => e.TenantId == _tenantId);
-        m.Entity<Package>().HasQueryFilter(e => e.TenantId == _tenantId);
-        m.Entity<PackageSelection>().HasQueryFilter(e => e.TenantId == _tenantId);
-        m.Entity<IncumbentPolicy>().HasQueryFilter(e => e.TenantId == _tenantId);
-        m.Entity<CoverageRemovalAcknowledgment>().HasQueryFilter(e => e.TenantId == _tenantId);
-        m.Entity<CarrierNote>().HasQueryFilter(e => e.TenantId == _tenantId);
-        m.Entity<ComparisonDraft>().HasQueryFilter(e => e.TenantId == _tenantId);
-        m.Entity<BenchmarkPremium>().HasQueryFilter(e => e.TenantId == _tenantId);
-        m.Entity<CarrierBundleRule>().HasQueryFilter(e => e.TenantId == _tenantId);
     }
 }
 
