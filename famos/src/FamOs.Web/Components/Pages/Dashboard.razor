@@ -1,25 +1,37 @@
 @page "/"
 @attribute [Authorize]
-@inject OpportunityService OppService
+@inject DashboardService DashboardSvc
 @inject UserSessionService UserSession
 @inject NavigationManager Nav
+@inject ISnackbar Snackbar
 @using FamOs.Web.Services
-@using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
 
 <PageTitle>Dashboard — FAM OS</PageTitle>
 
+@* ══ ZONE 1: Page Header ══════════════════════════════════════════════ *@
 <div class="famos-page-header famos-page-header-row">
     <div>
-        <h2 class="famos-page-h2">Command Center</h2>
-        <p class="famos-page-sub">@DateTime.Now.ToString("dddd, MMMM d, yyyy")</p>
+        <nav class="famos-breadcrumb">
+            <span>Titan Insurance Group</span>
+            <span class="famos-breadcrumb-sep">→</span>
+            <span>Dashboard</span>
+        </nav>
+        <h2 class="famos-page-h2">Dashboard</h2>
+        <p class="famos-page-sub">@GetGreeting()</p>
     </div>
-    <div style="display:flex; gap:8px;">
-        <MudButton Class="famos-btn-outline-sm" OnClick="GoToPipeline">
-            Pipeline →
-        </MudButton>
-        <MudButton Class="famos-btn-outline-sm" OnClick="GoToTasks">
-            Tasks →
-        </MudButton>
+    <div class="famos-header-right">
+        <div class="famos-header-meta">
+            @_userName · TIG Program Manager · @DateTime.Now.ToString("MMMM yyyy")
+        </div>
+        <div class="famos-header-actions">
+            <MudButton Class="famos-btn-ghost" OnClick="@(() => Nav.NavigateTo("/pipeline"))">
+                Pipeline View →
+            </MudButton>
+            <MudButton Class="famos-btn-primary" OnClick="@(() => Nav.NavigateTo("/pipeline?new=true"))">
+                New Opportunity
+            </MudButton>
+        </div>
     </div>
 </div>
 
@@ -29,196 +41,327 @@
 }
 else if (_summary != null)
 {
-    @* ── KPI Cards ──────────────────────────────────────────────────── *@
-    <div class="famos-kpi-grid mb-5">
-        <StatCard Label="Active Opportunities"
-                  Value="@_summary.TotalActive.ToString()"
-                  AccentClass="kpi-navy"
-                  Sub="Currently in pipeline" />
-        <StatCard Label="Needs Attention"
-                  Value="@_summary.TimeRiskCount.ToString()"
-                  AccentClass="kpi-red"
-                  Sub="Urgent or at-risk" />
-        <StatCard Label="Awaiting Decision"
-                  Value="@_summary.DecisionNeeded.ToString()"
-                  AccentClass="kpi-amber"
-                  Sub="Proposal or binding stage" />
-        <StatCard Label="Bound This Month"
-                  Value="@_summary.BoundThisMonth.ToString()"
-                  AccentClass="kpi-green"
-                  Sub="@($"${_summary.TotalPremiumAtRisk:N0} at risk total")" />
+    @* ══ ZONE 2: Stat Cards (4 cards) ════════════════════════════════════ *@
+    <div class="famos-stat-grid">
+        @* Card 1: Active Pipeline *@
+        <div class="famos-stat-card" style="border-left: 3px solid #CC2200;">
+            <div class="famos-stat-label">Active Pipeline</div>
+            <div class="famos-stat-value">@_summary.ActivePipelineCount</div>
+            <div class="famos-stat-sub">Active opportunities</div>
+            @if (_summary.StaleCount > 0)
+            {
+                <span class="famos-stat-badge" style="background:#FFF8E1;color:#92400E;">
+                    @_summary.StaleCount stale
+                </span>
+            }
+        </div>
+
+        @* Card 2: Submission Queue *@
+        <div class="famos-stat-card" style="border-left: 3px solid #E8A020;">
+            <div class="famos-stat-label">Submission Queue</div>
+            <div class="famos-stat-value">@_summary.SubmissionQueueCount</div>
+            <div class="famos-stat-sub">Need submission</div>
+            @if (_summary.SubmissionQueueCount > 0)
+            {
+                <span class="famos-stat-badge" style="background:#FFEBEE;color:#CC2200;">
+                    @_summary.SubmissionQueueCount awaiting
+                </span>
+            }
+        </div>
+
+        @* Card 3: Bound Premium YTD *@
+        <div class="famos-stat-card" style="border-left: 3px solid #2E7D32;">
+            <div class="famos-stat-label">Bound Premium YTD</div>
+            <div class="famos-stat-value">@FormatPremium(_summary.BoundPremiumYtd)</div>
+            <div class="famos-stat-sub">@GetYoyComparison()</div>
+            @if (_yoyPercent > 0)
+            {
+                <span class="famos-stat-badge" style="background:#E8F5E9;color:#2E7D32;">
+                    +@_yoyPercent%
+                </span>
+            }
+        </div>
+
+        @* Card 4: All Accounts *@
+        <div class="famos-stat-card" style="border-left: 3px solid #888888;">
+            <div class="famos-stat-label">All Accounts</div>
+            <div class="famos-stat-value">@_summary.TotalAccountCount</div>
+            <div class="famos-stat-sub">Member companies</div>
+            @if (_summary.NewAccountsYtd > 0)
+            {
+                <span class="famos-stat-badge" style="background:#E8F5E9;color:#2E7D32;">
+                    +@_summary.NewAccountsYtd YTD
+                </span>
+            }
+        </div>
     </div>
 
-    <MudGrid Spacing="3">
-
-        @* ── Urgent / At-Risk Strip ──────────────────────────────────── *@
-        <MudItem xs="12" md="7">
-            <MudPaper Elevation="0"
-                      Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
-                <div style="padding:14px 16px; border-bottom:1px solid var(--border);
-                            display:flex; justify-content:space-between; align-items:center;">
-                    <MudText Typo="Typo.subtitle2" Class="famos-text-navy">
-                        Needs Attention
-                    </MudText>
-                    <MudChip T="string" Size="Size.Small" Color="Color.Error">
-                        @_summary.UrgentOpportunities.Count
-                    </MudChip>
-                </div>
-                @if (!_summary.UrgentOpportunities.Any())
+    @* ══ ZONE 3: 3-Column Panel Grid ═════════════════════════════════════ *@
+    <div class="famos-dashboard-panels">
+        @* Panel A: Accounts to Route *@
+        <div class="famos-panel">
+            <div class="famos-panel-header">
+                <h3>Accounts to Route</h3>
+            </div>
+            <div class="famos-panel-body">
+                @if (_summary.AccountsToRoute.Any())
                 {
-                    <div style="padding:24px 16px; text-align:center; color:var(--muted); font-size:13px;">
-                        All clear — no urgent items right now
-                    </div>
+                    @foreach (var acct in _summary.AccountsToRoute)
+                    {
+                        <div class="famos-route-row">
+                            <div class="famos-route-info">
+                                <div class="famos-route-company">@acct.CompanyName</div>
+                                <div class="famos-route-desc">@acct.Description</div>
+                            </div>
+                            <span class="famos-route-pill">@acct.Destination</span>
+                            <MudButton Size="Size.Small" Variant="Variant.Filled"
+                                       Color="Color.Error"
+                                       OnClick="@(() => Nav.NavigateTo(acct.CtaUrl))">
+                                @acct.CtaText
+                            </MudButton>
+                        </div>
+                    }
                 }
                 else
                 {
-                    @foreach (var opp in _summary.UrgentOpportunities)
+                    <MudAlert Severity="Severity.Success" Class="famos-empty-state">
+                        No accounts need routing right now.
+                    </MudAlert>
+                }
+            </div>
+        </div>
+
+        @* Panel B: Pipeline by Stage *@
+        <div class="famos-panel">
+            <div class="famos-panel-header">
+                <h3>Pipeline by Stage</h3>
+            </div>
+            <div class="famos-panel-body">
+                @* B1: Horizontal bar chart *@
+                @foreach (var row in _summary.PipelineByStage)
+                {
+                    var pct = _maxStageCount > 0 ? (row.Count * 100 / _maxStageCount) : 0;
+                    var color = GetStageColor(row.Stage);
+                    <div class="famos-stage-bar-row" @onclick="@(() => Nav.NavigateTo($"/pipeline?stage={(int)row.Stage}"))">
+                        <span class="famos-stage-bar-label">@GetStageName(row.Stage)</span>
+                        <div class="famos-stage-bar-track">
+                            <div class="famos-stage-bar-fill" style="width: @pct%; background: @color;"></div>
+                        </div>
+                        <span class="famos-stage-bar-count">@row.Count</span>
+                    </div>
+                }
+
+                @* B2: Overview table *@
+                <div class="famos-pipeline-divider"></div>
+                <table class="famos-pipeline-overview">
+                    <thead>
+                        <tr>
+                            <th>Stage</th>
+                            <th>Count</th>
+                            <th>Est. Premium</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _summary.PipelineByStage)
+                        {
+                            var color = GetStageColor(row.Stage);
+                            <tr @onclick="@(() => Nav.NavigateTo($"/pipeline?stage={(int)row.Stage}"))">
+                                <td>
+                                    <span class="famos-stage-pill" style="background:@color;">
+                                        @GetStageName(row.Stage)
+                                    </span>
+                                </td>
+                                <td>@row.Count</td>
+                                <td>@FormatPremium(row.TotalPremium)</td>
+                            </tr>
+                        }
+                        <tr class="famos-total-row">
+                            <td>Total</td>
+                            <td>@_summary.PipelineByStage.Sum(s => s.Count)</td>
+                            <td>@FormatPremium(_summary.PipelineByStage.Sum(s => s.TotalPremium))</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        @* Panel C: Next Tasks *@
+        <div class="famos-panel">
+            <div class="famos-panel-header">
+                <h3>Next Tasks</h3>
+            </div>
+            <div class="famos-panel-body">
+                @if (_summary.NextTasks.Any())
+                {
+                    @foreach (var task in _summary.NextTasks)
                     {
-                        <div style="display:flex; justify-content:space-between; align-items:center;
-                                    padding:10px 16px; border-bottom:1px solid var(--border);
-                                    cursor:pointer;"
-                             @onclick="() => GoToOpportunity(opp.Id)">
-                            <div>
-                                <MudText Typo="Typo.body2" Class="famos-text-navy famos-fw-600">
-                                    @opp.Name
-                                </MudText>
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                    @GetStageLabel(opp.LifecycleStage)
-                                    @(opp.EstimatedPremium.HasValue ? $" · ${opp.EstimatedPremium:N0}" : "")
-                                </MudText>
+                        var (bgColor, txtColor) = GetTaskBadgeColors(task.Priority);
+                        <div class="famos-task-row">
+                            <span class="famos-task-badge" style="background:@bgColor;color:@txtColor;">
+                                @task.Priority
+                            </span>
+                            <div class="famos-task-info">
+                                <div class="famos-task-name">@task.TaskName</div>
+                                <div class="famos-task-desc">@task.Description</div>
                             </div>
-                            <SignalChip Signal="opp.DominantSignal" />
+                            <MudButton Size="Size.Small" Variant="Variant.Filled"
+                                       Color="@(task.Priority == "URGENT" ? Color.Error : Color.Default)"
+                                       OnClick="@(() => Nav.NavigateTo($"/pipeline?opp={task.OpportunityId}"))">
+                                @task.CtaText
+                            </MudButton>
                         </div>
                     }
                 }
-            </MudPaper>
-        </MudItem>
+                else
+                {
+                    <MudAlert Severity="Severity.Success" Class="famos-empty-state">
+                        You're all caught up. No open tasks.
+                    </MudAlert>
+                }
+            </div>
+        </div>
+    </div>
 
-        @* ── Pipeline Distribution + Recent Activity ──────────────────── *@
-        <MudItem xs="12" md="5">
-            @* ── Pipeline Distribution ──────────────────────────────────── *@
-            <MudPaper Elevation="0" Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
-                <div style="padding:14px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-                    <MudText Typo="Typo.subtitle2" Class="famos-text-navy">Pipeline by Stage</MudText>
-                    <MudButton Class="famos-btn-outline-sm" OnClick="GoToPipeline">Full View →</MudButton>
-                </div>
-                <div style="padding:12px 16px;">
-                    @foreach (var stage in Enum.GetValues<LifecycleStage>()
-                        .Where(s => s != LifecycleStage.ClosedNotBound && s != LifecycleStage.Bound))
-                    {
-                        var count   = _summary!.ByStage.GetValueOrDefault(stage, 0);
-                        var premium = _summary.PremiumByStage.GetValueOrDefault(stage, 0);
-                        var pct     = _summary.TotalActive > 0 ? (double)count / _summary.TotalActive * 100 : 0;
-                        var color   = GetStageColor(stage);
-                        var label   = GetStageLabel(stage);
-                        <div style="margin-bottom:10px; cursor:pointer;"
-                             @onclick="GoToPipeline">
-                            <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:3px;">
-                                <span style="color:var(--text);">@label</span>
-                                <span style="color:var(--muted);">
-                                    @count @(premium > 0 ? $"· ${FormatPremium(premium)}" : "")
-                                </span>
-                            </div>
-                            <div style="height:8px; background:var(--border); border-radius:4px;">
-                                <div style="@($"height:8px; width:{pct:F0}%; background:{color}; border-radius:4px; transition:width 0.4s;")"></div>
-                            </div>
-                        </div>
-                    }
-                </div>
-            </MudPaper>
-
+    @* ══ ZONE 4: Recent Activity ══════════════════════════════════════════ *@
+    <div class="famos-panel famos-panel-wide">
+        <div class="famos-panel-header">
+            <h3>Recent Activity</h3>
+        </div>
+        <div class="famos-panel-body">
             @if (_summary.RecentActivity.Any())
             {
-                <MudPaper Elevation="0" Class="mt-3"
-                          Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
-                    <div style="padding:14px 16px; border-bottom:1px solid var(--border);">
-                        <MudText Typo="Typo.subtitle2" Class="famos-text-navy">Recent Activity</MudText>
-                    </div>
-                    @foreach (var act in _summary.RecentActivity)
+                <div class="famos-activity-grid">
+                    @foreach (var evt in _summary.RecentActivity)
                     {
-                        <div style="padding:8px 16px; border-bottom:1px solid var(--border);
-                                    font-size:12px; color:var(--text);">
-                            <span class="famos-text-muted">
-                                @act.OccurredAt.ToLocalTime().ToString("MMM d h:mm tt") ·
-                            </span>
-                            @act.Description
+                        <div class="famos-activity-row" @onclick="@(() => Nav.NavigateTo($"/pipeline?opp={evt.OpportunityId}"))">
+                            <span class="famos-activity-dot" style="background: @evt.DotColor;"></span>
+                            <div class="famos-activity-info">
+                                <div class="famos-activity-title">@evt.Title</div>
+                                <div class="famos-activity-desc">@evt.Description</div>
+                            </div>
+                            <span class="famos-activity-time">@RelativeTime(evt.OccurredAt)</span>
                         </div>
                     }
-                </MudPaper>
+                </div>
             }
-        </MudItem>
-        @* ── Stale Deal Alerts ──────────────────────────────────────── *@
-        @if (_summary!.StaleDeals.Any())
-        {
-            <MudItem xs="12">
-                <MudPaper Elevation="0" Style="border:1px solid var(--border); border-radius:12px; overflow:hidden;">
-                    <div style="padding:14px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-                        <MudText Typo="Typo.subtitle2" Class="famos-text-navy">⚠ Stale Deal Alerts</MudText>
-                        <MudChip T="string" Size="Size.Small" Color="Color.Warning">@_summary.StaleDeals.Count</MudChip>
-                    </div>
-                    <div style="display:flex; flex-wrap:wrap; gap:0; overflow:hidden;">
-                        @foreach (var deal in _summary.StaleDeals)
-                        {
-                            <div style="display:flex; justify-content:space-between; align-items:center;
-                                        padding:10px 16px; border-bottom:1px solid var(--border); width:100%;
-                                        cursor:pointer; @(deal.IsUrgent ? "background:#fff5f5;" : "background:#fffdf5;")"
-                                 @onclick="() => GoToOpportunity(deal.Id)">
-                                <div>
-                                    <div style="font-size:13px; font-weight:600; color:#002050;">@deal.Name</div>
-                                    <div style="font-size:11px; color:#6b7585;">@GetStageLabel(deal.Stage)</div>
-                                </div>
-                                <div class="famos-stale-badge @(deal.IsUrgent ? "famos-stale-urgent" : "famos-stale-warn")">
-                                    @deal.DaysStale&#x202F;d stale
-                                </div>
-                            </div>
-                        }
-                    </div>
-                </MudPaper>
-            </MudItem>
-        }
-    </MudGrid>
+            else
+            {
+                <MudAlert Severity="Severity.Info">No recent activity.</MudAlert>
+            }
+        </div>
+    </div>
 }
 
 @code {
-    private DashboardSummary? _summary;
+    private DashboardSummaryDto? _summary;
     private bool _loading = true;
+    private string _userName = "";
+    private string _firstName = "";
+    private int _maxStageCount;
+    private int _yoyPercent;
 
     protected override async Task OnInitializedAsync()
     {
-        _summary = await OppService.GetDashboardSummaryAsync(null);
-        _loading = false;
+        try
+        {
+            _userName = await UserSession.GetUserNameAsync();
+            _firstName = _userName.Split(' ').FirstOrDefault() ?? "User";
+
+            _summary = await DashboardSvc.GetSummaryAsync();
+            _maxStageCount = _summary.PipelineByStage.Any()
+                ? _summary.PipelineByStage.Max(s => s.Count)
+                : 1;
+
+            // Calculate YoY percentage
+            if (_summary.BoundPremiumLastYear > 0)
+            {
+                _yoyPercent = (int)((_summary.BoundPremiumYtd - _summary.BoundPremiumLastYear)
+                    / _summary.BoundPremiumLastYear * 100);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading dashboard: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
-    private static string GetStageLabel(LifecycleStage stage) => stage switch
+    private string GetGreeting()
     {
-        LifecycleStage.Intake           => "Intake",
-        LifecycleStage.UnderwritingPrep => "App Review",
-        LifecycleStage.Marketed         => "Submitted",
-        LifecycleStage.QuotesReceived   => "Quotes In",
-        LifecycleStage.ClientDecision   => "Proposal",
-        LifecycleStage.Binding          => "Binding",
-        LifecycleStage.Bound            => "Bound",
-        _                               => stage.ToString()
-    };
+        var hour = DateTime.Now.Hour;
+        var greeting = hour switch
+        {
+            >= 5 and < 12 => "Good morning",
+            >= 12 and < 18 => "Good afternoon",
+            _ => "Good evening"
+        };
+        var context = hour switch
+        {
+            >= 5 and < 12 => "Let's see what needs attention today.",
+            >= 12 and < 18 => "Here's where things stand.",
+            _ => "Wrapping up for the day."
+        };
+        return $"{greeting}, {_firstName}. {context}";
+    }
 
-    private void GoToPipeline() => Nav.NavigateTo("/pipeline");
-    private void GoToTasks() => Nav.NavigateTo("/tasks");
-    private void GoToOpportunity(Guid id) => Nav.NavigateTo($"/opportunity/{id}");
+    private string GetYoyComparison()
+    {
+        if (_yoyPercent > 0) return $"+{_yoyPercent}% vs last year";
+        if (_yoyPercent < 0) return $"{_yoyPercent}% vs last year";
+        return "vs last year";
+    }
+
+    private static string FormatPremium(decimal premium)
+    {
+        if (premium >= 1_000_000) return $"${premium / 1_000_000:N1}M";
+        if (premium >= 1_000) return $"${premium / 1_000:N0}K";
+        return $"${premium:N0}";
+    }
+
+    private static string GetStageName(LifecycleStage stage) => stage switch
+    {
+        LifecycleStage.Intake => "Prospect",
+        LifecycleStage.UnderwritingPrep => "DGT Active",
+        LifecycleStage.Marketed => "Marketing",
+        LifecycleStage.QuotesReceived => "Quoted",
+        LifecycleStage.ClientDecision => "Proposal",
+        LifecycleStage.Binding => "Binding",
+        LifecycleStage.Bound => "Bound",
+        LifecycleStage.ClosedNotBound => "Lost",
+        _ => stage.ToString()
+    };
 
     private static string GetStageColor(LifecycleStage stage) => stage switch
     {
-        LifecycleStage.Intake           => "#1d4ed8",
-        LifecycleStage.UnderwritingPrep => "#6d28d9",
-        LifecycleStage.Marketed         => "#d97706",
-        LifecycleStage.QuotesReceived   => "#0369a1",
-        LifecycleStage.ClientDecision   => "#9333ea",
-        LifecycleStage.Binding          => "#C0272D",
-        LifecycleStage.Bound            => "#059669",
-        _                               => "#6b7585",
+        LifecycleStage.Intake => "#6B7280",
+        LifecycleStage.UnderwritingPrep => "#F59E0B",
+        LifecycleStage.Marketed => "#F59E0B",
+        LifecycleStage.QuotesReceived => "#10B981",
+        LifecycleStage.ClientDecision => "#8B5CF6",
+        LifecycleStage.Binding => "#3B82F6",
+        LifecycleStage.Bound => "#111111",
+        LifecycleStage.ClosedNotBound => "#9CA3AF",
+        _ => "#6B7280"
     };
 
-    private static string FormatPremium(decimal value) =>
-        value >= 1_000_000 ? $"{value / 1_000_000:F1}M"
-        : value >= 1_000   ? $"{value / 1_000:F0}K"
-        : value.ToString("N0");
+    private static (string bg, string txt) GetTaskBadgeColors(string priority) => priority switch
+    {
+        "URGENT" => ("#FFEBEE", "#CC2200"),
+        "HIGH" => ("#FFF8E1", "#92400E"),
+        "NORMAL" => ("#E3F2FD", "#1565C0"),
+        _ => ("#F3F4F6", "#374151")
+    };
+
+    private static string RelativeTime(DateTime dt)
+    {
+        var span = DateTime.UtcNow - dt;
+        if (span.TotalMinutes < 1) return "just now";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
+        if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
+        if (span.TotalDays < 7) return $"{(int)span.TotalDays}d ago";
+        return dt.ToString("MMM d");
+    }
 }

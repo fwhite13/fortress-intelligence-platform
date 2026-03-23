@@ -127,6 +127,7 @@ builder.Services.AddScoped<IAmsService, AmsServiceStub>();
 builder.Services.AddScoped<TaskService>();
 builder.Services.AddScoped<UserAffinityService>();
 builder.Services.AddScoped<TeamNoteService>();
+builder.Services.AddScoped<DashboardService>();
 builder.Services.AddSingleton<IAccountSyncService, AccountSyncService>();
 builder.Services.AddHostedService(sp => (AccountSyncService)sp.GetRequiredService<IAccountSyncService>());
 

@@ -249,43 +249,38 @@
 .famos-pill-bound    { background: #d1fae5; color: #065f46; }
 .famos-pill-default  { background: #f3f4f6; color: #4b5563; }
 
-/* ── SIDEBAR NAVIGATION ──────────────────────────────────── */
-/* Custom nav items replace MudNavMenu treatment */
+/* ── SIDEBAR NAV (updated ADO#1017) ────────────────────────────────────── */
 .famos-nav-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
-    border-radius: 7px;
+    gap: 9px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    color: var(--nav-item-text, rgba(255,255,255,0.55));
+    font-size: 13px;
     cursor: pointer;
-    font-size: 12.5px;
-    font-weight: 500;
-    color: rgba(255,255,255,0.6);
-    transition: all 0.15s;
-    border-left: 2px solid transparent;
-    margin-bottom: 1px;
+    border-left: 2.5px solid transparent;
+    margin-left: -1px;
     text-decoration: none;
+    transition: background 0.15s, color 0.15s;
 }
-
 .famos-nav-item:hover {
-    background: rgba(255,255,255,0.05);
+    background: var(--nav-item-hover-bg, rgba(255,255,255,0.05));
     color: rgba(255,255,255,0.85);
     text-decoration: none;
 }
-
 .famos-nav-item--active,
 .famos-nav-item.active {
-    background: rgba(192,39,45,0.13);
-    color: #ffffff !important;
-    border-left-color: #C0272D;
+    background: var(--nav-active-bg, rgba(204,34,0,0.12));
+    color: #fff !important;
+    border-left-color: var(--nav-active-border, #CC2200);
+    border-radius: 0 6px 6px 0;
 }
-
 .famos-nav-item--disabled {
     opacity: 0.3;
     cursor: not-allowed;
     pointer-events: none;
 }
-
 .famos-nav-icon {
     display: flex;
     align-items: center;
@@ -294,23 +289,42 @@
     height: 16px;
     flex-shrink: 0;
 }
-
-/* Scale down MudIcon in nav */
 .famos-nav-icon .mud-icon-root {
     font-size: 16px !important;
     width: 16px !important;
     height: 16px !important;
 }
-
 .famos-nav-badge {
     margin-left: auto;
-    font-size: 9.5px;
-    font-weight: 700;
-    background: #C0272D;
+    background: var(--nav-badge-red, #CC2200);
     color: #fff;
-    padding: 1px 7px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
     border-radius: 10px;
-    flex-shrink: 0;
+}
+.famos-nav-badge.muted {
+    background: var(--nav-badge-muted-bg, rgba(255,255,255,0.15));
+    color: rgba(255,255,255,0.6);
+}
+.famos-nav-group {
+    padding: 12px 8px;
+}
+.famos-nav-section-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--nav-section-label, rgba(255,255,255,0.25));
+    padding: 0 8px 8px;
+}
+.famos-nav-section-label--spaced {
+    margin-top: 8px;
+}
+.famos-nav-divider {
+    height: 1px;
+    background: var(--nav-divider, rgba(255,255,255,0.06));
+    margin: 8px 0;
 }
 
 /* ── DRAWER FOOTER ───────────────────────────────────────── */
@@ -1121,3 +1135,358 @@
 }
 .famos-tag-tig  { background: #d1fae5; color: #065f46; }
 .famos-tag-higg { background: #fef3c7; color: #92400e; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DASHBOARD STYLES (ADO#1017)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Sidebar Nav Tokens ── */
+:root {
+    --nav-section-label: rgba(255,255,255,0.25);
+    --nav-item-text: rgba(255,255,255,0.55);
+    --nav-item-hover-bg: rgba(255,255,255,0.05);
+    --nav-active-bg: rgba(204,34,0,0.12);
+    --nav-active-border: #CC2200;
+    --nav-badge-red: #CC2200;
+    --nav-badge-muted-bg: rgba(255,255,255,0.15);
+    --nav-divider: rgba(255,255,255,0.06);
+}
+
+/* ── Zone 1: Header ── */
+.famos-breadcrumb {
+    font-size: 12px;
+    color: var(--text-muted, #6B7280);
+    margin-bottom: 4px;
+}
+.famos-breadcrumb-sep {
+    margin: 0 6px;
+    opacity: 0.5;
+}
+.famos-header-right {
+    text-align: right;
+}
+.famos-header-meta {
+    font-size: 12px;
+    color: var(--text-muted, #6B7280);
+    margin-bottom: 8px;
+}
+.famos-header-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+.famos-btn-ghost {
+    background: transparent !important;
+    border: 1px solid var(--border, #E5E7EB) !important;
+    color: var(--text-primary, #111827) !important;
+    font-size: 13px !important;
+    text-transform: none !important;
+}
+.famos-btn-ghost:hover {
+    background: var(--bg-hover, #F3F4F6) !important;
+}
+
+/* ── Zone 2: Stat Cards ── */
+.famos-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.famos-stat-card {
+    background: #fff;
+    border: 1px solid var(--border, #E5E7EB);
+    border-radius: 10px;
+    padding: 16px 18px;
+    position: relative;
+}
+.famos-stat-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #6B7280);
+    margin-bottom: 4px;
+}
+.famos-stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary, #111827);
+    line-height: 1.2;
+}
+.famos-stat-sub {
+    font-size: 12px;
+    color: var(--text-muted, #6B7280);
+    margin-top: 2px;
+}
+.famos-stat-badge {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+/* ── Zone 3: Panel Grid ── */
+.famos-dashboard-panels {
+    display: grid;
+    grid-template-columns: 35fr 35fr 30fr;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.famos-panel {
+    background: #fff;
+    border: 1px solid var(--border, #E5E7EB);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.famos-panel-wide {
+    grid-column: 1 / -1;
+}
+.famos-panel-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border, #E5E7EB);
+}
+.famos-panel-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary, #111827);
+    margin: 0;
+}
+.famos-panel-body {
+    padding: 12px 16px;
+}
+
+/* Panel A: Routing */
+.famos-route-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-light, #F3F4F6);
+}
+.famos-route-row:last-child {
+    border-bottom: none;
+}
+.famos-route-info {
+    flex: 1;
+    min-width: 0;
+}
+.famos-route-company {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #111827);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.famos-route-desc {
+    font-size: 11px;
+    color: var(--text-muted, #6B7280);
+}
+.famos-route-pill {
+    font-size: 10px;
+    font-weight: 500;
+    background: #F3F4F6;
+    color: #374151;
+    padding: 3px 8px;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+/* Panel B: Pipeline Chart */
+.famos-stage-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    cursor: pointer;
+}
+.famos-stage-bar-row:hover {
+    background: var(--bg-hover, #F9FAFB);
+    margin: 0 -16px;
+    padding: 6px 16px;
+}
+.famos-stage-bar-label {
+    font-size: 12px;
+    color: var(--text-primary, #111827);
+    width: 80px;
+    flex-shrink: 0;
+}
+.famos-stage-bar-track {
+    flex: 1;
+    height: 8px;
+    background: #F3F4F6;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.famos-stage-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+.famos-stage-bar-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary, #111827);
+    width: 30px;
+    text-align: right;
+}
+.famos-pipeline-divider {
+    height: 1px;
+    background: var(--border, #E5E7EB);
+    margin: 12px 0;
+}
+.famos-pipeline-overview {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.famos-pipeline-overview th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--text-muted, #6B7280);
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border, #E5E7EB);
+}
+.famos-pipeline-overview td {
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--border-light, #F3F4F6);
+}
+.famos-pipeline-overview tr {
+    cursor: pointer;
+}
+.famos-pipeline-overview tr:hover td {
+    background: var(--bg-hover, #F9FAFB);
+}
+.famos-pipeline-overview .famos-total-row td {
+    font-weight: 600;
+    border-top: 1px solid var(--border, #E5E7EB);
+    border-bottom: none;
+}
+.famos-stage-pill {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+/* Panel C: Tasks */
+.famos-task-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-light, #F3F4F6);
+}
+.famos-task-row:last-child {
+    border-bottom: none;
+}
+.famos-task-badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 3px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+.famos-task-info {
+    flex: 1;
+    min-width: 0;
+}
+.famos-task-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary, #111827);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.famos-task-desc {
+    font-size: 11px;
+    color: var(--text-muted, #6B7280);
+}
+
+/* Zone 4: Activity */
+.famos-activity-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+.famos-activity-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.famos-activity-row:hover {
+    background: var(--bg-hover, #F9FAFB);
+}
+.famos-activity-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+}
+.famos-activity-info {
+    flex: 1;
+    min-width: 0;
+}
+.famos-activity-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary, #111827);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.famos-activity-desc {
+    font-size: 11px;
+    color: var(--text-muted, #6B7280);
+}
+.famos-activity-time {
+    font-size: 10px;
+    color: var(--text-muted, #6B7280);
+    flex-shrink: 0;
+}
+.famos-empty-state {
+    margin: 8px 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+    .famos-stat-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .famos-dashboard-panels {
+        grid-template-columns: 1fr;
+    }
+    .famos-activity-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+@media (max-width: 768px) {
+    .famos-stat-grid {
+        grid-template-columns: 1fr;
+    }
+    .famos-activity-grid {
+        grid-template-columns: 1fr;
+    }
+    .famos-page-header-row {
+        flex-direction: column;
+        gap: 16px;
+    }
+    .famos-header-right {
+        text-align: left;
+    }
+    .famos-header-actions {
+        justify-content: flex-start;
+    }
+}
