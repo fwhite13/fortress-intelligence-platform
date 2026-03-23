@@ -247,7 +247,7 @@
                 string.IsNullOrWhiteSpace(result.RawJson) ||
                 result.RawJson == "{}" ||
                 result.RawJson.Contains("\"error\"") ||
-                (result.RawJson.Contains("\"message\":\"") && result.RawJson.Contains("fail")))
+                (result.RawJson.Contains("\"message\":\"") && result.RawJson.Contains("fail", StringComparison.OrdinalIgnoreCase)))
             {
                 _scrapeError = "Quote extraction failed. The PDF could not be processed. Please try again or enter the premium manually.";
                 _showManualEntry = true;
