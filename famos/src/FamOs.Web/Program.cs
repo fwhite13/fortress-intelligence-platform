@@ -633,10 +633,8 @@ var logger = app.Logger;
     try
     {
         await db.Database.ExecuteSqlRawAsync(@"
-            -- Delete manually-created Northland test row
-            DELETE FROM quotes WHERE Id = '88e5e8ae-54d2-4866-9860-291c86772f1f';
-
             -- Mark submissions as Error where scraper returned null results (status=2 but no real data)
+            -- NOTE: Northland row 88e5e8ae was NOT a test row — it was the real quote. DELETE removed.
             UPDATE submissions
             SET Status = 7,
                 scraper_error = 'Scraper completed but no extraction results were returned. Click Resubmit to try again.',
