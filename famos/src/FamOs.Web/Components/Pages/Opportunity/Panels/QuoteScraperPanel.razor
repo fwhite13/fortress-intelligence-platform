@@ -306,6 +306,16 @@
                     return;
                 }
 
+                if (result.IsUploadFailure)
+                {
+                    await Lifecycle.SetSubmissionErrorAsync(submissionId, "Upload failed — PDF arrived with 0 pages");
+                    _scrapeError = "Upload failed — the PDF appears to be empty or corrupt. Please try uploading again.";
+                    _uploading = false;
+                    await OnUpdated.InvokeAsync();
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+
                 // Success path — single atomic call to avoid nested transaction conflicts
                 var parsedPremium = TryParsePremium(result.RawJson);
                 var sub = Opportunity.Submissions.First(s => s.Id == submissionId);
@@ -322,7 +332,7 @@
                     }
                     else
                     {
-                        Snackbar.Add("Extraction complete but premium not found. Check the Received Quotes section to resubmit.", Severity.Warning);
+                        Snackbar.Add("PDF processed but no premium data was found. Use Resubmit in the Quotes section to try again.", Severity.Warning);
                     }
                 }
                 catch (LifecycleValidationException ex)

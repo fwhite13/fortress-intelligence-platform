@@ -141,7 +141,17 @@ public class QuoteScraperService : IQuoteScraperService
             return null;
 
         // Only return terminal result for explicitly success or failure statuses
-        return new QuoteScraperResult { Status = reqStatus, RawJson = raw, Results = status?.Results };
+        var pageCount      = status?.Request?.PageCount ?? -1;
+        var isUploadFailure = pageCount == 0;
+
+        return new QuoteScraperResult
+        {
+            Status          = reqStatus,
+            RawJson         = raw,
+            Results         = status?.Results,
+            IsUploadFailure = isUploadFailure,
+            PageCount       = pageCount,
+        };
     }
 
     // ── DTOs ──────────────────────────────────────────────────────────────
@@ -168,13 +178,16 @@ public class QuoteScraperService : IQuoteScraperService
 
     private class RequestInfoDto
     {
-        public string? Status { get; set; }
+        public string? Status    { get; set; }
+        public int     PageCount { get; set; }
     }
 }
 
 public class QuoteScraperResult
 {
-    public string  Status  { get; set; } = "";
-    public string  RawJson { get; set; } = "";
-    public object? Results { get; set; }
+    public string  Status          { get; set; } = "";
+    public string  RawJson         { get; set; } = "";
+    public object? Results         { get; set; }
+    public bool    IsUploadFailure { get; set; }
+    public int     PageCount       { get; set; }
 }
