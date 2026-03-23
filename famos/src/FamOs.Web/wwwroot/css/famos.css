@@ -1491,11 +1491,21 @@
 /* Bug 3 fix: smaller checkboxes in quote table (ADO#1035) */
 .famos-quote-col-check .mud-checkbox .mud-icon-root {
     font-size: 16px !important;
-    width: 16px;
-    height: 16px;
+    width: 16px !important;
+    height: 16px !important;
 }
 .famos-quote-col-check .mud-checkbox {
     padding: 0;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    min-height: 20px;
+}
+.famos-quote-col-check .mud-checkbox .mud-button-root {
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px !important;
+    padding: 0 !important;
 }
 .famos-quote-col-carrier { flex: 1; min-width: 100px; }
 .famos-quote-col-coverages { flex: 0 0 120px; font-size: 12px; color: var(--color-text-muted, #6b7280); }
