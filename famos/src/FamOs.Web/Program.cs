@@ -635,12 +635,16 @@ var logger = app.Logger;
         await db.Database.ExecuteSqlRawAsync(@"
             -- Mark submissions as Error where scraper returned null results (status=2 but no real data)
             -- NOTE: Northland row 88e5e8ae was NOT a test row — it was the real quote. DELETE removed.
-            UPDATE submissions
-            SET Status = 7,
-                scraper_error = 'Scraper completed but no extraction results were returned. Click Resubmit to try again.',
-                UpdatedAt = NOW()
-            WHERE Status = 2
-              AND (QuoteResultJson LIKE '%""results"":null%' OR QuoteResultJson IS NULL);
+            -- Only mark Error if there is no associated quote with a real premium
+            UPDATE submissions s
+            SET s.Status = 7,
+                s.scraper_error = 'Scraper completed but no extraction results were returned. Click Resubmit to try again.',
+                s.UpdatedAt = NOW()
+            WHERE s.Status = 2
+              AND (s.QuoteResultJson LIKE '%""results"":null%' OR s.QuoteResultJson IS NULL)
+              AND NOT EXISTS (
+                SELECT 1 FROM quotes q WHERE q.SubmissionId = s.Id AND q.PremiumAmount > 0
+              );
         ");
         logger.LogInformation("ADO#1034: Progressive + Northland migration complete");
     }
