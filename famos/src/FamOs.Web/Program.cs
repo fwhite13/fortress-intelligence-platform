@@ -557,6 +557,13 @@ var logger = app.Logger;
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """);
 
+        // ADO#1019 — quote scraper persist-first redesign
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN fortress_request_id VARCHAR(200) NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("fortress_request_id column already exists"); }
+
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE submissions ADD COLUMN scraper_error TEXT NULL"); }
+        catch (MySqlException ex) when (ex.Number == 1060) { logger.LogDebug("scraper_error column already exists"); }
+
         // ADO#979 — make tasks.OpportunityId nullable (general tasks)
         try
         {

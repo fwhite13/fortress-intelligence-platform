@@ -62,6 +62,29 @@
                 </MudItem>
             </MudGrid>
 
+            @if (Opportunity.Submissions.Any(s => s.Status is SubmissionStatus.Uploading or SubmissionStatus.Processing or SubmissionStatus.Error))
+            {
+                <MudDivider Class="my-3" />
+                <div class="famos-label mb-2">Scraper Jobs</div>
+                @foreach (var sub in Opportunity.Submissions.Where(s => s.Status is SubmissionStatus.Uploading or SubmissionStatus.Processing or SubmissionStatus.Error))
+                {
+                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+                        <span class="famos-meta-text" style="min-width:120px;">@sub.CarrierName</span>
+                        @if (sub.Status == SubmissionStatus.Error)
+                        {
+                            <span style="color:#CC2200; font-size:12px;">@sub.ScraperError</span>
+                            <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Text"
+                                OnClick="@(async () => await ResetSubmission(sub.Id))">Reset</MudButton>
+                        }
+                        else
+                        {
+                            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Style="max-width:120px;" />
+                            <span class="famos-meta-text">@(sub.Status == SubmissionStatus.Uploading ? "Uploading..." : "Processing...")</span>
+                        }
+                    </div>
+                }
+            }
+
             @if (_uploading)
             {
                 <MudDivider Class="my-3" />
@@ -122,11 +145,27 @@
     private IBrowserFile? _selectedFile;
     private bool   _uploading;
     private string _statusMessage = "";
-    private string _resultJson    = "";
+    private string? _activeRequestId;
     private string? _scrapeError;
     private decimal? _manualPremium;
     private decimal? _autoRecordedPremium;
     private bool     _showManualEntry;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Resume polling for any submission in Processing state
+        var processing = Opportunity.Submissions
+            .FirstOrDefault(s => s.Status == SubmissionStatus.Processing
+                              && !string.IsNullOrEmpty(s.FortressRequestId));
+        if (processing != null)
+        {
+            _selectedSubId = processing.Id;
+            _activeRequestId = processing.FortressRequestId!;
+            _uploading = true;
+            _statusMessage = "Resuming — checking job status...";
+            _ = Task.Run(async () => await PollUntilCompleteAsync(processing.Id, processing.FortressRequestId!));
+        }
+    }
 
     protected override void OnParametersSet()
     {
@@ -147,6 +186,167 @@
         _selectedFile = file;
         _scrapeError  = null;
         StateHasChanged();
+    }
+
+    private async Task UploadAndSubmit()
+    {
+        if (_selectedFile == null || _selectedSubId == Guid.Empty) return;
+
+        _uploading = true;
+        _scrapeError = null;
+        _statusMessage = "Uploading PDF...";
+        StateHasChanged();
+
+        var userId = await UserSession.GetUserIdAsync();
+
+        try
+        {
+            // Step 1: Set status to Uploading in DB immediately
+            await Lifecycle.UpdateSubmissionStatusAsync(_selectedSubId, SubmissionStatus.Uploading, null, userId);
+            await OnUpdated.InvokeAsync(); // refresh parent so list shows Uploading
+
+            // Step 2: Get upload link
+            _statusMessage = "Requesting upload slot...";
+            StateHasChanged();
+            var refId = $"famos-sub-{_selectedSubId:N}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+            var (uploadUrl, fileKey) = await Scraper.GetUploadLinkAsync(_selectedFile.Name, refId);
+
+            // Step 3: Upload to S3
+            _statusMessage = "Uploading to secure storage...";
+            StateHasChanged();
+            await Scraper.UploadToS3Async(uploadUrl, _selectedFile);
+
+            // Step 4: Submit to Fortress API
+            _statusMessage = "Submitting for extraction...";
+            StateHasChanged();
+            var projectRequestId = await Scraper.SubmitRequestAsync(fileKey, refId);
+
+            // Step 5: Persist projectRequestId IMMEDIATELY — before any polling
+            await Lifecycle.PersistFortressRequestIdAsync(_selectedSubId, projectRequestId);
+            _activeRequestId = projectRequestId;
+            _statusMessage = "Extraction in progress (may take 10–30 min)...";
+            await OnUpdated.InvokeAsync(); // refresh parent — now shows Processing
+            StateHasChanged();
+
+            // Step 6: Start polling
+            await PollUntilCompleteAsync(_selectedSubId, projectRequestId);
+        }
+        catch (Exception ex)
+        {
+            try { await Lifecycle.SetSubmissionErrorAsync(_selectedSubId, ex.Message); }
+            catch { /* ignore secondary errors */ }
+            _scrapeError = $"Upload failed: {ex.Message}";
+            _uploading = false;
+            await OnUpdated.InvokeAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task PollUntilCompleteAsync(Guid submissionId, string requestId)
+    {
+        var userId = await UserSession.GetUserIdAsync();
+        try
+        {
+            var pollStart = DateTime.UtcNow;
+            var maxPollSecs = 1800; // 30 min total timeout
+
+            while (true)
+            {
+                var elapsed = DateTime.UtcNow - pollStart;
+                if (elapsed.TotalSeconds >= maxPollSecs)
+                {
+                    // Timeout but don't error — job may still complete, user can reload
+                    _scrapeError = "Taking longer than expected. You can navigate away — we'll resume polling when you return.";
+                    _showManualEntry = true;
+                    _uploading = false;
+                    StateHasChanged();
+                    return;
+                }
+
+                var intervalMs = elapsed.TotalSeconds < 120 ? 5000 : 30000;
+                await Task.Delay(intervalMs);
+
+                var elapsedMin = (int)elapsed.TotalMinutes;
+                var elapsedSec = (int)elapsed.TotalSeconds % 60;
+                _statusMessage = elapsedMin > 0
+                    ? $"Processing... ({elapsedMin}m {elapsedSec}s)"
+                    : $"Processing... ({(int)elapsed.TotalSeconds}s)";
+                await InvokeAsync(StateHasChanged);
+
+                QuoteScraperResult? result;
+                try { result = await Scraper.PollResultAsync(requestId); }
+                catch (Exception ex)
+                {
+                    await Lifecycle.SetSubmissionErrorAsync(submissionId, $"Polling error: {ex.Message}");
+                    _scrapeError = $"Polling failed: {ex.Message}";
+                    _uploading = false;
+                    await OnUpdated.InvokeAsync();
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+
+                if (result == null) continue; // still in progress
+
+                if (result.Status == "Failed" || string.IsNullOrWhiteSpace(result.RawJson) || result.RawJson.Trim() == "{}")
+                {
+                    await Lifecycle.SetSubmissionErrorAsync(submissionId, $"Extraction failed: {result.Status}");
+                    _scrapeError = "Extraction failed. Use Reset to try again.";
+                    _uploading = false;
+                    await OnUpdated.InvokeAsync();
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+
+                // Success path
+                await Lifecycle.SaveSubmissionScraperResultAsync(submissionId, result.RawJson, userId);
+
+                var parsedPremium = TryParsePremium(result.RawJson);
+                if (parsedPremium.HasValue && parsedPremium.Value > 0)
+                {
+                    var sub = Opportunity.Submissions.First(s => s.Id == submissionId);
+                    try
+                    {
+                        await Lifecycle.RecordQuoteAsync(Opportunity.Id, submissionId, sub.CarrierName,
+                            parsedPremium.Value, null, userId);
+                        Snackbar.Add($"Quote from {sub.CarrierName} recorded — ${parsedPremium.Value:N0}.", Severity.Success);
+                        _autoRecordedPremium = parsedPremium;
+                    }
+                    catch (LifecycleValidationException ex)
+                    {
+                        Snackbar.Add(ex.Message, Severity.Error);
+                        _showManualEntry = true;
+                    }
+                }
+                else
+                {
+                    await Lifecycle.UpdateSubmissionStatusAsync(submissionId, SubmissionStatus.QuoteReceived, null, userId);
+                    _showManualEntry = true;
+                    Snackbar.Add("Extraction completed. Enter premium manually.", Severity.Warning);
+                }
+
+                _uploading = false;
+                await OnUpdated.InvokeAsync();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            try { await Lifecycle.SetSubmissionErrorAsync(submissionId, ex.Message); }
+            catch { /* ignore */ }
+            _scrapeError = $"Error: {ex.Message}";
+            _uploading = false;
+            await OnUpdated.InvokeAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ResetSubmission(Guid submissionId)
+    {
+        await Lifecycle.ResetSubmissionScraperAsync(submissionId);
+        _scrapeError = null;
+        _selectedFile = null;
+        await OnUpdated.InvokeAsync();
     }
 
     private static decimal? TryParsePremium(string rawJson)
@@ -192,126 +392,6 @@
         catch (LifecycleValidationException ex)
         {
             Snackbar.Add(ex.Message, Severity.Error);
-        }
-    }
-
-    private async Task UploadAndSubmit()
-    {
-        if (_selectedFile == null || _selectedSubId == Guid.Empty) return;
-
-        _uploading     = true;
-        _scrapeError   = null;
-        _resultJson    = "";
-        _statusMessage = "Uploading PDF...";
-
-        try
-        {
-            // Read file bytes (max 10MB)
-            // IMPORTANT: ReadAsync is not guaranteed to fill the buffer in one call (partial reads).
-            // Use MemoryStream to safely accumulate all bytes before upload.
-            const long maxSize = 10 * 1024 * 1024;
-            using var stream = _selectedFile.OpenReadStream(maxSize);
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms);
-            var bytes = ms.ToArray();
-
-            _statusMessage = "Submitting to scraper...";
-            // Include a timestamp so each upload attempt gets a unique clientReferenceId.
-            // The Fortress API returns 409 if the same clientReferenceId is reused across requests.
-            var refId     = $"famos-sub-{_selectedSubId:N}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
-            var requestId = await Scraper.SubmitQuotePdfAsync(
-                refId, _selectedFile.Name, bytes);
-
-            // Adaptive poll: 5s intervals for first 2 min, then 30s intervals up to 30 min total
-            _statusMessage = "Scraping quote data...";
-            QuoteScraperResult? result = null;
-            var pollStart = DateTime.UtcNow;
-            var elapsed = TimeSpan.Zero;
-            var shortPhaseSecs = 120;   // 5s intervals for 2 min
-            var maxPollSecs = 1800;     // 30 min total timeout
-
-            while (elapsed.TotalSeconds < maxPollSecs)
-            {
-                var intervalMs = elapsed.TotalSeconds < shortPhaseSecs ? 5000 : 30000;
-                await Task.Delay(intervalMs);
-                elapsed = DateTime.UtcNow - pollStart;
-
-                result = await Scraper.PollResultAsync(requestId);
-                if (result != null) break;
-
-                var elapsedMin = (int)elapsed.TotalMinutes;
-                var elapsedSec = (int)elapsed.TotalSeconds % 60;
-                _statusMessage = elapsedMin > 0
-                    ? $"Processing... ({elapsedMin}m {elapsedSec}s)"
-                    : $"Processing... ({(int)elapsed.TotalSeconds}s)";
-                StateHasChanged();
-            }
-
-            if (result == null)
-            {
-                _scrapeError = "Scraper is taking longer than expected. The PDF has been submitted — check back later or enter the premium manually.";
-                _showManualEntry = true;
-                return;
-            }
-
-            if (result.Status == "Failed")
-            {
-                _scrapeError = "Scraper returned an error. Check the PDF and try again.";
-                return;
-            }
-
-            // Only block on truly empty result — do NOT check for "error" string in JSON
-            // (successful responses may contain "error": null or error-named fields).
-            // An empty/null RawJson with a non-Failed status means the API returned no data.
-            if (string.IsNullOrWhiteSpace(result.RawJson) || result.RawJson.Trim() == "{}")
-            {
-                _scrapeError = "Quote extraction failed. The PDF could not be processed. Please try again or enter the premium manually.";
-                _showManualEntry = true;
-                return;
-            }
-
-            _resultJson = result.RawJson;
-
-            // Persist result JSON on the Submission
-            var userId = await UserSession.GetUserIdAsync();
-            await Lifecycle.SaveSubmissionScraperResultAsync(_selectedSubId, result.RawJson, userId);
-
-            var parsedPremium = TryParsePremium(result.RawJson);
-            if (parsedPremium.HasValue && parsedPremium.Value > 0)
-            {
-                var sub = Opportunity.Submissions.First(s => s.Id == _selectedSubId);
-                try
-                {
-                    await Lifecycle.RecordQuoteAsync(
-                        Opportunity.Id, _selectedSubId, sub.CarrierName,
-                        parsedPremium.Value, null, userId);
-                    Snackbar.Add($"Quote from {sub.CarrierName} recorded — ${parsedPremium.Value:N0}.", Severity.Success);
-                    _autoRecordedPremium = parsedPremium;
-                }
-                catch (LifecycleValidationException ex)
-                {
-                    Snackbar.Add(ex.Message, Severity.Error);
-                    _showManualEntry = true;
-                }
-            }
-            else
-            {
-                Snackbar.Add("Extraction completed but premium could not be parsed automatically. Please enter manually.", Severity.Warning);
-                _showManualEntry = true;
-                // Do NOT invoke OnUpdated here — that reloads the parent and resets this component,
-                // wiping _showManualEntry. OnUpdated is called from RecordManually() after user submits premium.
-                return;
-            }
-            await OnUpdated.InvokeAsync();
-        }
-        catch (Exception ex)
-        {
-            _scrapeError = $"Upload failed: {ex.Message}";
-        }
-        finally
-        {
-            _uploading = false;
-            StateHasChanged();
         }
     }
 }

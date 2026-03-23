@@ -28,6 +28,12 @@ public class Submission
     /// <summary>Raw JSON returned by the Fortress quote scraper API. Nullable until scrape completes.</summary>
     public string?  QuoteResultJson   { get; set; }
 
+    /// <summary>Fortress API project request ID — set immediately when POST /requests returns. Null until upload starts.</summary>
+    public string? FortressRequestId { get; set; }
+
+    /// <summary>Error message if Status=Error.</summary>
+    public string? ScraperError { get; set; }
+
     public string?  Notes             { get; set; }
 
     // Audit
@@ -45,5 +51,8 @@ public enum SubmissionStatus
     Sent           = 1,
     QuoteReceived  = 2,
     Declined       = 3,
-    Bound          = 4
+    Bound          = 4,
+    Uploading      = 5,   // PDF selected, upload in progress
+    Processing     = 6,   // projectRequestId obtained, polling Fortress API
+    Error          = 7    // failed at any stage after submission was created
 }

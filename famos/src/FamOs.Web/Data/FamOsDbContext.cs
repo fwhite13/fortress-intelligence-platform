@@ -76,6 +76,8 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.OpportunityId).HasColumnType("char(36)");
             e.Property(x => x.Status).HasConversion<int>();
             e.Property(x => x.QuoteResultJson).HasColumnType("mediumtext");
+            e.Property(x => x.FortressRequestId).HasColumnName("fortress_request_id").HasMaxLength(200);
+            e.Property(x => x.ScraperError).HasColumnName("scraper_error").HasColumnType("text");
             e.Property(x => x.Notes).HasColumnType("longtext");
             e.HasOne(x => x.Opportunity)
                 .WithMany(o => o.Submissions)

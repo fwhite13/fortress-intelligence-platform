@@ -689,6 +689,56 @@ public class LifecycleCommandService
         });
     }
 
+    /// <summary>
+    /// Persist the Fortress API request ID immediately after upload completes.
+    /// This makes the scraper job resumable if the user navigates away.
+    /// </summary>
+    public async Task PersistFortressRequestIdAsync(Guid submissionId, string fortressRequestId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            var sub = await _db.Submissions.FindAsync(submissionId)
+                ?? throw new NotFoundException($"Submission {submissionId} not found");
+            sub.FortressRequestId = fortressRequestId;
+            sub.Status = SubmissionStatus.Processing;
+            sub.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+        });
+    }
+
+    /// <summary>
+    /// Set submission to Error state with the error message.
+    /// </summary>
+    public async Task SetSubmissionErrorAsync(Guid submissionId, string errorMessage)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            var sub = await _db.Submissions.FindAsync(submissionId)
+                ?? throw new NotFoundException($"Submission {submissionId} not found");
+            sub.Status = SubmissionStatus.Error;
+            sub.ScraperError = errorMessage;
+            sub.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+        });
+    }
+
+    /// <summary>
+    /// Reset a submission's scraper state back to Pending (for retry after error).
+    /// </summary>
+    public async Task ResetSubmissionScraperAsync(Guid submissionId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            var sub = await _db.Submissions.FindAsync(submissionId)
+                ?? throw new NotFoundException($"Submission {submissionId} not found");
+            sub.Status = SubmissionStatus.Pending;
+            sub.FortressRequestId = null;
+            sub.ScraperError = null;
+            sub.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+        });
+    }
+
     /// <summary>Add a contact to an opportunity. Only one Primary allowed per opportunity.</summary>
     public async Task<Guid> AddContactAsync(
         Guid opportunityId, string firstName, string lastName,
