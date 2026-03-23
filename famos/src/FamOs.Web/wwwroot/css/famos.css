@@ -453,18 +453,6 @@
     margin: 8px 14px;
 }
 
-/* StatCard alias (spec uses famos-stat-card; implementation uses famos-kpi-card — both valid) */
-.famos-stat-card {
-    /* alias for famos-kpi-card */
-    display: flex;
-    flex-direction: column;
-    padding: 18px 20px 16px;
-    border-radius: 10px;
-    background: #fff;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 1px 4px rgba(0, 32, 80, 0.06);
-}
 
 /* Affinity sidebar logo (WI893) */
 .sb-logo {
@@ -1150,6 +1138,9 @@
     --nav-badge-red: #CC2200;
     --nav-badge-muted-bg: rgba(255,255,255,0.15);
     --nav-divider: rgba(255,255,255,0.06);
+    --color-stat-amber: #E8A020;
+    --color-stat-green: #2E7D32;
+    --color-stat-gray: #888888;
 }
 
 /* ── Zone 1: Header ── */

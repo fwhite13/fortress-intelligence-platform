@@ -113,8 +113,9 @@ public class DashboardService
             UpdatedAt = o.UpdatedAt
         }).ToList(), now);
 
-        // Recent activity from Activities table
+        // Recent activity from Activities table (filtered to current affinity)
         var recentActivity = await db.Activities
+            .Where(a => a.Opportunity.AffinityId == affinityId)
             .OrderByDescending(a => a.OccurredAt)
             .Take(15)
             .Select(a => new ActivityEventDto

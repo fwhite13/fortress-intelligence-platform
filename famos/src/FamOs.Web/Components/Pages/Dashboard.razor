@@ -44,7 +44,7 @@ else if (_summary != null)
     @* ══ ZONE 2: Stat Cards (4 cards) ════════════════════════════════════ *@
     <div class="famos-stat-grid">
         @* Card 1: Active Pipeline *@
-        <div class="famos-stat-card" style="border-left: 3px solid #CC2200;">
+        <div class="famos-stat-card" style="border-left: 3px solid var(--color-brand-accent);">
             <div class="famos-stat-label">Active Pipeline</div>
             <div class="famos-stat-value">@_summary.ActivePipelineCount</div>
             <div class="famos-stat-sub">Active opportunities</div>
@@ -57,7 +57,7 @@ else if (_summary != null)
         </div>
 
         @* Card 2: Submission Queue *@
-        <div class="famos-stat-card" style="border-left: 3px solid #E8A020;">
+        <div class="famos-stat-card" style="border-left: 3px solid var(--color-stat-amber);">
             <div class="famos-stat-label">Submission Queue</div>
             <div class="famos-stat-value">@_summary.SubmissionQueueCount</div>
             <div class="famos-stat-sub">Need submission</div>
@@ -70,7 +70,7 @@ else if (_summary != null)
         </div>
 
         @* Card 3: Bound Premium YTD *@
-        <div class="famos-stat-card" style="border-left: 3px solid #2E7D32;">
+        <div class="famos-stat-card" style="border-left: 3px solid var(--color-stat-green);">
             <div class="famos-stat-label">Bound Premium YTD</div>
             <div class="famos-stat-value">@FormatPremium(_summary.BoundPremiumYtd)</div>
             <div class="famos-stat-sub">@GetYoyComparison()</div>
@@ -83,7 +83,7 @@ else if (_summary != null)
         </div>
 
         @* Card 4: All Accounts *@
-        <div class="famos-stat-card" style="border-left: 3px solid #888888;">
+        <div class="famos-stat-card" style="border-left: 3px solid var(--color-stat-gray);">
             <div class="famos-stat-label">All Accounts</div>
             <div class="famos-stat-value">@_summary.TotalAccountCount</div>
             <div class="famos-stat-sub">Member companies</div>
@@ -246,7 +246,7 @@ else if (_summary != null)
             }
             else
             {
-                <MudAlert Severity="Severity.Info">No recent activity.</MudAlert>
+                <div class="famos-empty-state">No recent activity.</div>
             }
         </div>
     </div>
