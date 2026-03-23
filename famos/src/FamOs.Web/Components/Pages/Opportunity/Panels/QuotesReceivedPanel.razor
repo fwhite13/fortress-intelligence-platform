@@ -75,9 +75,9 @@
         </div>
 
         <div class="mt-3">
-            <MudButton Class="@(HasCompleteQuotes ? "famos-btn-primary" : "famos-btn-primary famos-btn-disabled")"
+            <MudButton Class="famos-btn-primary"
                        Disabled="@(!HasCompleteQuotes)"
-                       OnClick="@(() => Nav.NavigateTo($"/quote-comparison/{Opportunity.AccountId}"))">
+                       OnClick="@(() => Nav.NavigateTo($"/quote-comparison/{Opportunity.Id}"))">
                 Compare Quotes and Create Proposal
             </MudButton>
             @if (!HasCompleteQuotes)
@@ -124,13 +124,14 @@
     {
         try
         {
-            await Lifecycle.ResetSubmissionScraperAsync(submissionId);
+            var userId = await UserSession.GetUserIdAsync();
+            await Lifecycle.DeleteSubmissionAsync(submissionId, userId);
             await OnAdvanced.InvokeAsync();
         }
         catch (Exception ex)
         {
             Snackbar.Add($"Delete failed: {ex.Message}", Severity.Error);
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 }

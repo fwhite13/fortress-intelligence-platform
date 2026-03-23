@@ -127,7 +127,8 @@ public class LifecycleCommandService
                 CarrierName     = carrierName,
                 PremiumAmount   = premium,
                 CoverageDetails = coverageDetailsJson,
-                ReceivedAt      = DateTime.UtcNow
+                ReceivedAt      = DateTime.UtcNow,
+                TenantId        = opp.TenantId
             });
 
             if (isFirst && opp.LifecycleStage == LifecycleStage.Marketed)
@@ -719,7 +720,8 @@ public class LifecycleCommandService
                     SubmissionId = submissionId,
                     CarrierName = sub.CarrierName,
                     PremiumAmount = parsedPremium.Value,
-                    ReceivedAt = DateTime.UtcNow
+                    ReceivedAt = DateTime.UtcNow,
+                    TenantId = opp.TenantId
                 });
 
                 sub.Status = SubmissionStatus.QuoteReceived;
@@ -818,6 +820,21 @@ public class LifecycleCommandService
             sub.ScraperError = null;
             sub.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
+        });
+    }
+
+    public async Task DeleteSubmissionAsync(Guid submissionId, string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var sub = await _db.Submissions.FindAsync(submissionId)
+                ?? throw new NotFoundException($"Submission {submissionId} not found");
+            _db.Submissions.Remove(sub);
+            await WriteActivityAsync(sub.OpportunityId, "submission_deleted",
+                $"Submission for {sub.CarrierName} deleted", actorUserId);
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
         });
     }
 
