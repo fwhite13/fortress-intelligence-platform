@@ -209,11 +209,34 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
         await db.SaveChangesAsync(ct);
         await RefreshOppCountsAsync(affinityId);
 
+        // ADO#1053: Enhanced diagnostics logging
         var statusCounts = existingAccounts.Values
             .GroupBy(a => a.AccountStatus ?? "NULL")
             .ToDictionary(g => g.Key, g => g.Count());
         _logger.LogInformation("[AccountSync] Status distribution: {Counts}",
             string.Join(", ", statusCounts.Select(kv => $"{kv.Key}={kv.Value}")));
+
+        // Log lifecycle stage distribution from source HubSpot data
+        var lifecycleGroups = companies
+            .GroupBy(c => c.Properties?.Lifecyclestage ?? "null")
+            .Select(g => $"{g.Key}={g.Count()}");
+        _logger.LogInformation("[AccountSync] Lifecycle stages from HubSpot: {Stages}",
+            string.Join(", ", lifecycleGroups));
+
+        // Log lead status distribution
+        var leadStatusGroups = companies
+            .GroupBy(c => c.Properties?.HsLeadStatus ?? "null")
+            .Select(g => $"{g.Key}={g.Count()}");
+        _logger.LogInformation("[AccountSync] Lead statuses from HubSpot: {Statuses}",
+            string.Join(", ", leadStatusGroups));
+
+        // Log how many accounts got deal data
+        var withDealId = existingAccounts.Values.Count(a => !string.IsNullOrEmpty(a.PrimaryDealId));
+        var withCoverage = existingAccounts.Values.Count(a => !string.IsNullOrEmpty(a.PrimaryCoverage));
+        var withCarrier = existingAccounts.Values.Count(a => !string.IsNullOrEmpty(a.PrimaryCarrier));
+        var withExpiration = existingAccounts.Values.Count(a => a.PolicyExpiresAt != null);
+        _logger.LogInformation("[AccountSync] Deal data populated: {DealId} with deal ID, {Cov} with coverage, {Car} with carrier, {Exp} with expiration",
+            withDealId, withCoverage, withCarrier, withExpiration);
 
         _logger.LogInformation("[AccountSync] Sync complete for {Aff}", affinityId);
     }
@@ -258,11 +281,13 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
         var deals = new List<HsDeal>();
         string? after = null;
 
-        // Common HubSpot deal properties + custom properties for insurance
-        // Note: exact custom property names may vary per HubSpot instance
+        // ADO#1053: Expanded property list with common insurance custom property names
+        // Note: exact custom property names vary per HubSpot instance — we try multiple fallbacks
         const string props = "dealname,dealstage,closedate,amount," +
             "line_of_business,coverage_type,hs_line_of_business," +
-            "carrier_name,carrier,policy_expiration_date,expiration_date";
+            "coverage_lines,lines_of_business,insurance_type," +
+            "carrier_name,carrier,insurance_carrier,primary_carrier," +
+            "policy_expiration_date,expiration_date,policy_exp_date,renewal_date";
 
         do
         {
@@ -284,6 +309,17 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
             await Task.Delay(RateLimitDelayMs, ct);
         } while (after != null && deals.Count < 5000);
 
+        // ADO#1053: Debug logging for deal property coverage
+        var withCoverage = deals.Count(d => !string.IsNullOrEmpty(
+            d.Properties?.LineOfBusiness ?? d.Properties?.CoverageType ?? d.Properties?.HsLineOfBusiness
+            ?? d.Properties?.CoverageLines ?? d.Properties?.LinesOfBusiness ?? d.Properties?.InsuranceType));
+        var withCarrier = deals.Count(d => !string.IsNullOrEmpty(
+            d.Properties?.CarrierName ?? d.Properties?.Carrier ?? d.Properties?.InsuranceCarrier ?? d.Properties?.PrimaryCarrierHs));
+        var withExpiration = deals.Count(d => !string.IsNullOrEmpty(
+            d.Properties?.PolicyExpirationDate ?? d.Properties?.ExpirationDate ?? d.Properties?.RenewalDate));
+        _logger.LogInformation("[AccountSync] Deal property coverage: {Total} deals, {Cov} with coverage, {Car} with carrier, {Exp} with expiration",
+            deals.Count, withCoverage, withCarrier, withExpiration);
+
         return deals;
     }
 
@@ -302,9 +338,12 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
 
         // HubSpot batch associations endpoint
         const int batchSize = 100;
+        int totalAssociationsFound = 0;
+
         for (int i = 0; i < companyIds.Count; i += batchSize)
         {
             var batch = companyIds.Skip(i).Take(batchSize).ToList();
+            var batchEnd = Math.Min(i + batchSize, companyIds.Count);
 
             var request = new { inputs = batch.Select(id => new { id }).ToList() };
             var resp = await client.PostAsJsonAsync(
@@ -314,6 +353,8 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
             if (resp.IsSuccessStatusCode)
             {
                 var assocResult = await resp.Content.ReadFromJsonAsync<HsAssociationBatchResult>(Opts, ct);
+                int batchMappings = 0;
+
                 if (assocResult?.Results != null)
                 {
                     foreach (var item in assocResult.Results)
@@ -325,18 +366,32 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
                                 .Select(t => t.ToObjectId!)
                                 .ToList();
                             if (dealIds.Any())
+                            {
                                 result[item.From.Id] = dealIds;
+                                batchMappings++;
+                            }
                         }
                     }
                 }
+                totalAssociationsFound += batchMappings;
+
+                // ADO#1053: Log each batch result for debugging
+                _logger.LogDebug("[AccountSync] Association batch {Start}-{End}: {Count} company→deal mappings found",
+                    i, batchEnd, batchMappings);
             }
             else
             {
-                _logger.LogWarning("[AccountSync] Association batch fetch failed: {Status}", resp.StatusCode);
+                var body = await resp.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning("[AccountSync] Association batch {Start}-{End} failed: {Status} — {Body}",
+                    i, batchEnd, resp.StatusCode, body.Length > 500 ? body[..500] : body);
             }
 
             await Task.Delay(RateLimitDelayMs, ct);
         }
+
+        // ADO#1053: Summary logging
+        _logger.LogInformation("[AccountSync] Association fetch complete: {Total} companies with deal associations out of {CompanyCount}",
+            totalAssociationsFound, companyIds.Count);
 
         return result;
     }
@@ -429,19 +484,26 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
 
         var props = deal.Properties;
 
-        // Coverage: try multiple possible property names
+        // ADO#1053: Coverage — expanded fallback chain
         var coverage = props.LineOfBusiness
             ?? props.CoverageType
-            ?? props.HsLineOfBusiness;
+            ?? props.HsLineOfBusiness
+            ?? props.CoverageLines
+            ?? props.LinesOfBusiness
+            ?? props.InsuranceType;
 
-        // Carrier: try multiple possible property names
+        // ADO#1053: Carrier — expanded fallback chain
         var carrier = props.CarrierName
-            ?? props.Carrier;
+            ?? props.Carrier
+            ?? props.InsuranceCarrier
+            ?? props.PrimaryCarrierHs;
 
-        // Expiration: try multiple possible property names
+        // ADO#1053: Expiration — expanded fallback chain
         // Note: closedate is the deal won/close date — NOT the policy expiration date, so it is not used as a fallback
         var expiresAt = ParseDate(props.PolicyExpirationDate)
-            ?? ParseDate(props.ExpirationDate);
+            ?? ParseDate(props.ExpirationDate)
+            ?? ParseDate(props.PolicyExpDate)
+            ?? ParseDate(props.RenewalDate);
 
         return (coverage, carrier, expiresAt);
     }
@@ -497,22 +559,39 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
         public string? Dealstage             { get; set; }
         public string? Closedate             { get; set; }
         public string? Amount                { get; set; }
-        // Coverage line (try multiple property names)
+
+        // ADO#1053: Coverage line — expanded fallback property names
         [JsonPropertyName("line_of_business")]
         public string? LineOfBusiness        { get; set; }
         [JsonPropertyName("coverage_type")]
         public string? CoverageType          { get; set; }
         [JsonPropertyName("hs_line_of_business")]
         public string? HsLineOfBusiness      { get; set; }
-        // Carrier (try multiple property names)
+        [JsonPropertyName("coverage_lines")]
+        public string? CoverageLines         { get; set; }
+        [JsonPropertyName("lines_of_business")]
+        public string? LinesOfBusiness       { get; set; }
+        [JsonPropertyName("insurance_type")]
+        public string? InsuranceType         { get; set; }
+
+        // ADO#1053: Carrier — expanded fallback property names
         [JsonPropertyName("carrier_name")]
         public string? CarrierName           { get; set; }
         public string? Carrier               { get; set; }
-        // Expiration (try multiple property names)
+        [JsonPropertyName("insurance_carrier")]
+        public string? InsuranceCarrier      { get; set; }
+        [JsonPropertyName("primary_carrier")]
+        public string? PrimaryCarrierHs      { get; set; }
+
+        // ADO#1053: Expiration — expanded fallback property names
         [JsonPropertyName("policy_expiration_date")]
         public string? PolicyExpirationDate  { get; set; }
         [JsonPropertyName("expiration_date")]
         public string? ExpirationDate        { get; set; }
+        [JsonPropertyName("policy_exp_date")]
+        public string? PolicyExpDate         { get; set; }
+        [JsonPropertyName("renewal_date")]
+        public string? RenewalDate           { get; set; }
     }
 
     private class HsPaging
@@ -543,6 +622,9 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
 
     private class HsAssociationTo
     {
+        // ADO#1053: Explicit JSON property name to ensure deserialization works
+        // HubSpot API returns "toObjectId" in camelCase
+        [JsonPropertyName("toObjectId")]
         public string? ToObjectId { get; set; }
     }
 }
