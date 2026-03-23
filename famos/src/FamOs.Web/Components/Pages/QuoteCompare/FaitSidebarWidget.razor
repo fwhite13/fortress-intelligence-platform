@@ -82,7 +82,7 @@
     private void ParsePresetChips()
     {
         _presetChips.Clear();
-        if (!string.IsNullOrEmpty(Context.ProgramVertical.FaitPresetChips))
+        if (Context.ProgramVertical != null && !string.IsNullOrEmpty(Context.ProgramVertical.FaitPresetChips))
         {
             try
             {
