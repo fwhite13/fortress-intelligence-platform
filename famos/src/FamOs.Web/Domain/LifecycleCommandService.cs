@@ -128,7 +128,7 @@ public class LifecycleCommandService
                 PremiumAmount   = premium,
                 CoverageDetails = coverageDetailsJson,
                 ReceivedAt      = DateTime.UtcNow,
-                TenantId        = opp.TenantId
+                TenantId        = _tenantId
             });
 
             if (isFirst && opp.LifecycleStage == LifecycleStage.Marketed)
@@ -721,7 +721,7 @@ public class LifecycleCommandService
                     CarrierName = sub.CarrierName,
                     PremiumAmount = parsedPremium.Value,
                     ReceivedAt = DateTime.UtcNow,
-                    TenantId = opp.TenantId
+                    TenantId = _tenantId
                 });
 
                 sub.Status = SubmissionStatus.QuoteReceived;
