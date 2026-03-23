@@ -205,47 +205,54 @@
         StateHasChanged();
 
         var userId = await UserSession.GetUserIdAsync();
-        var sub = Opportunity.Submissions.First(s => s.Id == _selectedSubId.Value);
+        // _selectedSubId is the "template" carrier from Underwriting Prep dropdown
+        var templateSub = Opportunity.Submissions.First(s => s.Id == _selectedSubId.Value);
 
-        Logger.LogInformation("[QuoteScraper] {Step} sub={SubId} opp={OppId} carrier={Carrier} fileSize={Bytes}",
-            "PANEL_UPLOAD_START", _selectedSubId.Value, Opportunity.Id, sub.CarrierName, fileBytes.Length);
+        Logger.LogInformation("[QuoteScraper] {Step} templateSub={SubId} opp={OppId} carrier={Carrier} fileSize={Bytes}",
+            "PANEL_UPLOAD_START", _selectedSubId.Value, Opportunity.Id, templateSub.CarrierName, fileBytes.Length);
 
+        Guid uploadSubId = Guid.Empty;
         try
         {
-            // Step 1: Set status to Uploading in DB immediately
-            await Lifecycle.UpdateSubmissionStatusAsync(_selectedSubId.Value, SubmissionStatus.Uploading, null, userId);
-            await OnUpdated.InvokeAsync(); // refresh parent so list shows Uploading
+            // Step 1: Create a NEW submission + pending quote row for this upload
+            // Each upload gets its own submission/quote — no carrier reuse
+            uploadSubId = await Lifecycle.CreateUploadSubmissionAsync(
+                Opportunity.Id, templateSub.CarrierName, templateSub.CoverageTypes, userId);
+            await OnUpdated.InvokeAsync(); // refresh parent — new submission + quote row visible
 
             // Step 2: Get upload link
             _statusMessage = "Requesting upload slot...";
             StateHasChanged();
-            var refId = $"famos-sub-{_selectedSubId.Value:N}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+            var refId = $"famos-sub-{uploadSubId:N}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
             var (uploadUrl, fileKey) = await Scraper.GetUploadLinkAsync(fileName, refId);
 
             // Step 3: Upload bytes to S3 (using pre-buffered bytes, not IBrowserFile)
             _statusMessage = "Uploading to secure storage...";
             StateHasChanged();
-            await Scraper.UploadBytesToS3Async(uploadUrl, fileBytes, fileName, _selectedSubId.Value, Opportunity.Id, sub.CarrierName);
+            await Scraper.UploadBytesToS3Async(uploadUrl, fileBytes, fileName, uploadSubId, Opportunity.Id, templateSub.CarrierName);
 
             // Step 4: Submit to Fortress API
             _statusMessage = "Submitting for extraction...";
             StateHasChanged();
-            var projectRequestId = await Scraper.SubmitRequestAsync(fileKey, refId, _selectedSubId.Value);
+            var projectRequestId = await Scraper.SubmitRequestAsync(fileKey, refId, uploadSubId);
 
             // Step 5: Persist projectRequestId IMMEDIATELY — before any polling
-            await Lifecycle.PersistFortressRequestIdAsync(_selectedSubId.Value, projectRequestId);
+            await Lifecycle.PersistFortressRequestIdAsync(uploadSubId, projectRequestId);
             _activeRequestId = projectRequestId;
             _statusMessage = "Extraction in progress (may take 10–30 min)...";
             await OnUpdated.InvokeAsync(); // refresh parent — now shows Processing
             StateHasChanged();
 
             // Step 6: Start polling
-            await PollUntilCompleteAsync(_selectedSubId.Value, projectRequestId);
+            await PollUntilCompleteAsync(uploadSubId, projectRequestId);
         }
         catch (Exception ex)
         {
-            try { await Lifecycle.SetSubmissionErrorAsync(_selectedSubId.Value, ex.Message); }
-            catch { /* ignore secondary errors */ }
+            if (uploadSubId != Guid.Empty)
+            {
+                try { await Lifecycle.SetSubmissionErrorAsync(uploadSubId, ex.Message); }
+                catch { /* ignore secondary errors */ }
+            }
             _scrapeError = $"Upload failed: {ex.Message}";
             _uploading = false;
             await OnUpdated.InvokeAsync();
@@ -295,7 +302,9 @@
                 try { result = await Scraper.PollResultAsync(requestId, submissionId, cycleNumber, pollStart); }
                 catch (Exception ex)
                 {
-                    Logger.LogError(ex, "[QuoteScraper] {Step} sub={SubId} requestId={RequestId}", "POLL_ERROR", submissionId, requestId);
+                    var isTransient = ex.Message.Contains("504") || ex.Message.Contains("Gateway") || ex.Message.Contains("503") || ex.Message.Contains("502");
+                    Logger.LogError(ex, "[QuoteScraper] {Step} sub={SubId} requestId={RequestId} isTransient={IsTransient}",
+                        "POLL_ERROR", submissionId, requestId, isTransient);
                     await Lifecycle.SetSubmissionErrorAsync(submissionId, $"Polling error: {ex.Message}");
                     _scrapeError = $"Polling failed: {ex.Message}";
                     _uploading = false;

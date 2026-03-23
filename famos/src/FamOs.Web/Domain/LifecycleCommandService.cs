@@ -637,6 +637,64 @@ public class LifecycleCommandService
     }
 
     /// <summary>
+    /// Called at upload time. Creates a fresh Submission row for this upload attempt
+    /// and a pending Quote row. Returns the new submission ID.
+    /// Each upload gets its own submission + quote row regardless of carrier history.
+    /// </summary>
+    public async Task<Guid> CreateUploadSubmissionAsync(
+        Guid opportunityId,
+        string carrierName,
+        string? coverageTypes,
+        string actorUserId)
+    {
+        var subId = Guid.Empty;
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+
+            var opp = await _db.Opportunities
+                .FirstOrDefaultAsync(o => o.Id == opportunityId)
+                ?? throw new NotFoundException($"Opportunity {opportunityId} not found");
+
+            // New submission row — unique per upload
+            var sub = new Submission
+            {
+                OpportunityId = opportunityId,
+                CarrierName   = carrierName,
+                CoverageTypes = coverageTypes,
+                Status        = SubmissionStatus.Uploading,
+            };
+            _db.Submissions.Add(sub);
+            await _db.SaveChangesAsync(); // get sub.Id
+
+            // Pending quote row — tied to this specific submission
+            _db.Quotes.Add(new Quote
+            {
+                OpportunityId   = opportunityId,
+                SubmissionId    = sub.Id,
+                CarrierName     = carrierName,
+                PremiumAmount   = 0,
+                CoverageDetails = coverageTypes,
+                IsRecommended   = false,
+                ReceivedAt      = DateTime.UtcNow,
+                TenantId        = 1,
+            });
+
+            await WriteActivityAsync(opportunityId, "submission_created",
+                $"Upload started: {carrierName}", actorUserId);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+            subId = sub.Id;
+        });
+
+        _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} opp={OppId} carrier={Carrier}",
+            "UPLOAD_SUBMISSION_CREATED", subId, opportunityId, carrierName);
+
+        return subId;
+    }
+
+    /// <summary>
     /// Updates the status of a carrier submission (e.g., Pending → QuoteReceived).
     /// </summary>
     public async Task UpdateSubmissionStatusAsync(
@@ -665,30 +723,6 @@ public class LifecycleCommandService
 
             await WriteActivityAsync(sub.OpportunityId, "submission_updated",
                 $"{sub.CarrierName} → {newStatus}", actorUserId);
-
-            // Dual-write: create pending Quote row immediately on upload start
-            if (newStatus == SubmissionStatus.Uploading)
-            {
-                // Only create pending row if no pending (PremiumAmount=0) row already exists
-                // On re-upload, existing completed quotes (PremiumAmount>0) are kept; a new pending row is created
-                var pendingExists = await _db.Quotes.AnyAsync(q => q.SubmissionId == submissionId && q.PremiumAmount == 0);
-                _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} opp={OppId} carrier={Carrier} action={Action}",
-                    "PENDING_ROW", submissionId, sub.OpportunityId, sub.CarrierName, pendingExists ? "SKIP_EXISTS" : "INSERT");
-                if (!pendingExists)
-                {
-                    _db.Quotes.Add(new Quote
-                    {
-                        OpportunityId   = sub.OpportunityId,
-                        SubmissionId    = submissionId,
-                        CarrierName     = sub.CarrierName,
-                        PremiumAmount   = 0,   // pending — will be updated when scrape completes
-                        CoverageDetails = sub.CoverageTypes,
-                        IsRecommended   = false,
-                        ReceivedAt      = DateTime.UtcNow,
-                        TenantId        = 1,
-                    });
-                }
-            }
 
             await _db.SaveChangesAsync();
             await tx.CommitAsync();

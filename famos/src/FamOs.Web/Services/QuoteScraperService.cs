@@ -108,8 +108,36 @@ public class QuoteScraperService : IQuoteScraperService
         var client = _factory.CreateClient("FortressApi");
         var url    = $"/clients/{ClientId}/projects/{ProjectId}/requests/{projectRequestId}";
 
-        var resp = await client.GetAsync(url);
-        resp.EnsureSuccessStatusCode();
+        HttpResponseMessage resp;
+        const int maxRetries = 3;
+        for (int attempt = 1; ; attempt++)
+        {
+            resp = await client.GetAsync(url);
+
+            if (resp.IsSuccessStatusCode)
+                break;
+
+            // Only retry 502/503/504 — all other errors fail immediately
+            var statusCode = (int)resp.StatusCode;
+            if (statusCode < 500 || statusCode is not (502 or 503 or 504))
+            {
+                resp.EnsureSuccessStatusCode();
+            }
+
+            // Gateway errors (502, 503, 504) — retry with backoff
+            if (attempt >= maxRetries)
+            {
+                _logger.LogError("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} attempt={Attempt} status={Status}",
+                    "POLL_RETRY_EXHAUSTED", submissionId, projectRequestId, attempt, statusCode);
+                resp.EnsureSuccessStatusCode(); // throws after all retries exhausted
+                break;
+            }
+
+            _logger.LogWarning("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} attempt={Attempt} status={Status} retryInSec={RetryInSec}",
+                "POLL_RETRY", submissionId, projectRequestId, attempt, statusCode, 3);
+
+            await Task.Delay(3000);
+        }
 
         var raw    = await resp.Content.ReadAsStringAsync();
         var status = JsonSerializer.Deserialize<StatusResponseDto>(raw, Opts);
