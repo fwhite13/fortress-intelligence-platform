@@ -13,6 +13,9 @@ public interface IQuoteScraperService
     /// <summary>Upload the PDF bytes to S3 using the presigned URL.</summary>
     Task UploadToS3Async(string uploadUrl, IBrowserFile file);
 
+    /// <summary>Upload pre-buffered PDF bytes to S3 using the presigned URL.</summary>
+    Task UploadBytesToS3Async(string uploadUrl, byte[] fileBytes, string fileName);
+
     /// <summary>Submit the file to Fortress API for processing. Returns projectRequestId.</summary>
     Task<string> SubmitRequestAsync(string fileKey, string clientReferenceId);
 
@@ -79,6 +82,16 @@ public class QuoteScraperService : IQuoteScraperService
         s3Resp.EnsureSuccessStatusCode();
 
         _logger.LogInformation("[QuoteScraper] Uploaded {File} ({Bytes} bytes)", file.Name, bytes.Length);
+    }
+
+    public async Task UploadBytesToS3Async(string uploadUrl, byte[] fileBytes, string fileName)
+    {
+        using var s3Client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        var fileContent = new ByteArrayContent(fileBytes);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+        var s3Resp = await s3Client.PutAsync(uploadUrl, fileContent);
+        s3Resp.EnsureSuccessStatusCode();
+        _logger.LogInformation("[QuoteScraper] Uploaded {File} ({Bytes} bytes)", fileName, fileBytes.Length);
     }
 
     public async Task<string> SubmitRequestAsync(string fileKey, string clientReferenceId)

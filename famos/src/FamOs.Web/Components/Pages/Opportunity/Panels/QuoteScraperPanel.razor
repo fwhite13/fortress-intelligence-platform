@@ -192,6 +192,27 @@
     {
         if (_selectedFile == null || _selectedSubId == Guid.Empty) return;
 
+        // STEP 0: Buffer file bytes into memory BEFORE any StateHasChanged or DB writes.
+        // The IBrowserFile handle dies as soon as InputFile re-renders.
+        byte[] fileBytes;
+        string fileName;
+        try
+        {
+            const long maxSize = 10 * 1024 * 1024;
+            using var stream = _selectedFile.OpenReadStream(maxSize);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            fileBytes = ms.ToArray();
+            fileName = _selectedFile.Name;
+        }
+        catch (Exception ex)
+        {
+            _scrapeError = $"Failed to read file: {ex.Message}";
+            StateHasChanged();
+            return;
+        }
+
+        // NOW it's safe to update state and trigger re-renders
         _uploading = true;
         _scrapeError = null;
         _statusMessage = "Uploading PDF...";
@@ -209,12 +230,12 @@
             _statusMessage = "Requesting upload slot...";
             StateHasChanged();
             var refId = $"famos-sub-{_selectedSubId:N}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
-            var (uploadUrl, fileKey) = await Scraper.GetUploadLinkAsync(_selectedFile.Name, refId);
+            var (uploadUrl, fileKey) = await Scraper.GetUploadLinkAsync(fileName, refId);
 
-            // Step 3: Upload to S3
+            // Step 3: Upload bytes to S3 (using pre-buffered bytes, not IBrowserFile)
             _statusMessage = "Uploading to secure storage...";
             StateHasChanged();
-            await Scraper.UploadToS3Async(uploadUrl, _selectedFile);
+            await Scraper.UploadBytesToS3Async(uploadUrl, fileBytes, fileName);
 
             // Step 4: Submit to Fortress API
             _statusMessage = "Submitting for extraction...";
