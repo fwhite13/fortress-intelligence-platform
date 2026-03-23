@@ -133,7 +133,7 @@
     private string _statusMessage = "";
     private string? _activeRequestId;
     private string? _scrapeError;
-    private decimal? _manualPremium;
+
     private decimal? _autoRecordedPremium;
 
     protected override async Task OnInitializedAsync()
@@ -322,7 +322,7 @@
                     }
                     else
                     {
-                        Snackbar.Add($"Extraction complete but premium not found. Check the Received Quotes section to resubmit.", Severity.Warning);
+                        Snackbar.Add("Extraction complete but premium not found. Check the Received Quotes section to resubmit.", Severity.Warning);
                     }
                 }
                 catch (LifecycleValidationException ex)
@@ -390,21 +390,4 @@
         return null;
     }
 
-    private async Task RecordManually()
-    {
-        if (!_manualPremium.HasValue) return;
-        var sub = Opportunity.Submissions.First(s => s.Id == _selectedSubId.Value);
-        var userId = await UserSession.GetUserIdAsync();
-        try
-        {
-            await Lifecycle.RecordQuoteAsync(Opportunity.Id, _selectedSubId.Value, sub.CarrierName,
-                _manualPremium.Value, null, userId);
-            Snackbar.Add($"Quote from {sub.CarrierName} recorded — ${_manualPremium.Value:N0}.", Severity.Success);
-            await OnUpdated.InvokeAsync();
-        }
-        catch (LifecycleValidationException ex)
-        {
-            Snackbar.Add(ex.Message, Severity.Error);
-        }
-    }
 }
