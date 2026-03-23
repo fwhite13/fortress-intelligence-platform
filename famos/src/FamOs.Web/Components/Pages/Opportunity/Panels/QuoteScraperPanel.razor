@@ -163,7 +163,7 @@
             _activeRequestId = processing.FortressRequestId!;
             _uploading = true;
             _statusMessage = "Resuming — checking job status...";
-            _ = Task.Run(async () => await PollUntilCompleteAsync(processing.Id, processing.FortressRequestId!));
+            _ = InvokeAsync(() => PollUntilCompleteAsync(processing.Id, processing.FortressRequestId!));
         }
     }
 
@@ -343,10 +343,18 @@
 
     private async Task ResetSubmission(Guid submissionId)
     {
-        await Lifecycle.ResetSubmissionScraperAsync(submissionId);
-        _scrapeError = null;
-        _selectedFile = null;
-        await OnUpdated.InvokeAsync();
+        try
+        {
+            await Lifecycle.ResetSubmissionScraperAsync(submissionId);
+            _scrapeError = null;
+            _selectedFile = null;
+            await OnUpdated.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Reset failed: {ex.Message}", Severity.Error);
+            StateHasChanged();
+        }
     }
 
     private static decimal? TryParsePremium(string rawJson)
