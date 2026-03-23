@@ -116,7 +116,7 @@ public class QuoteScraperService : IQuoteScraperService
 
         var reqStatus = status?.Request?.Status ?? "Unknown";
         var elapsed   = DateTime.UtcNow - pollStart;
-        var rawTrunc  = raw.Length > 500 ? raw[..500] + "..." : raw;
+        var rawTrunc  = raw.Length > 300 ? raw[..300] + "..." : raw;
 
         _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} cycle={Cycle} status={Status} elapsed={ElapsedSec}s rawResponse={Raw}",
             "POLL_CYCLE", submissionId, projectRequestId, cycleNumber, reqStatus, (int)elapsed.TotalSeconds, rawTrunc);
