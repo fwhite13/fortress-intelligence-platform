@@ -136,7 +136,8 @@ public class QuoteScraperService : IQuoteScraperService
 
         // In-progress statuses — keep polling
         if (reqStatus is "Pending" or "Processing" or "Assembling" or "Queued"
-                        or "Submitted" or "Received" or "InProgress" or "In Progress")
+                        or "Submitted" or "Received" or "InProgress" or "In Progress"
+                        or "Sleeping")
             return null;
 
         // Only return terminal result for explicitly success or failure statuses

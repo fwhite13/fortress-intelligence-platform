@@ -652,6 +652,30 @@ var logger = app.Logger;
     }
 }
 
+// ADO#1035: Fix Sleeping→Error incorrectly set for Progressive Commercial
+{
+    using var scope1035 = app.Services.CreateScope();
+    var factory1035 = scope1035.ServiceProvider.GetRequiredService<IDbContextFactory<FamOsDbContext>>();
+    await using var db = await factory1035.CreateDbContextAsync();
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            UPDATE submissions
+            SET Status = 0,
+                scraper_error = NULL,
+                UpdatedAt = NOW()
+            WHERE Id = '69091da0-249e-11f1-9fed-0ebd3e72fbbb'
+              AND Status = 7;
+        ");
+        // Status=0 (Pending) so user can Resubmit — the scrape returned Sleeping which means no data yet
+        logger.LogInformation("ADO#1035: Progressive submission reset to Pending");
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("ADO#1035: Migration failed (non-fatal): {Error}", ex.Message);
+    }
+}
+
 // Quote Comparison seed data
 {
     using var seedScope = app.Services.CreateScope();

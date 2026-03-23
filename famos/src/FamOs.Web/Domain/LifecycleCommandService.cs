@@ -794,7 +794,7 @@ public class LifecycleCommandService
             else
             {
                 sub.Status = SubmissionStatus.Error;
-                sub.ScraperError = "Premium could not be extracted automatically — click Resubmit to try again";
+                sub.ScraperError = "No quote data found in this PDF — the carrier format may not be supported. Click Resubmit to try again or enter manually.";
             }
 
             await WriteActivityAsync(opportunityId, "quote_scraped",
