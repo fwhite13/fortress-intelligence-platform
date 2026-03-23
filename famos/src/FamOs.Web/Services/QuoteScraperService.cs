@@ -129,17 +129,18 @@ public class QuoteScraperService : IQuoteScraperService
         var status = JsonSerializer.Deserialize<StatusResponseDto>(raw, Opts);
 
         var reqStatus = status?.Request?.Status ?? "Unknown";
-        // Treat all non-terminal statuses as in-progress
+
+        // Treat unknown/null status as still in-progress — don't exit prematurely
+        if (reqStatus == "Unknown")
+            return null;
+
+        // In-progress statuses — keep polling
         if (reqStatus is "Pending" or "Processing" or "Assembling" or "Queued"
                         or "Submitted" or "Received" or "InProgress" or "In Progress")
-            return null;  // still working
+            return null;
 
-        return new QuoteScraperResult
-        {
-            Status  = reqStatus,
-            RawJson = raw,
-            Results = status?.Results
-        };
+        // Only return terminal result for explicitly success or failure statuses
+        return new QuoteScraperResult { Status = reqStatus, RawJson = raw, Results = status?.Results };
     }
 
     // ── DTOs ──────────────────────────────────────────────────────────────

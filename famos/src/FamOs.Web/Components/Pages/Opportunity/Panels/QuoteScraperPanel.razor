@@ -114,23 +114,6 @@
                 </MudAlert>
             }
 
-            @if (_showManualEntry)
-            {
-                <MudDivider Class="my-3" />
-                <div class="intake-section-label mb-2">Enter Premium to Record Quote</div>
-                <MudGrid Spacing="2">
-                    <MudItem xs="8">
-                        <MudNumericField @bind-Value="_manualPremium" Label="Premium ($)" Class="famos-input" />
-                    </MudItem>
-                    <MudItem xs="4">
-                        <MudButton Class="famos-btn-primary" OnClick="@(async () => await RecordManually())"
-                                   Disabled="@(!_manualPremium.HasValue || _manualPremium <= 0)">
-                            Record Quote
-                        </MudButton>
-                    </MudItem>
-                </MudGrid>
-            }
-
             @if (_scrapeError != null)
             {
                 <MudAlert Severity="Severity.Error" Class="mt-3">@_scrapeError</MudAlert>
@@ -152,7 +135,6 @@
     private string? _scrapeError;
     private decimal? _manualPremium;
     private decimal? _autoRecordedPremium;
-    private bool     _showManualEntry;
 
     protected override async Task OnInitializedAsync()
     {
@@ -281,7 +263,6 @@
                 {
                     // Timeout but don't error — job may still complete, user can reload
                     _scrapeError = "Taking longer than expected. You can navigate away — we'll resume polling when you return.";
-                    _showManualEntry = true;
                     _uploading = false;
                     StateHasChanged();
                     return;
@@ -311,10 +292,14 @@
 
                 if (result == null) continue; // still in progress
 
-                if (result.Status == "Failed" || string.IsNullOrWhiteSpace(result.RawJson) || result.RawJson.Trim() == "{}")
+                var isFailure = result.Status is "Failed" or "Error" or "Errored" or "error" or "failed"
+                    || string.IsNullOrWhiteSpace(result.RawJson)
+                    || result.RawJson.Trim() == "{}"
+                    || result.RawJson.Trim() == "null";
+                if (isFailure)
                 {
                     await Lifecycle.SetSubmissionErrorAsync(submissionId, $"Extraction failed: {result.Status}");
-                    _scrapeError = "Extraction failed. Use Reset to try again.";
+                    _scrapeError = "Extraction failed. Use Resubmit to try again.";
                     _uploading = false;
                     await OnUpdated.InvokeAsync();
                     await InvokeAsync(StateHasChanged);
@@ -337,14 +322,12 @@
                     }
                     else
                     {
-                        _showManualEntry = true;
-                        Snackbar.Add("Extraction completed. Enter premium manually.", Severity.Warning);
+                        Snackbar.Add($"Extraction complete but premium not found. Check the Received Quotes section to resubmit.", Severity.Warning);
                     }
                 }
                 catch (LifecycleValidationException ex)
                 {
                     Snackbar.Add(ex.Message, Severity.Error);
-                    _showManualEntry = true;
                 }
 
                 _uploading = false;
@@ -417,7 +400,6 @@
             await Lifecycle.RecordQuoteAsync(Opportunity.Id, _selectedSubId.Value, sub.CarrierName,
                 _manualPremium.Value, null, userId);
             Snackbar.Add($"Quote from {sub.CarrierName} recorded — ${_manualPremium.Value:N0}.", Severity.Success);
-            _showManualEntry = false;
             await OnUpdated.InvokeAsync();
         }
         catch (LifecycleValidationException ex)

@@ -757,7 +757,8 @@ public class LifecycleCommandService
             }
             else
             {
-                sub.Status = SubmissionStatus.QuoteReceived;
+                sub.Status = SubmissionStatus.Error;
+                sub.ScraperError = "Premium could not be extracted automatically — click Resubmit to try again";
             }
 
             await WriteActivityAsync(opportunityId, "quote_scraped",
