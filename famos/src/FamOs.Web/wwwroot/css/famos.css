@@ -1505,7 +1505,8 @@
     width: 20px !important;
     height: 20px !important;
     min-width: 20px !important;
-    padding: 0 !important;
+    min-height: 20px !important;
+    padding: 2px !important;
 }
 .famos-quote-col-carrier { flex: 1; min-width: 100px; }
 .famos-quote-col-coverages { flex: 0 0 120px; font-size: 12px; color: var(--color-text-muted, #6b7280); }
