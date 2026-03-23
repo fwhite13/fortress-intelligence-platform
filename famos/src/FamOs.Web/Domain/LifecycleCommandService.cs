@@ -666,6 +666,27 @@ public class LifecycleCommandService
             await WriteActivityAsync(sub.OpportunityId, "submission_updated",
                 $"{sub.CarrierName} → {newStatus}", actorUserId);
 
+            // Dual-write: create pending Quote row immediately on upload start
+            if (newStatus == SubmissionStatus.Uploading)
+            {
+                // Only create if no quote row exists for this submission yet
+                var existing = await _db.Quotes.FirstOrDefaultAsync(q => q.SubmissionId == submissionId);
+                if (existing == null)
+                {
+                    _db.Quotes.Add(new Quote
+                    {
+                        OpportunityId   = sub.OpportunityId,
+                        SubmissionId    = submissionId,
+                        CarrierName     = sub.CarrierName,
+                        PremiumAmount   = 0,   // pending — will be updated when scrape completes
+                        CoverageDetails = sub.CoverageTypes,
+                        IsRecommended   = false,
+                        ReceivedAt      = DateTime.UtcNow,
+                        TenantId        = 1,
+                    });
+                }
+            }
+
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
         });
@@ -712,17 +733,32 @@ public class LifecycleCommandService
             if (parsedPremium.HasValue && parsedPremium.Value > 0)
             {
                 // Record quote in same transaction
-                var isFirst = !opp.Quotes.Any();
+                var isFirst = !opp.Quotes.Any(q => q.PremiumAmount > 0);  // first REAL quote
 
-                _db.Quotes.Add(new Quote
+                // Find existing Quote row created at upload time
+                var existingQuote = await _db.Quotes.FirstOrDefaultAsync(q => q.SubmissionId == submissionId);
+
+                if (existingQuote != null)
                 {
-                    OpportunityId = opportunityId,
-                    SubmissionId = submissionId,
-                    CarrierName = sub.CarrierName,
-                    PremiumAmount = parsedPremium.Value,
-                    ReceivedAt = DateTime.UtcNow,
-                    TenantId = 1   // single-tenant; matches HasQueryFilter in DbContext
-                });
+                    // Update the pending row
+                    existingQuote.PremiumAmount   = parsedPremium.Value;
+                    existingQuote.CoverageDetails = sub.CoverageTypes ?? existingQuote.CoverageDetails;
+                    existingQuote.TenantId        = 1;
+                }
+                else
+                {
+                    // No pending row — insert (shouldn't happen with dual-write, but be safe)
+                    _db.Quotes.Add(new Quote
+                    {
+                        OpportunityId   = opportunityId,
+                        SubmissionId    = submissionId,
+                        CarrierName     = sub.CarrierName,
+                        PremiumAmount   = parsedPremium.Value,
+                        CoverageDetails = sub.CoverageTypes,
+                        ReceivedAt      = DateTime.UtcNow,
+                        TenantId        = 1,
+                    });
+                }
 
                 sub.Status = SubmissionStatus.QuoteReceived;
 
@@ -834,6 +870,28 @@ public class LifecycleCommandService
             _db.Submissions.Remove(sub);
             await WriteActivityAsync(sub.OpportunityId, "submission_deleted",
                 $"Submission for {sub.CarrierName} deleted", actorUserId);
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+    }
+
+    public async Task DeleteQuoteAndSubmissionAsync(Guid quoteId, Guid submissionId, string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+
+            var quote = await _db.Quotes.FindAsync(quoteId);
+            if (quote != null) _db.Quotes.Remove(quote);
+
+            var sub = await _db.Submissions.FindAsync(submissionId);
+            if (sub != null)
+            {
+                await WriteActivityAsync(sub.OpportunityId, "quote_deleted",
+                    $"Quote submission for {sub.CarrierName} deleted", actorUserId);
+                _db.Submissions.Remove(sub);
+            }
+
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
         });

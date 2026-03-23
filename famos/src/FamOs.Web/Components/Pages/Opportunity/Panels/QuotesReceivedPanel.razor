@@ -22,34 +22,39 @@
         <div class="famos-quote-table">
             <div class="famos-quote-header-row">
                 <div class="famos-quote-col-carrier">CARRIER</div>
+                <div class="famos-quote-col-coverages">COVERAGES</div>
                 <div class="famos-quote-col-premium">PREMIUM</div>
                 <div class="famos-quote-col-status">STATUS</div>
                 <div class="famos-quote-col-actions">ACTIONS</div>
             </div>
 
-            @* Completed quotes from Opportunity.Quotes *@
             @foreach (var quote in Opportunity.Quotes.OrderByDescending(q => q.ReceivedAt))
             {
+                var subStatus = GetQuoteSubmissionStatus(quote);
+                var isComplete = quote.PremiumAmount > 0;
+                var isError = subStatus == SubmissionStatus.Error;
+
                 <div class="famos-quote-row">
                     <div class="famos-quote-col-carrier">@quote.CarrierName</div>
-                    <div class="famos-quote-col-premium">$@quote.PremiumAmount.ToString("N0")</div>
-                    <div class="famos-quote-col-status">
-                        <span class="famos-status-badge famos-status-complete">Complete</span>
+                    <div class="famos-quote-col-coverages">
+                        <span class="famos-meta-text">@(string.IsNullOrEmpty(quote.CoverageDetails) ? "—" : quote.CoverageDetails)</span>
                     </div>
-                    <div class="famos-quote-col-actions">
-                        <MudButton Size="Size.Small" Class="famos-btn-outline" OnClick="@(() => EditQuote(quote.Id))">Edit</MudButton>
+                    <div class="famos-quote-col-premium">
+                        @if (isComplete)
+                        {
+                            <span>$@quote.PremiumAmount.ToString("N0")</span>
+                        }
+                        else
+                        {
+                            <span class="famos-meta-text">—</span>
+                        }
                     </div>
-                </div>
-            }
-
-            @* In-flight and errored submissions *@
-            @foreach (var sub in InFlightSubmissions)
-            {
-                <div class="famos-quote-row">
-                    <div class="famos-quote-col-carrier">@sub.CarrierName</div>
-                    <div class="famos-quote-col-premium">—</div>
                     <div class="famos-quote-col-status">
-                        @if (sub.Status == SubmissionStatus.Error)
+                        @if (isComplete)
+                        {
+                            <span class="famos-status-badge famos-status-complete">Complete</span>
+                        }
+                        else if (isError)
                         {
                             <MudTooltip Text="Processing failed — click Resubmit to try again" Placement="Placement.Top">
                                 <span class="famos-status-badge famos-status-error">Error</span>
@@ -59,15 +64,19 @@
                         {
                             <span class="famos-status-badge famos-status-processing">
                                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
-                                @(sub.Status == SubmissionStatus.Uploading ? "Uploading" : "Processing")
+                                @(subStatus == SubmissionStatus.Uploading ? "Uploading" : "Processing")
                             </span>
                         }
                     </div>
                     <div class="famos-quote-col-actions">
-                        @if (sub.Status == SubmissionStatus.Error)
+                        @if (isComplete)
                         {
-                            <MudButton Size="Size.Small" Class="famos-btn-outline" OnClick="@(async () => await ResubmitAsync(sub.Id))">Resubmit</MudButton>
-                            <MudButton Size="Size.Small" Class="famos-btn-danger" OnClick="@(async () => await DeleteSubmissionAsync(sub.Id))">Delete</MudButton>
+                            <MudButton Size="Size.Small" Class="famos-btn-outline" OnClick="@(() => EditQuote(quote.Id))">Edit</MudButton>
+                        }
+                        else if (isError)
+                        {
+                            <MudButton Size="Size.Small" Class="famos-btn-outline" OnClick="@(async () => await ResubmitAsync(quote.SubmissionId))">Resubmit</MudButton>
+                            <MudButton Size="Size.Small" Class="famos-btn-danger" OnClick="@(async () => await DeleteQuoteAsync(quote.Id, quote.SubmissionId))">Delete</MudButton>
                         }
                     </div>
                 </div>
@@ -93,13 +102,15 @@
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
     [Parameter] public EventCallback OnAdvanced { get; set; }
 
-    private bool HasCompleteQuotes => Opportunity.Quotes.Any();
+    private bool HasCompleteQuotes => Opportunity.Quotes.Any(q => q.PremiumAmount > 0);
+    private bool HasAnyContent => Opportunity.Quotes.Any();
 
-    private IEnumerable<Submission> InFlightSubmissions => Opportunity.Submissions
-        .Where(s => s.Status is SubmissionStatus.Uploading or SubmissionStatus.Processing or SubmissionStatus.Error)
-        .OrderByDescending(s => s.UpdatedAt);
-
-    private bool HasAnyContent => Opportunity.Quotes.Any() || InFlightSubmissions.Any();
+    private SubmissionStatus? GetQuoteSubmissionStatus(Quote quote)
+    {
+        if (quote.PremiumAmount > 0) return null;
+        var sub = Opportunity.Submissions.FirstOrDefault(s => s.Id == quote.SubmissionId);
+        return sub?.Status;
+    }
 
     private void EditQuote(Guid quoteId)
     {
@@ -116,16 +127,16 @@
         catch (Exception ex)
         {
             Snackbar.Add($"Resubmit failed: {ex.Message}", Severity.Error);
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 
-    private async Task DeleteSubmissionAsync(Guid submissionId)
+    private async Task DeleteQuoteAsync(Guid quoteId, Guid submissionId)
     {
         try
         {
             var userId = await UserSession.GetUserIdAsync();
-            await Lifecycle.DeleteSubmissionAsync(submissionId, userId);
+            await Lifecycle.DeleteQuoteAndSubmissionAsync(quoteId, submissionId, userId);
             await OnAdvanced.InvokeAsync();
         }
         catch (Exception ex)

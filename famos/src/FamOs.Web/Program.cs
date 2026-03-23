@@ -592,6 +592,37 @@ var logger = app.Logger;
     {
         logger.LogWarning("WI972: OwnerUserId backfill skipped: {Msg}", ex.Message);
     }
+
+    // ADO#1033: Backfill missing quotes rows + fix tenant_id=0 on existing quotes
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            -- Fix Northland tenant_id=0 (invisible behind HasQueryFilter)
+            UPDATE quotes SET tenant_id = 1 WHERE tenant_id = 0;
+
+            -- Backfill quotes for completed submissions that have no quotes row
+            INSERT IGNORE INTO quotes (Id, OpportunityId, SubmissionId, CarrierName, PremiumAmount, CoverageDetails, IsRecommended, ReceivedAt, tenant_id)
+            SELECT
+                UUID(),
+                s.OpportunityId,
+                s.Id,
+                s.CarrierName,
+                0,
+                s.CoverageTypes,
+                0,
+                NOW(6),
+                1
+            FROM submissions s
+            LEFT JOIN quotes q ON q.SubmissionId = s.Id
+            WHERE q.Id IS NULL
+              AND s.Status IN (2, 7);
+        ");
+        logger.LogInformation("ADO#1033: Backfill migration complete");
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("ADO#1033: Backfill migration failed (non-fatal): {Error}", ex.Message);
+    }
 }
 
 // Quote Comparison seed data
