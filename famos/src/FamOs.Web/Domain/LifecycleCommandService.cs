@@ -669,9 +669,12 @@ public class LifecycleCommandService
             // Dual-write: create pending Quote row immediately on upload start
             if (newStatus == SubmissionStatus.Uploading)
             {
-                // Only create if no quote row exists for this submission yet
-                var existing = await _db.Quotes.FirstOrDefaultAsync(q => q.SubmissionId == submissionId);
-                if (existing == null)
+                // Only create pending row if no pending (PremiumAmount=0) row already exists
+                // On re-upload, existing completed quotes (PremiumAmount>0) are kept; a new pending row is created
+                var pendingExists = await _db.Quotes.AnyAsync(q => q.SubmissionId == submissionId && q.PremiumAmount == 0);
+                _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} opp={OppId} carrier={Carrier} action={Action}",
+                    "PENDING_ROW", submissionId, sub.OpportunityId, sub.CarrierName, pendingExists ? "SKIP_EXISTS" : "INSERT");
+                if (!pendingExists)
                 {
                     _db.Quotes.Add(new Quote
                     {
@@ -735,19 +738,25 @@ public class LifecycleCommandService
                 // Record quote in same transaction
                 var isFirst = !opp.Quotes.Any(q => q.PremiumAmount > 0);  // first REAL quote
 
-                // Find existing Quote row created at upload time
-                var existingQuote = await _db.Quotes.FirstOrDefaultAsync(q => q.SubmissionId == submissionId);
+                // Find the pending row (PremiumAmount == 0) for this submission
+                // On re-upload, completed quotes (PremiumAmount>0) are preserved; a new row is inserted
+                var pendingQuote = await _db.Quotes
+                    .FirstOrDefaultAsync(q => q.SubmissionId == submissionId && q.PremiumAmount == 0);
 
-                if (existingQuote != null)
+                if (pendingQuote != null)
                 {
-                    // Update the pending row
-                    existingQuote.PremiumAmount   = parsedPremium.Value;
-                    existingQuote.CoverageDetails = sub.CoverageTypes ?? existingQuote.CoverageDetails;
-                    existingQuote.TenantId        = 1;
+                    // Update the pending placeholder row with real data
+                    _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} quoteId={QuoteId} action=UPDATE premium={Premium}",
+                        "DB_WRITE", submissionId, pendingQuote.Id, parsedPremium.Value);
+                    pendingQuote.PremiumAmount   = parsedPremium.Value;
+                    pendingQuote.CoverageDetails = sub.CoverageTypes ?? pendingQuote.CoverageDetails;
+                    pendingQuote.TenantId        = 1;
                 }
                 else
                 {
-                    // No pending row — insert (shouldn't happen with dual-write, but be safe)
+                    // No pending row (re-upload scenario) — insert a fresh quote row
+                    _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} action=INSERT premium={Premium}",
+                        "DB_WRITE", submissionId, parsedPremium.Value);
                     _db.Quotes.Add(new Quote
                     {
                         OpportunityId   = opportunityId,
@@ -795,6 +804,8 @@ public class LifecycleCommandService
             {
                 sub.Status = SubmissionStatus.Error;
                 sub.ScraperError = "No quote data found in this PDF — the carrier format may not be supported. Click Resubmit to try again or enter manually.";
+                _logger.LogError("[QuoteScraper] {Step} sub={SubId} error={Error}",
+                    "SET_ERROR", submissionId, sub.ScraperError);
             }
 
             await WriteActivityAsync(opportunityId, "quote_scraped",
@@ -830,7 +841,7 @@ public class LifecycleCommandService
         // Sanitize — never persist raw exception messages to user-visible field
         var safeError = "Processing failed — click Resubmit to try again";
         // Log the raw error server-side only
-        _logger.LogError("Submission {Id} scraper error (raw): {Error}", submissionId, errorMessage);
+        _logger.LogError("[QuoteScraper] {Step} sub={SubId} error={Error}", "SET_ERROR", submissionId, errorMessage);
 
         await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {

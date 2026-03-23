@@ -11,13 +11,13 @@ public interface IQuoteScraperService
     Task<(string uploadUrl, string fileKey)> GetUploadLinkAsync(string fileName, string clientReferenceId);
 
     /// <summary>Upload pre-buffered PDF bytes to S3 using the presigned URL.</summary>
-    Task UploadBytesToS3Async(string uploadUrl, byte[] fileBytes, string fileName);
+    Task UploadBytesToS3Async(string uploadUrl, byte[] fileBytes, string fileName, Guid submissionId, Guid opportunityId, string carrierName);
 
     /// <summary>Submit the file to Fortress API for processing. Returns projectRequestId.</summary>
-    Task<string> SubmitRequestAsync(string fileKey, string clientReferenceId);
+    Task<string> SubmitRequestAsync(string fileKey, string clientReferenceId, Guid submissionId);
 
     /// <summary>Poll for scraper results. Returns null if still processing.</summary>
-    Task<QuoteScraperResult?> PollResultAsync(string projectRequestId);
+    Task<QuoteScraperResult?> PollResultAsync(string projectRequestId, Guid submissionId, int cycleNumber, DateTime pollStart);
 }
 
 public class QuoteScraperService : IQuoteScraperService
@@ -64,17 +64,22 @@ public class QuoteScraperService : IQuoteScraperService
         return (link.UploadUrl!, link.FileKey!);
     }
 
-    public async Task UploadBytesToS3Async(string uploadUrl, byte[] fileBytes, string fileName)
+    public async Task UploadBytesToS3Async(string uploadUrl, byte[] fileBytes, string fileName, Guid submissionId, Guid opportunityId, string carrierName)
     {
+        _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} opp={OppId} carrier={Carrier} file={File} bytes={Bytes}",
+            "UPLOAD_START", submissionId, opportunityId, carrierName, fileName, fileBytes.Length);
+
         using var s3Client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
         var fileContent = new ByteArrayContent(fileBytes);
         fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
         var s3Resp = await s3Client.PutAsync(uploadUrl, fileContent);
         s3Resp.EnsureSuccessStatusCode();
-        _logger.LogInformation("[QuoteScraper] Uploaded {File} ({Bytes} bytes)", fileName, fileBytes.Length);
+
+        _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} file={File} bytes={Bytes}",
+            "UPLOAD_S3_OK", submissionId, fileName, fileBytes.Length);
     }
 
-    public async Task<string> SubmitRequestAsync(string fileKey, string clientReferenceId)
+    public async Task<string> SubmitRequestAsync(string fileKey, string clientReferenceId, Guid submissionId)
     {
         var client = _factory.CreateClient("FortressApi");
 
@@ -93,11 +98,12 @@ public class QuoteScraperService : IQuoteScraperService
         if (submit.Success != true)
             throw new InvalidOperationException($"Scraper submission failed: {submit.Reason}");
 
-        _logger.LogInformation("[QuoteScraper] Submitted request {Id}", submit.ProjectRequestId);
+        _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} fileKey={FileKey} refId={RefId}",
+            "SUBMIT_OK", submissionId, submit.ProjectRequestId, fileKey, clientReferenceId);
         return submit.ProjectRequestId!;
     }
 
-    public async Task<QuoteScraperResult?> PollResultAsync(string projectRequestId)
+    public async Task<QuoteScraperResult?> PollResultAsync(string projectRequestId, Guid submissionId, int cycleNumber, DateTime pollStart)
     {
         var client = _factory.CreateClient("FortressApi");
         var url    = $"/clients/{ClientId}/projects/{ProjectId}/requests/{projectRequestId}";
@@ -109,6 +115,11 @@ public class QuoteScraperService : IQuoteScraperService
         var status = JsonSerializer.Deserialize<StatusResponseDto>(raw, Opts);
 
         var reqStatus = status?.Request?.Status ?? "Unknown";
+        var elapsed   = DateTime.UtcNow - pollStart;
+        var rawTrunc  = raw.Length > 500 ? raw[..500] + "..." : raw;
+
+        _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} cycle={Cycle} status={Status} elapsed={ElapsedSec}s rawResponse={Raw}",
+            "POLL_CYCLE", submissionId, projectRequestId, cycleNumber, reqStatus, (int)elapsed.TotalSeconds, rawTrunc);
 
         // If status is Completed but results are missing/empty, treat as still processing
         if (reqStatus is "Completed" or "Complete")
@@ -126,6 +137,8 @@ public class QuoteScraperService : IQuoteScraperService
                 return null;
 
             var pageCount = status?.Request?.PageCount ?? -1;
+            _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} finalStatus={Status} totalCycles={Cycles} elapsedSec={Elapsed} pageCount={PageCount}",
+                "TERMINAL", submissionId, projectRequestId, reqStatus, cycleNumber, (int)elapsed.TotalSeconds, pageCount);
             return new QuoteScraperResult
             {
                 Status          = reqStatus,
@@ -141,6 +154,8 @@ public class QuoteScraperService : IQuoteScraperService
                       or "Timeout" or "TimedOut")
         {
             var pageCount = status?.Request?.PageCount ?? -1;
+            _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} finalStatus={Status} totalCycles={Cycles} elapsedSec={Elapsed} pageCount={PageCount}",
+                "TERMINAL", submissionId, projectRequestId, reqStatus, cycleNumber, (int)elapsed.TotalSeconds, pageCount);
             return new QuoteScraperResult
             {
                 Status          = reqStatus,

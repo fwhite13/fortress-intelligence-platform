@@ -3,6 +3,7 @@
 @inject LifecycleCommandService Lifecycle
 @inject UserSessionService UserSession
 @inject ISnackbar Snackbar
+@inject ILogger<QuoteScraperPanel> Logger
 @using FamOs.Web.Data.Entities
 @using FamOs.Web.Services
 @using FamOs.Web.Theme
@@ -204,6 +205,10 @@
         StateHasChanged();
 
         var userId = await UserSession.GetUserIdAsync();
+        var sub = Opportunity.Submissions.First(s => s.Id == _selectedSubId.Value);
+
+        Logger.LogInformation("[QuoteScraper] {Step} sub={SubId} opp={OppId} carrier={Carrier} fileSize={Bytes}",
+            "PANEL_UPLOAD_START", _selectedSubId.Value, Opportunity.Id, sub.CarrierName, fileBytes.Length);
 
         try
         {
@@ -220,12 +225,12 @@
             // Step 3: Upload bytes to S3 (using pre-buffered bytes, not IBrowserFile)
             _statusMessage = "Uploading to secure storage...";
             StateHasChanged();
-            await Scraper.UploadBytesToS3Async(uploadUrl, fileBytes, fileName);
+            await Scraper.UploadBytesToS3Async(uploadUrl, fileBytes, fileName, _selectedSubId.Value, Opportunity.Id, sub.CarrierName);
 
             // Step 4: Submit to Fortress API
             _statusMessage = "Submitting for extraction...";
             StateHasChanged();
-            var projectRequestId = await Scraper.SubmitRequestAsync(fileKey, refId);
+            var projectRequestId = await Scraper.SubmitRequestAsync(fileKey, refId, _selectedSubId.Value);
 
             // Step 5: Persist projectRequestId IMMEDIATELY — before any polling
             await Lifecycle.PersistFortressRequestIdAsync(_selectedSubId.Value, projectRequestId);
@@ -254,6 +259,7 @@
         try
         {
             var pollStart = DateTime.UtcNow;
+            var cycleNumber = 0;
             const int maxPollSecs = 1800; // 30 min per session — user can navigate away and return
 
             while (true)
@@ -263,6 +269,8 @@
                 if (elapsed.TotalSeconds >= maxPollSecs)
                 {
                     // Soft timeout — don't error, job may still complete when user returns
+                    Logger.LogWarning("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} elapsed={Elapsed}s",
+                        "POLL_TIMEOUT", submissionId, requestId, (int)elapsed.TotalSeconds);
                     _scrapeError = "Taking longer than expected. You can navigate away — we'll resume polling when you return.";
                     _uploading = false;
                     StateHasChanged();
@@ -271,6 +279,10 @@
 
                 var intervalMs = elapsed.TotalSeconds < 120 ? 5000 : 30000;
                 await Task.Delay(intervalMs);
+                cycleNumber++;
+
+                Logger.LogInformation("[QuoteScraper] {Step} sub={SubId} cycle={Cycle} elapsed={Elapsed}s",
+                    "POLL_TICK", submissionId, cycleNumber, (int)elapsed.TotalSeconds);
 
                 var elapsedMin = (int)elapsed.TotalMinutes;
                 var elapsedSec = (int)elapsed.TotalSeconds % 60;
@@ -280,9 +292,10 @@
                 await InvokeAsync(StateHasChanged);
 
                 QuoteScraperResult? result;
-                try { result = await Scraper.PollResultAsync(requestId); }
+                try { result = await Scraper.PollResultAsync(requestId, submissionId, cycleNumber, pollStart); }
                 catch (Exception ex)
                 {
+                    Logger.LogError(ex, "[QuoteScraper] {Step} sub={SubId} requestId={RequestId}", "POLL_ERROR", submissionId, requestId);
                     await Lifecycle.SetSubmissionErrorAsync(submissionId, $"Polling error: {ex.Message}");
                     _scrapeError = $"Polling failed: {ex.Message}";
                     _uploading = false;
@@ -321,6 +334,9 @@
                 // Success path — single atomic call to avoid nested transaction conflicts
                 var parsedPremium = TryParsePremium(result.RawJson);
                 var sub = Opportunity.Submissions.First(s => s.Id == submissionId);
+
+                Logger.LogInformation("[QuoteScraper] {Step} sub={SubId} premium={Premium} coverage={Coverage} pageCount={PageCount}",
+                    "RESULTS_PARSED", submissionId, parsedPremium, sub.CoverageTypes, result.PageCount);
 
                 try
                 {
