@@ -5,7 +5,7 @@ using FamOs.Web.Services;
 
 namespace FamOs.Web.Domain;
 
-public class LifecycleCommandService
+public class LifecycleCommandService : IUploadLifecycleService
 {
     private readonly FamOsDbContext _db;
     private readonly SignalResolver _signals;

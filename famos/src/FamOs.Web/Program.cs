@@ -122,6 +122,7 @@ builder.Services.AddScoped<OpportunitySearchService>();
 builder.Services.AddScoped<UserSessionService>();
 builder.Services.AddScoped<SignalResolver>();
 builder.Services.AddScoped<LifecycleCommandService>();
+builder.Services.AddScoped<IUploadLifecycleService>(sp => sp.GetRequiredService<LifecycleCommandService>());
 builder.Services.AddScoped<OpportunityService>();
 builder.Services.AddScoped<IAmsService, AmsServiceStub>();
 builder.Services.AddScoped<TaskService>();

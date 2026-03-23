@@ -1,10 +1,11 @@
 @namespace FamOs.Web.Components.Panels
 @inject IQuoteScraperService Scraper
-@inject LifecycleCommandService Lifecycle
+@inject IUploadLifecycleService Lifecycle
 @inject UserSessionService UserSession
 @inject ISnackbar Snackbar
 @inject ILogger<QuoteScraperPanel> Logger
 @using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
 @using FamOs.Web.Services
 @using FamOs.Web.Theme
 
