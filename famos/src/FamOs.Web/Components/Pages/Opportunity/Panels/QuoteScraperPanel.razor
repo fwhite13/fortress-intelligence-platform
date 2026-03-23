@@ -193,10 +193,13 @@
         try
         {
             // Read file bytes (max 10MB)
+            // IMPORTANT: ReadAsync is not guaranteed to fill the buffer in one call (partial reads).
+            // Use MemoryStream to safely accumulate all bytes before upload.
             const long maxSize = 10 * 1024 * 1024;
             using var stream = _selectedFile.OpenReadStream(maxSize);
-            var bytes = new byte[_selectedFile.Size];
-            _ = await stream.ReadAsync(bytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var bytes = ms.ToArray();
 
             _statusMessage = "Submitting to scraper...";
             // Include a timestamp so each upload attempt gets a unique clientReferenceId.
