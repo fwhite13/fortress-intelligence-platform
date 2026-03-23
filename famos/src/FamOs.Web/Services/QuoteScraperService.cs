@@ -10,9 +10,6 @@ public interface IQuoteScraperService
     /// <summary>Get a presigned S3 upload URL for the PDF.</summary>
     Task<(string uploadUrl, string fileKey)> GetUploadLinkAsync(string fileName, string clientReferenceId);
 
-    /// <summary>Upload the PDF bytes to S3 using the presigned URL.</summary>
-    Task UploadToS3Async(string uploadUrl, IBrowserFile file);
-
     /// <summary>Upload pre-buffered PDF bytes to S3 using the presigned URL.</summary>
     Task UploadBytesToS3Async(string uploadUrl, byte[] fileBytes, string fileName);
 
@@ -67,23 +64,6 @@ public class QuoteScraperService : IQuoteScraperService
         return (link.UploadUrl!, link.FileKey!);
     }
 
-    public async Task UploadToS3Async(string uploadUrl, IBrowserFile file)
-    {
-        const long maxSize = 10 * 1024 * 1024;
-        using var stream = file.OpenReadStream(maxSize);
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms);
-        var bytes = ms.ToArray();
-
-        using var s3Client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
-        var fileContent = new ByteArrayContent(bytes);
-        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
-        var s3Resp = await s3Client.PutAsync(uploadUrl, fileContent);
-        s3Resp.EnsureSuccessStatusCode();
-
-        _logger.LogInformation("[QuoteScraper] Uploaded {File} ({Bytes} bytes)", file.Name, bytes.Length);
-    }
-
     public async Task UploadBytesToS3Async(string uploadUrl, byte[] fileBytes, string fileName)
     {
         using var s3Client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
@@ -133,8 +113,16 @@ public class QuoteScraperService : IQuoteScraperService
         // If status is Completed but results are missing/empty, treat as still processing
         if (reqStatus is "Completed" or "Complete")
         {
-            // If we got Completed but no actual results object, keep polling — results not ready yet
-            if (status?.Results == null || raw.Trim() == "{}" || raw.Trim() == "null")
+            // If no results object at all, keep polling
+            if (status?.Results == null)
+                return null;
+
+            // JsonElement check: {} or [] or null/undefined JsonElement = no real results yet
+            if (status.Results is JsonElement el &&
+                (el.ValueKind == JsonValueKind.Null ||
+                 el.ValueKind == JsonValueKind.Undefined ||
+                 (el.ValueKind == JsonValueKind.Object && !el.EnumerateObject().Any()) ||
+                 (el.ValueKind == JsonValueKind.Array  && el.GetArrayLength() == 0)))
                 return null;
 
             var pageCount = status?.Request?.PageCount ?? -1;
@@ -148,8 +136,9 @@ public class QuoteScraperService : IQuoteScraperService
             };
         }
 
-        // For failure statuses — return immediately
-        if (reqStatus is "Failed" or "Failure" or "Error" or "Errored" or "error" or "failed")
+        // For failure statuses (including Timeout/TimedOut) — return immediately
+        if (reqStatus is "Failed" or "Failure" or "failure" or "Error" or "Errored" or "error" or "failed"
+                      or "Timeout" or "TimedOut")
         {
             var pageCount = status?.Request?.PageCount ?? -1;
             return new QuoteScraperResult

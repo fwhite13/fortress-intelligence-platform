@@ -254,11 +254,31 @@
         try
         {
             var pollStart = DateTime.UtcNow;
-            var maxPollSecs = 1800; // 30 min total timeout
+            // Use submission CreatedAt as absolute anchor — survives page reloads/navigations.
+            // This prevents the 30-min window from resetting on every page load.
+            var sub0 = Opportunity.Submissions.FirstOrDefault(s => s.Id == submissionId);
+            var absoluteStart = sub0?.CreatedAt ?? DateTime.UtcNow;
+            const int maxPollSecs   = 1800;  // 30 min per session (UI feedback)
+            const int maxAbsoluteSecs = 7200; // 2 hour hard cap across all sessions
 
             while (true)
             {
-                var elapsed = DateTime.UtcNow - pollStart;
+                var elapsed         = DateTime.UtcNow - pollStart;
+                var absoluteElapsed = DateTime.UtcNow - absoluteStart;
+
+                // 2-hour absolute hard cap — permanently mark failed, no more polling
+                if (absoluteElapsed.TotalSeconds >= maxAbsoluteSecs)
+                {
+                    await Lifecycle.SetSubmissionErrorAsync(submissionId,
+                        "Scrape timed out after 2 hours — please resubmit.");
+                    _scrapeError = "This scrape has been running for over 2 hours and has been marked failed. Use Resubmit to try again.";
+                    _uploading = false;
+                    await OnUpdated.InvokeAsync();
+                    StateHasChanged();
+                    return;
+                }
+
+                // 30-min per-session soft cap — allow user to navigate away and return
                 if (elapsed.TotalSeconds >= maxPollSecs)
                 {
                     // Timeout but don't error — job may still complete, user can reload
@@ -292,7 +312,8 @@
 
                 if (result == null) continue; // still in progress
 
-                var isFailure = result.Status is "Failed" or "Failure" or "Error" or "Errored" or "error" or "failed"
+                var isFailure = result.Status is "Failed" or "Failure" or "failure" or "Error" or "Errored" or "error" or "failed"
+                                            or "Timeout" or "TimedOut"
                     || string.IsNullOrWhiteSpace(result.RawJson)
                     || result.RawJson.Trim() == "{}"
                     || result.RawJson.Trim() == "null";
