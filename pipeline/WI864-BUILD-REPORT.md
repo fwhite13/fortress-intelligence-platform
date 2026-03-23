@@ -47,3 +47,35 @@
 
 ### Git Commit
 `32ee2bd` — WI864: ECS adapt — port 8080, Secrets Manager db creds, multi-stage Dockerfile, buildspec.yml
+
+---
+
+## Build Cycle 2 — Review Fix Pass
+
+### Outcome: ✅ BUILD COMPLETE
+
+**CC invocation:** `echo "..." | claude --model sonnet -p --dangerously-skip-permissions`
+
+### Review Issues Fixed (from Clint's Review Report)
+
+#### Fix 1 — CRITICAL: Secrets Manager `username` → `user` key mapping (`src/db.ts`)
+AWS RDS Secrets Manager stores credentials with `username` field, but `pg` Pool requires `user`. Previous code cast the raw JSON directly to a type with `user`, meaning `creds.user` would be `undefined` at runtime.
+
+**Fix:** Cast raw secret to `{ username: string; ... }`, then explicitly map `raw.username` to the returned `user` field.
+
+#### Fix 2 — P1: SSL CA bundle comment (`src/db.ts`)
+Added inline comment to the `ssl` block explaining that `rds-ca-rsa2048-g1` is included in Node 22's Mozilla trust store, so no cert file is needed unless using the legacy `rds-ca-2019` bundle.
+
+#### Fix 3 — P2: `buildspec.yml` missing `AWS_ACCOUNT_ID` env variable
+`$AWS_ACCOUNT_ID` was referenced in commands but not defined in an `env.variables` block. Added:
+```yaml
+env:
+  variables:
+    AWS_ACCOUNT_ID: '742932328420'
+```
+
+### Build Verification
+- `npm run build` — ✅ zero TypeScript errors
+
+### Git Commit
+`320be23` — WI864: fix Secrets Manager username key, buildspec AWS_ACCOUNT_ID, SSL CA comment

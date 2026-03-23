@@ -12,7 +12,7 @@ async function memoryList(params, user) {
         queryParams = [user.id, limit];
     }
     else if (scope === 'org') {
-        whereClause = "scope = 'org'";
+        whereClause = "scope = 'org' AND user_id IS NULL";
         queryParams = [user.id, limit];
     }
     else {
@@ -32,6 +32,6 @@ async function memoryList(params, user) {
     ORDER BY created_at DESC
     LIMIT $2
   `;
-    const result = await db_1.pool.query(query, queryParams);
+    const result = await (0, db_1.getPool)().query(query, queryParams);
     return result.rows;
 }

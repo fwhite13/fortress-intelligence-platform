@@ -243,6 +243,17 @@
                 return;
             }
 
+            if (result.Results == null ||
+                string.IsNullOrWhiteSpace(result.RawJson) ||
+                result.RawJson == "{}" ||
+                result.RawJson.Contains("\"error\"") ||
+                (result.RawJson.Contains("\"message\":\"") && result.RawJson.Contains("fail")))
+            {
+                _scrapeError = "Quote extraction failed. The PDF could not be processed. Please try again or enter the premium manually.";
+                _showManualEntry = true;
+                return;
+            }
+
             _resultJson = result.RawJson;
 
             // Persist result JSON on the Submission
@@ -269,7 +280,7 @@
             }
             else
             {
-                Snackbar.Add("Quote data extracted. Enter premium manually below to record the quote.", Severity.Warning);
+                Snackbar.Add("Extraction completed but premium could not be parsed automatically. Please enter manually.", Severity.Warning);
                 _showManualEntry = true;
                 // Do NOT invoke OnUpdated here — that reloads the parent and resets this component,
                 // wiping _showManualEntry. OnUpdated is called from RecordManually() after user submits premium.

@@ -15,7 +15,7 @@ async function getActiveUsers() {
     if (userCache && now - userCache.fetchedAt < CACHE_TTL_MS) {
         return userCache.users;
     }
-    const result = await db_1.pool.query('SELECT id, username, email, api_token, scope, is_active FROM cc_memory_users WHERE is_active = true');
+    const result = await (0, db_1.getPool)().query('SELECT id, username, email, api_token, scope, is_active FROM cc_memory_users WHERE is_active = true');
     userCache = { users: result.rows, fetchedAt: now };
     return result.rows;
 }
@@ -30,7 +30,7 @@ async function authenticate(req) {
     const users = await getActiveUsers();
     for (const user of users) {
         if (await bcrypt_1.default.compare(token, user.api_token)) {
-            db_1.pool.query('UPDATE cc_memory_users SET last_used_at = NOW() WHERE id = $1', [user.id])
+            (0, db_1.getPool)().query('UPDATE cc_memory_users SET last_used_at = NOW() WHERE id = $1', [user.id])
                 .catch(() => { });
             return user;
         }

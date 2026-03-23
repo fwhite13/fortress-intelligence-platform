@@ -16,7 +16,7 @@ async function memorySearch(params, user) {
              1 - (embedding <=> $1::vector) AS similarity
       FROM cc_memory_entries
       WHERE
-        (scope = 'org' OR user_id = $2)
+        (scope = 'org' AND user_id IS NULL OR user_id = $2)
         AND (expires_at IS NULL OR expires_at > NOW())
         AND (project = $3 OR project IS NULL)
       ORDER BY embedding <=> $1::vector
@@ -31,14 +31,14 @@ async function memorySearch(params, user) {
              1 - (embedding <=> $1::vector) AS similarity
       FROM cc_memory_entries
       WHERE
-        (scope = 'org' OR user_id = $2)
+        (scope = 'org' AND user_id IS NULL OR user_id = $2)
         AND (expires_at IS NULL OR expires_at > NOW())
       ORDER BY embedding <=> $1::vector
       LIMIT $3
     `;
         queryParams = [embeddingStr, user.id, limit * 2];
     }
-    const result = await db_1.pool.query(query, queryParams);
+    const result = await (0, db_1.getPool)().query(query, queryParams);
     return deduplicateAndRank(result.rows, limit);
 }
 function deduplicateAndRank(rows, limit) {

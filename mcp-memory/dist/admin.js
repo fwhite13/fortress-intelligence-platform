@@ -20,7 +20,7 @@ function parseArgs(argv) {
 async function addUser(username, email, scope = 'user') {
     const plaintext = crypto_1.default.randomBytes(32).toString('hex');
     const hash = await bcrypt_1.default.hash(plaintext, 12);
-    const result = await db_1.pool.query(`INSERT INTO cc_memory_users (username, email, api_token, scope)
+    const result = await (0, db_1.getPool)().query(`INSERT INTO cc_memory_users (username, email, api_token, scope)
      VALUES ($1, $2, $3, $4) RETURNING id`, [username, email, hash, scope]);
     console.log(`✓ User created: ${username} (${email})`);
     console.log(`  ID: ${result.rows[0].id}`);
@@ -29,7 +29,7 @@ async function addUser(username, email, scope = 'user') {
 async function resetToken(username) {
     const plaintext = crypto_1.default.randomBytes(32).toString('hex');
     const hash = await bcrypt_1.default.hash(plaintext, 12);
-    const result = await db_1.pool.query(`UPDATE cc_memory_users SET api_token = $1, last_used_at = NULL WHERE username = $2 RETURNING id`, [hash, username]);
+    const result = await (0, db_1.getPool)().query(`UPDATE cc_memory_users SET api_token = $1, last_used_at = NULL WHERE username = $2 RETURNING id`, [hash, username]);
     if (result.rowCount === 0) {
         console.error(`User not found: ${username}`);
         process.exit(1);
@@ -39,7 +39,7 @@ async function resetToken(username) {
     console.log(`  New token (save this — shown once): ${plaintext}`);
 }
 async function listUsers() {
-    const result = await db_1.pool.query(`SELECT id, username, email, scope, is_active, created_at, last_used_at FROM cc_memory_users ORDER BY created_at`);
+    const result = await (0, db_1.getPool)().query(`SELECT id, username, email, scope, is_active, created_at, last_used_at FROM cc_memory_users ORDER BY created_at`);
     for (const row of result.rows) {
         const status = row.is_active ? '✓' : '✗';
         console.log(`${status} ${row.username} (${row.email}) scope=${row.scope} last_used=${row.last_used_at?.toISOString() || 'never'}`);
@@ -70,6 +70,6 @@ async function main() {
             console.error('Commands: add-user, reset-token, list-users');
             process.exit(1);
     }
-    await db_1.pool.end();
+    await (0, db_1.getPool)().end();
 }
 main().catch(console.error);

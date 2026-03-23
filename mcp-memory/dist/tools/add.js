@@ -17,7 +17,7 @@ async function memoryAdd(params, user) {
     const embedding = await (0, embed_1.embedText)(content);
     const embeddingStr = JSON.stringify(embedding);
     const userId = scope === 'personal' ? user.id : null;
-    const result = await db_1.pool.query(`INSERT INTO cc_memory_entries (user_id, scope, project, content, entry_type, source, embedding, created_by)
+    const result = await (0, db_1.getPool)().query(`INSERT INTO cc_memory_entries (user_id, scope, project, content, entry_type, source, embedding, created_by)
      VALUES ($1, $2, $3, $4, $5, 'manual', $6::vector, $7)
      RETURNING id, created_at`, [userId, scope, params.project || null, content, entry_type, embeddingStr, user.id]);
     return { id: result.rows[0].id, created_at: result.rows[0].created_at };
