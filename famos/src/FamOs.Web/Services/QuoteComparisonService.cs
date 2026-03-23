@@ -89,7 +89,7 @@ public class QuoteComparisonService : IQuoteComparisonService
         return new ComparisonContextDto
         {
             Account         = account,
-            ProgramVertical = vertical!,
+            ProgramVertical = vertical,
             Lines           = lines,
             Requirements    = requirements,
             Quotes          = quotes,

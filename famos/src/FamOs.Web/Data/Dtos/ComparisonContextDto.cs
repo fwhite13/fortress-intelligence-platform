@@ -5,7 +5,7 @@ namespace FamOs.Web.Data.Dtos;
 public class ComparisonContextDto
 {
     public Account Account { get; set; } = default!;
-    public ProgramVertical ProgramVertical { get; set; } = default!;
+    public ProgramVertical? ProgramVertical { get; set; }
     public List<LineOfBusiness> Lines { get; set; } = new();
     public List<Requirement> Requirements { get; set; } = new();
     public List<QuoteWithCoverageDto> Quotes { get; set; } = new();
