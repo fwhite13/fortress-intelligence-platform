@@ -1,0 +1,16 @@
+@inherits ComponentBase
+
+<MudDialogContent>
+    <MudText>Mark <strong>@AccountName</strong> as Lost? This can be changed later from the opportunity workspace.</MudText>
+</MudDialogContent>
+<MudDialogActions>
+    <MudButton OnClick="Cancel">Cancel</MudButton>
+    <MudButton Class="famos-btn-danger" OnClick="Confirm">Mark Lost</MudButton>
+</MudDialogActions>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string AccountName { get; set; } = "";
+    private void Cancel() => MudDialog.Cancel();
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(true));
+}
