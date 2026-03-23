@@ -31,25 +31,28 @@
         {
             <MudGrid Spacing="2">
                 <MudItem xs="12" sm="5">
-                    <MudSelect @bind-Value="_selectedSubId"
-                               Label="Carrier" Class="famos-select">
+                    <MudSelect T="Guid?" @bind-Value="_selectedSubId"
+                               Label="Carrier" Class="famos-select" Placeholder="Select Carrier...">
+                        <MudSelectItem T="Guid?" Value="@((Guid?)null)">Select Carrier...</MudSelectItem>
                         @foreach (var sub in Opportunity.Submissions)
                         {
-                            <MudSelectItem Value="sub.Id">@sub.CarrierName</MudSelectItem>
+                            <MudSelectItem T="Guid?" Value="@((Guid?)sub.Id)">@sub.CarrierName</MudSelectItem>
                         }
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="7">
-                    <MudFileUpload T="IBrowserFile" FilesChanged="OnFileSelected" Accept=".pdf"
-                                   MaximumFileCount="1">
-                        <ActivatorContent>
-                            <MudButton Class="famos-btn-outline"
-                                       StartIcon="@FamosIcons.Upload"
-                                       Disabled="@(_uploading || _selectedSubId == Guid.Empty)">
-                                @(_selectedFile == null ? "Choose PDF" : _selectedFile.Name)
-                            </MudButton>
-                        </ActivatorContent>
-                    </MudFileUpload>
+                    <div style="@(_uploading || _selectedSubId == null ? "pointer-events:none;opacity:0.5;" : "")">
+                        <MudFileUpload T="IBrowserFile" FilesChanged="OnFileSelected" Accept=".pdf"
+                                       MaximumFileCount="1" Disabled="@(_uploading || _selectedSubId == null)">
+                            <ActivatorContent>
+                                <MudButton Class="famos-btn-outline"
+                                           StartIcon="@FamosIcons.Upload"
+                                           Disabled="@(_uploading || _selectedSubId == null)">
+                                    @(_selectedFile == null ? "Choose PDF" : _selectedFile.Name)
+                                </MudButton>
+                            </ActivatorContent>
+                        </MudFileUpload>
+                    </div>
                     @if (_selectedFile != null)
                     {
                         <MudButton Class="famos-btn-primary"
@@ -141,7 +144,7 @@
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
     [Parameter] public EventCallback OnUpdated { get; set; }
 
-    private Guid   _selectedSubId;
+    private Guid?  _selectedSubId;
     private IBrowserFile? _selectedFile;
     private bool   _uploading;
     private string _statusMessage = "";
@@ -170,7 +173,7 @@
     protected override void OnParametersSet()
     {
         // Restore previously recorded premium from the selected submission's quote
-        if (_selectedSubId != Guid.Empty)
+        if (_selectedSubId != null)
         {
             var sub = Opportunity.Submissions.FirstOrDefault(s => s.Id == _selectedSubId);
             var quote = sub != null
@@ -190,7 +193,7 @@
 
     private async Task UploadAndSubmit()
     {
-        if (_selectedFile == null || _selectedSubId == Guid.Empty) return;
+        if (_selectedFile == null || _selectedSubId == null) return;
 
         // STEP 0: Buffer file bytes into memory BEFORE any StateHasChanged or DB writes.
         // The IBrowserFile handle dies as soon as InputFile re-renders.
@@ -318,31 +321,30 @@
                     return;
                 }
 
-                // Success path
-                await Lifecycle.SaveSubmissionScraperResultAsync(submissionId, result.RawJson, userId);
-
+                // Success path — single atomic call to avoid nested transaction conflicts
                 var parsedPremium = TryParsePremium(result.RawJson);
-                if (parsedPremium.HasValue && parsedPremium.Value > 0)
+                var sub = Opportunity.Submissions.First(s => s.Id == submissionId);
+
+                try
                 {
-                    var sub = Opportunity.Submissions.First(s => s.Id == submissionId);
-                    try
+                    await Lifecycle.SaveScraperResultAndRecordQuoteAsync(
+                        Opportunity.Id, submissionId, result.RawJson, parsedPremium, userId);
+
+                    if (parsedPremium.HasValue && parsedPremium.Value > 0)
                     {
-                        await Lifecycle.RecordQuoteAsync(Opportunity.Id, submissionId, sub.CarrierName,
-                            parsedPremium.Value, null, userId);
                         Snackbar.Add($"Quote from {sub.CarrierName} recorded — ${parsedPremium.Value:N0}.", Severity.Success);
                         _autoRecordedPremium = parsedPremium;
                     }
-                    catch (LifecycleValidationException ex)
+                    else
                     {
-                        Snackbar.Add(ex.Message, Severity.Error);
                         _showManualEntry = true;
+                        Snackbar.Add("Extraction completed. Enter premium manually.", Severity.Warning);
                     }
                 }
-                else
+                catch (LifecycleValidationException ex)
                 {
-                    await Lifecycle.UpdateSubmissionStatusAsync(submissionId, SubmissionStatus.QuoteReceived, null, userId);
+                    Snackbar.Add(ex.Message, Severity.Error);
                     _showManualEntry = true;
-                    Snackbar.Add("Extraction completed. Enter premium manually.", Severity.Warning);
                 }
 
                 _uploading = false;

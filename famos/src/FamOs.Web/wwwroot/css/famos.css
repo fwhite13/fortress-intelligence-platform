@@ -1482,3 +1482,29 @@
         justify-content: flex-start;
     }
 }
+
+/* Quote table columns for Received Quotes panel — override grid with flex */
+.famos-quote-header-row,
+.famos-quote-row { display: flex; }
+
+.famos-quote-col-carrier { flex: 1; min-width: 120px; }
+.famos-quote-col-premium { flex: 0 0 100px; text-align: right; }
+.famos-quote-col-status { flex: 0 0 110px; }
+.famos-quote-col-actions { flex: 0 0 160px; display: flex; gap: 6px; align-items: center; }
+
+/* Status badges */
+.famos-status-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.famos-status-complete { background: #d1fae5; color: #065f46; }
+.famos-status-processing { background: #e0f2fe; color: #0369a1; }
+.famos-status-error { background: #fee2e2; color: #991b1b; cursor: help; }
+
+/* Disabled primary button state */
+.famos-btn-disabled { opacity: 0.5; cursor: not-allowed; }

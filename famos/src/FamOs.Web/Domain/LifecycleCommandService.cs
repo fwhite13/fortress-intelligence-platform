@@ -690,6 +690,83 @@ public class LifecycleCommandService
     }
 
     /// <summary>
+    /// Atomically saves scraper result JSON, records the quote, and marks status QuoteReceived.
+    /// Combines SaveSubmissionScraperResultAsync + RecordQuoteAsync to avoid nested transaction conflicts.
+    /// </summary>
+    public async Task SaveScraperResultAndRecordQuoteAsync(
+        Guid opportunityId, Guid submissionId, string resultJson,
+        decimal? parsedPremium, string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+
+            var opp = await LoadOpportunityWithDetailsAsync(opportunityId);
+            var sub = await _db.Submissions.FindAsync(submissionId)
+                ?? throw new NotFoundException($"Submission {submissionId} not found");
+
+            sub.QuoteResultJson = resultJson;
+            sub.UpdatedAt = DateTime.UtcNow;
+
+            if (parsedPremium.HasValue && parsedPremium.Value > 0)
+            {
+                // Record quote in same transaction
+                var isFirst = !opp.Quotes.Any();
+
+                _db.Quotes.Add(new Quote
+                {
+                    OpportunityId = opportunityId,
+                    SubmissionId = submissionId,
+                    CarrierName = sub.CarrierName,
+                    PremiumAmount = parsedPremium.Value,
+                    ReceivedAt = DateTime.UtcNow
+                });
+
+                sub.Status = SubmissionStatus.QuoteReceived;
+
+                if (isFirst && opp.LifecycleStage == LifecycleStage.Marketed)
+                {
+                    var from = opp.LifecycleStage;
+                    opp.LifecycleStage = LifecycleStage.QuotesReceived;
+                    opp.LastStageTransitionAt = DateTime.UtcNow;
+                    opp.UpdatedAt = DateTime.UtcNow;
+                    opp.Version++;
+                    await WriteOutboxAsync(DomainEventType.OpportunityLifecycleChanged, new
+                    {
+                        opportunity_id = opp.Id,
+                        from_stage = from.ToString(),
+                        to_stage = opp.LifecycleStage.ToString(),
+                        actor_user_id = actorUserId,
+                        occurred_at = DateTime.UtcNow
+                    });
+                    await CreateTasksForStageAsync(opp.Id, LifecycleStage.QuotesReceived);
+                }
+
+                await RecomputeSignalAsync(opp);
+                await WriteActivityAsync(opp.Id, "quote_recorded",
+                    $"Quote from {sub.CarrierName}: ${parsedPremium.Value:N0}", actorUserId);
+                await WriteOutboxAsync(DomainEventType.QuoteRecorded, new
+                {
+                    opportunity_id = opportunityId,
+                    carrier = sub.CarrierName,
+                    premium = parsedPremium.Value,
+                    occurred_at = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                sub.Status = SubmissionStatus.QuoteReceived;
+            }
+
+            await WriteActivityAsync(opportunityId, "quote_scraped",
+                $"Quote PDF scraped for {sub.CarrierName}", actorUserId);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+    }
+
+    /// <summary>
     /// Persist the Fortress API request ID immediately after upload completes.
     /// This makes the scraper job resumable if the user navigates away.
     /// </summary>
@@ -711,12 +788,17 @@ public class LifecycleCommandService
     /// </summary>
     public async Task SetSubmissionErrorAsync(Guid submissionId, string errorMessage)
     {
+        // Sanitize — never persist raw exception messages to user-visible field
+        var safeError = "Processing failed — click Resubmit to try again";
+        // Log the raw error server-side only
+        _logger.LogError("Submission {Id} scraper error (raw): {Error}", submissionId, errorMessage);
+
         await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
             var sub = await _db.Submissions.FindAsync(submissionId)
                 ?? throw new NotFoundException($"Submission {submissionId} not found");
             sub.Status = SubmissionStatus.Error;
-            sub.ScraperError = errorMessage;
+            sub.ScraperError = safeError;  // sanitized, not raw errorMessage
             sub.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync();
         });
