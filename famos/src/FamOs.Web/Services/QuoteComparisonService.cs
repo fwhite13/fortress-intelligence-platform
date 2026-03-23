@@ -195,6 +195,16 @@ public class QuoteComparisonService : IQuoteComparisonService
         return proposal.Id;
     }
 
+    public async Task<Guid?> ResolveAccountIdFromOpportunityAsync(Guid opportunityId, int tenantId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var opp = await db.Opportunities.FindAsync(opportunityId);
+        if (opp == null) return null;
+        var account = await db.Accounts
+            .FirstOrDefaultAsync(a => a.AffinityId == opp.AffinityId);
+        return account?.Id;
+    }
+
     // ── Mapping helpers ────────────────────────────────────────────────────────
 
     private static QuoteWithCoverageDto MapToQuoteWithCoverageDto(Quote q)

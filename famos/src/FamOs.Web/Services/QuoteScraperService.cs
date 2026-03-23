@@ -130,14 +130,11 @@ public class QuoteScraperService : IQuoteScraperService
 
         var reqStatus = status?.Request?.Status ?? "Unknown";
 
-        // Treat unknown/null status as still in-progress — don't exit prematurely
-        if (reqStatus == "Unknown")
-            return null;
+        // Only stop on explicitly terminal statuses — any unknown/in-progress status keeps polling
+        var isTerminal = reqStatus is "Completed" or "Complete"
+            or "Failed" or "Failure" or "Error" or "Errored" or "error" or "failed";
 
-        // In-progress statuses — keep polling
-        if (reqStatus is "Pending" or "Processing" or "Assembling" or "Queued"
-                        or "Submitted" or "Received" or "InProgress" or "In Progress"
-                        or "Sleeping")
+        if (!isTerminal)
             return null;
 
         // Only return terminal result for explicitly success or failure statuses

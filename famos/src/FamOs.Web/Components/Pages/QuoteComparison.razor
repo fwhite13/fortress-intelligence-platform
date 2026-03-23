@@ -1,4 +1,4 @@
-@page "/quote-comparison/{AccountId:guid}"
+@page "/quote-comparison/{OpportunityId:guid}"
 @namespace FamOs.Web.Components.Pages
 @attribute [Authorize]
 @using FamOs.Web.Components.Pages.QuoteCompare
@@ -133,8 +133,9 @@ else
 }
 
 @code {
-    [Parameter] public Guid AccountId { get; set; }
+    [Parameter] public Guid OpportunityId { get; set; }
 
+    private Guid _accountId;
     private bool _loading = true;
     private ComparisonContextDto? _context;
     private ComparisonPageState _state = new();
@@ -152,11 +153,19 @@ else
     {
         try
         {
-            _context = await QuoteComparisonService.GetComparisonContextAsync(AccountId, _userId, _tenantId);
-            
+            var accountId = await QuoteComparisonService.ResolveAccountIdFromOpportunityAsync(OpportunityId, _tenantId);
+            if (!accountId.HasValue)
+            {
+                _loading = false;
+                return;
+            }
+            _accountId = accountId.Value;
+
+            _context = await QuoteComparisonService.GetComparisonContextAsync(_accountId, _userId, _tenantId);
+
             if (_context != null)
             {
-                _carrierNotes = await CarrierNoteService.GetNotesForAccountAsync(AccountId, _tenantId);
+                _carrierNotes = await CarrierNoteService.GetNotesForAccountAsync(_accountId, _tenantId);
                 
                 BuildQuoteLookup();
                 BuildRequirementGroups();
@@ -359,7 +368,7 @@ else
                 CollapsedBlocks = _state.CollapsedBlocks
             };
 
-            await QuoteComparisonService.SaveDraftAsync(AccountId, _userId, _tenantId, draft);
+            await QuoteComparisonService.SaveDraftAsync(_accountId, _userId, _tenantId, draft);
             Snackbar.Add("Draft saved", Severity.Success);
         }
         catch (Exception ex)
@@ -432,7 +441,7 @@ else
         try
         {
             var proposalId = await QuoteComparisonService.BuildProposalAsync(
-                AccountId, _userId, Guid.NewGuid(), _tenantId);
+                _accountId, _userId, Guid.NewGuid(), _tenantId);
             Snackbar.Add("Proposal created successfully", Severity.Success);
             // TODO: Navigate to proposal view
         }
@@ -461,7 +470,7 @@ else
     {
         try
         {
-            await CarrierNoteService.SaveNoteAsync(AccountId, args.QuoteId, _userId, _tenantId, args.NoteText);
+            await CarrierNoteService.SaveNoteAsync(_accountId, args.QuoteId, _userId, _tenantId, args.NoteText);
             _carrierNotes[args.QuoteId] = args.NoteText;
             Snackbar.Add("Note saved", Severity.Success);
             StateHasChanged();
