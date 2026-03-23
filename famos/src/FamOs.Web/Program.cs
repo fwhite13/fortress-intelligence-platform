@@ -625,6 +625,33 @@ var logger = app.Logger;
     }
 }
 
+// ADO#1034: Fix Progressive scrape-with-no-results + delete Northland test data
+{
+    using var scope1034 = app.Services.CreateScope();
+    var factory1034 = scope1034.ServiceProvider.GetRequiredService<IDbContextFactory<FamOsDbContext>>();
+    await using var db = await factory1034.CreateDbContextAsync();
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            -- Delete manually-created Northland test row
+            DELETE FROM quotes WHERE Id = '88e5e8ae-54d2-4866-9860-291c86772f1f';
+
+            -- Mark submissions as Error where scraper returned null results (status=2 but no real data)
+            UPDATE submissions
+            SET Status = 7,
+                scraper_error = 'Scraper completed but no extraction results were returned. Click Resubmit to try again.',
+                UpdatedAt = NOW()
+            WHERE Status = 2
+              AND (QuoteResultJson LIKE '%""results"":null%' OR QuoteResultJson IS NULL);
+        ");
+        logger.LogInformation("ADO#1034: Progressive + Northland migration complete");
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("ADO#1034: Migration failed (non-fatal): {Error}", ex.Message);
+    }
+}
+
 // Quote Comparison seed data
 {
     using var seedScope = app.Services.CreateScope();

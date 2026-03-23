@@ -21,6 +21,10 @@
     {
         <div class="famos-quote-table">
             <div class="famos-quote-header-row">
+                <div class="famos-quote-col-check">
+                    <MudCheckBox T="bool" Value="@AllSelected" ValueChanged="@ToggleSelectAll"
+                                 Size="Size.Small" />
+                </div>
                 <div class="famos-quote-col-carrier">CARRIER</div>
                 <div class="famos-quote-col-coverages">COVERAGES</div>
                 <div class="famos-quote-col-premium">PREMIUM</div>
@@ -35,6 +39,11 @@
                 var isError = subStatus == SubmissionStatus.Error;
 
                 <div class="famos-quote-row">
+                    <div class="famos-quote-col-check">
+                        <MudCheckBox T="bool" Value="@_selectedQuoteIds.Contains(quote.Id)"
+                                     ValueChanged="@(v => ToggleQuote(quote.Id, v))"
+                                     Size="Size.Small" />
+                    </div>
                     <div class="famos-quote-col-carrier">@quote.CarrierName</div>
                     <div class="famos-quote-col-coverages">
                         <span class="famos-meta-text">@(string.IsNullOrEmpty(quote.CoverageDetails) ? "—" : quote.CoverageDetails)</span>
@@ -63,7 +72,7 @@
                         else
                         {
                             <span class="famos-status-badge famos-status-processing">
-                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Style="width:14px;height:14px;" Class="mr-1" />
                                 @(subStatus == SubmissionStatus.Uploading ? "Uploading" : "Processing")
                             </span>
                         }
@@ -71,27 +80,36 @@
                     <div class="famos-quote-col-actions">
                         @if (isComplete)
                         {
-                            <MudButton Size="Size.Small" Class="famos-btn-outline" OnClick="@(() => EditQuote(quote.Id))">Edit</MudButton>
+                            <MudTooltip Text="Edit">
+                                <MudIconButton Icon="@FamosIcons.Edit" Size="Size.Small"
+                                               OnClick="@(() => EditQuote(quote.Id))" />
+                            </MudTooltip>
                         }
                         else if (isError)
                         {
-                            <MudButton Size="Size.Small" Class="famos-btn-outline" OnClick="@(async () => await ResubmitAsync(quote.SubmissionId))">Resubmit</MudButton>
-                            <MudButton Size="Size.Small" Class="famos-btn-danger" OnClick="@(async () => await DeleteQuoteAsync(quote.Id, quote.SubmissionId))">Delete</MudButton>
+                            <MudTooltip Text="Resubmit">
+                                <MudIconButton Icon="@FamosIcons.Retry" Size="Size.Small"
+                                               OnClick="@(async () => await ResubmitAsync(quote.SubmissionId))" />
+                            </MudTooltip>
+                            <MudTooltip Text="Delete">
+                                <MudIconButton Icon="@FamosIcons.Delete" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(async () => await DeleteQuoteAsync(quote.Id, quote.SubmissionId))" />
+                            </MudTooltip>
                         }
                     </div>
                 </div>
             }
         </div>
 
-        <div class="mt-3">
+        <div class="mt-4" style="padding-top: 4px;">
             <MudButton Class="famos-btn-primary"
-                       Disabled="@(!HasCompleteQuotes)"
+                       Disabled="@(!CanCompare)"
                        OnClick="@(() => Nav.NavigateTo($"/quote-comparison/{Opportunity.Id}"))">
                 Compare Quotes and Create Proposal
             </MudButton>
-            @if (!HasCompleteQuotes)
+            @if (!CanCompare)
             {
-                <span class="famos-meta-text ml-2">Available once quotes are processed</span>
+                <span class="famos-meta-text ml-2">Select quotes to compare</span>
             }
         </div>
     }
@@ -102,8 +120,28 @@
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
     [Parameter] public EventCallback OnAdvanced { get; set; }
 
-    private bool HasCompleteQuotes => Opportunity.Quotes.Any(q => q.PremiumAmount > 0);
+    private HashSet<Guid> _selectedQuoteIds = new();
+
+    private bool AllSelected => Opportunity.Quotes.Any() &&
+        Opportunity.Quotes.All(q => _selectedQuoteIds.Contains(q.Id));
+
+    private bool CanCompare => _selectedQuoteIds.Any();
+
     private bool HasAnyContent => Opportunity.Quotes.Any();
+
+    private void ToggleSelectAll(bool value)
+    {
+        if (value)
+            _selectedQuoteIds = Opportunity.Quotes.Select(q => q.Id).ToHashSet();
+        else
+            _selectedQuoteIds.Clear();
+    }
+
+    private void ToggleQuote(Guid id, bool value)
+    {
+        if (value) _selectedQuoteIds.Add(id);
+        else _selectedQuoteIds.Remove(id);
+    }
 
     private SubmissionStatus? GetQuoteSubmissionStatus(Quote quote)
     {

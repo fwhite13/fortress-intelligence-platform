@@ -18,6 +18,7 @@ public static class FamosIcons
     public const string Add = Icons.Material.Outlined.Add;
     public const string Edit = Icons.Material.Outlined.Edit;
     public const string Delete = Icons.Material.Outlined.Delete;
+    public const string Retry = Icons.Material.Outlined.Replay;
     public const string Close = Icons.Material.Outlined.Close;
     public const string Save = Icons.Material.Outlined.Save;
     public const string Upload = Icons.Material.Outlined.Upload;

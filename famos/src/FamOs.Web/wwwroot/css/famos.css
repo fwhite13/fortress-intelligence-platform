@@ -1487,6 +1487,7 @@
 .famos-quote-header-row,
 .famos-quote-row { display: flex; }
 
+.famos-quote-col-check { flex: 0 0 36px; display: flex; align-items: center; }
 .famos-quote-col-carrier { flex: 1; min-width: 100px; }
 .famos-quote-col-coverages { flex: 0 0 120px; font-size: 12px; color: var(--color-text-muted, #6b7280); }
 .famos-quote-col-premium { flex: 0 0 100px; text-align: right; }
