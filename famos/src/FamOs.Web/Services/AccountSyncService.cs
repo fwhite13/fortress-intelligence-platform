@@ -201,7 +201,7 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing company {CompanyId} — skipping", company.Id);
+                _logger.LogError(ex, "[AccountSync] Error processing company {CompanyId} — skipping", company.Id);
                 // continue to next company
             }
         }
@@ -316,7 +316,8 @@ public class AccountSyncService : BackgroundService, IAccountSyncService
         var withCarrier = deals.Count(d => !string.IsNullOrEmpty(
             d.Properties?.CarrierName ?? d.Properties?.Carrier ?? d.Properties?.InsuranceCarrier ?? d.Properties?.PrimaryCarrierHs));
         var withExpiration = deals.Count(d => !string.IsNullOrEmpty(
-            d.Properties?.PolicyExpirationDate ?? d.Properties?.ExpirationDate ?? d.Properties?.RenewalDate));
+            d.Properties?.PolicyExpirationDate ?? d.Properties?.ExpirationDate
+            ?? d.Properties?.PolicyExpDate ?? d.Properties?.RenewalDate));
         _logger.LogInformation("[AccountSync] Deal property coverage: {Total} deals, {Cov} with coverage, {Car} with carrier, {Exp} with expiration",
             deals.Count, withCoverage, withCarrier, withExpiration);
 
