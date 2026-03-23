@@ -100,6 +100,9 @@ else
             <PanelErrorBoundary>
                 <MarketedPanel Opportunity="_opp" OnAdvanced="Reload" />
             </PanelErrorBoundary>
+            <PanelErrorBoundary>
+                <QuotesReceivedPanel Opportunity="_opp" OnAdvanced="Reload" />
+            </PanelErrorBoundary>
             break;
         case LifecycleStage.QuotesReceived:
             <PanelErrorBoundary>

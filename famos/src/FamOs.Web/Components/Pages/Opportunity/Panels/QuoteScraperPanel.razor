@@ -292,7 +292,7 @@
 
                 if (result == null) continue; // still in progress
 
-                var isFailure = result.Status is "Failed" or "Error" or "Errored" or "error" or "failed"
+                var isFailure = result.Status is "Failed" or "Failure" or "Error" or "Errored" or "error" or "failed"
                     || string.IsNullOrWhiteSpace(result.RawJson)
                     || result.RawJson.Trim() == "{}"
                     || result.RawJson.Trim() == "null";

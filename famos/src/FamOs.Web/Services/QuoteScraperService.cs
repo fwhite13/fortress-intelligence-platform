@@ -130,25 +130,40 @@ public class QuoteScraperService : IQuoteScraperService
 
         var reqStatus = status?.Request?.Status ?? "Unknown";
 
-        // Only stop on explicitly terminal statuses — any unknown/in-progress status keeps polling
-        var isTerminal = reqStatus is "Completed" or "Complete"
-            or "Failed" or "Failure" or "Error" or "Errored" or "error" or "failed";
-
-        if (!isTerminal)
-            return null;
-
-        // Only return terminal result for explicitly success or failure statuses
-        var pageCount      = status?.Request?.PageCount ?? -1;
-        var isUploadFailure = pageCount == 0;
-
-        return new QuoteScraperResult
+        // If status is Completed but results are missing/empty, treat as still processing
+        if (reqStatus is "Completed" or "Complete")
         {
-            Status          = reqStatus,
-            RawJson         = raw,
-            Results         = status?.Results,
-            IsUploadFailure = isUploadFailure,
-            PageCount       = pageCount,
-        };
+            // If we got Completed but no actual results object, keep polling — results not ready yet
+            if (status?.Results == null || raw.Trim() == "{}" || raw.Trim() == "null")
+                return null;
+
+            var pageCount = status?.Request?.PageCount ?? -1;
+            return new QuoteScraperResult
+            {
+                Status          = reqStatus,
+                RawJson         = raw,
+                Results         = status?.Results,
+                IsUploadFailure = pageCount == 0,
+                PageCount       = pageCount,
+            };
+        }
+
+        // For failure statuses — return immediately
+        if (reqStatus is "Failed" or "Failure" or "Error" or "Errored" or "error" or "failed")
+        {
+            var pageCount = status?.Request?.PageCount ?? -1;
+            return new QuoteScraperResult
+            {
+                Status          = reqStatus,
+                RawJson         = raw,
+                Results         = status?.Results,
+                IsUploadFailure = false,
+                PageCount       = pageCount,
+            };
+        }
+
+        // All other statuses: keep polling
+        return null;
     }
 
     // ── DTOs ──────────────────────────────────────────────────────────────
