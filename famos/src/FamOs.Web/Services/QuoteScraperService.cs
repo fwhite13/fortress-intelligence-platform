@@ -54,8 +54,20 @@ public class QuoteScraperService : IQuoteScraperService
             clientReferenceId,
             files = new[] { new { fileName, sequence = 1 } }
         };
+
+        _logger.LogInformation("[QuoteScraper] {Step} baseUrl={BaseUrl} path={Path} clientId={ClientId} projectId={ProjectId}",
+            "UPLOAD_LINK_REQUEST",
+            client.BaseAddress?.ToString() ?? "null",
+            linkUrl, ClientId, ProjectId);
+
         var linkResp = await client.PostAsJsonAsync(linkUrl, linkBody, Opts);
-        linkResp.EnsureSuccessStatusCode();
+        if (!linkResp.IsSuccessStatusCode)
+        {
+            var body = await linkResp.Content.ReadAsStringAsync();
+            _logger.LogError("[QuoteScraper] {Step} url={Url} status={Status} body={Body}",
+                "UPLOAD_LINK_FAIL", linkUrl, (int)linkResp.StatusCode, body);
+            linkResp.EnsureSuccessStatusCode();
+        }
 
         var links = await linkResp.Content.ReadFromJsonAsync<List<UploadLinkDto>>(Opts)
             ?? throw new InvalidOperationException("No upload links returned");
@@ -73,7 +85,13 @@ public class QuoteScraperService : IQuoteScraperService
         var fileContent = new ByteArrayContent(fileBytes);
         fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
         var s3Resp = await s3Client.PutAsync(uploadUrl, fileContent);
-        s3Resp.EnsureSuccessStatusCode();
+        if (!s3Resp.IsSuccessStatusCode)
+        {
+            var body = await s3Resp.Content.ReadAsStringAsync();
+            _logger.LogError("[QuoteScraper] {Step} sub={SubId} url={Url} status={Status} body={Body}",
+                "S3_UPLOAD_FAIL", submissionId, uploadUrl[..Math.Min(80, uploadUrl.Length)], (int)s3Resp.StatusCode, body);
+            s3Resp.EnsureSuccessStatusCode();
+        }
 
         _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} file={File} bytes={Bytes}",
             "UPLOAD_S3_OK", submissionId, fileName, fileBytes.Length);
@@ -89,8 +107,20 @@ public class QuoteScraperService : IQuoteScraperService
             clientReferenceId,
             fileKeys = new[] { fileKey }
         };
+
+        _logger.LogInformation("[QuoteScraper] {Step} baseUrl={BaseUrl} path={Path} clientId={ClientId} projectId={ProjectId} fileKey={FileKey}",
+            "SUBMIT_REQUEST",
+            client.BaseAddress?.ToString() ?? "null",
+            submitUrl, ClientId, ProjectId, fileKey);
+
         var submitResp = await client.PostAsJsonAsync(submitUrl, submitBody, Opts);
-        submitResp.EnsureSuccessStatusCode();
+        if (!submitResp.IsSuccessStatusCode)
+        {
+            var body = await submitResp.Content.ReadAsStringAsync();
+            _logger.LogError("[QuoteScraper] {Step} sub={SubId} url={Url} status={Status} body={Body}",
+                "SUBMIT_FAIL", submissionId, submitUrl, (int)submitResp.StatusCode, body);
+            submitResp.EnsureSuccessStatusCode();
+        }
 
         var submit = await submitResp.Content.ReadFromJsonAsync<SubmitResponseDto>(Opts)
             ?? throw new InvalidOperationException("No submit response");
