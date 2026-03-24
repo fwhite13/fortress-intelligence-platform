@@ -430,10 +430,11 @@
                             if (premSummary.TryGetProperty(premKey, out var premNode))
                             {
                                 decimal val = 0;
-                                if (premNode.TryGetDecimal(out val) || decimal.TryParse(premNode.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out val))
-                                {
-                                    if (val > best) best = val;
-                                }
+                                if (premNode.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                    premNode.TryGetDecimal(out val);
+                                else if (premNode.ValueKind == System.Text.Json.JsonValueKind.String)
+                                    decimal.TryParse(premNode.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out val);
+                                if (val > best) best = val;
                             }
                         }
                     }
@@ -459,10 +460,11 @@
                                 if (ps2.TryGetProperty(premKey, out var pn2))
                                 {
                                     decimal val2 = 0;
-                                    if (pn2.TryGetDecimal(out val2) || decimal.TryParse(pn2.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out val2))
-                                    {
-                                        if (val2 > best2) best2 = val2;
-                                    }
+                                    if (pn2.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                        pn2.TryGetDecimal(out val2);
+                                    else if (pn2.ValueKind == System.Text.Json.JsonValueKind.String)
+                                        decimal.TryParse(pn2.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out val2);
+                                    if (val2 > best2) best2 = val2;
                                 }
                             }
                         }
@@ -478,8 +480,10 @@
                 {
                     if (node.TryGetProperty(premKey, out var premNode))
                     {
-                        if (premNode.TryGetDecimal(out var d)) return d;
-                        if (decimal.TryParse(premNode.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var s)) return s;
+                        decimal lv = 0;
+                        if (premNode.ValueKind == System.Text.Json.JsonValueKind.Number) premNode.TryGetDecimal(out lv);
+                        else if (premNode.ValueKind == System.Text.Json.JsonValueKind.String) decimal.TryParse(premNode.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out lv);
+                        if (lv > 0) return lv;
                     }
                 }
             }
@@ -491,8 +495,10 @@
                 {
                     if (data.TryGetProperty(premKey, out var premNode))
                     {
-                        if (premNode.TryGetDecimal(out var d)) return d;
-                        if (decimal.TryParse(premNode.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var s)) return s;
+                        decimal lv = 0;
+                        if (premNode.ValueKind == System.Text.Json.JsonValueKind.Number) premNode.TryGetDecimal(out lv);
+                        else if (premNode.ValueKind == System.Text.Json.JsonValueKind.String) decimal.TryParse(premNode.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out lv);
+                        if (lv > 0) return lv;
                     }
                 }
             }
