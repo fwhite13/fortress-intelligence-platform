@@ -33,17 +33,26 @@
         {
             <MudGrid Spacing="2">
                 <MudItem xs="12" sm="5">
-                    <MudSelect T="Guid?" @bind-Value="_selectedSubId"
-                               Label="Carrier" Class="famos-select" Placeholder="Select Carrier...">
-                        <MudSelectItem T="Guid?" Value="@((Guid?)null)">Select Carrier...</MudSelectItem>
-                        @foreach (var sub in Opportunity.Submissions
-                            .Where(s => s.Status == SubmissionStatus.Pending)
-                            .GroupBy(s => s.CarrierName)
-                            .Select(g => g.OrderBy(s => s.CreatedAt).First()))
-                        {
-                            <MudSelectItem T="Guid?" Value="@((Guid?)sub.Id)">@sub.CarrierName</MudSelectItem>
-                        }
-                    </MudSelect>
+                    @if (_uploading && _activeCarrierName != null)
+                    {
+                        <div class="famos-meta-text" style="min-height:56px; display:flex; align-items:center;">
+                            <strong>@_activeCarrierName</strong>
+                        </div>
+                    }
+                    else
+                    {
+                        <MudSelect T="Guid?" @bind-Value="_selectedSubId"
+                                   Label="Carrier" Class="famos-select" Placeholder="Select Carrier...">
+                            <MudSelectItem T="Guid?" Value="@((Guid?)null)">Select Carrier...</MudSelectItem>
+                            @foreach (var sub in Opportunity.Submissions
+                                .Where(s => s.Status == SubmissionStatus.Pending)
+                                .GroupBy(s => s.CarrierName)
+                                .Select(g => g.OrderBy(s => s.CreatedAt).First()))
+                            {
+                                <MudSelectItem T="Guid?" Value="@((Guid?)sub.Id)">@sub.CarrierName</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
                 </MudItem>
                 <MudItem xs="12" sm="7">
                     <div style="@(_uploading || _selectedSubId == null ? "pointer-events:none;opacity:0.5;" : "")">
@@ -137,6 +146,7 @@
     private bool   _uploading;
     private string _statusMessage = "";
     private string? _activeRequestId;
+    private string? _activeCarrierName;
     private string? _scrapeError;
 
     private decimal? _autoRecordedPremium;
@@ -150,6 +160,7 @@
         if (processing != null)
         {
             _selectedSubId = processing.Id;
+            _activeCarrierName = processing.CarrierName;
             _activeRequestId = processing.FortressRequestId!;
             _uploading = true;
             _statusMessage = "Resuming — checking job status...";
@@ -166,7 +177,7 @@
             var quote = sub != null
                 ? Opportunity.Quotes.FirstOrDefault(q => q.SubmissionId == sub.Id)
                 : null;
-            if (quote != null && !_autoRecordedPremium.HasValue)
+            if (quote != null && !_autoRecordedPremium.HasValue && quote.PremiumAmount > 0)
                 _autoRecordedPremium = quote.PremiumAmount;
         }
     }
@@ -211,6 +222,7 @@
         var userId = await UserSession.GetUserIdAsync();
         // _selectedSubId is the "template" carrier from Underwriting Prep dropdown
         var templateSub = Opportunity.Submissions.First(s => s.Id == _selectedSubId.Value);
+        _activeCarrierName = templateSub.CarrierName;
 
         Logger.LogInformation("[QuoteScraper] {Step} templateSub={SubId} opp={OppId} carrier={Carrier} fileSize={Bytes}",
             "PANEL_UPLOAD_START", _selectedSubId.Value, Opportunity.Id, templateSub.CarrierName, fileBytes.Length);
