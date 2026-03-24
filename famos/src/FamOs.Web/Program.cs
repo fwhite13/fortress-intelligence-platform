@@ -150,6 +150,9 @@ var fortressBase = builder.Configuration["FortressApi:Endpoint"]
 builder.Services.AddHttpClient("FortressApi", c =>
 {
     c.BaseAddress = new Uri(fortressBase);
+    // When using ALB direct URL (bypassing Cloudflare), the Classic LB needs
+    // the original hostname to route to the correct backend virtual host.
+    c.DefaultRequestHeaders.Host = "api.fortressam.ai";
     c.DefaultRequestHeaders.Add("apiKey",
         builder.Configuration["FortressApi:ApiKey"]
             ?? builder.Configuration["FortressApi:Key"]

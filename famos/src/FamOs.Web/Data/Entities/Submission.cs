@@ -40,7 +40,7 @@ public class Submission
     /// Individual coverage line for this submission row (e.g., GL, AUTO, WC).
     /// After migration, one row per carrier × line.
     /// </summary>
-    public string CoverageLine { get; set; } = string.Empty;
+    public string? CoverageLine { get; set; }
 
     /// <summary>
     /// Per-line quote status: Pending, QuoteReceived, Declined.
