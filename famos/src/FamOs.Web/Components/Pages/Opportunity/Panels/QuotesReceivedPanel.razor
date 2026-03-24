@@ -157,16 +157,8 @@
 
     private async Task ResubmitAsync(Guid submissionId)
     {
-        try
-        {
-            await Lifecycle.ResetSubmissionScraperAsync(submissionId);
-            await OnAdvanced.InvokeAsync();
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Resubmit failed: {ex.Message}", Severity.Error);
-            await InvokeAsync(StateHasChanged);
-        }
+        Snackbar.Add("To resubmit, go to the Quote Scraper panel and upload a new PDF for this carrier.", Severity.Info);
+        await Task.CompletedTask;
     }
 
     private async Task DeleteQuoteAsync(Guid quoteId, Guid submissionId)
