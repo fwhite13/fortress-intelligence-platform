@@ -409,19 +409,60 @@
         {
             using var doc = System.Text.Json.JsonDocument.Parse(rawJson);
             var root = doc.RootElement;
-            foreach (var path in new[] { "results", "data", "coverages" })
+
+            // Path 1: root.result.results.coverages.<coverage_type>.premium_summary.total_premium
+            // This is the Fortress AI Projects scraper format
+            if (root.TryGetProperty("result", out var result) &&
+                result.TryGetProperty("results", out var results) &&
+                results.TryGetProperty("coverages", out var coverages) &&
+                coverages.ValueKind == System.Text.Json.JsonValueKind.Object)
             {
-                if (root.TryGetProperty(path, out var node))
+                decimal best = 0;
+                foreach (var coverage in coverages.EnumerateObject())
                 {
-                    if (node.ValueKind == System.Text.Json.JsonValueKind.Array && node.GetArrayLength() > 0)
-                        node = node[0];
-                    foreach (var premKey in new[] { "premium", "totalPremium", "annualPremium", "total_premium" })
+                    if (coverage.Value.TryGetProperty("premium_summary", out var premSummary))
                     {
-                        if (node.TryGetProperty(premKey, out var premNode))
+                        foreach (var premKey in new[] { "total_premium", "premium", "annualPremium", "totalPremium" })
                         {
-                            if (premNode.TryGetDecimal(out var d)) return d;
-                            if (decimal.TryParse(premNode.GetString(), out var s)) return s;
+                            if (premSummary.TryGetProperty(premKey, out var premNode))
+                            {
+                                decimal val = 0;
+                                if (premNode.TryGetDecimal(out val) || decimal.TryParse(premNode.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out val))
+                                {
+                                    if (val > best) best = val;
+                                }
+                            }
                         }
+                    }
+                }
+                if (best > 0) return best;
+            }
+
+            // Path 2: root.results (flat legacy format)
+            if (root.TryGetProperty("results", out var legacyResults))
+            {
+                var node = legacyResults;
+                if (node.ValueKind == System.Text.Json.JsonValueKind.Array && node.GetArrayLength() > 0)
+                    node = node[0];
+                foreach (var premKey in new[] { "premium", "totalPremium", "annualPremium", "total_premium" })
+                {
+                    if (node.TryGetProperty(premKey, out var premNode))
+                    {
+                        if (premNode.TryGetDecimal(out var d)) return d;
+                        if (decimal.TryParse(premNode.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var s)) return s;
+                    }
+                }
+            }
+
+            // Path 3: root.data (other legacy format)
+            if (root.TryGetProperty("data", out var data))
+            {
+                foreach (var premKey in new[] { "premium", "totalPremium", "annualPremium", "total_premium" })
+                {
+                    if (data.TryGetProperty(premKey, out var premNode))
+                    {
+                        if (premNode.TryGetDecimal(out var d)) return d;
+                        if (decimal.TryParse(premNode.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var s)) return s;
                     }
                 }
             }
