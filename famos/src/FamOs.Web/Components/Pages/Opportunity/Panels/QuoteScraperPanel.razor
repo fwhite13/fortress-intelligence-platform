@@ -249,6 +249,8 @@
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "[QuoteScraper] {Step} uploadSubId={SubId} opp={OppId} error={Error}",
+                "UPLOAD_EXCEPTION", uploadSubId, Opportunity.Id, ex.Message);
             if (uploadSubId != Guid.Empty)
             {
                 try { await Lifecycle.SetSubmissionErrorAsync(uploadSubId, ex.Message); }

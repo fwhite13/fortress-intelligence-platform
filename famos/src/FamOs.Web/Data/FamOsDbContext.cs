@@ -81,7 +81,6 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.Notes).HasColumnType("longtext");
             e.Property(x => x.CoverageLine).HasColumnName("CoverageLine").HasMaxLength(50);
             e.Property(x => x.LineStatus).HasColumnName("LineStatus").HasConversion<byte>();
-            e.HasIndex(x => new { x.OpportunityId, x.CarrierName, x.CoverageLine }).IsUnique().HasDatabaseName("uq_submission_carrier_line");
             e.HasOne(x => x.Opportunity)
                 .WithMany(o => o.Submissions)
                 .HasForeignKey(x => x.OpportunityId);
