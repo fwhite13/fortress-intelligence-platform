@@ -63,29 +63,27 @@
                     <MudSelectItem Value="@("other")">Other (type below)</MudSelectItem>
                 </MudSelect>
             </MudItem>
-            <MudItem xs="12" sm="6">
-                @if (_selectedCarrier == "other")
-                {
+            @if (_selectedCarrier == "other")
+            {
+                <MudItem xs="12" sm="6">
                     <MudTextField @bind-Value="_customCarrier"
                         Label="Carrier Name"
                         Class="famos-input" />
-                }
-                else
-                {
-                    <MudTextField @bind-Value="_coverageTypes"
-                        Label="Coverage Types (e.g. AUTO,WC,GL)"
-                        Class="famos-input"
-                        HelperText="AUTO · GL · WC · UMBRELLA · IM · OTHER" />
-                }
-            </MudItem>
-            @if (_selectedCarrier == "other")
-            {
-                <MudItem xs="12">
-                    <MudTextField @bind-Value="_coverageTypes"
-                        Label="Coverage Types (e.g. AUTO,WC,GL)"
-                        Class="famos-input" />
                 </MudItem>
             }
+            <MudItem xs="12">
+                <MudSelect T="string"
+                           MultiSelection="true"
+                           @bind-SelectedValues="_selectedCoverageLines"
+                           Label="Coverage Lines *"
+                           Class="famos-select"
+                           HelperText="Select all that apply">
+                    @foreach (var opt in CoverageLineOptions)
+                    {
+                        <MudSelectItem T="string" Value="@opt.Code">@opt.Label (@opt.Code)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
             <MudItem xs="12">
                 <MudTextField @bind-Value="_subNotes" Label="Notes (optional)"
                               Class="famos-input" />
@@ -94,7 +92,7 @@
         <div style="margin-top:8px;">
             <MudButton Class="famos-btn-outline"
                        OnClick="AddSubmission"
-                       Disabled="@(_saving || string.IsNullOrWhiteSpace(CarrierNameValue))">
+                       Disabled="@(_saving || string.IsNullOrWhiteSpace(CarrierNameValue) || !_selectedCoverageLines.Any())">
                 + Add Submission
             </MudButton>
         </div>
@@ -126,7 +124,25 @@
     private bool _saving;
     private string _selectedCarrier = "";
     private string _customCarrier   = "";
-    private string _coverageTypes   = "";
+    private IEnumerable<string> _selectedCoverageLines = new List<string>();
+    private static readonly (string Code, string Label)[] CoverageLineOptions = new[]
+    {
+        ("GL",     "General Liability"),
+        ("Auto",   "Automobile"),
+        ("MTC",    "Motor Truck Cargo"),
+        ("BT",     "Bobtail"),
+        ("WC",     "Workers Compensation"),
+        ("OppAcc", "Occupational Accident"),
+        ("UMB",    "Umbrella/Excess"),
+        ("POL",    "Pollution Liability"),
+        ("PL",     "Professional Liability"),
+        ("D&O",    "Directors & Officers"),
+        ("Prop",   "Property"),
+        ("Cyb",    "Cyber"),
+        ("TI",     "Trailer Interchange"),
+        ("Cr",     "Crime"),
+        ("Other",  "Other"),
+    };
     private string _subNotes        = "";
 
     private string CarrierNameValue =>
@@ -140,12 +156,12 @@
         {
             var userId = await UserSession.GetUserIdAsync();
             await Lifecycle.CreateSubmissionAsync(
-                Opportunity.Id, CarrierNameValue, _coverageTypes.Trim(), _subNotes.Trim(), userId);
+                Opportunity.Id, CarrierNameValue, string.Join(",", _selectedCoverageLines), _subNotes.Trim(), userId);
             Snackbar.Add($"{CarrierNameValue} added.", Severity.Success);
-            _selectedCarrier = "";
-            _customCarrier   = "";
-            _coverageTypes   = "";
-            _subNotes        = "";
+            _selectedCarrier       = "";
+            _customCarrier         = "";
+            _selectedCoverageLines = new List<string>();
+            _subNotes              = "";
             await OnAdvanced.InvokeAsync();
         }
         catch (Exception ex)
