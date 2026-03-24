@@ -94,12 +94,15 @@
                                  Format="N0" Class="famos-input" />
             </MudItem>
             <MudItem xs="12" sm="3">
-                <MudButton Class="famos-btn-primary"
-                           OnClick="RecordQuote"
-                           Disabled="@(_saving || _quoteSubId == Guid.Empty || !_quotePremium.HasValue)"
-                           Style="height:40px; margin-top:4px;">
-                    Record Quote
-                </MudButton>
+                <MudTooltip Text="Manual quote entry is disabled. Upload a PDF via the Quote Scraper to record quotes."
+                            Placement="Placement.Top">
+                    <MudButton Class="famos-btn-primary"
+                               OnClick="RecordQuote"
+                               Disabled="true"
+                               Style="height:40px; margin-top:4px;">
+                        Record Quote
+                    </MudButton>
+                </MudTooltip>
             </MudItem>
         </MudGrid>
     </div>
