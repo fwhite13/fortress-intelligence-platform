@@ -89,7 +89,7 @@
                         {
                             <MudTooltip Text="Reset — re-upload PDF in Quote Scraper">
                                 <MudIconButton Icon="@FamosIcons.Retry" Size="Size.Small"
-                                               OnClick="@(async () => await ResubmitAsync(quote.SubmissionId))" />
+                                               OnClick="@(() => ResubmitAsync())" />
                             </MudTooltip>
                             <MudTooltip Text="Delete">
                                 <MudIconButton Icon="@FamosIcons.Delete" Size="Size.Small" Color="Color.Error"
@@ -155,10 +155,9 @@
         Snackbar.Add("Quote editor coming soon.", Severity.Info);
     }
 
-    private async Task ResubmitAsync(Guid submissionId)
+    private void ResubmitAsync()
     {
         Snackbar.Add("To resubmit, go to the Quote Scraper panel and upload a new PDF for this carrier.", Severity.Info);
-        await Task.CompletedTask;
     }
 
     private async Task DeleteQuoteAsync(Guid quoteId, Guid submissionId)
