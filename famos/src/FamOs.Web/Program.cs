@@ -576,6 +576,11 @@ var logger = app.Logger;
         {
             logger.LogWarning("ADO#979: tasks OpportunityId MODIFY skipped: {Msg}", ex.Message);
         }
+
+        // ADO#1112: Carrier × coverage line model
+        await TryAddColumnAsync("ALTER TABLE submissions ADD COLUMN CoverageLine VARCHAR(50) NULL");
+        await TryAddColumnAsync("ALTER TABLE submissions ADD COLUMN LineStatus TINYINT NOT NULL DEFAULT 0");
+        await TryAddColumnAsync("ALTER TABLE quotes ADD COLUMN CoverageLine VARCHAR(50) NULL");
     }
     catch (Exception ex)
     {
