@@ -15,7 +15,7 @@ public class QuoteComparisonService : IQuoteComparisonService
         _dbFactory = dbFactory;
     }
 
-    public async Task<ComparisonContextDto> GetComparisonContextAsync(Guid accountId, Guid userId, int tenantId)
+    public async Task<ComparisonContextDto> GetComparisonContextAsync(Guid accountId, Guid opportunityId, Guid userId, int tenantId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -51,14 +51,8 @@ public class QuoteComparisonService : IQuoteComparisonService
             }
         }
 
-        // Quotes via opportunities linked by AffinityId
-        var oppIds = await db.Opportunities
-            .Where(o => o.AffinityId == account.AffinityId)
-            .Select(o => o.Id)
-            .ToListAsync();
-
         var rawQuotes = await db.Quotes
-            .Where(q => oppIds.Contains(q.OpportunityId) && q.TenantId == tenantId)
+            .Where(q => q.OpportunityId == opportunityId && q.TenantId == tenantId)
             .ToListAsync();
 
         var quotes = rawQuotes.Select(MapToQuoteWithCoverageDto).ToList();
@@ -154,7 +148,7 @@ public class QuoteComparisonService : IQuoteComparisonService
         await db.SaveChangesAsync();
     }
 
-    public async Task<Guid> BuildProposalAsync(Guid accountId, Guid userId, Guid packageId, int tenantId)
+    public async Task<Guid> BuildProposalAsync(Guid accountId, Guid opportunityId, Guid userId, Guid packageId, int tenantId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -169,15 +163,9 @@ public class QuoteComparisonService : IQuoteComparisonService
         if (selections.Count == 0)
             throw new InvalidOperationException("Package has no selections — cannot build proposal");
 
-        // Find the opportunity for this account via AffinityId
-        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId)
-            ?? throw new KeyNotFoundException($"Account {accountId} not found");
-
         var opportunity = await db.Opportunities
-            .Where(o => o.AffinityId == account.AffinityId && !o.IsClosed)
-            .OrderByDescending(o => o.UpdatedAt)
-            .FirstOrDefaultAsync()
-            ?? throw new InvalidOperationException($"No active opportunity found for account {accountId}");
+            .FirstOrDefaultAsync(o => o.Id == opportunityId)
+            ?? throw new InvalidOperationException($"Opportunity {opportunityId} not found");
 
         var primaryQuoteId = selections.First().QuoteId;
 

@@ -161,7 +161,7 @@ else
             }
             _accountId = accountId.Value;
 
-            _context = await QuoteComparisonService.GetComparisonContextAsync(_accountId, _userId, _tenantId);
+            _context = await QuoteComparisonService.GetComparisonContextAsync(_accountId, OpportunityId, _userId, _tenantId);
 
             if (_context != null)
             {
@@ -441,7 +441,7 @@ else
         try
         {
             var proposalId = await QuoteComparisonService.BuildProposalAsync(
-                _accountId, _userId, Guid.NewGuid(), _tenantId);
+                _accountId, OpportunityId, _userId, Guid.NewGuid(), _tenantId);
             Snackbar.Add("Proposal created successfully", Severity.Success);
             // TODO: Navigate to proposal view
         }
