@@ -438,9 +438,36 @@
                 if (best > 0) return best;
             }
 
-            // Path 2: root.results (flat legacy format)
+            // Path 2: root.results.coverages.<type>.premium_summary.total_premium
+            // This is the raw poll response format: {"error":null,"results":{...},"success":true}
             if (root.TryGetProperty("results", out var legacyResults))
             {
+                // Sub-path 2a: results.coverages.<type>.premium_summary.total_premium
+                if (legacyResults.TryGetProperty("coverages", out var pollCoverages) &&
+                    pollCoverages.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    decimal best2 = 0;
+                    foreach (var coverage in pollCoverages.EnumerateObject())
+                    {
+                        if (coverage.Value.TryGetProperty("premium_summary", out var ps2))
+                        {
+                            foreach (var premKey in new[] { "total_premium", "premium", "annualPremium", "totalPremium" })
+                            {
+                                if (ps2.TryGetProperty(premKey, out var pn2))
+                                {
+                                    decimal val2 = 0;
+                                    if (pn2.TryGetDecimal(out val2) || decimal.TryParse(pn2.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out val2))
+                                    {
+                                        if (val2 > best2) best2 = val2;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (best2 > 0) return best2;
+                }
+
+                // Sub-path 2b: results flat format (original legacy)
                 var node = legacyResults;
                 if (node.ValueKind == System.Text.Json.JsonValueKind.Array && node.GetArrayLength() > 0)
                     node = node[0];
