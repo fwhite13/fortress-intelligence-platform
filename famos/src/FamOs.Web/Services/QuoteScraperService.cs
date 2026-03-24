@@ -179,22 +179,45 @@ public class QuoteScraperService : IQuoteScraperService
         _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} cycle={Cycle} status={Status} elapsed={ElapsedSec}s rawResponse={Raw}",
             "POLL_CYCLE", submissionId, projectRequestId, cycleNumber, reqStatus, (int)elapsed.TotalSeconds, rawTrunc);
 
-        // If status is Completed but results are missing/empty, treat as still processing
         if (reqStatus is "Completed" or "Complete")
         {
-            // If no results object at all, keep polling
-            if (status?.Results == null)
-                return null;
+            var pageCount = status?.Request?.PageCount ?? -1;
 
-            // JsonElement check: {} or [] or null/undefined JsonElement = no real results yet
-            if (status.Results is JsonElement el &&
+            // Results missing entirely — terminal, not still-processing
+            if (status?.Results == null)
+            {
+                _logger.LogWarning("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} reason=ResultsNull totalCycles={Cycles} elapsed={Elapsed}s",
+                    "COMPLETED_NO_RESULTS", submissionId, projectRequestId, cycleNumber, (int)elapsed.TotalSeconds);
+                return new QuoteScraperResult
+                {
+                    Status          = reqStatus,
+                    RawJson         = raw,
+                    Results         = null,
+                    IsUploadFailure = false,
+                    PageCount       = pageCount,
+                };
+            }
+
+            // Results is JsonElement — check for empty object/array
+            if (status?.Results is JsonElement el &&
                 (el.ValueKind == JsonValueKind.Null ||
                  el.ValueKind == JsonValueKind.Undefined ||
                  (el.ValueKind == JsonValueKind.Object && !el.EnumerateObject().Any()) ||
                  (el.ValueKind == JsonValueKind.Array  && el.GetArrayLength() == 0)))
-                return null;
+            {
+                _logger.LogWarning("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} reason=ResultsEmpty kind={Kind} totalCycles={Cycles} elapsed={Elapsed}s",
+                    "COMPLETED_NO_RESULTS", submissionId, projectRequestId, el.ValueKind.ToString(), cycleNumber, (int)elapsed.TotalSeconds);
+                return new QuoteScraperResult
+                {
+                    Status          = reqStatus,
+                    RawJson         = raw,
+                    Results         = status?.Results,
+                    IsUploadFailure = pageCount == 0,
+                    PageCount       = pageCount,
+                };
+            }
 
-            var pageCount = status?.Request?.PageCount ?? -1;
+            // Results present and non-empty — actual success
             _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} requestId={RequestId} finalStatus={Status} totalCycles={Cycles} elapsedSec={Elapsed} pageCount={PageCount}",
                 "TERMINAL", submissionId, projectRequestId, reqStatus, cycleNumber, (int)elapsed.TotalSeconds, pageCount);
             return new QuoteScraperResult
