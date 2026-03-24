@@ -808,6 +808,65 @@ public class LifecycleCommandService : IUploadLifecycleService
                 sub.Status = SubmissionStatus.QuoteReceived;
                 sub.LineStatus = LineStatus.QuoteReceived;
 
+                // ── Carrier × line routing — mark the correct line row as QuoteReceived ──────
+                // Step 1: Try to extract coverage line from scraper result JSON
+                string? scrapedLine = null;
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(resultJson);
+                    // Look for common coverage line keys in scraper output
+                    foreach (var key in new[] { "coverage_line", "coverageLine", "line_of_business", "lineOfBusiness", "coverage_type" })
+                    {
+                        if (doc.RootElement.TryGetProperty(key, out var el) && el.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            scrapedLine = el.GetString();
+                            break;
+                        }
+                    }
+                }
+                catch { /* malformed JSON — fall through to fallback */ }
+
+                // Find sibling submission rows for the same carrier on this opportunity
+                var siblingLines = await _db.Submissions
+                    .Where(s => s.OpportunityId == opportunityId
+                             && s.CarrierName == sub.CarrierName
+                             && s.Id != sub.Id
+                             && s.CoverageLine != null)
+                    .ToListAsync();
+
+                if (siblingLines.Any())
+                {
+                    // Multi-line carrier — need to route to correct line row
+                    Submission? targetLine = null;
+
+                    // Step 1: Match by scraped line name
+                    if (scrapedLine != null)
+                    {
+                        targetLine = siblingLines.FirstOrDefault(s =>
+                            string.Equals(s.CoverageLine, scrapedLine, StringComparison.OrdinalIgnoreCase));
+                    }
+
+                    // Step 2: Single sibling shortcut (unambiguous)
+                    if (targetLine == null && siblingLines.Count == 1)
+                    {
+                        targetLine = siblingLines[0];
+                    }
+
+                    // Step 3: Fallback — MIN(Id) with warning
+                    if (targetLine == null)
+                    {
+                        targetLine = siblingLines.OrderBy(s => s.Id).First();
+                        _logger.LogWarning("[QuoteScraper] {Step} sub={SubId} opp={OppId} carrier={Carrier} scrapedLine={ScrapedLine} action=FALLBACK_MIN_ID targetLine={TargetLine}",
+                            "LINE_ROUTING_FALLBACK", submissionId, opportunityId, sub.CarrierName, scrapedLine ?? "null", targetLine.CoverageLine);
+                    }
+
+                    if (targetLine.LineStatus != LineStatus.QuoteReceived)
+                    {
+                        targetLine.LineStatus = LineStatus.QuoteReceived;
+                    }
+                }
+                // If no siblings: sub IS the only line row — sub.LineStatus already set above, nothing more needed
+
                 if (isFirst && opp.LifecycleStage == LifecycleStage.Marketed)
                 {
                     var from = opp.LifecycleStage;
