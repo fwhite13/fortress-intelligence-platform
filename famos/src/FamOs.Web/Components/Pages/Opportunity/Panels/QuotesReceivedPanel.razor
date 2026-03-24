@@ -65,7 +65,7 @@
                         }
                         else if (isError)
                         {
-                            <MudTooltip Text="Processing failed — click Resubmit to try again" Placement="Placement.Top">
+                            <MudTooltip Text="Processing failed — click Reset to re-upload" Placement="Placement.Top">
                                 <span class="famos-status-badge famos-status-error">Error</span>
                             </MudTooltip>
                         }
@@ -87,7 +87,7 @@
                         }
                         else if (isError)
                         {
-                            <MudTooltip Text="Resubmit">
+                            <MudTooltip Text="Reset — re-upload PDF in Quote Scraper">
                                 <MudIconButton Icon="@FamosIcons.Retry" Size="Size.Small"
                                                OnClick="@(async () => await ResubmitAsync(quote.SubmissionId))" />
                             </MudTooltip>

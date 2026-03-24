@@ -36,7 +36,7 @@
                     <MudSelect T="Guid?" @bind-Value="_selectedSubId"
                                Label="Carrier" Class="famos-select" Placeholder="Select Carrier...">
                         <MudSelectItem T="Guid?" Value="@((Guid?)null)">Select Carrier...</MudSelectItem>
-                        @foreach (var sub in Opportunity.Submissions)
+                        @foreach (var sub in Opportunity.Submissions.Where(s => s.Status == SubmissionStatus.Pending))
                         {
                             <MudSelectItem T="Guid?" Value="@((Guid?)sub.Id)">@sub.CarrierName</MudSelectItem>
                         }
