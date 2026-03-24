@@ -3,6 +3,7 @@
 @inject UserSessionService UserSession
 @inject ISnackbar Snackbar
 @using FamOs.Web.Data.Entities
+@using FamOs.Web.Domain
 @using FamOs.Web.Theme
 
 <div class="intake-form-container">
@@ -10,158 +11,129 @@
     <div class="section-header mb-3">
         <MudText Typo="Typo.h6" Class="famos-text-navy">Submitted to Market</MudText>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
-            Awaiting carrier quotes. Update status as responses arrive.
+            Carriers grouped by coverage line. Quote status updates automatically via scraper.
         </MudText>
     </div>
 
-    @* Submission status table *@
-    <div class="mb-4">
-        @if (!Opportunity.Submissions.Any())
+    @if (!Opportunity.Submissions.Any())
+    {
+        <div class="famos-empty-state">
+            <MudIcon Icon="@FamosIcons.Warning" Class="famos-empty-icon" />
+            <div>No submissions found. This may be a data issue — contact support.</div>
+        </div>
+    }
+    else
+    {
+        @foreach (var carrierGroup in Opportunity.Submissions
+            .Where(s => !string.IsNullOrEmpty(s.CoverageLine))
+            .GroupBy(s => s.CarrierName)
+            .OrderBy(g => g.Key))
         {
-            <div class="famos-empty-state">
-                <MudIcon Icon="@FamosIcons.Warning" Class="famos-empty-icon" />
-                <div>No submissions found. This may be a data issue — contact support.</div>
-            </div>
-        }
-        else
-        {
-        @foreach (var sub in Opportunity.Submissions)
-        {
-            var isExpanded = _expandedId == sub.Id;
-            <div style="border:1px solid var(--border); border-radius:8px; margin-bottom:8px; overflow:hidden;">
-                <div style="display:flex; justify-content:space-between; align-items:center;
-                            padding:10px 14px; cursor:pointer; background:var(--cream);"
-                     @onclick="() => ToggleExpand(sub.Id)">
-                    <div>
-                        <MudText Typo="Typo.body2" Class="famos-fw-600">@sub.CarrierName</MudText>
-                        @if (sub.SubmittedAt.HasValue)
-                        {
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                Sent @sub.SubmittedAt.Value.ToLocalTime().ToString("MMM d")
-                            </MudText>
-                        }
-                    </div>
-                    <div style="display:flex; gap:8px; align-items:center;">
-                        <MudChip T="string" Size="Size.Small" Color="GetStatusColor(sub.Status)">
-                            @GetStatusLabel(sub.Status)
+            var carrierStatus = LifecycleCommandService.GetCarrierStatus(carrierGroup);
+            var isExpanded = _expandedCarrier == carrierGroup.Key;
+
+            <div class="carrier-group" style="border:1px solid var(--border); border-radius:8px; margin-bottom:12px; overflow:hidden;">
+                <div class="carrier-header" style="display:flex; justify-content:space-between; align-items:center;
+                            padding:12px 16px; cursor:pointer; background:var(--cream);"
+                     @onclick="() => ToggleCarrier(carrierGroup.Key)">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <MudText Typo="Typo.body1" Class="famos-fw-600">@carrierGroup.Key</MudText>
+                        <MudChip T="string" Size="Size.Small" Color="@GetCarrierStatusColor(carrierStatus)">
+                            @GetCarrierStatusLabel(carrierStatus)
                         </MudChip>
-                        <MudIcon Icon="@(isExpanded ? FamosIcons.ExpandLess : FamosIcons.ExpandMore)"
-                                 Style="font-size:16px; color:var(--muted);" />
                     </div>
+                    <MudIcon Icon="@(isExpanded ? FamosIcons.ExpandLess : FamosIcons.ExpandMore)"
+                             Style="font-size:20px; color:var(--muted);" />
                 </div>
 
                 @if (isExpanded)
                 {
-                    <div style="padding:12px 14px; border-top:1px solid var(--border);">
-                        <MudGrid Spacing="2">
-                            <MudItem xs="12" sm="6">
-                                <MudSelect Value="sub.Status"
-                                           ValueChanged="@(async (SubmissionStatus s) => await UpdateStatus(sub, s))"
-                                           Label="Status" Class="famos-select">
-                                    <MudSelectItem Value="SubmissionStatus.Pending">Pending</MudSelectItem>
-                                    <MudSelectItem Value="SubmissionStatus.Sent">Sent</MudSelectItem>
-                                    <MudSelectItem Value="SubmissionStatus.QuoteReceived">Quote Received</MudSelectItem>
-                                    <MudSelectItem Value="SubmissionStatus.Declined">Declined</MudSelectItem>
-                                </MudSelect>
-                            </MudItem>
-                            <MudItem xs="12">
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                    @(string.IsNullOrEmpty(sub.Notes) ? "No notes" : sub.Notes)
-                                </MudText>
-                            </MudItem>
-                        </MudGrid>
+                    <div style="padding:8px 16px 12px; border-top:1px solid var(--border);">
+                        @foreach (var line in carrierGroup.OrderBy(l => l.CoverageLine))
+                        {
+                            <div class="submission-line-row" style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border-light);">
+                                <div style="display:flex; align-items:center; gap:12px;">
+                                    <MudText Typo="Typo.body2" Class="famos-fw-500">@line.CoverageLine</MudText>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetLineStatusColor(line.LineStatus)">
+                                        @GetLineStatusLabel(line.LineStatus)
+                                    </MudChip>
+                                    @if (line.LineStatus == LineStatus.QuoteReceived)
+                                    {
+                                        var quoteCount = Opportunity.Quotes.Count(q => q.SubmissionId == line.Id);
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                            @quoteCount quote@(quoteCount != 1 ? "s" : "")
+                                        </MudText>
+                                    }
+                                </div>
+                                <div>
+                                    @if (line.LineStatus == LineStatus.Pending)
+                                    {
+                                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Warning"
+                                                   OnClick="@(async () => await MarkLineDeclined(line.Id))">
+                                            Mark Declined
+                                        </MudButton>
+                                    }
+                                </div>
+                            </div>
+                        }
                     </div>
                 }
             </div>
         }
-        }
-    </div>
-
-    @* Quote recording inline *@
-    <div class="intake-section mb-4">
-        <div class="intake-section-label mb-2">Record a Quote</div>
-        <MudGrid Spacing="2">
-            <MudItem xs="12" sm="5">
-                <MudSelect @bind-Value="_quoteSubId" Label="Carrier" Class="famos-select">
-                    @foreach (var sub in Opportunity.Submissions.Where(s => s.Status != SubmissionStatus.Declined))
-                    {
-                        <MudSelectItem Value="sub.Id">@sub.CarrierName</MudSelectItem>
-                    }
-                </MudSelect>
-            </MudItem>
-            <MudItem xs="12" sm="4">
-                <MudNumericField @bind-Value="_quotePremium" Label="Premium ($)"
-                                 Format="N0" Class="famos-input" />
-            </MudItem>
-            <MudItem xs="12" sm="3">
-                <MudTooltip Text="Manual quote entry is disabled. Upload a PDF via the Quote Scraper to record quotes."
-                            Placement="Placement.Top">
-                    <MudButton Class="famos-btn-primary"
-                               OnClick="RecordQuote"
-                               Disabled="true"
-                               Style="height:40px; margin-top:4px;">
-                        Record Quote
-                    </MudButton>
-                </MudTooltip>
-            </MudItem>
-        </MudGrid>
-    </div>
-
+    }
 </div>
 
 @code {
     [Parameter, EditorRequired] public Opportunity Opportunity { get; set; } = default!;
     [Parameter] public EventCallback OnAdvanced { get; set; }
 
-    private bool _saving;
-    private Guid _quoteSubId;
-    private decimal? _quotePremium;
-    private Guid _expandedId;
+    private string? _expandedCarrier;
 
-    private void ToggleExpand(Guid id) => _expandedId = _expandedId == id ? Guid.Empty : id;
+    private void ToggleCarrier(string carrier) =>
+        _expandedCarrier = _expandedCarrier == carrier ? null : carrier;
 
-    private async Task UpdateStatus(Submission sub, SubmissionStatus newStatus)
+    private async Task MarkLineDeclined(Guid submissionId)
     {
-        var userId = await UserSession.GetUserIdAsync();
-        await Lifecycle.UpdateSubmissionStatusAsync(sub.Id, newStatus, null, userId);
-        sub.Status = newStatus;
-        Snackbar.Add($"{sub.CarrierName} → {newStatus}", Severity.Success);
-    }
-
-    private async Task RecordQuote()
-    {
-        _saving = true;
         try
         {
-            var sub    = Opportunity.Submissions.First(s => s.Id == _quoteSubId);
             var userId = await UserSession.GetUserIdAsync();
-            await Lifecycle.RecordQuoteAsync(
-                Opportunity.Id, _quoteSubId, sub.CarrierName,
-                _quotePremium!.Value, null, userId);
-            Snackbar.Add($"Quote from {sub.CarrierName} recorded.", Severity.Success);
-            await OnAdvanced.InvokeAsync();
+            await Lifecycle.MarkLineDeclinedAsync(submissionId, userId);
+            var sub = Opportunity.Submissions.FirstOrDefault(s => s.Id == submissionId);
+            if (sub != null) sub.LineStatus = LineStatus.Declined;
+            Snackbar.Add("Line marked as declined", Severity.Success);
+            StateHasChanged();
         }
-        catch (LifecycleValidationException ex)
+        catch (Exception ex)
         {
-            Snackbar.Add(ex.Message, Severity.Error);
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
         }
-        finally { _saving = false; }
     }
 
-    private static Color GetStatusColor(SubmissionStatus s) => s switch
+    private static Color GetCarrierStatusColor(LineStatusSummary status) => status switch
     {
-        SubmissionStatus.QuoteReceived => Color.Success,
-        SubmissionStatus.Declined      => Color.Error,
-        _                              => Color.Default
+        LineStatusSummary.Complete => Color.Success,
+        LineStatusSummary.Declined => Color.Error,
+        _ => Color.Default
     };
 
-    private static string GetStatusLabel(SubmissionStatus s) => s switch
+    private static string GetCarrierStatusLabel(LineStatusSummary status) => status switch
     {
-        SubmissionStatus.Pending       => "Pending",
-        SubmissionStatus.Sent          => "Sent",
-        SubmissionStatus.QuoteReceived => "Quote In",
-        SubmissionStatus.Declined      => "Declined",
-        SubmissionStatus.Bound         => "Bound",
-        _                              => s.ToString()
+        LineStatusSummary.Complete => "Complete",
+        LineStatusSummary.Declined => "All Declined",
+        _ => "Pending"
+    };
+
+    private static Color GetLineStatusColor(LineStatus status) => status switch
+    {
+        LineStatus.QuoteReceived => Color.Success,
+        LineStatus.Declined      => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string GetLineStatusLabel(LineStatus status) => status switch
+    {
+        LineStatus.QuoteReceived => "Quote Received",
+        LineStatus.Declined      => "Declined",
+        _ => "Pending"
     };
 }

@@ -10,6 +10,10 @@ public class Quote
     public string?  CoverageDetails     { get; set; }   // JSON string
     public bool     IsRecommended       { get; set; } = false;
     public DateTime ReceivedAt          { get; set; } = DateTime.UtcNow;
+    /// <summary>
+    /// Coverage line this quote applies to (from scraper output).
+    /// </summary>
+    public string?  CoverageLine        { get; set; }
     public Guid?    LineOfBusinessId    { get; set; }
     public int      TenantId            { get; set; }
 

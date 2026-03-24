@@ -784,6 +784,7 @@ public class LifecycleCommandService : IUploadLifecycleService
                         "DB_WRITE", submissionId, pendingQuote.Id, parsedPremium.Value);
                     pendingQuote.PremiumAmount   = parsedPremium.Value;
                     pendingQuote.CoverageDetails = sub.CoverageTypes ?? pendingQuote.CoverageDetails;
+                    pendingQuote.CoverageLine    = sub.CoverageLine;
                     pendingQuote.TenantId        = 1;
                 }
                 else
@@ -798,12 +799,14 @@ public class LifecycleCommandService : IUploadLifecycleService
                         CarrierName     = sub.CarrierName,
                         PremiumAmount   = parsedPremium.Value,
                         CoverageDetails = sub.CoverageTypes,
+                        CoverageLine    = sub.CoverageLine,
                         ReceivedAt      = DateTime.UtcNow,
                         TenantId        = 1,
                     });
                 }
 
                 sub.Status = SubmissionStatus.QuoteReceived;
+                sub.LineStatus = LineStatus.QuoteReceived;
 
                 if (isFirst && opp.LifecycleStage == LifecycleStage.Marketed)
                 {
@@ -1146,6 +1149,48 @@ public class LifecycleCommandService : IUploadLifecycleService
         // Tasks are saved in the calling method's SaveChangesAsync() — do not call SaveChanges here.
         await Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Derives carrier-level status from its line statuses.
+    /// </summary>
+    public static LineStatusSummary GetCarrierStatus(IEnumerable<Submission> lines)
+    {
+        var lineList = lines.ToList();
+        if (!lineList.Any()) return LineStatusSummary.Pending;
+        if (lineList.All(l => l.LineStatus == LineStatus.Declined)) return LineStatusSummary.Declined;
+        if (lineList.All(l => l.LineStatus == LineStatus.QuoteReceived || l.LineStatus == LineStatus.Declined))
+            return LineStatusSummary.Complete;
+        return LineStatusSummary.Pending;
+    }
+
+    /// <summary>
+    /// Marks a submission line as declined (carrier declined this coverage line).
+    /// </summary>
+    public async Task MarkLineDeclinedAsync(Guid submissionId, string actorUserId)
+    {
+        await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            var sub = await _db.Submissions.FindAsync(submissionId)
+                ?? throw new NotFoundException($"Submission {submissionId} not found");
+
+            sub.LineStatus = LineStatus.Declined;
+            sub.UpdatedAt = DateTime.UtcNow;
+
+            await WriteActivityAsync(sub.OpportunityId, "line_declined",
+                $"{sub.CarrierName} × {sub.CoverageLine} marked declined", actorUserId);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+    }
+}
+
+public enum LineStatusSummary
+{
+    Pending,
+    Complete,
+    Declined
 }
 
 public class LifecycleValidationException : Exception

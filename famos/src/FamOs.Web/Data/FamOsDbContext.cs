@@ -79,6 +79,9 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.FortressRequestId).HasColumnName("fortress_request_id").HasMaxLength(200);
             e.Property(x => x.ScraperError).HasColumnName("scraper_error").HasColumnType("text");
             e.Property(x => x.Notes).HasColumnType("longtext");
+            e.Property(x => x.CoverageLine).HasColumnName("CoverageLine").HasMaxLength(50);
+            e.Property(x => x.LineStatus).HasColumnName("LineStatus").HasConversion<byte>();
+            e.HasIndex(x => new { x.OpportunityId, x.CarrierName, x.CoverageLine }).IsUnique().HasDatabaseName("uq_submission_carrier_line");
             e.HasOne(x => x.Opportunity)
                 .WithMany(o => o.Submissions)
                 .HasForeignKey(x => x.OpportunityId);
@@ -241,6 +244,7 @@ public class FamOsDbContext : DbContext
         m.Entity<Quote>(e => {
             e.Property(x => x.LineOfBusinessId).HasColumnType("char(36)").HasColumnName("line_of_business_id");
             e.Property(x => x.TenantId).HasColumnName("tenant_id");
+            e.Property(x => x.CoverageLine).HasColumnName("CoverageLine").HasMaxLength(50);
         });
 
         // ProgramVertical

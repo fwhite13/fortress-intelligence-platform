@@ -36,6 +36,18 @@ public class Submission
 
     public string?  Notes             { get; set; }
 
+    /// <summary>
+    /// Individual coverage line for this submission row (e.g., GL, AUTO, WC).
+    /// After migration, one row per carrier × line.
+    /// </summary>
+    public string CoverageLine { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Per-line quote status: Pending, QuoteReceived, Declined.
+    /// Separate from Status (upload lifecycle).
+    /// </summary>
+    public LineStatus LineStatus { get; set; } = LineStatus.Pending;
+
     // Audit
     public DateTime CreatedAt         { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt         { get; set; } = DateTime.UtcNow;
@@ -43,6 +55,13 @@ public class Submission
     // Navigation
     public Opportunity Opportunity    { get; set; } = default!;
     public List<Quote> Quotes         { get; set; } = new();
+}
+
+public enum LineStatus
+{
+    Pending       = 0,
+    QuoteReceived = 1,
+    Declined      = 2
 }
 
 public enum SubmissionStatus
