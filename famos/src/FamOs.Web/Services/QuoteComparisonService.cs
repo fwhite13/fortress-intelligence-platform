@@ -76,7 +76,7 @@ public class QuoteComparisonService : IQuoteComparisonService
         return new ComparisonContextDto
         {
             OpportunityName = opportunity.Name,
-            IsRenewal       = opportunity.IsRenewal,
+            IsRenewal       = false, // TODO: Opportunity entity does not yet carry IsRenewal; defaulting until migrated (ADO#1136)
             ProgramVertical = vertical,
             Lines           = lines,
             Requirements    = requirements,
