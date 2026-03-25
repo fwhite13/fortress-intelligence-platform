@@ -773,9 +773,9 @@ var logger = app.Logger;
     {
         await db1144.Database.ExecuteSqlRawAsync(@"
             CREATE TABLE IF NOT EXISTS quote_lines (
-                id         CHAR(36)       NOT NULL PRIMARY KEY,
-                quote_id   CHAR(36)       NOT NULL,
-                lob_id     CHAR(36)       NOT NULL,
+                id         CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+                quote_id   CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+                lob_id     CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
                 slug       VARCHAR(50)    NOT NULL,
                 premium    DECIMAL(18,2)  NULL,
                 tenant_id  INT            NOT NULL DEFAULT 1,
