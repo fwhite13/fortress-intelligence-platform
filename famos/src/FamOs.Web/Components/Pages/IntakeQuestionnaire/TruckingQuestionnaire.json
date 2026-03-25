@@ -1,0 +1,2216 @@
+{
+  "title": "Commercial Trucking Insurance Application",
+  "description": "Please complete all sections. Your progress is saved as you go.",
+  "completedHtml": "<h3>Thank you! Your application has been submitted successfully.</h3><p>Our team will review your submission and be in touch shortly.</p>",
+  "pages": [
+    {
+      "name": "page_dates",
+      "title": "Application Dates",
+      "elements": [
+        {
+          "type": "text",
+          "name": "effective_date",
+          "title": "Effective Date",
+          "isRequired": true,
+          "FieldCode": "effective_date",
+          "inputType": "date"
+        },
+        {
+          "type": "text",
+          "name": "requested_quote_date",
+          "title": "Requested Quote Date",
+          "FieldCode": "requested_quote_date",
+          "inputType": "date"
+        }
+      ]
+    },
+    {
+      "name": "page_agent",
+      "title": "Agent Information",
+      "elements": [
+        {
+          "type": "text",
+          "name": "agency_name",
+          "title": "Name of Agency",
+          "isRequired": true,
+          "FieldCode": "agency_name"
+        },
+        {
+          "type": "text",
+          "name": "producer_name",
+          "title": "Name of Producer",
+          "isRequired": true,
+          "FieldCode": "producer_name"
+        },
+        {
+          "type": "radiogroup",
+          "name": "incumbent_agency",
+          "title": "Are you the incumbent agency?",
+          "isRequired": true,
+          "FieldCode": "incumbent_agency",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "text",
+          "name": "agency_tenure",
+          "title": "How long has your agency written this applicant?",
+          "FieldCode": "agency_tenure",
+          "placeholder": "e.g. 3 years"
+        }
+      ]
+    },
+    {
+      "name": "page_applicant",
+      "title": "Applicant Information",
+      "elements": [
+        {
+          "type": "text",
+          "name": "company_name",
+          "title": "Company Name",
+          "isRequired": true,
+          "FieldCode": "company_name"
+        },
+        {
+          "type": "text",
+          "name": "company_dba",
+          "title": "Company DBA (if applicable)",
+          "FieldCode": "company_dba"
+        },
+        {
+          "type": "text",
+          "name": "usdot_number",
+          "title": "U.S. DOT #",
+          "isRequired": true,
+          "FieldCode": "usdot_number"
+        },
+        {
+          "type": "text",
+          "name": "fein",
+          "title": "FEIN (Federal Employer Identification Number)",
+          "isRequired": true,
+          "FieldCode": "fein"
+        },
+        {
+          "type": "dropdown",
+          "name": "business_type",
+          "title": "Business Type",
+          "isRequired": true,
+          "FieldCode": "business_type",
+          "choices": [
+            "Corporation",
+            "LLC",
+            "LLP",
+            "Individual (Sole Proprietorship)",
+            "Partnership",
+            "Other"
+          ]
+        },
+        {
+          "type": "text",
+          "name": "website",
+          "title": "Website",
+          "FieldCode": "website",
+          "inputType": "url",
+          "placeholder": "https://www.example.com"
+        },
+        {
+          "type": "text",
+          "name": "years_in_business",
+          "title": "Years in Business",
+          "isRequired": true,
+          "FieldCode": "years_in_business",
+          "inputType": "number",
+          "min": 0
+        },
+        {
+          "type": "text",
+          "name": "years_current_management",
+          "title": "Years Under Current Management",
+          "isRequired": true,
+          "FieldCode": "years_current_management",
+          "inputType": "number",
+          "min": 0
+        }
+      ]
+    },
+    {
+      "name": "page_officers",
+      "title": "Principal Officers",
+      "description": "Please provide contact information for your principal officers.",
+      "elements": [
+        {
+          "type": "matrixdropdown",
+          "name": "principal_officers",
+          "title": "Principal Officers",
+          "FieldCode": "principal_officers",
+          "columns": [
+            {
+              "name": "name",
+              "title": "Name",
+              "cellType": "text"
+            },
+            {
+              "name": "email",
+              "title": "Email Address",
+              "cellType": "text",
+              "inputType": "email"
+            },
+            {
+              "name": "phone",
+              "title": "Phone Number",
+              "cellType": "text",
+              "inputType": "tel"
+            }
+          ],
+          "rows": [
+            {
+              "value": "president",
+              "text": "President"
+            },
+            {
+              "value": "operations_manager",
+              "text": "Operations Manager"
+            },
+            {
+              "value": "safety_director",
+              "text": "Safety Director"
+            },
+            {
+              "value": "financial_manager",
+              "text": "Financial Manager"
+            }
+          ]
+        },
+        {
+          "type": "paneldynamic",
+          "name": "subsidiaries",
+          "title": "Subsidiaries / Affiliates",
+          "description": "Add any subsidiaries or affiliated companies (if applicable).",
+          "FieldCode": "subsidiaries",
+          "templateElements": [
+            {
+              "type": "text",
+              "name": "sub_company_name",
+              "title": "Company Name",
+              "isRequired": true,
+              "FieldCode": "sub_company_name"
+            },
+            {
+              "type": "text",
+              "name": "sub_dot",
+              "title": "DOT # (if applicable)",
+              "FieldCode": "sub_dot"
+            },
+            {
+              "type": "text",
+              "name": "sub_operations",
+              "title": "Description of Operations",
+              "FieldCode": "sub_operations"
+            },
+            {
+              "type": "radiogroup",
+              "name": "sub_included",
+              "title": "Included on Applicant's Insurance?",
+              "isRequired": true,
+              "FieldCode": "sub_included",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            }
+          ],
+          "addPanelText": "Add Subsidiary / Affiliate"
+        }
+      ]
+    },
+    {
+      "name": "page_coverages",
+      "title": "Coverages Requested",
+      "description": "Enter your current and requested coverage limits and deductibles.",
+      "elements": [
+        {
+          "type": "matrixdropdown",
+          "name": "coverages",
+          "title": "Coverage Details",
+          "FieldCode": "coverages",
+          "columns": [
+            {
+              "name": "current_limit",
+              "title": "Current Limit",
+              "cellType": "text",
+              "placeholder": "e.g. $1,000,000"
+            },
+            {
+              "name": "current_deductible",
+              "title": "Current Deductible",
+              "cellType": "text",
+              "placeholder": "e.g. $1,000"
+            },
+            {
+              "name": "requested_limit",
+              "title": "Requested Limit",
+              "cellType": "text",
+              "placeholder": "e.g. $1,000,000"
+            },
+            {
+              "name": "requested_deductible",
+              "title": "Requested Deductible",
+              "cellType": "text",
+              "placeholder": "e.g. $1,000"
+            },
+            {
+              "name": "target_premium",
+              "title": "Target / Expiring Premium",
+              "cellType": "text",
+              "placeholder": "e.g. $10,000"
+            },
+            {
+              "name": "comments",
+              "title": "Comments",
+              "cellType": "text"
+            }
+          ],
+          "rows": [
+            {
+              "value": "auto_liability",
+              "text": "Auto Liability"
+            },
+            {
+              "value": "hired_auto_liability",
+              "text": "Hired Auto Liability"
+            },
+            {
+              "value": "non_owned_auto_liability",
+              "text": "Non-Owned Auto Liability"
+            },
+            {
+              "value": "private_passenger_autos",
+              "text": "Private Passenger Autos"
+            },
+            {
+              "value": "auto_physical_damage",
+              "text": "Auto Physical Damage"
+            },
+            {
+              "value": "hired_physical_damage",
+              "text": "Hired Physical Damage"
+            },
+            {
+              "value": "catastrophic_physical_damage",
+              "text": "Catastrophic Physical Damage"
+            },
+            {
+              "value": "trailer_interchange",
+              "text": "Trailer Interchange"
+            },
+            {
+              "value": "garagekeepers_legal_liability",
+              "text": "Garagekeepers Legal Liability"
+            },
+            {
+              "value": "cargo_legal_liability",
+              "text": "Cargo Legal Liability"
+            },
+            {
+              "value": "general_liability",
+              "text": "General Liability"
+            },
+            {
+              "value": "excess_liability",
+              "text": "Excess Liability"
+            },
+            {
+              "value": "workers_compensation",
+              "text": "Workers Compensation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "page_fleet_data",
+      "title": "Fleet & Revenue Data",
+      "description": "Provide fleet and revenue figures for each year period.",
+      "elements": [
+        {
+          "type": "matrixdropdown",
+          "name": "fleet_data",
+          "title": "Fleet & Revenue History",
+          "FieldCode": "fleet_data",
+          "columns": [
+            {
+              "name": "trucking_revenue",
+              "title": "Trucking Revenue ($)",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "placeholder": "0"
+            },
+            {
+              "name": "brokerage_revenue",
+              "title": "Brokerage Revenue ($)",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "placeholder": "0"
+            },
+            {
+              "name": "total_miles",
+              "title": "Total Miles",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "placeholder": "0"
+            },
+            {
+              "name": "company_units",
+              "title": "# Company Units",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "placeholder": "0"
+            },
+            {
+              "name": "oo_units",
+              "title": "# O/O Units",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "placeholder": "0"
+            },
+            {
+              "name": "subhaulers",
+              "title": "# Subhaulers",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "placeholder": "0"
+            },
+            {
+              "name": "ppt_service_units",
+              "title": "# PPT & Service Units",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "placeholder": "0"
+            }
+          ],
+          "rows": [
+            {
+              "value": "projection",
+              "text": "Projection (Next 12 Months)"
+            },
+            {
+              "value": "current_year",
+              "text": "Current Policy Year"
+            },
+            {
+              "value": "prior_1",
+              "text": "1st Prior Year"
+            },
+            {
+              "value": "prior_2",
+              "text": "2nd Prior Year"
+            },
+            {
+              "value": "prior_3",
+              "text": "3rd Prior Year"
+            },
+            {
+              "value": "prior_4",
+              "text": "4th Prior Year"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "page_operations",
+      "title": "Operations",
+      "description": "Describe the nature of your trucking operations. All percentages must total 100%.",
+      "elements": [
+        {
+          "type": "matrixdropdown",
+          "name": "type_of_operations",
+          "title": "Type of Operations",
+          "description": "Enter what percentage of your work applies to each type. Only fill in what applies — must total 100%.",
+          "validators": [
+            {
+              "type": "expression",
+              "text": "The total of all operation type percentages must equal 100%.",
+              "expression": "matrixDropdownColumnSum({type_of_operations}, 'percentage') == 100"
+            }
+          ],
+          "FieldCode": "type_of_operations",
+          "columns": [
+            {
+              "name": "percentage",
+              "title": "%",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "max": 100,
+              "placeholder": "0"
+            }
+          ],
+          "rows": [
+            {
+              "value": "dry_van_general",
+              "text": "Dry Van - General"
+            },
+            {
+              "value": "dry_van_dedicated",
+              "text": "Dry Van - Dedicated"
+            },
+            {
+              "value": "dry_van_mail",
+              "text": "Dry Van - Mail"
+            },
+            {
+              "value": "dry_van_walking_floor",
+              "text": "Dry Van - Walking Floor"
+            },
+            {
+              "value": "less_than_truckload",
+              "text": "Less Than Truckload"
+            },
+            {
+              "value": "flatbed_general",
+              "text": "Flatbed - General"
+            },
+            {
+              "value": "flatbed_steel_pipe",
+              "text": "Flatbed - Steel/Pipe"
+            },
+            {
+              "value": "flatbed_heavy_haul",
+              "text": "Flatbed - Heavy Haul"
+            },
+            {
+              "value": "reefer_general",
+              "text": "Reefer - General"
+            },
+            {
+              "value": "reefer_produce",
+              "text": "Reefer - Produce"
+            },
+            {
+              "value": "reefer_seafood",
+              "text": "Reefer - Seafood"
+            },
+            {
+              "value": "tanker_non_hazmat",
+              "text": "Tanker - Non-Hazmat"
+            },
+            {
+              "value": "tanker_hazmat",
+              "text": "Tanker - Hazmat"
+            },
+            {
+              "value": "intermodal",
+              "text": "Intermodal"
+            },
+            {
+              "value": "auto_hauler",
+              "text": "Auto Hauler"
+            },
+            {
+              "value": "dump",
+              "text": "Dump"
+            },
+            {
+              "value": "driving_school",
+              "text": "Driving School"
+            },
+            {
+              "value": "drive_away",
+              "text": "Drive Away"
+            }
+          ]
+        },
+        {
+          "type": "matrixdropdown",
+          "name": "routes",
+          "title": "Routes",
+          "description": "Percentage of miles by route type — must total 100%.",
+          "validators": [
+            {
+              "type": "expression",
+              "text": "Route percentages must total 100%.",
+              "expression": "matrixDropdownColumnSum({routes}, 'percentage') == 100"
+            }
+          ],
+          "FieldCode": "routes",
+          "columns": [
+            {
+              "name": "percentage",
+              "title": "%",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "max": 100,
+              "placeholder": "0"
+            }
+          ],
+          "rows": [
+            {
+              "value": "regular_route",
+              "text": "Regular Route"
+            },
+            {
+              "value": "irregular_route",
+              "text": "Irregular Route"
+            },
+            {
+              "value": "just_in_time",
+              "text": "Just in Time"
+            },
+            {
+              "value": "hot_shot",
+              "text": "Hot Shot"
+            }
+          ]
+        },
+        {
+          "type": "matrixdropdown",
+          "name": "radius",
+          "title": "Operating Radius",
+          "description": "Percentage of miles by radius — must total 100%.",
+          "validators": [
+            {
+              "type": "expression",
+              "text": "Radius percentages must total 100%.",
+              "expression": "matrixDropdownColumnSum({radius}, 'percentage') == 100"
+            }
+          ],
+          "FieldCode": "radius",
+          "columns": [
+            {
+              "name": "percentage",
+              "title": "%",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "max": 100,
+              "placeholder": "0"
+            }
+          ],
+          "rows": [
+            {
+              "value": "radius_0_50",
+              "text": "0 - 50 miles"
+            },
+            {
+              "value": "radius_51_200",
+              "text": "51 - 200 miles"
+            },
+            {
+              "value": "radius_201_500",
+              "text": "201 - 500 miles"
+            },
+            {
+              "value": "radius_501_plus",
+              "text": "501+ miles"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "name": "avg_length_of_haul",
+          "title": "Average Length of Haul (miles)",
+          "FieldCode": "avg_length_of_haul",
+          "inputType": "number",
+          "min": 0
+        },
+        {
+          "type": "text",
+          "name": "max_length_of_haul",
+          "title": "Maximum Length of Haul (miles)",
+          "FieldCode": "max_length_of_haul",
+          "inputType": "number",
+          "min": 0
+        },
+        {
+          "type": "paneldynamic",
+          "name": "traffic_lanes",
+          "title": "Major Traffic Lanes",
+          "description": "List the primary routes your fleet travels (From → To).",
+          "FieldCode": "traffic_lanes",
+          "templateElements": [
+            {
+              "type": "text",
+              "name": "lane_from",
+              "title": "From",
+              "isRequired": true,
+              "FieldCode": "lane_from"
+            },
+            {
+              "type": "text",
+              "name": "lane_to",
+              "title": "To",
+              "isRequired": true,
+              "FieldCode": "lane_to"
+            }
+          ],
+          "panelCount": 1,
+          "minPanelCount": 1,
+          "maxPanelCount": 6,
+          "addPanelText": "Add Traffic Lane"
+        }
+      ]
+    },
+    {
+      "name": "page_commodities",
+      "title": "Commodities",
+      "elements": [
+        {
+          "type": "paneldynamic",
+          "name": "commodities",
+          "title": "Commodities Hauled",
+          "description": "List all commodities hauled.",
+          "FieldCode": "commodities",
+          "templateElements": [
+            {
+              "type": "text",
+              "name": "commodity_name",
+              "title": "Commodity",
+              "isRequired": true,
+              "FieldCode": "commodity_name"
+            },
+            {
+              "type": "text",
+              "name": "commodity_pct_gross",
+              "title": "% of Gross Receipts",
+              "FieldCode": "commodity_pct_gross",
+              "inputType": "number",
+              "min": 0,
+              "max": 100
+            },
+            {
+              "type": "text",
+              "name": "commodity_avg_value",
+              "title": "Per Unit Average Value ($)",
+              "FieldCode": "commodity_avg_value",
+              "inputType": "number",
+              "min": 0
+            },
+            {
+              "type": "text",
+              "name": "commodity_max_value",
+              "title": "Per Unit Maximum Value ($)",
+              "FieldCode": "commodity_max_value",
+              "inputType": "number",
+              "min": 0
+            }
+          ],
+          "panelCount": 1,
+          "minPanelCount": 1,
+          "addPanelText": "Add Commodity"
+        },
+        {
+          "type": "radiogroup",
+          "name": "haul_high_value",
+          "title": "Do you haul high value material?",
+          "description": "High value includes electronics, jewelry, pharmaceuticals, etc.",
+          "isRequired": true,
+          "FieldCode": "haul_high_value",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "own_product",
+          "title": "Do you own the product you transport?",
+          "isRequired": true,
+          "FieldCode": "own_product",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "panel",
+          "name": "required_cargo_limits_panel",
+          "title": "Required Cargo Limits",
+          "elements": [
+            {
+              "type": "text",
+              "name": "cargo_limit_per_unit",
+              "title": "Per Unit ($)",
+              "FieldCode": "cargo_limit_per_unit",
+              "inputType": "number",
+              "min": 0
+            },
+            {
+              "type": "text",
+              "name": "cargo_limit_per_terminal",
+              "title": "Per Terminal ($)",
+              "FieldCode": "cargo_limit_per_terminal",
+              "inputType": "number",
+              "min": 0
+            },
+            {
+              "type": "text",
+              "name": "cargo_limit_per_disaster",
+              "title": "Per Disaster ($)",
+              "FieldCode": "cargo_limit_per_disaster",
+              "inputType": "number",
+              "min": 0
+            }
+          ]
+        },
+        {
+          "type": "panel",
+          "name": "hired_trailer_panel",
+          "title": "Hired Auto & Trailer Interchange",
+          "elements": [
+            {
+              "type": "text",
+              "name": "annual_cost_of_hire",
+              "title": "Annual Cost of Hire ($)",
+              "FieldCode": "annual_cost_of_hire",
+              "inputType": "number",
+              "min": 0
+            },
+            {
+              "type": "radiogroup",
+              "name": "non_owned_trailers",
+              "title": "Are non-owned trailers used?",
+              "isRequired": true,
+              "FieldCode": "non_owned_trailers",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "uiia_required",
+              "title": "Is the UIIA endorsement required?",
+              "isRequired": true,
+              "FieldCode": "uiia_required",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "text",
+              "name": "trailers_interchanged_per_month",
+              "title": "# of Trailers Interchanged per Month",
+              "FieldCode": "trailers_interchanged_per_month",
+              "inputType": "number",
+              "min": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "page_locations",
+      "title": "Locations",
+      "elements": [
+        {
+          "type": "paneldynamic",
+          "name": "locations",
+          "title": "Business Locations",
+          "description": "List all locations where operations are conducted.",
+          "FieldCode": "locations",
+          "templateElements": [
+            {
+              "type": "text",
+              "name": "loc_address",
+              "title": "Street Address",
+              "isRequired": true,
+              "FieldCode": "loc_address"
+            },
+            {
+              "type": "text",
+              "name": "loc_city",
+              "title": "City",
+              "isRequired": true,
+              "FieldCode": "loc_city"
+            },
+            {
+              "type": "dropdown",
+              "name": "loc_state",
+              "title": "State",
+              "isRequired": true,
+              "FieldCode": "loc_state",
+              "choices": [
+                "AL",
+                "AK",
+                "AZ",
+                "AR",
+                "CA",
+                "CO",
+                "CT",
+                "DE",
+                "DC",
+                "FL",
+                "GA",
+                "HI",
+                "ID",
+                "IL",
+                "IN",
+                "IA",
+                "KS",
+                "KY",
+                "LA",
+                "ME",
+                "MD",
+                "MA",
+                "MI",
+                "MN",
+                "MS",
+                "MO",
+                "MT",
+                "NE",
+                "NV",
+                "NH",
+                "NJ",
+                "NM",
+                "NY",
+                "NC",
+                "ND",
+                "OH",
+                "OK",
+                "OR",
+                "PA",
+                "RI",
+                "SC",
+                "SD",
+                "TN",
+                "TX",
+                "UT",
+                "VT",
+                "VA",
+                "WA",
+                "WV",
+                "WI",
+                "WY"
+              ]
+            },
+            {
+              "type": "text",
+              "name": "loc_zip",
+              "title": "Zip Code",
+              "isRequired": true,
+              "FieldCode": "loc_zip",
+              "maxLength": 10
+            },
+            {
+              "type": "dropdown",
+              "name": "loc_type",
+              "title": "Location Type",
+              "isRequired": true,
+              "FieldCode": "loc_type",
+              "choices": [
+                "Terminal",
+                "Plant",
+                "Office",
+                "Leased Lot/Parking",
+                "Storage Lot",
+                "Shop",
+                "Warehouse"
+              ]
+            },
+            {
+              "type": "dropdown",
+              "name": "loc_gl_class_1",
+              "title": "GL Class Code 1",
+              "FieldCode": "loc_gl_class_1",
+              "choices": [
+                "61224 - Bldg./Premises - (Sq Ft) Owned/Occupied",
+                "61226 - Bldg./Premises - (Sq Ft) Owned/Occupied",
+                "61212 - Bldg./Premises - LRO (Sq Ft) Lessee Occupied",
+                "61217 - Bldg./Premises - LRO (Sq Ft) Lessee Occupied",
+                "46622 - Private Parking (Sq Ft)",
+                "99793 - Truckers (Payroll)",
+                "10073 - Truck/Auto Repair (Sales)",
+                "10367 - Truck Wash (Sales)",
+                "10368 - Truck Wash (Sales)",
+                "19796 - Trailer Rentals (Sales)",
+                "19795 - Trailer Dealers (Sales)",
+                "67512 - Truck School (Square Footage)",
+                "99938 - Warehouse Customer Goods (Payroll)",
+                "99917 - Warehouse Cold Storage (Payroll)",
+                "68706 - Warehouse (Sq Ft) Insured Storage",
+                "68702 - Warehouse LRO (Sq Ft) Multi Lessee Occupied",
+                "68703 - Warehouse LRO (Sq Ft) Single Lessee Occupied"
+              ]
+            },
+            {
+              "type": "text",
+              "name": "loc_gl_1_value",
+              "title": "GL Code 1 — Sq Ft / Payroll / Sales",
+              "FieldCode": "loc_gl_1_value",
+              "inputType": "number",
+              "min": 0
+            },
+            {
+              "type": "dropdown",
+              "name": "loc_gl_class_2",
+              "title": "GL Class Code 2 (if applicable)",
+              "FieldCode": "loc_gl_class_2",
+              "choices": [
+                "61224 - Bldg./Premises - (Sq Ft) Owned/Occupied",
+                "61226 - Bldg./Premises - (Sq Ft) Owned/Occupied",
+                "61212 - Bldg./Premises - LRO (Sq Ft) Lessee Occupied",
+                "61217 - Bldg./Premises - LRO (Sq Ft) Lessee Occupied",
+                "46622 - Private Parking (Sq Ft)",
+                "99793 - Truckers (Payroll)",
+                "10073 - Truck/Auto Repair (Sales)",
+                "10367 - Truck Wash (Sales)",
+                "10368 - Truck Wash (Sales)",
+                "19796 - Trailer Rentals (Sales)",
+                "19795 - Trailer Dealers (Sales)",
+                "67512 - Truck School (Square Footage)",
+                "99938 - Warehouse Customer Goods (Payroll)",
+                "99917 - Warehouse Cold Storage (Payroll)",
+                "68706 - Warehouse (Sq Ft) Insured Storage",
+                "68702 - Warehouse LRO (Sq Ft) Multi Lessee Occupied",
+                "68703 - Warehouse LRO (Sq Ft) Single Lessee Occupied"
+              ]
+            },
+            {
+              "type": "text",
+              "name": "loc_gl_2_value",
+              "title": "GL Code 2 — Sq Ft / Payroll / Sales",
+              "FieldCode": "loc_gl_2_value",
+              "inputType": "number",
+              "min": 0
+            }
+          ],
+          "panelCount": 1,
+          "minPanelCount": 1,
+          "maxPanelCount": 10,
+          "addPanelText": "Add Location"
+        }
+      ]
+    },
+    {
+      "name": "page_technology",
+      "title": "Technology & Safety Equipment",
+      "elements": [
+        {
+          "type": "matrixdropdown",
+          "name": "technology",
+          "title": "Safety Technology Installed",
+          "description": "For each technology type, indicate your provider(s), fleet coverage percentage, and date installed.",
+          "FieldCode": "technology",
+          "columns": [
+            {
+              "name": "provider_1",
+              "title": "Provider 1",
+              "cellType": "text",
+              "placeholder": "Provider name"
+            },
+            {
+              "name": "pct_fleet_1",
+              "title": "% of Fleet",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "max": 100,
+              "placeholder": "0"
+            },
+            {
+              "name": "provider_2",
+              "title": "Provider 2",
+              "cellType": "text",
+              "placeholder": "Provider name"
+            },
+            {
+              "name": "pct_fleet_2",
+              "title": "% of Fleet",
+              "cellType": "text",
+              "inputType": "number",
+              "min": 0,
+              "max": 100,
+              "placeholder": "0"
+            },
+            {
+              "name": "date_installed",
+              "title": "Date Installed",
+              "cellType": "text",
+              "inputType": "date"
+            }
+          ],
+          "rows": [
+            {
+              "value": "eld",
+              "text": "Electronic Logging Device (ELD)"
+            },
+            {
+              "value": "camera",
+              "text": "In-Vehicle Camera"
+            },
+            {
+              "value": "collision_avoidance",
+              "text": "Collision Avoidance"
+            },
+            {
+              "value": "anti_rollover",
+              "text": "Anti-Rollover"
+            },
+            {
+              "value": "lane_departure",
+              "text": "Lane Departure Warning"
+            },
+            {
+              "value": "adaptive_cruise",
+              "text": "Adaptive Cruise Control"
+            },
+            {
+              "value": "telematics",
+              "text": "Telematics"
+            },
+            {
+              "value": "other",
+              "text": "Other"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "name": "camera_type",
+          "title": "Camera Type (if applicable)",
+          "description": "e.g. forward-facing, dual-facing, 360°",
+          "FieldCode": "camera_type"
+        },
+        {
+          "type": "text",
+          "name": "technology_other_explain",
+          "title": "If 'Other' technology listed above, please explain",
+          "FieldCode": "technology_other_explain"
+        }
+      ]
+    },
+    {
+      "name": "page_vehicles",
+      "title": "Vehicle List",
+      "description": "Required fields: Year, Make, VIN, Stated Amount (if APD coverage desired), Unit Type, Power Unit Type.",
+      "elements": [
+        {
+          "type": "paneldynamic",
+          "name": "vehicles",
+          "title": "Vehicles",
+          "FieldCode": "vehicles",
+          "templateElements": [
+            {
+              "type": "text",
+              "name": "veh_year",
+              "title": "Year",
+              "isRequired": true,
+              "FieldCode": "veh_year",
+              "inputType": "number",
+              "min": 1900,
+              "max": 2030
+            },
+            {
+              "type": "text",
+              "name": "veh_make",
+              "title": "Make",
+              "isRequired": true,
+              "FieldCode": "veh_make"
+            },
+            {
+              "type": "text",
+              "name": "veh_vin",
+              "title": "VIN",
+              "description": "Must be 17 digits unless year is prior to 1981.",
+              "isRequired": true,
+              "FieldCode": "veh_vin"
+            },
+            {
+              "type": "text",
+              "name": "veh_stated_amount",
+              "title": "Stated Amount ($)",
+              "description": "Required if APD coverage is desired.",
+              "FieldCode": "veh_stated_amount",
+              "inputType": "number",
+              "min": 0
+            },
+            {
+              "type": "dropdown",
+              "name": "veh_unit_type",
+              "title": "Unit Type",
+              "isRequired": true,
+              "FieldCode": "veh_unit_type",
+              "choices": [
+                "Power Unit - Tractor",
+                "Power Unit - Straight Truck",
+                "Power Unit - Pickup/Van",
+                "Trailer - Dry Van",
+                "Trailer - Reefer",
+                "Trailer - Flatbed",
+                "Trailer - Tanker",
+                "Trailer - Other",
+                "Service Vehicle",
+                "Private Passenger"
+              ]
+            },
+            {
+              "type": "dropdown",
+              "name": "veh_power_unit_type",
+              "title": "Power Unit Type (if applicable)",
+              "FieldCode": "veh_power_unit_type",
+              "choices": [
+                "Company",
+                "Owner/Operator",
+                "N/A"
+              ]
+            },
+            {
+              "type": "dropdown",
+              "name": "veh_reg_state",
+              "title": "Registration State",
+              "FieldCode": "veh_reg_state",
+              "choices": [
+                "AL",
+                "AK",
+                "AZ",
+                "AR",
+                "CA",
+                "CO",
+                "CT",
+                "DE",
+                "DC",
+                "FL",
+                "GA",
+                "HI",
+                "ID",
+                "IL",
+                "IN",
+                "IA",
+                "KS",
+                "KY",
+                "LA",
+                "ME",
+                "MD",
+                "MA",
+                "MI",
+                "MN",
+                "MS",
+                "MO",
+                "MT",
+                "NE",
+                "NV",
+                "NH",
+                "NJ",
+                "NM",
+                "NY",
+                "NC",
+                "ND",
+                "OH",
+                "OK",
+                "OR",
+                "PA",
+                "RI",
+                "SC",
+                "SD",
+                "TN",
+                "TX",
+                "UT",
+                "VT",
+                "VA",
+                "WA",
+                "WV",
+                "WI",
+                "WY"
+              ]
+            },
+            {
+              "type": "dropdown",
+              "name": "veh_company_or_oo",
+              "title": "Company or O/O",
+              "FieldCode": "veh_company_or_oo",
+              "choices": [
+                "Company",
+                "Owner/Operator"
+              ]
+            }
+          ],
+          "panelCount": 1,
+          "minPanelCount": 1,
+          "addPanelText": "Add Vehicle"
+        }
+      ]
+    },
+    {
+      "name": "page_drivers",
+      "title": "Driver List",
+      "description": "Required fields: First Name, Last Name, Date of Birth, Date of Hire.",
+      "elements": [
+        {
+          "type": "paneldynamic",
+          "name": "drivers",
+          "title": "Drivers",
+          "FieldCode": "drivers",
+          "templateElements": [
+            {
+              "type": "text",
+              "name": "drv_first_name",
+              "title": "First Name",
+              "isRequired": true,
+              "FieldCode": "drv_first_name"
+            },
+            {
+              "type": "text",
+              "name": "drv_last_name",
+              "title": "Last Name",
+              "isRequired": true,
+              "FieldCode": "drv_last_name"
+            },
+            {
+              "type": "text",
+              "name": "drv_dob",
+              "title": "Date of Birth",
+              "isRequired": true,
+              "FieldCode": "drv_dob",
+              "inputType": "date"
+            },
+            {
+              "type": "text",
+              "name": "drv_date_of_hire",
+              "title": "Date of Hire",
+              "isRequired": true,
+              "FieldCode": "drv_date_of_hire",
+              "inputType": "date"
+            },
+            {
+              "type": "text",
+              "name": "drv_years_experience",
+              "title": "Years of Experience",
+              "FieldCode": "drv_years_experience",
+              "inputType": "number",
+              "min": 0
+            },
+            {
+              "type": "dropdown",
+              "name": "drv_company_or_oo",
+              "title": "Company or O/O",
+              "FieldCode": "drv_company_or_oo",
+              "choices": [
+                "Company",
+                "Owner/Operator"
+              ]
+            },
+            {
+              "type": "text",
+              "name": "drv_cdl_issue_date",
+              "title": "CDL Issue Date",
+              "FieldCode": "drv_cdl_issue_date",
+              "inputType": "date"
+            },
+            {
+              "type": "dropdown",
+              "name": "drv_license_state",
+              "title": "License State",
+              "FieldCode": "drv_license_state",
+              "choices": [
+                "AL",
+                "AK",
+                "AZ",
+                "AR",
+                "CA",
+                "CO",
+                "CT",
+                "DE",
+                "DC",
+                "FL",
+                "GA",
+                "HI",
+                "ID",
+                "IL",
+                "IN",
+                "IA",
+                "KS",
+                "KY",
+                "LA",
+                "ME",
+                "MD",
+                "MA",
+                "MI",
+                "MN",
+                "MS",
+                "MO",
+                "MT",
+                "NE",
+                "NV",
+                "NH",
+                "NJ",
+                "NM",
+                "NY",
+                "NC",
+                "ND",
+                "OH",
+                "OK",
+                "OR",
+                "PA",
+                "RI",
+                "SC",
+                "SD",
+                "TN",
+                "TX",
+                "UT",
+                "VT",
+                "VA",
+                "WA",
+                "WV",
+                "WI",
+                "WY"
+              ]
+            },
+            {
+              "type": "text",
+              "name": "drv_license_number",
+              "title": "License Number",
+              "FieldCode": "drv_license_number"
+            }
+          ],
+          "panelCount": 1,
+          "minPanelCount": 1,
+          "addPanelText": "Add Driver"
+        }
+      ]
+    },
+    {
+      "name": "page_driver_standards",
+      "title": "Driver Standards & Hiring",
+      "elements": [
+        {
+          "type": "panel",
+          "name": "driver_standards_panel",
+          "title": "Driver Standards",
+          "elements": [
+            {
+              "type": "radiogroup",
+              "name": "report_drivers_to_niic",
+              "title": "Do you agree to report all drivers to NIIC?",
+              "isRequired": true,
+              "FieldCode": "report_drivers_to_niic",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "family_under_21",
+              "title": "Are any family members under 21 primary drivers of a company auto?",
+              "isRequired": true,
+              "FieldCode": "family_under_21",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "drivers_licensed_dot",
+              "title": "Are all drivers properly licensed and DOT compliant?",
+              "isRequired": true,
+              "FieldCode": "drivers_licensed_dot",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "drivers_2yr_experience",
+              "title": "Have all drivers been driving a similar vehicle for 2+ years?",
+              "isRequired": true,
+              "FieldCode": "drivers_2yr_experience",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "disciplinary_plan",
+              "title": "Is a disciplinary plan documented for all drivers?",
+              "isRequired": true,
+              "FieldCode": "disciplinary_plan",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "panel",
+          "name": "driver_hiring_panel",
+          "title": "Driver Hiring Criteria",
+          "description": "Check all that apply to your hiring process.",
+          "elements": [
+            {
+              "type": "checkbox",
+              "name": "hiring_criteria",
+              "title": "Your hiring process includes:",
+              "FieldCode": "hiring_criteria",
+              "choices": [
+                "Written Application",
+                "Road Test",
+                "Written Test",
+                "Pre-Hire Physical",
+                "Drug Test",
+                "Interview",
+                "Reference Checks"
+              ]
+            },
+            {
+              "type": "text",
+              "name": "driver_max_age",
+              "title": "Maximum Driver Age (if applicable)",
+              "FieldCode": "driver_max_age",
+              "inputType": "number",
+              "min": 18
+            },
+            {
+              "type": "radiogroup",
+              "name": "psp_screening",
+              "title": "Do you utilize Pre-Employment Screening (PSP) as part of your hiring process?",
+              "isRequired": true,
+              "FieldCode": "psp_screening",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "mvr_prior_to_hire",
+              "title": "Do you order MVRs prior to hiring?",
+              "isRequired": true,
+              "FieldCode": "mvr_prior_to_hire",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "background_checks",
+              "title": "Are background checks performed prior to hiring?",
+              "isRequired": true,
+              "FieldCode": "background_checks",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "allow_major_violations",
+              "title": "Do you allow drivers with major violations?",
+              "isRequired": true,
+              "FieldCode": "allow_major_violations",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "exclude_dwi_dui",
+              "title": "Do you exclude drivers with citations for DWI, DUI, or reckless operations?",
+              "isRequired": true,
+              "FieldCode": "exclude_dwi_dui",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "panel",
+          "name": "owner_operator_panel",
+          "title": "Owner-Operators",
+          "elements": [
+            {
+              "type": "radiogroup",
+              "name": "oo_permanent_lease",
+              "title": "Are permanent/exclusive lease agreements used?",
+              "isRequired": true,
+              "FieldCode": "oo_permanent_lease",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "oo_trip_lease",
+              "title": "Are trip lease agreements used?",
+              "isRequired": true,
+              "FieldCode": "oo_trip_lease",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "oo_same_training",
+              "title": "Are O/O drivers subject to the same driver training as company drivers?",
+              "isRequired": true,
+              "FieldCode": "oo_same_training",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "oo_driver_files",
+              "title": "Are driver files maintained by the insured?",
+              "isRequired": true,
+              "FieldCode": "oo_driver_files",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "oo_equipment_inspected",
+              "title": "Is equipment inspected by the insured?",
+              "isRequired": true,
+              "FieldCode": "oo_equipment_inspected",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "oo_same_maintenance",
+              "title": "Are O/O drivers subject to the same maintenance program as owned equipment?",
+              "isRequired": true,
+              "FieldCode": "oo_same_maintenance",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "oo_500k_ntl",
+              "title": "Are all owner/operators required to carry at least $500,000 non-trucking liability?",
+              "isRequired": true,
+              "FieldCode": "oo_500k_ntl",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "oo_certs_on_file",
+              "title": "Are certificates on file?",
+              "isRequired": true,
+              "FieldCode": "oo_certs_on_file",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "oo_additional_insured",
+              "title": "Is the insured listed as an additional insured?",
+              "isRequired": true,
+              "FieldCode": "oo_additional_insured",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "page_maintenance",
+      "title": "Vehicle Maintenance",
+      "elements": [
+        {
+          "type": "checkbox",
+          "name": "maintenance_program_includes",
+          "title": "Your Vehicle Maintenance Program includes:",
+          "FieldCode": "maintenance_program_includes",
+          "choices": [
+            "Written Maintenance Program",
+            "A Service Record for Each Vehicle",
+            "Controlled & Frequent Pre/Post Trip Inspections",
+            "All Maintenance Records on File",
+            "Re-treads Being Used",
+            "Vehicle Daily Condition Reports"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "maintenance_external_service",
+          "title": "Do you provide external service (public)?",
+          "isRequired": true,
+          "FieldCode": "maintenance_external_service",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "checkbox",
+          "name": "maintenance_facilities",
+          "title": "Indicate which of the following you have on-site:",
+          "FieldCode": "maintenance_facilities",
+          "choices": [
+            "Parts Department",
+            "Body Shop",
+            "Service Bays",
+            "Controlled Inspection Reports"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "page_risk_operations",
+      "title": "Operations & Risk Management",
+      "elements": [
+        {
+          "type": "panel",
+          "name": "additional_operations_panel",
+          "title": "Additional Operations Questions",
+          "elements": [
+            {
+              "type": "radiogroup",
+              "name": "fuel_tanks_on_premises",
+              "title": "Are any fuel tanks located on the premises?",
+              "isRequired": true,
+              "FieldCode": "fuel_tanks_on_premises",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "rent_lease_long_trips",
+              "title": "Do you rent/lease for long trips?",
+              "isRequired": true,
+              "FieldCode": "rent_lease_long_trips",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "rent_lease_trips",
+              "title": "Do you rent/lease for trips?",
+              "isRequired": true,
+              "FieldCode": "rent_lease_trips",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "other_business_activity",
+              "title": "Is insured involved in any business activity other than trucking?",
+              "isRequired": true,
+              "FieldCode": "other_business_activity",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "underground_storage",
+              "title": "Does insured have underground or above ground storage facilities?",
+              "isRequired": true,
+              "FieldCode": "underground_storage",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "mobile_equipment",
+              "title": "Does insured have mobile equipment?",
+              "isRequired": true,
+              "FieldCode": "mobile_equipment",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "sell_product",
+              "title": "Does insured sell any product either wholesale or retail?",
+              "isRequired": true,
+              "FieldCode": "sell_product",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "lease_mobile_equipment",
+              "title": "Does insured lease mobile equipment?",
+              "isRequired": true,
+              "FieldCode": "lease_mobile_equipment",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "rigging",
+              "title": "Does insured do any rigging?",
+              "isRequired": true,
+              "FieldCode": "rigging",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "tank_wash_on_premises",
+              "title": "Is there a tank wash located on the premises?",
+              "isRequired": true,
+              "FieldCode": "tank_wash_on_premises",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        },
+        {
+          "type": "panel",
+          "name": "risk_management_panel",
+          "title": "Risk Management",
+          "elements": [
+            {
+              "type": "radiogroup",
+              "name": "drug_testing_program",
+              "title": "Do you participate in a drug testing program?",
+              "isRequired": true,
+              "FieldCode": "drug_testing_program",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "other_ops_under_authority",
+              "title": "Are there any other operations under your control or authority?",
+              "isRequired": true,
+              "FieldCode": "other_ops_under_authority",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "driver_teams",
+              "title": "Do you use driver teams?",
+              "isRequired": true,
+              "FieldCode": "driver_teams",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "allow_passengers",
+              "title": "Do you allow passengers?",
+              "isRequired": true,
+              "FieldCode": "allow_passengers",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "haul_doubles",
+              "title": "Do you haul doubles?",
+              "isRequired": true,
+              "FieldCode": "haul_doubles",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "haul_triples",
+              "title": "Do you haul triples?",
+              "isRequired": true,
+              "FieldCode": "haul_triples",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "loan_lease_rent_vehicles",
+              "title": "Do you loan, lease, or rent vehicles to others with or without drivers?",
+              "isRequired": true,
+              "FieldCode": "loan_lease_rent_vehicles",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "insurance_verified_contracts",
+              "visibleIf": "{loan_lease_rent_vehicles} = 'Yes'",
+              "title": "If yes to above — is insurance verified with these contracts?",
+              "FieldCode": "insurance_verified_contracts",
+              "choices": [
+                "Yes",
+                "No",
+                "N/A"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "brokerage_contract_basis",
+              "title": "Are brokerage operations conducted on a contract basis?",
+              "isRequired": true,
+              "FieldCode": "brokerage_contract_basis",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "checkbox",
+              "name": "safety_programs",
+              "title": "Which of the following safety programs do you have?",
+              "FieldCode": "safety_programs",
+              "choices": [
+                "Written Safety Program",
+                "Written Driver-Training Program",
+                "Written Accident Reporting Procedures",
+                "Safety Award Program",
+                "Mandatory Safety Meetings",
+                "Remedial Training for Drivers with Accidents/Speeding",
+                "Accident Register & Periodic Accident Analysis"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "driver_files_available",
+              "title": "Will the Driver Files be available for our review?",
+              "isRequired": true,
+              "FieldCode": "driver_files_available",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "accident_files_available",
+              "title": "Will the Accident Files be available for our review?",
+              "isRequired": true,
+              "FieldCode": "accident_files_available",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "claims_reported_to_niic",
+              "title": "Will all claims be reported directly to NIIC?",
+              "isRequired": true,
+              "FieldCode": "claims_reported_to_niic",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            },
+            {
+              "type": "radiogroup",
+              "name": "personal_use_vehicles",
+              "title": "Are private passenger and/or service vehicles allowed to be used for personal use?",
+              "isRequired": true,
+              "FieldCode": "personal_use_vehicles",
+              "choices": [
+                "Yes",
+                "No"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "page_underwriting",
+      "title": "Mandatory Underwriting Questions",
+      "description": "Please answer ALL of the following questions honestly and completely.",
+      "elements": [
+        {
+          "type": "radiogroup",
+          "name": "uw_cancelled_nonrenewed",
+          "title": "Has your insurance been cancelled or non-renewed in the last 5 years for any reason? (Not applicable in MO)",
+          "isRequired": true,
+          "FieldCode": "uw_cancelled_nonrenewed",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_bankruptcy_5yr",
+          "title": "Have you filed for bankruptcy in the last 5 years?",
+          "isRequired": true,
+          "FieldCode": "uw_bankruptcy_5yr",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_assigned_risk",
+          "title": "During the past 4 years, has your insurance ever been obtained through an Assigned Risk Plan?",
+          "isRequired": true,
+          "FieldCode": "uw_assigned_risk",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_notice_cancellation",
+          "title": "Has any company provided notice of cancellation/non-renewal or otherwise cancelled/refused to renew your insurance?",
+          "isRequired": true,
+          "FieldCode": "uw_notice_cancellation",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_workers_comp",
+          "title": "Do you provide Workers Compensation for all employees?",
+          "isRequired": true,
+          "FieldCode": "uw_workers_comp",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_bankruptcy_contemplated",
+          "title": "Have you ever filed for or contemplated filing for bankruptcy?",
+          "isRequired": true,
+          "FieldCode": "uw_bankruptcy_contemplated",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_authority_suspended",
+          "title": "Has your operating authority ever been suspended or revoked?",
+          "isRequired": true,
+          "FieldCode": "uw_authority_suspended",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_equipment_on_schedule",
+          "title": "Is all equipment operated under the applicant's authority scheduled on the applicant's driver and vehicle schedule?",
+          "isRequired": true,
+          "FieldCode": "uw_equipment_on_schedule",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_interline_arrangements",
+          "title": "Do you have any interline, intermodal, or interchange arrangements?",
+          "isRequired": true,
+          "FieldCode": "uw_interline_arrangements",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_haul_hazardous",
+          "title": "Do you ever haul noxious, caustic, toxic, flammable or explosive commodities?",
+          "isRequired": true,
+          "FieldCode": "uw_haul_hazardous",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_fracking",
+          "title": "Are you involved in the fracking industry?",
+          "isRequired": true,
+          "FieldCode": "uw_fracking",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_broker_freight_forwarder",
+          "title": "Do you operate as a broker or freight forwarder?",
+          "isRequired": true,
+          "FieldCode": "uw_broker_freight_forwarder",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "radiogroup",
+          "name": "uw_haul_waste",
+          "title": "Are you hauling any waste products to a final resting destination?",
+          "isRequired": true,
+          "FieldCode": "uw_haul_waste",
+          "choices": [
+            "Yes",
+            "No"
+          ]
+        },
+        {
+          "type": "comment",
+          "name": "uw_yes_explanation",
+          "visibleIf": "{uw_cancelled_nonrenewed} = 'Yes' or {uw_bankruptcy_5yr} = 'Yes' or {uw_assigned_risk} = 'Yes' or {uw_notice_cancellation} = 'Yes' or {uw_bankruptcy_contemplated} = 'Yes' or {uw_authority_suspended} = 'Yes' or {uw_interline_arrangements} = 'Yes' or {uw_haul_hazardous} = 'Yes' or {uw_fracking} = 'Yes' or {uw_broker_freight_forwarder} = 'Yes' or {uw_haul_waste} = 'Yes'",
+          "title": "If you answered 'Yes' to any of the above, please explain:",
+          "FieldCode": "uw_yes_explanation"
+        }
+      ]
+    },
+    {
+      "name": "page_filings",
+      "title": "State & Federal Filings",
+      "elements": [
+        {
+          "type": "checkbox",
+          "name": "federal_filings_needed",
+          "title": "Federal / Form Filings Needed:",
+          "FieldCode": "federal_filings_needed",
+          "choices": [
+            "E-Form (Liability Certificate of Insurance)",
+            "K-Form (Notice of Cancellation)",
+            "MCS-90 Form",
+            "BMC-91X (Federal)",
+            "BMC-35 (Cancellation)",
+            "All Other Motor Carrier Forms"
+          ]
+        },
+        {
+          "type": "checkbox",
+          "name": "state_filings_needed",
+          "title": "State Filings Needed — check all states that apply:",
+          "FieldCode": "state_filings_needed",
+          "choices": [
+            "Alabama",
+            "Alaska",
+            "Arizona",
+            "Arkansas",
+            "California",
+            "Colorado",
+            "Connecticut",
+            "Delaware",
+            "DC",
+            "Florida",
+            "Georgia",
+            "Hawaii",
+            "Idaho",
+            "Illinois",
+            "Indiana",
+            "Iowa",
+            "Kansas",
+            "Kentucky",
+            "Louisiana",
+            "Maine",
+            "Maryland",
+            "Massachusetts",
+            "Michigan",
+            "Minnesota",
+            "Mississippi",
+            "Missouri",
+            "Montana",
+            "Nebraska",
+            "Nevada",
+            "New Hampshire",
+            "New Jersey",
+            "New Mexico",
+            "New York",
+            "North Carolina",
+            "North Dakota",
+            "Ohio",
+            "Oklahoma",
+            "Oregon",
+            "Pennsylvania",
+            "Rhode Island",
+            "South Carolina",
+            "South Dakota",
+            "Tennessee",
+            "Texas",
+            "Utah",
+            "Vermont",
+            "Virginia",
+            "Washington",
+            "West Virginia",
+            "Wisconsin",
+            "Wyoming"
+          ]
+        }
+      ]
+    }
+  ],
+  "showQuestionNumbers": "on",
+  "showProgressBar": true,
+  "progressBarLocation": "top"
+}

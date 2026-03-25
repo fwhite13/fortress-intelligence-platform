@@ -1,0 +1,61 @@
+@namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
+@using System.Text.Json.Nodes
+@using FamOs.Web.Services
+@using MudBlazor
+@inject IIntakeResponseService IntakeService
+@inject ISnackbar Snackbar
+
+<div class="intake-producer-layout">
+    <MudText Typo="Typo.h5" Class="mb-4">Intake Questionnaire — @OpportunityId</MudText>
+    <MudExpansionPanels MultiExpansion="true">
+        @foreach (var page in Pages)
+        {
+            var pageName = page["name"]?.GetValue<string>() ?? "";
+            var pageTitle = page["title"]?.GetValue<string>() ?? pageName;
+            <MudExpansionPanel Text="@pageTitle">
+                <QuestionnairePage PageDef="@page"
+                                   Responses="@_responses"
+                                   Evaluator="@_evaluator"
+                                   OnFieldChanged="@HandleFieldChanged" />
+            </MudExpansionPanel>
+        }
+    </MudExpansionPanels>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string OpportunityId { get; set; } = "";
+    [Parameter] public IEnumerable<JsonObject> Pages { get; set; } = Enumerable.Empty<JsonObject>();
+
+    private Dictionary<string, string> _responses = new();
+    private ConditionEvaluator _evaluator = new();
+    private System.Timers.Timer? _debounce;
+    private (string FieldCode, string Value) _pendingSave;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _responses = await IntakeService.LoadAllAsync(OpportunityId);
+        _evaluator.SetAll(_responses);
+    }
+
+    private void HandleFieldChanged((string FieldCode, string Value) change)
+    {
+        _pendingSave = change;
+        _debounce?.Stop();
+        _debounce?.Dispose();
+        _debounce = new System.Timers.Timer(800);
+        _debounce.Elapsed += async (_, _) =>
+        {
+            _debounce?.Stop();
+            try
+            {
+                await IntakeService.UpsertAsync(OpportunityId, _pendingSave.FieldCode, _pendingSave.Value);
+            }
+            catch (Exception ex)
+            {
+                await InvokeAsync(() => Snackbar.Add($"Auto-save failed: {ex.Message}", Severity.Warning));
+            }
+        };
+        _debounce.AutoReset = false;
+        _debounce.Start();
+    }
+}

@@ -1,0 +1,29 @@
+@namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
+@using System.Text.Json.Nodes
+@using MudBlazor
+
+@if (_pages is null)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (Mode == QuestionnaireMode.Producer)
+{
+    <ProducerLayout OpportunityId="@OpportunityId" Pages="@_pages" />
+}
+else
+{
+    @* Prospect WizardChrome — ADO#1196 *@
+    <MudText>Wizard coming in ADO#1196</MudText>
+}
+
+@code {
+    [Parameter, EditorRequired] public QuestionnaireMode Mode { get; set; }
+    [Parameter, EditorRequired] public string OpportunityId { get; set; } = "";
+
+    private IEnumerable<JsonObject>? _pages;
+
+    protected override void OnInitialized()
+    {
+        _pages = QuestionnaireDefinition.GetPages().OfType<JsonObject>();
+    }
+}

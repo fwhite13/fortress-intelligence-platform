@@ -1,0 +1,64 @@
+@namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
+@using System.Text.Json.Nodes
+@using MudBlazor
+
+<MudSimpleTable Dense="true" Bordered="true" Class="intake-matrix mb-2">
+    <thead>
+        <tr>
+            <th></th>
+            @foreach (var col in GetColumns())
+            {
+                <th>@col["title"]?.GetValue<string>()</th>
+            }
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var row in GetRows())
+        {
+            <tr>
+                <td><strong>@row["text"]?.GetValue<string>()</strong></td>
+                @foreach (var col in GetColumns())
+                {
+                    var key = $"{row["value"]?.GetValue<string>()}.{col["name"]?.GetValue<string>()}";
+                    var cellVal = GetCellValue(key);
+                    <td>
+                        <MudTextField T="string" Value="@cellVal"
+                                      ValueChanged="@(v => SetCellValue(key, v))"
+                                      Variant="Variant.Text" />
+                    </td>
+                }
+            </tr>
+        }
+    </tbody>
+</MudSimpleTable>
+
+@code {
+    [Parameter, EditorRequired] public JsonObject Element { get; set; } = default!;
+    [Parameter] public string? CurrentValue { get; set; }
+    [Parameter] public EventCallback<string> OnValueChanged { get; set; }
+
+    private Dictionary<string, string> _cells = new();
+
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrEmpty(CurrentValue))
+        {
+            try { _cells = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(CurrentValue) ?? new(); }
+            catch { _cells = new(); }
+        }
+    }
+
+    private IEnumerable<JsonObject> GetColumns() =>
+        Element["columns"]?.AsArray().OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>();
+
+    private IEnumerable<JsonObject> GetRows() =>
+        Element["rows"]?.AsArray().OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>();
+
+    private string GetCellValue(string key) => _cells.TryGetValue(key, out var v) ? v : "";
+
+    private void SetCellValue(string key, string value)
+    {
+        _cells[key] = value;
+        OnValueChanged.InvokeAsync(System.Text.Json.JsonSerializer.Serialize(_cells));
+    }
+}

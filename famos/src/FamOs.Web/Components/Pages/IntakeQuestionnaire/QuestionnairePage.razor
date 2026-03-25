@@ -1,0 +1,61 @@
+@namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
+@using System.Text.Json.Nodes
+@using MudBlazor
+
+<div class="intake-page">
+    @if (!string.IsNullOrEmpty(PageDef["title"]?.GetValue<string>()))
+    {
+        <MudText Typo="Typo.h6" Class="mb-1">@PageDef["title"]?.GetValue<string>()</MudText>
+    }
+    @if (!string.IsNullOrEmpty(PageDef["description"]?.GetValue<string>()))
+    {
+        <MudText Typo="Typo.body2" Class="mb-3 famos-meta-text">@PageDef["description"]?.GetValue<string>()</MudText>
+    }
+
+    @foreach (var el in GetElements())
+    {
+        var elType = el["type"]?.GetValue<string>() ?? "text";
+        @if (elType == "panel")
+        {
+            @if (!string.IsNullOrEmpty(el["title"]?.GetValue<string>()))
+            {
+                <MudText Typo="Typo.subtitle1" Class="mt-3 mb-1">@el["title"]?.GetValue<string>()</MudText>
+            }
+            @foreach (var child in el["elements"]?.AsArray().OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>())
+            {
+                var childFc = child["FieldCode"]?.GetValue<string>() ?? child["name"]?.GetValue<string>() ?? "";
+                <QuestionRenderer Element="@child"
+                                  CurrentValue="@GetValue(childFc)"
+                                  OnValueChanged="@(v => HandleChange(childFc, v))"
+                                  IsVisible="@Evaluator.Evaluate(child["visibleIf"]?.GetValue<string>())" />
+            }
+        }
+        else
+        {
+            var fc = el["FieldCode"]?.GetValue<string>() ?? el["name"]?.GetValue<string>() ?? "";
+            <QuestionRenderer Element="@el"
+                              CurrentValue="@GetValue(fc)"
+                              OnValueChanged="@(v => HandleChange(fc, v))"
+                              IsVisible="@Evaluator.Evaluate(el["visibleIf"]?.GetValue<string>())" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public JsonObject PageDef { get; set; } = default!;
+    [Parameter, EditorRequired] public Dictionary<string, string> Responses { get; set; } = new();
+    [Parameter, EditorRequired] public ConditionEvaluator Evaluator { get; set; } = default!;
+    [Parameter] public EventCallback<(string FieldCode, string Value)> OnFieldChanged { get; set; }
+
+    private IEnumerable<JsonObject> GetElements() =>
+        PageDef["elements"]?.AsArray().OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>();
+
+    private string GetValue(string fc) => Responses.TryGetValue(fc, out var v) ? v : "";
+
+    private async Task HandleChange(string fc, string value)
+    {
+        Responses[fc] = value;
+        Evaluator.UpdateResponse(fc, value);
+        await OnFieldChanged.InvokeAsync((fc, value));
+    }
+}

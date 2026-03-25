@@ -1,0 +1,74 @@
+@namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
+@using System.Text.Json.Nodes
+@using MudBlazor
+
+<div class="intake-paneldynamic">
+    @for (int i = 0; i < _panels.Count; i++)
+    {
+        var idx = i;
+        <MudPaper Class="mb-2 pa-3" Elevation="1">
+            <div class="d-flex justify-space-between align-center mb-2">
+                <MudText Typo="Typo.subtitle2">@(Element["title"]?.GetValue<string>()) #@(idx + 1)</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                               OnClick="@(() => RemovePanel(idx))" />
+            </div>
+            @foreach (var tmpl in GetTemplateElements())
+            {
+                var fc = tmpl["FieldCode"]?.GetValue<string>() ?? tmpl["name"]?.GetValue<string>() ?? "";
+                <QuestionRenderer Element="@tmpl" CurrentValue="@GetPanelValue(idx, fc)"
+                                  OnValueChanged="@(v => SetPanelValue(idx, fc, v))"
+                                  IsVisible="true" />
+            }
+        </MudPaper>
+    }
+    <MudButton StartIcon="@Icons.Material.Filled.Add" OnClick="@AddPanel"
+               Variant="Variant.Outlined" Size="Size.Small">
+        Add @(Element["panelAddText"]?.GetValue<string>() ?? "Entry")
+    </MudButton>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public JsonObject Element { get; set; } = default!;
+    [Parameter] public string? CurrentValue { get; set; }
+    [Parameter] public EventCallback<string> OnValueChanged { get; set; }
+
+    private List<Dictionary<string, string>> _panels = new();
+
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrEmpty(CurrentValue))
+        {
+            try
+            {
+                _panels = System.Text.Json.JsonSerializer.Deserialize<List<Dictionary<string, string>>>(CurrentValue) ?? new();
+            }
+            catch { _panels = new(); }
+        }
+        if (_panels.Count == 0) _panels.Add(new());
+    }
+
+    private IEnumerable<JsonObject> GetTemplateElements() =>
+        Element["templateElements"]?.AsArray().OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>();
+
+    private string GetPanelValue(int idx, string fc) =>
+        _panels.ElementAtOrDefault(idx)?.TryGetValue(fc, out var v) == true ? v : "";
+
+    private void SetPanelValue(int idx, string fc, string value)
+    {
+        while (_panels.Count <= idx) _panels.Add(new());
+        _panels[idx][fc] = value;
+        OnValueChanged.InvokeAsync(System.Text.Json.JsonSerializer.Serialize(_panels));
+    }
+
+    private void AddPanel()
+    {
+        _panels.Add(new());
+        OnValueChanged.InvokeAsync(System.Text.Json.JsonSerializer.Serialize(_panels));
+    }
+
+    private void RemovePanel(int idx)
+    {
+        _panels.RemoveAt(idx);
+        OnValueChanged.InvokeAsync(System.Text.Json.JsonSerializer.Serialize(_panels));
+    }
+}

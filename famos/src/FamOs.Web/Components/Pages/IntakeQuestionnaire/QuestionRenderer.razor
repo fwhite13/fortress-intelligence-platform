@@ -1,0 +1,117 @@
+@namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
+@using System.Text.Json.Nodes
+@using MudBlazor
+
+@if (IsVisible)
+{
+    <div class="intake-question @(Element["isRequired"]?.GetValue<bool>() == true ? "intake-required" : "")">
+        <label class="intake-label">
+            @Element["title"]?.GetValue<string>()
+            @if (Element["isRequired"]?.GetValue<bool>() == true)
+            {
+                <span class="intake-req-marker">*</span>
+            }
+        </label>
+
+        @{
+            var type = Element["type"]?.GetValue<string>() ?? "text";
+        }
+
+        @switch (type)
+        {
+            case "text":
+                <MudTextField T="string" Value="@CurrentValue" ValueChanged="@OnValueChanged"
+                              Placeholder="@Element["placeholder"]?.GetValue<string>()"
+                              InputType="@GetInputType(Element)" Variant="Variant.Outlined" />
+                break;
+            case "radiogroup":
+                <MudRadioGroup T="string" Value="@CurrentValue" ValueChanged="@OnValueChanged">
+                    @foreach (var choice in GetChoices())
+                    {
+                        <MudRadio T="string" Value="@choice">@choice</MudRadio>
+                    }
+                </MudRadioGroup>
+                break;
+            case "dropdown":
+                <MudSelect T="string" Value="@CurrentValue" ValueChanged="@OnValueChanged"
+                           Variant="Variant.Outlined">
+                    @foreach (var choice in GetChoices())
+                    {
+                        <MudSelectItem T="string" Value="@choice">@choice</MudSelectItem>
+                    }
+                </MudSelect>
+                break;
+            case "checkbox":
+                @foreach (var choice in GetChoices())
+                {
+                    var isChecked = (CurrentValue ?? "").Split(',').Any(v => v.Trim() == choice);
+                    <MudCheckBox T="bool" Value="@isChecked"
+                                 ValueChanged="@(v => ToggleCheckbox(choice, v))"
+                                 Label="@choice" />
+                }
+                break;
+            case "comment":
+                <MudTextField T="string" Value="@CurrentValue" ValueChanged="@OnValueChanged"
+                              Lines="4" Variant="Variant.Outlined" />
+                break;
+            case "boolean":
+                <MudCheckBox T="bool"
+                             Value="@(CurrentValue == "true")"
+                             ValueChanged="@(v => OnValueChanged.InvokeAsync(v ? "true" : "false"))"
+                             Label="@Element["labelTrue"]?.GetValue<string>()" />
+                break;
+            case "matrixdropdown":
+            case "matrix":
+                <MatrixQuestion Element="@Element" CurrentValue="@CurrentValue" OnValueChanged="@OnValueChanged" />
+                break;
+            case "paneldynamic":
+                <PanelDynamicQuestion Element="@Element" CurrentValue="@CurrentValue" OnValueChanged="@OnValueChanged" />
+                break;
+            default:
+                @* expression, html, panel types — skip rendering *@
+                break;
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public JsonObject Element { get; set; } = default!;
+    [Parameter] public string? CurrentValue { get; set; }
+    [Parameter] public EventCallback<string> OnValueChanged { get; set; }
+    [Parameter] public bool IsVisible { get; set; } = true;
+
+    private IEnumerable<string> GetChoices()
+    {
+        var choices = Element["choices"]?.AsArray();
+        if (choices is null) yield break;
+        foreach (var c in choices)
+        {
+            if (c is JsonValue v) yield return v.GetValue<string>();
+            else if (c is JsonObject o) yield return o["value"]?.GetValue<string>() ?? "";
+        }
+    }
+
+    private InputType GetInputType(JsonObject el)
+    {
+        return el["inputType"]?.GetValue<string>() switch
+        {
+            "date" => InputType.Date,
+            "number" => InputType.Number,
+            "email" => InputType.Email,
+            "url" => InputType.Url,
+            "tel" => InputType.Telephone,
+            _ => InputType.Text
+        };
+    }
+
+    private void ToggleCheckbox(string choice, bool add)
+    {
+        var values = (CurrentValue ?? "").Split(',')
+            .Select(v => v.Trim())
+            .Where(v => !string.IsNullOrEmpty(v))
+            .ToList();
+        if (add && !values.Contains(choice)) values.Add(choice);
+        else values.Remove(choice);
+        OnValueChanged.InvokeAsync(string.Join(", ", values));
+    }
+}
