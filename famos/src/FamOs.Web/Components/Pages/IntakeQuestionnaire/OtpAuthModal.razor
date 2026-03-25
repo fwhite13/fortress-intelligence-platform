@@ -37,7 +37,7 @@
 </MudDialog>
 
 @code {
-    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public string OpportunityId { get; set; } = "";
 
     private string _email = "";
