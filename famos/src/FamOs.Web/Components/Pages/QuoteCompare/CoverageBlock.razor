@@ -282,6 +282,25 @@
     private void ParseFieldDefinitions()
     {
         _fieldDefinitions.Clear();
+
+        // Check if any quote has scraper-derived CoverageBySlug data for this LOB
+        var scraperKeys = Quotes
+            .Select(q => q.CoverageBySlug.GetValueOrDefault(Lob.Slug))
+            .Where(dto => dto?.Vals != null && dto.Vals.Count > 0)
+            .SelectMany(dto => dto!.Vals.Keys)
+            .Distinct()
+            .ToList();
+
+        if (scraperKeys.Any())
+        {
+            // Scraper data available — use its keys directly (FieldDefinitions keys won't match scraper output)
+            _fieldDefinitions = scraperKeys
+                .Select((k, i) => new FieldDef { Key = k, Label = k, Order = i })
+                .ToList();
+            return;
+        }
+
+        // No scraper data — try FieldDefinitions (predefined semantic schema)
         if (!string.IsNullOrEmpty(Lob.FieldDefinitions))
         {
             try
@@ -290,25 +309,19 @@
                 if (fields != null)
                 {
                     _fieldDefinitions = fields.OrderBy(f => f.Order).ToList();
+                    return;
                 }
             }
             catch { /* ignore parse errors */ }
         }
 
-        // Fallback: extract keys from CoverageBySlug[Lob.Slug] (scoped, non-namespaced)
-        // Fall back to CoverageDetails.Vals if CoverageBySlug not populated
+        // Final fallback: flat CoverageDetails.Vals keys
         if (!_fieldDefinitions.Any())
         {
             var allKeys = Quotes
-                .SelectMany(q =>
-                {
-                    if (q.CoverageBySlug.TryGetValue(Lob.Slug, out var lobDto) && lobDto.Vals.Count > 0)
-                        return lobDto.Vals.Keys;
-                    return q.CoverageDetails?.Vals.Keys ?? Enumerable.Empty<string>();
-                })
+                .SelectMany(q => q.CoverageDetails?.Vals.Keys ?? Enumerable.Empty<string>())
                 .Distinct()
                 .ToList();
-
             _fieldDefinitions = allKeys.Select((k, i) => new FieldDef { Key = k, Label = k, Order = i }).ToList();
         }
     }
