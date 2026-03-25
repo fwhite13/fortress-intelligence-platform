@@ -47,6 +47,7 @@ public class OpportunityService
             .Include(o => o.Flags.Where(f => f.IsActive))
             .Include(o => o.Submissions)
             .Include(o => o.Quotes)
+                .ThenInclude(q => q.QuoteLines)
             .Include(o => o.Proposals)
             .Include(o => o.PolicyShadow)
             .Include(o => o.Activities.OrderByDescending(a => a.OccurredAt).Take(50))

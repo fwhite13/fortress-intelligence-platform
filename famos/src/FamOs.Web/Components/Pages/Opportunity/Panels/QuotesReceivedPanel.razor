@@ -46,7 +46,7 @@
                     </div>
                     <div class="famos-quote-col-carrier">@quote.CarrierName</div>
                     <div class="famos-quote-col-coverages">
-                        <span class="famos-meta-text">@(string.IsNullOrEmpty(quote.CoverageDetails) ? "—" : quote.CoverageDetails)</span>
+                        <span class="famos-meta-text">@GetCoverageDisplay(quote)</span>
                     </div>
                     <div class="famos-quote-col-premium">
                         @if (isComplete)
@@ -159,6 +159,40 @@
     {
         Snackbar.Add("To resubmit, go to the Quote Scraper panel and upload a new PDF for this carrier.", Severity.Info);
     }
+
+    private string GetCoverageDisplay(Quote quote)
+    {
+        if (quote.QuoteLines.Any())
+        {
+            var names = quote.QuoteLines
+                .Select(ql => SlugToDisplayName(ql.Slug))
+                .Distinct()
+                .OrderBy(n => n)
+                .ToList();
+            return string.Join(", ", names);
+        }
+        return string.IsNullOrEmpty(quote.CoverageDetails) ? "—" : quote.CoverageDetails;
+    }
+
+    private static string SlugToDisplayName(string slug) => slug switch
+    {
+        "auto"    => "Commercial Auto",
+        "gl"      => "General Liability",
+        "wc"      => "Workers Comp",
+        "umb"     => "Umbrella / Excess",
+        "mtc"     => "Motor Truck Cargo",
+        "bt"      => "Bobtail / Non-Trucking",
+        "ti"      => "Trailer Interchange",
+        "oppacc"  => "Occupational Accident",
+        "pl"      => "Professional Liability",
+        "pol"     => "Pollution Liability",
+        "do"      => "Directors & Officers",
+        "prop"    => "Commercial Property",
+        "cyb"     => "Cyber Liability",
+        "cr"      => "Crime",
+        "other"   => "Other",
+        _         => slug
+    };
 
     private async Task DeleteQuoteAsync(Guid quoteId, Guid submissionId)
     {
