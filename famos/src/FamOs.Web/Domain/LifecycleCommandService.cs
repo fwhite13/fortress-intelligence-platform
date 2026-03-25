@@ -925,6 +925,87 @@ public class LifecycleCommandService : IUploadLifecycleService
             await WriteActivityAsync(opportunityId, "quote_scraped",
                 $"Quote PDF scraped for {sub.CarrierName}", actorUserId);
 
+            // ADO#1162 — create/update quote_lines for each coverage with premium data
+            if (parsedPremium.HasValue && parsedPremium.Value > 0)
+            {
+                try
+                {
+                    using var doc2 = System.Text.Json.JsonDocument.Parse(resultJson);
+                    if (doc2.RootElement.TryGetProperty("result", out var r2) &&
+                        r2.TryGetProperty("results", out var res2) &&
+                        res2.TryGetProperty("coverages", out var covs2))
+                    {
+                        var slugMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["auto"]                   = "auto",
+                            ["general_liability"]      = "gl",
+                            ["workers_compensation"]   = "wc",
+                            ["umbrella"]               = "umb",
+                            ["inland_marine"]          = "mtc",
+                            ["professional_liability"] = "pl",
+                            ["pollution"]              = "pol",
+                            ["crime"]                  = "cr",
+                            ["cyber"]                  = "cyb",
+                            ["property"]               = "prop",
+                            ["management_liability"]   = "do",
+                            ["participant_accident"]   = "oppacc",
+                            ["bobtail"]                = "bt",
+                            ["trailer_interchange"]    = "ti",
+                            ["other"]                  = "other",
+                        };
+
+                        // Resolve the quote id — prefer pendingQuote, fall back to local cache
+                        var quoteId2 = pendingQuote?.Id
+                            ?? _db.Quotes.Local
+                                   .FirstOrDefault(q => q.SubmissionId == submissionId)?.Id;
+
+                        if (quoteId2.HasValue)
+                        {
+                            foreach (var cov in covs2.EnumerateObject())
+                            {
+                                decimal covPremium = 0;
+                                if (cov.Value.TryGetProperty("premium_summary", out var ps2) &&
+                                    ps2.TryGetProperty("total_premium", out var tp2))
+                                {
+                                    if (tp2.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                        tp2.TryGetDecimal(out covPremium);
+                                    else if (tp2.ValueKind == System.Text.Json.JsonValueKind.String)
+                                        decimal.TryParse(tp2.GetString(), out covPremium);
+                                }
+
+                                if (!slugMap.TryGetValue(cov.Name, out var dbSlug)) continue;
+
+                                var lob2 = await _db.LinesOfBusiness
+                                    .FirstOrDefaultAsync(l => l.Slug == dbSlug && l.TenantId == 1);
+                                if (lob2 == null) continue;
+
+                                var existingLine = await _db.QuoteLines
+                                    .FirstOrDefaultAsync(ql => ql.QuoteId == quoteId2.Value && ql.LobId == lob2.Id);
+                                if (existingLine != null)
+                                {
+                                    if (covPremium > 0) existingLine.Premium = covPremium;
+                                }
+                                else
+                                {
+                                    _db.QuoteLines.Add(new QuoteLine
+                                    {
+                                        QuoteId  = quoteId2.Value,
+                                        LobId    = lob2.Id,
+                                        Slug     = dbSlug,
+                                        Premium  = covPremium > 0 ? covPremium : null,
+                                        TenantId = 1,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex2)
+                {
+                    _logger.LogWarning("[QuoteScraper] ADO#1162 quote_lines upsert failed (non-fatal): {Msg}", ex2.Message);
+                }
+            }
+
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
         });

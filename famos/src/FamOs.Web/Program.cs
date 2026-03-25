@@ -822,6 +822,22 @@ var logger = app.Logger;
     catch (Exception ex) { logger.LogWarning("[Startup] ADO#1147 TI label: {Msg}", ex.Message); }
 }
 
+// ADO#1162 — fix Progressive GL premium in quote_lines (was NULL, should be $312,190)
+{
+    using var db1162Scope = app.Services.CreateScope();
+    var db1162Factory = db1162Scope.ServiceProvider.GetRequiredService<IDbContextFactory<FamOsDbContext>>();
+    await using var db1162 = await db1162Factory.CreateDbContextAsync();
+    try
+    {
+        await db1162.Database.ExecuteSqlRawAsync(@"
+            UPDATE quote_lines SET premium=312190.00
+            WHERE quote_id='91101f47-3757-4089-9aab-19847a66db64'
+              AND slug='gl'");
+        logger.LogInformation("ADO#1162: Progressive GL quote_lines premium fix applied");
+    }
+    catch (Exception ex) { logger.LogWarning("[Startup] ADO#1162 GL premium fix: {Msg}", ex.Message); }
+}
+
 // Quote Comparison seed data
 {
     using var seedScope = app.Services.CreateScope();

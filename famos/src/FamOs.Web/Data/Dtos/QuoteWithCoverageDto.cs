@@ -10,6 +10,7 @@ public class QuoteWithCoverageDto
     public string CarrierName { get; set; } = "";
     public decimal PremiumAmount { get; set; }
     public CoverageDetailsDto? CoverageDetails { get; set; }
+    public Dictionary<string, CoverageDetailsDto> CoverageBySlug { get; set; } = new();
     public DateTime ReceivedAt { get; set; }
     public List<QuoteLine> QuoteLines { get; set; } = new();
 }

@@ -82,7 +82,10 @@
                             }
                             @foreach (var quote in Quotes)
                             {
-                                var val = quote.CoverageDetails?.Vals.GetValueOrDefault(field.Key, "—") ?? "—";
+                                var lobDet = quote.CoverageBySlug.GetValueOrDefault(Lob.Slug);
+                                var val = (lobDet?.Vals.GetValueOrDefault(field.Key))
+                                    ?? quote.CoverageDetails?.Vals.GetValueOrDefault(field.Key)
+                                    ?? "—";
                                 var isExcluded = val.Equals("EXCLUDED", StringComparison.OrdinalIgnoreCase);
                                 
                                 <td style="padding:8px 12px; text-align:center; border-top:1px solid var(--border);">
@@ -120,11 +123,12 @@
                             </td>
                             @foreach (var quote in Quotes)
                             {
-                                var diff = Incumbent.AnnualPremium > 0 
-                                    ? ((quote.PremiumAmount - Incumbent.AnnualPremium) / Incumbent.AnnualPremium * 100) 
+                                var lobPremDelta = quote.QuoteLines.FirstOrDefault(ql => ql.LobId == Lob.Id)?.Premium ?? quote.PremiumAmount;
+                                var diff = Incumbent.AnnualPremium > 0
+                                    ? ((lobPremDelta - Incumbent.AnnualPremium) / Incumbent.AnnualPremium * 100)
                                     : 0;
                                 var diffColor = diff > 0 ? "#ef4444" : (diff < 0 ? "#22c55e" : "var(--muted)");
-                                
+
                                 <td style="padding:8px 12px; text-align:center; font-size:11px; color:@diffColor;">
                                     @if (diff != 0)
                                     {
@@ -153,8 +157,12 @@
                             var isSelectedB = State.PackageBSelections.GetValueOrDefault(Lob.Slug) == quote.Id;
                             
                             <td style="padding:10px 12px; text-align:center;">
+                                @{
+                                    var lobPremium = quote.QuoteLines.FirstOrDefault(ql => ql.LobId == Lob.Id)?.Premium;
+                                    var displayPremium = lobPremium ?? quote.PremiumAmount;
+                                }
                                 <div style="font-size:16px; font-weight:700; color:#002050; margin-bottom:6px;">
-                                    @quote.PremiumAmount.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
+                                    @displayPremium.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
                                 </div>
                                 <div style="display:flex; gap:4px; justify-content:center;">
                                     <MudButton Variant="@(isSelectedA ? Variant.Filled : Variant.Outlined)"
@@ -287,15 +295,20 @@
             catch { /* ignore parse errors */ }
         }
 
-        // Fallback: extract keys from quotes if no field definitions
+        // Fallback: extract keys from CoverageBySlug[Lob.Slug] (scoped, non-namespaced)
+        // Fall back to CoverageDetails.Vals if CoverageBySlug not populated
         if (!_fieldDefinitions.Any())
         {
             var allKeys = Quotes
-                .Where(q => q.CoverageDetails?.Vals != null)
-                .SelectMany(q => q.CoverageDetails!.Vals.Keys)
+                .SelectMany(q =>
+                {
+                    if (q.CoverageBySlug.TryGetValue(Lob.Slug, out var lobDto) && lobDto.Vals.Count > 0)
+                        return lobDto.Vals.Keys;
+                    return q.CoverageDetails?.Vals.Keys ?? Enumerable.Empty<string>();
+                })
                 .Distinct()
                 .ToList();
-            
+
             _fieldDefinitions = allKeys.Select((k, i) => new FieldDef { Key = k, Label = k, Order = i }).ToList();
         }
     }

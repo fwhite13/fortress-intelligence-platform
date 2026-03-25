@@ -194,8 +194,13 @@ public class QuoteComparisonService : IQuoteComparisonService
     private static QuoteWithCoverageDto MapToQuoteWithCoverageDto(Quote q, string? scraperJson = null)
     {
         CoverageDetailsDto? details = null;
+        var coverageBySlug = new Dictionary<string, CoverageDetailsDto>();
+
         if (!string.IsNullOrEmpty(scraperJson))
+        {
             details = BuildCoverageDetailsFromScraperJson(scraperJson, q);
+            coverageBySlug = BuildCoverageBySlug(scraperJson, q);
+        }
 
         return new QuoteWithCoverageDto
         {
@@ -205,6 +210,7 @@ public class QuoteComparisonService : IQuoteComparisonService
             CarrierName      = q.CarrierName,
             PremiumAmount    = q.PremiumAmount,
             CoverageDetails  = details,
+            CoverageBySlug   = coverageBySlug,
             ReceivedAt       = q.ReceivedAt,
             QuoteLines       = q.QuoteLines.ToList(),
         };
@@ -238,6 +244,26 @@ public class QuoteComparisonService : IQuoteComparisonService
             IsOverridden     = ip.IsOverridden,
         };
     }
+
+    private static readonly Dictionary<string, string> ScraperCovKeyToSlug =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["auto"]                   = "auto",
+            ["general_liability"]      = "gl",
+            ["workers_compensation"]   = "wc",
+            ["umbrella"]               = "umb",
+            ["inland_marine"]          = "mtc",
+            ["professional_liability"] = "pl",
+            ["pollution"]              = "pol",
+            ["crime"]                  = "cr",
+            ["cyber"]                  = "cyb",
+            ["property"]               = "prop",
+            ["management_liability"]   = "do",
+            ["participant_accident"]   = "oppacc",
+            ["bobtail"]                = "bt",
+            ["trailer_interchange"]    = "ti",
+            ["other"]                  = "other",
+        };
 
     private static CoverageDetailsDto BuildCoverageDetailsFromScraperJson(string resultJson, Quote q)
     {
@@ -296,6 +322,80 @@ public class QuoteComparisonService : IQuoteComparisonService
         }
         catch { /* malformed JSON — return partial dto */ }
         return dto;
+    }
+
+    /// <summary>
+    /// Builds a per-slug breakdown: each scraper coverage key → its own CoverageDetailsDto
+    /// with scoped (non-namespaced) Vals, Includes, and Excludes.
+    /// </summary>
+    private static Dictionary<string, CoverageDetailsDto> BuildCoverageBySlug(string resultJson, Quote q)
+    {
+        var result = new Dictionary<string, CoverageDetailsDto>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("result", out var res)) return result;
+            if (!res.TryGetProperty("results", out var results)) return result;
+            if (!results.TryGetProperty("coverages", out var coverages)) return result;
+
+            foreach (var cov in coverages.EnumerateObject())
+            {
+                if (!ScraperCovKeyToSlug.TryGetValue(cov.Name, out var slug)) continue;
+
+                var dto = new CoverageDetailsDto { Id = q.Id.ToString(), Carrier = q.CarrierName };
+
+                // Premium
+                if (cov.Value.TryGetProperty("premium_summary", out var ps) &&
+                    ps.TryGetProperty("total_premium", out var tp))
+                {
+                    decimal covPremium = 0;
+                    if (tp.ValueKind == JsonValueKind.Number) tp.TryGetDecimal(out covPremium);
+                    else if (tp.ValueKind == JsonValueKind.String) decimal.TryParse(tp.GetString(), out covPremium);
+                    dto.Premium = covPremium;
+                }
+
+                // coverage_terms + deductibles → Vals (scoped, no namespace prefix)
+                foreach (var section in new[] { "coverage_terms", "deductibles" })
+                {
+                    if (cov.Value.TryGetProperty(section, out var sectionEl))
+                        foreach (var prop in sectionEl.EnumerateObject())
+                        {
+                            var val = prop.Value.ValueKind == JsonValueKind.String
+                                ? prop.Value.GetString() ?? ""
+                                : prop.Value.ToString();
+                            if (!string.IsNullOrEmpty(val))
+                                dto.Vals[prop.Name] = val;
+                        }
+                }
+
+                // endorsements.schedule[].description → Includes
+                if (cov.Value.TryGetProperty("endorsements", out var endt) &&
+                    endt.TryGetProperty("schedule", out var sched))
+                    foreach (var e in sched.EnumerateArray())
+                        if (e.TryGetProperty("description", out var desc) &&
+                            desc.ValueKind == JsonValueKind.String)
+                        {
+                            var d = desc.GetString();
+                            if (!string.IsNullOrEmpty(d)) dto.Includes.Add(d);
+                        }
+
+                // exclusions.list[].name → Excludes
+                if (cov.Value.TryGetProperty("exclusions", out var excl) &&
+                    excl.TryGetProperty("list", out var exclList))
+                    foreach (var ex in exclList.EnumerateArray())
+                        if (ex.TryGetProperty("name", out var nm) &&
+                            nm.ValueKind == JsonValueKind.String)
+                        {
+                            var n = nm.GetString();
+                            if (!string.IsNullOrEmpty(n)) dto.Excludes.Add(n);
+                        }
+
+                result[slug] = dto;
+            }
+        }
+        catch { /* malformed JSON */ }
+        return result;
     }
 
     private static DraftStateDto MapDraftToDto(ComparisonDraft d)
