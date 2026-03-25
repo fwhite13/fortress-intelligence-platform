@@ -19,4 +19,5 @@ public class Quote
 
     public Opportunity Opportunity      { get; set; } = default!;
     public Submission  Submission       { get; set; } = default!;
+    public ICollection<QuoteLine> QuoteLines { get; set; } = new List<QuoteLine>();
 }

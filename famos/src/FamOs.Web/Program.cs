@@ -764,6 +764,51 @@ var logger = app.Logger;
     }
 }
 
+// ADO#1144 — quote_lines junction table
+{
+    using var scope1144 = app.Services.CreateScope();
+    var factory1144 = scope1144.ServiceProvider.GetRequiredService<IDbContextFactory<FamOsDbContext>>();
+    await using var db1144 = await factory1144.CreateDbContextAsync();
+    try
+    {
+        await db1144.Database.ExecuteSqlRawAsync(@"
+            CREATE TABLE IF NOT EXISTS quote_lines (
+                id         CHAR(36)       NOT NULL PRIMARY KEY,
+                quote_id   CHAR(36)       NOT NULL,
+                lob_id     CHAR(36)       NOT NULL,
+                slug       VARCHAR(50)    NOT NULL,
+                premium    DECIMAL(18,2)  NULL,
+                tenant_id  INT            NOT NULL DEFAULT 1,
+                created_at DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_quote_lob (quote_id, lob_id),
+                FOREIGN KEY (quote_id) REFERENCES quotes(Id) ON DELETE CASCADE,
+                FOREIGN KEY (lob_id)   REFERENCES lines_of_business(id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+        // Seed test data for opp 266dffab — GWC: auto only
+        await db1144.Database.ExecuteSqlRawAsync(@"
+            INSERT IGNORE INTO quote_lines (id, quote_id, lob_id, slug, premium, tenant_id)
+            VALUES (UUID(), '13e07d0d-d659-4baf-8315-ab12e86b22ed',
+                    '97f8bb31-7376-4c06-9fc2-8e0a166a8153', 'auto', 453949.00, 1)");
+
+        // Seed test data — Progressive: auto + gl
+        await db1144.Database.ExecuteSqlRawAsync(@"
+            INSERT IGNORE INTO quote_lines (id, quote_id, lob_id, slug, premium, tenant_id)
+            VALUES (UUID(), '91101f47-3757-4089-9aab-19847a66db64',
+                    '97f8bb31-7376-4c06-9fc2-8e0a166a8153', 'auto', 447343.00, 1)");
+        await db1144.Database.ExecuteSqlRawAsync(@"
+            INSERT IGNORE INTO quote_lines (id, quote_id, lob_id, slug, premium, tenant_id)
+            VALUES (UUID(), '91101f47-3757-4089-9aab-19847a66db64',
+                    'cb76cde2-65c5-4760-bd8a-1fbb3b4976e1', 'gl', NULL, 1)");
+
+        logger.LogInformation("ADO#1144: quote_lines migration complete");
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("[Startup] ADO#1144 quote_lines migration: {Msg}", ex.Message);
+    }
+}
+
 // Quote Comparison seed data
 {
     using var seedScope = app.Services.CreateScope();

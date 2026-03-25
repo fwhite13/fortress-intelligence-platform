@@ -51,6 +51,7 @@ public class QuoteComparisonService : IQuoteComparisonService
         }
 
         var rawQuotes = await db.Quotes
+            .Include(q => q.QuoteLines)
             .Where(q => q.OpportunityId == opportunityId && q.TenantId == tenantId)
             .ToListAsync();
 
@@ -76,7 +77,7 @@ public class QuoteComparisonService : IQuoteComparisonService
         return new ComparisonContextDto
         {
             OpportunityName = opportunity.Name,
-            IsRenewal       = false, // TODO: Opportunity entity does not yet carry IsRenewal; defaulting until migrated (ADO#1136)
+            IsRenewal       = false, // TODO: Opportunity entity has no IsRenewal — needs separate ADO to add the property
             ProgramVertical = vertical,
             Lines           = lines,
             Requirements    = requirements,
@@ -202,6 +203,7 @@ public class QuoteComparisonService : IQuoteComparisonService
             PremiumAmount    = q.PremiumAmount,
             CoverageDetails  = details,
             ReceivedAt       = q.ReceivedAt,
+            QuoteLines       = q.QuoteLines.ToList(),
         };
     }
 

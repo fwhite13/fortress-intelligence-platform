@@ -38,6 +38,7 @@ public class FamOsDbContext : DbContext
     public DbSet<ComparisonDraft>               ComparisonDrafts               => Set<ComparisonDraft>();
     public DbSet<BenchmarkPremium>              BenchmarkPremiums              => Set<BenchmarkPremium>();
     public DbSet<CarrierBundleRule>             CarrierBundleRules             => Set<CarrierBundleRule>();
+    public DbSet<QuoteLine>                     QuoteLines                     => Set<QuoteLine>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -432,6 +433,22 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.HasIndex(x => new { x.TenantId, x.ProgramVerticalId, x.LineOfBusinessId });
             e.HasQueryFilter(x => x.TenantId == _tenantId);
+        });
+
+        // QuoteLine
+        m.Entity<QuoteLine>(e =>
+        {
+            e.ToTable("quote_lines");
+            e.HasKey(ql => ql.Id);
+            e.Property(ql => ql.Id).HasColumnName("id");
+            e.Property(ql => ql.QuoteId).HasColumnName("quote_id");
+            e.Property(ql => ql.LobId).HasColumnName("lob_id");
+            e.Property(ql => ql.Slug).HasColumnName("slug");
+            e.Property(ql => ql.Premium).HasColumnName("premium");
+            e.Property(ql => ql.TenantId).HasColumnName("tenant_id");
+            e.Property(ql => ql.CreatedAt).HasColumnName("created_at");
+            e.HasOne(ql => ql.Quote).WithMany(q => q.QuoteLines).HasForeignKey(ql => ql.QuoteId);
+            e.HasOne(ql => ql.LineOfBusiness).WithMany().HasForeignKey(ql => ql.LobId);
         });
 
         // CarrierBundleRule

@@ -93,7 +93,7 @@ else
 
             @foreach (var lob in _context.Lines.OrderBy(l => l.DisplayOrder))
             {
-                var quotesForLob = _context.Quotes.Where(q => q.LineOfBusinessId == lob.Id).ToList();
+                var quotesForLob = _context.Quotes.Where(q => q.QuoteLines.Any(ql => ql.LobId == lob.Id)).ToList();
                 var incumbent = _context.Incumbents.GetValueOrDefault(lob.Id);
                 var benchmark = _context.Benchmarks.GetValueOrDefault(lob.Id);
 
@@ -304,7 +304,7 @@ else
                 if (bundledLine != null)
                 {
                     var bundledQuote = _context.Quotes
-                        .FirstOrDefault(q => q.LineOfBusinessId == bundledLine.Id 
+                        .FirstOrDefault(q => q.QuoteLines.Any(ql => ql.LobId == bundledLine.Id)
                                            && q.CarrierName == quote.CarrierName);
                     if (bundledQuote != null && !selections.ContainsKey(bundledLineSlug))
                     {
