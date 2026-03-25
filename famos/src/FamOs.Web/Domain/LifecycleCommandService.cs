@@ -954,9 +954,8 @@ public class LifecycleCommandService : IUploadLifecycleService
                             ["other"]                  = "other",
                         };
 
-                        // Resolve the quote id — prefer pendingQuote, fall back to local cache
-                        var quoteId2 = pendingQuote?.Id
-                            ?? _db.Quotes.Local
+                        // Resolve the quote id from EF local cache (quote was upserted above)
+                        var quoteId2 = _db.Quotes.Local
                                    .FirstOrDefault(q => q.SubmissionId == submissionId)?.Id;
 
                         if (quoteId2.HasValue)
