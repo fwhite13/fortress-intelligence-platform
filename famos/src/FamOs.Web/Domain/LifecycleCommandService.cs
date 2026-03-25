@@ -620,6 +620,9 @@ public class LifecycleCommandService : IUploadLifecycleService
                 OpportunityId = opportunityId,
                 CarrierName   = carrierName.Trim(),
                 CoverageTypes = coverageTypes,
+                CoverageLine  = (coverageTypes != null && !coverageTypes.Contains(','))
+                                ? coverageTypes.Trim().ToLowerInvariant()
+                                : null,
                 Notes         = notes,
                 Status        = SubmissionStatus.Pending,
             };
@@ -662,6 +665,9 @@ public class LifecycleCommandService : IUploadLifecycleService
                 OpportunityId = opportunityId,
                 CarrierName   = carrierName,
                 CoverageTypes = coverageTypes,
+                CoverageLine  = (coverageTypes != null && !coverageTypes.Contains(','))
+                                ? coverageTypes.Trim().ToLowerInvariant()
+                                : null,
                 Status        = SubmissionStatus.Uploading,
             };
             _db.Submissions.Add(sub);
@@ -675,6 +681,7 @@ public class LifecycleCommandService : IUploadLifecycleService
                 CarrierName     = carrierName,
                 PremiumAmount   = 0,
                 CoverageDetails = coverageTypes,
+                CoverageLine    = sub.CoverageLine,
                 IsRecommended   = false,
                 ReceivedAt      = DateTime.UtcNow,
                 TenantId        = 1,
@@ -777,15 +784,25 @@ public class LifecycleCommandService : IUploadLifecycleService
                 var pendingQuote = await _db.Quotes
                     .FirstOrDefaultAsync(q => q.SubmissionId == submissionId && q.PremiumAmount == 0);
 
+                // Look up LOB for LineOfBusinessId assignment
+                Guid? lobId = null;
+                if (sub.CoverageLine != null)
+                {
+                    var lob = await _db.LinesOfBusiness
+                        .FirstOrDefaultAsync(l => l.Slug == sub.CoverageLine && l.TenantId == 1);
+                    if (lob != null) lobId = lob.Id;
+                }
+
                 if (pendingQuote != null)
                 {
                     // Update the pending placeholder row with real data
                     _logger.LogInformation("[QuoteScraper] {Step} sub={SubId} quoteId={QuoteId} action=UPDATE premium={Premium}",
                         "DB_WRITE", submissionId, pendingQuote.Id, parsedPremium.Value);
-                    pendingQuote.PremiumAmount   = parsedPremium.Value;
-                    pendingQuote.CoverageDetails = sub.CoverageTypes ?? pendingQuote.CoverageDetails;
-                    pendingQuote.CoverageLine    = sub.CoverageLine;
-                    pendingQuote.TenantId        = 1;
+                    pendingQuote.PremiumAmount      = parsedPremium.Value;
+                    pendingQuote.CoverageDetails    = sub.CoverageTypes ?? pendingQuote.CoverageDetails;
+                    pendingQuote.CoverageLine       = sub.CoverageLine;
+                    pendingQuote.LineOfBusinessId   = lobId;
+                    pendingQuote.TenantId           = 1;
                 }
                 else
                 {
@@ -794,14 +811,15 @@ public class LifecycleCommandService : IUploadLifecycleService
                         "DB_WRITE", submissionId, parsedPremium.Value);
                     _db.Quotes.Add(new Quote
                     {
-                        OpportunityId   = opportunityId,
-                        SubmissionId    = submissionId,
-                        CarrierName     = sub.CarrierName,
-                        PremiumAmount   = parsedPremium.Value,
-                        CoverageDetails = sub.CoverageTypes,
-                        CoverageLine    = sub.CoverageLine,
-                        ReceivedAt      = DateTime.UtcNow,
-                        TenantId        = 1,
+                        OpportunityId       = opportunityId,
+                        SubmissionId        = submissionId,
+                        CarrierName         = sub.CarrierName,
+                        PremiumAmount       = parsedPremium.Value,
+                        CoverageDetails     = sub.CoverageTypes,
+                        CoverageLine        = sub.CoverageLine,
+                        LineOfBusinessId    = lobId,
+                        ReceivedAt          = DateTime.UtcNow,
+                        TenantId            = 1,
                     });
                 }
 
@@ -1120,6 +1138,14 @@ public class LifecycleCommandService : IUploadLifecycleService
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
         });
+    }
+
+    public async Task<List<LineOfBusiness>> GetLinesOfBusinessAsync(int tenantId = 1)
+    {
+        return await _db.LinesOfBusiness
+            .Where(l => l.TenantId == tenantId && l.IsActive)
+            .OrderBy(l => l.DisplayOrder)
+            .ToListAsync();
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

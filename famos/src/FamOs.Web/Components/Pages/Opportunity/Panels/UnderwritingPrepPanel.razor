@@ -78,9 +78,9 @@
                            Label="Coverage Lines *"
                            Class="famos-select"
                            HelperText="Select all that apply">
-                    @foreach (var opt in CoverageLineOptions)
+                    @foreach (var lob in _coverageLines)
                     {
-                        <MudSelectItem T="string" Value="@opt.Code">@opt.Label (@opt.Code)</MudSelectItem>
+                        <MudSelectItem T="string" Value="@lob.Slug">@lob.Name</MudSelectItem>
                     }
                 </MudSelect>
             </MudItem>
@@ -125,25 +125,13 @@
     private string _selectedCarrier = "";
     private string _customCarrier   = "";
     private IEnumerable<string> _selectedCoverageLines = new List<string>();
-    private static readonly (string Code, string Label)[] CoverageLineOptions = new[]
-    {
-        ("GL",     "General Liability"),
-        ("Auto",   "Automobile"),
-        ("MTC",    "Motor Truck Cargo"),
-        ("BT",     "Bobtail"),
-        ("WC",     "Workers Compensation"),
-        ("OppAcc", "Occupational Accident"),
-        ("UMB",    "Umbrella/Excess"),
-        ("POL",    "Pollution Liability"),
-        ("PL",     "Professional Liability"),
-        ("D&O",    "Directors & Officers"),
-        ("Prop",   "Property"),
-        ("Cyb",    "Cyber"),
-        ("TI",     "Trailer Interchange"),
-        ("Cr",     "Crime"),
-        ("Other",  "Other"),
-    };
+    private List<LineOfBusiness> _coverageLines = new();
     private string _subNotes        = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _coverageLines = await Lifecycle.GetLinesOfBusinessAsync();
+    }
 
     private string CarrierNameValue =>
         _selectedCarrier == "other" ? _customCarrier : _selectedCarrier;
