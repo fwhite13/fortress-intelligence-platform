@@ -265,6 +265,77 @@ public class QuoteComparisonService : IQuoteComparisonService
             ["other"]                  = "other",
         };
 
+    // Convert snake_case key to readable label
+    private static string FormatLabel(string key) =>
+        System.Globalization.CultureInfo.CurrentCulture.TextInfo
+            .ToTitleCase(key.Replace('_', ' '));
+
+    private static CoverageDetailsDto BuildSlugDto(string covKey, JsonElement covVal, string quoteId = "", string carrier = "")
+    {
+        var dto = new CoverageDetailsDto { Id = quoteId, Carrier = carrier };
+
+        // Sections to skip entirely (handled separately or not useful as Vals)
+        var skipSections = new HashSet<string> { "premium_summary", "endorsements", "exclusions",
+            "driver_schedule", "vehicle_schedule", "location_schedule", "classifications",
+            "classification_summary" };
+
+        // Flatten all object/scalar sections into Vals
+        foreach (var section in covVal.EnumerateObject())
+        {
+            if (skipSections.Contains(section.Name)) continue;
+
+            if (section.Value.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in section.Value.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.Array) continue;
+                    if (prop.Value.ValueKind == JsonValueKind.Null) continue;
+                    var val = prop.Value.ValueKind == JsonValueKind.String
+                        ? prop.Value.GetString() ?? "" : prop.Value.ToString();
+                    if (!string.IsNullOrWhiteSpace(val))
+                        dto.Vals[FormatLabel(prop.Name)] = val;
+                }
+            }
+            else if (section.Value.ValueKind == JsonValueKind.String ||
+                     section.Value.ValueKind == JsonValueKind.Number)
+            {
+                var val = section.Value.ValueKind == JsonValueKind.String
+                    ? section.Value.GetString() ?? "" : section.Value.ToString();
+                if (!string.IsNullOrWhiteSpace(val))
+                    dto.Vals[FormatLabel(section.Name)] = val;
+            }
+            // Arrays (additional_coverages etc) — skip for now
+        }
+
+        // endorsements.schedule[].description → Includes
+        if (covVal.TryGetProperty("endorsements", out var endt) &&
+            endt.TryGetProperty("schedule", out var sched))
+            foreach (var e in sched.EnumerateArray())
+                if (e.TryGetProperty("description", out var desc) &&
+                    desc.ValueKind == JsonValueKind.String)
+                { var d = desc.GetString(); if (!string.IsNullOrEmpty(d)) dto.Includes.Add(d); }
+
+        // exclusions.list[].name → Excludes
+        if (covVal.TryGetProperty("exclusions", out var excl) &&
+            excl.TryGetProperty("list", out var exclList))
+            foreach (var ex in exclList.EnumerateArray())
+                if (ex.TryGetProperty("name", out var nm) &&
+                    nm.ValueKind == JsonValueKind.String)
+                { var n = nm.GetString(); if (!string.IsNullOrEmpty(n)) dto.Excludes.Add(n); }
+
+        // Premium from premium_summary
+        if (covVal.TryGetProperty("premium_summary", out var ps) &&
+            ps.TryGetProperty("total_premium", out var tp))
+        {
+            decimal p = 0;
+            if (tp.ValueKind == JsonValueKind.Number) tp.TryGetDecimal(out p);
+            else if (tp.ValueKind == JsonValueKind.String) decimal.TryParse(tp.GetString(), out p);
+            if (p > 0) dto.Premium = p;
+        }
+
+        return dto;
+    }
+
     private static CoverageDetailsDto BuildCoverageDetailsFromScraperJson(string resultJson, Quote q)
     {
         var dto = new CoverageDetailsDto { Id = q.Id.ToString(), Carrier = q.CarrierName };
@@ -276,48 +347,23 @@ public class QuoteComparisonService : IQuoteComparisonService
             if (!result.TryGetProperty("results", out var results)) return dto;
             if (!results.TryGetProperty("coverages", out var coverages)) return dto;
 
+            // Merge all coverage sections into one dto using BuildSlugDto (ADO#1164)
             foreach (var cov in coverages.EnumerateObject())
             {
-                var covVal = cov.Value;
+                var slugDto = BuildSlugDto(cov.Name, cov.Value, q.Id.ToString(), q.CarrierName);
 
-                // Premium — sum all non-null total_premium values (ADO#1149)
-                if (covVal.TryGetProperty("premium_summary", out var ps) &&
-                    ps.TryGetProperty("total_premium", out var tp))
-                {
-                    decimal covPremium = 0;
-                    if (tp.ValueKind == JsonValueKind.Number) tp.TryGetDecimal(out covPremium);
-                    else if (tp.ValueKind == JsonValueKind.String) decimal.TryParse(tp.GetString(), out covPremium);
-                    if (covPremium > 0) dto.Premium += covPremium;
-                }
+                // Merge Vals (namespaced with coverage key to avoid collisions)
+                foreach (var kv in slugDto.Vals)
+                    dto.Vals[$"{cov.Name}.{kv.Key}"] = kv.Value;
 
-                // coverage_terms + deductibles → Vals
-                foreach (var section in new[] { "coverage_terms", "deductibles" })
-                {
-                    if (covVal.TryGetProperty(section, out var sectionEl))
-                        foreach (var prop in sectionEl.EnumerateObject())
-                        {
-                            var val = prop.Value.ValueKind == JsonValueKind.String
-                                ? prop.Value.GetString() ?? "" : prop.Value.ToString();
-                            if (!string.IsNullOrEmpty(val))
-                                dto.Vals[$"{cov.Name}.{prop.Name}"] = val;
-                        }
-                }
+                // Merge Includes/Excludes (deduplicated)
+                foreach (var inc in slugDto.Includes)
+                    dto.Includes.Add(inc);
+                foreach (var exc in slugDto.Excludes)
+                    dto.Excludes.Add(exc);
 
-                // endorsements.schedule[].description → Includes
-                if (covVal.TryGetProperty("endorsements", out var endt) &&
-                    endt.TryGetProperty("schedule", out var sched))
-                    foreach (var e in sched.EnumerateArray())
-                        if (e.TryGetProperty("description", out var desc) &&
-                            desc.ValueKind == JsonValueKind.String)
-                        { var d = desc.GetString(); if (!string.IsNullOrEmpty(d)) dto.Includes.Add(d); }
-
-                // exclusions.list[].name → Excludes
-                if (covVal.TryGetProperty("exclusions", out var excl) &&
-                    excl.TryGetProperty("list", out var exclList))
-                    foreach (var ex in exclList.EnumerateArray())
-                        if (ex.TryGetProperty("name", out var nm) &&
-                            nm.ValueKind == JsonValueKind.String)
-                        { var n = nm.GetString(); if (!string.IsNullOrEmpty(n)) dto.Excludes.Add(n); }
+                // Sum premiums (ADO#1149)
+                dto.Premium += slugDto.Premium;
             }
         }
         catch { /* malformed JSON — return partial dto */ }
@@ -327,6 +373,7 @@ public class QuoteComparisonService : IQuoteComparisonService
     /// <summary>
     /// Builds a per-slug breakdown: each scraper coverage key → its own CoverageDetailsDto
     /// with scoped (non-namespaced) Vals, Includes, and Excludes.
+    /// Uses BuildSlugDto to extract from actual scraper schema sections (ADO#1164).
     /// </summary>
     private static Dictionary<string, CoverageDetailsDto> BuildCoverageBySlug(string resultJson, Quote q)
     {
@@ -343,54 +390,7 @@ public class QuoteComparisonService : IQuoteComparisonService
             {
                 if (!ScraperCovKeyToSlug.TryGetValue(cov.Name, out var slug)) continue;
 
-                var dto = new CoverageDetailsDto { Id = q.Id.ToString(), Carrier = q.CarrierName };
-
-                // Premium
-                if (cov.Value.TryGetProperty("premium_summary", out var ps) &&
-                    ps.TryGetProperty("total_premium", out var tp))
-                {
-                    decimal covPremium = 0;
-                    if (tp.ValueKind == JsonValueKind.Number) tp.TryGetDecimal(out covPremium);
-                    else if (tp.ValueKind == JsonValueKind.String) decimal.TryParse(tp.GetString(), out covPremium);
-                    dto.Premium = covPremium;
-                }
-
-                // coverage_terms + deductibles → Vals (scoped, no namespace prefix)
-                foreach (var section in new[] { "coverage_terms", "deductibles" })
-                {
-                    if (cov.Value.TryGetProperty(section, out var sectionEl))
-                        foreach (var prop in sectionEl.EnumerateObject())
-                        {
-                            var val = prop.Value.ValueKind == JsonValueKind.String
-                                ? prop.Value.GetString() ?? ""
-                                : prop.Value.ToString();
-                            if (!string.IsNullOrEmpty(val))
-                                dto.Vals[prop.Name] = val;
-                        }
-                }
-
-                // endorsements.schedule[].description → Includes
-                if (cov.Value.TryGetProperty("endorsements", out var endt) &&
-                    endt.TryGetProperty("schedule", out var sched))
-                    foreach (var e in sched.EnumerateArray())
-                        if (e.TryGetProperty("description", out var desc) &&
-                            desc.ValueKind == JsonValueKind.String)
-                        {
-                            var d = desc.GetString();
-                            if (!string.IsNullOrEmpty(d)) dto.Includes.Add(d);
-                        }
-
-                // exclusions.list[].name → Excludes
-                if (cov.Value.TryGetProperty("exclusions", out var excl) &&
-                    excl.TryGetProperty("list", out var exclList))
-                    foreach (var ex in exclList.EnumerateArray())
-                        if (ex.TryGetProperty("name", out var nm) &&
-                            nm.ValueKind == JsonValueKind.String)
-                        {
-                            var n = nm.GetString();
-                            if (!string.IsNullOrEmpty(n)) dto.Excludes.Add(n);
-                        }
-
+                var dto = BuildSlugDto(cov.Name, cov.Value, q.Id.ToString(), q.CarrierName);
                 result[slug] = dto;
             }
         }
