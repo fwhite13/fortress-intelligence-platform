@@ -6,7 +6,7 @@
 {
     <div class="intake-question @(Element["isRequired"]?.GetValue<bool>() == true ? "intake-required" : "")">
         <label class="intake-label">
-            @Element["title"]?.GetValue<string>()
+            @(Element["title"]?.GetValue<string>())
             @if (Element["isRequired"]?.GetValue<bool>() == true)
             {
                 <span class="intake-req-marker">*</span>
