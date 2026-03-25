@@ -56,7 +56,8 @@ public class QuoteComparisonService : IQuoteComparisonService
 
         var quotes = rawQuotes.Select(MapToQuoteWithCoverageDto).ToList();
 
-        // IncumbentPolicies: still AccountId-scoped — skip for now (no OpportunityId on entity)
+        // IncumbentPolicies scoped to AccountId — no OpportunityId FK on the incumbent_policies table yet.
+        // Returns empty until ADO#XXXX migrates incumbent_policies to carry opportunity_id.
         var incumbents = new Dictionary<Guid, IncumbentPolicyDto>();
 
         var benchmarks = benchmarkList
@@ -75,7 +76,7 @@ public class QuoteComparisonService : IQuoteComparisonService
         return new ComparisonContextDto
         {
             OpportunityName = opportunity.Name,
-            IsRenewal       = false,
+            IsRenewal       = opportunity.IsRenewal,
             ProgramVertical = vertical,
             Lines           = lines,
             Requirements    = requirements,
@@ -127,7 +128,7 @@ public class QuoteComparisonService : IQuoteComparisonService
             db.ComparisonDrafts.Add(new ComparisonDraft
             {
                 OpportunityId          = opportunityId,
-                AccountId              = Guid.Empty,
+                AccountId              = null,
                 UserId                 = userId,
                 TenantId               = tenantId,
                 ActiveRequirementSlugs = JsonSerializer.Serialize(dto.CheckedRequirements),

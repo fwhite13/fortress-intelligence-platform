@@ -584,6 +584,30 @@ var logger = app.Logger;
         await TryAddColumnAsync("ALTER TABLE submissions ADD COLUMN CoverageLine VARCHAR(50) NULL");
         await TryAddColumnAsync("ALTER TABLE submissions ADD COLUMN LineStatus TINYINT NOT NULL DEFAULT 0");
         await TryAddColumnAsync("ALTER TABLE quotes ADD COLUMN CoverageLine VARCHAR(50) NULL");
+
+        // ADO#1136: make account_id nullable on carrier_notes + comparison_drafts
+        // These tables are now scoped to opportunity_id; account_id is no longer required.
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE carrier_notes MODIFY COLUMN account_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL");
+            logger.LogInformation("ADO#1136: carrier_notes.account_id made nullable");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("ADO#1136: carrier_notes account_id MODIFY skipped: {Msg}", ex.Message);
+        }
+
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE comparison_drafts MODIFY COLUMN account_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL");
+            logger.LogInformation("ADO#1136: comparison_drafts.account_id made nullable");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("ADO#1136: comparison_drafts account_id MODIFY skipped: {Msg}", ex.Message);
+        }
     }
     catch (Exception ex)
     {

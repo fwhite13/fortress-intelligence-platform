@@ -99,7 +99,7 @@ public class CarrierNoteService : ICarrierNoteService
             db.CarrierNotes.Add(new CarrierNote
             {
                 OpportunityId   = opportunityId,
-                AccountId       = Guid.Empty,
+                AccountId       = null,
                 QuoteId         = quoteId,
                 TenantId        = tenantId,
                 NoteText        = noteText,
