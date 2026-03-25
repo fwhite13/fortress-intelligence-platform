@@ -14,7 +14,7 @@ public class AlertService : IAlertService
         var alerts = new List<AlertDto>();
 
         // Alert 7: New Venture — account is not a renewal; suppress incumbent comparisons
-        if (!context.Account.IsRenewal)
+        if (!context.IsRenewal)
         {
             alerts.Add(new AlertDto
             {
@@ -98,7 +98,7 @@ public class AlertService : IAlertService
         }
 
         // Alerts 4 & 5 only apply to renewal accounts
-        if (context.Account.IsRenewal)
+        if (context.IsRenewal)
         {
             // Alert 4: Coverage Adequacy vs Incumbent — coverage absent/reduced vs incumbent
             foreach (var (pkg, selections) in new[] { ("A", state.PackageASelections), ("B", state.PackageBSelections) })

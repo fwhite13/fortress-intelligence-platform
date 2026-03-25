@@ -67,6 +67,7 @@
 @code {
     [Parameter] public ComparisonPageState State { get; set; } = new();
     [Parameter] public ComparisonContextDto Context { get; set; } = default!;
+    [Parameter] public Guid OpportunityId { get; set; }
 
     private List<PresetChip> _presetChips = new();
     private string _customQuestion = "";
@@ -129,7 +130,7 @@
             var request = new FaitAskRequest
             {
                 Question = question,
-                AccountId = Context.Account.Id,
+                OpportunityId = OpportunityId,
                 SelectedPackageA = State.PackageASelections,
                 SelectedPackageB = State.PackageBSelections,
                 CheckedRequirements = State.CheckedRequirements.ToList()
@@ -168,7 +169,7 @@
     private class FaitAskRequest
     {
         public string Question { get; set; } = "";
-        public Guid AccountId { get; set; }
+        public Guid OpportunityId { get; set; }
         public Dictionary<string, Guid> SelectedPackageA { get; set; } = new();
         public Dictionary<string, Guid> SelectedPackageB { get; set; } = new();
         public List<string> CheckedRequirements { get; set; } = new();

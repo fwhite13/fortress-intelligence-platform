@@ -67,4 +67,46 @@ public class CarrierNoteService : ICarrierNoteService
         db.CarrierNotes.Remove(note);
         await db.SaveChangesAsync();
     }
+
+    public async Task<Dictionary<Guid, string>> GetNotesForOpportunityAsync(Guid opportunityId, int tenantId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var notes = await db.CarrierNotes
+            .Where(n => n.OpportunityId == opportunityId && n.TenantId == tenantId)
+            .ToListAsync();
+
+        return notes
+            .GroupBy(n => n.QuoteId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(n => n.UpdatedAt).First().NoteText);
+    }
+
+    public async Task SaveNoteForOpportunityAsync(Guid opportunityId, Guid quoteId, Guid userId, int tenantId, string noteText)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var existing = await db.CarrierNotes
+            .FirstOrDefaultAsync(n => n.OpportunityId == opportunityId && n.QuoteId == quoteId && n.TenantId == tenantId);
+
+        if (existing != null)
+        {
+            existing.NoteText        = noteText;
+            existing.UpdatedByUserId = userId;
+            existing.UpdatedAt       = DateTime.UtcNow;
+        }
+        else
+        {
+            db.CarrierNotes.Add(new CarrierNote
+            {
+                OpportunityId   = opportunityId,
+                AccountId       = Guid.Empty,
+                QuoteId         = quoteId,
+                TenantId        = tenantId,
+                NoteText        = noteText,
+                CreatedByUserId = userId,
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
 }

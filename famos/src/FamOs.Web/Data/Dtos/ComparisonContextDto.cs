@@ -4,7 +4,8 @@ namespace FamOs.Web.Data.Dtos;
 
 public class ComparisonContextDto
 {
-    public Account Account { get; set; } = default!;
+    public string OpportunityName { get; set; } = "";
+    public bool IsRenewal { get; set; } = false;
     public ProgramVertical? ProgramVertical { get; set; }
     public List<LineOfBusiness> Lines { get; set; } = new();
     public List<Requirement> Requirements { get; set; } = new();

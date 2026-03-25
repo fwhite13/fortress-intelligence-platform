@@ -4,6 +4,7 @@ public class ComparisonDraft
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid AccountId { get; set; }
+    public Guid? OpportunityId { get; set; }
     public int TenantId { get; set; }
     public Guid UserId { get; set; }
     public string? ActiveRequirementSlugs { get; set; }  // JSON array of checked requirement slugs

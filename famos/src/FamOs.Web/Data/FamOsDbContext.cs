@@ -385,6 +385,7 @@ public class FamOsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnType("char(36)");
             e.Property(x => x.AccountId).HasColumnType("char(36)").HasColumnName("account_id");
+            e.Property(x => x.OpportunityId).HasColumnType("char(36)").HasColumnName("opportunity_id");
             e.Property(x => x.QuoteId).HasColumnType("char(36)").HasColumnName("quote_id");
             e.Property(x => x.TenantId).HasColumnName("tenant_id");
             e.Property(x => x.NoteText).HasColumnType("longtext").HasColumnName("note_text");
@@ -392,7 +393,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.UpdatedByUserId).HasColumnType("char(36)").HasColumnName("updated_by_user_id");
             e.Property(x => x.CreatedAt).HasColumnName("created_at");
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
-            e.HasIndex(x => new { x.AccountId, x.QuoteId });
+            e.HasIndex(x => new { x.OpportunityId, x.QuoteId }).HasDatabaseName("idx_cn_opp_quote");
             e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
 
@@ -402,6 +403,7 @@ public class FamOsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnType("char(36)");
             e.Property(x => x.AccountId).HasColumnType("char(36)").HasColumnName("account_id");
+            e.Property(x => x.OpportunityId).HasColumnType("char(36)").HasColumnName("opportunity_id");
             e.Property(x => x.TenantId).HasColumnName("tenant_id");
             e.Property(x => x.UserId).HasColumnType("char(36)").HasColumnName("user_id");
             e.Property(x => x.ActiveRequirementSlugs).HasColumnType("longtext").HasColumnName("active_requirement_slugs");
@@ -410,7 +412,7 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.ShowIncumbent).HasColumnName("show_incumbent");
             e.Property(x => x.CollapsedBlocks).HasColumnType("longtext").HasColumnName("collapsed_blocks");
             e.Property(x => x.SavedAt).HasColumnName("saved_at");
-            e.HasIndex(x => new { x.AccountId, x.UserId }).IsUnique();
+            e.HasIndex(x => new { x.OpportunityId, x.UserId }).HasDatabaseName("idx_draft_opp_user");
             e.HasQueryFilter(x => x.TenantId == _tenantId);
         });
 

@@ -15,22 +15,22 @@ public class QuoteComparisonService : IQuoteComparisonService
         _dbFactory = dbFactory;
     }
 
-    public async Task<ComparisonContextDto> GetComparisonContextAsync(Guid accountId, Guid opportunityId, Guid userId, int tenantId)
+    public async Task<ComparisonContextDto> GetComparisonContextAsync(Guid opportunityId, Guid userId, int tenantId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        var account = await db.Accounts.FirstOrDefaultAsync(a => a.Id == accountId)
-            ?? throw new KeyNotFoundException($"Account {accountId} not found");
+        var opportunity = await db.Opportunities.FirstOrDefaultAsync(o => o.Id == opportunityId)
+            ?? throw new KeyNotFoundException($"Opportunity {opportunityId} not found");
 
         ProgramVertical? vertical = null;
         List<LineOfBusiness> lines = new();
         List<Requirement> requirements = new();
         List<BenchmarkPremium> benchmarkList = new();
 
-        if (account.ProgramVerticalId.HasValue)
+        if (opportunity.ProgramId.HasValue)
         {
             vertical = await db.ProgramVerticals
-                .FirstOrDefaultAsync(v => v.Id == account.ProgramVerticalId.Value && v.TenantId == tenantId);
+                .FirstOrDefaultAsync(v => v.Id == opportunity.ProgramId.Value && v.TenantId == tenantId);
 
             if (vertical != null)
             {
@@ -44,7 +44,6 @@ public class QuoteComparisonService : IQuoteComparisonService
                     .OrderBy(r => r.DisplayOrder)
                     .ToListAsync();
 
-                // Take latest benchmark per line
                 benchmarkList = await db.BenchmarkPremiums
                     .Where(bp => bp.ProgramVerticalId == vertical.Id && bp.TenantId == tenantId)
                     .ToListAsync();
@@ -57,16 +56,9 @@ public class QuoteComparisonService : IQuoteComparisonService
 
         var quotes = rawQuotes.Select(MapToQuoteWithCoverageDto).ToList();
 
-        // Incumbents keyed by LineOfBusinessId
-        var incumbentList = await db.IncumbentPolicies
-            .Where(ip => ip.AccountId == accountId && ip.TenantId == tenantId)
-            .ToListAsync();
+        // IncumbentPolicies: still AccountId-scoped — skip for now (no OpportunityId on entity)
+        var incumbents = new Dictionary<Guid, IncumbentPolicyDto>();
 
-        var incumbents = incumbentList.ToDictionary(
-            ip => ip.LineOfBusinessId,
-            ip => MapToIncumbentPolicyDto(ip));
-
-        // Latest benchmark per line
         var benchmarks = benchmarkList
             .GroupBy(bp => bp.LineOfBusinessId)
             .ToDictionary(
@@ -78,11 +70,12 @@ public class QuoteComparisonService : IQuoteComparisonService
             .ToListAsync();
 
         var draft = await db.ComparisonDrafts
-            .FirstOrDefaultAsync(d => d.AccountId == accountId && d.UserId == userId && d.TenantId == tenantId);
+            .FirstOrDefaultAsync(d => d.OpportunityId == opportunityId && d.UserId == userId && d.TenantId == tenantId);
 
         return new ComparisonContextDto
         {
-            Account         = account,
+            OpportunityName = opportunity.Name,
+            IsRenewal       = false,
             ProgramVertical = vertical,
             Lines           = lines,
             Requirements    = requirements,
@@ -113,12 +106,12 @@ public class QuoteComparisonService : IQuoteComparisonService
         return rawQuotes.Select(MapToQuoteWithCoverageDto).ToList();
     }
 
-    public async Task SaveDraftAsync(Guid accountId, Guid userId, int tenantId, DraftStateDto dto)
+    public async Task SaveDraftAsync(Guid opportunityId, Guid userId, int tenantId, DraftStateDto dto)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var existing = await db.ComparisonDrafts
-            .FirstOrDefaultAsync(d => d.AccountId == accountId && d.UserId == userId && d.TenantId == tenantId);
+            .FirstOrDefaultAsync(d => d.OpportunityId == opportunityId && d.UserId == userId && d.TenantId == tenantId);
 
         if (existing != null)
         {
@@ -133,7 +126,8 @@ public class QuoteComparisonService : IQuoteComparisonService
         {
             db.ComparisonDrafts.Add(new ComparisonDraft
             {
-                AccountId              = accountId,
+                OpportunityId          = opportunityId,
+                AccountId              = Guid.Empty,
                 UserId                 = userId,
                 TenantId               = tenantId,
                 ActiveRequirementSlugs = JsonSerializer.Serialize(dto.CheckedRequirements),
@@ -148,13 +142,13 @@ public class QuoteComparisonService : IQuoteComparisonService
         await db.SaveChangesAsync();
     }
 
-    public async Task<Guid> BuildProposalAsync(Guid accountId, Guid opportunityId, Guid userId, Guid packageId, int tenantId)
+    public async Task<Guid> BuildProposalAsync(Guid opportunityId, Guid userId, Guid packageId, int tenantId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var package = await db.Packages
-            .FirstOrDefaultAsync(p => p.Id == packageId && p.AccountId == accountId && p.TenantId == tenantId)
-            ?? throw new KeyNotFoundException($"Package {packageId} not found for account {accountId}");
+            .FirstOrDefaultAsync(p => p.Id == packageId && p.TenantId == tenantId)
+            ?? throw new KeyNotFoundException($"Package {packageId} not found");
 
         var selections = await db.PackageSelections
             .Where(s => s.PackageId == packageId && s.TenantId == tenantId)
@@ -171,26 +165,16 @@ public class QuoteComparisonService : IQuoteComparisonService
 
         var proposal = new Proposal
         {
-            OpportunityId     = opportunity.Id,
+            OpportunityId      = opportunity.Id,
             RecommendedQuoteId = primaryQuoteId,
-            Status            = "draft",
-            ProposalDate      = DateTime.UtcNow,
+            Status             = "draft",
+            ProposalDate       = DateTime.UtcNow,
         };
 
         db.Proposals.Add(proposal);
         await db.SaveChangesAsync();
 
         return proposal.Id;
-    }
-
-    public async Task<Guid?> ResolveAccountIdFromOpportunityAsync(Guid opportunityId, int tenantId)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var opp = await db.Opportunities.FindAsync(opportunityId);
-        if (opp == null) return null;
-        var account = await db.Accounts
-            .FirstOrDefaultAsync(a => a.AffinityId == opp.AffinityId);
-        return account?.Id;
     }
 
     // ── Mapping helpers ────────────────────────────────────────────────────────

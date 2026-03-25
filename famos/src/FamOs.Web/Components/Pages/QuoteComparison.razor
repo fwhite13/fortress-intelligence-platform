@@ -27,8 +27,8 @@ else if (_context == null)
 {
     <div class="famos-empty-state" style="margin-top:48px;">
         <MudIcon Icon="@Icons.Material.Outlined.Error" Style="font-size:48px; color:var(--muted);" />
-        <div style="font-size:16px; font-weight:600; color:#002050;">Account Not Found</div>
-        <p style="font-size:13px; color:var(--muted);">Could not load comparison data for this account.</p>
+        <div style="font-size:16px; font-weight:600; color:#002050;">Opportunity Not Found</div>
+        <p style="font-size:13px; color:var(--muted);">Could not load comparison data for this opportunity.</p>
     </div>
 }
 else if (_state.ShowCompareView)
@@ -78,7 +78,7 @@ else
         <div class="qc-main-content">
             <div class="famos-page-header famos-page-header-row mb-4">
                 <div>
-                    <h2 class="famos-page-h2">@_context.Account.CompanyName</h2>
+                    <h2 class="famos-page-h2">@_context.OpportunityName</h2>
                     <p class="famos-page-sub">Quote Comparison</p>
                 </div>
                 <div style="display:flex; gap:8px; align-items:center;">
@@ -87,7 +87,7 @@ else
                                ValueChanged="HandleToggleIncumbent"
                                Color="Color.Warning"
                                Label="Show Incumbent"
-                               Disabled="@(!_context.Account.IsRenewal)" />
+                               Disabled="@(!_context.IsRenewal)" />
                 </div>
             </div>
 
@@ -127,7 +127,8 @@ else
 
             <FaitSidebarWidget
                 State="_state"
-                Context="_context" />
+                Context="_context"
+                OpportunityId="OpportunityId" />
         </div>
     </div>
 }
@@ -135,7 +136,6 @@ else
 @code {
     [Parameter] public Guid OpportunityId { get; set; }
 
-    private Guid _accountId;
     private bool _loading = true;
     private ComparisonContextDto? _context;
     private ComparisonPageState _state = new();
@@ -153,25 +153,16 @@ else
     {
         try
         {
-            var accountId = await QuoteComparisonService.ResolveAccountIdFromOpportunityAsync(OpportunityId, _tenantId);
-            if (!accountId.HasValue)
-            {
-                _loading = false;
-                return;
-            }
-            _accountId = accountId.Value;
-
-            _context = await QuoteComparisonService.GetComparisonContextAsync(_accountId, OpportunityId, _userId, _tenantId);
+            _context = await QuoteComparisonService.GetComparisonContextAsync(OpportunityId, _userId, _tenantId);
 
             if (_context != null)
             {
-                _carrierNotes = await CarrierNoteService.GetNotesForAccountAsync(_accountId, _tenantId);
-                
+                _carrierNotes = await CarrierNoteService.GetNotesForOpportunityAsync(OpportunityId, _tenantId);
+
                 BuildQuoteLookup();
                 BuildRequirementGroups();
                 CalculateIncumbentTotal();
 
-                // Restore draft if exists
                 if (_context.SavedDraft != null)
                 {
                     RestoreFromDraft(_context.SavedDraft);
@@ -182,11 +173,12 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error loading comparison: {ex.Message}", Severity.Error);
+            Logger.LogError(ex, "OnInitializedAsync failed");
         }
         finally
         {
             _loading = false;
+            StateHasChanged();
         }
     }
 
@@ -368,7 +360,7 @@ else
                 CollapsedBlocks = _state.CollapsedBlocks
             };
 
-            await QuoteComparisonService.SaveDraftAsync(_accountId, _userId, _tenantId, draft);
+            await QuoteComparisonService.SaveDraftAsync(OpportunityId, _userId, _tenantId, draft);
             Snackbar.Add("Draft saved", Severity.Success);
         }
         catch (Exception ex)
@@ -394,7 +386,7 @@ else
     private async Task HandleBuildProposal()
     {
         // Check for coverage removals vs incumbent
-        if (_context!.Account.IsRenewal && _state.ShowIncumbent)
+        if (_context!.IsRenewal && _state.ShowIncumbent)
         {
             var allRemovals = new List<CoverageChangeDto>();
             
@@ -441,7 +433,7 @@ else
         try
         {
             var proposalId = await QuoteComparisonService.BuildProposalAsync(
-                _accountId, OpportunityId, _userId, Guid.NewGuid(), _tenantId);
+                OpportunityId, _userId, Guid.NewGuid(), _tenantId);
             Snackbar.Add("Proposal created successfully", Severity.Success);
             // TODO: Navigate to proposal view
         }
@@ -470,7 +462,7 @@ else
     {
         try
         {
-            await CarrierNoteService.SaveNoteAsync(_accountId, args.QuoteId, _userId, _tenantId, args.NoteText);
+            await CarrierNoteService.SaveNoteForOpportunityAsync(OpportunityId, args.QuoteId, _userId, _tenantId, args.NoteText);
             _carrierNotes[args.QuoteId] = args.NoteText;
             Snackbar.Add("Note saved", Severity.Success);
             StateHasChanged();
