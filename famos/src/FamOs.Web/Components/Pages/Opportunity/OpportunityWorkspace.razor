@@ -87,9 +87,9 @@ else
     @switch (_opp.LifecycleStage)
     {
         case LifecycleStage.Intake:
-            <PanelErrorBoundary>
-                <IntakePanel Opportunity="_opp" OnAdvanced="Reload" />
-            </PanelErrorBoundary>
+            <FamOs.Web.Components.Pages.IntakeQuestionnaire.IntakeQuestionnaire
+                Mode="FamOs.Web.Components.Pages.IntakeQuestionnaire.QuestionnaireMode.Producer"
+                OpportunityId="@_opp.Id.ToString()" />
             break;
         case LifecycleStage.UnderwritingPrep:
             <PanelErrorBoundary>

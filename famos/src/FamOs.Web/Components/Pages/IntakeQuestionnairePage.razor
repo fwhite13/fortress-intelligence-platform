@@ -1,10 +1,10 @@
 @page "/intake-questionnaire"
+@layout FamOs.Web.Components.Layout.IntakeLayout
 @namespace FamOs.Web.Components.Pages
 @using FamOs.Web.Components.Pages.IntakeQuestionnaire
 
 <IntakeQuestionnaire Mode="QuestionnaireMode.Prospect" OpportunityId="@(OpportunityId ?? "")" />
 
 @code {
-    [Parameter, SupplyParameterFromQuery]
-    public string? OpportunityId { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? OpportunityId { get; set; }
 }

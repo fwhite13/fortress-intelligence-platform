@@ -1,0 +1,317 @@
+/* TIG Intake Standalone Layout */
+.intake-standalone-root {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #f8fafc;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.intake-standalone-header {
+    background: #1a365d;
+    padding: 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.intake-standalone-header-inner {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.intake-standalone-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.intake-tig-logo {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+}
+
+.intake-standalone-brand-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: -0.01em;
+}
+
+.intake-standalone-tagline {
+    font-size: 13px;
+    color: #c5a028;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.intake-standalone-main {
+    flex: 1;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+    padding: 40px 24px;
+}
+
+.intake-standalone-footer {
+    background: #1a365d;
+    color: #94a3b8;
+    text-align: center;
+    padding: 16px 24px;
+    font-size: 12px;
+}
+
+@media (max-width: 640px) {
+    .intake-standalone-header-inner {
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-start;
+    }
+    .intake-standalone-main {
+        padding: 24px 16px;
+    }
+}
+
+/* ── Wizard Chrome ── */
+.wiz-root {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Progress steps (desktop) */
+.wiz-progress-steps {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    gap: 2px;
+}
+
+.wiz-progress-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    cursor: default;
+    padding: 0 2px;
+}
+
+.wiz-progress-step.completed { cursor: pointer; }
+
+.wiz-step-circle {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    border: 2px solid #e5e7eb;
+    background: white;
+    color: #9ca3af;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.wiz-progress-step.current .wiz-step-circle {
+    border-color: #1a365d;
+    background: #1a365d;
+    color: white;
+    box-shadow: 0 2px 8px rgba(26,54,93,0.3);
+}
+
+.wiz-progress-step.completed .wiz-step-circle {
+    border-color: #059669;
+    background: #059669;
+    color: white;
+}
+
+.wiz-step-label {
+    font-size: 10px;
+    color: #9ca3af;
+    text-align: center;
+    margin-top: 4px;
+    line-height: 1.2;
+    max-width: 72px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wiz-progress-step.current .wiz-step-label { color: #1a365d; font-weight: 600; }
+.wiz-progress-step.completed .wiz-step-label { color: #4b5563; }
+
+/* Connector lines */
+.wiz-progress-step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 13px;
+    left: calc(50% + 16px);
+    right: calc(-50% + 16px);
+    height: 2px;
+    background: #e5e7eb;
+    z-index: -1;
+}
+.wiz-progress-step.completed:not(:last-child)::after { background: #059669; }
+
+/* Progress bar */
+.wiz-progress-bar-track {
+    width: 100%;
+    height: 4px;
+    background: #e5e7eb;
+    border-radius: 9999px;
+    overflow: hidden;
+    margin-bottom: 32px;
+    margin-top: 8px;
+}
+.wiz-progress-bar-fill {
+    height: 100%;
+    background: #1a365d;
+    border-radius: 9999px;
+    transition: width 0.5s ease;
+}
+
+/* Mobile progress */
+.wiz-progress-mobile {
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.wiz-progress-mobile-text {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a365d;
+}
+.wiz-progress-dots {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.wiz-progress-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #e5e7eb;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.wiz-progress-dot.done { background: #059669; }
+.wiz-progress-dot.current { background: #1a365d; transform: scale(1.3); }
+
+/* Card */
+.wiz-card {
+    background: white;
+    border-radius: 16px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    margin-bottom: 24px;
+    overflow: hidden;
+}
+.wiz-card-header {
+    padding: 32px 40px 0;
+}
+.wiz-step-label-sm {
+    font-size: 12px;
+    font-weight: 600;
+    color: #c5a028;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+}
+.wiz-card-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #1a365d;
+    margin: 0 0 8px;
+    line-height: 1.3;
+}
+.wiz-card-desc {
+    font-size: 14px;
+    color: #6b7280;
+    margin: 0 0 24px;
+    line-height: 1.6;
+}
+.wiz-card-body {
+    padding: 24px 40px 40px;
+}
+
+/* Navigation */
+.wiz-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.wiz-nav-left, .wiz-nav-right { display: flex; align-items: center; gap: 8px; }
+
+.wiz-btn-back {
+    padding: 10px 20px;
+    border-radius: 10px;
+    border: 1.5px solid #d1d5db;
+    background: white;
+    color: #374151;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+}
+.wiz-btn-back:hover { background: #f9fafb; border-color: #9ca3af; }
+
+.wiz-btn-next, .wiz-btn-submit {
+    padding: 10px 24px;
+    border-radius: 10px;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+}
+.wiz-btn-next { background: #1a365d; color: white; }
+.wiz-btn-next:hover { background: #1e3a6e; box-shadow: 0 4px 12px rgba(26,54,93,0.25); }
+.wiz-btn-submit { background: #059669; color: white; }
+.wiz-btn-submit:hover { background: #047857; box-shadow: 0 4px 12px rgba(5,150,105,0.25); }
+
+.wiz-nav-secondary {
+    display: flex;
+    justify-content: center;
+    margin-top: 4px;
+}
+.wiz-btn-save-later {
+    background: none;
+    border: none;
+    color: #9ca3af;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+    padding: 4px 8px;
+    transition: color 0.15s;
+}
+.wiz-btn-save-later:hover { color: #6b7280; }
+
+/* Step enter animation */
+.wiz-step-enter {
+    animation: wizFadeSlide 0.25s ease-out;
+}
+@keyframes wizFadeSlide {
+    from { opacity: 0; transform: translateX(20px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Responsive */
+@media (max-width: 767px) {
+    .wiz-progress-steps { display: none; }
+    .wiz-progress-mobile { display: flex !important; }
+    .wiz-card-header { padding: 24px 20px 0; }
+    .wiz-card-body { padding: 20px 20px 28px; }
+    .wiz-card-title { font-size: 18px; }
+}

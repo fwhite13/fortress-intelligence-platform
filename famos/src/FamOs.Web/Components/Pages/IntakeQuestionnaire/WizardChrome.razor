@@ -1,53 +1,104 @@
 @namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
 @using System.Text.Json.Nodes
-@using FamOs.Web.Services
 @inject IIntakeResponseService IntakeService
 @inject IIntakeSessionService SessionService
 @inject ISnackbar Snackbar
 @implements IDisposable
 
-<div class="intake-wizard">
-    @* Step indicator *@
-    <div class="intake-wizard-steps">
-        @for (int i = 0; i < Pages.Count(); i++)
+<div class="wiz-root">
+
+    @* ── Progress indicator (desktop) ── *@
+    <div class="wiz-progress-steps">
+        @for (int i = 0; i < _pageList.Count; i++)
         {
             var idx = i;
-            var pageItem = Pages.ElementAt(i);
-            var title = pageItem["title"]?.GetValue<string>() ?? $"Step {i + 1}";
-            <div class="intake-step @(idx == CurrentPageIndex ? "active" : idx < CurrentPageIndex ? "done" : "")">
-                <span class="intake-step-num">@(i + 1)</span>
-                <span class="intake-step-label">@title</span>
+            var pageTitle = _pageList[idx]["title"]?.GetValue<string>() ?? $"Step {idx+1}";
+            var shortLabel = pageTitle.Length > 12 ? pageTitle[..12] + "…" : pageTitle;
+            var stepClass = idx == CurrentPageIndex ? "current"
+                          : idx < CurrentPageIndex ? "completed"
+                          : "";
+            <div class="wiz-progress-step @stepClass"
+                 @onclick="@(() => TryNavigateTo(idx))"
+                 title="@pageTitle">
+                <div class="wiz-step-circle">
+                    @if (idx < CurrentPageIndex)
+                    {
+                        <span>&#10003;</span>
+                    }
+                    else
+                    {
+                        <span>@(idx + 1)</span>
+                    }
+                </div>
+                <span class="wiz-step-label">@shortLabel</span>
             </div>
         }
     </div>
 
-    @* Current page *@
-    @if (_currentPage is not null)
-    {
-        <QuestionnairePage PageDef="@_currentPage"
-                           Responses="@_responses"
-                           Evaluator="@_evaluator"
-                           OnFieldChanged="@HandleFieldChanged" />
-    }
-
-    @* Navigation *@
-    <div class="intake-wizard-nav">
-        <MudButton Variant="Variant.Text" OnClick="SaveAndReturnAsync">Save &amp; Come Back Later</MudButton>
-        <div class="d-flex gap-2">
-            @if (CurrentPageIndex > 0)
+    @* ── Progress mobile ── *@
+    <div class="wiz-progress-mobile">
+        <div class="wiz-progress-mobile-text">
+            Step @(CurrentPageIndex + 1) of @_pageList.Count — @(_pageList.Count > 0 ? (_pageList[CurrentPageIndex]["title"]?.GetValue<string>() ?? "") : "")
+        </div>
+        <div class="wiz-progress-dots">
+            @for (int i = 0; i < _pageList.Count; i++)
             {
-                <MudButton Variant="Variant.Outlined" OnClick="PrevPage">Back</MudButton>
-            }
-            @if (CurrentPageIndex < Pages.Count() - 1)
-            {
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="NextPageAsync">Save &amp; Continue</MudButton>
-            }
-            else
-            {
-                <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SubmitAsync">Submit Application</MudButton>
+                var idx = i;
+                var dotClass = idx == CurrentPageIndex ? "current" : idx < CurrentPageIndex ? "done" : "";
+                <div class="wiz-progress-dot @dotClass" @onclick="@(() => TryNavigateTo(idx))"></div>
             }
         </div>
     </div>
+
+    @* ── Progress bar ── *@
+    <div class="wiz-progress-bar-track">
+        <div class="wiz-progress-bar-fill" style="width: @(ProgressPercent)%"></div>
+    </div>
+
+    @* ── Step card ── *@
+    @if (_currentPage is not null)
+    {
+        <div class="wiz-card wiz-step-enter">
+            <div class="wiz-card-header">
+                <div class="wiz-step-label-sm">Step @(CurrentPageIndex + 1) of @_pageList.Count</div>
+                <h2 class="wiz-card-title">@(_currentPage["title"]?.GetValue<string>() ?? "")</h2>
+                @if (!string.IsNullOrEmpty(_currentPage["description"]?.GetValue<string>()))
+                {
+                    <p class="wiz-card-desc">@(_currentPage["description"]?.GetValue<string>())</p>
+                }
+            </div>
+            <div class="wiz-card-body">
+                <QuestionnairePage PageDef="@_currentPage"
+                                   Responses="@_responses"
+                                   Evaluator="@_evaluator"
+                                   OnFieldChanged="@HandleFieldChanged" />
+            </div>
+        </div>
+    }
+
+    @* ── Navigation ── *@
+    <div class="wiz-nav">
+        <div class="wiz-nav-left">
+            @if (CurrentPageIndex > 0)
+            {
+                <button class="wiz-btn-back" @onclick="PrevPage">&#8592; Back</button>
+            }
+        </div>
+        <div class="wiz-nav-right">
+            @if (CurrentPageIndex < _pageList.Count - 1)
+            {
+                <button class="wiz-btn-next" @onclick="NextPageAsync">Save &amp; Continue &#8594;</button>
+            }
+            else
+            {
+                <button class="wiz-btn-submit" @onclick="SubmitAsync">Submit Application</button>
+            }
+        </div>
+    </div>
+    <div class="wiz-nav-secondary">
+        <button class="wiz-btn-save-later" @onclick="SaveAndReturnAsync">Save &amp; Come Back Later</button>
+    </div>
+
 </div>
 
 @code {
@@ -55,32 +106,43 @@
     [Parameter, EditorRequired] public long SessionId { get; set; }
     [Parameter, EditorRequired] public IEnumerable<JsonObject> Pages { get; set; } = Enumerable.Empty<JsonObject>();
     [Parameter] public EventCallback OnCompleted { get; set; }
-
     [Parameter] public int CurrentPageIndex { get; set; }
     [Parameter] public EventCallback<int> CurrentPageIndexChanged { get; set; }
 
+    private List<JsonObject> _pageList = new();
     private Dictionary<string, string> _responses = new();
     private ConditionEvaluator _evaluator = new();
     private JsonObject? _currentPage;
     private System.Timers.Timer? _debounce;
     private (string FieldCode, string Value) _pendingSave;
 
+    private int ProgressPercent =>
+        _pageList.Count == 0 ? 0
+        : (int)Math.Round((CurrentPageIndex + 1.0) / _pageList.Count * 100);
+
     protected override async Task OnInitializedAsync()
     {
+        _pageList = Pages.ToList();
         _responses = await IntakeService.LoadAllAsync(OpportunityId);
         _evaluator.SetAll(_responses);
         UpdateCurrentPage();
     }
 
+    protected override void OnParametersSet()
+    {
+        _pageList = Pages.ToList();
+        UpdateCurrentPage();
+    }
+
     private void UpdateCurrentPage()
-        => _currentPage = Pages.ElementAtOrDefault(CurrentPageIndex);
+        => _currentPage = _pageList.ElementAtOrDefault(CurrentPageIndex);
 
     private void HandleFieldChanged((string FieldCode, string Value) change)
     {
         _pendingSave = change;
         _debounce?.Stop();
         _debounce?.Dispose();
-        _debounce = new System.Timers.Timer(800);
+        _debounce = new System.Timers.Timer(800) { AutoReset = false };
         _debounce.Elapsed += async (_, _) =>
         {
             _debounce?.Stop();
@@ -93,14 +155,22 @@
                 await InvokeAsync(() => Snackbar.Add($"Auto-save failed: {ex.Message}", Severity.Warning));
             }
         };
-        _debounce.AutoReset = false;
         _debounce.Start();
+    }
+
+    private void TryNavigateTo(int idx)
+    {
+        if (idx <= CurrentPageIndex)
+        {
+            CurrentPageIndexChanged.InvokeAsync(idx);
+            UpdateCurrentPage();
+        }
     }
 
     private async Task NextPageAsync()
     {
-        var currentName = Pages.ElementAt(CurrentPageIndex)["name"]?.GetValue<string>() ?? "";
-        await SessionService.UpdateLastPageAsync(SessionId, currentName);
+        var pageName = _pageList.ElementAtOrDefault(CurrentPageIndex)?["name"]?.GetValue<string>() ?? "";
+        await SessionService.UpdateLastPageAsync(SessionId, pageName);
         var next = CurrentPageIndex + 1;
         await CurrentPageIndexChanged.InvokeAsync(next);
         UpdateCurrentPage();
@@ -115,11 +185,8 @@
 
     private async Task SaveAndReturnAsync()
     {
-        if (_currentPage is not null)
-        {
-            var currentName = _currentPage["name"]?.GetValue<string>() ?? "";
-            await SessionService.UpdateLastPageAsync(SessionId, currentName);
-        }
+        var pageName = _currentPage?["name"]?.GetValue<string>() ?? "";
+        await SessionService.UpdateLastPageAsync(SessionId, pageName);
         Snackbar.Add("Progress saved. Use your original link to return.", Severity.Success);
     }
 

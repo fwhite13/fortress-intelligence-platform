@@ -1,0 +1,47 @@
+@inherits LayoutComponentBase
+@namespace FamOs.Web.Components.Layout
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TIG Insurance Application</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+    <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="FamOs.Web.styles.css" />
+    <link rel="stylesheet" href="css/intake-standalone.css" />
+</head>
+<body>
+    <div class="intake-standalone-root">
+        <header class="intake-standalone-header">
+            <div class="intake-standalone-header-inner">
+                <div class="intake-standalone-brand">
+                    <svg class="intake-tig-logo" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect width="40" height="40" rx="8" fill="#1a365d"/>
+                        <path d="M10 13h20M20 13v14" stroke="#c5a028" stroke-width="2.5" stroke-linecap="round"/>
+                        <path d="M14 27h12" stroke="#c5a028" stroke-width="2.5" stroke-linecap="round"/>
+                    </svg>
+                    <span class="intake-standalone-brand-name">TIG Insurance Group</span>
+                </div>
+                <span class="intake-standalone-tagline">Trucking Coverage Application</span>
+            </div>
+        </header>
+        <main class="intake-standalone-main">
+            @Body
+        </main>
+        <footer class="intake-standalone-footer">
+            <p>© @DateTime.UtcNow.Year TIG Insurance Group. Secure application. Questions? Call us at 1-800-TIG-TRUCK.</p>
+        </footer>
+    </div>
+
+    <MudThemeProvider />
+    <MudPopoverProvider />
+    <MudDialogProvider />
+    <MudSnackbarProvider />
+
+    <script src="_framework/blazor.web.js"></script>
+    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+</body>
+</html>
