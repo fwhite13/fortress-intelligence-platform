@@ -711,6 +711,59 @@ var logger = app.Logger;
     }
 }
 
+// ADO#1142: Update TIG Trucking LOBs — replace 6 placeholder LOBs with full 15-line list
+{
+    using var scope1142 = app.Services.CreateScope();
+    var factory1142 = scope1142.ServiceProvider.GetRequiredService<IDbContextFactory<FamOsDbContext>>();
+    await using var db1142 = await factory1142.CreateDbContextAsync();
+    try
+    {
+        await db1142.Database.ExecuteSqlRawAsync(@"
+            -- Update existing LOBs by slug (keep IDs, just fix names/order)
+            UPDATE lines_of_business SET name='General Liability', display_order=1 WHERE slug='gl' AND program_vertical_id='290f3df6-e977-472e-8d39-55603f994fb7';
+            UPDATE lines_of_business SET name='Commercial Auto', display_order=2 WHERE slug='auto' AND program_vertical_id='290f3df6-e977-472e-8d39-55603f994fb7';
+            UPDATE lines_of_business SET slug='mtc', name='Motor Truck Cargo', display_order=3 WHERE slug='cargo' AND program_vertical_id='290f3df6-e977-472e-8d39-55603f994fb7';
+            UPDATE lines_of_business SET slug='bt', name='Bobtail / Non-Trucking', display_order=4 WHERE slug='pd' AND program_vertical_id='290f3df6-e977-472e-8d39-55603f994fb7';
+            UPDATE lines_of_business SET name='Workers Comp', display_order=5 WHERE slug='wc' AND program_vertical_id='290f3df6-e977-472e-8d39-55603f994fb7';
+            UPDATE lines_of_business SET display_order=7 WHERE slug='umb' AND program_vertical_id='290f3df6-e977-472e-8d39-55603f994fb7';
+        ");
+
+        await db1142.Database.ExecuteSqlRawAsync(@"
+            -- Insert 9 new LOBs (INSERT IGNORE is idempotent via unique index idx_lob_tenant_slug on tenant_id,slug)
+            INSERT IGNORE INTO lines_of_business (id, program_vertical_id, tenant_id, slug, name, icon, display_order, is_active, created_at)
+            VALUES
+              (UUID(), '290f3df6-e977-472e-8d39-55603f994fb7', 1, 'oppacc', 'Occupational Accident', '🦺', 6, 1, NOW()),
+              (UUID(), '290f3df6-e977-472e-8d39-55603f994fb7', 1, 'pol', 'Pollution Liability', '☣️', 8, 1, NOW()),
+              (UUID(), '290f3df6-e977-472e-8d39-55603f994fb7', 1, 'pl', 'Professional Liability', '📋', 9, 1, NOW()),
+              (UUID(), '290f3df6-e977-472e-8d39-55603f994fb7', 1, 'do', 'Directors & Officers', '👔', 10, 1, NOW()),
+              (UUID(), '290f3df6-e977-472e-8d39-55603f994fb7', 1, 'prop', 'Commercial Property', '🏢', 11, 1, NOW()),
+              (UUID(), '290f3df6-e977-472e-8d39-55603f994fb7', 1, 'cyb', 'Cyber Liability', '🔐', 12, 1, NOW()),
+              (UUID(), '290f3df6-e977-472e-8d39-55603f994fb7', 1, 'ti', 'Trade Insurance', '🤝', 13, 1, NOW()),
+              (UUID(), '290f3df6-e977-472e-8d39-55603f994fb7', 1, 'cr', 'Crime', '🔒', 14, 1, NOW()),
+              (UUID(), '290f3df6-e977-472e-8d39-55603f994fb7', 1, 'other', 'Other', '📎', 15, 1, NOW());
+        ");
+
+        await db1142.Database.ExecuteSqlRawAsync(@"
+            -- Update carrier_bundle_rules: cargo→mtc, pd→bt
+            UPDATE carrier_bundle_rules SET primary_line_slug='mtc' WHERE primary_line_slug='cargo';
+            UPDATE carrier_bundle_rules SET required_line_slug='mtc' WHERE required_line_slug='cargo';
+            UPDATE carrier_bundle_rules SET primary_line_slug='bt' WHERE primary_line_slug='pd';
+            UPDATE carrier_bundle_rules SET required_line_slug='bt' WHERE required_line_slug='pd';
+        ");
+
+        await db1142.Database.ExecuteSqlRawAsync(@"
+            -- Set ProgramId on all opportunities missing it
+            UPDATE opportunities SET ProgramId='290f3df6-e977-472e-8d39-55603f994fb7' WHERE ProgramId IS NULL;
+        ");
+
+        logger.LogInformation("ADO#1142: TIG Trucking LOB migration complete (15 LOBs, carrier bundle rules, ProgramId backfill)");
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("ADO#1142: LOB migration failed (non-fatal): {Error}", ex.Message);
+    }
+}
+
 // Quote Comparison seed data
 {
     using var seedScope = app.Services.CreateScope();
