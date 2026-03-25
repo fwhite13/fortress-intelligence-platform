@@ -140,6 +140,7 @@ builder.Services.AddScoped<IAlertService, AlertService>();
 builder.Services.AddScoped<ICarrierNoteService, CarrierNoteService>();
 builder.Services.AddScoped<IIncumbentPolicyService, IncumbentPolicyService>();
 builder.Services.AddScoped<IIntakeResponseService, IntakeResponseService>();
+builder.Services.AddScoped<IIntakeSessionService, IntakeSessionService>();
 
 builder.Services.Configure<AffinityConfig>(
     builder.Configuration.GetSection("AffinityConfig"));

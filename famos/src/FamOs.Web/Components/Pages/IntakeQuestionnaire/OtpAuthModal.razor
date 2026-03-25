@@ -1,0 +1,76 @@
+@namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
+@using FamOs.Web.Services
+@inject IIntakeSessionService SessionService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Verify Your Identity</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (!_codeSent)
+        {
+            <MudText Class="mb-3">Enter your email address to receive a verification code.</MudText>
+            <MudTextField @bind-Value="_email" Label="Email Address" InputType="InputType.Email"
+                          Variant="Variant.Outlined" />
+        }
+        else
+        {
+            <MudText Class="mb-3">A 6-digit code has been sent to <strong>@_email</strong>. (Stub: check console logs)</MudText>
+            <MudTextField @bind-Value="_code" Label="Verification Code" MaxLength="6"
+                          Variant="Variant.Outlined" />
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (!_codeSent)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SendCodeAsync"
+                       Disabled="@(string.IsNullOrWhiteSpace(_email))">Send Code</MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Text" OnClick="@(() => _codeSent = false)">Back</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="VerifyCodeAsync"
+                       Disabled="@(_code.Length != 6)">Verify</MudButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string OpportunityId { get; set; } = "";
+
+    private string _email = "";
+    private string _code = "";
+    private bool _codeSent = false;
+    private long _sessionId;
+
+    private async Task SendCodeAsync()
+    {
+        try
+        {
+            var (sessionId, code) = await SessionService.CreateOrRefreshSessionAsync(OpportunityId, _email);
+            _sessionId = sessionId;
+            Console.WriteLine($"[OTP STUB] Code for {_email}: {code}");
+            Snackbar.Add("Code sent (stub — check server console)", Severity.Info);
+            _codeSent = true;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error sending code: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task VerifyCodeAsync()
+    {
+        try
+        {
+            var lastPage = await SessionService.VerifyOtpAsync(_sessionId, _code);
+            MudDialog.Close(DialogResult.Ok(new OtpResult { Email = _email, SessionId = _sessionId, LastPage = lastPage }));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+}

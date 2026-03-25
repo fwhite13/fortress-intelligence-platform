@@ -1,0 +1,137 @@
+@namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
+@using System.Text.Json.Nodes
+@using FamOs.Web.Services
+@inject IIntakeResponseService IntakeService
+@inject IIntakeSessionService SessionService
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<div class="intake-wizard">
+    @* Step indicator *@
+    <div class="intake-wizard-steps">
+        @for (int i = 0; i < Pages.Count(); i++)
+        {
+            var idx = i;
+            var pageItem = Pages.ElementAt(i);
+            var title = pageItem["title"]?.GetValue<string>() ?? $"Step {i + 1}";
+            <div class="intake-step @(idx == CurrentPageIndex ? "active" : idx < CurrentPageIndex ? "done" : "")">
+                <span class="intake-step-num">@(i + 1)</span>
+                <span class="intake-step-label">@title</span>
+            </div>
+        }
+    </div>
+
+    @* Current page *@
+    @if (_currentPage is not null)
+    {
+        <QuestionnairePage PageDef="@_currentPage"
+                           Responses="@_responses"
+                           Evaluator="@_evaluator"
+                           OnFieldChanged="@HandleFieldChanged" />
+    }
+
+    @* Navigation *@
+    <div class="intake-wizard-nav">
+        <MudButton Variant="Variant.Text" OnClick="SaveAndReturnAsync">Save &amp; Come Back Later</MudButton>
+        <div class="d-flex gap-2">
+            @if (CurrentPageIndex > 0)
+            {
+                <MudButton Variant="Variant.Outlined" OnClick="PrevPage">Back</MudButton>
+            }
+            @if (CurrentPageIndex < Pages.Count() - 1)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="NextPageAsync">Save &amp; Continue</MudButton>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Success" OnClick="SubmitAsync">Submit Application</MudButton>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string OpportunityId { get; set; } = "";
+    [Parameter, EditorRequired] public long SessionId { get; set; }
+    [Parameter, EditorRequired] public IEnumerable<JsonObject> Pages { get; set; } = Enumerable.Empty<JsonObject>();
+    [Parameter] public EventCallback OnCompleted { get; set; }
+
+    [Parameter] public int CurrentPageIndex { get; set; }
+    [Parameter] public EventCallback<int> CurrentPageIndexChanged { get; set; }
+
+    private Dictionary<string, string> _responses = new();
+    private ConditionEvaluator _evaluator = new();
+    private JsonObject? _currentPage;
+    private System.Timers.Timer? _debounce;
+    private (string FieldCode, string Value) _pendingSave;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _responses = await IntakeService.LoadAllAsync(OpportunityId);
+        _evaluator.SetAll(_responses);
+        UpdateCurrentPage();
+    }
+
+    private void UpdateCurrentPage()
+        => _currentPage = Pages.ElementAtOrDefault(CurrentPageIndex);
+
+    private void HandleFieldChanged((string FieldCode, string Value) change)
+    {
+        _pendingSave = change;
+        _debounce?.Stop();
+        _debounce?.Dispose();
+        _debounce = new System.Timers.Timer(800);
+        _debounce.Elapsed += async (_, _) =>
+        {
+            _debounce?.Stop();
+            try
+            {
+                await IntakeService.UpsertAsync(OpportunityId, _pendingSave.FieldCode, _pendingSave.Value);
+            }
+            catch (Exception ex)
+            {
+                await InvokeAsync(() => Snackbar.Add($"Auto-save failed: {ex.Message}", Severity.Warning));
+            }
+        };
+        _debounce.AutoReset = false;
+        _debounce.Start();
+    }
+
+    private async Task NextPageAsync()
+    {
+        var currentName = Pages.ElementAt(CurrentPageIndex)["name"]?.GetValue<string>() ?? "";
+        await SessionService.UpdateLastPageAsync(SessionId, currentName);
+        var next = CurrentPageIndex + 1;
+        await CurrentPageIndexChanged.InvokeAsync(next);
+        UpdateCurrentPage();
+    }
+
+    private void PrevPage()
+    {
+        var prev = CurrentPageIndex - 1;
+        _ = CurrentPageIndexChanged.InvokeAsync(prev);
+        UpdateCurrentPage();
+    }
+
+    private async Task SaveAndReturnAsync()
+    {
+        if (_currentPage is not null)
+        {
+            var currentName = _currentPage["name"]?.GetValue<string>() ?? "";
+            await SessionService.UpdateLastPageAsync(SessionId, currentName);
+        }
+        Snackbar.Add("Progress saved. Use your original link to return.", Severity.Success);
+    }
+
+    private async Task SubmitAsync()
+    {
+        await SessionService.CompleteSessionAsync(SessionId);
+        await OnCompleted.InvokeAsync();
+    }
+
+    public void Dispose()
+    {
+        _debounce?.Stop();
+        _debounce?.Dispose();
+    }
+}

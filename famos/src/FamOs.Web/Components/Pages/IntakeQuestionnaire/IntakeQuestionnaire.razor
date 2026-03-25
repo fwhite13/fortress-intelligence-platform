@@ -1,6 +1,7 @@
 @namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
 @using System.Text.Json.Nodes
 @using MudBlazor
+@inject IDialogService DialogService
 
 @if (_pages is null)
 {
@@ -10,10 +11,24 @@ else if (Mode == QuestionnaireMode.Producer)
 {
     <ProducerLayout OpportunityId="@OpportunityId" Pages="@_pages" />
 }
+else if (_completed)
+{
+    <div class="intake-complete pa-8 text-center">
+        <MudText Typo="Typo.h5" Class="mb-2">Thank you!</MudText>
+        <MudText>Your application has been submitted successfully. Our team will review your submission and be in touch shortly.</MudText>
+    </div>
+}
+else if (!_authenticated)
+{
+    <MudText Class="pa-4">Loading authentication...</MudText>
+}
 else
 {
-    @* Prospect WizardChrome — ADO#1196 *@
-    <MudText>Wizard coming in ADO#1196</MudText>
+    <WizardChrome OpportunityId="@OpportunityId"
+                  SessionId="@_sessionId"
+                  Pages="@_pages"
+                  @bind-CurrentPageIndex="_currentPageIndex"
+                  OnCompleted="@(() => _completed = true)" />
 }
 
 @code {
@@ -21,6 +36,33 @@ else
     [Parameter, EditorRequired] public string OpportunityId { get; set; } = "";
 
     private IEnumerable<JsonObject>? _pages;
+    private bool _authenticated = false;
+    private bool _completed = false;
+    private long _sessionId;
+    private int _currentPageIndex = 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || Mode != QuestionnaireMode.Prospect) return;
+
+        var options = new DialogOptions { CloseButton = false, BackdropClick = false };
+        var parameters = new DialogParameters { ["OpportunityId"] = OpportunityId };
+        var dialog = await DialogService.ShowAsync<OtpAuthModal>("Verify Your Identity", parameters, options);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: OtpResult otp })
+        {
+            _sessionId = otp.SessionId;
+            if (!string.IsNullOrEmpty(otp.LastPage))
+            {
+                var pageList = _pages?.ToList() ?? new();
+                var idx = pageList.FindIndex(p => p["name"]?.GetValue<string>() == otp.LastPage);
+                if (idx >= 0) _currentPageIndex = idx;
+            }
+            _authenticated = true;
+            StateHasChanged();
+        }
+    }
 
     protected override void OnInitialized()
     {
