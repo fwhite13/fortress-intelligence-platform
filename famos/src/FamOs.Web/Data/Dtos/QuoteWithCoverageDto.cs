@@ -1,3 +1,5 @@
+using FamOs.Web.Data.Entities;
+
 namespace FamOs.Web.Data.Dtos;
 
 public class QuoteWithCoverageDto
@@ -9,4 +11,5 @@ public class QuoteWithCoverageDto
     public decimal PremiumAmount { get; set; }
     public CoverageDetailsDto? CoverageDetails { get; set; }
     public DateTime ReceivedAt { get; set; }
+    public List<QuoteLine> QuoteLines { get; set; } = new();
 }
