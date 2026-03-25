@@ -9,12 +9,12 @@
 <div class="intake-producer-layout">
     <MudText Typo="Typo.h5" Class="mb-4">Intake Questionnaire — @OpportunityId</MudText>
     <MudExpansionPanels MultiExpansion="true">
-        @foreach (var page in Pages)
+        @foreach (var pageDef in Pages)
         {
-            var pageName = page["name"]?.GetValue<string>() ?? "";
-            var pageTitle = page["title"]?.GetValue<string>() ?? pageName;
+            var pageName = pageDef["name"]?.GetValue<string>() ?? "";
+            var pageTitle = pageDef["title"]?.GetValue<string>() ?? pageName;
             <MudExpansionPanel Text="@pageTitle">
-                <QuestionnairePage PageDef="@page"
+                <QuestionnairePage PageDef="@pageDef"
                                    Responses="@_responses"
                                    Evaluator="@_evaluator"
                                    OnFieldChanged="@HandleFieldChanged" />
