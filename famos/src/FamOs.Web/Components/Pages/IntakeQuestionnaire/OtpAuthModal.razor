@@ -17,8 +17,9 @@
         else
         {
             <MudText Class="mb-3">A 6-digit code has been sent to <strong>@_email</strong>. (Stub: check console logs)</MudText>
-            <MudTextField @bind-Value="_code" Label="Verification Code" MaxLength="6"
-                          Variant="Variant.Outlined" />
+            <MudTextField Value="@_code" ValueChanged="@((string v) => _code = v)"
+                          Label="Verification Code" MaxLength="6"
+                          Variant="Variant.Outlined" Immediate="true" />
         }
     </DialogContent>
     <DialogActions>
