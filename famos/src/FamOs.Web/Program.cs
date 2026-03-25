@@ -139,6 +139,7 @@ builder.Services.AddScoped<ICoverageGapService, CoverageGapService>();
 builder.Services.AddScoped<IAlertService, AlertService>();
 builder.Services.AddScoped<ICarrierNoteService, CarrierNoteService>();
 builder.Services.AddScoped<IIncumbentPolicyService, IncumbentPolicyService>();
+builder.Services.AddScoped<IIntakeResponseService, IntakeResponseService>();
 
 builder.Services.Configure<AffinityConfig>(
     builder.Configuration.GetSection("AffinityConfig"));
@@ -851,6 +852,58 @@ var logger = app.Logger;
     catch (Exception ex)
     {
         logger.LogWarning(ex, "Quote comparison seed failed (may be first run before tables exist)");
+    }
+}
+
+// ADO#1194 — intake_responses + intake_sessions tables (TIG Intake Questionnaire)
+{
+    using var scope1194 = app.Services.CreateScope();
+    var factory1194 = scope1194.ServiceProvider.GetRequiredService<IDbContextFactory<FamOsDbContext>>();
+    await using var db1194 = await factory1194.CreateDbContextAsync();
+    try
+    {
+        await db1194.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS intake_responses (
+                id             BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                opportunity_id VARCHAR(36) NOT NULL,
+                field_code     VARCHAR(100) NOT NULL,
+                value          LONGTEXT NULL,
+                page_name      VARCHAR(100) NULL,
+                created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_intake_resp_opp (opportunity_id),
+                INDEX idx_intake_resp_opp_page (opportunity_id, page_name),
+                UNIQUE KEY uq_intake_resp (opportunity_id, field_code)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """);
+        logger.LogInformation("ADO#1194: intake_responses table migration complete");
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("[Startup] ADO#1194 intake_responses migration: {Msg}", ex.Message);
+    }
+
+    try
+    {
+        await db1194.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS intake_sessions (
+                id             BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                opportunity_id VARCHAR(36) NOT NULL,
+                email          VARCHAR(255) NOT NULL,
+                otp_code       CHAR(6) NULL,
+                otp_expires_at DATETIME NULL,
+                is_verified    TINYINT(1) NOT NULL DEFAULT 0,
+                last_page      VARCHAR(100) NULL,
+                created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at     DATETIME NULL,
+                INDEX idx_intake_sess_opp_email (opportunity_id, email)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """);
+        logger.LogInformation("ADO#1194: intake_sessions table migration complete");
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning("[Startup] ADO#1194 intake_sessions migration: {Msg}", ex.Message);
     }
 }
 

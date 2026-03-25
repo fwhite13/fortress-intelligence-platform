@@ -39,6 +39,8 @@ public class FamOsDbContext : DbContext
     public DbSet<BenchmarkPremium>              BenchmarkPremiums              => Set<BenchmarkPremium>();
     public DbSet<CarrierBundleRule>             CarrierBundleRules             => Set<CarrierBundleRule>();
     public DbSet<QuoteLine>                     QuoteLines                     => Set<QuoteLine>();
+    public DbSet<IntakeResponse> IntakeResponses => Set<IntakeResponse>();
+    public DbSet<IntakeSession> IntakeSessions => Set<IntakeSession>();
 
     protected override void OnModelCreating(ModelBuilder m)
     {
@@ -464,6 +466,37 @@ public class FamOsDbContext : DbContext
             e.Property(x => x.Notes).HasColumnType("longtext").HasColumnName("notes");
             e.HasIndex(x => new { x.TenantId, x.CarrierName, x.PrimaryLineSlug });
             e.HasQueryFilter(x => x.TenantId == _tenantId);
+        });
+
+        // IntakeResponse
+        m.Entity<IntakeResponse>(e => {
+            e.ToTable("intake_responses");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            e.Property(x => x.OpportunityId).HasColumnName("opportunity_id").IsRequired();
+            e.Property(x => x.FieldCode).HasColumnName("field_code").IsRequired();
+            e.Property(x => x.Value).HasColumnName("value");
+            e.Property(x => x.PageName).HasColumnName("page_name");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.HasIndex(x => x.OpportunityId).HasDatabaseName("idx_intake_resp_opp");
+            e.HasIndex(x => new { x.OpportunityId, x.PageName }).HasDatabaseName("idx_intake_resp_opp_page");
+        });
+
+        // IntakeSession
+        m.Entity<IntakeSession>(e => {
+            e.ToTable("intake_sessions");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            e.Property(x => x.OpportunityId).HasColumnName("opportunity_id").IsRequired();
+            e.Property(x => x.Email).HasColumnName("email").IsRequired();
+            e.Property(x => x.OtpCode).HasColumnName("otp_code");
+            e.Property(x => x.OtpExpiresAt).HasColumnName("otp_expires_at");
+            e.Property(x => x.IsVerified).HasColumnName("is_verified");
+            e.Property(x => x.LastPage).HasColumnName("last_page");
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.ExpiresAt).HasColumnName("expires_at");
+            e.HasIndex(x => new { x.OpportunityId, x.Email }).HasDatabaseName("idx_intake_sess_opp_email");
         });
     }
 }
