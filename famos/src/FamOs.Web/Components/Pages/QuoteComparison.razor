@@ -167,6 +167,16 @@ else
                 {
                     RestoreFromDraft(_context.SavedDraft);
                 }
+                else
+                {
+                    // Pre-collapse LOB blocks with no quotes (ADO#1146)
+                    foreach (var lob in _context!.Lines)
+                    {
+                        var hasQuotes = _context.Quotes.Any(q => q.QuoteLines.Any(ql => ql.LobId == lob.Id));
+                        if (!hasQuotes && !_state.CollapsedBlocks.Contains(lob.Slug))
+                            _state.CollapsedBlocks.Add(lob.Slug);
+                    }
+                }
 
                 await ReevaluateGapsAndAlerts();
             }

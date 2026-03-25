@@ -13,7 +13,7 @@
                 <span style="font-size:10px; color:var(--muted);">@_pkgALineCount lines</span>
             </div>
             <div style="font-size:20px; font-weight:700; color:#002050; margin-top:4px;">
-                @_pkgATotal.ToString("C0")
+                @_pkgATotal.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
             </div>
         </div>
 
@@ -26,7 +26,7 @@
                 <span style="font-size:10px; color:var(--muted);">@_pkgBLineCount lines</span>
             </div>
             <div style="font-size:20px; font-weight:700; color:#002050; margin-top:4px;">
-                @_pkgBTotal.ToString("C0")
+                @_pkgBTotal.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
             </div>
         </div>
 
@@ -38,7 +38,7 @@
                     <span style="font-size:12px; font-weight:600; color:#b45309;">📋 Incumbent</span>
                 </div>
                 <div style="font-size:18px; font-weight:700; color:#b45309; margin-top:4px;">
-                    @IncumbentTotal.ToString("C0")
+                    @IncumbentTotal.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
                 </div>
             </div>
         }
@@ -69,7 +69,7 @@
                 @if (quote != null)
                 {
                     <div style="text-align:right;">
-                        <div style="font-weight:600; color:#002050;">@quote.Premium.ToString("C0")</div>
+                        <div style="font-weight:600; color:#002050;">@quote.Premium.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))</div>
                         <div style="font-size:10px; color:var(--muted);">@quote.Carrier</div>
                     </div>
                 }
@@ -106,7 +106,7 @@
                 @if (quote != null)
                 {
                     <div style="text-align:right;">
-                        <div style="font-weight:600; color:#002050;">@quote.Premium.ToString("C0")</div>
+                        <div style="font-weight:600; color:#002050;">@quote.Premium.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))</div>
                         <div style="font-size:10px; color:var(--muted);">@quote.Carrier</div>
                     </div>
                 }

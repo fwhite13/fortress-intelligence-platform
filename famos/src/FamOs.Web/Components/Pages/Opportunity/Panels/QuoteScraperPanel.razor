@@ -446,7 +446,8 @@
                                     premNode.TryGetDecimal(out val);
                                 else if (premNode.ValueKind == System.Text.Json.JsonValueKind.String)
                                     decimal.TryParse(premNode.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out val);
-                                if (val > best) best = val;
+                                best += val;
+                                break;
                             }
                         }
                     }
@@ -476,7 +477,8 @@
                                         pn2.TryGetDecimal(out val2);
                                     else if (pn2.ValueKind == System.Text.Json.JsonValueKind.String)
                                         decimal.TryParse(pn2.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out val2);
-                                    if (val2 > best2) best2 = val2;
+                                    best2 += val2;
+                                    break;
                                 }
                             }
                         }

@@ -77,7 +77,7 @@
                             <td style="padding:8px 16px; text-align:center; border-top:1px solid var(--border);">
                                 @if (quoteA != null)
                                 {
-                                    <div style="font-weight:600;">@quoteA.PremiumAmount.ToString("C0")</div>
+                                    <div style="font-weight:600;">@quoteA.PremiumAmount.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))</div>
                                     @if (_showIncumbent && incumbent != null)
                                     {
                                         var diff = CalculateDiff(quoteA.PremiumAmount, incumbent.AnnualPremium);
@@ -92,7 +92,7 @@
                             <td style="padding:8px 16px; text-align:center; border-top:1px solid var(--border);">
                                 @if (quoteB != null)
                                 {
-                                    <div style="font-weight:600;">@quoteB.PremiumAmount.ToString("C0")</div>
+                                    <div style="font-weight:600;">@quoteB.PremiumAmount.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))</div>
                                     @if (_showIncumbent && incumbent != null)
                                     {
                                         var diff = CalculateDiff(quoteB.PremiumAmount, incumbent.AnnualPremium);
@@ -107,7 +107,7 @@
                             @if (_showIncumbent)
                             {
                                 <td style="padding:8px 16px; text-align:center; border-top:1px solid var(--border); background:rgba(245,158,11,0.05); font-weight:600;">
-                                    @(incumbent?.AnnualPremium.ToString("C0") ?? "—")
+                                    @(incumbent?.AnnualPremium.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US")) ?? "—")
                                 </td>
                             }
                         </tr>
@@ -146,7 +146,7 @@
                     <tr style="background:#002050; color:#fff;">
                         <td style="padding:12px 16px; font-weight:700;">TOTAL</td>
                         <td style="padding:12px 16px; text-align:center; font-weight:700; font-size:18px;">
-                            @_pkgATotal.ToString("C0")
+                            @_pkgATotal.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
                             @if (_showIncumbent && _incumbentTotal > 0)
                             {
                                 var totalDiff = CalculateDiff(_pkgATotal, _incumbentTotal);
@@ -154,7 +154,7 @@
                             }
                         </td>
                         <td style="padding:12px 16px; text-align:center; font-weight:700; font-size:18px;">
-                            @_pkgBTotal.ToString("C0")
+                            @_pkgBTotal.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
                             @if (_showIncumbent && _incumbentTotal > 0)
                             {
                                 var totalDiff = CalculateDiff(_pkgBTotal, _incumbentTotal);
@@ -164,7 +164,7 @@
                         @if (_showIncumbent)
                         {
                             <td style="padding:12px 16px; text-align:center; font-weight:700; font-size:18px; background:rgba(245,158,11,0.2);">
-                                @_incumbentTotal.ToString("C0")
+                                @_incumbentTotal.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
                             </td>
                         }
                     </tr>

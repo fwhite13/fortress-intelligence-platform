@@ -55,7 +55,17 @@ public class QuoteComparisonService : IQuoteComparisonService
             .Where(q => q.OpportunityId == opportunityId && q.TenantId == tenantId)
             .ToListAsync();
 
-        var quotes = rawQuotes.Select(MapToQuoteWithCoverageDto).ToList();
+        var submissionIds = rawQuotes.Select(q => q.SubmissionId).Distinct().ToList();
+        var submissionJsons = await db.Submissions
+            .Where(s => submissionIds.Contains(s.Id))
+            .Select(s => new { s.Id, s.QuoteResultJson })
+            .ToDictionaryAsync(s => s.Id);
+
+        var quotes = rawQuotes.Select(q =>
+        {
+            submissionJsons.TryGetValue(q.SubmissionId, out var sub);
+            return MapToQuoteWithCoverageDto(q, sub?.QuoteResultJson);
+        }).ToList();
 
         // IncumbentPolicies scoped to AccountId — no OpportunityId FK on the incumbent_policies table yet.
         // Returns empty until ADO#XXXX migrates incumbent_policies to carry opportunity_id.
@@ -105,7 +115,7 @@ public class QuoteComparisonService : IQuoteComparisonService
             .Where(q => oppIds.Contains(q.OpportunityId) && q.TenantId == tenantId)
             .ToListAsync();
 
-        return rawQuotes.Select(MapToQuoteWithCoverageDto).ToList();
+        return rawQuotes.Select(q => MapToQuoteWithCoverageDto(q)).ToList();
     }
 
     public async Task SaveDraftAsync(Guid opportunityId, Guid userId, int tenantId, DraftStateDto dto)
@@ -181,18 +191,11 @@ public class QuoteComparisonService : IQuoteComparisonService
 
     // ── Mapping helpers ────────────────────────────────────────────────────────
 
-    private static QuoteWithCoverageDto MapToQuoteWithCoverageDto(Quote q)
+    private static QuoteWithCoverageDto MapToQuoteWithCoverageDto(Quote q, string? scraperJson = null)
     {
         CoverageDetailsDto? details = null;
-        if (!string.IsNullOrWhiteSpace(q.CoverageDetails))
-        {
-            try
-            {
-                details = JsonSerializer.Deserialize<CoverageDetailsDto>(q.CoverageDetails,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            }
-            catch { /* malformed JSON — leave null */ }
-        }
+        if (!string.IsNullOrEmpty(scraperJson))
+            details = BuildCoverageDetailsFromScraperJson(scraperJson, q);
 
         return new QuoteWithCoverageDto
         {
@@ -234,6 +237,65 @@ public class QuoteComparisonService : IQuoteComparisonService
             SourceType       = ip.SourceType,
             IsOverridden     = ip.IsOverridden,
         };
+    }
+
+    private static CoverageDetailsDto BuildCoverageDetailsFromScraperJson(string resultJson, Quote q)
+    {
+        var dto = new CoverageDetailsDto { Id = q.Id.ToString(), Carrier = q.CarrierName };
+        try
+        {
+            using var doc = JsonDocument.Parse(resultJson);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("result", out var result)) return dto;
+            if (!result.TryGetProperty("results", out var results)) return dto;
+            if (!results.TryGetProperty("coverages", out var coverages)) return dto;
+
+            foreach (var cov in coverages.EnumerateObject())
+            {
+                var covVal = cov.Value;
+
+                // Premium — sum all non-null total_premium values (ADO#1149)
+                if (covVal.TryGetProperty("premium_summary", out var ps) &&
+                    ps.TryGetProperty("total_premium", out var tp))
+                {
+                    decimal covPremium = 0;
+                    if (tp.ValueKind == JsonValueKind.Number) tp.TryGetDecimal(out covPremium);
+                    else if (tp.ValueKind == JsonValueKind.String) decimal.TryParse(tp.GetString(), out covPremium);
+                    if (covPremium > 0) dto.Premium += covPremium;
+                }
+
+                // coverage_terms + deductibles → Vals
+                foreach (var section in new[] { "coverage_terms", "deductibles" })
+                {
+                    if (covVal.TryGetProperty(section, out var sectionEl))
+                        foreach (var prop in sectionEl.EnumerateObject())
+                        {
+                            var val = prop.Value.ValueKind == JsonValueKind.String
+                                ? prop.Value.GetString() ?? "" : prop.Value.ToString();
+                            if (!string.IsNullOrEmpty(val))
+                                dto.Vals[$"{cov.Name}.{prop.Name}"] = val;
+                        }
+                }
+
+                // endorsements.schedule[].description → Includes
+                if (covVal.TryGetProperty("endorsements", out var endt) &&
+                    endt.TryGetProperty("schedule", out var sched))
+                    foreach (var e in sched.EnumerateArray())
+                        if (e.TryGetProperty("description", out var desc) &&
+                            desc.ValueKind == JsonValueKind.String)
+                        { var d = desc.GetString(); if (!string.IsNullOrEmpty(d)) dto.Includes.Add(d); }
+
+                // exclusions.list[].name → Excludes
+                if (covVal.TryGetProperty("exclusions", out var excl) &&
+                    excl.TryGetProperty("list", out var exclList))
+                    foreach (var ex in exclList.EnumerateArray())
+                        if (ex.TryGetProperty("name", out var nm) &&
+                            nm.ValueKind == JsonValueKind.String)
+                        { var n = nm.GetString(); if (!string.IsNullOrEmpty(n)) dto.Excludes.Add(n); }
+            }
+        }
+        catch { /* malformed JSON — return partial dto */ }
+        return dto;
     }
 
     private static DraftStateDto MapDraftToDto(ComparisonDraft d)

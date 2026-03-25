@@ -809,6 +809,19 @@ var logger = app.Logger;
     }
 }
 
+// ADO#1147 — fix TI LOB label
+{
+    using var db1147Scope = app.Services.CreateScope();
+    var db1147Factory = db1147Scope.ServiceProvider.GetRequiredService<IDbContextFactory<FamOsDbContext>>();
+    await using var db1147 = await db1147Factory.CreateDbContextAsync();
+    try
+    {
+        await db1147.Database.ExecuteSqlRawAsync(
+            "UPDATE lines_of_business SET name='Trailer Interchange' WHERE slug='ti' AND tenant_id=1");
+    }
+    catch (Exception ex) { logger.LogWarning("[Startup] ADO#1147 TI label: {Msg}", ex.Message); }
+}
+
 // Quote Comparison seed data
 {
     using var seedScope = app.Services.CreateScope();
