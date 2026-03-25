@@ -290,17 +290,47 @@ public class QuoteComparisonService : IQuoteComparisonService
                 {
                     if (prop.Value.ValueKind == JsonValueKind.Array) continue;
                     if (prop.Value.ValueKind == JsonValueKind.Null) continue;
-                    var val = prop.Value.ValueKind == JsonValueKind.String
-                        ? prop.Value.GetString() ?? "" : prop.Value.ToString();
-                    if (!string.IsNullOrWhiteSpace(val))
-                        dto.Vals[FormatLabel(prop.Name)] = val;
+
+                    if (prop.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        // Two levels deep — flatten sub-properties
+                        foreach (var subProp in prop.Value.EnumerateObject())
+                        {
+                            if (subProp.Value.ValueKind == JsonValueKind.Array) continue;
+                            if (subProp.Value.ValueKind == JsonValueKind.Null) continue;
+                            if (subProp.Value.ValueKind == JsonValueKind.Object) continue; // max 2 levels
+                            var subVal = subProp.Value.ValueKind == JsonValueKind.String
+                                ? subProp.Value.GetString() ?? ""
+                                : subProp.Value.ValueKind == JsonValueKind.True ? "Yes"
+                                : subProp.Value.ValueKind == JsonValueKind.False ? "No"
+                                : subProp.Value.ToString();
+                            if (!string.IsNullOrWhiteSpace(subVal))
+                                dto.Vals[$"{FormatLabel(prop.Name)}: {FormatLabel(subProp.Name)}"] = subVal;
+                        }
+                    }
+                    else
+                    {
+                        // Scalar (or True/False) — existing logic extended with bool support
+                        var val = prop.Value.ValueKind == JsonValueKind.String
+                            ? prop.Value.GetString() ?? ""
+                            : prop.Value.ValueKind == JsonValueKind.True ? "Yes"
+                            : prop.Value.ValueKind == JsonValueKind.False ? "No"
+                            : prop.Value.ToString();
+                        if (!string.IsNullOrWhiteSpace(val))
+                            dto.Vals[FormatLabel(prop.Name)] = val;
+                    }
                 }
             }
             else if (section.Value.ValueKind == JsonValueKind.String ||
-                     section.Value.ValueKind == JsonValueKind.Number)
+                     section.Value.ValueKind == JsonValueKind.Number ||
+                     section.Value.ValueKind == JsonValueKind.True ||
+                     section.Value.ValueKind == JsonValueKind.False)
             {
                 var val = section.Value.ValueKind == JsonValueKind.String
-                    ? section.Value.GetString() ?? "" : section.Value.ToString();
+                    ? section.Value.GetString() ?? ""
+                    : section.Value.ValueKind == JsonValueKind.True ? "Yes"
+                    : section.Value.ValueKind == JsonValueKind.False ? "No"
+                    : section.Value.ToString();
                 if (!string.IsNullOrWhiteSpace(val))
                     dto.Vals[FormatLabel(section.Name)] = val;
             }
