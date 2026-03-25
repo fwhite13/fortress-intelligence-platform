@@ -4,6 +4,7 @@
 @using MudBlazor
 @inject IIntakeResponseService IntakeService
 @inject ISnackbar Snackbar
+@implements IDisposable
 
 <div class="intake-producer-layout">
     <MudText Typo="Typo.h5" Class="mb-4">Intake Questionnaire — @OpportunityId</MudText>
@@ -57,5 +58,11 @@
         };
         _debounce.AutoReset = false;
         _debounce.Start();
+    }
+
+    public void Dispose()
+    {
+        _debounce?.Stop();
+        _debounce?.Dispose();
     }
 }

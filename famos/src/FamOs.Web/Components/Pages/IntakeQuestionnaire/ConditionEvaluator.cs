@@ -14,7 +14,10 @@ public class ConditionEvaluator
     {
         if (string.IsNullOrWhiteSpace(condition)) return true;
         // OR: split on " or " (case-insensitive), any true → visible
-        var parts = condition.Split(new[] { " or " }, StringSplitOptions.RemoveEmptyEntries);
+        var parts = System.Text.RegularExpressions.Regex.Split(
+            condition,
+            @"\s+or\s+",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         return parts.Any(EvaluateSingle);
     }
 
