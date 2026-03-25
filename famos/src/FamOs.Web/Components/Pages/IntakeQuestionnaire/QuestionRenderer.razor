@@ -21,7 +21,7 @@
         {
             case "text":
                 <MudTextField T="string" Value="@CurrentValue" ValueChanged="@OnValueChanged"
-                              Placeholder="@Element["placeholder"]?.GetValue<string>()"
+                              Placeholder="@(Element["placeholder"]?.GetValue<string>())"
                               InputType="@GetInputType(Element)" Variant="Variant.Outlined" />
                 break;
             case "radiogroup":
@@ -58,7 +58,7 @@
                 <MudCheckBox T="bool"
                              Value="@(CurrentValue == "true")"
                              ValueChanged="@(v => OnValueChanged.InvokeAsync(v ? "true" : "false"))"
-                             Label="@Element["labelTrue"]?.GetValue<string>()" />
+                             Label="@(Element["labelTrue"]?.GetValue<string>())" />
                 break;
             case "matrixdropdown":
             case "matrix":

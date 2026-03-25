@@ -27,7 +27,7 @@
                 <QuestionRenderer Element="@child"
                                   CurrentValue="@GetValue(childFc)"
                                   OnValueChanged="@(v => HandleChange(childFc, v))"
-                                  IsVisible="@Evaluator.Evaluate(child["visibleIf"]?.GetValue<string>())" />
+                                  IsVisible="@(Evaluator.Evaluate(child["visibleIf"]?.GetValue<string>()))" />
             }
         }
         else
@@ -36,7 +36,7 @@
             <QuestionRenderer Element="@el"
                               CurrentValue="@GetValue(fc)"
                               OnValueChanged="@(v => HandleChange(fc, v))"
-                              IsVisible="@Evaluator.Evaluate(el["visibleIf"]?.GetValue<string>())" />
+                              IsVisible="@(Evaluator.Evaluate(el["visibleIf"]?.GetValue<string>()))" />
         }
     }
 </div>
