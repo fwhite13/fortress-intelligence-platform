@@ -121,7 +121,20 @@ public class DatabaseInitializationService : IHostedService
     pushed_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     UNIQUE KEY uq_push (meeting_id, doc_type, kb_scope),
     INDEX idx_meeting (meeting_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;")
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"),
+                ("firm_bot_installations", @"CREATE TABLE IF NOT EXISTS firm_bot_installations (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    team_id VARCHAR(255) NOT NULL,
+    team_name VARCHAR(255) NOT NULL,
+    channel_id VARCHAR(255) NOT NULL,
+    channel_name VARCHAR(255) NOT NULL,
+    conversation_reference JSON NOT NULL,
+    service_url VARCHAR(500) NOT NULL,
+    tenant_id VARCHAR(128) NOT NULL,
+    installed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_bot_install (team_id, channel_id),
+    INDEX idx_bi_team (team_id)
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 
             foreach (var (name, sql) in extraTables)

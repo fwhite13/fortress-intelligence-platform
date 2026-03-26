@@ -6,6 +6,8 @@ using MySqlConnector;
 using MudBlazor.Services;
 using FortressIntelligenceRM.Web.Data;
 using FortressIntelligenceRM.Web.Services;
+using Microsoft.Bot.Builder;
+using Microsoft.Bot.Builder.Integration.AspNet.Core;
 using Amazon.ECS;
 using Amazon.S3;
 
@@ -51,6 +53,10 @@ builder.Services.AddScoped<MeetingService>();
 builder.Services.AddScoped<VpBotService>();
 builder.Services.AddScoped<S3Service>();
 builder.Services.AddScoped<FirmKbService>();
+// Bot Framework
+builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();
+builder.Services.AddTransient<IBot, FirmBot>();
+builder.Services.AddSingleton<IFirmBotService, FirmBotService>();
 builder.Services.AddHttpClient();
 
 // AWS SDK services
