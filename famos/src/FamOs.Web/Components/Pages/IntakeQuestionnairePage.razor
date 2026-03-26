@@ -5,6 +5,11 @@
 @namespace FamOs.Web.Components.Pages
 @using FamOs.Web.Components.Pages.IntakeQuestionnaire
 
+<HeadContent>
+    <title>TIG Insurance Application</title>
+    <link rel="stylesheet" href="css/intake-standalone.css" />
+</HeadContent>
+
 <IntakeQuestionnaire Mode="QuestionnaireMode.Prospect" OpportunityId="@(OpportunityId ?? "")" />
 
 @code {

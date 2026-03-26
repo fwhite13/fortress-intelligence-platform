@@ -1,46 +1,26 @@
 @inherits LayoutComponentBase
 @namespace FamOs.Web.Components.Layout
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <base href="/" />
-    <title>TIG Insurance Application</title>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Fraunces:wght@600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
-    <link rel="stylesheet" href="/_content/FipShared/css/fip-tokens.css" />
-    <link rel="stylesheet" href="/css/famos.css" />
-    <link rel="stylesheet" href="FamOs.Web.styles.css" />
-    <link rel="stylesheet" href="css/intake-standalone.css" />
-</head>
-<body>
-    <div class="intake-standalone-root">
-        <header class="intake-standalone-header">
-            <div class="intake-standalone-header-inner">
-                <div class="intake-standalone-brand">
-                    <div class="intake-tig-logo-box">
-                        <img src="images/affinity/tig-logo.svg" class="intake-tig-logo" alt="TIG Insurance Group" />
-                    </div>
-                    <span class="intake-standalone-brand-name">Titan Insurance Group</span>
+<div class="intake-standalone-root">
+    <header class="intake-standalone-header">
+        <div class="intake-standalone-header-inner">
+            <div class="intake-standalone-brand">
+                <div class="intake-tig-logo-box">
+                    <img src="images/affinity/tig-logo.svg" class="intake-tig-logo" alt="TIG Insurance Group" />
                 </div>
+                <span class="intake-standalone-brand-name">Titan Insurance Group</span>
             </div>
-        </header>
-        <main class="intake-standalone-main">
-            @Body
-        </main>
-        <footer class="intake-standalone-footer">
-            <p>© @DateTime.UtcNow.Year TIG Insurance Group. Secure application. Questions? Call us at 1-800-TIG-TRUCK.</p>
-        </footer>
-    </div>
+        </div>
+    </header>
+    <main class="intake-standalone-main">
+        @Body
+    </main>
+    <footer class="intake-standalone-footer">
+        <p>© @DateTime.UtcNow.Year TIG Insurance Group. Secure application. Questions? Call us at 1-800-TIG-TRUCK.</p>
+    </footer>
+</div>
 
-    <MudThemeProvider />
-    <MudPopoverProvider />
-    <MudDialogProvider />
-    <MudSnackbarProvider />
-
-    <script src="_framework/blazor.server.js"></script>
-    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
-</body>
-</html>
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />

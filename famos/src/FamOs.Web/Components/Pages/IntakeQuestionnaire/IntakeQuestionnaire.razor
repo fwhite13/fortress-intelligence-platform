@@ -53,7 +53,7 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || Mode != QuestionnaireMode.Prospect) return;
+        if (!firstRender || Mode != QuestionnaireMode.Prospect || _authenticated) return;
 
         var options = new DialogOptions { CloseButton = false, BackdropClick = false };
         var parameters = new DialogParameters { ["OpportunityId"] = OpportunityId };
