@@ -28,10 +28,21 @@
     gap: 12px;
 }
 
-.intake-tig-logo {
-    width: 40px;
-    height: 40px;
+.intake-tig-logo-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: white;
+    border: 2px solid #cc0008; /* TIG red */
+    border-radius: 6px;
+    padding: 6px 10px;
     flex-shrink: 0;
+}
+
+.intake-tig-logo {
+    height: 36px;
+    width: auto;
+    display: block;
 }
 
 .intake-standalone-brand-name {
@@ -39,14 +50,6 @@
     font-weight: 700;
     color: var(--color-surface);
     letter-spacing: -0.01em;
-}
-
-.intake-standalone-tagline {
-    font-size: 13px;
-    color: var(--fortress-gold);
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
 }
 
 .intake-standalone-main {
