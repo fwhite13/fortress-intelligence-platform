@@ -1,0 +1,21 @@
+@namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
+
+<div class="intake-welcome-card">
+    <img src="images/affinity/tig-logo.svg" class="intake-welcome-logo" alt="TIG Insurance Group" />
+
+    <h2 class="intake-welcome-title">Welcome to the Titan Insurance Group Trucking Coverage Intake Questionnaire</h2>
+
+    <div class="intake-welcome-body">
+        <p>Thank you for choosing Titan Insurance Group for your trucking coverage needs. This intake questionnaire helps us understand your operation so we can match you with the right coverage options.</p>
+        <p>The questionnaire covers your business details, fleet information, driver history, safety practices, and coverage preferences. Most applicants complete it in 15–20 minutes.</p>
+        <p>Your progress is saved automatically — if you need to step away, you can return where you left off at any time using the same link.</p>
+    </div>
+
+    <div class="intake-welcome-cta">
+        <button class="wiz-btn-next" style="min-width: 200px;" @onclick="OnBegin">Begin →</button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnBegin { get; set; }
+}

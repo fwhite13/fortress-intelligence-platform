@@ -1,0 +1,47 @@
+@namespace FamOs.Web.Components.Pages.IntakeQuestionnaire
+
+<div class="intake-docupload-card">
+    <h2 class="intake-welcome-title">Upload Supporting Documents</h2>
+
+    <p class="intake-welcome-body">
+        To help us get started, you may optionally upload copies of your loss run history or current policy documents. We'll use them to automatically pre-fill as much of the questionnaire as possible — the more you provide, the less you'll need to fill in manually.
+    </p>
+    <p class="intake-welcome-body">
+        You can upload documents now or proceed directly to the questionnaire and complete it manually. Either way, your answers are saved as you go.
+    </p>
+    <p style="font-style: italic; font-size: 13px; color: var(--color-text-muted); margin-bottom: 16px;">
+        Accepted: PDF, images (JPG, PNG). Multiple files supported.
+    </p>
+
+    <div class="intake-upload-zone" disabled>
+        <span style="font-size: 32px;">📄</span>
+        <p style="margin: 8px 0 0;">Click to upload or drag and drop</p>
+    </div>
+
+    <h3 style="font-size: 15px; font-weight: 600; color: var(--fortress-navy); margin: 24px 0 8px;">Submitted Documents</h3>
+
+    <table class="intake-docs-table">
+        <thead>
+            <tr>
+                <th>Carrier</th>
+                <th>Type</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Progressive Commercial</td>
+                <td>Policy Document</td>
+                <td><span class="intake-status-badge">✓ Processed</span></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="intake-welcome-cta">
+        <button class="wiz-btn-next" style="min-width: 240px;" @onclick="OnProceed">Start the Questionnaire →</button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnProceed { get; set; }
+}
