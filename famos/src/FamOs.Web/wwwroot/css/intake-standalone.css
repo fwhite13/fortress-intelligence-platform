@@ -146,10 +146,18 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    /* Hide labels on inactive steps — too cramped at 17 steps */
+    display: none;
 }
 
-.wiz-progress-step.current .wiz-step-label { color: var(--fortress-navy); font-weight: 600; }
-.wiz-progress-step.completed .wiz-step-label { color: var(--color-text-secondary); }
+/* Only show label on current step */
+.wiz-progress-step.current .wiz-step-label {
+    display: block;
+    color: var(--fortress-navy);
+    font-weight: 600;
+}
+
+.wiz-progress-step.completed .wiz-step-label { display: none; }
 
 /* Connector lines */
 .wiz-progress-step:not(:last-child)::after {
