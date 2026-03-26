@@ -1061,7 +1061,12 @@ app.MapGet("/auth/logout", async (HttpContext ctx) =>
 
 // ── Blazor Server ──
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    .AllowAnonymous(); // Required: FallbackPolicy=DefaultPolicy blocks /_framework/blazor.server.js
+                       // and /_blazor SignalR hub for unauthenticated users, breaking the Blazor
+                       // circuit on [AllowAnonymous] pages. AllowAnonymous here covers all
+                       // framework-level Blazor requests without disabling auth on app routes —
+                       // [Authorize] on individual pages/components still enforces access control.
 
 app.Run();
 
