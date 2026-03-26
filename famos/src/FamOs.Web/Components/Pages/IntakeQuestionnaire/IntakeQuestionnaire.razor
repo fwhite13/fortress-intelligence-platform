@@ -36,7 +36,7 @@ else
     [Parameter, EditorRequired] public string OpportunityId { get; set; } = "";
 
     private IEnumerable<JsonObject>? _pages;
-    private bool _authenticated = false;
+    private bool _authenticated = true; // TODO: re-enable OTP auth after wizard UX is validated
     private bool _completed = false;
     private long _sessionId;
     private int _currentPageIndex = 0;
