@@ -200,7 +200,7 @@
         };
         var dialog = await DialogService.ShowAsync<JoinMeetingDialog>("Join a Meeting", options);
         var result = await dialog.Result;
-        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?> data)
+        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?> data)
         {
             await JoinMeetingWithParams(data.Item1, data.Item2);
         }

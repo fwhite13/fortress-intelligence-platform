@@ -5,10 +5,53 @@
         <MudText Typo="Typo.h6" Style="color: var(--color-text-primary);">Join a Meeting</MudText>
     </TitleContent>
     <DialogContent>
-        <MudTextField @bind-Value="MeetingUrl" Label="Teams Meeting URL"
+        <MudTextField @bind-Value="MeetingUrl" Label="Meeting URL"
                       Style="color: var(--color-text-primary);" Variant="Variant.Outlined"
                       Placeholder="https://teams.microsoft.com/l/meetup-join/..."
                       Required Class="mb-3" />
+
+        @if (!string.IsNullOrWhiteSpace(MeetingUrl))
+        {
+            @if (DetectMode(MeetingUrl) == "A")
+            {
+                <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Videocam">
+                    <strong>Teams meeting detected — Mode A (Native Transcript)</strong><br/>
+                    No bot will join. Transcript is fetched directly from Teams after the meeting ends.
+                </MudAlert>
+            }
+            else if (DetectMode(MeetingUrl) == "B")
+            {
+                var platformLabel = DetectPlatform(MeetingUrl) == "zoom" ? "Zoom" : "Google Meet";
+                <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.SmartToy">
+                    <strong>@platformLabel meeting detected — Mode B (VP Bot)</strong><br/>
+                    A bot will appear as "Fortress Notetaker" in your meeting.
+                </MudAlert>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Warning">
+                    Platform not detected — verify URL and try again.
+                </MudAlert>
+            }
+        }
+
+        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _showOverride = !_showOverride)"
+                   Style="color: var(--color-text-secondary);" Class="mb-2">
+            @(_showOverride ? "Hide Override ▲" : "Override ▾")
+        </MudButton>
+
+        @if (_showOverride)
+        {
+            <MudSelect @bind-Value="_platformOverride" Label="Platform Override" Variant="Variant.Outlined"
+                       Class="mb-3" Style="color: var(--color-text-primary);">
+                <MudSelectItem Value="@("auto")">Auto-detect</MudSelectItem>
+                <MudSelectItem Value="@("teams-native")">Teams Native (Mode A)</MudSelectItem>
+                <MudSelectItem Value="@("teams-bot")">Teams Bot (Mode B)</MudSelectItem>
+                <MudSelectItem Value="@("zoom")">Zoom Bot (Mode B)</MudSelectItem>
+                <MudSelectItem Value="@("meet")" Disabled="true">Google Meet Bot (coming soon)</MudSelectItem>
+            </MudSelect>
+        }
+
         <MudTextField @bind-Value="MeetingTitle" Label="Meeting Title (optional)"
                       Style="color: var(--color-text-primary);" Variant="Variant.Outlined" />
     </DialogContent>
@@ -28,6 +71,34 @@
     [Parameter] public string MeetingUrl { get; set; } = "";
     [Parameter] public string? MeetingTitle { get; set; }
 
-    private void Submit() => MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle)));
+    private bool _showOverride = false;
+    private string _platformOverride = "auto";
+
+    private string DetectPlatform(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return "unknown";
+        if (url.Contains("teams.microsoft.com")) return "teams";
+        if (url.Contains("zoom.us/j/")) return "zoom";
+        if (url.Contains("meet.google.com/")) return "meet";
+        return "unknown";
+    }
+
+    private string? DetectMode(string url)
+    {
+        var platform = DetectPlatform(url);
+        return platform == "teams" ? "A" : (platform == "unknown" ? null : "B");
+    }
+
+    private void Submit()
+    {
+        var effectivePlatform = _platformOverride == "auto"
+            ? DetectPlatform(MeetingUrl)
+            : _platformOverride.Replace("teams-native", "teams").Replace("teams-bot", "teams");
+        var effectiveMode = _platformOverride == "auto"
+            ? DetectMode(MeetingUrl)
+            : (_platformOverride == "teams-native" ? "A" : "B");
+        MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle, effectivePlatform, effectiveMode)));
+    }
+
     private void Cancel() => MudDialog.Cancel();
 }

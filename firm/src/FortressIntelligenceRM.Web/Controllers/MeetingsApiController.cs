@@ -75,6 +75,9 @@ public class MeetingsApiController : ControllerBase
         var meeting = await _meetingService.CreateMeetingAsync(firmUser.Id, request.MeetingUrl, request.Title);
 
         // Trigger bot (fire and forget — don't fail the response if ECS isn't configured)
+        // TODO (Mode A): When TeamsGraphService is implemented, detect platform here and route to
+        // Mode A (native Teams transcript fetch) vs Mode B (VP bot). Mode A completion must call
+        // FAIT /api/firm/meeting-complete the same way as Mode B does in VpCallback. See ADO#1232.
         _ = _vpBotService.TriggerBotAsync(meeting.Id, request.MeetingUrl);
 
         return Ok(new { meetingId = meeting.Id });

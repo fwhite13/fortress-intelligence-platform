@@ -20,7 +20,7 @@ public class VpBotService
         _meetingService = meetingService;
     }
 
-    public async Task<string?> TriggerBotAsync(long meetingId, string meetingUrl)
+    public async Task<string?> TriggerBotAsync(long meetingId, string meetingUrl, string platform = "teams")
     {
         var taskDef = _config["Firm:VpBotTaskDefinition"];
         var cluster = _config["Firm:EcsCluster"];
@@ -65,7 +65,10 @@ public class VpBotService
                                 new() { Name = "MEETING_ID", Value = meetingId.ToString() },
                                 new() { Name = "MEETING_URL", Value = meetingUrl },
                                 new() { Name = "BOT_DISPLAY_NAME", Value = "Fortress Notetaker" },
-                                new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret }
+                                new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret },
+                                new() { Name = "MEETING_PLATFORM", Value = platform },
+                                new() { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },
+                                new() { Name = "AWS_REGION", Value = "us-east-1" }
                             }
                         }
                     }
