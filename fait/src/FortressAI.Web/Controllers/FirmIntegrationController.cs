@@ -7,6 +7,7 @@ using FortressAI.Web.Data;
 using FortressAI.Web.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using FortressAI.Shared.Models;
 
 namespace FortressAI.Web.Controllers;
 
@@ -24,6 +25,8 @@ public class FirmIntegrationController : ControllerBase
     private readonly IAmazonBedrockAgent _bedrockAgent;
     private readonly IConfiguration _config;
     private readonly ILogger<FirmIntegrationController> _logger;
+    private readonly ForgeService _forgeService;
+    private readonly KbDocumentService _kbDocumentService;
 
     private string BucketName => _config["Firm:KbS3Bucket"] ?? "fortress-tools";
     private string PersonalKbId => _config["KnowledgeBase:PersonalKbId"] ?? "ZCEZCJGHQC";
@@ -34,13 +37,17 @@ public class FirmIntegrationController : ControllerBase
         IAmazonS3 s3,
         IAmazonBedrockAgent bedrockAgent,
         IConfiguration config,
-        ILogger<FirmIntegrationController> logger)
+        ILogger<FirmIntegrationController> logger,
+        ForgeService forgeService,
+        KbDocumentService kbDocumentService)
     {
         _dbFactory = dbFactory;
         _s3 = s3;
         _bedrockAgent = bedrockAgent;
         _config = config;
         _logger = logger;
+        _forgeService = forgeService;
+        _kbDocumentService = kbDocumentService;
     }
 
     /// <summary>
@@ -96,6 +103,41 @@ public class FirmIntegrationController : ControllerBase
 
         _logger.LogInformation("FirmIntegration: Resolved entraOid {OID} → FAIT user {UserId}", entraOid, user.Id);
         return Ok(new { userId = user.Id.ToString() });
+    }
+
+    /// <summary>
+    /// GET /api/firm/user-teams?entraOid={oid}
+    /// Returns list of KB teams the user belongs to.
+    /// Protected by X-Firm-Secret header.
+    /// </summary>
+    [HttpGet("user-teams")]
+    public async Task<IActionResult> GetUserTeams([FromQuery] string entraOid)
+    {
+        var expectedSecret = _config["Firm:SharedSecret"] ?? "";
+        var providedSecret = Request.Headers["X-Firm-Secret"].FirstOrDefault() ?? "";
+        if (string.IsNullOrEmpty(expectedSecret) || providedSecret != expectedSecret)
+        {
+            _logger.LogWarning("FirmIntegration: user-teams rejected — invalid X-Firm-Secret");
+            return Unauthorized(new { error = "Invalid or missing X-Firm-Secret" });
+        }
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var user = await db.Users
+            .Where(u => u.IsEntraUser && u.IsActive)
+            .OrderByDescending(u => u.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (user == null)
+            return NotFound(new { error = "No matching FAIT user found for this Entra OID" });
+
+        var teams = await _forgeService.GetUserTeamsAsync(user.Id);
+        var memberships = teams.Select(t =>
+        {
+            var member = t.Members.FirstOrDefault(m => m.UserId == user.Id);
+            return new UserTeamDto(t.Id, t.Name, member?.Role.ToString() ?? "Member");
+        }).ToList();
+
+        return Ok(memberships);
     }
 
     /// <summary>
@@ -187,6 +229,50 @@ public class FirmIntegrationController : ControllerBase
             _logger.LogDebug("FirmIntegration: User {UserId} has auto-add disabled — skipping KB push for meeting {MeetingId}", user.Id, payload.MeetingId);
         }
 
+        // Team KB pushes (best-effort — failures must NOT affect 200 response)
+        if (payload.TeamKbPushes?.Count > 0)
+        {
+            foreach (var push in payload.TeamKbPushes)
+            {
+                try
+                {
+                    if (push.DocType is "transcript" or "both" && !string.IsNullOrWhiteSpace(payload.TranscriptText))
+                    {
+                        var key = $"kb-docs/team/{push.TeamId}/firm-transcript-{payload.MeetingId}.txt";
+                        await _s3.PutObjectAsync(new PutObjectRequest
+                        {
+                            BucketName = BucketName,
+                            Key = key,
+                            ContentBody = payload.TranscriptText,
+                            ContentType = "text/plain"
+                        });
+                    }
+
+                    if (push.DocType is "summary" or "both" && !string.IsNullOrWhiteSpace(payload.SummaryText))
+                    {
+                        var key = $"kb-docs/team/{push.TeamId}/firm-summary-{payload.MeetingId}.md";
+                        await _s3.PutObjectAsync(new PutObjectRequest
+                        {
+                            BucketName = BucketName,
+                            Key = key,
+                            ContentBody = payload.SummaryText,
+                            ContentType = "text/markdown"
+                        });
+                    }
+
+                    // Trigger shared team KB ingestion
+                    await _kbDocumentService.StartIngestionAsync(KbTier.Team);
+
+                    _logger.LogInformation("FirmIntegration: Team KB push complete: team={TeamId} docType={DocType}",
+                        push.TeamId, push.DocType);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "FirmIntegration: Team KB push failed for team {TeamId} (non-fatal)", push.TeamId);
+                }
+            }
+        }
+
         return Ok(new { success = true });
     }
 
@@ -251,4 +337,13 @@ public class FirmMeetingCompletePayload
     public long MeetingId { get; set; }
     public string? TranscriptText { get; set; }
     public string? SummaryText { get; set; }
+    public List<TeamKbPushRequest>? TeamKbPushes { get; set; }
 }
+
+public class TeamKbPushRequest
+{
+    public int TeamId { get; set; }
+    public string DocType { get; set; } = "transcript"; // "transcript" | "summary" | "both"
+}
+
+public record UserTeamDto(int Id, string Name, string Role);
