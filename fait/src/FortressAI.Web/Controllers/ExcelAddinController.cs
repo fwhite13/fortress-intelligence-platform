@@ -44,6 +44,9 @@ public class ExcelAddinController : ControllerBase
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
+        var oidClaim = User.FindFirst("oid")?.Value
+            ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
         // Look up existing Entra user by email
         var user = await db.Users.FirstOrDefaultAsync(
             u => u.IsEntraUser && u.Email == email);
@@ -60,12 +63,21 @@ public class ExcelAddinController : ControllerBase
                 IsActive    = true,
                 Role        = "user",
                 CreatedAt   = DateTime.UtcNow,
+                EntraOid    = oidClaim,
             };
             db.Users.Add(user);
             await db.SaveChangesAsync();
             _logger.LogInformation(
                 "ExcelAddin: Provisioned new Entra user {Email} as FAIT user {Id}",
                 email, user.Id);
+        }
+
+        // Backfill EntraOid for existing users who were provisioned before ADO#1240
+        if (user.EntraOid == null && oidClaim != null)
+        {
+            user.EntraOid = oidClaim;
+            await db.SaveChangesAsync();
+            _logger.LogInformation("ExcelAddin: Backfilled EntraOid for user {Id}", user.Id);
         }
 
         return Ok(new

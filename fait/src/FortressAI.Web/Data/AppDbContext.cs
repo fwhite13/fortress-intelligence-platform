@@ -55,6 +55,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
             entity.Property(e => e.IsEntraUser).HasColumnName("is_entra_user").HasDefaultValue(false);
+            entity.Property(e => e.EntraOid).HasColumnName("entra_oid").HasMaxLength(255);
         });
 
         modelBuilder.Entity<Project>(entity =>

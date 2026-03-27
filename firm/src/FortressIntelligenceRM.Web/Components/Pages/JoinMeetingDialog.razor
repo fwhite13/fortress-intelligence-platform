@@ -2,7 +2,7 @@
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6" Style="color: var(--color-text-primary);">Join a Meeting</MudText>
+        <MudText Typo="Typo.h6" Style="color: var(--color-text-primary);">Add a Meeting</MudText>
     </TitleContent>
     <DialogContent>
         <MudTextField @bind-Value="MeetingUrl" Label="Meeting URL"
@@ -54,6 +54,19 @@
 
         <MudTextField @bind-Value="MeetingTitle" Label="Meeting Title (optional)"
                       Style="color: var(--color-text-primary);" Variant="Variant.Outlined" />
+
+        <MudText Typo="Typo.body2" Class="mt-3 mb-1" Style="color: var(--color-text-secondary);">
+            Schedule for later (optional)
+        </MudText>
+        <div class="d-flex gap-2">
+            <MudDatePicker @bind-Date="_startDate" Label="Date" Variant="Variant.Outlined"
+                           Class="flex-1" MinDate="DateTime.Today" />
+            <MudTimePicker @bind-Time="_startTime" Label="Time" Variant="Variant.Outlined"
+                           Class="flex-1" AmPm="true" />
+        </div>
+        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+            Leave blank to join now
+        </MudText>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" Style="color: var(--color-text-secondary);">Cancel</MudButton>
@@ -83,6 +96,17 @@
     private bool _showOverride = false;
     private string _platformOverride = "auto";
 
+    private DateTime? _startDate;
+    private TimeSpan? _startTime;
+
+    private DateTime? GetStartDatetime()
+    {
+        if (_startDate == null) return null;
+        var date = _startDate.Value.Date;
+        var time = _startTime ?? TimeSpan.Zero;
+        return DateTime.SpecifyKind(date + time, DateTimeKind.Local).ToUniversalTime();
+    }
+
     private string DetectPlatform(string url)
     {
         if (string.IsNullOrWhiteSpace(url)) return "unknown";
@@ -106,7 +130,8 @@
         var effectiveMode = _platformOverride == "auto"
             ? DetectMode(MeetingUrl)
             : (_platformOverride == "teams-native" ? "A" : "B");
-        MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle, effectivePlatform, effectiveMode)));
+        var startDatetime = GetStartDatetime();
+        MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle, effectivePlatform, effectiveMode, startDatetime)));
     }
 
     private void Cancel() => MudDialog.Cancel();

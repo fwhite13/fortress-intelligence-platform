@@ -20,7 +20,7 @@
         <MudText Typo="Typo.h5" Style="color: var(--color-text-primary); font-weight: 600;">My Meetings</MudText>
         <MudSpacer />
         <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;" OnClick="OpenJoinDialog">
-            Join a Meeting
+            Add a Meeting
         </MudButton>
     </MudStack>
 
@@ -86,7 +86,7 @@
             <MudIcon Icon="@Icons.Material.Filled.VideoCall" Style="color: var(--color-border); font-size: 64px;" />
             <MudText Typo="Typo.h6" Class="mt-4" Style="color: var(--color-text-secondary);">No meetings yet.</MudText>
             <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);" Class="mt-2">
-                Click "Join a Meeting" to get started.
+                Click "Add a Meeting" to get started.
             </MudText>
         </MudPaper>
     }
@@ -296,9 +296,9 @@
         };
         var dialog = await DialogService.ShowAsync<JoinMeetingDialog>("New Meeting", parameters, options);
         var result = await dialog.Result;
-        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?> data)
+        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?, DateTime?> data)
         {
-            await JoinMeetingWithParams(data.Item1, data.Item2);
+            await JoinMeetingWithParams(data.Item1, data.Item2, data.Item5);
         }
     }
 
@@ -337,15 +337,15 @@
             MaxWidth = MaxWidth.Small,
             FullWidth = true
         };
-        var dialog = await DialogService.ShowAsync<JoinMeetingDialog>("Join a Meeting", options);
+        var dialog = await DialogService.ShowAsync<JoinMeetingDialog>("Add a Meeting", options);
         var result = await dialog.Result;
-        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?> data)
+        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?, DateTime?> data)
         {
-            await JoinMeetingWithParams(data.Item1, data.Item2);
+            await JoinMeetingWithParams(data.Item1, data.Item2, data.Item5);
         }
     }
 
-    private async Task JoinMeetingWithParams(string meetingUrl, string? meetingTitle)
+    private async Task JoinMeetingWithParams(string meetingUrl, string? meetingTitle, DateTime? startDatetime = null)
     {
         if (string.IsNullOrWhiteSpace(meetingUrl)) return;
         _joining = true;
@@ -354,10 +354,16 @@
         {
             var http = HttpClientFactory.CreateClient();
             var uri = Navigation.ToAbsoluteUri("/api/meetings/join");
-            var response = await http.PostAsJsonAsync(uri, new { meetingUrl = meetingUrl, title = meetingTitle });
+            var response = await http.PostAsJsonAsync(uri, new
+            {
+                meetingUrl = meetingUrl,
+                title = meetingTitle,
+                startDatetime = startDatetime?.ToString("O")
+            });
             if (response.IsSuccessStatusCode)
             {
-                Snackbar.Add("Bot is joining the meeting!", Severity.Success);
+                var isFuture = startDatetime.HasValue && startDatetime.Value > DateTime.UtcNow.AddMinutes(5);
+                Snackbar.Add(isFuture ? "Meeting scheduled!" : "Bot is joining the meeting!", Severity.Success);
                 await LoadMeetings();
             }
             else

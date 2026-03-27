@@ -355,14 +355,29 @@ public class FirmIntegrationController : ControllerBase
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        // AppUser doesn't have EntraOid column yet — use same workaround as resolve-user endpoint
-        // (single-tenant: first active Entra user). TODO: add EntraOid to AppUser for multi-user accuracy.
+        // Try exact EntraOid match first (populated since ADO#1240)
         var user = await db.Users
-            .Where(u => u.IsEntraUser && u.IsActive)
-            .OrderByDescending(u => u.CreatedAt)
+            .Where(u => u.EntraOid == entraOid && u.IsActive)
             .FirstOrDefaultAsync();
+
+        // Fallback for users created before EntraOid was added:
+        // find active Entra user — works for single-tenant
         if (user == null)
+        {
+            user = await db.Users
+                .Where(u => u.IsEntraUser && u.IsActive)
+                .OrderByDescending(u => u.CreatedAt)
+                .FirstOrDefaultAsync();
+            _logger.LogInformation("FirmIntegration: calendar-events — EntraOid lookup missed for {OID}, fell back to latest Entra user {UserId}", entraOid, user?.Id);
+        }
+
+        if (user == null)
+        {
+            _logger.LogWarning("FirmIntegration: calendar-events — no Entra user found for OID {OID}", entraOid);
             return Ok(new List<object>());
+        }
+
+        _logger.LogInformation("FirmIntegration: calendar-events — resolved OID {OID} → user {UserId}", entraOid, user.Id);
 
         var now = DateTime.UtcNow;
         var end = now.AddDays(7);

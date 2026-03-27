@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace FortressAI.Shared.Models;
 
 public class AppUser
@@ -11,6 +13,9 @@ public class AppUser
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastLogin { get; set; }
+
+    [MaxLength(255)]
+    public string? EntraOid { get; set; }
 
     // Navigation
     public List<Project> Projects { get; set; } = new();

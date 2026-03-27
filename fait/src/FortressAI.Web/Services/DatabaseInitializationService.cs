@@ -358,6 +358,7 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE conversations DROP COLUMN EnableTeamKbId",
                 "ALTER TABLE users ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1",
                 "ALTER TABLE users ADD COLUMN is_entra_user TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE users ADD COLUMN entra_oid VARCHAR(255) NULL",
                 // Fix mcp_tool_call_log JSON columns — MySQL JSON rejects non-JSON plain text output
                 "ALTER TABLE mcp_tool_call_log MODIFY COLUMN input_json LONGTEXT",
                 "ALTER TABLE mcp_tool_call_log MODIFY COLUMN output_json LONGTEXT",

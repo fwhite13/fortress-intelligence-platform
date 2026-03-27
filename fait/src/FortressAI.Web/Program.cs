@@ -209,11 +209,20 @@ builder.Services.AddAuthentication(options =>
                 .GetRequiredService<IDbContextFactory<FortressAI.Web.Data.AppDbContext>>();
             await using var db = await dbFactory.CreateDbContextAsync();
 
+            var oidClaim = ctx.Principal?.FindFirst("oid")?.Value
+                ?? ctx.Principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
             var user = await db.Users.FirstOrDefaultAsync(
                 u => u.IsEntraUser && u.Email == email);
 
             if (user != null)
             {
+                // Backfill EntraOid if missing (users created before ADO#1240)
+                if (user.EntraOid == null && oidClaim != null)
+                {
+                    user.EntraOid = oidClaim;
+                    await db.SaveChangesAsync();
+                }
                 // Inject the FAIT userId as NameIdentifier so controllers get the right userId
                 var identity = ctx.Principal!.Identity as System.Security.Claims.ClaimsIdentity;
                 var existing = identity?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
