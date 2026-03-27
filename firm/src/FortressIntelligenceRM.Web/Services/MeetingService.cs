@@ -20,7 +20,7 @@ public class MeetingService
         _httpClientFactory = httpClientFactory;
     }
 
-    public async Task<List<FirmMeeting>> GetMeetingsAsync(Guid userId)
+    public async Task<List<FirmMeeting>> GetMeetingsAsync(string userId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.Meetings
@@ -29,7 +29,7 @@ public class MeetingService
             .ToListAsync();
     }
 
-    public async Task<FirmMeeting?> GetMeetingAsync(long id, Guid userId)
+    public async Task<FirmMeeting?> GetMeetingAsync(long id, string userId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.Meetings
@@ -39,7 +39,7 @@ public class MeetingService
             .FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == userId);
     }
 
-    public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null)
+    public async Task<FirmMeeting> CreateMeetingAsync(string userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = new FirmMeeting
@@ -96,7 +96,7 @@ public class MeetingService
         {
             user = new FirmUser
             {
-                Id = Guid.NewGuid(),
+                Id = Guid.NewGuid().ToString(),
                 EntraOid = entraOid,
                 Email = email,
                 DisplayName = displayName,

@@ -27,7 +27,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
         {
             entity.ToTable("firm_users");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnType("char(36)").HasConversion<string>();
+            entity.Property(e => e.Id).HasColumnType("char(36)");
             entity.HasIndex(e => e.EntraOid).IsUnique();
             entity.HasIndex(e => e.Email).IsUnique();
             entity.Property(e => e.EntraOid).HasColumnName("entra_oid").HasMaxLength(128).IsRequired();
@@ -60,7 +60,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.AudioS3Key).HasColumnName("audio_s3_key").HasMaxLength(1000);
             entity.Property(e => e.TranscriptS3Key).HasColumnName("transcript_s3_key").HasMaxLength(1000);
             entity.Property(e => e.BotTaskArn).HasColumnName("bot_task_arn").HasMaxLength(500);
-            entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasColumnType("char(36)").HasConversion<string>();
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasColumnType("char(36)");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.TranscriptKbPushed).HasColumnName("transcript_kb_pushed").HasDefaultValue(false);

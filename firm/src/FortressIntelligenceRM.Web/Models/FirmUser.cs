@@ -4,7 +4,7 @@ namespace FortressIntelligenceRM.Web.Models;
 
 public class FirmUser
 {
-    public Guid Id { get; set; }
+    public string Id { get; set; } = "";
     [MaxLength(128)]
     public string EntraOid { get; set; } = "";
     [MaxLength(256)]

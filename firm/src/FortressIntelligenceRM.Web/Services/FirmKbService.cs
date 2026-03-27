@@ -39,7 +39,7 @@ public class FirmKbService
     }
 
     /// <summary>Push meeting transcript to the user's personal KB in S3, then trigger Bedrock ingestion.</summary>
-    public async Task PushTranscriptAsync(long meetingId, Guid userId, string faitUserId)
+    public async Task PushTranscriptAsync(long meetingId, string userId, string faitUserId)
     {
         if (string.IsNullOrWhiteSpace(faitUserId))
         {
@@ -102,7 +102,7 @@ public class FirmKbService
     }
 
     /// <summary>Push meeting summary to the user's personal KB in S3, then trigger Bedrock ingestion.</summary>
-    public async Task PushSummaryAsync(long meetingId, Guid userId, string faitUserId)
+    public async Task PushSummaryAsync(long meetingId, string userId, string faitUserId)
     {
         if (string.IsNullOrWhiteSpace(faitUserId))
         {
@@ -192,7 +192,7 @@ public class FirmKbService
     /// Push meeting content (transcript or summary) to one or more KB scopes.
     /// Checks for existing push record BEFORE uploading to S3 — dedup is mandatory.
     /// </summary>
-    public async Task PushDocumentAsync(long meetingId, Guid userId, string faitUserId, string docType, IEnumerable<string> kbScopes)
+    public async Task PushDocumentAsync(long meetingId, string userId, string faitUserId, string docType, IEnumerable<string> kbScopes)
     {
         var scopeList = kbScopes.Distinct().ToList();
         if (!scopeList.Any()) return;

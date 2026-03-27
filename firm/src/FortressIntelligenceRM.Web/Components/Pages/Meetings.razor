@@ -167,7 +167,7 @@
     private bool _joining = false;
     private int _page = 1;
     private const int _pageSize = 20;
-    private Guid? _userId;
+    private string? _userId;
     private System.Threading.Timer? _pollTimer;
     private List<UpcomingMeetingCard>? _upcomingMeetings;
     private bool _calendarLoading = true;
@@ -239,7 +239,7 @@
                 _meetings = new();
                 return;
             }
-            _meetings = await MeetingService.GetMeetingsAsync(_userId.Value);
+            _meetings = await MeetingService.GetMeetingsAsync(_userId);
         }
         catch (Exception ex)
         {
@@ -436,7 +436,7 @@
         builder.CloseElement();
     };
 
-    private async Task<(Guid userId, string entraOid)> GetCurrentUserAsync()
+    private async Task<(string userId, string entraOid)> GetCurrentUserAsync()
     {
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         var user = authState.User;
