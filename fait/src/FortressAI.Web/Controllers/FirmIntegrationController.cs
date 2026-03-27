@@ -5,6 +5,7 @@ using Amazon.S3;
 using Amazon.S3.Model;
 using FortressAI.Web.Data;
 using FortressAI.Web.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using FortressAI.Shared.Models;
@@ -18,6 +19,7 @@ namespace FortressAI.Web.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/firm")]
+[AllowAnonymous]
 public class FirmIntegrationController : ControllerBase
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;

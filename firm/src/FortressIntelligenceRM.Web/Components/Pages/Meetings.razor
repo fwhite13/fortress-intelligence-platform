@@ -7,6 +7,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject ILogger<Meetings> Logger
+@inject VpBotService VpBotService
 @implements IDisposable
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
@@ -354,23 +355,7 @@
         StateHasChanged();
         try
         {
-            var http = HttpClientFactory.CreateClient("local");
-            var response = await http.PostAsJsonAsync("/api/meetings/join", new
-            {
-                meetingUrl = meetingUrl,
-                title = meetingTitle
-            });
-            if (response.IsSuccessStatusCode)
-            {
-                Snackbar.Add("Bot is joining the meeting!", Severity.Success);
-                await LoadMeetings();
-            }
-            else
-            {
-                var err = await response.Content.ReadAsStringAsync();
-                Logger.LogError("Failed to join meeting: HTTP {Status} — {Body}", (int)response.StatusCode, err);
-                Snackbar.Add("Failed to add meeting — please try again.", Severity.Error);
-            }
+            await JoinMeetingDirectAsync(meetingUrl, meetingTitle);
         }
         catch (Exception ex)
         {
@@ -406,24 +391,7 @@
         StateHasChanged();
         try
         {
-            var http = HttpClientFactory.CreateClient("local");
-            var response = await http.PostAsJsonAsync("/api/meetings/join", new
-            {
-                meetingUrl = meetingUrl,
-                title = meetingTitle,
-                startDatetime = scheduledDatetime.ToString("O")
-            });
-            if (response.IsSuccessStatusCode)
-            {
-                Snackbar.Add("Meeting added to FIRM.", Severity.Success);
-                await LoadMeetings();
-            }
-            else
-            {
-                var err = await response.Content.ReadAsStringAsync();
-                Logger.LogError("Failed to schedule meeting: HTTP {Status} — {Body}", (int)response.StatusCode, err);
-                Snackbar.Add("Failed to add meeting — please try again.", Severity.Error);
-            }
+            await JoinMeetingDirectAsync(meetingUrl, meetingTitle, scheduledDatetime);
         }
         catch (Exception ex)
         {
@@ -463,6 +431,42 @@
         builder.AddContent(2, label);
         builder.CloseElement();
     };
+
+    private async Task<(Guid userId, string entraOid)> GetCurrentUserAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var entraOid = user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? "";
+        var email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            ?? user.FindFirst("preferred_username")?.Value ?? "";
+        var displayName = user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? user.FindFirst("name")?.Value ?? email;
+
+        var firmUser = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+        if (firmUser == null) throw new InvalidOperationException("Failed to resolve FIRM user");
+        return (firmUser.Id, entraOid);
+    }
+
+    private async Task JoinMeetingDirectAsync(string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null)
+    {
+        var (userId, _) = await GetCurrentUserAsync();
+        var meeting = await MeetingService.CreateMeetingAsync(userId, meetingUrl, title, startDatetime, calendarEventId);
+
+        if (startDatetime.HasValue && startDatetime.Value.ToUniversalTime() > DateTime.UtcNow.AddMinutes(5))
+        {
+            await MeetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
+            Snackbar.Add("Meeting scheduled!", Severity.Success);
+        }
+        else
+        {
+            _ = VpBotService.TriggerBotAsync(meeting.Id, meetingUrl);
+            Snackbar.Add("Bot is joining!", Severity.Success);
+        }
+
+        await LoadMeetings();
+    }
 
     private async Task JoinNow(long meetingId)
     {
@@ -509,26 +513,7 @@
         {
             try
             {
-                var http = HttpClientFactory.CreateClient("local");
-                var payload = new
-                {
-                    meetingUrl = card.JoinUrl,
-                    title = card.Subject,
-                    startDatetime = card.StartDateTime,
-                    calendarEventId = card.CalendarEventId
-                };
-                var response = await http.PostAsJsonAsync("/api/meetings/join", payload);
-                if (response.IsSuccessStatusCode)
-                {
-                    Snackbar.Add("Meeting added to FIRM.", Severity.Success);
-                    await LoadMeetings();
-                }
-                else
-                {
-                    var err = await response.Content.ReadAsStringAsync();
-                    Logger.LogError("AddCalendarMeetingToFirm failed: HTTP {Status} — {Body}", (int)response.StatusCode, err);
-                    Snackbar.Add("Failed to add meeting — please try again.", Severity.Error);
-                }
+                await JoinMeetingDirectAsync(card.JoinUrl, card.Subject, start, card.CalendarEventId);
             }
             catch (Exception ex)
             {
