@@ -8,6 +8,7 @@
 @inject IDialogService DialogService
 @inject ILogger<Meetings> Logger
 @inject VpBotService VpBotService
+@inject IConfiguration _config
 @implements IDisposable
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
@@ -259,6 +260,9 @@
         try
         {
             var http = HttpClientFactory.CreateClient("local");
+            var secret = _config["Firm:SharedSecret"] ?? "";
+            if (!string.IsNullOrEmpty(secret))
+                http.DefaultRequestHeaders.Add("X-Firm-Secret", secret);
             var response = await http.GetAsync("/api/firm/calendar/upcoming-meetings");
             if (response.Headers.TryGetValues("X-Firm-Pending", out var vals))
                 _calendarPendingMsg = vals.FirstOrDefault();

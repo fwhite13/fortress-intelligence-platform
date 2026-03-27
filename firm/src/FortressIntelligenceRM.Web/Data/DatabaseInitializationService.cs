@@ -74,7 +74,7 @@ public class DatabaseInitializationService : IHostedService
                     audio_s3_key VARCHAR(1000) NULL,
                     transcript_s3_key VARCHAR(1000) NULL,
                     bot_task_arn VARCHAR(500) NULL,
-                    created_by CHAR(36) NOT NULL,
+                    created_by CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     start_datetime DATETIME NULL,
@@ -188,7 +188,8 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_meetings ADD COLUMN transcript_kb_pushed TINYINT(1) NOT NULL DEFAULT 0",
                 "ALTER TABLE firm_meetings ADD COLUMN summary_kb_pushed TINYINT(1) NOT NULL DEFAULT 0",
                 "ALTER TABLE firm_meetings ADD COLUMN start_datetime DATETIME NULL",
-                "ALTER TABLE firm_meetings ADD COLUMN calendar_event_id VARCHAR(500) NULL"
+                "ALTER TABLE firm_meetings ADD COLUMN calendar_event_id VARCHAR(500) NULL",
+                "ALTER TABLE firm_meetings MODIFY COLUMN created_by CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL"
             };
 
             foreach (var alterSql in alterStatements)
