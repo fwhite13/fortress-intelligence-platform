@@ -60,7 +60,7 @@
                             <MudButton Variant="Variant.Filled"
                                        Color="Color.Primary"
                                        Size="Size.Small"
-                                       OnClick="@(() => OpenJoinDialogPrefilled(upcomingCard.JoinUrl))">
+                                       OnClick="@(() => AddCalendarMeetingToFirm(upcomingCard))">
                                 Add to FIRM →
                             </MudButton>
                         </MudCardActions>
@@ -113,6 +113,10 @@
                 </MudTd>
                 <MudTd DataLabel="Status">
                     @StatusBadge(context.Status)
+                    @if (_calendarRemovedMeetingIds.Contains(context.Id))
+                    {
+                        <MudChip T="string" Color="Color.Warning" Size="Size.Small">⚠️ Removed from calendar</MudChip>
+                    }
                 </MudTd>
                 <MudTd DataLabel="Actions">
                     <MudStack Row>
@@ -124,6 +128,19 @@
                             <MudIconButton Icon="@Icons.Material.Filled.Download"
                                            Style="color: var(--color-text-secondary);" Size="Size.Small"
                                            Href="@($"/api/meetings/{context.Id}/transcript/download")" />
+                        }
+                        @if (context.Status == MeetingStatus.Scheduled)
+                        {
+                            <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
+                                       OnClick="@(() => JoinNow(context.Id))">Join Now</MudButton>
+                            <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
+                                       OnClick="@(() => RemoveMeeting(context.Id))">Remove</MudButton>
+                        }
+                        else if (context.Status is MeetingStatus.Pending or MeetingStatus.Joining or MeetingStatus.Recording or MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing or MeetingStatus.Summarizing)
+                        {
+                            <MudTooltip Text="Already in progress">
+                                <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined" Disabled="true">Join Now</MudButton>
+                            </MudTooltip>
                         }
                     </MudStack>
                 </MudTd>
@@ -150,6 +167,7 @@
     private List<UpcomingMeetingCard>? _upcomingMeetings;
     private bool _calendarLoading = true;
     private string? _calendarPendingMsg;
+    private HashSet<long> _calendarRemovedMeetingIds = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -245,6 +263,16 @@
             if (response.IsSuccessStatusCode)
             {
                 _upcomingMeetings = await response.Content.ReadFromJsonAsync<List<UpcomingMeetingCard>>() ?? new();
+                var calendarEventIds = _upcomingMeetings
+                    .Select(c => c.CalendarEventId)
+                    .Where(ceid => !string.IsNullOrEmpty(ceid))
+                    .ToHashSet();
+                _calendarRemovedMeetingIds = _meetings
+                    .Where(m => m.Status == MeetingStatus.Scheduled
+                             && !string.IsNullOrEmpty(m.CalendarEventId)
+                             && !calendarEventIds.Contains(m.CalendarEventId))
+                    .Select(m => m.Id)
+                    .ToHashSet();
             }
         }
         catch (Exception ex)
@@ -375,6 +403,83 @@
         builder.AddContent(2, label);
         builder.CloseElement();
     };
+
+    private async Task JoinNow(long meetingId)
+    {
+        try
+        {
+            var http = HttpClientFactory.CreateClient();
+            var uri = Navigation.ToAbsoluteUri($"/api/meetings/{meetingId}/join");
+            var response = await http.PostAsync(uri, null);
+            if (response.IsSuccessStatusCode)
+                await LoadMeetings();
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                Snackbar.Add($"Failed to join: {error}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RemoveMeeting(long meetingId)
+    {
+        try
+        {
+            var http = HttpClientFactory.CreateClient();
+            var uri = Navigation.ToAbsoluteUri($"/api/meetings/{meetingId}");
+            var response = await http.DeleteAsync(uri);
+            if (response.IsSuccessStatusCode)
+                await LoadMeetings();
+            else
+                Snackbar.Add("Failed to remove meeting", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task AddCalendarMeetingToFirm(UpcomingMeetingCard card)
+    {
+        // For future meetings (> 5 min), POST directly to create Scheduled record
+        if (DateTime.TryParse(card.StartDateTime, null, System.Globalization.DateTimeStyles.RoundtripKind, out var start)
+            && start > DateTime.UtcNow.AddMinutes(5))
+        {
+            try
+            {
+                var http = HttpClientFactory.CreateClient();
+                var uri = Navigation.ToAbsoluteUri("/api/meetings/join");
+                var payload = new
+                {
+                    meetingUrl = card.JoinUrl,
+                    title = card.Subject,
+                    startDatetime = card.StartDateTime,
+                    calendarEventId = card.CalendarEventId
+                };
+                var response = await http.PostAsJsonAsync(uri, payload);
+                if (response.IsSuccessStatusCode)
+                {
+                    Snackbar.Add($"'{card.Subject}' added to FIRM as scheduled.", Severity.Success);
+                    await LoadMeetings();
+                }
+                else
+                    Snackbar.Add("Failed to add meeting", Severity.Error);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            }
+        }
+        else
+        {
+            // Imminent/past meeting — open dialog for immediate join
+            await OpenJoinDialogPrefilled(card.JoinUrl);
+        }
+    }
 
     public void Dispose() => _pollTimer?.Dispose();
 }

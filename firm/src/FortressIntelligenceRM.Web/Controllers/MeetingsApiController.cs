@@ -76,7 +76,16 @@ public class MeetingsApiController : ControllerBase
         var firmUser = await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
         if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
 
-        var meeting = await _meetingService.CreateMeetingAsync(firmUser.Id, request.MeetingUrl, request.Title);
+        var meeting = await _meetingService.CreateMeetingAsync(
+            firmUser.Id, request.MeetingUrl, request.Title,
+            request.StartDatetime, request.CalendarEventId);
+
+        // Scheduling branch: if start is > 5 min in the future, don't dispatch bot
+        if (request.StartDatetime.HasValue && request.StartDatetime.Value.ToUniversalTime() > DateTime.UtcNow.AddMinutes(5))
+        {
+            await _meetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
+            return Ok(new { meetingId = meeting.Id, status = "scheduled" });
+        }
 
         // Trigger bot (fire and forget — don't fail the response if ECS isn't configured)
         // TODO (Mode A): When TeamsGraphService is implemented, detect platform here and route to
@@ -540,6 +549,70 @@ public class MeetingsApiController : ControllerBase
         }
     }
 
+    [HttpPost("{id}/join")]
+    [Authorize]
+    public async Task<IActionResult> JoinNow(long id)
+    {
+        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
+
+        var email = User.FindFirst(ClaimTypes.Email)?.Value
+            ?? User.FindFirst("preferred_username")?.Value ?? "";
+        var displayName = User.FindFirst(ClaimTypes.Name)?.Value
+            ?? User.FindFirst("name")?.Value ?? email;
+
+        var firmUser = await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+        if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
+
+        var meeting = await _meetingService.GetMeetingAsync(id, firmUser.Id);
+        if (meeting == null) return NotFound();
+        if (meeting.Status != MeetingStatus.Scheduled)
+            return Conflict(new { error = "Meeting is not in Scheduled state" });
+
+        // Mode A: Teams — no bot, transition to WaitingTranscript
+        if (meeting.Platform == "teams")
+        {
+            await _meetingService.UpdateStatusAsync(id, MeetingStatus.WaitingTranscript);
+            return Ok(new {
+                meetingId = id,
+                status = "waiting_transcript",
+                message = "Mode A meeting — start the Teams meeting when ready. FIRM will capture the transcript automatically."
+            });
+        }
+
+        // Mode B: Zoom/Meet/other — dispatch bot
+        _ = _vpBotService.TriggerBotAsync(id, meeting.MeetingUrl ?? "");
+        await _meetingService.UpdateStatusAsync(id, MeetingStatus.Pending);
+        return Ok(new { meetingId = id, status = "pending" });
+    }
+
+    [HttpDelete("{id}")]
+    [Authorize]
+    public async Task<IActionResult> RemoveMeeting(long id)
+    {
+        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
+
+        var email = User.FindFirst(ClaimTypes.Email)?.Value
+            ?? User.FindFirst("preferred_username")?.Value ?? "";
+        var displayName = User.FindFirst(ClaimTypes.Name)?.Value
+            ?? User.FindFirst("name")?.Value ?? email;
+
+        var firmUser = await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+        if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
+
+        var meeting = await _meetingService.GetMeetingAsync(id, firmUser.Id);
+        if (meeting == null) return NotFound();
+        if (meeting.Status != MeetingStatus.Scheduled)
+            return Conflict(new { error = "Cannot remove a meeting that is in progress or complete" });
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        await db.Database.ExecuteSqlRawAsync("DELETE FROM firm_meetings WHERE id = {0}", id);
+        return NoContent();
+    }
+
     public record PushToKbRequest(string DocType, List<string> KbScopes);
 
     private async Task<(FirmMeeting? meeting, IActionResult? error)> ResolveOwnedMeeting(long id)
@@ -564,7 +637,13 @@ public class MeetingsApiController : ControllerBase
         return (meeting, user, null);
     }
 
-    public record JoinRequest(string MeetingUrl, string? Title);
+    public record JoinRequest(
+        string MeetingUrl,
+        string? Title,
+        string? Platform = null,
+        bool Force = false,
+        DateTime? StartDatetime = null,
+        string? CalendarEventId = null);
 }
 
 public class ChannelPostRequest

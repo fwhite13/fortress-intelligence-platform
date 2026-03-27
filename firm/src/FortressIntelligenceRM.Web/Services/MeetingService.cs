@@ -39,7 +39,7 @@ public class MeetingService
             .FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == userId);
     }
 
-    public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title)
+    public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = new FirmMeeting
@@ -49,7 +49,9 @@ public class MeetingService
             Status = MeetingStatus.Joining,
             CreatedBy = userId,
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
+            StartDatetime = startDatetime,
+            CalendarEventId = calendarEventId,
         };
         db.Meetings.Add(meeting);
         await db.SaveChangesAsync();

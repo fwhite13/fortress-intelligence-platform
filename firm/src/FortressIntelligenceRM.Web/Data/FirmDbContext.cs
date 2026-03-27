@@ -65,6 +65,8 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.TranscriptKbPushed).HasColumnName("transcript_kb_pushed").HasDefaultValue(false);
             entity.Property(e => e.SummaryKbPushed).HasColumnName("summary_kb_pushed").HasDefaultValue(false);
+            entity.Property(e => e.StartDatetime).HasColumnName("start_datetime");
+            entity.Property(e => e.CalendarEventId).HasColumnName("calendar_event_id").HasMaxLength(500);
             entity.HasOne(e => e.CreatedByUser)
                 .WithMany(u => u.Meetings)
                 .HasForeignKey(e => e.CreatedBy)

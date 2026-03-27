@@ -77,6 +77,8 @@ public class DatabaseInitializationService : IHostedService
                     created_by CHAR(36) NOT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    start_datetime DATETIME NULL,
+                    calendar_event_id VARCHAR(500) NULL,
                     INDEX idx_fm_created_by (created_by),
                     INDEX idx_fm_status (status),
                     INDEX idx_fm_created_at (created_at)
@@ -183,7 +185,9 @@ public class DatabaseInitializationService : IHostedService
             {
                 "ALTER TABLE firm_users ADD COLUMN fait_user_id CHAR(36) NULL",
                 "ALTER TABLE firm_meetings ADD COLUMN transcript_kb_pushed TINYINT(1) NOT NULL DEFAULT 0",
-                "ALTER TABLE firm_meetings ADD COLUMN summary_kb_pushed TINYINT(1) NOT NULL DEFAULT 0"
+                "ALTER TABLE firm_meetings ADD COLUMN summary_kb_pushed TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE firm_meetings ADD COLUMN start_datetime DATETIME NULL",
+                "ALTER TABLE firm_meetings ADD COLUMN calendar_event_id VARCHAR(500) NULL"
             };
 
             foreach (var alterSql in alterStatements)

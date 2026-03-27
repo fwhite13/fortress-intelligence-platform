@@ -14,6 +14,9 @@ public class FirmMeeting
     public MeetingStatus Status { get; set; } = MeetingStatus.Joining;
     public string? ErrorMessage { get; set; }
     public DateTime? ScheduledAt { get; set; }
+    public DateTime? StartDatetime { get; set; }    // When the meeting is scheduled to start
+    [MaxLength(500)]
+    public string? CalendarEventId { get; set; }    // Graph calendar event ID for sync
     public DateTime? StartedAt { get; set; }
     public DateTime? EndedAt { get; set; }
     public int? DurationSeconds { get; set; }
