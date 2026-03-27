@@ -11,6 +11,7 @@ using System.Text.Json;
 namespace FortressIntelligenceRM.Web.Controllers;
 
 [ApiController]
+[Route("api/meetings")]
 public class MeetingsApiController : ControllerBase
 {
     private readonly MeetingService _meetingService;
@@ -525,7 +526,8 @@ public class MeetingsApiController : ControllerBase
         try
         {
             var client = _httpClientFactory.CreateClient();
-            var req = new HttpRequestMessage(HttpMethod.Get, $"{faitUrl}/api/firm/user-teams?entraOid=");
+            var oid = User.FindFirstValue("oid") ?? User.FindFirstValue("http://schemas.microsoft.com/identity/claims/objectidentifier") ?? "";
+            var req = new HttpRequestMessage(HttpMethod.Get, $"{faitUrl}/api/firm/user-teams?entraOid={oid}");
             req.Headers.Add("X-Firm-Secret", secret);
             var resp = await client.SendAsync(req);
             if (!resp.IsSuccessStatusCode) return Ok(new List<object>());
