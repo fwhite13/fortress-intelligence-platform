@@ -96,16 +96,113 @@ checks and prints instructions if the rule is missing.
 
 ### Step 1 — Revert env vars to public hostnames
 
-For `firm-web`:
 ```bash
-# Describe current task def, change FIP__FaitApiUrl back to https://fait.dev.fortressam.ai
-# Register new revision, update-service
-```
+REGION="us-east-1"
+CLUSTER="fortress-tools-cluster"
 
-For `fip-dev`:
-```bash
-# Change Apps__FaitUrl, Apps__FirmUrl, Apps__FormsUrl back to public hostnames
-# Register new revision, update-service
+# --- firm-web ---
+aws ecs describe-task-definition --task-definition firm-web \
+  --include TAGS --region $REGION \
+  --query 'taskDefinition' --output json > /tmp/td-firm-web.json
+
+python3 - "firm-web" "FIP__FaitApiUrl" "https://fait.dev.fortressam.ai" << 'PYEOF'
+import json, sys
+
+task_def = sys.argv[1]
+var_name = sys.argv[2]
+new_value = sys.argv[3]
+
+with open(f'/tmp/td-{task_def}.json') as f:
+    td = json.load(f)
+
+updated = False
+for cd in td['containerDefinitions']:
+    for env in cd.get('environment', []):
+        if env['name'] == var_name:
+            old_val = env['value']
+            env['value'] = new_value
+            print(f"  {task_def}: {var_name}")
+            print(f"    old: {old_val}")
+            print(f"    new: {new_value}")
+            updated = True
+
+# Remove read-only fields before re-registering
+for key in ['taskDefinitionArn', 'revision', 'status', 'requiresAttributes',
+            'compatibilities', 'registeredAt', 'registeredBy']:
+    td.pop(key, None)
+
+with open(f'/tmp/td-{task_def}-new.json', 'w') as f:
+    json.dump(td, f, indent=2)
+
+if not updated:
+    print(f"  WARNING: {var_name} not found in {task_def} — check env var name")
+PYEOF
+
+FIRM_REV=$(aws ecs register-task-definition --region $REGION \
+  --cli-input-json file:///tmp/td-firm-web-new.json \
+  --query 'taskDefinition.revision' --output text)
+
+aws ecs update-service --cluster $CLUSTER --service firm-web \
+  --task-definition firm-web:${FIRM_REV} --region $REGION \
+  --query 'service.taskDefinition' --output text
+
+# --- fip-dev (3 sequential updates — each re-describes latest so they chain R1→R2→R3) ---
+for args in \
+  "fip-dev Apps__FaitUrl  https://fait.dev.fortressam.ai" \
+  "fip-dev Apps__FirmUrl  https://firm.dev.fortressam.ai" \
+  "fip-dev Apps__FormsUrl https://forms.dev.fortressam.ai"
+do
+  set -- $args
+  task_def=$1 var_name=$2 new_value=$3
+
+  aws ecs describe-task-definition --task-definition $task_def \
+    --include TAGS --region $REGION \
+    --query 'taskDefinition' --output json > /tmp/td-${task_def}.json
+
+  python3 - "$task_def" "$var_name" "$new_value" << 'PYEOF'
+import json, sys
+
+task_def = sys.argv[1]
+var_name = sys.argv[2]
+new_value = sys.argv[3]
+
+with open(f'/tmp/td-{task_def}.json') as f:
+    td = json.load(f)
+
+updated = False
+for cd in td['containerDefinitions']:
+    for env in cd.get('environment', []):
+        if env['name'] == var_name:
+            old_val = env['value']
+            env['value'] = new_value
+            print(f"  {task_def}: {var_name}")
+            print(f"    old: {old_val}")
+            print(f"    new: {new_value}")
+            updated = True
+
+# Remove read-only fields before re-registering
+for key in ['taskDefinitionArn', 'revision', 'status', 'requiresAttributes',
+            'compatibilities', 'registeredAt', 'registeredBy']:
+    td.pop(key, None)
+
+with open(f'/tmp/td-{task_def}-new.json', 'w') as f:
+    json.dump(td, f, indent=2)
+
+if not updated:
+    print(f"  WARNING: {var_name} not found in {task_def} — check env var name")
+PYEOF
+
+  aws ecs register-task-definition --region $REGION \
+    --cli-input-json file:///tmp/td-${task_def}-new.json \
+    --query 'taskDefinition.revision' --output text
+done
+
+FIP_FINAL_REV=$(aws ecs describe-task-definition --task-definition fip-dev \
+  --region $REGION --query 'taskDefinition.revision' --output text)
+
+aws ecs update-service --cluster $CLUSTER --service fip-dev \
+  --task-definition fip-dev:${FIP_FINAL_REV} --region $REGION \
+  --query 'service.taskDefinition' --output text
 ```
 
 ### Step 2 — Remove service registries from ECS services
@@ -122,15 +219,24 @@ done
 ### Step 3 — Delete Cloud Map services and namespace
 
 ```bash
-# Delete each Cloud Map service (must deregister instances first)
-# Then delete the fip.internal namespace
-# Route 53 private hosted zone is deleted automatically with namespace
+REGION="us-east-1"
+NS_ID="<namespace_id>"   # get from: aws servicediscovery list-namespaces --region $REGION
+
+for name in fait fait-prod firm famos forms fip mcp-memory; do
+  SVC_ID=$(aws servicediscovery list-services --region $REGION \
+    --filters Name=NAMESPACE_ID,Values=$NS_ID \
+    --query "Services[?Name=='${name}'].Id" --output text)
+  aws servicediscovery delete-service --id $SVC_ID --region $REGION
+done
+
+aws servicediscovery delete-namespace --id $NS_ID --region $REGION
+echo "Route 53 private hosted zone deleted automatically with namespace"
 ```
 
 ### Step 4 — Force new deployments
 
 ```bash
-for svc in red-dev fait-prod firm-web famos-dev formiq-dev fip-dev mcp-memory; do
+for svc in fred-dev fait-prod firm-web famos-dev formiq-dev fip-dev mcp-memory; do
   aws ecs update-service --cluster fortress-tools-cluster --service $svc \
     --force-new-deployment --region us-east-1
 done

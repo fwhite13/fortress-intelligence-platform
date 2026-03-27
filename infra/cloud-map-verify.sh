@@ -36,7 +36,7 @@ aws servicediscovery list-services \
 
 echo ""
 echo "=== ECS service registries ==="
-for svc in red-dev fait-prod firm-web famos-dev formiq-dev fip-dev mcp-memory; do
+for svc in fred-dev fait-prod firm-web famos-dev formiq-dev fip-dev mcp-memory; do
   REG=$(aws ecs describe-services \
     --cluster "$CLUSTER" \
     --services "$svc" \
