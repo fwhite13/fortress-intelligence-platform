@@ -110,28 +110,10 @@ declare -A ECS_SERVICES=(
   [fip]="fip-dev"
   [mcp-memory]="mcp-memory"
 )
-declare -A SERVICE_PORTS=(
-  [fait]=8080
-  [fait-prod]=8080
-  [firm]=8080
-  [famos]=8080
-  [forms]=8080
-  [fip]=80
-  [mcp-memory]=8080
-)
-
 for svc_name in "${!ECS_SERVICES[@]}"; do
   ecs_svc="${ECS_SERVICES[$svc_name]}"
   svc_id="${SERVICE_IDS[$svc_name]}"
   svc_arn="arn:aws:servicediscovery:${REGION}:${ACCOUNT_ID}:service/${svc_id}"
-  port="${SERVICE_PORTS[$svc_name]}"
-
-  # Get the container name from the task definition
-  container_name=$(aws ecs describe-task-definition \
-    --task-definition "$ecs_svc" \
-    --region "$REGION" \
-    --query 'taskDefinition.containerDefinitions[0].name' \
-    --output text)
 
   # Check if already registered
   CURRENT=$(aws ecs describe-services \
@@ -144,11 +126,11 @@ for svc_name in "${!ECS_SERVICES[@]}"; do
   if echo "$CURRENT" | grep -q "$svc_id"; then
     echo "$ecs_svc: already registered with Cloud Map"
   else
-    echo "Registering $ecs_svc -> $svc_name.fip.internal:$port (container: $container_name)"
+    echo "Registering $ecs_svc -> $svc_name.fip.internal (awsvpc: registryArn only, no containerPort)"
     aws ecs update-service \
       --cluster "$CLUSTER" \
       --service "$ecs_svc" \
-      --service-registries "registryArn=${svc_arn},containerName=${container_name},containerPort=${port}" \
+      --service-registries "registryArn=${svc_arn}" \
       --region "$REGION" \
       --query 'service.serviceName' \
       --output text
