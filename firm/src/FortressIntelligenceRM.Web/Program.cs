@@ -63,6 +63,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddAWSService<IAmazonECS>();
 builder.Services.AddAWSService<IAmazonS3>();
 builder.Services.AddAWSService<Amazon.BedrockAgent.IAmazonBedrockAgent>();
+builder.Services.AddAWSService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
 
 // Controllers for API endpoints
 builder.Services.AddControllers();
@@ -96,6 +97,8 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHostedService<DatabaseInitializationService>();
+builder.Services.AddSingleton<TeamsGraphService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TeamsGraphService>());
 
 // DataProtection: shared key ring points to fred_dev (FAIT's DB) — same DataProtectionKeys table
 // SharedKeyRingDbContext reads from fred_dev via FIP_KEYRING_DB_NAME env var

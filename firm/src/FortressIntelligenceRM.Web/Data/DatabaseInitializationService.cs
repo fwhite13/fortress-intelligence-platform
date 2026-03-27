@@ -134,6 +134,30 @@ public class DatabaseInitializationService : IHostedService
     installed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_bot_install (team_id, channel_id),
     INDEX idx_bi_team (team_id)
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                ("firm_meeting_channel_posts", @"CREATE TABLE IF NOT EXISTS firm_meeting_channel_posts (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    meeting_id BIGINT NOT NULL,
+    initiated_by BIGINT NOT NULL,
+    team_id VARCHAR(255) NOT NULL,
+    team_name VARCHAR(255) NOT NULL,
+    channel_id VARCHAR(255) NOT NULL,
+    channel_name VARCHAR(255) NOT NULL,
+    doc_type VARCHAR(20) NOT NULL,
+    posted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    success TINYINT(1) NOT NULL DEFAULT 1,
+    error_message TEXT NULL,
+    INDEX idx_fmcp_meeting (meeting_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"),
+                ("firm_webhook_subscriptions", @"CREATE TABLE IF NOT EXISTS firm_webhook_subscriptions (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    subscription_id VARCHAR(500) NOT NULL,
+    resource VARCHAR(500) NOT NULL,
+    expiry_datetime DATETIME NOT NULL,
+    last_renewed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_sub_id (subscription_id),
+    INDEX idx_sub_expiry (expiry_datetime)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 
