@@ -87,71 +87,7 @@
                         </MudButton>
                     }
                 </MudStack>
-                <div style="margin-top: 8px; border: 1px solid var(--color-border); border-radius: 8px; padding: 16px; background: var(--color-bg-page);">
-                    <div style="font-size: 13px; font-weight: 600; color: var(--color-text-secondary); margin-bottom: 12px;">Add to FORGE Knowledge Base</div>
-
-                    @* Transcript row *@
-                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;">
-                        <span style="font-size: 13px; color: var(--color-text-primary); min-width: 80px;">Transcript</span>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;">
-                                <input type="checkbox" @bind="_transcriptSelectPersonal"
-                                       disabled="@(_transcriptPushedTo.Contains("personal") || _pushingTranscript)" />
-                                My KB
-                                @if (_transcriptPushedTo.Contains("personal"))
-                                {
-                                    <span style="color: #4caf50; font-size: 11px; margin-left: 2px;">✓</span>
-                                }
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;">
-                                <input type="checkbox" @bind="_transcriptSelectTeam"
-                                       disabled="@(_transcriptPushedTo.Contains("team") || _pushingTranscript)" />
-                                Team KB
-                                @if (_transcriptPushedTo.Contains("team"))
-                                {
-                                    <span style="color: #4caf50; font-size: 11px; margin-left: 2px;">✓</span>
-                                }
-                            </label>
-                        </div>
-                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                                   Style="border-color: var(--color-border); color: var(--color-text-secondary);"
-                                   Disabled="@(!TranscriptHasSelection() || _pushingTranscript)"
-                                   OnClick="PushTranscript">
-                            @(_pushingTranscript ? "Adding…" : "Add")
-                        </MudButton>
-                    </div>
-
-                    @* Summary row *@
-                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                        <span style="font-size: 13px; color: var(--color-text-primary); min-width: 80px;">Summary</span>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;">
-                                <input type="checkbox" @bind="_summarySelectPersonal"
-                                       disabled="@(_summaryPushedTo.Contains("personal") || _pushingSummary)" />
-                                My KB
-                                @if (_summaryPushedTo.Contains("personal"))
-                                {
-                                    <span style="color: #4caf50; font-size: 11px; margin-left: 2px;">✓</span>
-                                }
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;">
-                                <input type="checkbox" @bind="_summarySelectTeam"
-                                       disabled="@(_summaryPushedTo.Contains("team") || _pushingSummary)" />
-                                Team KB
-                                @if (_summaryPushedTo.Contains("team"))
-                                {
-                                    <span style="color: #4caf50; font-size: 11px; margin-left: 2px;">✓</span>
-                                }
-                            </label>
-                        </div>
-                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                                   Style="border-color: var(--color-border); color: var(--color-text-secondary);"
-                                   Disabled="@(!SummaryHasSelection() || _pushingSummary)"
-                                   OnClick="PushSummary">
-                            @(_pushingSummary ? "Adding…" : "Add")
-                        </MudButton>
-                    </div>
-                </div>
+                <SharePanel MeetingId="@_meeting.Id" />
             }
         </MudPaper>
 

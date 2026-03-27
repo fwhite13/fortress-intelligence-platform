@@ -21,6 +21,7 @@ public class MeetingsApiController : ControllerBase
     private readonly IConfiguration _config;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MeetingsApiController> _logger;
+    private readonly IFirmBotService _firmBotService;
 
     public MeetingsApiController(
         MeetingService meetingService,
@@ -30,7 +31,8 @@ public class MeetingsApiController : ControllerBase
         IDbContextFactory<FirmDbContext> dbFactory,
         IConfiguration config,
         IHttpClientFactory httpClientFactory,
-        ILogger<MeetingsApiController> logger)
+        ILogger<MeetingsApiController> logger,
+        IFirmBotService firmBotService)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
@@ -40,6 +42,7 @@ public class MeetingsApiController : ControllerBase
         _config = config;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _firmBotService = firmBotService;
     }
 
     private Guid? GetCurrentUserId()
@@ -449,6 +452,92 @@ public class MeetingsApiController : ControllerBase
         });
     }
 
+    [HttpPost("{id}/post-to-channel")]
+    public async Task<IActionResult> PostToChannel(long id, [FromBody] List<ChannelPostRequest> requests)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id);
+        if (meeting == null) return NotFound();
+
+        var results = new List<object>();
+        foreach (var req in requests ?? new List<ChannelPostRequest>())
+        {
+            try
+            {
+                string content;
+                if (req.DocType == "transcript")
+                {
+                    var transcriptKey = meeting.TranscriptS3Key ?? "";
+                    content = string.IsNullOrEmpty(transcriptKey) ? "" : await _s3Service.GetTranscriptTextAsync(transcriptKey);
+                }
+                else
+                {
+                    await using var db2 = await _dbFactory.CreateDbContextAsync();
+                    var summary = await db2.Summaries.OrderByDescending(s => s.CreatedAt).FirstOrDefaultAsync(s => s.MeetingId == id);
+                    content = summary?.SummaryText ?? "";
+                }
+
+                await _firmBotService.PostToChannelAsync(req.TeamId ?? "", req.ChannelId ?? "", content, req.DocType ?? "summary");
+
+                await db.Database.ExecuteSqlRawAsync(
+                    "INSERT INTO firm_meeting_channel_posts (meeting_id, initiated_by, team_id, team_name, channel_id, channel_name, doc_type, success) VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, 1)",
+                    id, 0L, req.TeamId ?? "", req.TeamName ?? "", req.ChannelId ?? "", req.ChannelName ?? "", req.DocType ?? "summary");
+
+                results.Add(new { teamId = req.TeamId, channelId = req.ChannelId, success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to post to channel {ChannelId}", req.ChannelId);
+                results.Add(new { teamId = req.TeamId, channelId = req.ChannelId, success = false, error = ex.Message });
+            }
+        }
+        return Ok(results);
+    }
+
+    [HttpGet("{id}/channel-post-history")]
+    public async Task<IActionResult> GetChannelPostHistory(long id)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var rows = await db.Database
+            .SqlQueryRaw<ChannelPostHistoryRow>(
+                "SELECT team_name AS TeamName, channel_name AS ChannelName, doc_type AS DocType, posted_at AS PostedAt, success AS Success FROM firm_meeting_channel_posts WHERE meeting_id = {0} ORDER BY posted_at DESC",
+                id)
+            .ToListAsync();
+        return Ok(rows);
+    }
+
+    [HttpGet("/api/firm/bot-installations")]
+    public async Task<IActionResult> GetBotInstallations()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var rows = await db.Database
+            .SqlQueryRaw<BotInstallRow>("SELECT team_id AS TeamId, channel_id AS ChannelId FROM firm_bot_installations ORDER BY installed_at DESC")
+            .ToListAsync();
+        return Ok(rows);
+    }
+
+    [HttpGet("/api/firm/user-teams-local")]
+    public async Task<IActionResult> GetUserTeamsLocal()
+    {
+        var faitUrl = _config["FIP:FaitApiUrl"] ?? "";
+        var secret = _config["Firm:SharedSecret"] ?? "";
+        if (string.IsNullOrEmpty(faitUrl)) return Ok(new List<object>());
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            var req = new HttpRequestMessage(HttpMethod.Get, $"{faitUrl}/api/firm/user-teams?entraOid=");
+            req.Headers.Add("X-Firm-Secret", secret);
+            var resp = await client.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return Ok(new List<object>());
+            var body = await resp.Content.ReadAsStringAsync();
+            return Content(body, "application/json");
+        }
+        catch
+        {
+            return Ok(new List<object>());
+        }
+    }
+
     public record PushToKbRequest(string DocType, List<string> KbScopes);
 
     private async Task<(FirmMeeting? meeting, IActionResult? error)> ResolveOwnedMeeting(long id)
@@ -474,6 +563,30 @@ public class MeetingsApiController : ControllerBase
     }
 
     public record JoinRequest(string MeetingUrl, string? Title);
+}
+
+public class ChannelPostRequest
+{
+    public string? TeamId { get; set; }
+    public string? TeamName { get; set; }
+    public string? ChannelId { get; set; }
+    public string? ChannelName { get; set; }
+    public string DocType { get; set; } = "summary";
+}
+
+internal class ChannelPostHistoryRow
+{
+    public string TeamName { get; set; } = "";
+    public string ChannelName { get; set; } = "";
+    public string DocType { get; set; } = "";
+    public DateTime PostedAt { get; set; }
+    public bool Success { get; set; }
+}
+
+internal class BotInstallRow
+{
+    public string TeamId { get; set; } = "";
+    public string ChannelId { get; set; } = "";
 }
 
 public class VpCallbackPayload

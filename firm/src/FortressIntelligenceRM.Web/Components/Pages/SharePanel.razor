@@ -1,0 +1,289 @@
+@inject HttpClient Http
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<MudPaper Class="pa-4 mb-4" Elevation="1">
+    <MudText Typo="Typo.h6" Class="mb-3">Share Meeting</MudText>
+
+    @* KB Section *@
+    <MudText Typo="Typo.subtitle1" Class="mb-2">Push to Knowledge Base</MudText>
+    @if (_kbLoading)
+    {
+        <MudProgressLinear Indeterminate="true" Class="mb-2" />
+    }
+    else
+    {
+        @foreach (var row in _kbRows)
+        {
+            <div class="d-flex align-center mb-2">
+                <MudCheckBox @bind-Value="row.IsChecked" />
+                <MudText Class="flex-grow-1 ml-2">@row.TeamName</MudText>
+                <MudSelect @bind-Value="row.DocType" Dense="true" Style="width:130px">
+                    <MudSelectItem Value="@("transcript")">Transcript</MudSelectItem>
+                    <MudSelectItem Value="@("summary")">Summary</MudSelectItem>
+                    <MudSelectItem Value="@("both")">Both</MudSelectItem>
+                </MudSelect>
+                @if (!string.IsNullOrEmpty(row.LastPushedAt))
+                {
+                    <MudText Typo="Typo.caption" Class="ml-2">Pushed @row.LastPushedAt</MudText>
+                }
+            </div>
+        }
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="PushToKb"
+                   Disabled="_kbRows.All(r => !r.IsChecked) || _kbPushing">
+            @(_kbPushing ? "Pushing..." : "Push to Selected KBs")
+        </MudButton>
+    }
+
+    <MudDivider Class="my-4" />
+
+    @* Channel Section *@
+    <MudText Typo="Typo.subtitle1" Class="mb-2">Post to Teams Channel</MudText>
+    @foreach (var row in _channelRows)
+    {
+        <div class="d-flex flex-wrap align-center gap-2 mb-2">
+            <MudSelect Value="row.TeamId" Label="Team" Style="width:180px"
+                       ValueChanged="@((string? v) => OnTeamSelected(row, v))"
+                       T="string?"
+                       ToStringFunc="@(v => _teams.FirstOrDefault(t => t.Id == v)?.DisplayName ?? v ?? "")">
+                @foreach (var t in _teams)
+                {
+                    <MudSelectItem Value="@t.Id">@t.DisplayName</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect @bind-Value="row.ChannelId" Label="Channel" Style="width:180px"
+                       Disabled="@(row.Channels.Count == 0)">
+                @if (row.Channels.Count == 0 && !string.IsNullOrEmpty(row.TeamId))
+                {
+                    <MudSelectItem Value="@("")" Disabled="true">Channels unavailable</MudSelectItem>
+                }
+                @foreach (var c in row.Channels)
+                {
+                    <MudSelectItem Value="@c.Id">@c.DisplayName</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect @bind-Value="row.DocType" Label="Content" Style="width:130px">
+                <MudSelectItem Value="@("transcript")">Transcript</MudSelectItem>
+                <MudSelectItem Value="@("summary")">Summary</MudSelectItem>
+                <MudSelectItem Value="@("both")">Both</MudSelectItem>
+            </MudSelect>
+            @if (row.BotNotInstalled)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true">Bot not installed in this team</MudAlert>
+            }
+        </div>
+    }
+    <MudButton Variant="Variant.Text" OnClick="AddChannelRow">+ Add another channel</MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="PostToChannels"
+               Disabled="@(_channelRows.All(r => string.IsNullOrEmpty(r.ChannelId)) || _channelPosting)"
+               Class="ml-2">
+        @(_channelPosting ? "Posting..." : "Post to Selected Channels")
+    </MudButton>
+
+    @if (_channelHistory.Any())
+    {
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.subtitle2">Post history</MudText>
+        @foreach (var h in _channelHistory)
+        {
+            <MudText Typo="Typo.caption">• @h.ChannelName (@h.TeamName) — @h.DocType — @h.PostedAt.ToString("g")</MudText>
+        }
+    }
+</MudPaper>
+
+@code {
+    [Parameter] public long MeetingId { get; set; }
+
+    // KB state
+    private List<KbRowState> _kbRows = new();
+    private bool _kbLoading = true;
+    private bool _kbPushing = false;
+
+    // Channel state
+    private List<ChannelRowState> _channelRows = new() { new() };
+    private bool _channelPosting = false;
+    private List<TeamInfo> _teams = new();
+    private List<ChannelPostRecord> _channelHistory = new();
+    private List<BotInstall> _botInstalls = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadKbRows();
+        await LoadTeams();
+        await LoadChannelHistory();
+        await LoadBotInstalls();
+    }
+
+    private async Task LoadKbRows()
+    {
+        _kbLoading = true;
+        _kbRows.Clear();
+        _kbRows.Add(new KbRowState { TeamId = null, TeamName = "Personal KB", DocType = "both" });
+
+        try
+        {
+            var teams = await Http.GetFromJsonAsync<List<UserTeamItem>>("/api/firm/user-teams-local") ?? new();
+            foreach (var t in teams)
+                _kbRows.Add(new KbRowState { TeamId = t.Id, TeamName = t.Name, DocType = "both" });
+        }
+        catch { /* ignore — show personal KB only */ }
+
+        _kbLoading = false;
+    }
+
+    private async Task LoadTeams()
+    {
+        try
+        {
+            var teams = await Http.GetFromJsonAsync<List<TeamInfo>>("/api/firm/graph/teams") ?? new();
+            _teams = teams;
+        }
+        catch { _teams = new(); }
+    }
+
+    private async Task LoadChannelHistory()
+    {
+        try
+        {
+            var history = await Http.GetFromJsonAsync<List<ChannelPostRecord>>($"/api/meetings/{MeetingId}/channel-post-history") ?? new();
+            _channelHistory = history;
+        }
+        catch { _channelHistory = new(); }
+    }
+
+    private async Task LoadBotInstalls()
+    {
+        try
+        {
+            var installs = await Http.GetFromJsonAsync<List<BotInstall>>("/api/firm/bot-installations") ?? new();
+            _botInstalls = installs;
+        }
+        catch { _botInstalls = new(); }
+    }
+
+    private async Task PushToKb()
+    {
+        if (_kbPushing) return;
+        _kbPushing = true;
+        try
+        {
+            foreach (var row in _kbRows.Where(r => r.IsChecked))
+            {
+                var docTypes = row.DocType == "both"
+                    ? new[] { "transcript", "summary" }
+                    : new[] { row.DocType };
+
+                foreach (var docType in docTypes)
+                {
+                    var kbScopes = row.TeamId == null
+                        ? new List<string> { "personal" }
+                        : new List<string> { "team" };
+
+                    var resp = await Http.PostAsJsonAsync($"/api/meetings/{MeetingId}/push-to-kb",
+                        new { docType, kbScopes });
+
+                    if (resp.IsSuccessStatusCode)
+                        row.LastPushedAt = DateTime.Now.ToString("g");
+                    else
+                        Snackbar.Add($"Failed to push {docType} to {row.TeamName}", Severity.Error);
+                }
+            }
+            Snackbar.Add("Knowledge base updated!", Severity.Success);
+        }
+        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        finally { _kbPushing = false; StateHasChanged(); }
+    }
+
+    private async Task PostToChannels()
+    {
+        if (_channelPosting) return;
+        _channelPosting = true;
+        try
+        {
+            var requests = _channelRows
+                .Where(r => !string.IsNullOrEmpty(r.ChannelId))
+                .SelectMany(r =>
+                {
+                    var team = _teams.FirstOrDefault(t => t.Id == r.TeamId);
+                    if (r.DocType == "both")
+                    {
+                        return new[]
+                        {
+                            new { teamId = r.TeamId, teamName = team?.DisplayName ?? "", channelId = r.ChannelId, channelName = "", docType = "transcript" },
+                            new { teamId = r.TeamId, teamName = team?.DisplayName ?? "", channelId = r.ChannelId, channelName = "", docType = "summary" }
+                        };
+                    }
+                    return new[]
+                    {
+                        new { teamId = r.TeamId, teamName = team?.DisplayName ?? "", channelId = r.ChannelId, channelName = "", docType = r.DocType }
+                    };
+                })
+                .ToList();
+
+            var resp = await Http.PostAsJsonAsync($"/api/meetings/{MeetingId}/post-to-channel", requests);
+            if (resp.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Posted to channels!", Severity.Success);
+                await LoadChannelHistory();
+            }
+            else
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                Snackbar.Add($"Failed: {body}", Severity.Error);
+            }
+        }
+        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        finally { _channelPosting = false; StateHasChanged(); }
+    }
+
+    private async void OnTeamSelected(ChannelRowState row, string? teamId)
+    {
+        row.TeamId = teamId;
+        row.ChannelId = null;
+        row.Channels.Clear();
+        row.BotNotInstalled = false;
+
+        if (!string.IsNullOrEmpty(teamId))
+        {
+            try
+            {
+                var channels = await Http.GetFromJsonAsync<List<ChannelItem>>($"/api/firm/graph/teams/{teamId}/channels") ?? new();
+                row.Channels = channels;
+                row.BotNotInstalled = !_botInstalls.Any(b => b.TeamId == teamId);
+            }
+            catch { row.Channels = new(); }
+        }
+        StateHasChanged();
+    }
+
+    private void AddChannelRow()
+    {
+        _channelRows.Add(new ChannelRowState());
+    }
+
+    // State classes
+    private class KbRowState
+    {
+        public int? TeamId { get; set; }
+        public string TeamName { get; set; } = "";
+        public bool IsChecked { get; set; }
+        public string DocType { get; set; } = "both";
+        public string? LastPushedAt { get; set; }
+    }
+
+    private class ChannelRowState
+    {
+        public string? TeamId { get; set; }
+        public string? TeamName { get; set; }
+        public string? ChannelId { get; set; }
+        public string DocType { get; set; } = "summary";
+        public List<ChannelItem> Channels { get; set; } = new();
+        public bool BotNotInstalled { get; set; }
+    }
+
+    private record TeamInfo(string Id, string DisplayName);
+    private record ChannelItem(string Id, string DisplayName);
+    private record UserTeamItem(int Id, string Name, string Role);
+    private record BotInstall(string TeamId, string ChannelId);
+    private record ChannelPostRecord(string TeamName, string ChannelName, string DocType, DateTime PostedAt, bool Success);
+}
