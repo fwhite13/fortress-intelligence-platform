@@ -1,0 +1,94 @@
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="color: var(--color-text-primary);">Add a Meeting</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="MeetingUrl" Label="Meeting URL"
+                      Style="color: var(--color-text-primary);" Variant="Variant.Outlined"
+                      Placeholder="https://teams.microsoft.com/l/meetup-join/..."
+                      Required Class="mb-3" />
+
+        <MudTextField @bind-Value="MeetingTitle" Label="Meeting Title (optional)"
+                      Style="color: var(--color-text-primary);" Variant="Variant.Outlined"
+                      Class="mb-3" />
+
+        <MudText Typo="Typo.body2" Class="mt-2 mb-1" Style="color: var(--color-text-secondary);">
+            Scheduled time (required)
+        </MudText>
+        <div class="d-flex gap-2 mb-1">
+            <MudDatePicker @bind-Date="_startDate" Label="Date" Variant="Variant.Outlined"
+                           Class="flex-1" MinDate="DateTime.Today"
+                           Required />
+            <MudTimePicker @bind-Time="_startTime" Label="Time" Variant="Variant.Outlined"
+                           Class="flex-1" AmPm="true"
+                           Required />
+        </div>
+
+        @if (_validationError != null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                @_validationError
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Style="color: var(--color-text-secondary);">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                   OnClick="Submit" Disabled="@(!IsValid())">
+            Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private MudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string MeetingUrl { get; set; } = "";
+    [Parameter] public string? MeetingTitle { get; set; }
+
+    private DateTime? _startDate;
+    private TimeSpan? _startTime;
+    private string? _validationError;
+
+    private DateTime? GetScheduledDatetime()
+    {
+        if (_startDate == null || _startTime == null) return null;
+        var date = _startDate.Value.Date;
+        return DateTime.SpecifyKind(date + _startTime.Value, DateTimeKind.Local).ToUniversalTime();
+    }
+
+    private bool IsValid()
+    {
+        if (string.IsNullOrWhiteSpace(MeetingUrl)) return false;
+        var dt = GetScheduledDatetime();
+        if (dt == null) return false;
+        return dt.Value > DateTime.UtcNow.AddMinutes(5);
+    }
+
+    private void Submit()
+    {
+        _validationError = null;
+        if (string.IsNullOrWhiteSpace(MeetingUrl))
+        {
+            _validationError = "Meeting URL is required.";
+            return;
+        }
+        var dt = GetScheduledDatetime();
+        if (dt == null)
+        {
+            _validationError = "Please select a date and time.";
+            return;
+        }
+        if (dt.Value <= DateTime.UtcNow.AddMinutes(5))
+        {
+            _validationError = "Use Join Now for immediate recording.";
+            return;
+        }
+        MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle, dt.Value)));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

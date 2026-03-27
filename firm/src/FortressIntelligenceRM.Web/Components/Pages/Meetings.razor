@@ -20,6 +20,9 @@
         <MudText Typo="Typo.h5" Style="color: var(--color-text-primary); font-weight: 600;">My Meetings</MudText>
         <MudSpacer />
         <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;" OnClick="OpenJoinDialog">
+            Join Now
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Style="border-color: #d4af37; color: #d4af37;" OnClick="OpenAddMeetingDialog">
             Add a Meeting
         </MudButton>
     </MudStack>
@@ -51,7 +54,7 @@
                                 @DateTime.Parse(upcomingCard.EndDateTime).ToLocalTime().ToString("h:mm tt")
                             </MudText>
                             <MudChip T="string"
-                                     Color="@(upcomingCard.ModeHint == "A" ? Color.Info : Color.Warning)"
+                                     Color="@(upcomingCard.Platform == "teams" ? Color.Info : Color.Warning)"
                                      Size="Size.Small" Class="mb-1">
                                 @upcomingCard.ModeText
                             </MudChip>
@@ -294,11 +297,11 @@
             MaxWidth = MaxWidth.Small,
             FullWidth = true
         };
-        var dialog = await DialogService.ShowAsync<JoinMeetingDialog>("New Meeting", parameters, options);
+        var dialog = await DialogService.ShowAsync<JoinMeetingDialog>("Join Now", parameters, options);
         var result = await dialog.Result;
-        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?, DateTime?> data)
+        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?> data)
         {
-            await JoinMeetingWithParams(data.Item1, data.Item2, data.Item5);
+            await JoinMeetingWithParams(data.Item1, data.Item2);
         }
     }
 
@@ -337,15 +340,68 @@
             MaxWidth = MaxWidth.Small,
             FullWidth = true
         };
-        var dialog = await DialogService.ShowAsync<JoinMeetingDialog>("Add a Meeting", options);
+        var dialog = await DialogService.ShowAsync<JoinMeetingDialog>("Join Now", options);
         var result = await dialog.Result;
-        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?, DateTime?> data)
+        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?> data)
         {
-            await JoinMeetingWithParams(data.Item1, data.Item2, data.Item5);
+            await JoinMeetingWithParams(data.Item1, data.Item2);
         }
     }
 
-    private async Task JoinMeetingWithParams(string meetingUrl, string? meetingTitle, DateTime? startDatetime = null)
+    private async Task JoinMeetingWithParams(string meetingUrl, string? meetingTitle)
+    {
+        if (string.IsNullOrWhiteSpace(meetingUrl)) return;
+        _joining = true;
+        StateHasChanged();
+        try
+        {
+            var http = HttpClientFactory.CreateClient();
+            var uri = Navigation.ToAbsoluteUri("/api/meetings/join");
+            var response = await http.PostAsJsonAsync(uri, new
+            {
+                meetingUrl = meetingUrl,
+                title = meetingTitle
+            });
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Bot is joining the meeting!", Severity.Success);
+                await LoadMeetings();
+            }
+            else
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                Logger.LogError("Failed to join meeting: HTTP {Status} — {Body}", (int)response.StatusCode, err);
+                Snackbar.Add("Failed to add meeting — please try again.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exception in JoinMeetingWithParams for URL {Url}", meetingUrl);
+            Snackbar.Add("Something went wrong — please try again.", Severity.Error);
+        }
+        finally
+        {
+            _joining = false;
+        }
+    }
+
+    private async Task OpenAddMeetingDialog()
+    {
+        var options = new DialogOptions
+        {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true
+        };
+        var dialog = await DialogService.ShowAsync<AddMeetingDialog>("Add a Meeting", options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, DateTime> data)
+        {
+            await ScheduleMeetingWithParams(data.Item1, data.Item2, data.Item3);
+        }
+    }
+
+    private async Task ScheduleMeetingWithParams(string meetingUrl, string? meetingTitle, DateTime scheduledDatetime)
     {
         if (string.IsNullOrWhiteSpace(meetingUrl)) return;
         _joining = true;
@@ -358,23 +414,24 @@
             {
                 meetingUrl = meetingUrl,
                 title = meetingTitle,
-                startDatetime = startDatetime?.ToString("O")
+                startDatetime = scheduledDatetime.ToString("O")
             });
             if (response.IsSuccessStatusCode)
             {
-                var isFuture = startDatetime.HasValue && startDatetime.Value > DateTime.UtcNow.AddMinutes(5);
-                Snackbar.Add(isFuture ? "Meeting scheduled!" : "Bot is joining the meeting!", Severity.Success);
+                Snackbar.Add("Meeting added to FIRM.", Severity.Success);
                 await LoadMeetings();
             }
             else
             {
                 var err = await response.Content.ReadAsStringAsync();
-                Snackbar.Add($"Failed to join: {err}", Severity.Error);
+                Logger.LogError("Failed to schedule meeting: HTTP {Status} — {Body}", (int)response.StatusCode, err);
+                Snackbar.Add("Failed to add meeting — please try again.", Severity.Error);
             }
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+            Logger.LogError(ex, "Exception in ScheduleMeetingWithParams for URL {Url}", meetingUrl);
+            Snackbar.Add("Something went wrong — please try again.", Severity.Error);
         }
         finally
         {
@@ -469,15 +526,20 @@
                 var response = await http.PostAsJsonAsync(uri, payload);
                 if (response.IsSuccessStatusCode)
                 {
-                    Snackbar.Add($"'{card.Subject}' added to FIRM as scheduled.", Severity.Success);
+                    Snackbar.Add("Meeting added to FIRM.", Severity.Success);
                     await LoadMeetings();
                 }
                 else
-                    Snackbar.Add("Failed to add meeting", Severity.Error);
+                {
+                    var err = await response.Content.ReadAsStringAsync();
+                    Logger.LogError("AddCalendarMeetingToFirm failed: HTTP {Status} — {Body}", (int)response.StatusCode, err);
+                    Snackbar.Add("Failed to add meeting — please try again.", Severity.Error);
+                }
             }
             catch (Exception ex)
             {
-                Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+                Logger.LogError(ex, "Exception in AddCalendarMeetingToFirm for card {CalendarEventId}", card.CalendarEventId);
+                Snackbar.Add("Something went wrong — please try again.", Severity.Error);
             }
         }
         else

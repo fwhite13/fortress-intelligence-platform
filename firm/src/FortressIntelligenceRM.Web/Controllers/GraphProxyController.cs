@@ -125,6 +125,8 @@ public class GraphProxyController : ControllerBase
         if (string.IsNullOrEmpty(oid))
             return Ok(new List<object>());
 
+        _logger.LogInformation("[CalendarProxy] Fetching upcoming meetings for OID {Oid}", oid);
+
         try
         {
             var httpClient = _httpClientFactory.CreateClient();
@@ -132,6 +134,7 @@ public class GraphProxyController : ControllerBase
                 $"{faitUrl}/api/firm/calendar-events?entraOid={Uri.EscapeDataString(oid)}");
             req.Headers.Add("X-Firm-Secret", secret);
             var resp = await httpClient.SendAsync(req);
+            _logger.LogInformation("[CalendarProxy] FAIT calendar-events returned HTTP {Status} for OID {Oid}", (int)resp.StatusCode, oid);
             if (!resp.IsSuccessStatusCode)
                 return Ok(new List<object>());
 
@@ -139,6 +142,8 @@ public class GraphProxyController : ControllerBase
             var events = JsonSerializer.Deserialize<List<CalendarEventItem>>(body,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (events == null) return Ok(new List<object>());
+
+            _logger.LogInformation("[CalendarProxy] FAIT returned {Count} calendar events for OID {Oid}", events?.Count ?? 0, oid);
 
             var enriched = events.Select(e =>
             {
@@ -162,6 +167,8 @@ public class GraphProxyController : ControllerBase
                     ModeText = modeText,
                 };
             }).ToList();
+
+            _logger.LogInformation("[CalendarProxy] Returning {Count} upcoming meetings for OID {Oid}", enriched.Count, oid);
 
             return Ok(enriched);
         }

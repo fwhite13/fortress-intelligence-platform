@@ -12,25 +12,28 @@
 
         @if (!string.IsNullOrWhiteSpace(MeetingUrl))
         {
-            @if (DetectMode(MeetingUrl) == "A")
+            @if (DetectPlatform(MeetingUrl) == "teams")
             {
                 <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Videocam">
-                    <strong>Teams meeting detected — Mode A (Native Transcript)</strong><br/>
-                    No bot will join. Transcript is fetched directly from Teams after the meeting ends.
+                    Teams meeting detected — transcript will be captured automatically after the meeting ends.
                 </MudAlert>
             }
-            else if (DetectMode(MeetingUrl) == "B")
+            else if (DetectPlatform(MeetingUrl) == "zoom")
             {
-                var platformLabel = DetectPlatform(MeetingUrl) == "zoom" ? "Zoom" : "Google Meet";
-                <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.SmartToy">
-                    <strong>@platformLabel meeting detected — Mode B (VP Bot)</strong><br/>
-                    A bot will appear as "Fortress Notetaker" in your meeting.
+                <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.SmartToy">
+                    Zoom meeting detected — Fortress Notetaker will join as a participant to record.
+                </MudAlert>
+            }
+            else if (DetectPlatform(MeetingUrl) == "meet")
+            {
+                <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.SmartToy">
+                    Google Meet detected — Fortress Notetaker will join as a participant to record.
                 </MudAlert>
             }
             else
             {
                 <MudAlert Severity="Severity.Warning" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Warning">
-                    Platform not detected — verify URL and try again.
+                    Platform not recognized — please verify the meeting link.
                 </MudAlert>
             }
         }
@@ -45,28 +48,16 @@
             <MudSelect @bind-Value="_platformOverride" Label="Platform Override" Variant="Variant.Outlined"
                        Class="mb-3" Style="color: var(--color-text-primary);">
                 <MudSelectItem Value="@("auto")">Auto-detect</MudSelectItem>
-                <MudSelectItem Value="@("teams-native")">Teams Native (Mode A)</MudSelectItem>
-                <MudSelectItem Value="@("teams-bot")">Teams Bot (Mode B)</MudSelectItem>
-                <MudSelectItem Value="@("zoom")">Zoom Bot (Mode B)</MudSelectItem>
-                <MudSelectItem Value="@("meet")" Disabled="true">Google Meet Bot (coming soon)</MudSelectItem>
+                <MudSelectItem Value="@("teams-native")">Teams — native transcript</MudSelectItem>
+                <MudSelectItem Value="@("teams-bot")">Teams — Fortress Notetaker</MudSelectItem>
+                <MudSelectItem Value="@("zoom")">Zoom — Fortress Notetaker</MudSelectItem>
+                <MudSelectItem Value="@("meet")" Disabled="true">Google Meet (coming soon)</MudSelectItem>
             </MudSelect>
         }
 
         <MudTextField @bind-Value="MeetingTitle" Label="Meeting Title (optional)"
                       Style="color: var(--color-text-primary);" Variant="Variant.Outlined" />
 
-        <MudText Typo="Typo.body2" Class="mt-3 mb-1" Style="color: var(--color-text-secondary);">
-            Schedule for later (optional)
-        </MudText>
-        <div class="d-flex gap-2">
-            <MudDatePicker @bind-Date="_startDate" Label="Date" Variant="Variant.Outlined"
-                           Class="flex-1" MinDate="DateTime.Today" />
-            <MudTimePicker @bind-Time="_startTime" Label="Time" Variant="Variant.Outlined"
-                           Class="flex-1" AmPm="true" />
-        </div>
-        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
-            Leave blank to join now
-        </MudText>
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" Style="color: var(--color-text-secondary);">Cancel</MudButton>
@@ -96,17 +87,6 @@
     private bool _showOverride = false;
     private string _platformOverride = "auto";
 
-    private DateTime? _startDate;
-    private TimeSpan? _startTime;
-
-    private DateTime? GetStartDatetime()
-    {
-        if (_startDate == null) return null;
-        var date = _startDate.Value.Date;
-        var time = _startTime ?? TimeSpan.Zero;
-        return DateTime.SpecifyKind(date + time, DateTimeKind.Local).ToUniversalTime();
-    }
-
     private string DetectPlatform(string url)
     {
         if (string.IsNullOrWhiteSpace(url)) return "unknown";
@@ -130,8 +110,7 @@
         var effectiveMode = _platformOverride == "auto"
             ? DetectMode(MeetingUrl)
             : (_platformOverride == "teams-native" ? "A" : "B");
-        var startDatetime = GetStartDatetime();
-        MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle, effectivePlatform, effectiveMode, startDatetime)));
+        MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle, effectivePlatform, effectiveMode)));
     }
 
     private void Cancel() => MudDialog.Cancel();

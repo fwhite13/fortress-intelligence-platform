@@ -353,12 +353,15 @@ public class FirmIntegrationController : ControllerBase
         if (string.IsNullOrEmpty(entraOid))
             return Ok(new List<object>());
 
+        _logger.LogInformation("FirmIntegration: calendar-events called with entraOid={OID}", entraOid);
+
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         // Try exact EntraOid match first (populated since ADO#1240)
         var user = await db.Users
             .Where(u => u.EntraOid == entraOid && u.IsActive)
             .FirstOrDefaultAsync();
+        _logger.LogInformation("FirmIntegration: calendar-events EntraOid exact match: {Result} for OID {OID}", user != null ? $"found user {user.Id}" : "not found", entraOid);
 
         // Fallback for users created before EntraOid was added:
         // find active Entra user — works for single-tenant
@@ -393,11 +396,15 @@ public class FirmIntegrationController : ControllerBase
             return Ok(new List<object>());
         }
 
+        _logger.LogInformation("FirmIntegration: calendar-events Graph returned {Count} events for user {UserId}", events.Count, user.Id);
+
         var meetingEvents = events
             .Where(e => !string.IsNullOrEmpty(e.OnlineMeetingUrl))
             .OrderBy(e => e.StartTime)
             .Take(20)
             .ToList();
+
+        _logger.LogInformation("FirmIntegration: calendar-events returning {Count} meeting events (with join URL) for user {UserId}", meetingEvents.Count, user.Id);
 
         var result = meetingEvents.Select(e =>
         {
