@@ -49,7 +49,7 @@ public class DatabaseInitializationService : IHostedService
             var extraTables = new[]
             {
                 ("firm_users", @"CREATE TABLE IF NOT EXISTS firm_users (
-                    id CHAR(36) NOT NULL PRIMARY KEY,
+                    id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
                     entra_oid VARCHAR(128) NOT NULL,
                     email VARCHAR(256) NOT NULL,
                     display_name VARCHAR(255) NOT NULL,
@@ -183,7 +183,8 @@ public class DatabaseInitializationService : IHostedService
             // Schema column additions — idempotent ALTER TABLE statements
             var alterStatements = new[]
             {
-                "ALTER TABLE firm_users ADD COLUMN fait_user_id CHAR(36) NULL",
+                "ALTER TABLE firm_users ADD COLUMN fait_user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL",
+                "ALTER TABLE firm_users MODIFY COLUMN id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL",
                 "ALTER TABLE firm_meetings ADD COLUMN transcript_kb_pushed TINYINT(1) NOT NULL DEFAULT 0",
                 "ALTER TABLE firm_meetings ADD COLUMN summary_kb_pushed TINYINT(1) NOT NULL DEFAULT 0",
                 "ALTER TABLE firm_meetings ADD COLUMN start_datetime DATETIME NULL",

@@ -110,10 +110,24 @@ public class GraphProxyController : ControllerBase
     /// Returns slim DTO with modeHint added by FIRM based on platform.
     /// </summary>
     [HttpGet("calendar/upcoming-meetings")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetUpcomingMeetings()
     {
-        var faitUrl = _config["FIP:FaitApiUrl"] ?? "";
+        // Internal self-call from Meetings.razor via local HttpClient — validate X-Firm-Secret
         var secret = _config["Firm:SharedSecret"] ?? "";
+        var providedSecret = Request.Headers["X-Firm-Secret"].FirstOrDefault();
+        // Only enforce secret check when a secret is configured (dev environments may not have it)
+        if (!string.IsNullOrEmpty(secret) && providedSecret != secret)
+        {
+            // Also allow authenticated users (browser requests from logged-in sessions)
+            if (!User.Identity?.IsAuthenticated ?? true)
+            {
+                _logger.LogWarning("[CalendarProxy] Rejected unauthenticated request without valid X-Firm-Secret");
+                return Forbid();
+            }
+        }
+
+        var faitUrl = _config["FIP:FaitApiUrl"] ?? "";
 
         if (string.IsNullOrEmpty(faitUrl))
             return Ok(new List<object>());

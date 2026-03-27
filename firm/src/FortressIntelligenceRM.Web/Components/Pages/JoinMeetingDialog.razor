@@ -15,7 +15,7 @@
             @if (DetectPlatform(MeetingUrl) == "teams")
             {
                 <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Videocam">
-                    Teams meeting detected — transcript will be captured automatically after the meeting ends.
+                    Teams meeting detected — bot will join and capture the transcript.
                 </MudAlert>
             }
             else if (DetectPlatform(MeetingUrl) == "zoom")
