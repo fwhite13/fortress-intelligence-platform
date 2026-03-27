@@ -27,6 +27,7 @@ public class FirmIntegrationController : ControllerBase
     private readonly ILogger<FirmIntegrationController> _logger;
     private readonly ForgeService _forgeService;
     private readonly KbDocumentService _kbDocumentService;
+    private readonly GraphCalendarService _graphCalendarService;
 
     private string BucketName => _config["Firm:KbS3Bucket"] ?? "fortress-tools";
     private string PersonalKbId => _config["KnowledgeBase:PersonalKbId"] ?? "ZCEZCJGHQC";
@@ -39,7 +40,8 @@ public class FirmIntegrationController : ControllerBase
         IConfiguration config,
         ILogger<FirmIntegrationController> logger,
         ForgeService forgeService,
-        KbDocumentService kbDocumentService)
+        KbDocumentService kbDocumentService,
+        GraphCalendarService graphCalendarService)
     {
         _dbFactory = dbFactory;
         _s3 = s3;
@@ -48,6 +50,7 @@ public class FirmIntegrationController : ControllerBase
         _logger = logger;
         _forgeService = forgeService;
         _kbDocumentService = kbDocumentService;
+        _graphCalendarService = graphCalendarService;
     }
 
     /// <summary>
@@ -328,6 +331,86 @@ public class FirmIntegrationController : ControllerBase
         {
             _logger.LogWarning(ex, "FirmIntegration: Failed to start KB ingestion for user {UserId} (non-fatal)", userId);
         }
+    }
+
+    /// <summary>
+    /// GET /api/firm/calendar-events?entraOid={oid}
+    /// Returns upcoming meeting events (next 7 days) that have a Teams/Zoom/Meet join URL.
+    /// Filtered and shaped for FIRM's calendar detection feature.
+    /// Auth: X-Firm-Secret header
+    /// </summary>
+    [HttpGet("calendar-events")]
+    public async Task<IActionResult> GetCalendarEvents([FromQuery] string? entraOid)
+    {
+        var secret = _config["Firm:SharedSecret"] ?? "";
+        var incomingSecret = Request.Headers["X-Firm-Secret"].FirstOrDefault() ?? "";
+        if (!string.Equals(incomingSecret, secret, StringComparison.Ordinal))
+        {
+            _logger.LogWarning("FirmIntegration: calendar-events rejected — invalid X-Firm-Secret");
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrEmpty(entraOid))
+            return Ok(new List<object>());
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        // AppUser doesn't have EntraOid column yet — use same workaround as resolve-user endpoint
+        // (single-tenant: first active Entra user). TODO: add EntraOid to AppUser for multi-user accuracy.
+        var user = await db.Users
+            .Where(u => u.IsEntraUser && u.IsActive)
+            .OrderByDescending(u => u.CreatedAt)
+            .FirstOrDefaultAsync();
+        if (user == null)
+            return Ok(new List<object>());
+
+        var now = DateTime.UtcNow;
+        var end = now.AddDays(7);
+
+        List<CalendarEvent> events;
+        try
+        {
+            events = await _graphCalendarService.GetUserCalendarEventsAsync(user.Id, now, end);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FirmIntegration: calendar-events failed for user {UserId}", user.Id);
+            return Ok(new List<object>());
+        }
+
+        var meetingEvents = events
+            .Where(e => !string.IsNullOrEmpty(e.OnlineMeetingUrl))
+            .OrderBy(e => e.StartTime)
+            .Take(20)
+            .ToList();
+
+        var result = meetingEvents.Select(e =>
+        {
+            var joinUrl = e.OnlineMeetingUrl ?? "";
+            var platform = DetectCalendarPlatform(joinUrl);
+            return new
+            {
+                calendarEventId = e.EventId,
+                subject = e.Subject,
+                startDateTime = e.StartTime.ToString("O"),
+                endDateTime = e.EndTime.ToString("O"),
+                joinUrl = joinUrl,
+                platform = platform,
+            };
+        }).ToList();
+
+        return Ok(result);
+    }
+
+    private static string DetectCalendarPlatform(string url)
+    {
+        if (url.Contains("teams.microsoft.com") || url.Contains("teams.live.com"))
+            return "teams";
+        if (url.Contains("zoom.us"))
+            return "zoom";
+        if (url.Contains("meet.google.com"))
+            return "meet";
+        return "other";
     }
 }
 

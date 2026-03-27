@@ -70,6 +70,15 @@
 
     [Parameter] public string MeetingUrl { get; set; } = "";
     [Parameter] public string? MeetingTitle { get; set; }
+    [Parameter] public string? PrefilledUrl { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrEmpty(PrefilledUrl) && string.IsNullOrEmpty(MeetingUrl))
+        {
+            MeetingUrl = PrefilledUrl;
+        }
+    }
 
     private bool _showOverride = false;
     private string _platformOverride = "auto";

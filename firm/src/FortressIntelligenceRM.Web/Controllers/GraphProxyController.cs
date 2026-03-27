@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 
@@ -103,6 +104,74 @@ public class GraphProxyController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// GET /api/firm/calendar/upcoming-meetings
+    /// Proxies to FAIT calendar-events endpoint for the current user.
+    /// Returns slim DTO with modeHint added by FIRM based on platform.
+    /// </summary>
+    [HttpGet("calendar/upcoming-meetings")]
+    public async Task<IActionResult> GetUpcomingMeetings()
+    {
+        var faitUrl = _config["FIP:FaitApiUrl"] ?? "";
+        var secret = _config["Firm:SharedSecret"] ?? "";
+
+        if (string.IsNullOrEmpty(faitUrl))
+            return Ok(new List<object>());
+
+        var oid = User.FindFirstValue("oid")
+            ?? User.FindFirstValue("http://schemas.microsoft.com/identity/claims/objectidentifier")
+            ?? "";
+
+        if (string.IsNullOrEmpty(oid))
+            return Ok(new List<object>());
+
+        try
+        {
+            var httpClient = _httpClientFactory.CreateClient();
+            var req = new HttpRequestMessage(HttpMethod.Get,
+                $"{faitUrl}/api/firm/calendar-events?entraOid={Uri.EscapeDataString(oid)}");
+            req.Headers.Add("X-Firm-Secret", secret);
+            var resp = await httpClient.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+                return Ok(new List<object>());
+
+            var body = await resp.Content.ReadAsStringAsync();
+            var events = JsonSerializer.Deserialize<List<CalendarEventItem>>(body,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (events == null) return Ok(new List<object>());
+
+            var enriched = events.Select(e =>
+            {
+                var modeHint = e.Platform == "teams" ? "A" : "B";
+                var modeText = e.Platform switch
+                {
+                    "teams" => "FIRM will capture the transcript directly.",
+                    "zoom" => "Fortress Notetaker will join to record.",
+                    "meet" => "Fortress Notetaker will join to record.",
+                    _ => "Fortress Notetaker will join to record."
+                };
+                return new
+                {
+                    e.CalendarEventId,
+                    e.Subject,
+                    e.StartDateTime,
+                    e.EndDateTime,
+                    e.JoinUrl,
+                    e.Platform,
+                    ModeHint = modeHint,
+                    ModeText = modeText,
+                };
+            }).ToList();
+
+            return Ok(enriched);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Calendar] Failed to fetch upcoming meetings for OID {Oid}", oid);
+            return Ok(new List<object>());
+        }
+    }
+
     private async Task<string?> GetAppTokenAsync()
     {
         if (_cachedToken != null && DateTime.UtcNow < _tokenExpiry.AddMinutes(-2))
@@ -152,4 +221,14 @@ public class GraphProxyController : ControllerBase
             _tokenLock.Release();
         }
     }
+}
+
+internal class CalendarEventItem
+{
+    public string CalendarEventId { get; set; } = "";
+    public string Subject { get; set; } = "";
+    public string StartDateTime { get; set; } = "";
+    public string EndDateTime { get; set; } = "";
+    public string JoinUrl { get; set; } = "";
+    public string Platform { get; set; } = "";
 }

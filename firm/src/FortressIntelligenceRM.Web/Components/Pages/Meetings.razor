@@ -24,6 +24,58 @@
         </MudButton>
     </MudStack>
 
+    @if (!_calendarLoading && _upcomingMeetings?.Count > 0)
+    {
+        <MudText Typo="Typo.h6" Class="mb-2 mt-4" Style="color: var(--color-text-primary);">
+            Upcoming Meetings
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                           Size="Size.Small"
+                           OnClick="LoadUpcomingMeetingsAsync" />
+        </MudText>
+        <MudGrid Class="mb-4">
+            @foreach (var upcomingCard in _upcomingMeetings)
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <MudCard Outlined="true" Style="background: var(--color-bg-elevated);">
+                        <MudCardContent>
+                            <div class="d-flex align-center gap-2 mb-1">
+                                <MudChip T="string"
+                                         Color="@(upcomingCard.Platform == "teams" ? Color.Secondary : upcomingCard.Platform == "zoom" ? Color.Info : upcomingCard.Platform == "meet" ? Color.Success : Color.Default)"
+                                         Size="Size.Small">
+                                    @(upcomingCard.Platform == "teams" ? "Teams" : upcomingCard.Platform == "zoom" ? "Zoom" : upcomingCard.Platform == "meet" ? "Meet" : upcomingCard.Platform)
+                                </MudChip>
+                                <MudText Typo="Typo.subtitle2" Style="color: var(--color-text-primary);">@upcomingCard.Subject</MudText>
+                            </div>
+                            <MudText Typo="Typo.caption" Class="mb-2" Style="color: var(--color-text-secondary);">
+                                @DateTime.Parse(upcomingCard.StartDateTime).ToLocalTime().ToString("ddd MMM d · h:mm tt") –
+                                @DateTime.Parse(upcomingCard.EndDateTime).ToLocalTime().ToString("h:mm tt")
+                            </MudText>
+                            <MudChip T="string"
+                                     Color="@(upcomingCard.ModeHint == "A" ? Color.Info : Color.Warning)"
+                                     Size="Size.Small" Class="mb-1">
+                                @upcomingCard.ModeText
+                            </MudChip>
+                        </MudCardContent>
+                        <MudCardActions>
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       Size="Size.Small"
+                                       OnClick="@(() => OpenJoinDialogPrefilled(upcomingCard.JoinUrl))">
+                                Add to FIRM →
+                            </MudButton>
+                        </MudCardActions>
+                    </MudCard>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+    else if (!_calendarLoading && !string.IsNullOrEmpty(_calendarPendingMsg))
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+            Calendar integration pending — connect your account in FAIT to see upcoming meetings.
+        </MudAlert>
+    }
+
     @if (_loading)
     {
         <MudProgressLinear Color="Color.Warning" Indeterminate />
@@ -95,6 +147,9 @@
     private const int _pageSize = 20;
     private Guid? _userId;
     private System.Threading.Timer? _pollTimer;
+    private List<UpcomingMeetingCard>? _upcomingMeetings;
+    private bool _calendarLoading = true;
+    private string? _calendarPendingMsg;
 
     protected override async Task OnInitializedAsync()
     {
@@ -145,6 +200,7 @@
         finally
         {
             // Always load (or show empty state) — never leave _loading = true
+            await LoadUpcomingMeetingsAsync();
             await LoadMeetings();
         }
         StartPolling();
@@ -173,6 +229,61 @@
             _loading = false;
             StateHasChanged();
         }
+    }
+
+    private async Task LoadUpcomingMeetingsAsync()
+    {
+        _calendarLoading = true;
+        try
+        {
+            var http = HttpClientFactory.CreateClient();
+            var uri = Navigation.ToAbsoluteUri("/api/firm/calendar/upcoming-meetings");
+            var response = await http.GetAsync(uri);
+            if (response.Headers.TryGetValues("X-Firm-Pending", out var vals))
+                _calendarPendingMsg = vals.FirstOrDefault();
+
+            if (response.IsSuccessStatusCode)
+            {
+                _upcomingMeetings = await response.Content.ReadFromJsonAsync<List<UpcomingMeetingCard>>() ?? new();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "FIRM: failed to load upcoming meetings from calendar");
+        }
+        finally
+        {
+            _calendarLoading = false;
+        }
+    }
+
+    private async Task OpenJoinDialogPrefilled(string joinUrl)
+    {
+        var parameters = new DialogParameters { { "PrefilledUrl", joinUrl } };
+        var options = new DialogOptions
+        {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true
+        };
+        var dialog = await DialogService.ShowAsync<JoinMeetingDialog>("New Meeting", parameters, options);
+        var result = await dialog.Result;
+        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?> data)
+        {
+            await JoinMeetingWithParams(data.Item1, data.Item2);
+        }
+    }
+
+    internal class UpcomingMeetingCard
+    {
+        public string CalendarEventId { get; set; } = "";
+        public string Subject { get; set; } = "";
+        public string StartDateTime { get; set; } = "";
+        public string EndDateTime { get; set; } = "";
+        public string JoinUrl { get; set; } = "";
+        public string Platform { get; set; } = "";
+        public string ModeHint { get; set; } = "";
+        public string ModeText { get; set; } = "";
     }
 
     private void StartPolling()
