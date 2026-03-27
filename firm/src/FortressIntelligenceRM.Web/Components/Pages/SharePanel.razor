@@ -1,4 +1,4 @@
-@inject HttpClient Http
+@inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 
@@ -122,7 +122,8 @@
 
         try
         {
-            var teams = await Http.GetFromJsonAsync<List<UserTeamItem>>("/api/firm/user-teams-local") ?? new();
+            var http = HttpClientFactory.CreateClient("local");
+            var teams = await http.GetFromJsonAsync<List<UserTeamItem>>("/api/firm/user-teams-local") ?? new();
             foreach (var t in teams)
                 _kbRows.Add(new KbRowState { TeamId = t.Id, TeamName = t.Name, DocType = "both" });
         }
@@ -135,7 +136,8 @@
     {
         try
         {
-            var teams = await Http.GetFromJsonAsync<List<TeamInfo>>("/api/firm/graph/teams") ?? new();
+            var http = HttpClientFactory.CreateClient("local");
+            var teams = await http.GetFromJsonAsync<List<TeamInfo>>("/api/firm/graph/teams") ?? new();
             _teams = teams;
         }
         catch { _teams = new(); }
@@ -145,7 +147,8 @@
     {
         try
         {
-            var history = await Http.GetFromJsonAsync<List<ChannelPostRecord>>($"/api/meetings/{MeetingId}/channel-post-history") ?? new();
+            var http = HttpClientFactory.CreateClient("local");
+            var history = await http.GetFromJsonAsync<List<ChannelPostRecord>>($"/api/meetings/{MeetingId}/channel-post-history") ?? new();
             _channelHistory = history;
         }
         catch { _channelHistory = new(); }
@@ -155,7 +158,8 @@
     {
         try
         {
-            var installs = await Http.GetFromJsonAsync<List<BotInstall>>("/api/firm/bot-installations") ?? new();
+            var http = HttpClientFactory.CreateClient("local");
+            var installs = await http.GetFromJsonAsync<List<BotInstall>>("/api/firm/bot-installations") ?? new();
             _botInstalls = installs;
         }
         catch { _botInstalls = new(); }
@@ -167,6 +171,7 @@
         _kbPushing = true;
         try
         {
+            var http = HttpClientFactory.CreateClient("local");
             foreach (var row in _kbRows.Where(r => r.IsChecked))
             {
                 var docTypes = row.DocType == "both"
@@ -179,7 +184,7 @@
                         ? new List<string> { "personal" }
                         : new List<string> { "team" };
 
-                    var resp = await Http.PostAsJsonAsync($"/api/meetings/{MeetingId}/push-to-kb",
+                    var resp = await http.PostAsJsonAsync($"/api/meetings/{MeetingId}/push-to-kb",
                         new { docType, kbScopes });
 
                     if (resp.IsSuccessStatusCode)
@@ -200,6 +205,7 @@
         _channelPosting = true;
         try
         {
+            var http = HttpClientFactory.CreateClient("local");
             var requests = _channelRows
                 .Where(r => !string.IsNullOrEmpty(r.ChannelId))
                 .SelectMany(r =>
@@ -220,7 +226,7 @@
                 })
                 .ToList();
 
-            var resp = await Http.PostAsJsonAsync($"/api/meetings/{MeetingId}/post-to-channel", requests);
+            var resp = await http.PostAsJsonAsync($"/api/meetings/{MeetingId}/post-to-channel", requests);
             if (resp.IsSuccessStatusCode)
             {
                 Snackbar.Add("Posted to channels!", Severity.Success);
@@ -247,7 +253,8 @@
         {
             try
             {
-                var channels = await Http.GetFromJsonAsync<List<ChannelItem>>($"/api/firm/graph/teams/{teamId}/channels") ?? new();
+                var http = HttpClientFactory.CreateClient("local");
+                var channels = await http.GetFromJsonAsync<List<ChannelItem>>($"/api/firm/graph/teams/{teamId}/channels") ?? new();
                 row.Channels = channels;
                 row.BotNotInstalled = !_botInstalls.Any(b => b.TeamId == teamId);
             }

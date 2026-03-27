@@ -257,9 +257,8 @@
         _calendarLoading = true;
         try
         {
-            var http = HttpClientFactory.CreateClient();
-            var uri = Navigation.ToAbsoluteUri("/api/firm/calendar/upcoming-meetings");
-            var response = await http.GetAsync(uri);
+            var http = HttpClientFactory.CreateClient("local");
+            var response = await http.GetAsync("/api/firm/calendar/upcoming-meetings");
             if (response.Headers.TryGetValues("X-Firm-Pending", out var vals))
                 _calendarPendingMsg = vals.FirstOrDefault();
 
@@ -355,9 +354,8 @@
         StateHasChanged();
         try
         {
-            var http = HttpClientFactory.CreateClient();
-            var uri = Navigation.ToAbsoluteUri("/api/meetings/join");
-            var response = await http.PostAsJsonAsync(uri, new
+            var http = HttpClientFactory.CreateClient("local");
+            var response = await http.PostAsJsonAsync("/api/meetings/join", new
             {
                 meetingUrl = meetingUrl,
                 title = meetingTitle
@@ -408,9 +406,8 @@
         StateHasChanged();
         try
         {
-            var http = HttpClientFactory.CreateClient();
-            var uri = Navigation.ToAbsoluteUri("/api/meetings/join");
-            var response = await http.PostAsJsonAsync(uri, new
+            var http = HttpClientFactory.CreateClient("local");
+            var response = await http.PostAsJsonAsync("/api/meetings/join", new
             {
                 meetingUrl = meetingUrl,
                 title = meetingTitle,
@@ -471,9 +468,8 @@
     {
         try
         {
-            var http = HttpClientFactory.CreateClient();
-            var uri = Navigation.ToAbsoluteUri($"/api/meetings/{meetingId}/join");
-            var response = await http.PostAsync(uri, null);
+            var http = HttpClientFactory.CreateClient("local");
+            var response = await http.PostAsync($"/api/meetings/{meetingId}/join", null);
             if (response.IsSuccessStatusCode)
                 await LoadMeetings();
             else
@@ -492,9 +488,8 @@
     {
         try
         {
-            var http = HttpClientFactory.CreateClient();
-            var uri = Navigation.ToAbsoluteUri($"/api/meetings/{meetingId}");
-            var response = await http.DeleteAsync(uri);
+            var http = HttpClientFactory.CreateClient("local");
+            var response = await http.DeleteAsync($"/api/meetings/{meetingId}");
             if (response.IsSuccessStatusCode)
                 await LoadMeetings();
             else
@@ -514,8 +509,7 @@
         {
             try
             {
-                var http = HttpClientFactory.CreateClient();
-                var uri = Navigation.ToAbsoluteUri("/api/meetings/join");
+                var http = HttpClientFactory.CreateClient("local");
                 var payload = new
                 {
                     meetingUrl = card.JoinUrl,
@@ -523,7 +517,7 @@
                     startDatetime = card.StartDateTime,
                     calendarEventId = card.CalendarEventId
                 };
-                var response = await http.PostAsJsonAsync(uri, payload);
+                var response = await http.PostAsJsonAsync("/api/meetings/join", payload);
                 if (response.IsSuccessStatusCode)
                 {
                     Snackbar.Add("Meeting added to FIRM.", Severity.Success);

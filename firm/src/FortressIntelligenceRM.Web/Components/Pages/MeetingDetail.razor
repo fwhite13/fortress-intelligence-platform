@@ -5,7 +5,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ISnackbar Snackbar
 @inject ILogger<MeetingDetail> Logger
-@inject HttpClient Http
+@inject IHttpClientFactory HttpClientFactory
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
@@ -265,7 +265,8 @@
             {
                 try
                 {
-                    var kbStatusResp = await Http.GetFromJsonAsync<KbStatusResponse>($"/api/meetings/{Id}/kb-status");
+                    var http = HttpClientFactory.CreateClient("local");
+                    var kbStatusResp = await http.GetFromJsonAsync<KbStatusResponse>($"/api/meetings/{Id}/kb-status");
                     if (kbStatusResp != null)
                     {
                         _transcriptPushedTo = kbStatusResp.Transcript?.ToHashSet() ?? new();
@@ -312,7 +313,8 @@
             if (_transcriptSelectTeam     && !_transcriptPushedTo.Contains("team"))     scopes.Add("team");
             if (!scopes.Any()) return;
 
-            var resp = await Http.PostAsJsonAsync($"/api/meetings/{_meeting.Id}/push-to-kb",
+            var http = HttpClientFactory.CreateClient("local");
+            var resp = await http.PostAsJsonAsync($"/api/meetings/{_meeting.Id}/push-to-kb",
                 new { docType = "transcript", kbScopes = scopes });
             if (resp.IsSuccessStatusCode)
             {
@@ -340,7 +342,8 @@
             if (_summarySelectTeam     && !_summaryPushedTo.Contains("team"))     scopes.Add("team");
             if (!scopes.Any()) return;
 
-            var resp = await Http.PostAsJsonAsync($"/api/meetings/{_meeting.Id}/push-to-kb",
+            var http = HttpClientFactory.CreateClient("local");
+            var resp = await http.PostAsJsonAsync($"/api/meetings/{_meeting.Id}/push-to-kb",
                 new { docType = "summary", kbScopes = scopes });
             if (resp.IsSuccessStatusCode)
             {

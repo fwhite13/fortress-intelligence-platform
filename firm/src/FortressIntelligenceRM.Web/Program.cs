@@ -58,6 +58,11 @@ builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>
 builder.Services.AddTransient<IBot, FirmBot>();
 builder.Services.AddSingleton<IFirmBotService, FirmBotService>();
 builder.Services.AddHttpClient();
+// Named client for same-container (self) API calls — bypasses Cloudflare
+builder.Services.AddHttpClient("local", client =>
+{
+    client.BaseAddress = new Uri("http://localhost:8080");
+});
 
 // AWS SDK services
 builder.Services.AddAWSService<IAmazonECS>();
