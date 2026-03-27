@@ -342,9 +342,9 @@ public class FirmIntegrationController : ControllerBase
     [HttpGet("calendar-events")]
     public async Task<IActionResult> GetCalendarEvents([FromQuery] string? entraOid)
     {
-        var secret = _config["Firm:SharedSecret"] ?? "";
-        var incomingSecret = Request.Headers["X-Firm-Secret"].FirstOrDefault() ?? "";
-        if (!string.Equals(incomingSecret, secret, StringComparison.Ordinal))
+        var expectedSecret = _config["Firm:SharedSecret"] ?? "";
+        var providedSecret = Request.Headers["X-Firm-Secret"].FirstOrDefault() ?? "";
+        if (string.IsNullOrEmpty(expectedSecret) || providedSecret != expectedSecret)
         {
             _logger.LogWarning("FirmIntegration: calendar-events rejected — invalid X-Firm-Secret");
             return Unauthorized();
