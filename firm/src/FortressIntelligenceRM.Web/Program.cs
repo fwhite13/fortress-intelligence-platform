@@ -32,7 +32,8 @@ if (!string.IsNullOrEmpty(dbHost))
         Database = dbName,
         UserID = dbUser,
         Password = dbPass,
-        ConnectionTimeout = 10
+        ConnectionTimeout = 10,
+        GuidFormat = MySqlGuidFormat.None    // ADO#1329: prevent Char36 auto-cast on CHAR(36) cols
     };
     firmConnectionString = csb.ConnectionString;
     Console.WriteLine($"FIRM: Using Aurora MySQL: {dbHost}/{dbName}");
