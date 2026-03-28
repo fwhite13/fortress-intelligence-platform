@@ -167,6 +167,53 @@ public class MeetingService
         return body?.UserId;
     }
 
+    public async Task UpdateModeAsync(long id, string mode)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.FindAsync(id);
+        if (meeting == null) return;
+        meeting.Mode = mode;
+        meeting.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Upserts a meeting from calendar detection. Keyed on calendar_event_id to prevent duplicates.
+    /// If meeting already exists for this user + calendar_event_id, returns existing meeting.
+    /// </summary>
+    public async Task<FirmMeeting> UpsertFromCalendarAsync(string userId, CalendarMeetingDto dto)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var existing = await db.Meetings.FirstOrDefaultAsync(m =>
+            m.CreatedBy == userId &&
+            m.CalendarEventId == dto.CalendarEventId);
+
+        if (existing != null)
+            return existing;
+
+        if (!DateTime.TryParse(dto.StartDateTime, null, System.Globalization.DateTimeStyles.RoundtripKind, out var startDt))
+            startDt = DateTime.UtcNow;
+
+        var meeting = new FirmMeeting
+        {
+            Title = dto.Subject,
+            MeetingUrl = dto.JoinUrl,
+            Status = MeetingStatus.Scheduled,
+            Platform = dto.Platform,
+            Mode = dto.Mode,
+            CreatedBy = userId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            StartDatetime = startDt,
+            CalendarEventId = dto.CalendarEventId,
+        };
+        db.Meetings.Add(meeting);
+        await db.SaveChangesAsync();
+        _logger.LogInformation("FIRM: Calendar upsert created meeting {Id} Mode {Mode} for user {UserId}", meeting.Id, dto.Mode, userId);
+        return meeting;
+    }
+
     private record ResolveFaitUserResponse(
         [property: System.Text.Json.Serialization.JsonPropertyName("userId")] string UserId);
 }

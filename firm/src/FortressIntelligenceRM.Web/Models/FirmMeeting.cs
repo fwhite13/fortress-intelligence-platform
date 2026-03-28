@@ -17,6 +17,8 @@ public class FirmMeeting
     public DateTime? StartDatetime { get; set; }    // When the meeting is scheduled to start
     [MaxLength(500)]
     public string? CalendarEventId { get; set; }    // Graph calendar event ID for sync
+    [MaxLength(2)]
+    public string? Mode { get; set; }  // "A" or "B" — set at creation time
     public DateTime? StartedAt { get; set; }
     public DateTime? EndedAt { get; set; }
     public int? DurationSeconds { get; set; }

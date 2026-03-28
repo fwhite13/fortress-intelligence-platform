@@ -9,6 +9,7 @@
 @inject ILogger<Meetings> Logger
 @inject VpBotService VpBotService
 @inject IConfiguration _config
+@inject CalendarService CalendarService
 @implements IDisposable
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
@@ -168,6 +169,8 @@
     private int _page = 1;
     private const int _pageSize = 20;
     private string? _userId;
+    private string? _entraOid;
+    private string? _userEmail;
     private System.Threading.Timer? _pollTimer;
     private List<UpcomingMeetingCard>? _upcomingMeetings;
     private bool _calendarLoading = true;
@@ -201,6 +204,8 @@
                 {
                     var firmUser = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
                     _userId = firmUser?.Id;
+                    _entraOid = entraOid;
+                    _userEmail = email;
                     Logger.LogInformation("FIRM Meetings: resolved userId={UserId} for entraOid={OID}", _userId, entraOid);
                 }
                 catch (Exception dbEx)
@@ -259,28 +264,32 @@
         _calendarLoading = true;
         try
         {
-            var http = HttpClientFactory.CreateClient("local");
-            var secret = _config["Firm:SharedSecret"] ?? "";
-            if (!string.IsNullOrEmpty(secret))
-                http.DefaultRequestHeaders.Add("X-Firm-Secret", secret);
-            var response = await http.GetAsync("/api/firm/calendar/upcoming-meetings");
-            if (response.Headers.TryGetValues("X-Firm-Pending", out var vals))
-                _calendarPendingMsg = vals.FirstOrDefault();
-
-            if (response.IsSuccessStatusCode)
+            if (string.IsNullOrEmpty(_entraOid) || string.IsNullOrEmpty(_userEmail))
             {
-                _upcomingMeetings = await response.Content.ReadFromJsonAsync<List<UpcomingMeetingCard>>() ?? new();
-                var calendarEventIds = _upcomingMeetings
-                    .Select(c => c.CalendarEventId)
-                    .Where(ceid => !string.IsNullOrEmpty(ceid))
-                    .ToHashSet();
-                _calendarRemovedMeetingIds = _meetings
-                    .Where(m => m.Status == MeetingStatus.Scheduled
-                             && !string.IsNullOrEmpty(m.CalendarEventId)
-                             && !calendarEventIds.Contains(m.CalendarEventId))
-                    .Select(m => m.Id)
-                    .ToHashSet();
+                _calendarLoading = false;
+                return;
             }
+            var calendarMeetings = await CalendarService.GetUpcomingCalendarMeetingsAsync(_entraOid, _userEmail);
+            _upcomingMeetings = calendarMeetings.Select(c => new UpcomingMeetingCard
+            {
+                CalendarEventId = c.CalendarEventId,
+                Subject = c.Subject,
+                StartDateTime = c.StartDateTime,
+                EndDateTime = c.EndDateTime,
+                JoinUrl = c.JoinUrl,
+                Platform = c.Platform,
+                ModeHint = c.Mode,
+                ModeText = c.ModeText,
+                Mode = c.Mode
+            }).ToList();
+
+            var calendarEventIds = _upcomingMeetings.Select(c => c.CalendarEventId).Where(id => !string.IsNullOrEmpty(id)).ToHashSet();
+            _calendarRemovedMeetingIds = _meetings
+                .Where(m => m.Status == MeetingStatus.Scheduled
+                         && !string.IsNullOrEmpty(m.CalendarEventId)
+                         && !calendarEventIds.Contains(m.CalendarEventId))
+                .Select(m => m.Id)
+                .ToHashSet();
         }
         catch (Exception ex)
         {
@@ -319,6 +328,7 @@
         public string Platform { get; set; } = "";
         public string ModeHint { get; set; } = "";
         public string ModeText { get; set; } = "";
+        public string Mode { get; set; } = "B";
     }
 
     private void StartPolling()
@@ -382,20 +392,20 @@
         };
         var dialog = await DialogService.ShowAsync<AddMeetingDialog>("Add a Meeting", options);
         var result = await dialog.Result;
-        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, DateTime> data)
+        if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, DateTime, bool, string?> data)
         {
-            await ScheduleMeetingWithParams(data.Item1, data.Item2, data.Item3);
+            await ScheduleMeetingWithParams(data.Item1, data.Item2, data.Item3, data.Item5);
         }
     }
 
-    private async Task ScheduleMeetingWithParams(string meetingUrl, string? meetingTitle, DateTime scheduledDatetime)
+    private async Task ScheduleMeetingWithParams(string meetingUrl, string? meetingTitle, DateTime scheduledDatetime, string? mode = null)
     {
         if (string.IsNullOrWhiteSpace(meetingUrl)) return;
         _joining = true;
         StateHasChanged();
         try
         {
-            await JoinMeetingDirectAsync(meetingUrl, meetingTitle, scheduledDatetime);
+            await JoinMeetingDirectAsync(meetingUrl, meetingTitle, scheduledDatetime, mode: mode);
         }
         catch (Exception ex)
         {
@@ -453,10 +463,12 @@
         return (firmUser.Id, entraOid);
     }
 
-    private async Task JoinMeetingDirectAsync(string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null)
+    private async Task JoinMeetingDirectAsync(string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? mode = null)
     {
         var (userId, _) = await GetCurrentUserAsync();
         var meeting = await MeetingService.CreateMeetingAsync(userId, meetingUrl, title, startDatetime, calendarEventId);
+        if (!string.IsNullOrEmpty(mode))
+            await MeetingService.UpdateModeAsync(meeting.Id, mode);
 
         if (startDatetime.HasValue && startDatetime.Value.ToUniversalTime() > DateTime.UtcNow.AddMinutes(5))
         {
@@ -517,7 +529,7 @@
         {
             try
             {
-                await JoinMeetingDirectAsync(card.JoinUrl, card.Subject, start, card.CalendarEventId);
+                await JoinMeetingDirectAsync(card.JoinUrl, card.Subject, start, card.CalendarEventId, mode: card.Mode);
             }
             catch (Exception ex)
             {

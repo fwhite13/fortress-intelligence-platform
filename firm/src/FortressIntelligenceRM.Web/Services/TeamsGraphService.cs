@@ -19,7 +19,6 @@ public class TeamsGraphService : IHostedService, IDisposable
 
     private string? _accessToken;
     private DateTime _tokenExpiry = DateTime.MinValue;
-    private CancellationTokenSource? _renewalCts;
 
     public TeamsGraphService(
         IDbContextFactory<FirmDbContext> dbFactory,
@@ -35,38 +34,15 @@ public class TeamsGraphService : IHostedService, IDisposable
         _httpClientFactory = httpClientFactory;
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
     {
-        var clientId = _config["Firm:GraphClientId"];
-        if (string.IsNullOrEmpty(clientId))
-        {
-            _logger.LogWarning("[TeamsGraph] Firm:GraphClientId not configured — skipping Graph subscription setup. Mode A pipeline inactive.");
-            return;
-        }
-
-        try
-        {
-            await CreateSubscriptionAsync(cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[TeamsGraph] Failed to create Graph subscription at startup — Mode A will not receive webhook notifications.");
-        }
-
-        _renewalCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _ = Task.Run(() => RenewalLoopAsync(_renewalCts.Token), _renewalCts.Token);
-    }
-
-    public Task StopAsync(CancellationToken cancellationToken)
-    {
-        _renewalCts?.Cancel();
+        _logger.LogInformation("[TeamsGraph] Webhook subscription mode removed. Transcript processing available via polling service.");
         return Task.CompletedTask;
     }
 
-    public void Dispose()
-    {
-        _renewalCts?.Dispose();
-    }
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public void Dispose() { }
 
     // ── Graph Auth ────────────────────────────────────────────────────────────
 
@@ -105,137 +81,111 @@ public class TeamsGraphService : IHostedService, IDisposable
         return _accessToken;
     }
 
-    // ── Subscription Management ───────────────────────────────────────────────
+    // ── Public helpers ────────────────────────────────────────────────────────
 
-    public async Task CreateSubscriptionAsync(CancellationToken ct = default)
+    public Task<string> GetGraphAccessTokenAsync(CancellationToken ct = default) => GetAccessTokenAsync(ct);
+
+    /// <summary>
+    /// Polls FAIT for the transcript via delegated token.
+    /// Called by TranscriptPollingService for Mode A meetings.
+    /// </summary>
+    public async Task<bool> TryFetchTranscriptForMeetingAsync(long meetingId, string joinUrl, string entraOid, CancellationToken ct)
     {
-        var token = await GetAccessTokenAsync(ct);
-        var webhookBaseUrl = _config["Firm:WebhookBaseUrl"] ?? throw new InvalidOperationException("Firm:WebhookBaseUrl not configured");
-        var clientState = _config["Firm:WebhookClientState"] ?? "";
-        var expiryDateTime = DateTime.UtcNow.AddMinutes(55).ToString("o");
+        var faitUrl = _config["FIP:FaitApiUrl"]?.TrimEnd('/') ?? "";
+        var secret = _config["Firm:SharedSecret"] ?? "";
+        if (string.IsNullOrEmpty(faitUrl)) return false;
 
-        var body = JsonSerializer.Serialize(new
+        try
         {
-            changeType = "created",
-            notificationUrl = $"{webhookBaseUrl.TrimEnd('/')}/api/teams/webhook",
-            resource = "communications/onlineMeetings/getAllTranscripts",
-            includeResourceData = false,
-            expirationDateTime = expiryDateTime,
-            clientState = clientState
-        });
+            var client = _httpClientFactory.CreateClient();
+            var req = new HttpRequestMessage(HttpMethod.Get,
+                $"{faitUrl}/api/firm/meeting-transcript?entraOid={Uri.EscapeDataString(entraOid)}&joinUrl={Uri.EscapeDataString(joinUrl)}");
+            if (!string.IsNullOrEmpty(secret)) req.Headers.Add("X-Firm-Secret", secret);
 
-        var client = _httpClientFactory.CreateClient();
-        var req = new HttpRequestMessage(HttpMethod.Post, "https://graph.microsoft.com/v1.0/subscriptions");
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+            var resp = await client.SendAsync(req, ct);
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogInformation("[TeamsGraph] Transcript not yet available for meeting {MeetingId}", meetingId);
+                return false;
+            }
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[TeamsGraph] FAIT meeting-transcript returned {Status} for meeting {MeetingId}", resp.StatusCode, meetingId);
+                return false;
+            }
 
-        var response = await client.SendAsync(req, ct);
-        var responseBody = await response.Content.ReadAsStringAsync(ct);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var vttContent = doc.RootElement.TryGetProperty("vttContent", out var v) ? v.GetString() : null;
+            if (string.IsNullOrEmpty(vttContent))
+            {
+                _logger.LogInformation("[TeamsGraph] No VTT content returned for meeting {MeetingId}", meetingId);
+                return false;
+            }
 
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogError("[TeamsGraph] Failed to create subscription: {Status} — {Body}", response.StatusCode, responseBody);
-            return;
+            await ProcessVttForMeetingAsync(meetingId, vttContent, ct);
+            return true;
         }
-
-        using var doc = JsonDocument.Parse(responseBody);
-        var root = doc.RootElement;
-        var subscriptionId = root.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? "" : "";
-        var expirationStr = root.TryGetProperty("expirationDateTime", out var expProp) ? expProp.GetString() ?? expiryDateTime : expiryDateTime;
-
-        if (string.IsNullOrEmpty(subscriptionId))
+        catch (Exception ex)
         {
-            _logger.LogError("[TeamsGraph] Subscription created but no id returned — body: {Body}", responseBody);
-            return;
+            _logger.LogError(ex, "[TeamsGraph] TryFetchTranscriptForMeetingAsync failed for meeting {MeetingId}", meetingId);
+            return false;
         }
+    }
 
-        // Store in DB
+    private async Task ProcessVttForMeetingAsync(long meetingId, string vttContent, CancellationToken ct)
+    {
+        var segments = ParseVttSegments(vttContent);
+        _logger.LogInformation("[TeamsGraph] Parsed {Count} VTT segments for meeting {MeetingId}.", segments.Count, meetingId);
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
         await db.Database.ExecuteSqlRawAsync(
-            @"INSERT INTO firm_webhook_subscriptions (subscription_id, resource, expiry_datetime, created_at)
-              VALUES ({0}, {1}, {2}, UTC_TIMESTAMP())
-              ON DUPLICATE KEY UPDATE expiry_datetime = VALUES(expiry_datetime), last_renewed_at = UTC_TIMESTAMP()",
-            subscriptionId,
-            "communications/onlineMeetings/getAllTranscripts",
-            DateTime.Parse(expirationStr).ToUniversalTime(),
-            ct);
+            "UPDATE firm_meetings SET status = 'Transcribing', updated_at = UTC_TIMESTAMP() WHERE id = {0}",
+            meetingId);
 
-        _logger.LogInformation("[TeamsGraph] Subscription created: {SubId}, expires {Expiry}", subscriptionId, expirationStr);
-    }
-
-    private async Task RenewalLoopAsync(CancellationToken ct)
-    {
-        _logger.LogInformation("[TeamsGraph] Renewal loop started.");
-        while (!ct.IsCancellationRequested)
+        foreach (var seg in segments)
         {
-            try
-            {
-                await Task.Delay(TimeSpan.FromMinutes(45), ct);
-                if (ct.IsCancellationRequested) break;
-                await RenewExpiringSoonAsync(ct);
-            }
-            catch (TaskCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[TeamsGraph] Renewal loop error");
-            }
+            await db.Database.ExecuteSqlRawAsync(
+                @"INSERT INTO firm_meeting_transcripts (meeting_id, speaker_name, text, start_time_ms, end_time_ms)
+                  VALUES ({0}, {1}, {2}, {3}, {4})",
+                meetingId, seg.SpeakerName ?? "Unknown", seg.Text, seg.StartTimeMs, seg.EndTimeMs);
         }
-        _logger.LogInformation("[TeamsGraph] Renewal loop stopped.");
-    }
 
-    private async Task RenewExpiringSoonAsync(CancellationToken ct)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var cutoff = DateTime.UtcNow.AddMinutes(15);
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE firm_meetings SET status = 'Summarizing', updated_at = UTC_TIMESTAMP() WHERE id = {0}",
+            meetingId);
 
-        // Get subscriptions expiring within 15 minutes
-        var subs = await db.Database
-            .SqlQueryRaw<WebhookSubRow>(
-                "SELECT subscription_id AS SubscriptionId, resource AS Resource FROM firm_webhook_subscriptions WHERE expiry_datetime < {0}",
-                cutoff)
-            .ToListAsync(ct);
-
-        _logger.LogInformation("[TeamsGraph] Renewing {Count} subscription(s) expiring soon.", subs.Count);
-
-        foreach (var sub in subs)
+        var sb = new System.Text.StringBuilder();
+        foreach (var seg in segments)
         {
-            try
-            {
-                var token = await GetAccessTokenAsync(ct);
-                var newExpiry = DateTime.UtcNow.AddMinutes(55).ToString("o");
-
-                var patchBody = JsonSerializer.Serialize(new { expirationDateTime = newExpiry });
-                var client = _httpClientFactory.CreateClient();
-                var req = new HttpRequestMessage(new HttpMethod("PATCH"),
-                    $"https://graph.microsoft.com/v1.0/subscriptions/{sub.SubscriptionId}");
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                req.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
-
-                var response = await client.SendAsync(req, ct);
-
-                if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-                {
-                    _logger.LogWarning("[TeamsGraph] Subscription {SubId} not found — recreating.", sub.SubscriptionId);
-                    await CreateSubscriptionAsync(ct);
-                    continue;
-                }
-
-                response.EnsureSuccessStatusCode();
-
-                await db.Database.ExecuteSqlRawAsync(
-                    "UPDATE firm_webhook_subscriptions SET expiry_datetime = {0}, last_renewed_at = UTC_TIMESTAMP() WHERE subscription_id = {1}",
-                    DateTime.Parse(newExpiry).ToUniversalTime(), sub.SubscriptionId);
-
-                _logger.LogInformation("[TeamsGraph] Renewed subscription {SubId}", sub.SubscriptionId);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[TeamsGraph] Failed to renew subscription {SubId}", sub.SubscriptionId);
-            }
+            var ts = seg.StartTimeMs.HasValue
+                ? TimeSpan.FromMilliseconds(seg.StartTimeMs.Value).ToString(@"hh\:mm\:ss")
+                : "00:00:00";
+            sb.AppendLine($"[{ts}] {seg.SpeakerName ?? "Unknown"}: {seg.Text}");
         }
+        var transcriptText = sb.ToString();
+
+        var summary = await SummarizeAsync(transcriptText, meetingId, ct);
+        if (summary != null)
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                @"INSERT INTO firm_meeting_summaries (meeting_id, summary_text, action_items_json, key_decisions_json, follow_ups_json, created_at)
+                  VALUES ({0}, {1}, {2}, {3}, {4}, UTC_TIMESTAMP())
+                  ON DUPLICATE KEY UPDATE summary_text = VALUES(summary_text),
+                      action_items_json = VALUES(action_items_json),
+                      key_decisions_json = VALUES(key_decisions_json),
+                      follow_ups_json = VALUES(follow_ups_json)",
+                meetingId, summary.SummaryText ?? "", summary.ActionItemsJson ?? "[]",
+                summary.KeyDecisionsJson ?? "[]", summary.FollowUpsJson ?? "[]");
+        }
+
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE firm_meetings SET status = 'Complete', updated_at = UTC_TIMESTAMP() WHERE id = {0}",
+            meetingId);
+
+        await NotifyFaitMeetingCompleteAsync(meetingId, transcriptText, summary?.SummaryText ?? "", db, ct);
+        _logger.LogInformation("[TeamsGraph] Completed processing transcript for meeting {MeetingId}.", meetingId);
     }
 
     // ── Transcript Fetch & Process ────────────────────────────────────────────
@@ -612,12 +562,6 @@ Respond ONLY in JSON (no markdown wrapper):
         public string? ActionItemsJson { get; set; }
         public string? KeyDecisionsJson { get; set; }
         public string? FollowUpsJson { get; set; }
-    }
-
-    private class WebhookSubRow
-    {
-        public string SubscriptionId { get; set; } = "";
-        public string Resource { get; set; } = "";
     }
 
     private class MeetingIdRow

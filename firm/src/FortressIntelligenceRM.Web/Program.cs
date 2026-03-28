@@ -54,6 +54,7 @@ builder.Services.AddScoped<MeetingService>();
 builder.Services.AddScoped<VpBotService>();
 builder.Services.AddScoped<S3Service>();
 builder.Services.AddScoped<FirmKbService>();
+builder.Services.AddScoped<CalendarService>();
 // Bot Framework
 builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();
 builder.Services.AddTransient<IBot, FirmBot>();
@@ -105,6 +106,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddHostedService<DatabaseInitializationService>();
 builder.Services.AddSingleton<TeamsGraphService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TeamsGraphService>());
+builder.Services.AddHostedService<TranscriptPollingService>();
 
 // DataProtection: shared key ring points to fred_dev (FAIT's DB) — same DataProtectionKeys table
 // SharedKeyRingDbContext reads from fred_dev via FIP_KEYRING_DB_NAME env var
