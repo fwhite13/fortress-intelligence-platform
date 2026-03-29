@@ -59,13 +59,13 @@ public class FirmMicrosoftTokenService : IFirmMicrosoftTokenService
                $"&prompt=select_account";
     }
 
-    public bool HasToken(string firmUserId)
+    public bool HasToken(Guid firmUserId)
     {
         using var db = _dbFactory.CreateDbContext();
         return db.UserMicrosoftTokens.Any(t => t.UserId == firmUserId);
     }
 
-    public async Task<string?> GetValidAccessTokenAsync(string firmUserId)
+    public async Task<string?> GetValidAccessTokenAsync(Guid firmUserId)
     {
         if (_useStubAuth)
         {
@@ -129,7 +129,7 @@ public class FirmMicrosoftTokenService : IFirmMicrosoftTokenService
         }
     }
 
-    public async Task<UserMicrosoftToken> ExchangeCodeAsync(string firmUserId, string code, string redirectUri)
+    public async Task<UserMicrosoftToken> ExchangeCodeAsync(Guid firmUserId, string code, string redirectUri)
     {
         _logger.LogInformation("[FirmMicrosoftTokenService] Exchanging auth code for user {UserId}", firmUserId);
 
@@ -209,7 +209,7 @@ public class FirmMicrosoftTokenService : IFirmMicrosoftTokenService
         return existing ?? token;
     }
 
-    public async Task RevokeTokenAsync(string firmUserId)
+    public async Task RevokeTokenAsync(Guid firmUserId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var token = await db.UserMicrosoftTokens.FindAsync(firmUserId);

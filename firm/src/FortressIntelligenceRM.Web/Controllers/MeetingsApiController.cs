@@ -77,7 +77,7 @@ public class MeetingsApiController : ControllerBase
         if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
 
         var meeting = await _meetingService.CreateMeetingAsync(
-            firmUser.Id, request.MeetingUrl, request.Title,
+            firmUser.Id.ToString(), request.MeetingUrl, request.Title,
             request.StartDatetime, request.CalendarEventId);
 
         // Scheduling branch: if start is > 5 min in the future, don't dispatch bot
@@ -375,7 +375,7 @@ public class MeetingsApiController : ControllerBase
 
         try
         {
-            await _firmKbService.PushTranscriptAsync(id, user.Id, user.FaitUserId);
+            await _firmKbService.PushTranscriptAsync(id, user.Id.ToString(), user.FaitUserId);
             return Ok(new { success = true });
         }
         catch (Exception ex)
@@ -401,7 +401,7 @@ public class MeetingsApiController : ControllerBase
 
         try
         {
-            await _firmKbService.PushSummaryAsync(id, user.Id, user.FaitUserId);
+            await _firmKbService.PushSummaryAsync(id, user.Id.ToString(), user.FaitUserId);
             return Ok(new { success = true });
         }
         catch (Exception ex)
@@ -436,7 +436,7 @@ public class MeetingsApiController : ControllerBase
 
         try
         {
-            await _firmKbService.PushDocumentAsync(id, user.Id, user.FaitUserId, request.DocType, validScopes);
+            await _firmKbService.PushDocumentAsync(id, user.Id.ToString(), user.FaitUserId, request.DocType, validScopes);
             return Ok(new { success = true });
         }
         catch (Exception ex)
@@ -565,7 +565,7 @@ public class MeetingsApiController : ControllerBase
         var firmUser = await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
         if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
 
-        var meeting = await _meetingService.GetMeetingAsync(id, firmUser.Id);
+        var meeting = await _meetingService.GetMeetingAsync(id, firmUser.Id.ToString());
         if (meeting == null) return NotFound();
         if (meeting.Status != MeetingStatus.Scheduled)
             return Conflict(new { error = "Meeting is not in Scheduled state" });
@@ -603,7 +603,7 @@ public class MeetingsApiController : ControllerBase
         var firmUser = await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
         if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
 
-        var meeting = await _meetingService.GetMeetingAsync(id, firmUser.Id);
+        var meeting = await _meetingService.GetMeetingAsync(id, firmUser.Id.ToString());
         if (meeting == null) return NotFound();
         if (meeting.Status != MeetingStatus.Scheduled)
             return Conflict(new { error = "Cannot remove a meeting that is in progress or complete" });
@@ -631,7 +631,7 @@ public class MeetingsApiController : ControllerBase
         var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
         if (user == null) return (null, null, Unauthorized());
 
-        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == user.Id);
+        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == user.Id.ToString());
         if (meeting == null) return (null, null, NotFound(new { error = "Meeting not found" }));
 
         return (meeting, user, null);

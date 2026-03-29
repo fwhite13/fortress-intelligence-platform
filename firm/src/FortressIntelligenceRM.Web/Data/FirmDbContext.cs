@@ -28,7 +28,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
         {
             entity.ToTable("firm_users");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasColumnType("char(36)");
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
             entity.HasIndex(e => e.EntraOid).IsUnique();
             entity.HasIndex(e => e.Email).IsUnique();
             entity.Property(e => e.EntraOid).HasColumnName("entra_oid").HasMaxLength(128).IsRequired();
@@ -159,13 +159,13 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
         {
             entity.ToTable("user_microsoft_tokens");
             entity.HasKey(e => e.UserId);
-            entity.Property(e => e.UserId).HasColumnType("char(36)").HasColumnName("UserId");
-            entity.Property(e => e.AccessToken).HasColumnType("longtext").HasColumnName("AccessToken");
-            entity.Property(e => e.RefreshToken).HasColumnType("longtext").HasColumnName("RefreshToken");
-            entity.Property(e => e.ExpiresAt).HasColumnName("ExpiresAt").HasColumnType("datetime(6)");
-            entity.Property(e => e.MicrosoftEmail).HasColumnName("MicrosoftEmail").HasColumnType("varchar(255)");
-            entity.Property(e => e.CreatedAt).HasColumnName("CreatedAt");
-            entity.Property(e => e.UpdatedAt).HasColumnName("UpdatedAt");
+            entity.Property(e => e.UserId).ValueGeneratedNever();
+            entity.Property(e => e.AccessToken).IsRequired();
+            entity.Property(e => e.RefreshToken).IsRequired();
+            entity.Property(e => e.MicrosoftEmail).HasMaxLength(255);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithOne().HasForeignKey<UserMicrosoftToken>(e => e.UserId);
         });
 
     }

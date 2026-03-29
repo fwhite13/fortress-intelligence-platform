@@ -56,6 +56,7 @@ builder.Services.AddScoped<S3Service>();
 builder.Services.AddScoped<FirmKbService>();
 builder.Services.AddScoped<CalendarService>();
 builder.Services.AddScoped<IFirmMicrosoftTokenService, FirmMicrosoftTokenService>();
+builder.Services.AddScoped<MicrosoftTokenService>();
 // Bot Framework
 builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();
 builder.Services.AddTransient<IBot, FirmBot>();
@@ -215,7 +216,14 @@ app.MapGet("/auth/ms-callback", async (HttpContext ctx, IFirmMicrosoftTokenServi
             "</body></html>", "text/html");
     }
 
-    var firmUserId = stateParts[0];
+    if (!Guid.TryParse(stateParts[0], out var firmUserGuid))
+    {
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#dc2626;'>Invalid State</h1>" +
+            "<p><a href='/meetings'>Back to Meetings</a></p>" +
+            "</body></html>", "text/html");
+    }
 
     // Security: verify the authenticated user's FIRM record matches firmUserId from state
     // Prevents an attacker from injecting a victim's firmUserId into their own OAuth flow
@@ -239,18 +247,18 @@ app.MapGet("/auth/ms-callback", async (HttpContext ctx, IFirmMicrosoftTokenServi
 
     await using var verifyDb = await dbFactory.CreateDbContextAsync();
     var currentUser = await verifyDb.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
-    if (currentUser == null || currentUser.Id != firmUserId)
+    if (currentUser == null || currentUser.Id != firmUserGuid)
     {
         return Results.StatusCode(403);
     }
 
-    var firmUser = currentUser; // Already verified: non-null and matches firmUserId from state
+    var firmUser = currentUser; // Already verified: non-null and matches firmUserGuid from state
 
     try
     {
         var redirectUri = config["Firm:MsCallbackUrl"]
             ?? $"{ctx.Request.Scheme}://{ctx.Request.Host}/auth/ms-callback";
-        var token = await tokenService.ExchangeCodeAsync(firmUserId, code, redirectUri);
+        var token = await tokenService.ExchangeCodeAsync(firmUserGuid, code, redirectUri);
         var email = token.MicrosoftEmail ?? "user";
         return Results.Content(
             "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
@@ -263,7 +271,7 @@ app.MapGet("/auth/ms-callback", async (HttpContext ctx, IFirmMicrosoftTokenServi
     catch (Exception ex)
     {
         var logger = ctx.RequestServices.GetRequiredService<ILogger<FirmMicrosoftTokenService>>();
-        logger.LogError(ex, "[FIRM /auth/ms-callback] Token exchange failed for user {UserId}", firmUserId);
+        logger.LogError(ex, "[FIRM /auth/ms-callback] Token exchange failed for user {UserId}", firmUserGuid);
         return Results.Content(
             "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
             "<h1 style='color:#dc2626;'>Connection Failed</h1>" +

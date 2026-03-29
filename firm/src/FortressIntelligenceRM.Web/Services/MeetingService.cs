@@ -96,7 +96,7 @@ public class MeetingService
         {
             user = new FirmUser
             {
-                Id = Guid.NewGuid().ToString(),
+                Id = Guid.NewGuid(),
                 EntraOid = entraOid,
                 Email = email,
                 DisplayName = displayName,
