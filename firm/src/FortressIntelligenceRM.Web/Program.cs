@@ -55,7 +55,7 @@ builder.Services.AddScoped<VpBotService>();
 builder.Services.AddScoped<S3Service>();
 builder.Services.AddScoped<FirmKbService>();
 builder.Services.AddScoped<CalendarService>();
-builder.Services.AddScoped<FirmMicrosoftTokenService>();
+builder.Services.AddScoped<IFirmMicrosoftTokenService, FirmMicrosoftTokenService>();
 // Bot Framework
 builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();
 builder.Services.AddTransient<IBot, FirmBot>();
@@ -132,22 +132,6 @@ builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
         new MySqlServerVersion(new Version(8, 0, 28)),
         mysql => mysql.EnableRetryOnFailure(3)));
 
-// FaitSharedDbContext — reads/updates user_microsoft_tokens from fait_dev
-// Same host/user/pass as keyring, but GuidFormat=None because UserId is CHAR(36)
-var faitSharedCsb = new MySqlConnector.MySqlConnectionStringBuilder
-{
-    Server = keyRingCsb.Server,
-    Port = keyRingCsb.Port,
-    Database = keyRingCsb.Database,
-    UserID = keyRingCsb.UserID,
-    Password = keyRingCsb.Password,
-    ConnectionTimeout = keyRingCsb.ConnectionTimeout,
-    GuidFormat = MySqlGuidFormat.None
-};
-builder.Services.AddDbContextFactory<FaitSharedDbContext>(options =>
-    options.UseMySql(faitSharedCsb.ConnectionString,
-        new MySqlServerVersion(new Version(8, 0, 28)),
-        mysql => mysql.EnableRetryOnFailure(3)));
 
 // FIRM is a consumer — DisableAutomaticKeyGeneration so only FIP portal creates keys
 builder.Services.AddDataProtection()
@@ -190,6 +174,87 @@ app.MapGet("/auth/firm-session", async (HttpContext ctx) =>
         return Results.Redirect("/");
     // Cookie is already set by FIP portal — just redirect to home
     return Results.Redirect("/meetings");
+}).AllowAnonymous().DisableAntiforgery();
+
+// Microsoft OAuth consent callback — FIRM manages its own tokens in firm_dev
+app.MapGet("/auth/ms-callback", async (HttpContext ctx, IFirmMicrosoftTokenService tokenService, IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config) =>
+{
+    var code = ctx.Request.Query["code"].ToString();
+    var state = ctx.Request.Query["state"].ToString();
+    var error = ctx.Request.Query["error"].ToString();
+
+    if (!string.IsNullOrEmpty(error))
+    {
+        var errorDesc = ctx.Request.Query["error_description"].ToString();
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#dc2626;'>Authentication Failed</h1>" +
+            $"<p>{error}: {errorDesc}</p>" +
+            "<p><a href='/meetings'>Back to Meetings</a></p>" +
+            "</body></html>", "text/html");
+    }
+
+    if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state))
+    {
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#dc2626;'>Invalid Response</h1>" +
+            "<p>No authorization code received.</p>" +
+            "<p><a href='/meetings'>Back to Meetings</a></p>" +
+            "</body></html>", "text/html");
+    }
+
+    // State format: "firmUserId:random"
+    var stateParts = state.Split(':');
+    if (stateParts.Length < 2)
+    {
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#dc2626;'>Invalid State</h1>" +
+            "<p><a href='/meetings'>Back to Meetings</a></p>" +
+            "</body></html>", "text/html");
+    }
+
+    var firmUserId = stateParts[0];
+
+    // Verify the user exists in FIRM
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var firmUser = await db.Users.FindAsync(firmUserId);
+    if (firmUser == null)
+    {
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#dc2626;'>User Not Found</h1>" +
+            "<p>FIRM user not found for this session.</p>" +
+            "<p><a href='/meetings'>Back to Meetings</a></p>" +
+            "</body></html>", "text/html");
+    }
+
+    try
+    {
+        var redirectUri = config["Firm:MsCallbackUrl"]
+            ?? $"{ctx.Request.Scheme}://{ctx.Request.Host}/auth/ms-callback";
+        var token = await tokenService.ExchangeCodeAsync(firmUserId, code, redirectUri);
+        var email = token.MicrosoftEmail ?? "user";
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#059669;'>&#x2705; Microsoft 365 Connected!</h1>" +
+            $"<p>Successfully connected as <strong>{email}</strong></p>" +
+            "<p>Redirecting to Meetings...</p>" +
+            "<script>setTimeout(function(){ window.location.href = '/meetings'; }, 2000);</script>" +
+            "</body></html>", "text/html");
+    }
+    catch (Exception ex)
+    {
+        var logger = ctx.RequestServices.GetRequiredService<ILogger<FirmMicrosoftTokenService>>();
+        logger.LogError(ex, "[FIRM /auth/ms-callback] Token exchange failed for user {UserId}", firmUserId);
+        return Results.Content(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+            "<h1 style='color:#dc2626;'>Connection Failed</h1>" +
+            $"<p>{ex.Message}</p>" +
+            "<p><a href='/meetings'>Back to Meetings</a></p>" +
+            "</body></html>", "text/html");
+    }
 }).AllowAnonymous().DisableAntiforgery();
 
 // Logout: clear local cookie only (FIP portal owns OIDC sign-out)

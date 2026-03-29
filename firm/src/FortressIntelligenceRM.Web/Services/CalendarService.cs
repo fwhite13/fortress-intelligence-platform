@@ -8,7 +8,7 @@ namespace FortressIntelligenceRM.Web.Services;
 public class CalendarService
 {
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly FirmMicrosoftTokenService _tokenService;
+    private readonly IFirmMicrosoftTokenService _tokenService;
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<CalendarService> _logger;
@@ -16,7 +16,7 @@ public class CalendarService
 
     public CalendarService(
         IHttpClientFactory httpClientFactory,
-        FirmMicrosoftTokenService tokenService,
+        IFirmMicrosoftTokenService tokenService,
         IDbContextFactory<FirmDbContext> dbFactory,
         IConfiguration config,
         ILogger<CalendarService> logger)
@@ -34,7 +34,7 @@ public class CalendarService
         {
             _logger.LogInformation("[CalendarService] GetUpcomingCalendarMeetingsAsync — entry. OID={Oid} Email={Email}", entraOid, userEmail);
 
-            // Look up FirmUser by EntraOid to get FaitUserId for token lookup
+            // Look up FirmUser by EntraOid to get FIRM user ID for token lookup
             await using var db = await _dbFactory.CreateDbContextAsync(ct);
             var firmUser = await db.Users
                 .FirstOrDefaultAsync(u => u.EntraOid == entraOid, ct);
@@ -45,16 +45,10 @@ public class CalendarService
                 return new List<CalendarMeetingDto>();
             }
 
-            if (!Guid.TryParse(firmUser.FaitUserId, out var faitGuid))
-            {
-                _logger.LogWarning("[CalendarService] FirmUser {UserId} has no valid FaitUserId (value: {FaitUserId})", firmUser.Id, firmUser.FaitUserId);
-                return new List<CalendarMeetingDto>();
-            }
-
-            var token = await _tokenService.GetValidAccessTokenAsync(faitGuid);
+            var token = await _tokenService.GetValidAccessTokenAsync(firmUser.Id);
             if (string.IsNullOrEmpty(token))
             {
-                _logger.LogWarning("[CalendarService] No delegated Graph token for user {FaitGuid} (EntraOid={Oid})", faitGuid, entraOid);
+                _logger.LogWarning("[CalendarService] No delegated Graph token for FIRM user {FirmUserId} (EntraOid={Oid})", firmUser.Id, entraOid);
                 return new List<CalendarMeetingDto>();
             }
             _logger.LogInformation("[CalendarService] Delegated Graph token acquired (length={Len}). OID={Oid}", token.Length, entraOid);
