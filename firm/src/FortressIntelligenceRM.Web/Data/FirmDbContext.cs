@@ -28,6 +28,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
         {
             entity.ToTable("firm_users");
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasColumnType("char(36)");
             entity.HasIndex(e => e.EntraOid).IsUnique();
             entity.HasIndex(e => e.Email).IsUnique();
             entity.Property(e => e.EntraOid).HasColumnName("entra_oid").HasMaxLength(128).IsRequired();
@@ -37,7 +38,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.LastLoginAt).HasColumnName("last_login_at");
-            entity.Property(e => e.FaitUserId).HasColumnName("fait_user_id").HasMaxLength(36);
+            entity.Property(e => e.FaitUserId).HasColumnName("fait_user_id").HasColumnType("char(36)");
         });
 
         modelBuilder.Entity<FirmMeeting>(entity =>
