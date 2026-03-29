@@ -148,17 +148,7 @@ public class CalendarService
         return null;
     }
 
-    public static string? ExtractTenantIdFromUrl(string? url) => url == null ? null : ExtractTenantIdStatic(url);
-
-    private static string? ExtractTenantIdStatic(string joinUrl)
-    {
-        if (string.IsNullOrEmpty(joinUrl)) return null;
-        var contextMatch = Regex.Match(joinUrl, @"[Tt]id["":]([a-fA-F0-9\-]{36})");
-        if (contextMatch.Success) return contextMatch.Groups[1].Value;
-        var tenantMatch = Regex.Match(joinUrl, @"[Tt]enant[Ii]d=([a-fA-F0-9\-]{36})");
-        if (tenantMatch.Success) return tenantMatch.Groups[1].Value;
-        return null;
-    }
+    public static string? ExtractTenantIdFromUrl(string? url) => url == null ? null : ExtractTenantId(url);
 
     public static bool IsFortressTenant(string? tenantId) =>
         !string.IsNullOrEmpty(tenantId) && tenantId.StartsWith(FortressTenantPrefix, StringComparison.OrdinalIgnoreCase);

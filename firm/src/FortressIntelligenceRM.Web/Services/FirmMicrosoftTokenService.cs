@@ -17,6 +17,8 @@ public class FirmMicrosoftTokenService
     private readonly string _tenantId;
     private readonly bool _useStubAuth;
 
+    public bool IsConfigured => !string.IsNullOrEmpty(_clientId) && !string.IsNullOrEmpty(_tenantId) && !string.IsNullOrEmpty(_clientSecret);
+
     private static readonly string[] Scopes = new[]
     {
         "https://graph.microsoft.com/Mail.Read",
