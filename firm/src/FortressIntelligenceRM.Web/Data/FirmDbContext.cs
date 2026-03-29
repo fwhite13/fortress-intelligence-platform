@@ -161,8 +161,8 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.UserId).HasColumnType("char(36)").HasColumnName("UserId");
             entity.Property(e => e.AccessToken).HasColumnType("longtext").HasColumnName("AccessToken");
             entity.Property(e => e.RefreshToken).HasColumnType("longtext").HasColumnName("RefreshToken");
-            entity.Property(e => e.ExpiresAt).HasColumnName("ExpiresAt");
-            entity.Property(e => e.MicrosoftEmail).HasColumnName("MicrosoftEmail");
+            entity.Property(e => e.ExpiresAt).HasColumnName("ExpiresAt").HasColumnType("datetime(6)");
+            entity.Property(e => e.MicrosoftEmail).HasColumnName("MicrosoftEmail").HasColumnType("varchar(255)");
             entity.Property(e => e.CreatedAt).HasColumnName("CreatedAt");
             entity.Property(e => e.UpdatedAt).HasColumnName("UpdatedAt");
         });

@@ -185,6 +185,7 @@ public class FirmMicrosoftTokenService : IFirmMicrosoftTokenService
             RefreshToken = refreshToken,
             ExpiresAt = expiresAt,
             MicrosoftEmail = email,
+            CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 

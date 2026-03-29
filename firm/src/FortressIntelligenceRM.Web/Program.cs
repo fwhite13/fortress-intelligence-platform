@@ -217,18 +217,34 @@ app.MapGet("/auth/ms-callback", async (HttpContext ctx, IFirmMicrosoftTokenServi
 
     var firmUserId = stateParts[0];
 
-    // Verify the user exists in FIRM
-    await using var db = await dbFactory.CreateDbContextAsync();
-    var firmUser = await db.Users.FindAsync(firmUserId);
-    if (firmUser == null)
+    // Security: verify the authenticated user's FIRM record matches firmUserId from state
+    // Prevents an attacker from injecting a victim's firmUserId into their own OAuth flow
+    var authResult = await ctx.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    if (!authResult.Succeeded)
     {
         return Results.Content(
             "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
-            "<h1 style='color:#dc2626;'>User Not Found</h1>" +
-            "<p>FIRM user not found for this session.</p>" +
+            "<h1 style='color:#dc2626;'>Unauthorized</h1>" +
+            "<p>You must be signed in to connect Microsoft 365.</p>" +
             "<p><a href='/meetings'>Back to Meetings</a></p>" +
             "</body></html>", "text/html");
     }
+
+    var entraOid = authResult.Principal?.FindFirst("oid")?.Value
+                   ?? authResult.Principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+    if (string.IsNullOrEmpty(entraOid))
+    {
+        return Results.Forbid();
+    }
+
+    await using var verifyDb = await dbFactory.CreateDbContextAsync();
+    var currentUser = await verifyDb.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
+    if (currentUser == null || currentUser.Id != firmUserId)
+    {
+        return Results.StatusCode(403);
+    }
+
+    var firmUser = currentUser; // Already verified: non-null and matches firmUserId from state
 
     try
     {
@@ -251,7 +267,7 @@ app.MapGet("/auth/ms-callback", async (HttpContext ctx, IFirmMicrosoftTokenServi
         return Results.Content(
             "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
             "<h1 style='color:#dc2626;'>Connection Failed</h1>" +
-            $"<p>{ex.Message}</p>" +
+            "<p>An unexpected error occurred. Please try again.</p>" +
             "<p><a href='/meetings'>Back to Meetings</a></p>" +
             "</body></html>", "text/html");
     }
