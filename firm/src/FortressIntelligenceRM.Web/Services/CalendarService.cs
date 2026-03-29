@@ -6,38 +6,53 @@ namespace FortressIntelligenceRM.Web.Services;
 public class CalendarService
 {
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly TeamsGraphService _teamsGraphService;
     private readonly IConfiguration _config;
     private readonly ILogger<CalendarService> _logger;
     private const string FortressTenantPrefix = "7152ea12";
 
-    public CalendarService(IHttpClientFactory httpClientFactory, IConfiguration config, ILogger<CalendarService> logger)
+    public CalendarService(IHttpClientFactory httpClientFactory, TeamsGraphService teamsGraphService, IConfiguration config, ILogger<CalendarService> logger)
     {
         _httpClientFactory = httpClientFactory;
+        _teamsGraphService = teamsGraphService;
         _config = config;
         _logger = logger;
     }
 
     public async Task<List<CalendarMeetingDto>> GetUpcomingCalendarMeetingsAsync(string entraOid, string userEmail, CancellationToken ct = default)
     {
-        var faitUrl = _config["FIP:FaitApiUrl"]?.TrimEnd('/') ?? "";
-        var secret = _config["Firm:SharedSecret"] ?? "";
-        if (string.IsNullOrEmpty(faitUrl)) return new List<CalendarMeetingDto>();
-
         try
         {
+            var token = await _teamsGraphService.GetGraphAccessTokenAsync(ct);
+            if (string.IsNullOrEmpty(token))
+            {
+                _logger.LogWarning("[CalendarService] No Graph access token available for OID {Oid}", entraOid);
+                return new List<CalendarMeetingDto>();
+            }
+
+            var startDateTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+            var endDateTime = DateTime.UtcNow.AddDays(7).ToString("yyyy-MM-ddTHH:mm:ssZ");
+            var select = "id,subject,start,end,isOnlineMeeting,onlineMeetingProvider,joinUrl,onlineMeeting,organizer";
+            var url = $"https://graph.microsoft.com/v1.0/users/{entraOid}/calendarview" +
+                      $"?startDateTime={Uri.EscapeDataString(startDateTime)}" +
+                      $"&endDateTime={Uri.EscapeDataString(endDateTime)}" +
+                      $"&$select={select}" +
+                      $"&$top=50";
+
             var client = _httpClientFactory.CreateClient();
-            var url = $"{faitUrl}/api/firm/calendarview?entraOid={Uri.EscapeDataString(entraOid)}&days=7";
             var req = new HttpRequestMessage(HttpMethod.Get, url);
-            if (!string.IsNullOrEmpty(secret)) req.Headers.Add("X-Firm-Secret", secret);
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             var resp = await client.SendAsync(req, ct);
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogWarning("[CalendarService] FAIT calendarview returned {Status} for OID {Oid}", resp.StatusCode, entraOid);
+                _logger.LogWarning("[CalendarService] Graph calendarview returned {Status} for OID {Oid}", resp.StatusCode, entraOid);
                 return new List<CalendarMeetingDto>();
             }
 
             var body = await resp.Content.ReadAsStringAsync(ct);
-            var events = JsonSerializer.Deserialize<List<CalendarViewEvent>>(body,
+            using var doc = JsonDocument.Parse(body);
+            var events = JsonSerializer.Deserialize<List<CalendarViewEvent>>(
+                doc.RootElement.GetProperty("value").GetRawText(),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                 ?? new List<CalendarViewEvent>();
 
@@ -125,7 +140,7 @@ public class CalendarMeetingDto
     public string ModeText { get; set; } = "";
 }
 
-// DTOs for FAIT calendarview response
+// DTOs for Graph calendarview response
 internal class CalendarViewEvent
 {
     public string? Id { get; set; }

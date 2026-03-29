@@ -86,40 +86,79 @@ public class TeamsGraphService : IHostedService, IDisposable
     public Task<string> GetGraphAccessTokenAsync(CancellationToken ct = default) => GetAccessTokenAsync(ct);
 
     /// <summary>
-    /// Polls FAIT for the transcript via delegated token.
+    /// Polls Graph directly for the transcript using app token.
     /// Called by TranscriptPollingService for Mode A meetings.
     /// </summary>
     public async Task<bool> TryFetchTranscriptForMeetingAsync(long meetingId, string joinUrl, string entraOid, CancellationToken ct)
     {
-        var faitUrl = _config["FIP:FaitApiUrl"]?.TrimEnd('/') ?? "";
-        var secret = _config["Firm:SharedSecret"] ?? "";
-        if (string.IsNullOrEmpty(faitUrl)) return false;
-
         try
         {
+            var token = await GetAccessTokenAsync(ct);
             var client = _httpClientFactory.CreateClient();
-            var req = new HttpRequestMessage(HttpMethod.Get,
-                $"{faitUrl}/api/firm/meeting-transcript?entraOid={Uri.EscapeDataString(entraOid)}&joinUrl={Uri.EscapeDataString(joinUrl)}");
-            if (!string.IsNullOrEmpty(secret)) req.Headers.Add("X-Firm-Secret", secret);
 
-            var resp = await client.SendAsync(req, ct);
-            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            // Step 1: Find the online meeting by joinWebUrl
+            var filter = Uri.EscapeDataString($"joinWebUrl eq '{joinUrl}'");
+            var meetingReq = new HttpRequestMessage(HttpMethod.Get,
+                $"https://graph.microsoft.com/v1.0/users/{entraOid}/onlineMeetings?$filter={filter}");
+            meetingReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            var meetingResp = await client.SendAsync(meetingReq, ct);
+
+            if (!meetingResp.IsSuccessStatusCode)
             {
-                _logger.LogInformation("[TeamsGraph] Transcript not yet available for meeting {MeetingId}", meetingId);
-                return false;
-            }
-            if (!resp.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("[TeamsGraph] FAIT meeting-transcript returned {Status} for meeting {MeetingId}", resp.StatusCode, meetingId);
+                _logger.LogInformation("[TranscriptPolling] Meeting not found for joinUrl {JoinUrl}, meeting {MeetingId}", joinUrl, meetingId);
                 return false;
             }
 
-            var body = await resp.Content.ReadAsStringAsync(ct);
-            using var doc = System.Text.Json.JsonDocument.Parse(body);
-            var vttContent = doc.RootElement.TryGetProperty("vttContent", out var v) ? v.GetString() : null;
-            if (string.IsNullOrEmpty(vttContent))
+            var meetingBody = await meetingResp.Content.ReadAsStringAsync(ct);
+            using var meetingDoc = JsonDocument.Parse(meetingBody);
+            var meetingItems = meetingDoc.RootElement.GetProperty("value");
+            if (meetingItems.GetArrayLength() == 0)
             {
-                _logger.LogInformation("[TeamsGraph] No VTT content returned for meeting {MeetingId}", meetingId);
+                _logger.LogInformation("[TranscriptPolling] No online meeting found for joinUrl, meeting {MeetingId}", meetingId);
+                return false;
+            }
+            var graphMeetingId = meetingItems[0].GetProperty("id").GetString() ?? "";
+
+            // Step 2: List transcripts
+            var transcriptReq = new HttpRequestMessage(HttpMethod.Get,
+                $"https://graph.microsoft.com/v1.0/users/{entraOid}/onlineMeetings/{graphMeetingId}/transcripts");
+            transcriptReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            var transcriptListResp = await client.SendAsync(transcriptReq, ct);
+
+            if (!transcriptListResp.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("[TranscriptPolling] Transcript list returned {Status} for meeting {MeetingId}", transcriptListResp.StatusCode, meetingId);
+                return false;
+            }
+
+            var transcriptListBody = await transcriptListResp.Content.ReadAsStringAsync(ct);
+            using var transcriptListDoc = JsonDocument.Parse(transcriptListBody);
+            var transcripts = transcriptListDoc.RootElement.GetProperty("value");
+            if (transcripts.GetArrayLength() == 0)
+            {
+                _logger.LogInformation("[TranscriptPolling] Transcript not yet available for meeting {MeetingId} — will retry.", meetingId);
+                return false;
+            }
+
+            // Get the latest transcript ID
+            var latestTranscriptId = transcripts[transcripts.GetArrayLength() - 1].GetProperty("id").GetString() ?? "";
+
+            // Step 3: Fetch VTT content
+            var vttReq = new HttpRequestMessage(HttpMethod.Get,
+                $"https://graph.microsoft.com/v1.0/users/{entraOid}/onlineMeetings/{graphMeetingId}/transcripts/{latestTranscriptId}/content?$format=text/vtt");
+            vttReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            var vttResp = await client.SendAsync(vttReq, ct);
+
+            if (!vttResp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[TranscriptPolling] VTT fetch returned {Status} for meeting {MeetingId}", vttResp.StatusCode, meetingId);
+                return false;
+            }
+
+            var vttContent = await vttResp.Content.ReadAsStringAsync(ct);
+            if (string.IsNullOrWhiteSpace(vttContent))
+            {
+                _logger.LogInformation("[TranscriptPolling] Empty VTT content for meeting {MeetingId}", meetingId);
                 return false;
             }
 
