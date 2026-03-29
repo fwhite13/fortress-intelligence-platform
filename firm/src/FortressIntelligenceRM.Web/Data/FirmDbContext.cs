@@ -53,7 +53,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
                 .HasColumnName("status")
                 .HasConversion<string>()
                 .HasDefaultValue(MeetingStatus.Joining);
-            entity.Property(e => e.ErrorMessage).HasColumnName("error_message").HasColumnType("TEXT");
+            entity.Property(e => e.ErrorMessage).HasColumnName("error_message");
             entity.Property(e => e.ScheduledAt).HasColumnName("scheduled_at");
             entity.Property(e => e.StartedAt).HasColumnName("started_at");
             entity.Property(e => e.EndedAt).HasColumnName("ended_at");
@@ -104,7 +104,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.MeetingId).HasColumnName("meeting_id");
             entity.Property(e => e.SpeakerLabel).HasColumnName("speaker_label").HasMaxLength(20);
             entity.Property(e => e.SpeakerName).HasColumnName("speaker_name").HasMaxLength(255);
-            entity.Property(e => e.Text).HasColumnName("text").HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.Text).HasColumnName("text").IsRequired();
             entity.Property(e => e.StartTimeMs).HasColumnName("start_time_ms");
             entity.Property(e => e.EndTimeMs).HasColumnName("end_time_ms");
             entity.Property(e => e.IsPartial).HasColumnName("is_partial").HasDefaultValue(false);
@@ -124,7 +124,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.MeetingId).HasColumnName("meeting_id");
             entity.HasIndex(e => e.MeetingId).IsUnique();
-            entity.Property(e => e.SummaryText).HasColumnName("summary_text").HasColumnType("TEXT");
+            entity.Property(e => e.SummaryText).HasColumnName("summary_text");
             entity.Property(e => e.ActionItemsJson).HasColumnName("action_items_json");
             entity.Property(e => e.KeyDecisionsJson).HasColumnName("key_decisions_json");
             entity.Property(e => e.FollowUpsJson).HasColumnName("follow_ups_json");
