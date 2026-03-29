@@ -23,29 +23,33 @@ public class CalendarService
     {
         try
         {
+            _logger.LogInformation("[CalendarService] GetUpcomingCalendarMeetingsAsync — entry. OID={Oid} Email={Email}", entraOid, userEmail);
             var token = await _teamsGraphService.GetGraphAccessTokenAsync(ct);
             if (string.IsNullOrEmpty(token))
             {
                 _logger.LogWarning("[CalendarService] No Graph access token available for OID {Oid}", entraOid);
                 return new List<CalendarMeetingDto>();
             }
+            _logger.LogInformation("[CalendarService] Graph token acquired (length={Len}). OID={Oid}", token.Length, entraOid);
 
             var startDateTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
             var endDateTime = DateTime.UtcNow.AddDays(7).ToString("yyyy-MM-ddTHH:mm:ssZ");
-            var select = "id,subject,start,end,isOnlineMeeting,onlineMeetingProvider,joinUrl,onlineMeeting,organizer";
+            var select = "id,subject,start,end,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,organizer";
             var url = $"https://graph.microsoft.com/v1.0/users/{entraOid}/calendarview" +
                       $"?startDateTime={Uri.EscapeDataString(startDateTime)}" +
                       $"&endDateTime={Uri.EscapeDataString(endDateTime)}" +
                       $"&$select={select}" +
                       $"&$top=50";
 
+            _logger.LogInformation("[CalendarService] Calling Graph calendarview. OID={Oid} URL={Url}", entraOid, url);
             var client = _httpClientFactory.CreateClient();
             var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             var resp = await client.SendAsync(req, ct);
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogWarning("[CalendarService] Graph calendarview returned {Status} for OID {Oid}", resp.StatusCode, entraOid);
+                var errorBody = await resp.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning("[CalendarService] Graph calendarview returned {Status} for OID {Oid}. Body={Body}", resp.StatusCode, entraOid, errorBody);
                 return new List<CalendarMeetingDto>();
             }
 
@@ -57,6 +61,11 @@ public class CalendarService
                 ?? new List<CalendarViewEvent>();
 
             _logger.LogInformation("[CalendarService] Got {Count} calendar events for OID {Oid}", events.Count, entraOid);
+            _logger.LogInformation("[CalendarService] Filtering events for OID {Oid}: total={Total}, online={Online}, teamsForBusiness={Teams}",
+                entraOid,
+                events.Count,
+                events.Count(e => e.IsOnlineMeeting),
+                events.Count(e => e.IsOnlineMeeting && e.OnlineMeetingProvider == "teamsForBusiness"));
 
             var result = new List<CalendarMeetingDto>();
             foreach (var ev in events)
@@ -64,7 +73,7 @@ public class CalendarService
                 if (!ev.IsOnlineMeeting || ev.OnlineMeetingProvider != "teamsForBusiness")
                     continue;
 
-                var joinUrl = ev.OnlineMeeting?.JoinUrl ?? ev.JoinUrl ?? "";
+                var joinUrl = ev.OnlineMeeting?.JoinUrl ?? "";
                 var tenantId = ExtractTenantId(joinUrl);
                 var organizerEmail = ev.Organizer?.EmailAddress?.Address?.ToLower() ?? "";
                 var currentUserEmail = userEmail.ToLower();
@@ -91,6 +100,7 @@ public class CalendarService
                 });
             }
 
+            _logger.LogInformation("[CalendarService] Returning {Count} Teams meetings for OID {Oid}", result.Count, entraOid);
             return result;
         }
         catch (Exception ex)
@@ -147,7 +157,6 @@ internal class CalendarViewEvent
     public string? Subject { get; set; }
     public bool IsOnlineMeeting { get; set; }
     public string? OnlineMeetingProvider { get; set; }
-    public string? JoinUrl { get; set; }
     public CalendarViewDatetime? Start { get; set; }
     public CalendarViewDatetime? End { get; set; }
     public CalendarViewOrganizer? Organizer { get; set; }
