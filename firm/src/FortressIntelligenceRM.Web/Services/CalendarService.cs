@@ -1,20 +1,29 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+using FortressIntelligenceRM.Web.Data;
 
 namespace FortressIntelligenceRM.Web.Services;
 
 public class CalendarService
 {
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly TeamsGraphService _teamsGraphService;
+    private readonly FirmMicrosoftTokenService _tokenService;
+    private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<CalendarService> _logger;
     private const string FortressTenantPrefix = "7152ea12";
 
-    public CalendarService(IHttpClientFactory httpClientFactory, TeamsGraphService teamsGraphService, IConfiguration config, ILogger<CalendarService> logger)
+    public CalendarService(
+        IHttpClientFactory httpClientFactory,
+        FirmMicrosoftTokenService tokenService,
+        IDbContextFactory<FirmDbContext> dbFactory,
+        IConfiguration config,
+        ILogger<CalendarService> logger)
     {
         _httpClientFactory = httpClientFactory;
-        _teamsGraphService = teamsGraphService;
+        _tokenService = tokenService;
+        _dbFactory = dbFactory;
         _config = config;
         _logger = logger;
     }
@@ -24,24 +33,43 @@ public class CalendarService
         try
         {
             _logger.LogInformation("[CalendarService] GetUpcomingCalendarMeetingsAsync — entry. OID={Oid} Email={Email}", entraOid, userEmail);
-            var token = await _teamsGraphService.GetGraphAccessTokenAsync(ct);
-            if (string.IsNullOrEmpty(token))
+
+            // Look up FirmUser by EntraOid to get FaitUserId for token lookup
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            var firmUser = await db.Users
+                .FirstOrDefaultAsync(u => u.EntraOid == entraOid, ct);
+
+            if (firmUser == null)
             {
-                _logger.LogWarning("[CalendarService] No Graph access token available for OID {Oid}", entraOid);
+                _logger.LogWarning("[CalendarService] No FirmUser found for EntraOid {Oid}", entraOid);
                 return new List<CalendarMeetingDto>();
             }
-            _logger.LogInformation("[CalendarService] Graph token acquired (length={Len}). OID={Oid}", token.Length, entraOid);
+
+            if (!Guid.TryParse(firmUser.FaitUserId, out var faitGuid))
+            {
+                _logger.LogWarning("[CalendarService] FirmUser {UserId} has no valid FaitUserId (value: {FaitUserId})", firmUser.Id, firmUser.FaitUserId);
+                return new List<CalendarMeetingDto>();
+            }
+
+            var token = await _tokenService.GetValidAccessTokenAsync(faitGuid);
+            if (string.IsNullOrEmpty(token))
+            {
+                _logger.LogWarning("[CalendarService] No delegated Graph token for user {FaitGuid} (EntraOid={Oid})", faitGuid, entraOid);
+                return new List<CalendarMeetingDto>();
+            }
+            _logger.LogInformation("[CalendarService] Delegated Graph token acquired (length={Len}). OID={Oid}", token.Length, entraOid);
 
             var startDateTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
             var endDateTime = DateTime.UtcNow.AddDays(7).ToString("yyyy-MM-ddTHH:mm:ssZ");
             var select = "id,subject,start,end,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,organizer";
-            var url = $"https://graph.microsoft.com/v1.0/users/{entraOid}/calendarview" +
+            // Use /me/calendarview with delegated token — not /users/{entraOid}/calendarview
+            var url = $"https://graph.microsoft.com/v1.0/me/calendarview" +
                       $"?startDateTime={Uri.EscapeDataString(startDateTime)}" +
                       $"&endDateTime={Uri.EscapeDataString(endDateTime)}" +
                       $"&$select={select}" +
                       $"&$top=50";
 
-            _logger.LogInformation("[CalendarService] Calling Graph calendarview. OID={Oid} URL={Url}", entraOid, url);
+            _logger.LogInformation("[CalendarService] Calling Graph calendarview (delegated). OID={Oid} URL={Url}", entraOid, url);
             var client = _httpClientFactory.CreateClient();
             var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);

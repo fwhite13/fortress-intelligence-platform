@@ -55,6 +55,7 @@ builder.Services.AddScoped<VpBotService>();
 builder.Services.AddScoped<S3Service>();
 builder.Services.AddScoped<FirmKbService>();
 builder.Services.AddScoped<CalendarService>();
+builder.Services.AddScoped<FirmMicrosoftTokenService>();
 // Bot Framework
 builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();
 builder.Services.AddTransient<IBot, FirmBot>();
