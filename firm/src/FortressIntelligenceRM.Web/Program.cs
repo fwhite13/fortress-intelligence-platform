@@ -132,6 +132,23 @@ builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
         new MySqlServerVersion(new Version(8, 0, 28)),
         mysql => mysql.EnableRetryOnFailure(3)));
 
+// FaitSharedDbContext — reads/updates user_microsoft_tokens from fait_dev
+// Same host/user/pass as keyring, but GuidFormat=None because UserId is CHAR(36)
+var faitSharedCsb = new MySqlConnector.MySqlConnectionStringBuilder
+{
+    Server = keyRingCsb.Server,
+    Port = keyRingCsb.Port,
+    Database = keyRingCsb.Database,
+    UserID = keyRingCsb.UserID,
+    Password = keyRingCsb.Password,
+    ConnectionTimeout = keyRingCsb.ConnectionTimeout,
+    GuidFormat = MySqlGuidFormat.None
+};
+builder.Services.AddDbContextFactory<FaitSharedDbContext>(options =>
+    options.UseMySql(faitSharedCsb.ConnectionString,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mysql => mysql.EnableRetryOnFailure(3)));
+
 // FIRM is a consumer — DisableAutomaticKeyGeneration so only FIP portal creates keys
 builder.Services.AddDataProtection()
     .PersistKeysToDbContext<SharedKeyRingDbContext>()

@@ -8,7 +8,7 @@ namespace FortressIntelligenceRM.Web.Services;
 
 public class FirmMicrosoftTokenService
 {
-    private readonly IDbContextFactory<FirmDbContext> _dbFactory;
+    private readonly IDbContextFactory<FaitSharedDbContext> _dbFactory;
     private readonly ILogger<FirmMicrosoftTokenService> _logger;
     private readonly HttpClient _httpClient;
 
@@ -29,7 +29,7 @@ public class FirmMicrosoftTokenService
     };
 
     public FirmMicrosoftTokenService(
-        IDbContextFactory<FirmDbContext> dbFactory,
+        IDbContextFactory<FaitSharedDbContext> dbFactory,
         ILogger<FirmMicrosoftTokenService> logger,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory)
