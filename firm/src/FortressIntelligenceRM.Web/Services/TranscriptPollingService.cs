@@ -1,4 +1,5 @@
 using FortressIntelligenceRM.Web.Data;
+using FortressIntelligenceRM.Web.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace FortressIntelligenceRM.Web.Services;
@@ -60,18 +61,23 @@ public class TranscriptPollingService : IHostedService, IDisposable
         {
             await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
-            var meetingRows = await db.Database
-                .SqlQueryRaw<TranscriptPollRow>(
-                    @"SELECT m.id AS MeetingId, m.meeting_url AS MeetingUrl, m.start_datetime AS StartDatetime,
-                             u.entra_oid AS EntraOid
-                      FROM firm_meetings m
-                      JOIN firm_users u ON u.id = m.created_by
-                      WHERE m.status = 'WaitingTranscript'
-                        AND m.mode = 'A'
-                        AND m.start_datetime IS NOT NULL
-                        AND m.start_datetime < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 15 MINUTE)
-                        AND m.start_datetime > {0}",
-                    cutoff)
+            var fifteenMinutesAgo = DateTime.UtcNow.AddMinutes(-15);
+            var meetingRows = await db.Meetings
+                .Where(m => m.Status == MeetingStatus.WaitingTranscript
+                    && m.Mode == "A"
+                    && m.StartDatetime != null
+                    && m.StartDatetime < fifteenMinutesAgo
+                    && m.StartDatetime > cutoff)
+                .Join(db.Users,
+                    m => m.CreatedBy,
+                    u => u.Id,
+                    (m, u) => new TranscriptPollRow
+                    {
+                        MeetingId = m.Id,
+                        MeetingUrl = m.MeetingUrl,
+                        StartDatetime = m.StartDatetime,
+                        EntraOid = u.EntraOid
+                    })
                 .ToListAsync(ct);
 
             if (meetingRows.Count == 0) return;

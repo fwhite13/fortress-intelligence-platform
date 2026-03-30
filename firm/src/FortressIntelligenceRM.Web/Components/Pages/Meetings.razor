@@ -276,7 +276,7 @@
                 _meetings = new();
                 return;
             }
-            _meetings = await MeetingService.GetMeetingsAsync(_userId);
+            _meetings = await MeetingService.GetMeetingsAsync(Guid.Parse(_userId));
         }
         catch (Exception ex)
         {
@@ -498,7 +498,7 @@
     private async Task JoinMeetingDirectAsync(string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? mode = null)
     {
         var (userId, _) = await GetCurrentUserAsync();
-        var meeting = await MeetingService.CreateMeetingAsync(userId, meetingUrl, title, startDatetime, calendarEventId);
+        var meeting = await MeetingService.CreateMeetingAsync(Guid.Parse(userId), meetingUrl, title, startDatetime, calendarEventId);
         if (!string.IsNullOrEmpty(mode))
             await MeetingService.UpdateModeAsync(meeting.Id, mode);
 

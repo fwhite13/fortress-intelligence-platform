@@ -258,7 +258,7 @@
             }
             if (user == null) { Navigation.NavigateTo("/meetings"); return; }
 
-            _meeting = await MeetingService.GetMeetingAsync(Id, user.Id.ToString());
+            _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
 
             // Load KB push status
             if (_meeting != null && _meeting.Status == MeetingStatus.Complete)
