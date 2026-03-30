@@ -53,7 +53,7 @@ public class NexusDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.ActiveSpecDocumentId).HasColumnName("active_spec_document_id");
             entity.HasOne(e => e.MockupFile)
-                .WithMany(f => f.Submissions)
+                .WithMany()
                 .HasForeignKey(e => e.MockupFileId)
                 .OnDelete(DeleteBehavior.Restrict);
         });

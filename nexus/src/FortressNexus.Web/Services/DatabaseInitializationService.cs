@@ -128,11 +128,6 @@ public class DatabaseInitializationService : IHostedService
                     await cmd.ExecuteNonQueryAsync(cancellationToken);
                     _logger.LogInformation("Table ensured: {Table}", tableName);
                 }
-                catch (MySqlException ex) when (ex.Number == 1060)
-                {
-                    // Column already exists — idempotent, safe to ignore
-                    _logger.LogDebug("Table {Table}: column already exists (1060), continuing.", tableName);
-                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to create table {Table}", tableName);
