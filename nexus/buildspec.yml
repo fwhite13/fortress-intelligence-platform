@@ -1,0 +1,31 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+      - echo "Building commit:" && git log -1 --oneline
+      - echo "IMAGE_TAG=$IMAGE_TAG"
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building Docker image...
+      - docker build -f nexus/Dockerfile -t nexus-web:$IMAGE_TAG .
+      - docker tag nexus-web:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/nexus-web:latest
+      - docker tag nexus-web:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/nexus-web:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing Docker image...
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/nexus-web:latest
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/nexus-web:$IMAGE_TAG
+      - echo Updating ECS service...
+      - aws ecs update-service --cluster fortress-tools-cluster --service nexus-web --force-new-deployment --region $AWS_DEFAULT_REGION
+      - echo Deploy triggered
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_ACCOUNT_ID: 742932328420

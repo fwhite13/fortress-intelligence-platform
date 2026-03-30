@@ -1,67 +1,101 @@
-# ADO#1350 — FIRM FirmDbContext HasColumnType("JSON") Removal — Hawkeye Review Brief
+# ADO#1352 — Cycle 2 Re-Review Brief
+
+You are performing a **verification review** for ADO#1352, cycle 2 of 2.
+Working directory: `/home/fredw/projects/fip/`
 
 ## Context
-Commit `2bac7aa` removes `.HasColumnType("JSON")` from three `string?` properties in `FirmMeetingSummary` entity config inside `FirmDbContext.cs`. Root cause: Pomelo's `ElementMappingConvention` throws NullRef in `FindCollectionMapping` when `HasColumnType("JSON")` is applied to `string?` properties.
 
-## Files to Read
-1. `firm/src/FortressIntelligenceRM.Web/Data/FirmDbContext.cs` — read the FULL file
+Cycle 1 found 1 Important issue and 3 Nitpicks. Tony claims to have fixed all 4 in commit `a1c6c2c`.
 
-## Diff Being Reviewed
-```diff
--            entity.Property(e => e.ActionItemsJson).HasColumnName("action_items_json").HasColumnType("JSON");
--            entity.Property(e => e.KeyDecisionsJson).HasColumnName("key_decisions_json").HasColumnType("JSON");
--            entity.Property(e => e.FollowUpsJson).HasColumnName("follow_ups_json").HasColumnType("JSON");
-+            entity.Property(e => e.ActionItemsJson).HasColumnName("action_items_json");
-+            entity.Property(e => e.KeyDecisionsJson).HasColumnName("key_decisions_json");
-+            entity.Property(e => e.FollowUpsJson).HasColumnName("follow_ups_json");
-```
+Your job: verify each fix is actually present and correct, check for regressions, and flag any new issues introduced in cycle 2.
 
-## Review Tasks — be thorough and adversarial
+---
 
-### Task 1: Verify the three changed lines
-Confirm that in the current file:
-- `ActionItemsJson` has `HasColumnName("action_items_json")` but NO `HasColumnType("JSON")`
-- `KeyDecisionsJson` has `HasColumnName("key_decisions_json")` but NO `HasColumnType("JSON")`
-- `FollowUpsJson` has `HasColumnName("follow_ups_json")` but NO `HasColumnType("JSON")`
+## Verification Checklist
 
-### Task 2: Check full FirmMeetingSummary entity configuration block
-Locate the entire `entity => entity.ToTable("firm_meeting_summaries")` (or similar) block for FirmMeetingSummary.
-Verify:
-- HasKey is present and correct
-- HasIndex on MeetingId is still present
-- HasForeignKey / HasOne / WithMany / navigation properties intact
-- HasColumnType("TEXT") on SummaryText still present (this one is correct — TEXT is safe for non-collection string)
-- ModelUsed MaxLength still set
-- CreatedAt default still set
-- No accidental deletions or modifications beyond the 3 targeted lines
+### I1 — FipDbContext Server fallback
+**File:** `firm/Program.cs`
+**Claim:** FipDbContext registration now uses `Server = dbHost ?? "localhost"` instead of bare `dbHost`.
 
-### Task 3: Full-file scan for HasColumnType("JSON") or HasColumnType("json")
-Search the ENTIRE FirmDbContext.cs for:
-- Any remaining `HasColumnType("JSON")` — case sensitive
-- Any remaining `HasColumnType("json")` — lowercase variant
-- Any remaining `HasColumnType("Json")` — mixed case
-Report every occurrence found, including line number and surrounding context.
-If NONE found: confirm clearly.
+Action: Read `firm/Program.cs`. Find the FipDbContext registration block (look for `UseMySql` or connection string builder near FipDbContext). Verify `dbHost ?? "localhost"` is present. Also check the FipDbContext connection string construction doesn't have any other null-unsafe references to env vars.
 
-### Task 4: Scan for similar risk patterns
-Look for any other `string?` or `string` properties in FirmDbContext that use `HasColumnType(...)` with any JSON-like value. Also look for `HasColumnType` used with any value other than "TEXT", "longtext", "varchar", "char", "decimal", "datetime", "tinyint(1)" — i.e., flag anything unusual.
+### N1 — Dead field + unreachable render block removed from Meetings.razor
+**File:** `firm/Pages/Meetings.razor` (or similar path — search if needed)
+**Claim:** `_calendarPendingMsg` field declaration removed AND the render block that referenced it removed.
 
-### Task 5: Scope creep check
-The only file that should be changed in this commit is `firm/src/FortressIntelligenceRM.Web/Data/FirmDbContext.cs`.
-Confirm no other files were touched by reading the directory structure or checking for any other modified files.
+Action: Read the Meetings.razor file. Search for `_calendarPendingMsg` — it must not appear anywhere. Also confirm no orphaned/unreachable render blocks remain.
 
-## Pass/Fail Criteria
-PASS if:
-- All three HasColumnType("JSON") calls are gone
-- All three HasColumnName calls are preserved with correct column names
-- No other entity config in FirmMeetingSummary was touched
-- No other HasColumnType("JSON") anywhere in the file
-- No scope creep
+### N2 — Unused `using` directives removed from CalendarService.cs
+**File:** `firm/Services/CalendarService.cs` (or similar path — search if needed)
+**Claim:** 2 unused `using` directives were removed.
 
-FAIL/NEEDS-CHANGES if any of the above are violated.
+Action: Read CalendarService.cs. Check the using block at the top. Count and note what's there. Verify there are no obviously unused imports (namespaces not referenced in the file body).
+
+### N3 — UserMicrosoftToken cleanup
+**Files:**
+- `firm/Data/FirmDbContext.cs` (or similar)
+- `firm/Models/UserMicrosoftToken.cs` (should be DELETED)
+
+**Claim:**
+- `DbSet<UserMicrosoftToken>` property removed from FirmDbContext
+- `OnModelCreating` config block for UserMicrosoftToken removed
+- `UserMicrosoftToken.cs` model file deleted entirely
+
+Action:
+1. Try to read `firm/Models/UserMicrosoftToken.cs` — it should NOT exist (expect file not found).
+2. Read FirmDbContext.cs — search for `UserMicrosoftToken`, `DbSet<UserMicrosoftToken>`, and any OnModelCreating config referencing it. None should appear.
+3. Search the entire `firm/` directory for any remaining references to `UserMicrosoftToken` — use grep/find. The ONLY acceptable reference is in `FipTokenService` where it accesses the DbSet via the context property (e.g., `_context.UserMicrosoftTokens`). Wait — actually if the DbSet property was deleted, FipTokenService would break. CHECK THIS CAREFULLY.
+
+### Regression Check — FipTokenService
+**File:** `firm/Services/FipTokenService.cs` (or similar)
+**Concern:** If FipTokenService accesses `_context.UserMicrosoftTokens` (the DbSet property on FirmDbContext), and that property was deleted, FipTokenService would fail to compile.
+
+Action: Read FipTokenService.cs. Find any references to `UserMicrosoftTokens`. Then verify that FirmDbContext still has that property (or that FipTokenService was updated to not need it).
+
+### Regression Check — FipDbContext still registers correctly
+**File:** `firm/Program.cs`
+**Concern:** The I1 fix might have introduced a malformed connection string.
+
+Action: Read the full FipDbContext registration block. Verify:
+- Connection string is well-formed (Server, Database, User Id, Password all present)
+- `dbHost ?? "localhost"` is syntactically correct
+- No other env vars in the block are used without null safety
+
+---
+
+## New Issues Check
+
+While reading all the above files, also look for:
+- Any new hardcoded values that should be env vars
+- Any new dead code or unreachable blocks
+- Any new unused imports
+- Any obvious bugs introduced by the cycle 2 changes
+
+---
+
+## Pass Criteria
+
+**PASS** if:
+1. `Server = dbHost ?? "localhost"` confirmed in Program.cs FipDbContext block ✓
+2. `_calendarPendingMsg` completely absent from Meetings.razor ✓
+3. CalendarService.cs using block is clean (no obviously unused imports) ✓
+4. FirmDbContext.cs has no UserMicrosoftToken references ✓
+5. Models/UserMicrosoftToken.cs does not exist ✓
+6. No live references to UserMicrosoftToken outside of what's expected ✓
+7. FipTokenService still compiles (either the DbSet property is still there under a different context, or FipTokenService was updated) ✓
+8. No new issues introduced ✓
+
+**NEEDS-CHANGES** if any of the above fail.
+
+---
 
 ## Output Format
-Report findings for each Task (1-5) with:
-- Explicit PASS or FAIL for each task
-- Exact line numbers and code snippets for any issues
-- Final verdict: PASS or NEEDS-CHANGES
+
+Report findings for each verification item:
+- ✅ VERIFIED — what you found
+- ❌ NOT FIXED — what's actually there vs. what was claimed
+- ⚠️ NEW ISSUE — something not in cycle 1 findings
+
+End with overall verdict: **PASS** or **NEEDS-CHANGES** with summary.
+
+Be specific — cite file paths and line numbers where possible.
