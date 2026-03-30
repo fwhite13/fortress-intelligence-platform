@@ -72,6 +72,7 @@ builder.Services.AddScoped<IArtifactGenerationService, ArtifactGenerationService
 builder.Services.AddScoped<UserContextService>();
 builder.Services.AddScoped<IAdoService, StubAdoService>();
 builder.Services.AddScoped<ISpecExporter, MarkdownExporter>();
+builder.Services.AddScoped<BedrockService>();
 
 // DB initialization (CREATE TABLE IF NOT EXISTS at startup)
 builder.Services.AddHostedService<DatabaseInitializationService>();
