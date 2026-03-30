@@ -37,6 +37,23 @@ builder.Services.AddDataProtection()
     .PersistKeysToDbContext<SharedKeyRingDbContext>()
     .SetApplicationName("FortressAI");
 
+// ── FIP token store (fip_dev schema) ──────────────────────────────────────────
+var fipDbName = builder.Configuration["FIP_DB_NAME"] ?? "fip_dev";
+var fipCsb = new MySqlConnector.MySqlConnectionStringBuilder
+{
+    Server = dbHost,
+    Port = uint.Parse(dbPort),
+    UserID = dbUser,
+    Password = dbPass,
+    Database = fipDbName,
+    GuidFormat = MySqlConnector.MySqlGuidFormat.None,
+    ConnectionTimeout = 10
+};
+builder.Services.AddDbContextFactory<FipDbContext>(options =>
+    options.UseMySql(fipCsb.ConnectionString,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mysql => mysql.EnableRetryOnFailure(3)));
+
 // ── Authentication ────────────────────────────────────────────────────────────
 builder.Services.AddAuthentication(options =>
 {
@@ -64,6 +81,9 @@ builder.Services.AddAuthentication(options =>
     options.Scope.Add("openid");
     options.Scope.Add("profile");
     options.Scope.Add("email");
+    options.Scope.Add("offline_access");
+    options.Scope.Add("https://graph.microsoft.com/Calendars.Read");
+    options.Scope.Add("https://graph.microsoft.com/User.Read");
     options.CallbackPath = "/signin-oidc";
     options.SignedOutCallbackPath = "/signout-callback-oidc";
     options.MapInboundClaims = false;
@@ -76,8 +96,9 @@ builder.Services.AddAuthentication(options =>
         return Task.CompletedTask;
     };
 
-    options.Events.OnTokenValidated = ctx =>
+    options.Events.OnTokenValidated = async ctx =>
     {
+        // Existing role mapping
         var roles = ctx.Principal?.FindAll("roles").Select(c => c.Value) ?? [];
         var identity = ctx.Principal?.Identity as System.Security.Claims.ClaimsIdentity;
         if (identity != null)
@@ -87,7 +108,55 @@ builder.Services.AddAuthentication(options =>
 
         ctx.Properties!.IsPersistent = true;
         ctx.Properties.ExpiresUtc = DateTimeOffset.UtcNow.AddHours(12);
-        return Task.CompletedTask;
+
+        // NEW: store delegated Graph token in fip_dev
+        var entraOid = ctx.Principal?.FindFirst("oid")?.Value
+            ?? ctx.Principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var accessToken = ctx.TokenEndpointResponse?.AccessToken;
+        var refreshToken = ctx.TokenEndpointResponse?.RefreshToken;
+        var expiresIn = ctx.TokenEndpointResponse?.ExpiresIn;
+
+        if (!string.IsNullOrEmpty(entraOid) && !string.IsNullOrEmpty(accessToken) && !string.IsNullOrEmpty(refreshToken))
+        {
+            try
+            {
+                var dbFactory = ctx.HttpContext.RequestServices.GetRequiredService<IDbContextFactory<FipDbContext>>();
+                await using var db = await dbFactory.CreateDbContextAsync();
+                var expiresAt = int.TryParse(expiresIn, out var secs)
+                    ? DateTime.UtcNow.AddSeconds(secs)
+                    : DateTime.UtcNow.AddHours(1);
+                var email = ctx.Principal?.FindFirst("preferred_username")?.Value
+                    ?? ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+
+                var existing = await db.UserMicrosoftTokens.FindAsync(entraOid);
+                if (existing != null)
+                {
+                    existing.AccessToken = accessToken;
+                    existing.RefreshToken = refreshToken;
+                    existing.ExpiresAt = expiresAt;
+                    existing.MicrosoftEmail = email;
+                    existing.UpdatedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    db.UserMicrosoftTokens.Add(new FipUserMicrosoftToken
+                    {
+                        EntraOid = entraOid,
+                        AccessToken = accessToken,
+                        RefreshToken = refreshToken,
+                        ExpiresAt = expiresAt,
+                        MicrosoftEmail = email
+                    });
+                }
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                // Log but never fail login
+                var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogError(ex, "[FIP] Failed to store Graph token for OID {Oid}", entraOid);
+            }
+        }
     };
 });
 
