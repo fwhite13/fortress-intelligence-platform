@@ -28,7 +28,7 @@ public class FirmMeeting
     public string? TranscriptS3Key { get; set; }
     [MaxLength(500)]
     public string? BotTaskArn { get; set; }
-    public string CreatedBy { get; set; } = "";
+    public Guid CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public FirmUser? CreatedByUser { get; set; }

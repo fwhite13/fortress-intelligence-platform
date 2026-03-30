@@ -49,14 +49,30 @@ builder.Services.AddDbContextFactory<FirmDbContext>(options =>
     options.UseMySql(firmConnectionString, firmServerVersion,
         mysqlOptions => mysqlOptions.EnableRetryOnFailure(3)));
 
+// FIP token store — read delegated Graph tokens written by FIP at login
+var fipDbName = builder.Configuration["FIP_DB_NAME"] ?? "fip_dev";
+var fipCsb = new MySqlConnectionStringBuilder
+{
+    Server = dbHost,
+    Port = uint.Parse(dbPort),
+    Database = fipDbName,
+    UserID = dbUser,
+    Password = dbPass,
+    ConnectionTimeout = 10,
+    GuidFormat = MySqlGuidFormat.None
+};
+builder.Services.AddDbContextFactory<FipDbContext>(options =>
+    options.UseMySql(fipCsb.ConnectionString,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mysqlOptions => mysqlOptions.EnableRetryOnFailure(3)));
+
 // Application services
 builder.Services.AddScoped<MeetingService>();
 builder.Services.AddScoped<VpBotService>();
 builder.Services.AddScoped<S3Service>();
 builder.Services.AddScoped<FirmKbService>();
 builder.Services.AddScoped<CalendarService>();
-builder.Services.AddScoped<IFirmMicrosoftTokenService, FirmMicrosoftTokenService>();
-builder.Services.AddScoped<MicrosoftTokenService>();
+builder.Services.AddScoped<FipTokenService>();
 // Bot Framework
 builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();
 builder.Services.AddTransient<IBot, FirmBot>();
@@ -107,8 +123,8 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHostedService<DatabaseInitializationService>();
 builder.Services.AddSingleton<TeamsGraphService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<TeamsGraphService>());
-builder.Services.AddHostedService<TranscriptPollingService>();
+// builder.Services.AddHostedService(sp => sp.GetRequiredService<TeamsGraphService>()); // ADO#1352: disabled — FIRM reads via FipTokenService now
+// builder.Services.AddHostedService<TranscriptPollingService>(); // ADO#1352: disabled
 
 // DataProtection: shared key ring points to fred_dev (FAIT's DB) — same DataProtectionKeys table
 // SharedKeyRingDbContext reads from fred_dev via FIP_KEYRING_DB_NAME env var
@@ -177,108 +193,14 @@ app.MapGet("/auth/firm-session", async (HttpContext ctx) =>
     return Results.Redirect("/meetings");
 }).AllowAnonymous().DisableAntiforgery();
 
-// Microsoft OAuth consent callback — FIRM manages its own tokens in firm_dev
-app.MapGet("/auth/ms-callback", async (HttpContext ctx, IFirmMicrosoftTokenService tokenService, IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config) =>
+// /auth/ms-callback — Legacy FIRM OAuth endpoint. Disabled in ADO#1352 (tokens now via FIP at login).
+app.MapGet("/auth/ms-callback", (HttpContext ctx) =>
 {
-    var code = ctx.Request.Query["code"].ToString();
-    var state = ctx.Request.Query["state"].ToString();
-    var error = ctx.Request.Query["error"].ToString();
-
-    if (!string.IsNullOrEmpty(error))
-    {
-        var errorDesc = ctx.Request.Query["error_description"].ToString();
-        return Results.Content(
-            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
-            "<h1 style='color:#dc2626;'>Authentication Failed</h1>" +
-            $"<p>{error}: {errorDesc}</p>" +
-            "<p><a href='/meetings'>Back to Meetings</a></p>" +
-            "</body></html>", "text/html");
-    }
-
-    if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state))
-    {
-        return Results.Content(
-            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
-            "<h1 style='color:#dc2626;'>Invalid Response</h1>" +
-            "<p>No authorization code received.</p>" +
-            "<p><a href='/meetings'>Back to Meetings</a></p>" +
-            "</body></html>", "text/html");
-    }
-
-    // State format: "firmUserId:random"
-    var stateParts = state.Split(':');
-    if (stateParts.Length < 2)
-    {
-        return Results.Content(
-            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
-            "<h1 style='color:#dc2626;'>Invalid State</h1>" +
-            "<p><a href='/meetings'>Back to Meetings</a></p>" +
-            "</body></html>", "text/html");
-    }
-
-    if (!Guid.TryParse(stateParts[0], out var firmUserGuid))
-    {
-        return Results.Content(
-            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
-            "<h1 style='color:#dc2626;'>Invalid State</h1>" +
-            "<p><a href='/meetings'>Back to Meetings</a></p>" +
-            "</body></html>", "text/html");
-    }
-
-    // Security: verify the authenticated user's FIRM record matches firmUserId from state
-    // Prevents an attacker from injecting a victim's firmUserId into their own OAuth flow
-    var authResult = await ctx.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    if (!authResult.Succeeded)
-    {
-        return Results.Content(
-            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
-            "<h1 style='color:#dc2626;'>Unauthorized</h1>" +
-            "<p>You must be signed in to connect Microsoft 365.</p>" +
-            "<p><a href='/meetings'>Back to Meetings</a></p>" +
-            "</body></html>", "text/html");
-    }
-
-    var entraOid = authResult.Principal?.FindFirst("oid")?.Value
-                   ?? authResult.Principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
-    if (string.IsNullOrEmpty(entraOid))
-    {
-        return Results.Forbid();
-    }
-
-    await using var verifyDb = await dbFactory.CreateDbContextAsync();
-    var currentUser = await verifyDb.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
-    if (currentUser == null || currentUser.Id != firmUserGuid)
-    {
-        return Results.StatusCode(403);
-    }
-
-    var firmUser = currentUser; // Already verified: non-null and matches firmUserGuid from state
-
-    try
-    {
-        var redirectUri = config["Firm:MsCallbackUrl"]
-            ?? $"{ctx.Request.Scheme}://{ctx.Request.Host}/auth/ms-callback";
-        var token = await tokenService.ExchangeCodeAsync(firmUserGuid, code, redirectUri);
-        var email = token.MicrosoftEmail ?? "user";
-        return Results.Content(
-            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
-            "<h1 style='color:#059669;'>&#x2705; Microsoft 365 Connected!</h1>" +
-            $"<p>Successfully connected as <strong>{email}</strong></p>" +
-            "<p>Redirecting to Meetings...</p>" +
-            "<script>setTimeout(function(){ window.location.href = '/meetings'; }, 2000);</script>" +
-            "</body></html>", "text/html");
-    }
-    catch (Exception ex)
-    {
-        var logger = ctx.RequestServices.GetRequiredService<ILogger<FirmMicrosoftTokenService>>();
-        logger.LogError(ex, "[FIRM /auth/ms-callback] Token exchange failed for user {UserId}", firmUserGuid);
-        return Results.Content(
-            "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
-            "<h1 style='color:#dc2626;'>Connection Failed</h1>" +
-            "<p>An unexpected error occurred. Please try again.</p>" +
-            "<p><a href='/meetings'>Back to Meetings</a></p>" +
-            "</body></html>", "text/html");
-    }
+    return Results.Content(
+        "<html><body style='font-family:sans-serif;text-align:center;padding:60px;'>" +
+        "<h1>Microsoft 365 connection is now handled via FIP login.</h1>" +
+        "<p><a href='/meetings'>Back to Meetings</a></p>" +
+        "</body></html>", "text/html");
 }).AllowAnonymous().DisableAntiforgery();
 
 // Logout: clear local cookie only (FIP portal owns OIDC sign-out)

@@ -8,9 +8,9 @@
 @inject IDialogService DialogService
 @inject ILogger<Meetings> Logger
 @inject VpBotService VpBotService
-@inject IConfiguration _config
+
 @inject CalendarService CalendarService
-@inject MicrosoftTokenService MicrosoftTokenService
+
 @implements IDisposable
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
@@ -30,27 +30,6 @@
             Add a Meeting
         </MudButton>
     </MudStack>
-
-    @if (_ms365Checked && !_ms365Connected)
-    {
-        <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-4" Icon="@Icons.Material.Filled.Link">
-            <MudStack Row AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                <MudText Typo="Typo.body2">Connect Microsoft 365 to see your upcoming meetings and enable calendar integration.</MudText>
-                <MudButton Variant="Variant.Filled"
-                           Style="background: #0078d4; color: white; white-space: nowrap;"
-                           Size="Size.Small"
-                           OnClick="ConnectMs365">
-                    Connect Microsoft 365
-                </MudButton>
-            </MudStack>
-        </MudAlert>
-    }
-    else if (_ms365Checked && _ms365Connected && !string.IsNullOrEmpty(_ms365Email))
-    {
-        <MudAlert Severity="Severity.Success" Dense="true" Class="mb-4" Icon="@Icons.Material.Filled.CheckCircle">
-            <MudText Typo="Typo.body2">Microsoft 365 connected as <strong>@_ms365Email</strong></MudText>
-        </MudAlert>
-    }
 
     @if (!_calendarLoading && _upcomingMeetings?.Count > 0)
     {
@@ -198,9 +177,7 @@
     private bool _calendarLoading = true;
     private string? _calendarPendingMsg;
     private HashSet<long> _calendarRemovedMeetingIds = new();
-    private bool _ms365Connected = false;
-    private string? _ms365Email;
-    private bool _ms365Checked = false;
+
 
     protected override async Task OnInitializedAsync()
     {
@@ -232,13 +209,7 @@
                     _entraOid = entraOid;
                     _userEmail = email;
                     Logger.LogInformation("FIRM Meetings: resolved userId={UserId} for entraOid={OID}", _userId, entraOid);
-                    if (firmUser != null)
-                    {
-                        var (connected, msEmail, _) = await MicrosoftTokenService.GetConnectionStatusAsync(firmUser.Id);
-                        _ms365Connected = connected;
-                        _ms365Email = msEmail;
-                        _ms365Checked = true;
-                    }
+
                 }
                 catch (Exception dbEx)
                 {
@@ -574,16 +545,6 @@
             // Imminent/past meeting — open dialog for immediate join
             await OpenJoinDialogPrefilled(card.JoinUrl);
         }
-    }
-
-    private void ConnectMs365()
-    {
-        if (string.IsNullOrEmpty(_userId)) return;
-        if (!Guid.TryParse(_userId, out var userGuid)) return;
-        var state = $"{_userId}:{Guid.NewGuid()}";
-        var redirectUri = _config["Firm:MsCallbackUrl"] ?? Navigation.BaseUri.TrimEnd('/') + "/auth/ms-callback";
-        var authUrl = MicrosoftTokenService.GetAuthorizationUrl(redirectUri, state);
-        Navigation.NavigateTo(authUrl, forceLoad: true);
     }
 
     public void Dispose() => _pollTimer?.Dispose();

@@ -20,7 +20,7 @@ public class MeetingService
         _httpClientFactory = httpClientFactory;
     }
 
-    public async Task<List<FirmMeeting>> GetMeetingsAsync(string userId)
+    public async Task<List<FirmMeeting>> GetMeetingsAsync(Guid userId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.Meetings
@@ -29,7 +29,7 @@ public class MeetingService
             .ToListAsync();
     }
 
-    public async Task<FirmMeeting?> GetMeetingAsync(long id, string userId)
+    public async Task<FirmMeeting?> GetMeetingAsync(long id, Guid userId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.Meetings
@@ -39,7 +39,7 @@ public class MeetingService
             .FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == userId);
     }
 
-    public async Task<FirmMeeting> CreateMeetingAsync(string userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null)
+    public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = new FirmMeeting
@@ -181,7 +181,7 @@ public class MeetingService
     /// Upserts a meeting from calendar detection. Keyed on calendar_event_id to prevent duplicates.
     /// If meeting already exists for this user + calendar_event_id, returns existing meeting.
     /// </summary>
-    public async Task<FirmMeeting> UpsertFromCalendarAsync(string userId, CalendarMeetingDto dto)
+    public async Task<FirmMeeting> UpsertFromCalendarAsync(Guid userId, CalendarMeetingDto dto)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 

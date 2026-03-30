@@ -8,23 +8,17 @@ namespace FortressIntelligenceRM.Web.Services;
 public class CalendarService
 {
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IFirmMicrosoftTokenService _tokenService;
-    private readonly IDbContextFactory<FirmDbContext> _dbFactory;
-    private readonly IConfiguration _config;
+    private readonly FipTokenService _fipTokenService;
     private readonly ILogger<CalendarService> _logger;
     private const string FortressTenantPrefix = "7152ea12";
 
     public CalendarService(
         IHttpClientFactory httpClientFactory,
-        IFirmMicrosoftTokenService tokenService,
-        IDbContextFactory<FirmDbContext> dbFactory,
-        IConfiguration config,
+        FipTokenService fipTokenService,
         ILogger<CalendarService> logger)
     {
         _httpClientFactory = httpClientFactory;
-        _tokenService = tokenService;
-        _dbFactory = dbFactory;
-        _config = config;
+        _fipTokenService = fipTokenService;
         _logger = logger;
     }
 
@@ -34,21 +28,10 @@ public class CalendarService
         {
             _logger.LogInformation("[CalendarService] GetUpcomingCalendarMeetingsAsync — entry. OID={Oid} Email={Email}", entraOid, userEmail);
 
-            // Look up FirmUser by EntraOid to get FIRM user ID for token lookup
-            await using var db = await _dbFactory.CreateDbContextAsync(ct);
-            var firmUser = await db.Users
-                .FirstOrDefaultAsync(u => u.EntraOid == entraOid, ct);
-
-            if (firmUser == null)
-            {
-                _logger.LogWarning("[CalendarService] No FirmUser found for EntraOid {Oid}", entraOid);
-                return new List<CalendarMeetingDto>();
-            }
-
-            var token = await _tokenService.GetValidAccessTokenAsync(firmUser.Id);
+            var token = await _fipTokenService.GetValidAccessTokenAsync(entraOid);
             if (string.IsNullOrEmpty(token))
             {
-                _logger.LogWarning("[CalendarService] No delegated Graph token for FIRM user {FirmUserId} (EntraOid={Oid})", firmUser.Id, entraOid);
+                _logger.LogWarning("[CalendarService] No delegated Graph token in fip_dev for OID={Oid}", entraOid);
                 return new List<CalendarMeetingDto>();
             }
             _logger.LogInformation("[CalendarService] Delegated Graph token acquired (length={Len}). OID={Oid}", token.Length, entraOid);

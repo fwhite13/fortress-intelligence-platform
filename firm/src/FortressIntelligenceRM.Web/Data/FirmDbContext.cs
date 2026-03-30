@@ -61,7 +61,7 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.AudioS3Key).HasColumnName("audio_s3_key").HasMaxLength(1000);
             entity.Property(e => e.TranscriptS3Key).HasColumnName("transcript_s3_key").HasMaxLength(1000);
             entity.Property(e => e.BotTaskArn).HasColumnName("bot_task_arn").HasMaxLength(500);
-            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasColumnType("char(36)");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.TranscriptKbPushed).HasColumnName("transcript_kb_pushed").HasDefaultValue(false);
