@@ -53,7 +53,7 @@ builder.Services.AddDbContextFactory<FirmDbContext>(options =>
 var fipDbName = builder.Configuration["FIP_DB_NAME"] ?? "fip_dev";
 var fipCsb = new MySqlConnectionStringBuilder
 {
-    Server = dbHost,
+    Server = dbHost ?? "localhost",
     Port = uint.Parse(dbPort),
     Database = fipDbName,
     UserID = dbUser,

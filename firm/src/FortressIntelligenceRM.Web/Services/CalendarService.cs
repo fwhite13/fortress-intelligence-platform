@@ -1,7 +1,5 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Microsoft.EntityFrameworkCore;
-using FortressIntelligenceRM.Web.Data;
 
 namespace FortressIntelligenceRM.Web.Services;
 

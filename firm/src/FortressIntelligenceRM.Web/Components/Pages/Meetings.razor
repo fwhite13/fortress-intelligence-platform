@@ -76,12 +76,6 @@
             }
         </MudGrid>
     }
-    else if (!_calendarLoading && !string.IsNullOrEmpty(_calendarPendingMsg))
-    {
-        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-            Calendar integration pending — connect your account in FAIT to see upcoming meetings.
-        </MudAlert>
-    }
 
     @if (_loading)
     {
@@ -175,7 +169,6 @@
     private System.Threading.Timer? _pollTimer;
     private List<UpcomingMeetingCard>? _upcomingMeetings;
     private bool _calendarLoading = true;
-    private string? _calendarPendingMsg;
     private HashSet<long> _calendarRemovedMeetingIds = new();
 
 

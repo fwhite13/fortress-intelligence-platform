@@ -15,7 +15,6 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<FirmMeetingTranscript> Transcripts => Set<FirmMeetingTranscript>();
     public DbSet<FirmMeetingSummary> Summaries => Set<FirmMeetingSummary>();
     public DbSet<FirmMeetingKbPush> FirmMeetingKbPushes => Set<FirmMeetingKbPush>();
-    public DbSet<UserMicrosoftToken> UserMicrosoftTokens => Set<UserMicrosoftToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -153,19 +152,6 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("fk_fmkp_meeting");
             entity.HasIndex(e => new { e.MeetingId, e.DocType, e.KbScope }).HasDatabaseName("idx_fmkp_lookup");
-        });
-
-        modelBuilder.Entity<UserMicrosoftToken>(entity =>
-        {
-            entity.ToTable("user_microsoft_tokens");
-            entity.HasKey(e => e.UserId);
-            entity.Property(e => e.UserId).ValueGeneratedNever();
-            entity.Property(e => e.AccessToken).IsRequired();
-            entity.Property(e => e.RefreshToken).IsRequired();
-            entity.Property(e => e.MicrosoftEmail).HasMaxLength(255);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
-            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
-            entity.HasOne(e => e.User).WithOne().HasForeignKey<UserMicrosoftToken>(e => e.UserId);
         });
 
     }
