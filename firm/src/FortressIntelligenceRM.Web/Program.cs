@@ -32,15 +32,21 @@ if (!string.IsNullOrEmpty(dbHost))
         Database = dbName,
         UserID = dbUser,
         Password = dbPass,
-        ConnectionTimeout = 10
+        ConnectionTimeout = 10,
+        GuidFormat = MySqlGuidFormat.None
     };
     firmConnectionString = csb.ConnectionString;
     Console.WriteLine($"FIRM: Using Aurora MySQL: {dbHost}/{dbName}");
 }
 else
 {
-    firmConnectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    var localConn = builder.Configuration.GetConnectionString("DefaultConnection")
         ?? $"Server=localhost;Database={dbName};User=root;Password=dev;";
+    var localCsb = new MySqlConnectionStringBuilder(localConn)
+    {
+        GuidFormat = MySqlGuidFormat.None
+    };
+    firmConnectionString = localCsb.ConnectionString;
     Console.WriteLine("FIRM: Using local connection string.");
 }
 var firmServerVersion = new MySqlServerVersion(new Version(8, 0, 28));
