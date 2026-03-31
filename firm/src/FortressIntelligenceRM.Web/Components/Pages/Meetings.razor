@@ -183,9 +183,7 @@
             Logger.LogInformation("FIRM Meetings: claims = {Claims}", claimsList);
 
             var entraOid = user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                ?? user.FindFirst("oid")?.Value
-                ?? user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                ?? user.FindFirst("sub")?.Value;
+                ?? user.FindFirst("oid")?.Value;
 
             if (entraOid != null)
             {
@@ -460,27 +458,15 @@
         builder.CloseElement();
     };
 
-    private async Task<(string userId, string entraOid)> GetCurrentUserAsync()
-    {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = authState.User;
-        var entraOid = user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-            ?? "";
-        var email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
-            ?? user.FindFirst("preferred_username")?.Value ?? "";
-        var displayName = user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
-            ?? user.FindFirst("name")?.Value ?? email;
-
-        var firmUser = await MeetingService.GetOrCreateUserAsync(entraOid, email, displayName);
-        if (firmUser == null) throw new InvalidOperationException("Failed to resolve FIRM user");
-        return (firmUser.Id.ToString(), entraOid);
-    }
-
     private async Task JoinMeetingDirectAsync(string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? mode = null)
     {
-        var (userId, _) = await GetCurrentUserAsync();
-        var meeting = await MeetingService.CreateMeetingAsync(Guid.Parse(userId), meetingUrl, title, startDatetime, calendarEventId);
+        if (string.IsNullOrEmpty(_userId))
+        {
+            Snackbar.Add("User identity not resolved. Please refresh the page.", Severity.Error);
+            Logger.LogError("FIRM: JoinMeetingDirectAsync called with null _userId — identity not resolved at load");
+            return;
+        }
+        var meeting = await MeetingService.CreateMeetingAsync(Guid.Parse(_userId), meetingUrl, title, startDatetime, calendarEventId);
         if (!string.IsNullOrEmpty(mode))
             await MeetingService.UpdateModeAsync(meeting.Id, mode);
 
