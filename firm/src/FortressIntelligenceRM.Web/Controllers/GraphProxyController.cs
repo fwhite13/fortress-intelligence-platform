@@ -159,16 +159,23 @@ public class GraphProxyController : ControllerBase
 
             _logger.LogInformation("[CalendarProxy] FAIT returned {Count} calendar events for OID {Oid}", events?.Count ?? 0, oid);
 
+            // Get logged-in user's email for organizer comparison
+            var userEmail = User.FindFirstValue(ClaimTypes.Email)
+                ?? User.FindFirstValue("email")
+                ?? User.FindFirstValue("preferred_username")
+                ?? "";
+
             var enriched = events.Select(e =>
             {
-                var modeHint = e.Platform == "teams" ? "A" : "B";
-                var modeText = e.Platform switch
-                {
-                    "teams" => "FIRM will capture the transcript directly.",
-                    "zoom" => "Fortress Notetaker will join to record.",
-                    "meet" => "Fortress Notetaker will join to record.",
-                    _ => "Fortress Notetaker will join to record."
-                };
+                var isTeams = e.Platform == "teams";
+                var isOrganizer = isTeams
+                    && !string.IsNullOrEmpty(e.OrganizerEmail)
+                    && !string.IsNullOrEmpty(userEmail)
+                    && string.Equals(e.OrganizerEmail, userEmail, StringComparison.OrdinalIgnoreCase);
+                var modeHint = isOrganizer ? "A" : "B";
+                var modeText = isOrganizer
+                    ? "You're the host — FIRM captures natively, no bot joins."
+                    : "Fortress Notetaker will join to record.";
                 return new
                 {
                     e.CalendarEventId,
@@ -252,4 +259,5 @@ internal class CalendarEventItem
     public string EndDateTime { get; set; } = "";
     public string JoinUrl { get; set; } = "";
     public string Platform { get; set; } = "";
+    public string? OrganizerEmail { get; set; }
 }

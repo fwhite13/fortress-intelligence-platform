@@ -240,6 +240,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.Category).HasMaxLength(100);
             entity.Property(e => e.LastFetchedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.OrganizerEmail).HasColumnName("organizer_email").HasMaxLength(255);
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId);
         });
 

@@ -70,7 +70,7 @@ public class GraphCalendarService
 
         var startIso = startDate.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ");
         var endIso = endDate.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ");
-        var selectFields = "id,subject,start,end,location,attendees,onlineMeetingUrl,categories";
+        var selectFields = "id,subject,start,end,location,attendees,onlineMeetingUrl,categories,organizer";
 
         var url = $"{GraphBaseUrl}/me/calendar/events" +
                   $"?startDateTime={Uri.EscapeDataString(startIso)}" +
@@ -158,6 +158,16 @@ public class GraphCalendarService
                     attendeesJson = JsonSerializer.Serialize(attendees);
             }
 
+            // Parse organizer email
+            string? organizerEmail = null;
+            if (evt.TryGetProperty("organizer", out var orgProp) && orgProp.ValueKind != JsonValueKind.Null)
+            {
+                if (orgProp.TryGetProperty("emailAddress", out var orgEmail) && orgEmail.ValueKind != JsonValueKind.Null)
+                {
+                    organizerEmail = orgEmail.TryGetProperty("address", out var addr) ? addr.GetString() : null;
+                }
+            }
+
             // Parse online meeting URL
             var meetingUrl = evt.TryGetProperty("onlineMeetingUrl", out var mu) && mu.ValueKind != JsonValueKind.Null
                 ? mu.GetString()
@@ -182,6 +192,7 @@ public class GraphCalendarService
                 Location = location,
                 OnlineMeetingUrl = meetingUrl,
                 AttendeesJson = attendeesJson,
+                OrganizerEmail = organizerEmail,
                 Category = category,
                 LastFetchedAt = DateTime.UtcNow
             };
@@ -284,6 +295,7 @@ public class GraphCalendarService
                         new { name = "Sarah Chen", address = "sarah.chen@fortressam.ai" },
                         new { name = "John Miller", address = "john.miller@fortressam.ai" }
                     }),
+                    OrganizerEmail = "fwhite@refuge-ins.com",
                     Category = "Meeting",
                     LastFetchedAt = now
                 },

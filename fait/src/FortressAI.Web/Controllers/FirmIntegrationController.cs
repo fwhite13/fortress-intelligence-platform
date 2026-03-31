@@ -420,6 +420,7 @@ public class FirmIntegrationController : ControllerBase
                 endDateTime = e.EndTime.ToString("O"),
                 joinUrl = joinUrl,
                 platform = platform,
+                organizerEmail = e.OrganizerEmail,
             };
         }).ToList();
 

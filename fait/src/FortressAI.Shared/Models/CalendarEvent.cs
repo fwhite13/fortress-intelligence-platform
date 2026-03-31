@@ -11,6 +11,7 @@ public class CalendarEvent
     public string? Location { get; set; }
     public string? OnlineMeetingUrl { get; set; }
     public string? AttendeesJson { get; set; }
+    public string? OrganizerEmail { get; set; }
     public string? Category { get; set; }
     public DateTime LastFetchedAt { get; set; } = DateTime.UtcNow;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
