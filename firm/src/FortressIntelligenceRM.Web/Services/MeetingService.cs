@@ -93,11 +93,26 @@ public class MeetingService
     // a uniqueness strategy (per-user? time-window?) if duplicate meetings become an issue.
     public async Task<FirmUser?> GetOrCreateUserAsync(string entraOid, string email, string displayName)
     {
+        if (string.IsNullOrEmpty(email))
+        {
+            _logger.LogError("FIRM: GetOrCreateUserAsync called with empty email — cannot proceed");
+            return null;
+        }
+
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        // ADO#1450: SELECT first by entra_oid OR email to prevent duplicate insert
-        // hitting unique index idx_firm_users_email.
-        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid || u.Email == email);
+        // ADO#1478: Email is the stable unique identifier. Look up by email first.
+        // EntraOid is unreliable — Cognito auth provides Cognito sub UUID, not Entra OID,
+        // so OID-first lookup misses pre-existing rows created under a different OID.
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
+
+        if (user == null)
+        {
+            // Secondary lookup by OID — handles case where email changed but OID is stable
+            if (!string.IsNullOrEmpty(entraOid))
+                user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
+        }
+
         if (user == null)
         {
             user = new FirmUser
@@ -117,16 +132,16 @@ public class MeetingService
                 await db.SaveChangesAsync();
                 _logger.LogInformation("FIRM: Provisioned new user {Email}", email);
             }
-            catch (DbUpdateException)
+            catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("Duplicate entry") == true)
             {
-                // Race condition: another request inserted the same user between our
-                // SELECT and INSERT. Discard the failed context and re-query.
-                _logger.LogWarning("FIRM: Duplicate key race on user {Email} — re-querying", email);
+                // Race condition: another concurrent request inserted between our SELECT and INSERT.
+                // Discard tracked entities and re-fetch by email.
+                _logger.LogWarning("FIRM: Race condition duplicate key for {Email} — re-fetching", email);
                 await using var db2 = await _dbFactory.CreateDbContextAsync();
-                user = await db2.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid || u.Email == email);
+                user = await db2.Users.FirstOrDefaultAsync(u => u.Email == email);
                 if (user == null)
                 {
-                    _logger.LogError("FIRM: Re-query after duplicate key returned null for {Email}", email);
+                    _logger.LogError("FIRM: Cannot resolve user {Email} after duplicate key race", email);
                     return null;
                 }
                 return user;
@@ -134,8 +149,9 @@ public class MeetingService
         }
         else
         {
-            // Existing user — update fields that may have changed
-            user.EntraOid = entraOid;
+            // Existing user — update mutable fields. OID may change across auth providers.
+            if (!string.IsNullOrEmpty(entraOid))
+                user.EntraOid = entraOid;
             user.LastLoginAt = DateTime.UtcNow;
             user.DisplayName = displayName;
             user.Email = email;
