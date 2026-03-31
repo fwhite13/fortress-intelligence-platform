@@ -118,7 +118,7 @@ public class WeeklyRollupService
         sb.AppendLine($"Today is {todayStr}. You are summarizing activity from {weekStartStr} to {weekEndStr}.");
         sb.AppendLine($"You are {assistantName}, a personal AI assistant. Generate a concise weekly summary for your user.");
         sb.AppendLine();
-        sb.AppendLine($"## This Week's Activity ({stats.WeekStart} – {stats.WeekEnd})");
+        sb.AppendLine($"## This Week's Activity ({stats.WeekStart.ToString("MMMM d, yyyy")} – {stats.WeekEnd.ToString("MMMM d, yyyy")})");
         sb.AppendLine();
         sb.AppendLine($"📧 Email: {stats.EmailAlertsTriaged} emails triaged, {stats.HighPriorityEmails} flagged as high priority");
         sb.AppendLine($"📅 Meetings: {stats.MeetingNotesCaptures} post-meeting notes captured, {stats.MeetingsSummarized} AI summaries generated");
