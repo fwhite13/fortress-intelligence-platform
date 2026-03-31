@@ -132,9 +132,7 @@ public class GraphProxyController : ControllerBase
         if (string.IsNullOrEmpty(faitUrl))
             return Ok(new List<object>());
 
-        var oid = User.FindFirstValue("oid")
-            ?? User.FindFirstValue("http://schemas.microsoft.com/identity/claims/objectidentifier")
-            ?? "";
+        var oid = User.FindFirstValue("http://schemas.microsoft.com/identity/claims/objectidentifier") ?? "";
 
         if (string.IsNullOrEmpty(oid))
             return Ok(new List<object>());

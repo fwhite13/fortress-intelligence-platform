@@ -182,8 +182,7 @@
             var claimsList = string.Join(", ", user.Claims.Select(c => $"{c.Type.Split('/').Last()}={c.Value}"));
             Logger.LogInformation("FIRM Meetings: claims = {Claims}", claimsList);
 
-            var entraOid = user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                ?? user.FindFirst("oid")?.Value;
+            var entraOid = user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
 
             if (entraOid != null)
             {
