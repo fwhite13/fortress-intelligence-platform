@@ -61,7 +61,9 @@ public class BriefingGenerationService
                 userId = userId.ToString(),
                 assistantName = assistantConfig.AssistantName,
                 personality,
-                forgeKbContext
+                forgeKbContext,
+                today = DateTimeOffset.Now.ToString("yyyy-MM-dd"),
+                todayFormatted = DateTimeOffset.Now.ToString("dddd, MMMM d, yyyy")
             });
 
             var lambdaRequest = new InvokeRequest

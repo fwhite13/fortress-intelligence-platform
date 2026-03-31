@@ -112,6 +112,10 @@ public class WeeklyRollupService
     {
         var sb = new StringBuilder();
 
+        var todayStr = DateTimeOffset.Now.ToString("dddd, MMMM d, yyyy");
+        var weekStartStr = stats.WeekStart.ToString("MMMM d, yyyy");
+        var weekEndStr = stats.WeekEnd.ToString("MMMM d, yyyy");
+        sb.AppendLine($"Today is {todayStr}. You are summarizing activity from {weekStartStr} to {weekEndStr}.");
         sb.AppendLine($"You are {assistantName}, a personal AI assistant. Generate a concise weekly summary for your user.");
         sb.AppendLine();
         sb.AppendLine($"## This Week's Activity ({stats.WeekStart} – {stats.WeekEnd})");
