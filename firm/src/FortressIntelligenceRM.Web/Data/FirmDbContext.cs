@@ -1,14 +1,14 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using FortressIntelligenceRM.Web.Models;
 
 namespace FortressIntelligenceRM.Web.Data;
 
-public class FirmDbContext : DbContext, IDataProtectionKeyContext
+// NOTE: FIRM does NOT use EF migrations — all schema is managed by DatabaseInitializationService (raw SQL).
+// DataProtection keys live in SharedKeyRingDbContext (fred_dev), not here.
+public class FirmDbContext : DbContext
 {
     public FirmDbContext(DbContextOptions<FirmDbContext> options) : base(options) { }
 
-    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<FirmUser> Users => Set<FirmUser>();
     public DbSet<FirmMeeting> Meetings => Set<FirmMeeting>();
     public DbSet<FirmMeetingParticipant> Participants => Set<FirmMeetingParticipant>();
@@ -19,9 +19,6 @@ public class FirmDbContext : DbContext, IDataProtectionKeyContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-
-        // Map to FAIT DataProtectionKeys table — shared key ring for cross-app cookie reading
-        modelBuilder.Entity<DataProtectionKey>().ToTable("DataProtectionKeys");
 
         modelBuilder.Entity<FirmUser>(entity =>
         {

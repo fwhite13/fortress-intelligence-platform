@@ -1,7 +1,5 @@
 using FortressIntelligenceRM.Web.Data;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
 using MySqlConnector;
 
 namespace FortressIntelligenceRM.Web.Data;
@@ -33,19 +31,7 @@ public class DatabaseInitializationService : IHostedService
                 return;
             }
 
-            // Create all EF Core model tables
-            try
-            {
-                var creator = db.Database.GetService<IRelationalDatabaseCreator>();
-                await creator.CreateTablesAsync(cancellationToken);
-                _logger.LogInformation("FIRM: DB tables ensured via EF Core.");
-            }
-            catch (Exception efEx)
-            {
-                _logger.LogWarning("FIRM: CreateTablesAsync encountered errors (non-fatal): {Message}", efEx.Message);
-            }
-
-            // Ensure all FIRM tables explicitly with IF NOT EXISTS
+            // Ensure all FIRM tables explicitly with IF NOT EXISTS (raw SQL — no EF migrations)
             var extraTables = new[]
             {
                 ("firm_users", @"CREATE TABLE IF NOT EXISTS firm_users (

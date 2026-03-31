@@ -10,3 +10,13 @@
 Dockerfile*
 README.md
 pipeline/
+
+# Exclude other FIP services — prevent migration bleed across Docker builds
+fait/
+fip/
+portal/
+forms/
+famos/
+cowork/
+nexus/
+mcp-memory/
