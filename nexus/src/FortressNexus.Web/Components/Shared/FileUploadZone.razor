@@ -1,0 +1,71 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using MudBlazor
+
+<div class="file-upload-zone">
+    <MudFileUpload T="IBrowserFile" Accept=".html,.png,.jpg,.jpeg,.webp" OnFilesChanged="HandleFileChanged">
+        <ActivatorContent>
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.CloudUpload"
+                       Class="file-upload-btn">
+                Choose File or Drop Here
+            </MudButton>
+        </ActivatorContent>
+    </MudFileUpload>
+
+    @if (!string.IsNullOrEmpty(_hint))
+    {
+        <MudText Typo="Typo.caption" Class="file-upload-hint">@_hint</MudText>
+    }
+
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <MudAlert Severity="Severity.Error" Class="file-upload-error">@_errorMessage</MudAlert>
+    }
+
+    @if (_selectedFile is not null && string.IsNullOrEmpty(_errorMessage))
+    {
+        <MudChip T="string" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle" Class="file-upload-chip">
+            @_selectedFile.Name (@FormatSize(_selectedFile.Size))
+        </MudChip>
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback<IBrowserFile> OnFileSelected { get; set; }
+    [Parameter] public string[] AcceptedTypes { get; set; } = ["text/html", "image/png", "image/jpeg", "image/webp"];
+    [Parameter] public long MaxFileSizeBytes { get; set; } = 10 * 1024 * 1024;
+
+    private IBrowserFile? _selectedFile;
+    private string _errorMessage = "";
+    private string _hint => $"Accepted: HTML, PNG, JPG, WEBP — Max {MaxFileSizeBytes / 1024 / 1024}MB";
+
+    private async Task HandleFileChanged(InputFileChangeEventArgs e)
+    {
+        _errorMessage = "";
+        _selectedFile = null;
+        var file = e.File;
+
+        if (file.Size > MaxFileSizeBytes)
+        {
+            _errorMessage = $"File too large. Maximum allowed size is {MaxFileSizeBytes / 1024 / 1024}MB.";
+            return;
+        }
+
+        if (!AcceptedTypes.Contains(file.ContentType))
+        {
+            _errorMessage = $"File type '{file.ContentType}' is not accepted. Allowed: HTML, PNG, JPG, WEBP.";
+            return;
+        }
+
+        _selectedFile = file;
+        await OnFileSelected.InvokeAsync(file);
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024} KB";
+        return $"{bytes / 1024 / 1024} MB";
+    }
+}

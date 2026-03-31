@@ -1,3 +1,4 @@
+using Amazon.S3;
 using Microsoft.Identity.Web;
 using Microsoft.Identity.Web.UI;
 using Microsoft.AspNetCore.Authorization;
@@ -66,6 +67,7 @@ builder.Services.AddDbContext<NexusDbContext>(options =>
 // Application services
 builder.Services.AddScoped<ISubmissionService, SubmissionService>();
 builder.Services.AddScoped<ISpecGenerationService, SpecGenerationService>();
+builder.Services.AddScoped<IAmazonS3>(_ => new AmazonS3Client());
 builder.Services.AddScoped<IFileStorageService, FileStorageService>();
 builder.Services.AddScoped<IMockupProcessingService, MockupProcessingService>();
 builder.Services.AddScoped<IArtifactGenerationService, ArtifactGenerationService>();

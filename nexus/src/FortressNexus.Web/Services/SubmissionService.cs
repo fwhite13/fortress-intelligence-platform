@@ -2,6 +2,7 @@ using FortressNexus.Web.Data;
 using FortressNexus.Web.Models.DTOs;
 using FortressNexus.Web.Models.Entities;
 using FortressNexus.Web.Models.Enums;
+using Microsoft.EntityFrameworkCore;
 
 namespace FortressNexus.Web.Services;
 
@@ -16,21 +17,69 @@ public class SubmissionService : ISubmissionService
         _logger = logger;
     }
 
-    public Task<Submission> CreateAsync(SubmissionCreateDto dto, string userUpn) =>
-        throw new NotImplementedException("WI-2");
+    public async Task<Submission> CreateAsync(SubmissionCreateDto dto, string userUpn)
+    {
+        var submission = new Submission
+        {
+            Title = dto.Title,
+            FeatureArea = dto.FeatureArea,
+            NarrativeText = dto.NarrativeText,
+            MockupFileId = dto.MockupFileId,
+            SubmittedBy = userUpn,
+            SubmittedAt = DateTime.UtcNow,
+            Status = SubmissionStatus.Draft
+        };
+        _db.Submissions.Add(submission);
+        await _db.SaveChangesAsync();
+        _logger.LogInformation("NEXUS: Created submission {Id} for {Upn}", submission.Id, userUpn);
+        return submission;
+    }
 
-    public Task<Submission?> GetByIdAsync(int id) =>
-        throw new NotImplementedException("WI-2");
+    public async Task<Submission?> GetByIdAsync(int id)
+    {
+        return await _db.Submissions
+            .Include(s => s.MockupFile)
+            .Include(s => s.SpecDocuments)
+            .FirstOrDefaultAsync(s => s.Id == id);
+    }
 
-    public Task<List<Submission>> GetByUserAsync(string userUpn) =>
-        throw new NotImplementedException("WI-2");
+    public async Task<List<Submission>> GetByUserAsync(string userUpn)
+    {
+        return await _db.Submissions
+            .Where(s => s.SubmittedBy == userUpn)
+            .OrderByDescending(s => s.SubmittedAt)
+            .ToListAsync();
+    }
 
-    public Task<List<Submission>> GetAllPendingReviewAsync() =>
-        throw new NotImplementedException("WI-2");
+    public async Task<List<Submission>> GetAllPendingReviewAsync()
+    {
+        return await _db.Submissions
+            .Where(s => s.Status == SubmissionStatus.AwaitingReview)
+            .OrderBy(s => s.SubmittedAt)
+            .ToListAsync();
+    }
 
-    public Task UpdateStatusAsync(int id, SubmissionStatus status) =>
-        throw new NotImplementedException("WI-2");
+    public async Task UpdateStatusAsync(int id, SubmissionStatus status)
+    {
+        var submission = await _db.Submissions.FindAsync(id);
+        if (submission is null)
+        {
+            _logger.LogWarning("NEXUS: UpdateStatus — submission {Id} not found", id);
+            return;
+        }
+        submission.Status = status;
+        await _db.SaveChangesAsync();
+    }
 
-    public Task SetActiveSpecDocumentAsync(int submissionId, int specDocumentId) =>
-        throw new NotImplementedException("WI-2");
+    public async Task SetActiveSpecDocumentAsync(int submissionId, int specDocumentId)
+    {
+        var submission = await _db.Submissions.FindAsync(submissionId);
+        if (submission is null)
+        {
+            _logger.LogWarning("NEXUS: SetActiveSpec — submission {Id} not found", submissionId);
+            return;
+        }
+        submission.ActiveSpecDocumentId = specDocumentId;
+        await _db.SaveChangesAsync();
+    }
 }

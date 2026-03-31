@@ -1,0 +1,151 @@
+@page "/nexus/new"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject IFileStorageService FileStorageService
+@inject ISubmissionService SubmissionService
+@inject FortressNexus.Web.Data.NexusDbContext DbContext
+@inject NavigationManager Nav
+@inject UserContextService UserContextService
+@inject ISnackbar Snackbar
+
+<PageTitle>New Feature Submission — NEXUS</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="nexus-submit-container">
+    <MudText Typo="Typo.h4" Class="nexus-submit-title">New Feature Submission</MudText>
+    <MudText Typo="Typo.body2" Class="nexus-submit-subtitle">Submit a feature request with a mockup for AI spec generation.</MudText>
+
+    <MudDivider Class="nexus-submit-divider" />
+
+    <MudStack Spacing="4">
+        <MudTextField @bind-Value="_title"
+                      Label="Title"
+                      Required="true"
+                      RequiredError="Title is required"
+                      Placeholder="Brief descriptive title for this feature"
+                      Variant="Variant.Outlined"
+                      Class="nexus-field-title" />
+
+        <MudTextField @bind-Value="_featureArea"
+                      Label="Feature Area"
+                      Placeholder="e.g. FAIT, FIRM, FORMS (optional)"
+                      Variant="Variant.Outlined"
+                      Class="nexus-field-area" />
+
+        <MudTextField @bind-Value="_narrativeText"
+                      Label="Narrative"
+                      Required="true"
+                      RequiredError="Narrative is required"
+                      Placeholder="Describe what this feature should do and why it matters..."
+                      Variant="Variant.Outlined"
+                      Lines="5"
+                      Class="nexus-field-narrative" />
+
+        <div class="nexus-upload-section">
+            <MudText Typo="Typo.subtitle2" Class="nexus-upload-label">Mockup File</MudText>
+            <FileUploadZone OnFileSelected="HandleFileSelected" />
+        </div>
+
+        @if (_presignedUrl is not null)
+        {
+            <div class="nexus-preview-section">
+                <MudText Typo="Typo.subtitle2" Class="nexus-preview-label">Preview</MudText>
+                <MockupPreview PresignedUrl="@_presignedUrl"
+                               ContentType="@_uploadedFile?.ContentType"
+                               FileName="@_uploadedFile?.OriginalFileName" />
+            </div>
+        }
+
+        @if (_isUploading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="nexus-upload-progress" />
+            <MudText Typo="Typo.caption" Class="nexus-upload-status">Uploading mockup...</MudText>
+        }
+
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   OnClick="HandleSubmit"
+                   Disabled="@(!CanSubmit)"
+                   Class="nexus-submit-btn">
+            Submit for AI Spec Generation
+        </MudButton>
+    </MudStack>
+</MudContainer>
+
+@code {
+    private string _title = "";
+    private string? _featureArea;
+    private string _narrativeText = "";
+    private UploadedFile? _uploadedFile;
+    private string? _presignedUrl;
+    private bool _isUploading;
+    private bool _isSubmitting;
+
+    private bool CanSubmit =>
+        !string.IsNullOrWhiteSpace(_title) &&
+        !string.IsNullOrWhiteSpace(_narrativeText) &&
+        _uploadedFile is not null &&
+        !_isUploading &&
+        !_isSubmitting;
+
+    private async Task HandleFileSelected(IBrowserFile file)
+    {
+        _isUploading = true;
+        _presignedUrl = null;
+        _uploadedFile = null;
+        StateHasChanged();
+
+        try
+        {
+            var upn = await UserContextService.GetUpnAsync();
+            _uploadedFile = await FileStorageService.UploadAsync(file, upn);
+            _presignedUrl = await FileStorageService.GetPresignedUrlAsync(_uploadedFile.S3Key);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Upload failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (!CanSubmit || _uploadedFile is null) return;
+
+        _isSubmitting = true;
+        StateHasChanged();
+
+        try
+        {
+            var upn = await UserContextService.GetUpnAsync();
+
+            // Step 1: Save the uploaded file to DB
+            DbContext.UploadedFiles.Add(_uploadedFile);
+            await DbContext.SaveChangesAsync();
+
+            // Step 2: Create the submission
+            var dto = new SubmissionCreateDto
+            {
+                Title = _title,
+                FeatureArea = _featureArea,
+                NarrativeText = _narrativeText,
+                MockupFileId = _uploadedFile.Id
+            };
+
+            var submission = await SubmissionService.CreateAsync(dto, upn);
+
+            // Step 3: Navigate to the submission detail page
+            Nav.NavigateTo($"/nexus/{submission.Id}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Submission failed: {ex.Message}", Severity.Error);
+            _isSubmitting = false;
+            StateHasChanged();
+        }
+    }
+}

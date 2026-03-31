@@ -1,0 +1,26 @@
+@using MudBlazor
+
+@if (PresignedUrl is not null)
+{
+    <div class="mockup-preview">
+        @if (ContentType == "text/html")
+        {
+            <iframe src="@PresignedUrl"
+                    sandbox=""
+                    title="@FileName"
+                    class="mockup-preview-iframe"></iframe>
+        }
+        else if (ContentType is not null && ContentType.StartsWith("image/"))
+        {
+            <img src="@PresignedUrl"
+                 alt="@FileName"
+                 class="mockup-preview-img" />
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string? PresignedUrl { get; set; }
+    [Parameter] public string? ContentType { get; set; }
+    [Parameter] public string? FileName { get; set; }
+}
