@@ -12,4 +12,5 @@ public interface ISubmissionService
     Task<List<Submission>> GetAllPendingReviewAsync();
     Task UpdateStatusAsync(int id, SubmissionStatus status);
     Task SetActiveSpecDocumentAsync(int submissionId, int specDocumentId);
+    Task<UploadedFile> SaveUploadedFileAsync(UploadedFile file);
 }

@@ -55,7 +55,7 @@ var csb = new MySqlConnectionStringBuilder
     Password = dbPassword,
     GuidFormat = MySqlGuidFormat.None,   // MANDATORY — prevents CHAR(36) auto-cast
     AllowPublicKeyRetrieval = true,
-    SslMode = MySqlSslMode.None,
+    SslMode = builder.Environment.IsDevelopment() ? MySqlSslMode.None : MySqlSslMode.Required,
     ConnectionTimeout = 10
 };
 
@@ -67,7 +67,7 @@ builder.Services.AddDbContext<NexusDbContext>(options =>
 // Application services
 builder.Services.AddScoped<ISubmissionService, SubmissionService>();
 builder.Services.AddScoped<ISpecGenerationService, SpecGenerationService>();
-builder.Services.AddScoped<IAmazonS3>(_ => new AmazonS3Client());
+builder.Services.AddSingleton<IAmazonS3>(_ => new AmazonS3Client());
 builder.Services.AddScoped<IFileStorageService, FileStorageService>();
 builder.Services.AddScoped<IMockupProcessingService, MockupProcessingService>();
 builder.Services.AddScoped<IArtifactGenerationService, ArtifactGenerationService>();

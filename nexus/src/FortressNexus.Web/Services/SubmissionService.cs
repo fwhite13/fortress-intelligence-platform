@@ -82,4 +82,12 @@ public class SubmissionService : ISubmissionService
         submission.ActiveSpecDocumentId = specDocumentId;
         await _db.SaveChangesAsync();
     }
+
+    public async Task<UploadedFile> SaveUploadedFileAsync(UploadedFile file)
+    {
+        // TODO: Wrap UploadedFile + Submission saves in a transaction to prevent orphans on partial failure (WI-2 deferred — no retry logic yet)
+        _db.UploadedFiles.Add(file);
+        await _db.SaveChangesAsync();
+        return file;
+    }
 }

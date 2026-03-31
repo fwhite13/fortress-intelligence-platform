@@ -4,7 +4,6 @@
 
 @inject IFileStorageService FileStorageService
 @inject ISubmissionService SubmissionService
-@inject FortressNexus.Web.Data.NexusDbContext DbContext
 @inject NavigationManager Nav
 @inject UserContextService UserContextService
 @inject ISnackbar Snackbar
@@ -124,8 +123,7 @@
             var upn = await UserContextService.GetUpnAsync();
 
             // Step 1: Save the uploaded file to DB
-            DbContext.UploadedFiles.Add(_uploadedFile);
-            await DbContext.SaveChangesAsync();
+            await SubmissionService.SaveUploadedFileAsync(_uploadedFile);
 
             // Step 2: Create the submission
             var dto = new SubmissionCreateDto

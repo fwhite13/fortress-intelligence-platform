@@ -31,7 +31,10 @@ public class FileStorageService : IFileStorageService
         if (!AllowedTypes.Contains(file.ContentType))
             throw new InvalidOperationException($"File type '{file.ContentType}' is not allowed. Accepted: text/html, image/png, image/jpeg, image/webp.");
 
-        var s3Key = $"nexus/{uploaderUpn}/{Guid.NewGuid()}/{file.Name}";
+        var safeFileName = Path.GetFileName(file.Name);
+        if (string.IsNullOrWhiteSpace(safeFileName))
+            throw new InvalidOperationException("Invalid filename.");
+        var s3Key = $"nexus/{uploaderUpn}/{Guid.NewGuid()}/{safeFileName}";
         string? processedText = null;
 
         using var stream = file.OpenReadStream(MaxFileSizeBytes);
@@ -77,7 +80,7 @@ public class FileStorageService : IFileStorageService
 
         return new UploadedFile
         {
-            OriginalFileName = file.Name,
+            OriginalFileName = safeFileName,
             ContentType = file.ContentType,
             FileSizeBytes = file.Size,
             S3Key = s3Key,
