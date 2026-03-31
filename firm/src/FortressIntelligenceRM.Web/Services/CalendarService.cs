@@ -78,11 +78,11 @@ public class CalendarService
 
                 var joinUrl = ev.OnlineMeeting?.JoinUrl ?? "";
                 var tenantId = ExtractTenantId(joinUrl);
-                var organizerEmail = ev.Organizer?.EmailAddress?.Address?.ToLower() ?? "";
-                var currentUserEmail = userEmail.ToLower();
+                var organizerEmail = ev.Organizer?.EmailAddress?.Address?.Trim().ToLower() ?? "";
+                var currentUserEmail = userEmail.Trim().ToLower();
 
                 var isFortressTenant = !string.IsNullOrEmpty(tenantId) && tenantId.StartsWith(FortressTenantPrefix, StringComparison.OrdinalIgnoreCase);
-                var isOrganizer = !string.IsNullOrEmpty(organizerEmail) && organizerEmail == currentUserEmail;
+                var isOrganizer = !string.IsNullOrEmpty(organizerEmail) && !string.IsNullOrEmpty(currentUserEmail) && organizerEmail == currentUserEmail;
 
                 var mode = (isFortressTenant && isOrganizer) ? "A" : "B";
 
