@@ -88,10 +88,16 @@ public class MeetingService
         await db.SaveChangesAsync();
     }
 
+    // ADO#1450-NOTE: MeetingUrl has no unique index — re-joining the same Teams URL
+    // creates a new firm_meetings row each time. This is by design today but may need
+    // a uniqueness strategy (per-user? time-window?) if duplicate meetings become an issue.
     public async Task<FirmUser?> GetOrCreateUserAsync(string entraOid, string email, string displayName)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
+
+        // ADO#1450: SELECT first by entra_oid OR email to prevent duplicate insert
+        // hitting unique index idx_firm_users_email.
+        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid || u.Email == email);
         if (user == null)
         {
             user = new FirmUser
@@ -106,11 +112,30 @@ public class MeetingService
                 LastLoginAt = DateTime.UtcNow
             };
             db.Users.Add(user);
-            await db.SaveChangesAsync();
-            _logger.LogInformation("FIRM: Provisioned new user {Email}", email);
+            try
+            {
+                await db.SaveChangesAsync();
+                _logger.LogInformation("FIRM: Provisioned new user {Email}", email);
+            }
+            catch (DbUpdateException)
+            {
+                // Race condition: another request inserted the same user between our
+                // SELECT and INSERT. Discard the failed context and re-query.
+                _logger.LogWarning("FIRM: Duplicate key race on user {Email} — re-querying", email);
+                await using var db2 = await _dbFactory.CreateDbContextAsync();
+                user = await db2.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid || u.Email == email);
+                if (user == null)
+                {
+                    _logger.LogError("FIRM: Re-query after duplicate key returned null for {Email}", email);
+                    return null;
+                }
+                return user;
+            }
         }
         else
         {
+            // Existing user — update fields that may have changed
+            user.EntraOid = entraOid;
             user.LastLoginAt = DateTime.UtcNow;
             user.DisplayName = displayName;
             user.Email = email;

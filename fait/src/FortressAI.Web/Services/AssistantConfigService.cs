@@ -72,12 +72,17 @@ public class AssistantConfigService
 
     public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null)
     {
+        var todayStr = DateTimeOffset.Now.ToString("dddd, MMMM d, yyyy");
+        var datePrefix = $"Today's date is {todayStr}.\n\n";
+
         var prefix = config.PersonalityPreset switch
         {
             "formal" => $"You are a formal, professional assistant named {config.AssistantName}. Maintain a polished, respectful tone. Be thorough and precise.",
             "concise" => $"You are a concise, efficient assistant named {config.AssistantName}. Keep responses brief and actionable. No filler.",
             _ => $"You are a friendly, helpful assistant named {config.AssistantName}. Be warm and approachable while remaining professional."
         };
+
+        prefix = datePrefix + prefix;
 
         if (!string.IsNullOrWhiteSpace(userDisplayName))
             prefix += $" The user's name is {userDisplayName}. Address them by name occasionally to personalize responses.";

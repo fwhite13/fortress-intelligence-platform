@@ -180,6 +180,9 @@ public class HavenChatController : ControllerBase
 
         // ── Build System Prompt ───────────────────────────────────────────────────────
         var systemPromptBuilder = new StringBuilder();
+        var todayStr = DateTimeOffset.Now.ToString("dddd, MMMM d, yyyy");
+        systemPromptBuilder.AppendLine($"Today's date is {todayStr}.");
+        systemPromptBuilder.AppendLine();
         systemPromptBuilder.AppendLine("You are Haven, a helpful assistant. Answer the user's question concisely and accurately based on the provided context.");
         systemPromptBuilder.AppendLine("If the answer is not in the context, say so clearly rather than guessing.");
         systemPromptBuilder.AppendLine();
