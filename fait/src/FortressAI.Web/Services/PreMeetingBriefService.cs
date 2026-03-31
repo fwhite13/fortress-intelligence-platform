@@ -107,7 +107,8 @@ public class PreMeetingBriefService
             var region = Amazon.RegionEndpoint.GetBySystemName(regionStr);
             using var client = new AmazonBedrockRuntimeClient(region);
 
-            var prompt = $"You are {assistantName}. In 2-3 sentences, give me key context for this upcoming meeting: " +
+            var todayStr = DateTimeOffset.Now.ToString("dddd, MMMM d, yyyy");
+            var prompt = $"Today is {todayStr}. You are {assistantName}. In 2-3 sentences, give me key context for this upcoming meeting: " +
                          $"{meeting.Subject}, attendees: {string.Join(", ", attendeeNames)}, agenda: {agenda}.";
 
             var requestBody = JsonSerializer.Serialize(new
