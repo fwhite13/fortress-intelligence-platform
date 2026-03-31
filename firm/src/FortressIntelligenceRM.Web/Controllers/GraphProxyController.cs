@@ -160,10 +160,20 @@ public class GraphProxyController : ControllerBase
             _logger.LogInformation("[CalendarProxy] FAIT returned {Count} calendar events for OID {Oid}", events?.Count ?? 0, oid);
 
             // Get logged-in user's email for organizer comparison
+            // preferred_username in Cognito is often just the username (e.g. "fwhite"), not a full email.
+            // Only use it if it looks like an email address.
             var userEmail = User.FindFirstValue(ClaimTypes.Email)
                 ?? User.FindFirstValue("email")
-                ?? User.FindFirstValue("preferred_username")
                 ?? "";
+
+            if (string.IsNullOrEmpty(userEmail))
+            {
+                var preferredUsername = User.FindFirstValue("preferred_username") ?? "";
+                if (preferredUsername.Contains('@'))
+                    userEmail = preferredUsername;
+            }
+
+            _logger.LogDebug("FIRM Mode check: resolvedUserEmail={UserEmail}", userEmail);
 
             var enriched = events.Select(e =>
             {
@@ -172,6 +182,8 @@ public class GraphProxyController : ControllerBase
                     && !string.IsNullOrEmpty(e.OrganizerEmail)
                     && !string.IsNullOrEmpty(userEmail)
                     && string.Equals(e.OrganizerEmail, userEmail, StringComparison.OrdinalIgnoreCase);
+                _logger.LogDebug("FIRM Mode check: userEmail={UserEmail} organizerEmail={OrganizerEmail} isOrganizer={IsOrganizer}",
+                    userEmail, e.OrganizerEmail, isOrganizer);
                 var modeHint = isOrganizer ? "A" : "B";
                 var modeText = isOrganizer
                     ? "You're the host — FIRM captures natively, no bot joins."

@@ -118,15 +118,39 @@ public class GraphCalendarService
             if (evt.TryGetProperty("start", out var startProp))
             {
                 var dtStr = startProp.TryGetProperty("dateTime", out var dt) ? dt.GetString() : null;
-                if (dtStr != null && DateTime.TryParse(dtStr, out var parsed))
-                    startTime = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+                var tzStr = startProp.TryGetProperty("timeZone", out var tz) ? tz.GetString() : "UTC";
+                if (dtStr != null && DateTime.TryParse(dtStr, null, System.Globalization.DateTimeStyles.AssumeLocal, out var parsed))
+                {
+                    try
+                    {
+                        var tzi = TimeZoneInfo.FindSystemTimeZoneById(tzStr ?? "UTC");
+                        startTime = TimeZoneInfo.ConvertTimeToUtc(parsed, tzi);
+                    }
+                    catch
+                    {
+                        // Unknown timezone ID — treat as UTC
+                        startTime = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+                    }
+                }
             }
 
             if (evt.TryGetProperty("end", out var endProp))
             {
                 var dtStr = endProp.TryGetProperty("dateTime", out var dt) ? dt.GetString() : null;
-                if (dtStr != null && DateTime.TryParse(dtStr, out var parsed))
-                    endTime = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+                var tzStr = endProp.TryGetProperty("timeZone", out var tz) ? tz.GetString() : "UTC";
+                if (dtStr != null && DateTime.TryParse(dtStr, null, System.Globalization.DateTimeStyles.AssumeLocal, out var parsed))
+                {
+                    try
+                    {
+                        var tzi = TimeZoneInfo.FindSystemTimeZoneById(tzStr ?? "UTC");
+                        endTime = TimeZoneInfo.ConvertTimeToUtc(parsed, tzi);
+                    }
+                    catch
+                    {
+                        // Unknown timezone ID — treat as UTC
+                        endTime = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+                    }
+                }
             }
 
             // Parse location
