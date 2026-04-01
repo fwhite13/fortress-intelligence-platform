@@ -256,7 +256,7 @@
         finally
         {
             _loading = false;
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -367,7 +367,7 @@
     {
         if (string.IsNullOrWhiteSpace(meetingUrl)) return;
         _joining = true;
-        StateHasChanged();
+        await InvokeAsync(StateHasChanged);
         try
         {
             await JoinMeetingDirectAsync(meetingUrl, meetingTitle);
@@ -403,7 +403,7 @@
     {
         if (string.IsNullOrWhiteSpace(meetingUrl)) return;
         _joining = true;
-        StateHasChanged();
+        await InvokeAsync(StateHasChanged);
         try
         {
             await JoinMeetingDirectAsync(meetingUrl, meetingTitle, scheduledDatetime, mode: mode);
@@ -489,8 +489,45 @@
         }
         else
         {
-            _ = VpBotService.TriggerBotAsync(meeting.Id, meetingUrl);
-            Snackbar.Add("Bot is joining!", Severity.Success);
+            try
+            {
+                var taskArn = await VpBotService.TriggerBotAsync(meeting.Id, meetingUrl);
+                if (taskArn == null)
+                {
+                    // TriggerBotAsync returned null — ECS launch failed (it logged internally)
+                    await MeetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
+                    await InvokeAsync(() =>
+                    {
+                        Snackbar.Add("Bot failed to launch — meeting reset to Scheduled. Please try again.", Severity.Error);
+                        StateHasChanged();
+                    });
+                }
+                else
+                {
+                    await InvokeAsync(() =>
+                    {
+                        Snackbar.Add("Bot is joining!", Severity.Success);
+                        StateHasChanged();
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "FIRM: TriggerBotAsync threw for meeting {Id}", meeting.Id);
+                try
+                {
+                    await MeetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
+                }
+                catch (Exception dbEx)
+                {
+                    Logger.LogError(dbEx, "FIRM: Failed to reset meeting {Id} status to Scheduled after bot launch failure", meeting.Id);
+                }
+                await InvokeAsync(() =>
+                {
+                    Snackbar.Add("Bot failed to launch — meeting reset to Scheduled. Please try again.", Severity.Error);
+                    StateHasChanged();
+                });
+            }
         }
 
         await LoadMeetings();
