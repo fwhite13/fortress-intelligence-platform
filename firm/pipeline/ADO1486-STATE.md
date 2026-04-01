@@ -1,9 +1,9 @@
 # Pipeline State: ADO#1486
 
-## Current Stage: BUILDING
+## Current Stage: VERIFYING
 ## Risk Level: medium
 ## Pipeline Path: full
-## Review Cycles: 0
+## Review Cycles: 1
 
 ### Root Cause (pre-diagnosed)
 - Leave button disappearance not checked — most reliable Teams end signal, not in either polling loop
@@ -14,4 +14,7 @@
 | Stage | Status | Agent | Started | Completed | Notes |
 |-------|--------|-------|---------|-----------|-------|
 | PLAN | ✅ DONE | Maria | 08:45 | 08:50 | Root cause identified via code inspection |
-| BUILD | 🔄 ACTIVE | Tony | 08:50 | — | |
+| BUILD | ✅ DONE | Tony | 08:50 | 08:54 | CC sonnet, 0 TS errors. Commit 44a4990 |
+| REVIEW | ✅ PASS | Clint | 08:54 | 08:59 | PASS 24/24. Two non-blocking nitpicks |
+| DEPLOY | ✅ DONE | Rhodey | 08:59 | 09:08 | firm-vpbot:latest updated. Local Docker build (CodeBuild access-denied). |
+| VERIFY | 🔄 PENDING | Natasha | — | — | Awaiting 1485b build completion to bundle |

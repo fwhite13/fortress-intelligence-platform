@@ -90,6 +90,8 @@ public class MeetingsApiController : ControllerBase
     [HttpPost("/api/vp/callback")]
     public async Task<IActionResult> VpCallback([FromBody] VpCallbackPayload payload)
     {
+        _logger.LogInformation("FIRM: VpCallback received — meetingId={MeetingId} status={Status}", payload?.MeetingId, payload?.Status);
+
         // Validate shared secret — fail-closed: missing config blocks all requests
         var expectedSecret = _config["Firm:BotCallbackSecret"];
         var providedSecret = Request.Headers["X-Bot-Secret"].FirstOrDefault();
@@ -158,6 +160,7 @@ public class MeetingsApiController : ControllerBase
                 // Do not rethrow — return Ok() to bot so it doesn't retry callback
             }
         }
+        _logger.LogInformation("FIRM: VpCallback processed — meetingId={MeetingId} status={Status} → {MeetingStatus}", payload.MeetingId, payload.Status, meetingStatus);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
