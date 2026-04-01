@@ -144,6 +144,14 @@
                             <MudTooltip Text="Already in progress">
                                 <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined" Disabled="true">Join Now</MudButton>
                             </MudTooltip>
+                            @if (context.Status == MeetingStatus.Recording)
+                            {
+                                <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
+                                           OnClick="@(() => StopRecording(context.Id))"
+                                           Disabled="@_stoppingMeetingIds.Contains(context.Id)">
+                                    @(_stoppingMeetingIds.Contains(context.Id) ? "Stopping..." : "Stop Recording")
+                                </MudButton>
+                            }
                         }
                     </MudStack>
                 </MudTd>
@@ -173,6 +181,7 @@
     private List<UpcomingMeetingCard>? _upcomingMeetings;
     private bool _calendarLoading = true;
     private HashSet<long> _calendarRemovedMeetingIds = new();
+    private HashSet<long> _stoppingMeetingIds = new();
 
 
     protected override async Task OnInitializedAsync()
@@ -574,6 +583,36 @@
         catch (Exception ex)
         {
             Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task StopRecording(long meetingId)
+    {
+        _stoppingMeetingIds.Add(meetingId);
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            var http = HttpClientFactory.CreateClient("local");
+            var response = await http.PostAsync($"/api/vp/stop/{meetingId}", null);
+            var body = await response.Content.ReadAsStringAsync();
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Stop signal sent. Recording will finish processing shortly.", Severity.Info);
+            }
+            else
+            {
+                Snackbar.Add($"Could not send stop signal: {body}", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM: StopRecording failed for meeting {Id}", meetingId);
+            Snackbar.Add("Error sending stop signal. Please try again.", Severity.Error);
+        }
+        finally
+        {
+            _stoppingMeetingIds.Remove(meetingId);
+            await InvokeAsync(StateHasChanged);
         }
     }
 

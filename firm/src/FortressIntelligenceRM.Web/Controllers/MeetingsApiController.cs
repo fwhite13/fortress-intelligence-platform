@@ -638,6 +638,31 @@ public class MeetingsApiController : ControllerBase
         return Ok(new { meetingId = id, status = "pending" });
     }
 
+    [HttpPost("/api/vp/stop/{meetingId}")]
+    [Authorize]
+    public async Task<IActionResult> StopRecording(long meetingId)
+    {
+        var (meeting, error) = await ResolveOwnedMeeting(meetingId);
+        if (error != null) return error;
+
+        if (meeting!.Status != MeetingStatus.Recording)
+            return BadRequest(new { error = "Meeting is not currently recording" });
+
+        if (string.IsNullOrEmpty(meeting.BotTaskArn))
+            return Ok(new { status = "no_bot", message = "No active bot task found — recording may have already ended" });
+
+        try
+        {
+            await _vpBotService.StopBotAsync(meeting.BotTaskArn);
+            return Ok(new { status = "stop_signal_sent", message = "Stop signal sent to bot. Recording will complete shortly." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: StopBotAsync failed for meeting {Id} — treating as bot_unreachable", meetingId);
+            return Ok(new { status = "bot_unreachable", message = "Bot did not respond. If recording already ended, it will process normally." });
+        }
+    }
+
     [HttpDelete("{id}")]
     [Authorize]
     public async Task<IActionResult> RemoveMeeting(long id)

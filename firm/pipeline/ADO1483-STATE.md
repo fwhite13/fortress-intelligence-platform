@@ -1,6 +1,6 @@
 # Pipeline State: ADO#1483
 
-## Current Stage: IN-REVIEW
+## Current Stage: DEPLOYED ✅
 ## Risk Level: medium
 ## Pipeline Path: full
 ## Review Cycles: 1
@@ -13,4 +13,7 @@
 | REVIEW | ↩️ NEEDS-CHANGES | Clint | 23:20 | 23:25 | I1+I2: unprotected retry in VpCallback. N2: stale comment |
 | BUILD (cycle 2) | ✅ DONE | Tony | 23:25 | 23:27 | I1+I2+I3+N2 fixed. Commits 1724def, cfb1b30. 0 errors |
 | REVIEW (cycle 2) | ✅ PASS | Clint | 23:27 | 23:30 | PASS. One cosmetic nit (N3) — console.log "60s" → "30s" |
-| BUILD (nit fix) | 🔄 ACTIVE | Tony | 23:30 | — | |
+| BUILD (nit fix) | ✅ DONE | Tony | 23:30 | 23:31 | Commit 9874a85 — stale log fix |
+| DEPLOY | ✅ DONE | Rhodey | 23:31 | 23:48 | firm-web:72, image sha256:e6ca47a. FipShared 200, TG=1 |
+| VERIFY | ✅ PASS | Natasha | 23:48 | 23:53 | PASS 5/5. All sprint changes confirmed in firm-web:72 |
+| CONFIRM | ✅ DONE | Maria | 23:53 | 23:53 | Pipeline complete |

@@ -88,4 +88,31 @@ public class VpBotService
             return null;
         }
     }
+
+    public async System.Threading.Tasks.Task StopBotAsync(string taskArn)
+    {
+        var cluster = _config["Firm:EcsCluster"];
+        if (string.IsNullOrEmpty(cluster) || string.IsNullOrEmpty(taskArn))
+        {
+            _logger.LogWarning("FIRM: StopBotAsync called with empty cluster or taskArn");
+            return;
+        }
+
+        try
+        {
+            var request = new StopTaskRequest
+            {
+                Cluster = cluster,
+                Task = taskArn,
+                Reason = "User requested stop recording"
+            };
+            await _ecs.StopTaskAsync(request);
+            _logger.LogInformation("FIRM: ECS StopTask sent for task {TaskArn}", taskArn);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Failed to stop ECS task {TaskArn}", taskArn);
+            throw; // Re-throw so controller can handle as bot_unreachable
+        }
+    }
 }
