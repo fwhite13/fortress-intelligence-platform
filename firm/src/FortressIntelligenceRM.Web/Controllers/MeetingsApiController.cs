@@ -137,17 +137,25 @@ public class MeetingsApiController : ControllerBase
         }
         catch (Exception updateEx)
         {
-            _logger.LogWarning(updateEx, "FIRM: UpdateStatusAsync failed for meeting {Id} — retrying once", payload.MeetingId);
+            _logger.LogWarning(updateEx, "FIRM: UpdateStatusAsync failed for meeting {Id}, retrying in 500ms", payload.MeetingId);
             await Task.Delay(500);
-            if (meetingStatus == MeetingStatus.Failed &&
-                string.Equals(payload.Reason, "lobby_timeout", StringComparison.OrdinalIgnoreCase))
+            try
             {
-                await _meetingService.UpdateStatusAsync(payload.MeetingId, MeetingStatus.Scheduled,
-                    "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot.");
+                if (meetingStatus == MeetingStatus.Failed &&
+                    string.Equals(payload.Reason, "lobby_timeout", StringComparison.OrdinalIgnoreCase))
+                {
+                    await _meetingService.UpdateStatusAsync(payload.MeetingId, MeetingStatus.Scheduled,
+                        "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot.");
+                }
+                else
+                {
+                    await _meetingService.UpdateStatusAsync(payload.MeetingId, meetingStatus, payload.Error);
+                }
             }
-            else
+            catch (Exception retryEx)
             {
-                await _meetingService.UpdateStatusAsync(payload.MeetingId, meetingStatus, payload.Error);
+                _logger.LogError(retryEx, "FIRM: UpdateStatusAsync retry also failed for meeting {Id} — continuing", payload.MeetingId);
+                // Do not rethrow — return Ok() to bot so it doesn't retry callback
             }
         }
 
@@ -187,7 +195,17 @@ public class MeetingsApiController : ControllerBase
             {
                 _logger.LogWarning(participantSaveEx, "FIRM: Participant save failed for meeting {Id} — retrying once", payload.MeetingId);
                 await Task.Delay(500);
-                await db.SaveChangesAsync();
+                try
+                {
+                    // Retry on same DbContext — reliable for transient connection errors only.
+                    // Constraint violations or concurrency conflicts will re-throw on retry.
+                    await db.SaveChangesAsync();
+                }
+                catch (Exception retryEx)
+                {
+                    _logger.LogError(retryEx, "FIRM: Participant save retry also failed for meeting {Id} — continuing", payload.MeetingId);
+                    // Do not rethrow — return Ok() to bot so it doesn't retry callback
+                }
             }
         }
 

@@ -90,3 +90,18 @@ Both sessions ran **in parallel** (independent repos, no shared files).
 2. **URL navigation detection**: The Teams URL check uses simple string includes. Teams meeting URLs with `/meetup-join/` in them are excluded from the "navigated away" check. If Teams changes its URL structure, this may need updating.
 3. **`_startupPollCount` is never reset**: Once it exceeds 6, the startup window closes permanently for that page session. This is correct behavior — we only want the unconditioned polling on startup.
 4. **Refresh button placement**: Placed between "Join Now" and "Add a Meeting" buttons in the header row. Gold outlined style matches the "Add a Meeting" button pattern exactly.
+
+---
+
+## Cycle 2 Fixes
+
+- **I1**: Wrapped `UpdateStatusAsync` retry block in its own `try/catch` — logs `LogError` and swallows so bot doesn't retry callback on a double-fault
+- **I2**: Wrapped participant `SaveChangesAsync` retry in its own `try/catch` — same log-and-continue pattern
+- **I3**: Added comment to participant retry `SaveChangesAsync` explaining same-DbContext semantics (reliable for transient errors; constraint/concurrency violations re-throw)
+- **N2**: Fixed stale poll comment in `firm-vpbot/src/bot/meeting-bot.ts` line ~378: `"// 2 consecutive 30s polls = alone for ≥60s"` → `"// 2 consecutive 15s polls = alone for ≥30s"`
+- dotnet build: **SUCCEEDED** (0 errors, 11 warnings — all pre-existing)
+- CC invocations:
+  ```
+  cd /home/fredw/projects/fip/firm && cat /tmp/brief-1483-cycle2.md | claude --model sonnet --print --dangerously-skip-permissions
+  cd /home/fredw/projects/skunkworks/meeting-assistant/firm-vpbot && cat /tmp/brief-1483-comment.md | claude --model sonnet --print --dangerously-skip-permissions
+  ```
