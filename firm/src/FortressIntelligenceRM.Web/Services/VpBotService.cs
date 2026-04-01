@@ -95,7 +95,7 @@ public class VpBotService
         if (string.IsNullOrEmpty(cluster) || string.IsNullOrEmpty(taskArn))
         {
             _logger.LogWarning("FIRM: StopBotAsync called with empty cluster or taskArn");
-            return;
+            throw new InvalidOperationException("ECS cluster or taskArn not configured — cannot stop bot task");
         }
 
         try
