@@ -88,6 +88,7 @@ public class MeetingsApiController : ControllerBase
     }
 
     [HttpPost("/api/vp/callback")]
+    [AllowAnonymous]
     public async Task<IActionResult> VpCallback([FromBody] VpCallbackPayload payload)
     {
         _logger.LogInformation("FIRM: VpCallback received — meetingId={MeetingId} status={Status}", payload?.MeetingId, payload?.Status);

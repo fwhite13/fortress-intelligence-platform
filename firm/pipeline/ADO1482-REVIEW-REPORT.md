@@ -131,3 +131,33 @@ That's it. Everything else is correct and clean. Resubmit for cycle 2.
 ---
 
 _Reviewed by Hawkeye — Cycle 1 of 2_
+
+---
+
+## Cycle 2 Re-Review
+
+### Verdict: PASS
+
+### CC Invocation
+```bash
+cd /home/fredw/projects/skunkworks/meeting-assistant/firm-vpbot && cat /tmp/review-brief-1482-cycle2.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+
+### I1 (hasEOA fix) Verified: yes
+
+`throw new LobbyTimeoutError()` confirmed present at ~line 512, immediately after `screenshot(page, '05-eoa-error')`. No early return. Fix is correct.
+
+### LobbyTimeoutError Consistency: confirmed
+
+All three lobby-timeout paths throw the same class:
+- `!admitted` block (line 486) → `throw new LobbyTimeoutError()`
+- `hasEOA` block (line 512) → `throw new LobbyTimeoutError()` *(cycle 2 fix)*
+- uncertain-state `else` (line 519) → `throw new LobbyTimeoutError()`
+
+### New Issues: none
+
+Only change: `throw new LobbyTimeoutError()` added in `hasEOA` block + cosmetic log message update. No other modifications.
+
+---
+
+_Reviewed by Hawkeye — Cycle 2 of 2 — PASS_
