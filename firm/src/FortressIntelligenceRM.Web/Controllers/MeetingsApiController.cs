@@ -118,7 +118,20 @@ public class MeetingsApiController : ControllerBase
             return Ok();
         }
 
-        await _meetingService.UpdateStatusAsync(payload.MeetingId, meetingStatus, payload.Error);
+        // Special case: lobby_timeout is a retriable condition — revert to Scheduled
+        // so Fred sees a clear "not admitted" state and can retry, rather than Failed
+        if (meetingStatus == MeetingStatus.Failed &&
+            string.Equals(payload.Reason, "lobby_timeout", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("FIRM: Meeting {Id} bot stuck in lobby — reverting to Scheduled (lobby_timeout)",
+                payload.MeetingId);
+            await _meetingService.UpdateStatusAsync(payload.MeetingId, MeetingStatus.Scheduled,
+                "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot.");
+        }
+        else
+        {
+            await _meetingService.UpdateStatusAsync(payload.MeetingId, meetingStatus, payload.Error);
+        }
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -667,6 +680,7 @@ public class VpCallbackPayload
 {
     public long MeetingId { get; set; }
     public string Status { get; set; } = "";
+    public string? Reason { get; set; }
     public List<ParticipantPayload>? Participants { get; set; }
     public string? AudioS3Key { get; set; }
     public string? TranscriptS3Key { get; set; }
