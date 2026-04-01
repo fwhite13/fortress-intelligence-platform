@@ -26,6 +26,9 @@
         <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;" OnClick="OpenJoinDialog">
             Join Now
         </MudButton>
+        <MudButton Variant="Variant.Outlined" Style="border-color: #d4af37; color: #d4af37;" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadMeetings">
+            Refresh
+        </MudButton>
         <MudButton Variant="Variant.Outlined" Style="border-color: #d4af37; color: #d4af37;" OnClick="OpenAddMeetingDialog">
             Add a Meeting
         </MudButton>
@@ -166,6 +169,7 @@
     private string? _entraOid;
     private string? _userEmail;
     private System.Threading.Timer? _pollTimer;
+    private int _startupPollCount = 0;
     private List<UpcomingMeetingCard>? _upcomingMeetings;
     private bool _calendarLoading = true;
     private HashSet<long> _calendarRemovedMeetingIds = new();
@@ -336,10 +340,13 @@
     {
         _pollTimer = new System.Threading.Timer(async _ =>
         {
+            _startupPollCount++;
             var hasActive = _meetings.Any(m =>
                 m.Status is MeetingStatus.Joining or MeetingStatus.Recording
                     or MeetingStatus.Transcribing or MeetingStatus.Summarizing);
-            if (hasActive)
+            // Poll unconditionally for first 6 cycles (~60s startup window),
+            // then revert to conditional polling based on active meetings
+            if (_startupPollCount <= 6 || hasActive)
             {
                 await LoadMeetings();
                 await InvokeAsync(StateHasChanged);
