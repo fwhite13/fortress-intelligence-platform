@@ -164,3 +164,36 @@ Create a task or runbook note to set ECS `stopTimeout` to 900s on the bot task d
 ---
 
 *Review by Hawkeye (Clint Barton) — Cycle 1 of 2*
+
+---
+
+## Cycle 2 Re-Review
+
+### Verdict: PASS
+
+### CC Invocation
+```bash
+cd /home/fredw/projects/fip/firm && cat /tmp/review-brief-1484-cycle2.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+
+### I1 Verified: yes
+
+`VpBotService.cs` lines 95–99:
+```csharp
+if (string.IsNullOrEmpty(cluster) || string.IsNullOrEmpty(taskArn))
+{
+    _logger.LogWarning("FIRM: StopBotAsync called with empty cluster or taskArn");
+    throw new InvalidOperationException("ECS cluster or taskArn not configured — cannot stop bot task");
+}
+```
+Silent `return;` is gone. `InvalidOperationException` thrown with clear message. ✅
+
+Controller catch (`MeetingsApiController.cs` lines 659–663) uses broad `catch (Exception ex)` — catches `InvalidOperationException` and returns `bot_unreachable` as required. Propagation chain is correct. ✅
+
+No other changes to `VpBotService.cs` detected. ✅
+
+### New Issues: none
+
+### Final Verdict: PASS
+
+*Review by Hawkeye (Clint Barton) — Cycle 2 of 2*
