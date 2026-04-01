@@ -133,3 +133,44 @@ The core bug fixes are solid. meeting-bot.ts and Meetings.razor both pass. The i
 
 *Reviewed by: Hawkeye (Clint Barton) — Cycle 1 of 2*
 *Model: CC Sonnet via `claude --model sonnet --print --dangerously-skip-permissions`*
+
+---
+
+## Cycle 2 Re-Review
+
+### Verdict: PASS
+
+### CC Invocation
+```bash
+cd /home/fredw/projects/fip/firm && cat /tmp/review-brief-1483-cycle2.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+
+### Cycle 1 Issues Verified
+- **I1:** ✅ Verified — `UpdateStatusAsync` retry is wrapped in its own `try/catch`; catch logs at Error level and does not rethrow (`MeetingsApiController.cs:142–159`)
+- **I2:** ✅ Verified — Participant `SaveChangesAsync` retry is wrapped in its own `try/catch`; catch logs at Error level and does not rethrow (`MeetingsApiController.cs:198–208`)
+- **I3:** ✅ Verified — Comment added at `MeetingsApiController.cs:200–201`: *"Retry on same DbContext — reliable for transient connection errors only. Constraint violations or concurrency conflicts will re-throw on retry."*
+- **N2:** ✅ Verified — `meeting-bot.ts:378` now reads `// 2 consecutive 15s polls = alone for ≥30s`
+
+### X-Bot-Secret
+✅ Intact — Fail-closed validation (empty config blocks all requests) unchanged at `MeetingsApiController.cs:94–100`
+
+### New Issues Found
+**N3 (cosmetic — non-blocking):** `meeting-bot.ts:379` — `console.log` message still reads `"for 60s"` after the N2 comment fix above it was updated to reference 30s. The logic is correct; this is a stale log string only.
+
+```typescript
+// 2 consecutive 15s polls = alone for ≥30s          ← fixed ✓
+console.log('[Bot] Participant count dropped to 1 for 60s — leaving');  ← should say 30s
+```
+
+Recommend drive-by fix before merge, but does not block ship.
+
+**Pre-existing (not introduced by cycle 2):** `SaveChangesAsync` in the `Summarizing` and `Complete` branches (`MeetingsApiController.cs:228, 256`) have no retry protection — inconsistency with the participant block. Pre-existing, not in scope, not a regression.
+
+### Final Verdict: PASS
+
+All four cycle 1 issues correctly fixed. X-Bot-Secret intact. No logic regressions. One cosmetic stale log string (N3) recommended as drive-by fix before merge.
+
+---
+
+*Reviewed by: Hawkeye (Clint Barton) — Cycle 2 of 2*
+*Model: CC Sonnet via `claude --model sonnet --print --dangerously-skip-permissions`*
