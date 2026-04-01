@@ -234,7 +234,8 @@
         {
             var authState = await AuthStateProvider.GetAuthenticationStateAsync();
             var claimsUser = authState.User;
-            var entraOid = claimsUser.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+            var entraOid = claimsUser.FindFirst("oid")?.Value
+                ?? claimsUser.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
             if (string.IsNullOrEmpty(entraOid)) { Navigation.NavigateTo("/"); return; }
 
             var email = claimsUser.FindFirst(ClaimTypes.Email)?.Value

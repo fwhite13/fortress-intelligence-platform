@@ -54,7 +54,8 @@ public class MeetingsApiController : ControllerBase
             return BadRequest(new { error = "MeetingUrl is required" });
 
         // Get Entra OID from claims
-        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var entraOid = User.FindFirst("oid")?.Value
+            ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
         var email = User.FindFirst(ClaimTypes.Email)?.Value
             ?? User.FindFirst("preferred_username")?.Value ?? "";
         var displayName = User.FindFirst(ClaimTypes.Name)?.Value
@@ -525,7 +526,9 @@ public class MeetingsApiController : ControllerBase
         try
         {
             var client = _httpClientFactory.CreateClient();
-            var oid = User.FindFirstValue("http://schemas.microsoft.com/identity/claims/objectidentifier") ?? "";
+            var oid = User.FindFirstValue("oid")
+                ?? User.FindFirstValue("http://schemas.microsoft.com/identity/claims/objectidentifier")
+                ?? "";
             var req = new HttpRequestMessage(HttpMethod.Get, $"{faitUrl}/api/firm/user-teams?entraOid={oid}");
             req.Headers.Add("X-Firm-Secret", secret);
             var resp = await client.SendAsync(req);
@@ -543,7 +546,8 @@ public class MeetingsApiController : ControllerBase
     [Authorize]
     public async Task<IActionResult> JoinNow(long id)
     {
-        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var entraOid = User.FindFirst("oid")?.Value
+            ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
         if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
 
         var email = User.FindFirst(ClaimTypes.Email)?.Value
@@ -580,7 +584,8 @@ public class MeetingsApiController : ControllerBase
     [Authorize]
     public async Task<IActionResult> RemoveMeeting(long id)
     {
-        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var entraOid = User.FindFirst("oid")?.Value
+            ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
         if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
 
         var email = User.FindFirst(ClaimTypes.Email)?.Value
@@ -611,7 +616,8 @@ public class MeetingsApiController : ControllerBase
 
     private async Task<(FirmMeeting? meeting, FirmUser? user, IActionResult? error)> ResolveOwnedMeetingWithUser(long id)
     {
-        var entraOid = User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var entraOid = User.FindFirst("oid")?.Value
+            ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
         if (string.IsNullOrEmpty(entraOid)) return (null, null, Unauthorized());
 
         await using var db = await _dbFactory.CreateDbContextAsync();
