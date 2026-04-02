@@ -1,6 +1,4 @@
 using Amazon.S3;
-using Microsoft.Identity.Web;
-using Microsoft.Identity.Web.UI;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
@@ -20,23 +18,32 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Entra authentication (Microsoft Identity Web)
-builder.Services.AddMicrosoftIdentityWebAppAuthentication(builder.Configuration, "AzureAd");
-builder.Services.Configure<CookieAuthenticationOptions>(
-    CookieAuthenticationDefaults.AuthenticationScheme,
-    options =>
-    {
-        options.Cookie.Domain = builder.Configuration["Auth:CookieDomain"] ?? ".fortressam.ai";
-    });
-builder.Services.AddControllersWithViews().AddMicrosoftIdentityUI();
-
-// Authorization — all routes require auth by default
+// Cookie auth — consume the FIP shared session cookie
+// NEXUS is a FIP module; FAIT owns auth and sets .FortressAI.Session at login
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+})
+.AddCookie(options =>
+{
+    // Redirect to FIP portal for login — NEXUS has no auth of its own
+    options.LoginPath = "/auth/redirect-to-login";
+    options.AccessDeniedPath = "/access-denied";
+    options.ExpireTimeSpan = TimeSpan.FromHours(12);
+    options.SlidingExpiration = true;
+    // Must match FAIT's cookie name and domain exactly for cross-subdomain sharing
+    options.Cookie.Name = ".FortressAI.Session";
+    options.Cookie.Domain = builder.Configuration["Auth__CookieDomain"] ?? "";
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.IsEssential = true;
+});
 builder.Services.AddAuthorization(options =>
 {
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .Build();
+    options.FallbackPolicy = options.DefaultPolicy;
 });
+builder.Services.AddControllersWithViews();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCascadingAuthenticationState();
@@ -136,11 +143,13 @@ app.MapGet("/health", () => "OK").AllowAnonymous();
 // Auth redirect (for unauthenticated users)
 app.MapGet("/auth/redirect-to-login", (HttpContext ctx) =>
 {
-    var loginUrl = ctx.RequestServices.GetRequiredService<IConfiguration>()["FIP:LoginUrl"]?.TrimEnd('/') ?? "/";
-    return Results.Redirect(loginUrl);
+    var loginUrl = builder.Configuration["FIP:LoginUrl"]?.TrimEnd('/') ?? "https://fip.fortressam.ai";
+    var path = ctx.Request.Path.Value ?? "/";
+    var returnUrl = Uri.EscapeDataString($"https://nexus.fortressam.ai{path}");
+    return Results.Redirect($"{loginUrl}?returnUrl={returnUrl}");
 }).AllowAnonymous();
 
-// MicrosoftIdentity UI controllers (handles /signin-oidc callback)
+// API controllers (SubmissionExportController — ADO#1526)
 app.MapControllers();
 
 // Blazor components — ALL routes require auth

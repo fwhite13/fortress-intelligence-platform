@@ -111,3 +111,27 @@ _pendingReview = await SubmissionService.GetAllPendingReviewAsync() ?? new();
 ---
 
 *Reviewed by Hawkeye (Clint Barton) — cycle 1 — 2026-04-02*
+
+---
+
+## REVIEW cycle 2 — 2026-04-02
+
+**Reviewer:** Hawkeye (Clint Barton)
+**Commit:** 7656ffd
+**Scope:** Targeted re-review — 3 previously flagged items only
+
+### Verdict: ✅ PASS
+
+All 3 cycle 1 issues confirmed fixed in `src/FortressNexus.Web/Components/Pages/Dashboard.razor`.
+
+### Item-by-Item Results
+
+| # | Item | Result | Evidence |
+|---|------|--------|----------|
+| 1 | UPN claim (`preferred_username` first, `Identity.Name` fallback) | ✅ PASS | `var userUpn = authState.User.FindFirst("preferred_username")?.Value ?? authState.User.Identity?.Name ?? "";` (lines 122–124) |
+| 2 | `NexusRoles.Admin` — no magic string | ✅ PASS | `_isAdmin = authState.User.IsInRole(NexusRoles.Admin);` (line 125) |
+| 3 | Null guard on `GetByUserAsync` | ✅ PASS | `_submissions = await SubmissionService.GetByUserAsync(userUpn) ?? new();` (line 127) |
+
+### Summary
+All 3 cycle 1 NEEDS-CHANGES items have been correctly addressed. No new issues found in reviewed scope. Cycle 2 closes clean.
+
