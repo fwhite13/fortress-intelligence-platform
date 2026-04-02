@@ -463,8 +463,8 @@ Output EXACTLY this JSON structure (no markdown wrapper, no code fences):
 {{
   ""summaryText"": ""...(the full structured markdown summary — see format below)..."",
   ""actionItemsJson"": ""[{{\"description\": \"...\", \"owner\": \"...\", \"deadline\": \"...\"}}]"",
-  ""keyDecisionsJson"": ""[\""...\""\""]"",
-  ""followUpsJson"": ""[\""...\""\""]""
+  ""keyDecisionsJson"": ""[\""Decision text here\""]"",
+  ""followUpsJson"": ""[\""Follow-up item here\""]""
 }}
 
 The summaryText field must contain this EXACT markdown structure:
@@ -510,6 +510,10 @@ The summaryText field must contain this EXACT markdown structure:
 > ""{{verbatim quote}}"" — {{Speaker Name}}
 
 > ""{{verbatim quote}}"" — {{Speaker Name}}
+
+> ""{{verbatim quote}}"" — {{Speaker Name}}
+
+_(include 3–6 total quotes)_
 
 ---
 

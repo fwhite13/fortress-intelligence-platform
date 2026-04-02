@@ -403,7 +403,7 @@ public class MeetingsApiController : ControllerBase
             {
                 mdSb.AppendLine("## Action Items");
                 var items = JsonSerializer.Deserialize<List<ActionItem>>(summary.ActionItemsJson);
-                items?.ForEach(i => mdSb.AppendLine($"- **{i.Owner}**: {i.Description}"));
+                items?.ForEach(i => mdSb.AppendLine($"- **{i.Owner}**: {i.Description} _(due: {i.Deadline ?? "TBD"})_"));
                 mdSb.AppendLine();
             }
             if (!string.IsNullOrEmpty(summary.FollowUpsJson))
@@ -816,4 +816,5 @@ public class ActionItem
 {
     public string? Description { get; set; }
     public string? Owner { get; set; }
+    public string? Deadline { get; set; }
 }
