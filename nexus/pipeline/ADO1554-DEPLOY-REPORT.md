@@ -1,99 +1,103 @@
-# ADO#1554 — Deploy Report: Enable ID Tokens on NEXUS Entra App Registration
+# ADO#1554 — Deploy Report: nexus-web:8 (FIP Cookie Auth)
 
+**Deployed by:** War Machine (James Rhodes)  
 **Date:** 2026-04-02  
-**Assigned:** War Machine (James Rhodes)  
-**Status:** ⛔ BLOCKED — az CLI not installed
+**ADO Work Item:** [#1554](https://dev.azure.com/FortressAffinityGroup/4f20ca74-10f3-4707-b00b-04cd4e147909/_workitems/edit/1554)  
+**Final State:** Closed ✅
 
 ---
 
-## Objective
+## Summary
 
-Enable ID token issuance on NEXUS Entra app registration to resolve `AADSTS700054: response_type 'id_token' is not enabled`.
-
-**App Registration:**
-- ClientId: `eda4d502-8c93-422e-b7fb-bb922a2a472e`
-- TenantId: `7152ea12-c930-44b0-bb52-069152161c5b`
+Deployed nexus-web:8 — MSAL/Azure AD authentication removed, replaced with FIP shared cookie auth. Full CodeBuild + ECS deployment pipeline executed without issues.
 
 ---
 
-## Execution Log
+## Deployment Timeline
 
-### ✅ Step 1 — ADO Start Comment
-Posted to ADO#1554. Comment ID: 736879. Timestamp: 2026-04-02T15:03:50.287Z.
+| Time (EDT)   | Event                                      |
+|--------------|--------------------------------------------|
+| 12:27        | ADO#1554 comment posted — deploy start     |
+| 12:27        | CodeBuild `fip-nexus-build` started        |
+| 12:28        | CodeBuild SUCCEEDED (~90s)                 |
+| 12:29        | nexus-web:8 task definition registered     |
+| 12:29        | ECS update-service initiated               |
+| 12:33        | ECS rollout COMPLETED                      |
+| 12:33        | Health check → 200 ✅                      |
+| 12:33        | ADO#1554 closed                            |
 
-### ⛔ Step 2 — az CLI Auth Check — HARD STOP
+---
 
-**Command:**
+## Build
+
+- **CodeBuild Project:** `fip-nexus-build`
+- **Build ID:** `fip-nexus-build:f962ff2e-7b7b-422b-85c5-b798a91bc64d`
+- **Source Version:** `f948387`
+- **Full Commit SHA:** `f9483873c9ae629e349d87d6baec304b95bdf15f`
+- **Result:** SUCCEEDED
+
+---
+
+## Container Image
+
+```
+742932328420.dkr.ecr.us-east-1.amazonaws.com/nexus-web:f9483873c9ae629e349d87d6baec304b95bdf15f
+```
+
+---
+
+## Task Definition
+
+- **Baseline:** `nexus-web:7` (commit `16acb3f`)
+- **Registered:** `nexus-web:8`
+- **ARN:** `arn:aws:ecs:us-east-1:742932328420:task-definition/nexus-web:8`
+
+### AzureAd Vars (preserved — not used, but kept for future re-enable path)
+- `AzureAd__ClientId` ✅
+- `AzureAd__ClientSecret` ✅
+- `AzureAd__TenantId` ✅
+
+---
+
+## ECS Deployment
+
+- **Cluster:** `fortress-tools-cluster`
+- **Service:** `nexus-web`
+- **Task Definition:** `nexus-web:8`
+- **Rollout State:** COMPLETED
+- **Running Count:** 1
+
+---
+
+## Health Check
+
+```
+GET https://nexus.fortressam.ai/health → 200 OK
+```
+
+---
+
+## Rollback
+
+If rollback needed:
 ```bash
-az account show --query '{tenantId:tenantId,user:user.name}' --output json
-```
-
-**Error:**
-```
-/bin/bash: line 1: az: command not found
-```
-
-`az` is not installed anywhere on SteamServer. Confirmed via `which`, `command -v`, and full filesystem search.
-
-**Steps 3–7 were not attempted** per hard stop rule.
-
----
-
-## Blocker
-
-Azure CLI (`az`) is not installed on SteamServer (WSL2).
-
-**To unblock:**
-```bash
-# Install Azure CLI on SteamServer
-curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-
-# Then authenticate to the correct tenant
-az login --tenant 7152ea12-c930-44b0-bb52-069152161c5b
-```
-
-Once `az` is installed and authenticated, re-run the playbook:
-
-```bash
-# Step 2 — verify auth
-az account show --query '{tenantId:tenantId,user:user.name}' --output json
-
-# Step 3 — check current state
-az ad app show --id eda4d502-8c93-422e-b7fb-bb922a2a472e \
-  --query '{displayName:displayName,publicClient:publicClient,web:web}' \
-  --output json
-
-# Step 4 — enable ID token issuance
-az ad app update \
-  --id eda4d502-8c93-422e-b7fb-bb922a2a472e \
-  --enable-id-token-issuance true
-
-# Step 5 — verify
-az ad app show --id eda4d502-8c93-422e-b7fb-bb922a2a472e \
-  --query 'web.implicitGrantSettings' \
-  --output json
-
-# Step 6 — smoke test
-sleep 30
-curl -sk -o /dev/null -w "%{http_code}" https://nexus.fortressam.ai/health
-
-# Step 7 — close out ADO
-mcporter call devops.add_comment project="FAIT" id=1554 text="**[War Machine — DEPLOY complete]** ID token issuance enabled on NEXUS Entra app registration eda4d502. enableIdTokenIssuance=true verified. Health check: 200. AADSTS700054 resolved."
-mcporter call devops.update_work_item id=1554 state="Resolved" project="FAIT"
+source /home/fredw/projects/ai/projects/fortress_tools/.env.deployer
+export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+export AWS_DEFAULT_REGION=us-east-1
+aws ecs update-service \
+  --cluster fortress-tools-cluster \
+  --service nexus-web \
+  --task-definition nexus-web:7 \
+  --force-new-deployment \
+  --region us-east-1
 ```
 
 ---
 
-## Alternative: Run Manually via Azure Portal
+## Notes
 
-If CLI installation is not feasible:
-
-1. Go to [Azure Portal](https://portal.azure.com) → Entra ID → App registrations
-2. Find app with ClientId `eda4d502-8c93-422e-b7fb-bb922a2a472e`
-3. Go to **Authentication**
-4. Under **Implicit grant and hybrid flows**, check **ID tokens**
-5. Click **Save**
-
----
-
-_Report generated by War Machine | 2026-04-02_
+- MSAL dependency fully removed from nexus-web code at commit f948387
+- FIP shared cookie auth is now the sole auth mechanism
+- AzureAd environment variables retained in task definition for forward compatibility
+- No database migrations required
+- No rollback was needed

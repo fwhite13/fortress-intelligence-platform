@@ -257,3 +257,53 @@ Ensure `SharedKeyRingDbContext` is registered (with the same connection string t
 ---
 
 *Reviewed by Hawkeye (Clint Barton) — cycle 3 — 2026-04-02*
+
+
+---
+
+## REVIEW cycle 4 — 2026-04-02
+
+**Reviewer:** Hawkeye (Clint Barton)
+**Commit:** f948387
+**Scope:** Targeted single-item review — DataProtection shared key ring addition
+
+### Verdict: ✅ PASS
+
+All 6 checklist items confirmed. Cycle 3's critical defect is fully resolved.
+
+---
+
+### 6-Item Checklist Results
+
+| # | Item | Result | Evidence |
+|---|------|--------|----------|
+| 1 | `SharedKeyRingDbContext` implements `IDataProtectionKeyContext` | ✅ PASS | `public class SharedKeyRingDbContext : DbContext, IDataProtectionKeyContext` |
+| 2 | `DataProtectionKeys` DbSet maps to `"DataProtectionKeys"` table | ✅ PASS | `public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();` + `modelBuilder.Entity<DataProtectionKey>().ToTable("DataProtectionKeys");` |
+| 3 | Key ring DbContext uses `FORTRESS_DB_HOST` + `FIP_KEYRING_DB_NAME` (default `"fred_dev"`) | ✅ PASS | `var keyRingDbHost = builder.Configuration["FORTRESS_DB_HOST"];` + `var keyRingDbName = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? "fred_dev";` |
+| 4 | `AddDataProtection()` chain: `.PersistKeysToDbContext<SharedKeyRingDbContext>()` + `.SetApplicationName("FortressAI")` + `.DisableAutomaticKeyGeneration()` | ✅ PASS | All three present with exact values: `builder.Services.AddDataProtection().PersistKeysToDbContext<SharedKeyRingDbContext>().SetApplicationName("FortressAI").DisableAutomaticKeyGeneration();` |
+| 5 | `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore` in .csproj | ✅ PASS | `<PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="8.0.13" />` |
+| 6 | `using Microsoft.AspNetCore.DataProtection;` in Program.cs | ✅ PASS | `using Microsoft.AspNetCore.DataProtection;` (Program.cs line 3) |
+
+---
+
+### FIRM vs. Nexus Comparison
+
+| Property | FIRM | Nexus | Match? |
+|---|---|---|---|
+| `SetApplicationName` | `"FortressAI"` | `"FortressAI"` | ✅ |
+| `DisableAutomaticKeyGeneration` | present | present | ✅ |
+| `PersistKeysToDbContext` | `SharedKeyRingDbContext` | `SharedKeyRingDbContext` | ✅ |
+| Comment | `// FIRM is a consumer` | `// NEXUS is a consumer` | ✅ correct |
+| Password chain | `FORTRESS_DB_PASS ?? ""` | `NEXUS_DB_PASSWORD ?? FORTRESS_DB_PASS ?? ""` | ℹ️ intentional (Nexus-specific primary var) |
+
+The password fallback chain in Nexus is a deliberate extension — `NEXUS_DB_PASSWORD` takes priority, then falls back to the shared `FORTRESS_DB_PASS`. Not a defect; ensure deployment config has the correct credentials against `fred_dev`.
+
+---
+
+### Summary
+
+Cycle 3's critical defect (missing DataProtection shared key ring) is fully and correctly resolved. The implementation matches FIRM's working pattern exactly on all required criteria. Cookie auth between FAIT and NEXUS will function correctly in deployed environments.
+
+---
+
+*Reviewed by Hawkeye (Clint Barton) — cycle 4 — 2026-04-02*
