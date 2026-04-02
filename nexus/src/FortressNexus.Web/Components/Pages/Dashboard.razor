@@ -9,6 +9,7 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using FortressNexus.Web.Models.Entities
 @using FortressNexus.Web.Models.Enums
+@using FortressNexus.Web.Services
 
 <PageTitle>NEXUS Dashboard</PageTitle>
 
@@ -118,10 +119,12 @@
         try
         {
             var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
-            var userUpn = authState.User.Identity?.Name ?? "";
-            _isAdmin = authState.User.IsInRole("NexusAdmin");
+            var userUpn = authState.User.FindFirst("preferred_username")?.Value
+                       ?? authState.User.Identity?.Name
+                       ?? "";
+            _isAdmin = authState.User.IsInRole(NexusRoles.Admin);
 
-            _submissions = await SubmissionService.GetByUserAsync(userUpn);
+            _submissions = await SubmissionService.GetByUserAsync(userUpn) ?? new();
 
             if (_isAdmin)
             {
