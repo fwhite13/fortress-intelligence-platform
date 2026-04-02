@@ -1,5 +1,6 @@
 using Amazon.S3;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
@@ -79,6 +80,37 @@ var serverVersion = new MySqlServerVersion(new Version(8, 0, 28));
 builder.Services.AddDbContext<NexusDbContext>(options =>
     options.UseMySql(csb.ConnectionString, serverVersion,
         mysqlOptions => mysqlOptions.EnableRetryOnFailure(3)));
+
+// DataProtection: shared key ring points to fred_dev (FAIT's DB) — same DataProtectionKeys table
+// SharedKeyRingDbContext reads from fred_dev via FIP_KEYRING_DB_NAME env var
+var keyRingDbHost = builder.Configuration["FORTRESS_DB_HOST"];
+var keyRingDbPort = builder.Configuration["FORTRESS_DB_PORT"] ?? "3306";
+var keyRingDbUser = builder.Configuration["FORTRESS_DB_USER"] ?? "fortress_mysql";
+var keyRingDbPass = builder.Configuration["NEXUS_DB_PASSWORD"]
+    ?? builder.Configuration["FORTRESS_DB_PASS"]
+    ?? "";
+var keyRingDbName = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? "fred_dev";
+
+var keyRingCsb = new MySqlConnector.MySqlConnectionStringBuilder
+{
+    Server = keyRingDbHost ?? "localhost",
+    Port = uint.Parse(keyRingDbPort),
+    Database = keyRingDbName,
+    UserID = keyRingDbUser,
+    Password = keyRingDbPass,
+    ConnectionTimeout = 10
+};
+
+builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
+    options.UseMySql(keyRingCsb.ConnectionString,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mysql => mysql.EnableRetryOnFailure(3)));
+
+// NEXUS is a consumer — DisableAutomaticKeyGeneration so only FIP portal creates keys
+builder.Services.AddDataProtection()
+    .PersistKeysToDbContext<SharedKeyRingDbContext>()
+    .SetApplicationName("FortressAI")
+    .DisableAutomaticKeyGeneration();
 
 // Application services
 builder.Services.AddScoped<ISubmissionService, SubmissionService>();

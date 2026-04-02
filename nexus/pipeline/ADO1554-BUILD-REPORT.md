@@ -55,3 +55,49 @@ dotnet run --project src/FortressNexus.Web/FortressNexus.Web.csproj
 
 ## Commit
 `246dd0d feat(ADO#1554): NexusDashboard — submission list with status badges`
+
+---
+
+## BUILD cycle 3 — ADO#1554: MSAL → FIP cookie consumer
+
+### What was built
+Ripped out standalone Entra MSAL/OIDC auth (`AddMicrosoftIdentityWebAppAuthentication`) and replaced with the FIP shared cookie consumer pattern (exact match to FIRM/FORMS). NEXUS no longer owns its own auth — it reads the `.FortressAI.Session` cookie set by fip.fortressam.ai at login.
+
+### Files changed
+- `src/FortressNexus.Web/Program.cs` — Removed `Microsoft.Identity.Web` usings, `AddMicrosoftIdentityWebAppAuthentication`, `Configure<CookieAuthenticationOptions>` domain block, and `AddMicrosoftIdentityUI`. Added FIP shared cookie auth block (`AddAuthentication/AddCookie`) with `.FortressAI.Session`, `Auth__CookieDomain`, `LoginPath=/auth/redirect-to-login`. Updated `/auth/redirect-to-login` to pass `returnUrl`. Updated `MapControllers()` comment.
+- `src/FortressNexus.Web/appsettings.json` — Removed `AzureAd` section. Added `FIP.LoginUrl`.
+- `src/FortressNexus.Web/FortressNexus.Web.csproj` — Removed `Microsoft.Identity.Web` and `Microsoft.Identity.Web.UI` package references.
+
+### Parallelization used
+No — all changes in related files, sequential CC run.
+
+### CC sessions run
+1 × CC Sonnet via pipe mode. Clean first pass.
+
+### Acceptance criteria verification
+- [x] No `Microsoft.Identity.Web` usings in Program.cs — verified
+- [x] No `AddMicrosoftIdentityWebAppAuthentication` in Program.cs — verified
+- [x] No `AddMicrosoftIdentityUI` in Program.cs — verified
+- [x] Cookie auth block matches FIRM pattern: `.FortressAI.Session`, `Auth__CookieDomain`, LoginPath `/auth/redirect-to-login` — verified
+- [x] `/auth/redirect-to-login` passes `returnUrl` to FIP LoginUrl — verified
+- [x] `app.MapControllers()` kept (SubmissionExportController — ADO#1526) — verified
+- [x] appsettings.json: `AzureAd` section removed — verified
+- [x] appsettings.json: `FIP.LoginUrl` present — verified
+- [x] `Microsoft.Identity.Web` packages removed from .csproj — verified (grep returns nothing)
+- [x] Build: **SUCCEEDED** — 0 errors, 0 warnings
+
+### Known edge cases / things Clint should scrutinize
+- `Azure.Identity` and `Azure.Extensions.AspNetCore.Configuration.Secrets` packages remain — they're used for KeyVault integration, not auth. Correct to keep.
+- `builder.Services.AddControllersWithViews()` remains (was `.AddMicrosoftIdentityUI()` chained to it before) — this is fine; it supports `MapControllers()`.
+- `Auth__CookieDomain` (double underscore) matches ECS env var naming convention used across FIP. Consistent with FIRM.
+
+### How to test locally
+```bash
+cd /home/fredw/projects/fip/nexus
+dotnet run --project src/FortressNexus.Web/FortressNexus.Web.csproj
+# No valid .FortressAI.Session cookie → should redirect to https://fip.fortressam.ai?returnUrl=...
+# With valid shared cookie from FIP → should load dashboard directly
+```
+
+### Commit
+`6a0ec0f fix(ADO#1554): replace standalone Entra MSAL auth with FIP shared cookie consumer pattern`

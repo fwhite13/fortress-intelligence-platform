@@ -112,6 +112,8 @@ _pendingReview = await SubmissionService.GetAllPendingReviewAsync() ?? new();
 
 *Reviewed by Hawkeye (Clint Barton) — cycle 1 — 2026-04-02*
 
+
+
 ---
 
 ## REVIEW cycle 2 — 2026-04-02
@@ -135,3 +137,123 @@ All 3 cycle 1 issues confirmed fixed in `src/FortressNexus.Web/Components/Pages/
 ### Summary
 All 3 cycle 1 NEEDS-CHANGES items have been correctly addressed. No new issues found in reviewed scope. Cycle 2 closes clean.
 
+
+---
+
+## REVIEW cycle 3 — 2026-04-02
+
+**Reviewer:** Hawkeye (Clint Barton)
+**Commit:** 6a0ec0f
+**Scope:** MSAL → Cookie consumer rework — Program.cs, appsettings.json, .csproj
+
+### Verdict: ⚠️ NEEDS-CHANGES
+
+All 22 checklist items pass. One critical defect found outside the checklist.
+
+---
+
+### CC Review Summary
+
+CC ran the full 22-item checklist against NEXUS Program.cs, appsettings.json, .csproj, and FIRM Program.cs for comparison. 22/22 checklist items green. One critical issue discovered during out-of-checklist adversarial comparison: **DataProtection shared key ring is missing**.
+
+---
+
+### 22-Item Checklist Results
+
+| # | Item | Result |
+|---|------|--------|
+| 1 | No `using Microsoft.Identity.Web` in Program.cs | ✅ PASS |
+| 2 | No `using Microsoft.Identity.Web.UI` in Program.cs | ✅ PASS |
+| 3 | No `AddMicrosoftIdentityWebAppAuthentication` call | ✅ PASS |
+| 4 | No `Configure<CookieAuthenticationOptions>` MSAL block | ✅ PASS |
+| 5 | No `AddMicrosoftIdentityUI` call | ✅ PASS |
+| 6 | No `Microsoft.Identity.Web` in .csproj PackageReferences | ✅ PASS |
+| 7 | `AzureAd` section removed from appsettings.json | ✅ PASS |
+| 8 | `DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme` | ✅ PASS — Program.cs:25 |
+| 9 | `DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme` | ✅ PASS — Program.cs:26 |
+| 10 | Cookie Name = `.FortressAI.Session` (matches FIRM exactly) | ✅ PASS — Program.cs:36, FIRM:117 |
+| 11 | Cookie Domain from `Auth__CookieDomain` config | ✅ PASS — Program.cs:37 |
+| 12 | `LoginPath = "/auth/redirect-to-login"` | ✅ PASS — Program.cs:31 |
+| 13 | `SameSite = SameSiteMode.Lax` | ✅ PASS — Program.cs:38 |
+| 14 | `SecurePolicy = CookieSecurePolicy.Always` | ✅ PASS — Program.cs:39 |
+| 15 | `FallbackPolicy = options.DefaultPolicy` | ✅ PASS — Program.cs:44 |
+| 16 | `/auth/redirect-to-login` is AllowAnonymous | ✅ PASS — Program.cs:150 |
+| 17 | Reads `FIP:LoginUrl` from config | ✅ PASS — Program.cs:146 |
+| 18 | Passes `returnUrl` pointing back to nexus.fortressam.ai | ✅ PASS — Program.cs:148–149 |
+| 19 | `FIP.LoginUrl` present in appsettings.json | ✅ PASS — appsettings.json:9–11 |
+| 20 | `MapControllers()` still present | ✅ PASS — Program.cs:153 |
+| 21 | `/health` AllowAnonymous endpoint still present | ✅ PASS — Program.cs:141 |
+| 22 | `UseAuthentication()` before `UseAuthorization()` | ✅ PASS — Program.cs:136–137 |
+
+---
+
+### Issues Found
+
+#### ❌ CRITICAL — DataProtection shared key ring missing
+
+**File:** `Program.cs` (missing — no `AddDataProtection()` call anywhere)
+
+**Issue:** ASP.NET Core uses DataProtection to encrypt and decrypt auth cookies. NEXUS has no DataProtection configuration. Without sharing FAIT's key ring, NEXUS generates its own ephemeral keys at startup and **cannot decrypt the `.FortressAI.Session` cookie that FAIT issued**. Every authenticated request will fail and redirect to `/auth/redirect-to-login` — infinite redirect loop in deployed environments.
+
+**FIRM's working pattern (Program.cs:159–162):**
+```csharp
+builder.Services.AddDataProtection()
+    .PersistKeysToDbContext<SharedKeyRingDbContext>()
+    .SetApplicationName("FortressAI")
+    .DisableAutomaticKeyGeneration();
+```
+
+**Required fix — add to Program.cs, matching FIRM exactly:**
+```csharp
+builder.Services.AddDataProtection()
+    .PersistKeysToDbContext<SharedKeyRingDbContext>()
+    .SetApplicationName("FortressAI")
+    .DisableAutomaticKeyGeneration();
+```
+Also requires `SharedKeyRingDbContext` to be registered and the DB connection string configured to point to the same `fred_dev`/prod DB where FAIT writes keys.
+
+Without this fix, cookie auth will appear to work locally (ephemeral keys, single process) but will fail in any deployed environment.
+
+---
+
+### Warnings (non-blocking)
+
+#### ⚠️ WARN — `returnUrl` drops query string
+**Program.cs:147–148:** `ctx.Request.Path` does not include query string. A user at `/submissions?id=abc123` returns to `/submissions` after login — query string is silently lost. Not a security issue, UX regression only. Fix with `ctx.Request.Path + ctx.Request.QueryString` if deep-link fidelity matters.
+
+#### ⚠️ WARN — Config key style inconsistency vs. FIRM
+NEXUS reads `builder.Configuration["FIP:LoginUrl"]` (colon notation). FIRM reads `config["FIP__LoginUrl"]` (double-underscore). Both work — .NET config maps `FIP__LoginUrl` env vars to `FIP:LoginUrl` — but ops must use env-var form `FIP__LoginUrl` for overrides. Not blocking, worth noting.
+
+---
+
+### NEXUS vs. FIRM Cookie Config — Side-by-Side
+
+| Property | NEXUS | FIRM | Match? |
+|---|---|---|---|
+| `DefaultScheme` | `CookieAuthenticationDefaults` | `CookieAuthenticationDefaults` | ✅ |
+| `DefaultChallengeScheme` | `CookieAuthenticationDefaults` | `CookieAuthenticationDefaults` | ✅ |
+| `Cookie.Name` | `.FortressAI.Session` | `.FortressAI.Session` | ✅ |
+| `Cookie.Domain` | `Auth__CookieDomain` config | `Auth__CookieDomain` config | ✅ |
+| `SameSite` | `Lax` | `Lax` | ✅ |
+| `SecurePolicy` | `Always` | `Always` | ✅ |
+| `FallbackPolicy` | `DefaultPolicy` | `DefaultPolicy` | ✅ |
+| `DataProtection` | **MISSING** | Shared key ring (DB) | ❌ CRITICAL |
+
+---
+
+### What to Fix (Tony)
+
+**1 item required before PASS:**
+
+Add DataProtection shared key ring to Program.cs — match FIRM exactly:
+```csharp
+builder.Services.AddDataProtection()
+    .PersistKeysToDbContext<SharedKeyRingDbContext>()
+    .SetApplicationName("FortressAI")
+    .DisableAutomaticKeyGeneration();
+```
+Ensure `SharedKeyRingDbContext` is registered (with the same connection string that FAIT uses for the DataProtectionKeys table). Without this, the cookie FAIT issues cannot be read by NEXUS.
+
+---
+
+*Reviewed by Hawkeye (Clint Barton) — cycle 3 — 2026-04-02*
