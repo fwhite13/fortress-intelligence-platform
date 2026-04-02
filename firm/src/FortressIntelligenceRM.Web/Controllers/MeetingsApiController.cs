@@ -108,6 +108,7 @@ public class MeetingsApiController : ControllerBase
         var statusMap = new Dictionary<string, MeetingStatus>(StringComparer.OrdinalIgnoreCase)
         {
             ["recording"] = MeetingStatus.Recording,
+            ["transcribing"] = MeetingStatus.Transcribing,
             ["recording_complete"] = MeetingStatus.Transcribing,
             ["transcription_complete"] = MeetingStatus.Summarizing,
             ["summary_complete"] = MeetingStatus.Complete,

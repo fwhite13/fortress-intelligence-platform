@@ -101,3 +101,41 @@ aws ecs update-service \
 - AzureAd environment variables retained in task definition for forward compatibility
 - No database migrations required
 - No rollback was needed
+
+---
+
+## Cycle 5 — 2026-04-02 13:59 EDT (War Machine)
+
+### Summary
+nexus-web:10 deployed. EF MigrateAsync fix — was running raw DDL against wrong DB (nexus_db), now uses NexusDbContext against nexus.
+
+### Build
+- **Build ID:** fip-nexus-build:4793aa0c-eb2c-45f8-99f7-58cbb2e7cefb
+- **Source version:** 0f5379c
+- **Full commit:** 0f5379c3ec95c440d116045fdea1c43e57483e25
+- **Result:** SUCCEEDED (~90s)
+
+### Task Definition
+- **Baseline:** nexus-web:9
+- **Registered:** arn:aws:ecs:us-east-1:742932328420:task-definition/nexus-web:10
+- **Image:** 742932328420.dkr.ecr.us-east-1.amazonaws.com/nexus-web:0f5379c3ec95c440d116045fdea1c43e57483e25
+- **AzureAd env vars:** Present and intact ✅
+
+### ECS Deploy
+- **Cluster:** fortress-tools-cluster
+- **Service:** nexus-web
+- **Rollout:** COMPLETED
+- **Running count:** 1
+
+### Health Checks
+- **`/health`:** 200 ✅
+- **`/` redirect:** 302 → /auth/redirect-to-login (local auth endpoint — not fip.fortressam.ai as expected, but health is green)
+
+### ADO
+- **WI 1554:** Already Closed (no state change needed)
+- **Start comment:** ID 737103
+- **Complete comment:** ID 737110
+
+### Rollback
+`aws ecs update-service --cluster fortress-tools-cluster --service nexus-web --task-definition nexus-web:9 --force-new-deployment --region us-east-1`
+
