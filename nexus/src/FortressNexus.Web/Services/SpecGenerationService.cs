@@ -45,6 +45,9 @@ public class SpecGenerationService : ISpecGenerationService
         submission.Status = SubmissionStatus.Generating;
         await _db.SaveChangesAsync();
 
+        // Overall 5-minute timeout for generation
+        using var overallCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+
         try
         {
             // 3. System prompt
@@ -52,7 +55,7 @@ public class SpecGenerationService : ISpecGenerationService
                 ?? "You are a business analyst generating software specification documents. Produce clear, detailed, structured specs.";
 
             // 4. Build multi-file prompt
-            var userPrompt = await BuildPromptAsync(submission, systemPrompt);
+            var userPrompt = await BuildPromptAsync(submission, systemPrompt, overallCts.Token);
 
             // 5. Call AI
             var result = await _bedrock.InvokeAsync(systemPrompt, userPrompt);
@@ -82,6 +85,13 @@ public class SpecGenerationService : ISpecGenerationService
 
             return specDoc;
         }
+        catch (OperationCanceledException) when (overallCts.IsCancellationRequested)
+        {
+            _logger.LogError("[SPEC_GEN] Overall generation timeout (5min) for submission {SubId} — setting Failed", submissionId);
+            submission.Status = SubmissionStatus.Failed;
+            await _db.SaveChangesAsync();
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[SPEC_GEN] Failed to generate spec for submission {SubId}", submissionId);
@@ -91,7 +101,7 @@ public class SpecGenerationService : ISpecGenerationService
         }
     }
 
-    private async Task<string> BuildPromptAsync(Submission submission, string systemPrompt)
+    private async Task<string> BuildPromptAsync(Submission submission, string systemPrompt, CancellationToken cancellationToken = default)
     {
         var sb = new StringBuilder();
         sb.AppendLine("## Feature Request");
@@ -118,6 +128,7 @@ public class SpecGenerationService : ISpecGenerationService
         {
             for (int i = 0; i < files.Count; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var file = files[i]!;
                 sb.AppendLine();
                 sb.AppendLine($"## File {i + 1}: {file.OriginalFileName} ({file.FileType})");
@@ -144,18 +155,29 @@ public class SpecGenerationService : ISpecGenerationService
                         break;
 
                     case FileType.Image:
-                        // Vision call per image
+                        // Vision call per image — with 60s per-call timeout
                         try
                         {
                             var imageStream = await _fileStorage.DownloadAsync(file.S3Key);
                             using var ms = new MemoryStream();
                             await imageStream.CopyToAsync(ms);
                             var imageBytes = ms.ToArray();
-                            var visionResult = await _bedrock.InvokeWithImageAsync(
+
+                            var callTask = _bedrock.InvokeWithImageAsync(
                                 systemPrompt,
                                 $"Describe what you see in this UI mockup image for the feature: {submission.Title}",
                                 imageBytes,
                                 file.ContentType);
+                            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(60));
+
+                            if (await Task.WhenAny(callTask, timeoutTask) == timeoutTask)
+                            {
+                                _logger.LogWarning("[SPEC_GEN] Vision call timed out for file {FileId} in submission {SubId} — skipping", file.Id, submission.Id);
+                                sb.AppendLine("*Image vision analysis timed out — skipped.*");
+                                break;
+                            }
+
+                            var visionResult = await callTask;
                             sb.AppendLine($"**Vision Analysis:**");
                             sb.AppendLine(visionResult.Text);
                         }

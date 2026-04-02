@@ -54,7 +54,9 @@
                     <MudItem xs="12" md="6" Class="nexus-review-panel">
                         <MudText Typo="Typo.subtitle2" Class="nexus-review-panel-label">AI Original</MudText>
                         <MudPaper Elevation="1" Class="nexus-review-original-viewer">
-                            <pre class="nexus-review-spec-pre">@_specDoc.Content</pre>
+                            <div class="nexus-spec-content">
+                                @RenderMarkdown(_specDoc.Content)
+                            </div>
                         </MudPaper>
                     </MudItem>
 
@@ -66,7 +68,9 @@
                         @if (_specDoc.IsApproved)
                         {
                             <MudPaper Elevation="1" Class="nexus-review-original-viewer">
-                                <pre class="nexus-review-spec-pre">@(_specDoc.EditedContent ?? _specDoc.Content)</pre>
+                                <div class="nexus-spec-content">
+                                    @RenderMarkdown(_specDoc.EditedContent ?? _specDoc.Content)
+                                </div>
                             </MudPaper>
                         }
                         else
@@ -215,13 +219,12 @@
             var upn = await UserContextService.GetUpnAsync();
             await SpecService.SaveDraftAsync(_specDoc.Id, _editedContent, upn);
 
-            // Get OID from claims
+            // Get ClaimsPrincipal for service-layer role check
             var authState = AuthState is not null ? await AuthState : null;
-            var oid = authState?.User.FindFirst("oid")?.Value
-                ?? authState?.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                ?? upn;
+            var claimsPrincipal = authState?.User
+                ?? throw new InvalidOperationException("Unable to resolve authenticated user.");
 
-            _specDoc = await SpecService.ApproveAsync(_specDoc.Id, oid);
+            _specDoc = await SpecService.ApproveAsync(_specDoc.Id, claimsPrincipal);
             Snackbar.Add("Spec approved!", Severity.Success);
         }
         catch (Exception ex)
@@ -233,5 +236,14 @@
             _isApproving = false;
             StateHasChanged();
         }
+    }
+
+    private static MarkupString RenderMarkdown(string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return new MarkupString("");
+        var pipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Build();
+        return new MarkupString(Markdown.ToHtml(content, pipeline));
     }
 }

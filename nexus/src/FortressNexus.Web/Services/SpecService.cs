@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using FortressNexus.Web.Data;
 using FortressNexus.Web.Models.Entities;
 using FortressNexus.Web.Models.Enums;
@@ -28,8 +29,16 @@ public class SpecService : ISpecService
         _logger.LogInformation("NEXUS: Draft saved for SpecDocument {Id} by {Upn}", specDocumentId, userUpn);
     }
 
-    public async Task<SpecDocument> ApproveAsync(int specDocumentId, string approverOid)
+    public async Task<SpecDocument> ApproveAsync(int specDocumentId, ClaimsPrincipal user)
     {
+        // Service-layer role enforcement — defense-in-depth
+        if (!user.IsInRole(NexusRoles.Admin))
+            throw new UnauthorizedAccessException("Only NexusAdmin users can approve spec documents.");
+
+        var approverOid = user.FindFirst("oid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? throw new InvalidOperationException("Approver OID claim not found.");
+
         var doc = await _db.SpecDocuments
             .Include(d => d.Submission)
             .FirstOrDefaultAsync(d => d.Id == specDocumentId)

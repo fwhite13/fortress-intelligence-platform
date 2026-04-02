@@ -27,4 +27,6 @@
 | Stage | Status | Agent | Started | Completed | Notes |
 |-------|--------|-------|---------|-----------|-------|
 | PLAN | ✅ DONE | Maria | 23:44 | 23:49 | Full codebase pre-read. Int PKs. Nullable MockupFileId needed. |
-| BUILD | 🔄 ACTIVE | Tony | 23:49 | — | Full P1 implementation |
+| BUILD | ✅ DONE | Tony | 23:49 | 00:03 | Commit 905a4fc. 0 errors. All epics. 4 flags for Clint. WI#1523 Deferred. |
+| REVIEW | ⚠️ NEEDS-CHANGES | Clint | 00:03 | 00:16 | 4 issues: I1 vision timeout, I2 empty migration, I3 markdown render, I4 no service-layer role check on Approve |
+| BUILD (cycle 2) | 🔄 ACTIVE | Tony | 00:16 | — | Fix I1–I4 only, no scope creep |

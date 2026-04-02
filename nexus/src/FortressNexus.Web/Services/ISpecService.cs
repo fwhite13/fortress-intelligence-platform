@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using FortressNexus.Web.Models.Entities;
 
 namespace FortressNexus.Web.Services;
@@ -5,5 +6,5 @@ namespace FortressNexus.Web.Services;
 public interface ISpecService
 {
     Task SaveDraftAsync(int specDocumentId, string editedContent, string userUpn);
-    Task<SpecDocument> ApproveAsync(int specDocumentId, string approverOid);
+    Task<SpecDocument> ApproveAsync(int specDocumentId, ClaimsPrincipal user);
 }

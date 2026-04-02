@@ -136,7 +136,9 @@ else if (_submission is not null)
                     @if (_activeSpec.IsApproved) { <MudChip T="string" Color="Color.Success" Size="Size.Small" Class="nexus-detail-approved-chip">Approved</MudChip> }
                 </MudText>
                 <MudPaper Elevation="1" Class="nexus-detail-spec-viewer">
-                    <pre class="nexus-detail-spec-pre">@(_activeSpec.EditedContent ?? _activeSpec.Content)</pre>
+                    <div class="nexus-spec-content">
+                        @RenderMarkdown(_activeSpec.EditedContent ?? _activeSpec.Content)
+                    </div>
                 </MudPaper>
             </div>
         }
@@ -279,5 +281,14 @@ else if (_submission is not null)
     public void Dispose()
     {
         _pollTimer?.Dispose();
+    }
+
+    private static MarkupString RenderMarkdown(string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return new MarkupString("");
+        var pipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Build();
+        return new MarkupString(Markdown.ToHtml(content, pipeline));
     }
 }
