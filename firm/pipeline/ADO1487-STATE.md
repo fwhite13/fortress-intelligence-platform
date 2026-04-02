@@ -1,6 +1,6 @@
 # Pipeline State: ADO#1487
 
-## Current Stage: DEPLOYED ✅
+## Current Stage: DEPLOYED ✅ (cycle 2)
 ## Risk Level: low (config-only — env vars on task def)
 ## Pipeline Path: shortcut (infra config, no code change)
 ## Review Cycles: N/A
