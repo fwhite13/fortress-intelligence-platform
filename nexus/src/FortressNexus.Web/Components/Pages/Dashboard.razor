@@ -1,7 +1,147 @@
 @page "/"
 @attribute [Authorize]
+@rendermode InteractiveServer
 
-<PageTitle>NEXUS</PageTitle>
+@inject ISubmissionService SubmissionService
+@inject NavigationManager NavManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
-<MudText Typo="Typo.h4">NEXUS Dashboard</MudText>
-<MudText Typo="Typo.body1">Project scaffold complete. Full implementation in WI-5.</MudText>
+@using Microsoft.AspNetCore.Components.Authorization
+@using FortressNexus.Web.Models.Entities
+@using FortressNexus.Web.Models.Enums
+
+<PageTitle>NEXUS Dashboard</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="nexus-dashboard-container">
+    <div class="nexus-dashboard-header">
+        <MudText Typo="Typo.h4" Class="nexus-dashboard-title">My Submissions</MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="@(() => NavManager.NavigateTo("/nexus/new"))"
+                   Class="nexus-dashboard-new-btn">New Submission</MudButton>
+    </div>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="nexus-dashboard-progress" />
+    }
+    else
+    {
+        @if (!_submissions.Any())
+        {
+            <MudAlert Severity="Severity.Info" Class="nexus-dashboard-empty">No submissions yet. Click New Submission to get started.</MudAlert>
+        }
+        else
+        {
+            <MudTable Items="@_submissions" Hover="true" Class="nexus-dashboard-table">
+                <HeaderContent>
+                    <MudTh>#</MudTh>
+                    <MudTh>Title</MudTh>
+                    <MudTh>Feature Area</MudTh>
+                    <MudTh>Status</MudTh>
+                    <MudTh>Submitted</MudTh>
+                    <MudTh>Action</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="#">@context.Id</MudTd>
+                    <MudTd DataLabel="Title">
+                        <MudLink Href="@($"/nexus/{context.Id}")" Class="nexus-dashboard-title-link">@context.Title</MudLink>
+                    </MudTd>
+                    <MudTd DataLabel="Feature Area">@(context.FeatureArea ?? "—")</MudTd>
+                    <MudTd DataLabel="Status">
+                        <MudChip T="string" Color="@GetStatusColor(context.Status)" Size="Size.Small" Class="nexus-dashboard-status-chip">
+                            @context.Status.ToString()
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="Submitted">@context.SubmittedAt.ToString("MMM d, yyyy")</MudTd>
+                    <MudTd DataLabel="Action">
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                                   OnClick="@(() => NavManager.NavigateTo($"/nexus/{context.Id}"))"
+                                   Class="nexus-dashboard-view-btn">View</MudButton>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+
+        @if (_isAdmin)
+        {
+            <MudDivider Class="nexus-dashboard-divider" />
+            <MudText Typo="Typo.h5" Class="nexus-dashboard-admin-title">Pending Review</MudText>
+
+            @if (!_pendingReview.Any())
+            {
+                <MudAlert Severity="Severity.Info" Class="nexus-dashboard-admin-empty">No submissions pending review.</MudAlert>
+            }
+            else
+            {
+                <MudTable Items="@_pendingReview" Hover="true" Class="nexus-dashboard-admin-table">
+                    <HeaderContent>
+                        <MudTh>#</MudTh>
+                        <MudTh>Title</MudTh>
+                        <MudTh>Feature Area</MudTh>
+                        <MudTh>Status</MudTh>
+                        <MudTh>Submitted</MudTh>
+                        <MudTh>Action</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="#">@context.Id</MudTd>
+                        <MudTd DataLabel="Title">
+                            <MudLink Href="@($"/nexus/{context.Id}")" Class="nexus-dashboard-title-link">@context.Title</MudLink>
+                        </MudTd>
+                        <MudTd DataLabel="Feature Area">@(context.FeatureArea ?? "—")</MudTd>
+                        <MudTd DataLabel="Status">
+                            <MudChip T="string" Color="@GetStatusColor(context.Status)" Size="Size.Small" Class="nexus-dashboard-status-chip">
+                                @context.Status.ToString()
+                            </MudChip>
+                        </MudTd>
+                        <MudTd DataLabel="Submitted">@context.SubmittedAt.ToString("MMM d, yyyy")</MudTd>
+                        <MudTd DataLabel="Action">
+                            <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                                       OnClick="@(() => NavManager.NavigateTo($"/nexus/{context.Id}"))"
+                                       Class="nexus-dashboard-view-btn">View</MudButton>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        }
+    }
+</MudContainer>
+
+@code {
+    private List<Submission> _submissions = new();
+    private List<Submission> _pendingReview = new();
+    private bool _loading = true;
+    private bool _isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true;
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var userUpn = authState.User.Identity?.Name ?? "";
+            _isAdmin = authState.User.IsInRole("NexusAdmin");
+
+            _submissions = await SubmissionService.GetByUserAsync(userUpn);
+
+            if (_isAdmin)
+            {
+                _pendingReview = await SubmissionService.GetAllPendingReviewAsync();
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static Color GetStatusColor(SubmissionStatus status) => status switch
+    {
+        SubmissionStatus.Draft => Color.Default,
+        SubmissionStatus.Pending => Color.Info,
+        SubmissionStatus.Generating => Color.Warning,
+        SubmissionStatus.AwaitingReview => Color.Primary,
+        SubmissionStatus.Approved => Color.Success,
+        SubmissionStatus.Failed => Color.Error,
+        _ => Color.Default
+    };
+}
