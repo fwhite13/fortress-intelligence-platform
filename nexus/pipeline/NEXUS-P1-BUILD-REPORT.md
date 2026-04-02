@@ -136,3 +136,80 @@ dotnet run --project src/FortressNexus.Web
 - `NexusSubmit.razor` deleted — `NewSpecWizard.razor` is its full replacement at the same route
 - The `SubmissionStatus` enum has 3 new values (`Pending`, `Generating`, `Failed`) — any switch expressions on this enum elsewhere in the codebase may need case additions
 - `GuidFormat=None` in the connection string is preserved — no CHAR(36) anywhere in new migrations
+
+---
+
+---
+
+# BUILD cycle 2
+
+**Commit:** `c4e8783`
+**Build:** SUCCEEDED — 0 warnings, 0 errors
+**Date:** 2026-04-02
+**Issues Fixed:** I1 (WI#1524), I2 (WI#1519), I3 (WI#1525, #1527), I4 (WI#1528)
+**CC Sessions:** 1 (Sonnet) + 1 manual fix (CS0103 scope fix)
+
+---
+
+## What was fixed
+
+4 issues from Clint's cycle 1 review: vision call timeout, ghost migration removal, markdown rendering in both review pages, service-layer role enforcement on approve.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `Services/SpecGenerationService.cs` | I1: Task.WhenAny 60s per-vision-call timeout; overall 5-min CancellationTokenSource in GenerateAsync; cancellationToken passed to BuildPromptAsync; ThrowIfCancellationRequested at loop top; OperationCanceledException catch with Failed status |
+| `Migrations/20260402040049_AddFileTypeToUploadedFiles.cs` | I2: DELETED — ghost migration (empty Up/Down, file_type already in prior migration) |
+| `Migrations/20260402040049_AddFileTypeToUploadedFiles.Designer.cs` | I2: DELETED |
+| `FortressNexus.Web.csproj` | I3: Added `Markdig 0.40.0` |
+| `Components/_Imports.razor` | I3: Added `@using Markdig` |
+| `Components/Pages/SubmissionDetail.razor` | I3: Spec viewer replaced `<pre>` with `<div class="nexus-spec-content">@RenderMarkdown(...)`, added static `RenderMarkdown` helper |
+| `Components/Pages/NexusReview.razor` | I3: Both AI original + approved read-only panels use `RenderMarkdown`. I4: HandleApprove now passes `ClaimsPrincipal` (not raw OID string) |
+| `Services/ISpecService.cs` | I4: `ApproveAsync` signature changed from `string approverOid` to `ClaimsPrincipal user` |
+| `Services/SpecService.cs` | I4: Role guard added (`NexusRoles.Admin`), OID extracted from claims inside service; `using System.Security.Claims` added |
+
+---
+
+## Migration History (clean)
+
+```
+20260331145806_InitialCreate
+20260402040040_AddSubmissionFilesJunctionTable
+```
+
+Ghost migration `20260402040049_AddFileTypeToUploadedFiles` removed. 2 clean migrations remain.
+
+---
+
+## Build Fix Note
+
+CC used `submissionId` in `BuildPromptAsync` (a variable that only exists in `GenerateAsync` scope). Fixed manually: changed to `submission.Id` which is the `Submission` object parameter available in `BuildPromptAsync`.
+
+---
+
+## Acceptance Criteria
+
+- [x] I1: Vision calls wrapped with 60s Task.WhenAny timeout — hung calls log warning + skip file
+- [x] I1: Overall 5-min CancellationTokenSource in GenerateAsync — IsCancellationRequested checked between files
+- [x] I1: OperationCanceledException catch sets status to Failed
+- [x] I2: Ghost migration files deleted — migration list clean (2 migrations)
+- [x] I3: Markdig 0.40.0 in csproj, @using in _Imports.razor
+- [x] I3: SubmissionDetail.razor spec rendered as markdown HTML
+- [x] I3: NexusReview.razor both panels rendered as markdown HTML
+- [x] I4: ISpecService.ApproveAsync accepts ClaimsPrincipal
+- [x] I4: SpecService.ApproveAsync enforces NexusRoles.Admin role guard at service layer
+- [x] I4: NexusReview.razor passes ClaimsPrincipal to ApproveAsync
+- [x] Build: 0 warnings, 0 errors
+
+---
+
+## Known Edge Cases
+
+1. **Task.WhenAny fire-and-forget** — The timed-out vision call task is still running in the background after `Task.WhenAny` returns the timeout. It will eventually complete or fault silently. This is acceptable behavior for dev; production should consider a CancellationToken on BedrockService if Bedrock SDK supports it.
+
+2. **RenderMarkdown is static** — Both helpers are `private static`. This is intentional — no component state needed, pipeline can be recreated per call (Markdig pipelines are cheap). If perf becomes an issue, hoist to a static readonly field.
+
+3. **ClaimsPrincipal null guard** — NexusReview.razor throws `InvalidOperationException` if `AuthState` is null/unauthenticated. The page has `@attribute [Authorize]` so this should never happen in practice, but worth noting.

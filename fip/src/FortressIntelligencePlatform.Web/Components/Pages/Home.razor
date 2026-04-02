@@ -63,6 +63,24 @@
                             <span class="app-tile-open">Open →</span>
                         </a>
                     }
+                    @if (IsComingSoon("nexus"))
+                    {
+                        <div class="app-tile app-tile-disabled">
+                            <div class="app-tile-coming-soon">Coming Soon</div>
+                            <div class="app-tile-icon">📋</div>
+                            <h2>NEXUS</h2>
+                            <p>Fortress NEXUS — AI-powered feature specification and ADO work item generation</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <a class="app-tile" href="@Config["Apps:NexusUrl"]" target="_blank">
+                            <div class="app-tile-icon">📋</div>
+                            <h2>NEXUS</h2>
+                            <p>Fortress NEXUS — AI-powered feature specification and ADO work item generation</p>
+                            <span class="app-tile-open">Open →</span>
+                        </a>
+                    }
                 </div>
             </main>
         </div>

@@ -29,4 +29,8 @@
 | PLAN | ✅ DONE | Maria | 23:44 | 23:49 | Full codebase pre-read. Int PKs. Nullable MockupFileId needed. |
 | BUILD | ✅ DONE | Tony | 23:49 | 00:03 | Commit 905a4fc. 0 errors. All epics. 4 flags for Clint. WI#1523 Deferred. |
 | REVIEW | ⚠️ NEEDS-CHANGES | Clint | 00:03 | 00:16 | 4 issues: I1 vision timeout, I2 empty migration, I3 markdown render, I4 no service-layer role check on Approve |
-| BUILD (cycle 2) | 🔄 ACTIVE | Tony | 00:16 | — | Fix I1–I4 only, no scope creep |
+| BUILD (cycle 2) | ✅ DONE | Tony | 00:16 | 00:23 | Commit c4e8783. I1–I4 fixed. Manual submissionId scope patch applied. |
+| REVIEW (cycle 2) | ✅ PASS | Clint | 00:23 | 00:28 | PASS 22/22. All I1-I4 clean. Background task leak noted (non-blocking, SDK limitation). |
+| DEPLOY | ✅ DONE | Rhodey | 00:28 | 00:36 | nexus-web:7 live. Build fip-nexus-build:87006a12. AzureAd baseline verified. Health 200. |
+| VERIFY | ✅ PASS | Natasha | 00:36 | 00:38 | PASS 12/12. All routes, enums, migrations, role check confirmed. |
+| CONFIRM | ✅ DONE | Maria | 00:38 | 00:38 | Pipeline complete. All 9 WIs closed. |

@@ -208,3 +208,112 @@ Or inject `IHttpContextAccessor` in `SpecService.ApproveAsync` and validate role
 ---
 
 *Cycles: 1. Fix the 4 items above and resubmit for cycle 2 sign-off.*
+
+---
+
+## REVIEW cycle 2 — Targeted Re-Review
+
+**Reviewer:** Hawkeye (Clint Barton)
+**Commit:** `c4e8783`
+**Date:** 2026-04-02
+**CC Passes:** 1 (Sonnet, adversarial 22-criterion pass)
+**Scope:** I1–I4 fixes only (4 issues from cycle 1)
+
+---
+
+### Overall Verdict: ✅ PASS
+
+All 4 cycle 1 issues resolved. 22/22 criteria verified against actual code.
+
+| Issue | Description | Verdict |
+|-------|-------------|---------|
+| **I1** | Vision timeout — SpecGenerationService.cs | ✅ PASS |
+| **I2** | Ghost migration removed | ✅ PASS |
+| **I3** | Markdown rendering — SubmissionDetail + NexusReview | ✅ PASS |
+| **I4** | Service-layer role check | ✅ PASS |
+
+---
+
+### I1 — Vision Timeout (`SpecGenerationService.cs`) ✅ PASS
+
+All 6 criteria verified:
+
+1. **Task.WhenAny 60s timeout** — Lines 166–178: `var timeoutTask = Task.Delay(TimeSpan.FromSeconds(60)); if (await Task.WhenAny(callTask, timeoutTask) == timeoutTask)` ✅
+2. **Logs fileId + submissionId, skips + continues** — Line 175: `_logger.LogWarning("[SPEC_GEN] Vision call timed out for file {FileId} in submission {SubId} — skipping", file.Id, submission.Id)`. Loop continues to next file. ✅
+3. **5-minute overall CTS** — Line 49: `using var overallCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));` ✅
+4. **Loop cancellation check** — Line 131: `cancellationToken.ThrowIfCancellationRequested()` inside the file loop ✅
+5. **OperationCanceledException → Failed** — Lines 88–94: catch sets `submission.Status = SubmissionStatus.Failed`, saves, then rethrows ✅
+6. **submissionId scope** — Tony's manual patch confirmed clean. `submissionId` declared as method parameter in `GenerateAsync` (line 35), referenced on lines 41, 66, 84, 90, 97 — all in scope. `RegenerateAsync` has its own local `submissionId` at line 216. No shadowing, no use-before-declare. ✅
+
+**Minor observation (non-blocking):** The abandoned `callTask` is not cancelled after the `Task.WhenAny` timeout — the Bedrock request continues running as a detached background task. Inherent limitation of the pattern when the SDK lacks cancellation support. Documented, not a blocker.
+
+---
+
+### I2 — Ghost Migration Removed ✅ PASS
+
+All 3 criteria verified:
+
+7. **Exactly 2 migrations** — Directory contains only `20260331145806_InitialCreate` (+ Designer.cs) and `20260402040040_AddSubmissionFilesJunctionTable` (+ Designer.cs) plus `NexusDbContextModelSnapshot.cs`. No ghost. ✅
+8. **No empty Up()/Down()** — Both migrations have substantive Up/Down bodies. InitialCreate creates/drops 5 tables. AddSubmissionFilesJunctionTable adds `file_type` column, alters `mockup_file_id` to nullable, creates `submission_files` table. ✅
+9. **Snapshot consistent** — Snapshot reflects 6 entities (ArtifactSet, SpecDocument, Submission, SubmissionFile, UploadedFile, WorkItemRecord) all accounted for by the 2 migrations. `MockupFileId` is `int?` (matching migration 2's AlterColumn), `FileType` column present, `SubmissionFile` entity present. No orphaned state. ✅
+
+---
+
+### I3 — Markdown Rendering ✅ PASS
+
+All 7 criteria verified:
+
+10. **Markdig in .csproj** — `<PackageReference Include="Markdig" Version="0.40.0" />` ✅
+11. **@using Markdig** — In `Components/_Imports.razor` line 21 — cascades to both component files ✅
+12. **SubmissionDetail.razor — `<pre>` replaced** — `<div class="nexus-spec-content">@RenderMarkdown(_activeSpec.EditedContent ?? _activeSpec.Content)</div>`. No `<pre>`. ✅
+13. **NexusReview.razor — AI original panel renders markdown** — `<div class="nexus-spec-content">@RenderMarkdown(_specDoc.Content)</div>` ✅
+14. **RenderMarkdown uses UseAdvancedExtensions()** — Both components have identical implementation with `new MarkdownPipelineBuilder().UseAdvancedExtensions().Build()` ✅
+15. **EditedContent ?? Content fallback** — SubmissionDetail renders `EditedContent ?? Content`. NexusReview's AI original panel intentionally renders only `Content` (correct for "AI Original" display context). Approved view right panel renders `EditedContent ?? Content`. ✅
+16. **XSS assessment** — `new MarkupString(Markdown.ToHtml(content, pipeline))` — no additional sanitization. **Acceptable:** content is AI-generated markdown from Bedrock, not user-supplied HTML. Admin-edited content is admin's own input, not a cross-user attack vector. Raw `MarkupString` is the correct approach here. ✅
+
+---
+
+### I4 — Service-Layer Role Check ✅ PASS
+
+All 6 criteria verified:
+
+17. **ISpecService.ApproveAsync signature** — `Task<SpecDocument> ApproveAsync(int specDocumentId, ClaimsPrincipal user);` — takes `ClaimsPrincipal`, not raw OID ✅
+18. **Role check before DB operations** — Method order: (1) `!user.IsInRole(NexusRoles.Admin)` → throw, (2) OID extraction from claims, (3) DB query. Role check is strictly first. ✅
+19. **Throws UnauthorizedAccessException** — `throw new UnauthorizedAccessException("Only NexusAdmin users can approve spec documents.")` ✅
+20. **OID extracted internally** — Dual-claim lookup: `user.FindFirst("oid") ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")` — handles both Entra token variants. Caller does not pass OID. ✅
+21. **NexusReview.razor passes ClaimsPrincipal** — `await SpecService.ApproveAsync(_specDoc.Id, claimsPrincipal)` where `claimsPrincipal` is typed `ClaimsPrincipal` from `authState?.User` ✅
+22. **ClaimsPrincipal source** — `[CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }` — correct Blazor Server approach. `HttpContext.User` not used. ✅
+
+---
+
+### Criterion Scorecard
+
+| # | Criterion | Result |
+|---|-----------|--------|
+| 1 | Task.WhenAny 60s timeout | ✅ |
+| 2 | Logs fileId+submissionId, skips+continues | ✅ |
+| 3 | 5-min overall CTS in GenerateAsync | ✅ |
+| 4 | ThrowIfCancellationRequested in loop | ✅ |
+| 5 | OperationCanceledException → Failed | ✅ |
+| 6 | submissionId scope clean (Tony's patch) | ✅ |
+| 7 | Exactly 2 migrations, no ghosts | ✅ |
+| 8 | No empty Up()/Down() | ✅ |
+| 9 | Snapshot consistent with 2 migrations | ✅ |
+| 10 | Markdig 0.40.0 in .csproj | ✅ |
+| 11 | @using Markdig in _Imports.razor | ✅ |
+| 12 | SubmissionDetail — RenderMarkdown, no pre | ✅ |
+| 13 | NexusReview AI panel renders markdown | ✅ |
+| 14 | RenderMarkdown with UseAdvancedExtensions() | ✅ |
+| 15 | EditedContent ?? Content fallback | ✅ |
+| 16 | MarkupString wrap, AI-source, acceptable | ✅ |
+| 17 | ISpecService.ApproveAsync takes ClaimsPrincipal | ✅ |
+| 18 | Role check before DB operations | ✅ |
+| 19 | Throws UnauthorizedAccessException | ✅ |
+| 20 | OID extracted internally | ✅ |
+| 21 | NexusReview.razor passes ClaimsPrincipal | ✅ |
+| 22 | ClaimsPrincipal from CascadingParameter AuthState | ✅ |
+| **Total** | | **22/22** |
+
+---
+
+*Cycle 2 complete. NEXUS P1 ships.*
