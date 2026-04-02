@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace FortressIntelligenceRM.Web.Controllers;
 
@@ -368,36 +369,58 @@ public class MeetingsApiController : ControllerBase
             var summaryKey = meeting.TranscriptS3Key.Replace("transcript.json", "summary.md");
             var text = await _s3Service.GetSummaryTextAsync(summaryKey);
             if (!string.IsNullOrEmpty(text))
-                return File(Encoding.UTF8.GetBytes(text), "text/plain", $"summary-{id}.txt");
+            {
+                var slugS3 = Regex.Replace(
+                    (meeting!.Title ?? $"meeting-{id}").ToLowerInvariant(),
+                    @"[^a-z0-9]+", "-").Trim('-');
+                return File(Encoding.UTF8.GetBytes(text), "text/markdown; charset=utf-8", $"{slugS3}-summary.md");
+            }
         }
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var summary = await db.Summaries.FirstOrDefaultAsync(s => s.MeetingId == id);
         if (summary == null) return NotFound(new { error = "Summary not available" });
 
-        var sb = new StringBuilder();
-        if (!string.IsNullOrEmpty(summary.SummaryText)) sb.AppendLine(summary.SummaryText).AppendLine();
-        if (!string.IsNullOrEmpty(summary.KeyDecisionsJson))
+        // Build markdown summary from stored data
+        var mdSb = new StringBuilder();
+        if (!string.IsNullOrEmpty(summary.SummaryText))
         {
-            sb.AppendLine("KEY DECISIONS:");
-            var decisions = JsonSerializer.Deserialize<List<string>>(summary.KeyDecisionsJson);
-            decisions?.ForEach(d => sb.AppendLine($"  - {d}"));
-            sb.AppendLine();
+            mdSb.AppendLine(summary.SummaryText);
         }
-        if (!string.IsNullOrEmpty(summary.ActionItemsJson))
+        else
         {
-            sb.AppendLine("ACTION ITEMS:");
-            var items = JsonSerializer.Deserialize<List<ActionItem>>(summary.ActionItemsJson);
-            items?.ForEach(i => sb.AppendLine($"  - [{i.Owner}] {i.Description}"));
-            sb.AppendLine();
+            // Fallback: assemble from structured fields if summaryText is empty
+            mdSb.AppendLine("# Meeting Summary");
+            mdSb.AppendLine();
+            if (!string.IsNullOrEmpty(summary.KeyDecisionsJson))
+            {
+                mdSb.AppendLine("## Decisions Made");
+                var decisions = JsonSerializer.Deserialize<List<string>>(summary.KeyDecisionsJson);
+                decisions?.ForEach(d => mdSb.AppendLine($"- {d}"));
+                mdSb.AppendLine();
+            }
+            if (!string.IsNullOrEmpty(summary.ActionItemsJson))
+            {
+                mdSb.AppendLine("## Action Items");
+                var items = JsonSerializer.Deserialize<List<ActionItem>>(summary.ActionItemsJson);
+                items?.ForEach(i => mdSb.AppendLine($"- **{i.Owner}**: {i.Description}"));
+                mdSb.AppendLine();
+            }
+            if (!string.IsNullOrEmpty(summary.FollowUpsJson))
+            {
+                mdSb.AppendLine("## Follow-ups");
+                var followUps = JsonSerializer.Deserialize<List<string>>(summary.FollowUpsJson);
+                followUps?.ForEach(f => mdSb.AppendLine($"- {f}"));
+            }
         }
-        if (!string.IsNullOrEmpty(summary.FollowUpsJson))
-        {
-            sb.AppendLine("FOLLOW-UPS:");
-            var followUps = JsonSerializer.Deserialize<List<string>>(summary.FollowUpsJson);
-            followUps?.ForEach(f => sb.AppendLine($"  - {f}"));
-        }
-        return File(Encoding.UTF8.GetBytes(sb.ToString()), "text/plain", $"summary-{id}.txt");
+
+        // Generate slug from meeting title for filename
+        var slug = Regex.Replace(
+            (meeting!.Title ?? $"meeting-{id}").ToLowerInvariant(),
+            @"[^a-z0-9]+", "-").Trim('-');
+        var filename = $"{slug}-summary.md";
+
+        return File(Encoding.UTF8.GetBytes(mdSb.ToString()), "text/markdown; charset=utf-8", filename);
     }
 
     [HttpGet("/api/meetings/{id}/audio")]
