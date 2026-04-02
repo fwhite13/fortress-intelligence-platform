@@ -90,7 +90,10 @@ builder.Services.AddHostedService<DatabaseInitializationService>();
 
 // Azure Key Vault — load production secrets
 var vaultUri = builder.Configuration["KeyVaultSettings:VaultUri"];
-if (!string.IsNullOrEmpty(vaultUri))
+if (!string.IsNullOrEmpty(vaultUri)
+    && vaultUri.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+    && vaultUri.Contains(".vault.azure.net", StringComparison.OrdinalIgnoreCase)
+    && !vaultUri.Contains("placeholder", StringComparison.OrdinalIgnoreCase))
 {
     builder.Configuration.AddAzureKeyVault(new Uri(vaultUri), new DefaultAzureCredential());
 }
