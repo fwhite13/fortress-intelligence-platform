@@ -2,65 +2,102 @@
 @using MudBlazor
 
 <div class="file-upload-zone">
-    <MudFileUpload T="IBrowserFile" Accept=".html,.png,.jpg,.jpeg,.webp" OnFilesChanged="HandleFileChanged">
+    <MudFileUpload T="IReadOnlyList<IBrowserFile>"
+                   Accept=".html,.png,.jpg,.jpeg,.webp,.pdf"
+                   MaximumFileCount="10"
+                   OnFilesChanged="HandleFilesChanged">
         <ActivatorContent>
             <MudButton Variant="Variant.Outlined"
                        Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.CloudUpload"
                        Class="file-upload-btn">
-                Choose File or Drop Here
+                Choose Files or Drop Here (up to 10)
             </MudButton>
         </ActivatorContent>
     </MudFileUpload>
 
-    @if (!string.IsNullOrEmpty(_hint))
-    {
-        <MudText Typo="Typo.caption" Class="file-upload-hint">@_hint</MudText>
-    }
+    <MudText Typo="Typo.caption" Class="file-upload-hint">@_hint</MudText>
 
     @if (!string.IsNullOrEmpty(_errorMessage))
     {
         <MudAlert Severity="Severity.Error" Class="file-upload-error">@_errorMessage</MudAlert>
     }
 
-    @if (_selectedFile is not null && string.IsNullOrEmpty(_errorMessage))
+    @if (_selectedFiles.Count > 0)
     {
-        <MudChip T="string" Color="Color.Success" Icon="@Icons.Material.Filled.CheckCircle" Class="file-upload-chip">
-            @_selectedFile.Name (@FormatSize(_selectedFile.Size))
-        </MudChip>
+        <MudList T="string" Dense="true" Class="file-upload-list">
+            @foreach (var file in _selectedFiles)
+            {
+                var capturedFile = file;
+                <MudListItem T="string">
+                    <div class="file-upload-list-item">
+                        <MudIcon Icon="@GetFileIcon(capturedFile.ContentType)" Color="Color.Primary" Size="Size.Small" />
+                        <MudText Typo="Typo.body2">@capturedFile.Name (@FormatSize(capturedFile.Size))</MudText>
+                        <MudIconButton Icon="@Icons.Material.Filled.Close"
+                                       Size="Size.Small"
+                                       Color="Color.Error"
+                                       OnClick="@(() => RemoveFile(capturedFile))"
+                                       Class="file-upload-remove-btn" />
+                    </div>
+                </MudListItem>
+            }
+        </MudList>
     }
 </div>
 
 @code {
+    [Parameter] public EventCallback<IReadOnlyList<IBrowserFile>> OnFilesSelected { get; set; }
     [Parameter] public EventCallback<IBrowserFile> OnFileSelected { get; set; }
-    [Parameter] public string[] AcceptedTypes { get; set; } = ["text/html", "image/png", "image/jpeg", "image/webp"];
+    [Parameter] public string[] AcceptedTypes { get; set; } = ["text/html", "image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
     [Parameter] public long MaxFileSizeBytes { get; set; } = 10 * 1024 * 1024;
+    [Parameter] public int MaxFiles { get; set; } = 10;
 
-    private IBrowserFile? _selectedFile;
+    private List<IBrowserFile> _selectedFiles = new();
     private string _errorMessage = "";
-    private string _hint => $"Accepted: HTML, PNG, JPG, WEBP — Max {MaxFileSizeBytes / 1024 / 1024}MB";
+    private string _hint => $"Accepted: HTML, PNG, JPG, WEBP, PDF — Max {MaxFileSizeBytes / 1024 / 1024}MB each, up to {MaxFiles} files";
 
-    private async Task HandleFileChanged(InputFileChangeEventArgs e)
+    private async Task HandleFilesChanged(InputFileChangeEventArgs e)
     {
         _errorMessage = "";
-        _selectedFile = null;
-        var file = e.File;
+        var newFiles = e.GetMultipleFiles(MaxFiles).ToList();
 
-        if (file.Size > MaxFileSizeBytes)
+        foreach (var file in newFiles)
         {
-            _errorMessage = $"File too large. Maximum allowed size is {MaxFileSizeBytes / 1024 / 1024}MB.";
-            return;
+            if (file.Size > MaxFileSizeBytes)
+            {
+                _errorMessage = $"'{file.Name}' exceeds the maximum size of {MaxFileSizeBytes / 1024 / 1024}MB.";
+                return;
+            }
+            if (!AcceptedTypes.Contains(file.ContentType.ToLowerInvariant()))
+            {
+                _errorMessage = $"'{file.Name}': type '{file.ContentType}' is not accepted.";
+                return;
+            }
         }
 
-        if (!AcceptedTypes.Contains(file.ContentType))
-        {
-            _errorMessage = $"File type '{file.ContentType}' is not accepted. Allowed: HTML, PNG, JPG, WEBP.";
-            return;
-        }
+        _selectedFiles = newFiles;
 
-        _selectedFile = file;
-        await OnFileSelected.InvokeAsync(file);
+        await OnFilesSelected.InvokeAsync(_selectedFiles.AsReadOnly());
+
+        // Deprecated single-file compat
+        if (OnFileSelected.HasDelegate && _selectedFiles.Count > 0)
+            await OnFileSelected.InvokeAsync(_selectedFiles[0]);
     }
+
+    private async Task RemoveFile(IBrowserFile file)
+    {
+        _selectedFiles.Remove(file);
+        await OnFilesSelected.InvokeAsync(_selectedFiles.AsReadOnly());
+    }
+
+    private static string GetFileIcon(string contentType) =>
+        contentType.ToLowerInvariant() switch
+        {
+            "text/html" => Icons.Material.Filled.Code,
+            "application/pdf" => Icons.Material.Filled.PictureAsPdf,
+            var ct when ct.StartsWith("image/") => Icons.Material.Filled.Image,
+            _ => Icons.Material.Filled.InsertDriveFile
+        };
 
     private static string FormatSize(long bytes)
     {

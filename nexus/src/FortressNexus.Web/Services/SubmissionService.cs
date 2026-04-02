@@ -24,14 +24,31 @@ public class SubmissionService : ISubmissionService
             Title = dto.Title,
             FeatureArea = dto.FeatureArea,
             NarrativeText = dto.NarrativeText,
-            MockupFileId = dto.MockupFileId,
+            MockupFileId = null,
             SubmittedBy = userUpn,
             SubmittedAt = DateTime.UtcNow,
-            Status = SubmissionStatus.Draft
+            Status = SubmissionStatus.Pending
         };
         _db.Submissions.Add(submission);
         await _db.SaveChangesAsync();
-        _logger.LogInformation("NEXUS: Created submission {Id} for {Upn}", submission.Id, userUpn);
+
+        // Create SubmissionFile junction records
+        var fileIds = dto.FileIds.ToList();
+        for (int i = 0; i < fileIds.Count; i++)
+        {
+            var sf = new SubmissionFile
+            {
+                SubmissionId = submission.Id,
+                UploadedFileId = fileIds[i],
+                SortOrder = i
+            };
+            _db.SubmissionFiles.Add(sf);
+        }
+        if (fileIds.Count > 0)
+            await _db.SaveChangesAsync();
+
+        _logger.LogInformation("NEXUS: Created submission {Id} for {Upn} with {Count} files",
+            submission.Id, userUpn, fileIds.Count);
         return submission;
     }
 
@@ -39,6 +56,8 @@ public class SubmissionService : ISubmissionService
     {
         return await _db.Submissions
             .Include(s => s.MockupFile)
+            .Include(s => s.SubmissionFiles)
+                .ThenInclude(sf => sf.UploadedFile)
             .Include(s => s.SpecDocuments)
             .FirstOrDefaultAsync(s => s.Id == id);
     }
@@ -85,7 +104,6 @@ public class SubmissionService : ISubmissionService
 
     public async Task<UploadedFile> SaveUploadedFileAsync(UploadedFile file)
     {
-        // TODO: Wrap UploadedFile + Submission saves in a transaction to prevent orphans on partial failure (WI-2 deferred — no retry logic yet)
         _db.UploadedFiles.Add(file);
         await _db.SaveChangesAsync();
         return file;

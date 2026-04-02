@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text;
 using FortressNexus.Web.Data;
+using FortressNexus.Web.Models;
 using FortressNexus.Web.Models.Entities;
 using FortressNexus.Web.Models.Enums;
 
@@ -10,6 +12,7 @@ public class SpecGenerationService : ISpecGenerationService
     private readonly NexusDbContext _db;
     private readonly BedrockService _bedrock;
     private readonly IFileStorageService _fileStorage;
+    private readonly IMockupSectionizer _sectionizer;
     private readonly IConfiguration _config;
     private readonly ILogger<SpecGenerationService> _logger;
 
@@ -17,122 +20,185 @@ public class SpecGenerationService : ISpecGenerationService
         NexusDbContext db,
         BedrockService bedrock,
         IFileStorageService fileStorage,
+        IMockupSectionizer sectionizer,
         IConfiguration config,
         ILogger<SpecGenerationService> logger)
     {
         _db = db;
         _bedrock = bedrock;
         _fileStorage = fileStorage;
+        _sectionizer = sectionizer;
         _config = config;
         _logger = logger;
     }
 
     public async Task<SpecDocument> GenerateAsync(int submissionId)
     {
-        // 1. Load submission with file
+        // 1. Load submission with SubmissionFiles -> UploadedFile
         var submission = await _db.Submissions
-            .Include(s => s.MockupFile)
+            .Include(s => s.SubmissionFiles)
+                .ThenInclude(sf => sf.UploadedFile)
             .FirstOrDefaultAsync(s => s.Id == submissionId)
             ?? throw new KeyNotFoundException($"Submission {submissionId} not found.");
 
-        var file = submission.MockupFile
-            ?? throw new KeyNotFoundException($"Submission {submissionId} has no associated mockup file.");
+        // 2. Transition: Pending -> Generating
+        submission.Status = SubmissionStatus.Generating;
+        await _db.SaveChangesAsync();
 
-        // 2. System prompt from config
-        var systemPrompt = _config["Nexus:Prompts:SpecGenSystem"]
-            ?? "You are a business analyst generating software specification documents. Produce clear, detailed, structured specs.";
-
-        // 3. Build user prompt
-        var userPrompt = $"""
-            ## Feature Request
-
-            **Title:** {submission.Title}
-            **Feature Area:** {submission.FeatureArea ?? "Not specified"}
-
-            ## BA Narrative
-            {submission.NarrativeText}
-
-            ## UI Mockup Content
-            {file.ProcessedText ?? "[No mockup text available]"}
-
-            ---
-
-            Generate a complete spec document following the standard template.
-            """;
-
-        // 4. Call AI — use vision if image, otherwise text
-        (string Text, int PromptTokens, int CompletionTokens) result;
-
-        bool isImage = file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
-        if (isImage)
+        try
         {
-            _logger.LogInformation("[SPEC_GEN] Submission {Id} has image mockup ({ContentType}) — attempting vision call",
-                submissionId, file.ContentType);
-            try
+            // 3. System prompt
+            var systemPrompt = _config["Nexus:Prompts:SpecGenSystem"]
+                ?? "You are a business analyst generating software specification documents. Produce clear, detailed, structured specs.";
+
+            // 4. Build multi-file prompt
+            var userPrompt = await BuildPromptAsync(submission, systemPrompt);
+
+            // 5. Call AI
+            var result = await _bedrock.InvokeAsync(systemPrompt, userPrompt);
+
+            // 6. Create SpecDocument
+            var specDoc = new SpecDocument
             {
-                var stream = await _fileStorage.DownloadAsync(file.S3Key);
-                using var ms = new MemoryStream();
-                await stream.CopyToAsync(ms);
-                var imageBytes = ms.ToArray();
-                result = await _bedrock.InvokeWithImageAsync(systemPrompt, userPrompt, imageBytes, file.ContentType);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[SPEC_GEN] Vision call failed for submission {Id} — falling back to text-only", submissionId);
-                result = await _bedrock.InvokeAsync(systemPrompt, userPrompt);
-            }
+                SubmissionId = submissionId,
+                Version = 1,
+                Content = result.Text,
+                GeneratedAt = DateTime.UtcNow,
+                GeneratedBy = "ai",
+                PromptTokensUsed = result.PromptTokens,
+                CompletionTokensUsed = result.CompletionTokens
+            };
+
+            _db.SpecDocuments.Add(specDoc);
+            await _db.SaveChangesAsync();
+
+            // 7. Update Submission -> AwaitingReview
+            submission.ActiveSpecDocumentId = specDoc.Id;
+            submission.Status = SubmissionStatus.AwaitingReview;
+            await _db.SaveChangesAsync();
+
+            _logger.LogInformation("[SPEC_GEN] Generated SpecDocument {SpecId} v{Version} for Submission {SubId}",
+                specDoc.Id, specDoc.Version, submissionId);
+
+            return specDoc;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SPEC_GEN] Failed to generate spec for submission {SubId}", submissionId);
+            submission.Status = SubmissionStatus.Failed;
+            await _db.SaveChangesAsync();
+            throw;
+        }
+    }
+
+    private async Task<string> BuildPromptAsync(Submission submission, string systemPrompt)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("## Feature Request");
+        sb.AppendLine();
+        sb.AppendLine($"**Title:** {submission.Title}");
+        sb.AppendLine($"**Feature Area:** {submission.FeatureArea ?? "Not specified"}");
+        sb.AppendLine();
+        sb.AppendLine("## BA Narrative");
+        sb.AppendLine(submission.NarrativeText);
+
+        var files = submission.SubmissionFiles
+            .OrderBy(sf => sf.SortOrder)
+            .Select(sf => sf.UploadedFile)
+            .Where(f => f is not null)
+            .ToList();
+
+        if (files.Count == 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Notes");
+            sb.AppendLine("*No mockup files attached — narrative-only submission.*");
         }
         else
         {
-            result = await _bedrock.InvokeAsync(systemPrompt, userPrompt);
+            for (int i = 0; i < files.Count; i++)
+            {
+                var file = files[i]!;
+                sb.AppendLine();
+                sb.AppendLine($"## File {i + 1}: {file.OriginalFileName} ({file.FileType})");
+
+                switch (file.FileType)
+                {
+                    case FileType.Html:
+                        if (!string.IsNullOrWhiteSpace(file.ProcessedText))
+                        {
+                            // Sectionize for richer structure
+                            var sections = await _sectionizer.SectionizeAsync(
+                                file.ProcessedText, submission.Id.ToString());
+                            foreach (var section in sections)
+                            {
+                                sb.AppendLine($"### Section: {section.Label}");
+                                sb.AppendLine(section.TextContent);
+                                sb.AppendLine();
+                            }
+                        }
+                        else
+                        {
+                            sb.AppendLine("*HTML file — no text content extracted.*");
+                        }
+                        break;
+
+                    case FileType.Image:
+                        // Vision call per image
+                        try
+                        {
+                            var imageStream = await _fileStorage.DownloadAsync(file.S3Key);
+                            using var ms = new MemoryStream();
+                            await imageStream.CopyToAsync(ms);
+                            var imageBytes = ms.ToArray();
+                            var visionResult = await _bedrock.InvokeWithImageAsync(
+                                systemPrompt,
+                                $"Describe what you see in this UI mockup image for the feature: {submission.Title}",
+                                imageBytes,
+                                file.ContentType);
+                            sb.AppendLine($"**Vision Analysis:**");
+                            sb.AppendLine(visionResult.Text);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "[SPEC_GEN] Vision call failed for file {S3Key}", file.S3Key);
+                            sb.AppendLine("*Image vision analysis failed — skipped.*");
+                        }
+                        break;
+
+                    case FileType.Pdf:
+                    case FileType.Other:
+                    default:
+                        if (!string.IsNullOrWhiteSpace(file.ProcessedText))
+                            sb.AppendLine(file.ProcessedText);
+                        else
+                            sb.AppendLine("*No text content available for this file.*");
+                        break;
+                }
+            }
         }
 
-        // 5. Create SpecDocument
-        var specDoc = new SpecDocument
-        {
-            SubmissionId = submissionId,
-            Version = 1,
-            Content = result.Text,
-            GeneratedAt = DateTime.UtcNow,
-            GeneratedBy = "ai",
-            PromptTokensUsed = result.PromptTokens,
-            CompletionTokensUsed = result.CompletionTokens
-        };
+        sb.AppendLine();
+        sb.AppendLine("---");
+        sb.AppendLine("Generate a complete spec document following the standard template.");
 
-        // 6. Save SpecDocument
-        _db.SpecDocuments.Add(specDoc);
-        await _db.SaveChangesAsync();
-
-        // 7 & 8. Update Submission
-        submission.ActiveSpecDocumentId = specDoc.Id;
-        submission.Status = SubmissionStatus.AwaitingReview;
-        await _db.SaveChangesAsync();
-
-        _logger.LogInformation("[SPEC_GEN] Generated SpecDocument {SpecId} v{Version} for Submission {SubId}",
-            specDoc.Id, specDoc.Version, submissionId);
-
-        return specDoc;
+        return sb.ToString();
     }
 
     public async Task<SpecDocument> RegenerateAsync(int specDocumentId)
     {
-        // 1. Load existing SpecDocument
         var existing = await _db.SpecDocuments
             .FirstOrDefaultAsync(s => s.Id == specDocumentId)
             ?? throw new KeyNotFoundException($"SpecDocument {specDocumentId} not found.");
 
         int submissionId = existing.SubmissionId;
 
-        // 2. Get next version number
         int nextVersion = await _db.SpecDocuments
             .Where(s => s.SubmissionId == submissionId)
             .MaxAsync(s => (int?)s.Version) ?? 0;
         nextVersion += 1;
 
-        // 3. Generate new spec (calls same AI logic)
         var newSpec = await GenerateAsync(submissionId);
-
-        // Update version to correct number (GenerateAsync always sets Version=1)
         newSpec.Version = nextVersion;
         await _db.SaveChangesAsync();
 

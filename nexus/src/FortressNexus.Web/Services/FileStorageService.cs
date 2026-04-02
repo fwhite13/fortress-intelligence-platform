@@ -1,7 +1,11 @@
 using Amazon.S3;
 using Amazon.S3.Model;
 using FortressNexus.Web.Models.Entities;
+using FortressNexus.Web.Models.Enums;
+using HtmlAgilityPack;
 using Microsoft.AspNetCore.Components.Forms;
+using UglyToad.PdfPig;
+using System.Text;
 
 namespace FortressNexus.Web.Services;
 
@@ -11,7 +15,8 @@ public class FileStorageService : IFileStorageService
     private readonly IConfiguration _config;
     private readonly ILogger<FileStorageService> _logger;
 
-    private static readonly string[] AllowedTypes = ["text/html", "image/png", "image/jpeg", "image/webp"];
+    private static readonly string[] AllowedTypes =
+        ["text/html", "image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10MB
 
     private string Bucket => _config["Nexus:S3Bucket"] ?? "nexus-uploads-dev";
@@ -23,60 +28,86 @@ public class FileStorageService : IFileStorageService
         _logger = logger;
     }
 
+    private static FileType DetectFileType(string contentType) =>
+        contentType.ToLowerInvariant() switch
+        {
+            "text/html" => FileType.Html,
+            var ct when ct.StartsWith("image/") => FileType.Image,
+            "application/pdf" => FileType.Pdf,
+            _ => FileType.Other
+        };
+
+    private static string ExtractHtmlText(string htmlContent)
+    {
+        var doc = new HtmlDocument();
+        doc.LoadHtml(htmlContent);
+        // Remove script and style nodes
+        foreach (var node in doc.DocumentNode.SelectNodes("//script|//style") ?? Enumerable.Empty<HtmlNode>())
+            node.Remove();
+        return doc.DocumentNode.InnerText;
+    }
+
+    private static string ExtractPdfText(byte[] pdfBytes)
+    {
+        var sb = new StringBuilder();
+        using var pdfDoc = PdfDocument.Open(pdfBytes);
+        foreach (var page in pdfDoc.GetPages())
+            sb.AppendLine(page.Text);
+        return sb.ToString();
+    }
+
     public async Task<UploadedFile> UploadAsync(IBrowserFile file, string uploaderUpn)
     {
         if (file.Size > MaxFileSizeBytes)
             throw new InvalidOperationException($"File exceeds maximum size of 10MB. Actual size: {file.Size / 1024 / 1024}MB.");
 
-        if (!AllowedTypes.Contains(file.ContentType))
-            throw new InvalidOperationException($"File type '{file.ContentType}' is not allowed. Accepted: text/html, image/png, image/jpeg, image/webp.");
+        var normalizedContentType = file.ContentType.ToLowerInvariant();
+        if (!AllowedTypes.Contains(normalizedContentType))
+            throw new InvalidOperationException($"File type '{file.ContentType}' is not allowed. Accepted: HTML, PNG, JPG, JPEG, WEBP, PDF.");
 
         var safeFileName = Path.GetFileName(file.Name);
         if (string.IsNullOrWhiteSpace(safeFileName))
             throw new InvalidOperationException("Invalid filename.");
+
         var s3Key = $"nexus/{uploaderUpn}/{Guid.NewGuid()}/{safeFileName}";
+        var fileType = DetectFileType(normalizedContentType);
         string? processedText = null;
 
         using var stream = file.OpenReadStream(MaxFileSizeBytes);
+        var fileBytes = new byte[file.Size];
+        await stream.ReadExactlyAsync(fileBytes);
 
-        if (file.ContentType == "text/html")
+        if (fileType == FileType.Html)
         {
-            // Read text content for HTML mockups
-            using var reader = new StreamReader(stream);
-            var htmlContent = await reader.ReadToEndAsync();
-            processedText = htmlContent;
-
-            // Re-create stream for upload
-            var htmlBytes = System.Text.Encoding.UTF8.GetBytes(htmlContent);
-            using var uploadStream = new MemoryStream(htmlBytes);
-            var putRequest = new PutObjectRequest
-            {
-                BucketName = Bucket,
-                Key = s3Key,
-                InputStream = uploadStream,
-                ContentType = file.ContentType,
-                Metadata = { ["original-filename"] = file.Name, ["uploader-upn"] = uploaderUpn }
-            };
-            await _s3.PutObjectAsync(putRequest);
+            var htmlContent = Encoding.UTF8.GetString(fileBytes);
+            processedText = ExtractHtmlText(htmlContent);
         }
-        else
+        else if (fileType == FileType.Pdf)
         {
-            // Images — upload directly, ProcessedText stays null (AI vision handled later)
-            var imageBytes = new byte[file.Size];
-            await stream.ReadExactlyAsync(imageBytes);
-            using var uploadStream = new MemoryStream(imageBytes);
-            var putRequest = new PutObjectRequest
+            try
             {
-                BucketName = Bucket,
-                Key = s3Key,
-                InputStream = uploadStream,
-                ContentType = file.ContentType,
-                Metadata = { ["original-filename"] = file.Name, ["uploader-upn"] = uploaderUpn }
-            };
-            await _s3.PutObjectAsync(putRequest);
+                processedText = ExtractPdfText(fileBytes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "NEXUS: PDF text extraction failed for {FileName}", file.Name);
+                processedText = null;
+            }
         }
+        // Image: processedText stays null (vision model handles it)
 
-        _logger.LogInformation("NEXUS: Uploaded {FileName} to S3 key {Key}", file.Name, s3Key);
+        using var uploadStream = new MemoryStream(fileBytes);
+        var putRequest = new PutObjectRequest
+        {
+            BucketName = Bucket,
+            Key = s3Key,
+            InputStream = uploadStream,
+            ContentType = file.ContentType,
+            Metadata = { ["original-filename"] = file.Name, ["uploader-upn"] = uploaderUpn }
+        };
+        await _s3.PutObjectAsync(putRequest);
+
+        _logger.LogInformation("NEXUS: Uploaded {FileName} ({FileType}) to S3 key {Key}", file.Name, fileType, s3Key);
 
         return new UploadedFile
         {
@@ -87,7 +118,8 @@ public class FileStorageService : IFileStorageService
             S3Bucket = Bucket,
             UploadedBy = uploaderUpn,
             UploadedAt = DateTime.UtcNow,
-            ProcessedText = processedText
+            ProcessedText = processedText,
+            FileType = fileType
         };
     }
 

@@ -4,4 +4,5 @@ public static class NexusRoles
 {
     public const string User = "NexusUser";
     public const string Reviewer = "NexusReviewer";
+    public const string Admin = "NexusAdmin";
 }

@@ -1,0 +1,237 @@
+@page "/nexus/{Id:int}/review"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject ISubmissionService SubmissionService
+@inject ISpecService SpecService
+@inject UserContextService UserContextService
+@inject ISnackbar Snackbar
+
+@using FortressNexus.Web.Models.Entities
+@using FortressNexus.Web.Models.Enums
+@using Microsoft.AspNetCore.Components.Authorization
+
+<PageTitle>Review Spec — NEXUS</PageTitle>
+
+<AuthorizeView>
+    <Authorized>
+        @if (_loading)
+        {
+            <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="nexus-review-container">
+                <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="40px" Class="nexus-review-skeleton-title" />
+                <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="500px" Class="nexus-review-skeleton-body" />
+            </MudContainer>
+        }
+        else if (_error is not null)
+        {
+            <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="nexus-review-container">
+                <MudAlert Severity="Severity.Error" Class="nexus-review-error">@_error</MudAlert>
+            </MudContainer>
+        }
+        else if (_submission is not null && _specDoc is not null)
+        {
+            <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="nexus-review-container">
+                <div class="nexus-review-header">
+                    <MudText Typo="Typo.h5" Class="nexus-review-title">Review: @_submission.Title</MudText>
+                    @if (_specDoc.IsApproved)
+                    {
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small" Class="nexus-review-approved-chip">Approved</MudChip>
+                    }
+                    <MudToggleIconButton @bind-Toggled="_showEdit"
+                                        Icon="@Icons.Material.Filled.Visibility"
+                                        ToggledIcon="@Icons.Material.Filled.Edit"
+                                        Color="Color.Primary"
+                                        Class="nexus-review-toggle-btn" />
+                    <MudText Typo="Typo.caption" Class="nexus-review-toggle-label">
+                        @(_showEdit ? "Editing" : "AI Original")
+                    </MudText>
+                </div>
+
+                <MudDivider Class="nexus-review-divider" />
+
+                <MudGrid Spacing="3" Class="nexus-review-panels">
+                    @* Left panel — AI original *@
+                    <MudItem xs="12" md="6" Class="nexus-review-panel">
+                        <MudText Typo="Typo.subtitle2" Class="nexus-review-panel-label">AI Original</MudText>
+                        <MudPaper Elevation="1" Class="nexus-review-original-viewer">
+                            <pre class="nexus-review-spec-pre">@_specDoc.Content</pre>
+                        </MudPaper>
+                    </MudItem>
+
+                    @* Right panel — editable *@
+                    <MudItem xs="12" md="6" Class="nexus-review-panel">
+                        <MudText Typo="Typo.subtitle2" Class="nexus-review-panel-label">
+                            My Edit @if (_lastSavedAt.HasValue) { <span class="nexus-review-saved-at">Saved @_lastSavedAt.Value.ToLocalTime().ToString("h:mm tt")</span> }
+                        </MudText>
+                        @if (_specDoc.IsApproved)
+                        {
+                            <MudPaper Elevation="1" Class="nexus-review-original-viewer">
+                                <pre class="nexus-review-spec-pre">@(_specDoc.EditedContent ?? _specDoc.Content)</pre>
+                            </MudPaper>
+                        }
+                        else
+                        {
+                            <MudTextField @bind-Value="_editedContent"
+                                          Lines="30"
+                                          Variant="Variant.Outlined"
+                                          Class="nexus-review-editor"
+                                          Disabled="@_specDoc.IsApproved" />
+                        }
+                    </MudItem>
+                </MudGrid>
+
+                @* Actions *@
+                <div class="nexus-review-actions">
+                    @if (!_specDoc.IsApproved)
+                    {
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   OnClick="HandleSaveDraft"
+                                   Disabled="@_isSaving"
+                                   Class="nexus-review-save-btn">
+                            Save Draft
+                        </MudButton>
+
+                        <AuthorizeView Roles="@NexusRoles.Admin" Context="adminContext">
+                            <Authorized>
+                                <MudButton Variant="Variant.Filled"
+                                           Color="Color.Success"
+                                           StartIcon="@Icons.Material.Filled.CheckCircle"
+                                           OnClick="HandleApprove"
+                                           Disabled="@_isApproving"
+                                           Class="nexus-review-approve-btn">
+                                    Approve
+                                </MudButton>
+                            </Authorized>
+                        </AuthorizeView>
+                    }
+                    else
+                    {
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Build"
+                                   Disabled="true"
+                                   Class="nexus-review-ado-btn">
+                            Generate ADO Artifacts (Phase 2)
+                        </MudButton>
+                    }
+                </div>
+
+                @if (_isSaving)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="nexus-review-save-progress" />
+                }
+
+            </MudContainer>
+        }
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Submission? _submission;
+    private SpecDocument? _specDoc;
+    private string _editedContent = "";
+    private bool _loading = true;
+    private string? _error;
+    private bool _isSaving;
+    private bool _isApproving;
+    private bool _showEdit;
+    private DateTime? _lastSavedAt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _submission = await SubmissionService.GetByIdAsync(Id);
+            if (_submission is null)
+            {
+                _error = "Submission not found.";
+                return;
+            }
+
+            if (_submission.ActiveSpecDocumentId.HasValue)
+                _specDoc = _submission.SpecDocuments.FirstOrDefault(d => d.Id == _submission.ActiveSpecDocumentId.Value);
+
+            if (_specDoc is null)
+            {
+                _error = "No spec document found for this submission.";
+                return;
+            }
+
+            _editedContent = _specDoc.EditedContent ?? _specDoc.Content;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Error loading review: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task HandleSaveDraft()
+    {
+        if (_specDoc is null) return;
+        _isSaving = true;
+        StateHasChanged();
+        try
+        {
+            var upn = await UserContextService.GetUpnAsync();
+            await SpecService.SaveDraftAsync(_specDoc.Id, _editedContent, upn);
+            _lastSavedAt = DateTime.UtcNow;
+            Snackbar.Add("Draft saved.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleApprove()
+    {
+        if (_specDoc is null) return;
+        _isApproving = true;
+        StateHasChanged();
+        try
+        {
+            // First save current edits
+            var upn = await UserContextService.GetUpnAsync();
+            await SpecService.SaveDraftAsync(_specDoc.Id, _editedContent, upn);
+
+            // Get OID from claims
+            var authState = AuthState is not null ? await AuthState : null;
+            var oid = authState?.User.FindFirst("oid")?.Value
+                ?? authState?.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                ?? upn;
+
+            _specDoc = await SpecService.ApproveAsync(_specDoc.Id, oid);
+            Snackbar.Add("Spec approved!", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Approval failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isApproving = false;
+            StateHasChanged();
+        }
+    }
+}

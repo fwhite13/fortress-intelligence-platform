@@ -20,3 +20,10 @@
 | DEPLOY | ❌ BLOCKED (x2) | Rhodey | 21:49 | — | CodeBuild IAM gap: deployer lacks CreateProject + StartBuild on nexus-* projects. fip-nexus-build must be created by admin. ADO#1517 commented with resolution options. |
 | DEPLOY | ❌ BLOCKED (x3) | Rhodey | 22:14 | 22:17 | fip-nexus-build service role missing ecr:GetAuthorizationToken. PRE_BUILD failure. nexus-web:1 untouched. |
 | DEPLOY | ❌ FAILED | Rhodey | 22:48 | 23:09 | Build SUCCEEDED. App crashes SIGSEGV on startup — AddAzureKeyVault with placeholder URI causes DefaultAzureCredential to exhaust probes in Fargate. Rolled back to :1. |
+| BUILD (cycle 2) | ✅ DONE | Tony | 23:09 | 23:11 | Commit 16acb3f. KV guard tightened — 4-condition check, placeholder excluded. |
+| REVIEW (cycle 2) | ✅ PASS | Clint | 23:11 | 23:13 | PASS. Guard correct — all 3 test cases verified. |
+| DEPLOY (cycle 2) | ✅ DONE | Rhodey | 23:13 | 23:25 | nexus-web:5 live (prior failures registered :2/:3/:4). Health 200. |
+| VERIFY | ❌ FAIL | Natasha | 23:25 | 23:27 | FAIL 4/8 — HTTP 500. AzureAd env vars missing from :5 (cloned from :1, not :3). IDX20803 placeholder TenantId. |
+| DEPLOY (cycle 3) | ✅ DONE | Rhodey | 23:27 | 23:32 | nexus-web:6 live. :3 baseline, same image. Health 200. |
+| VERIFY (cycle 2) | ✅ PASS | Natasha | 23:32 | 23:34 | PASS 8/8. IDX20803 fixed. All gates clean. |
+| CONFIRM | ✅ DONE | Maria | 23:34 | 23:34 | Pipeline complete. |

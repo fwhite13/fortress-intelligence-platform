@@ -114,3 +114,57 @@ All 4 adversarial checks: ✅ verified
 Nitpick count: 2 (neither blocks ship)
 
 **NEXUS P0 commit fbc0b0d is clear to proceed.**
+
+---
+
+## REVIEW cycle 2 — ADO#1517 KV Guard Fix (commit 16acb3f)
+
+**Reviewer:** Hawkeye (Clint Barton)
+**Date:** 2026-04-01
+**Scope:** Program.cs Key Vault guard condition only
+
+### Verdict: ✅ PASS
+
+---
+
+### Diff Scope
+
+One commit (`16acb3f`) touching exactly one section of `Program.cs`. The diff expands the guard from a single `IsNullOrEmpty` check to a 4-condition compound `if`. No other lines changed.
+
+**Exact guard (lines 92–99):**
+```csharp
+var vaultUri = builder.Configuration["KeyVaultSettings:VaultUri"];
+if (!string.IsNullOrEmpty(vaultUri)
+    && vaultUri.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+    && vaultUri.Contains(".vault.azure.net", StringComparison.OrdinalIgnoreCase)
+    && !vaultUri.Contains("placeholder", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Configuration.AddAzureKeyVault(new Uri(vaultUri), new DefaultAzureCredential());
+}
+```
+
+---
+
+### CC Analysis (adversarial trace)
+
+| Check | Result |
+|-------|--------|
+| Guard requires all 4 conditions | ✅ PASS |
+| `https://placeholder.vault.azure.net/` excluded (fails cond 4) | ✅ PASS |
+| `""` excluded (fails cond 1, short-circuits) | ✅ PASS |
+| `https://fortress-tools-kv.vault.azure.net/` allowed (all 4 pass) | ✅ PASS |
+| `AddAzureKeyVault` called with `DefaultAzureCredential` when guard passes | ✅ PASS |
+| No other changes to Program.cs | ✅ PASS |
+| C# syntax valid | ✅ PASS |
+
+**CC note:** `IsNullOrEmpty` does not catch pure-whitespace strings, but a whitespace-only URI would fail `StartsWith("https://")` regardless. No functional gap — defence-in-depth only.
+
+---
+
+### Root Cause Addressed
+
+The Fargate SIGSEGV (exit 139) was caused by `DefaultAzureCredential` exhausting all credential probes against `https://placeholder.vault.azure.net/`. The `!Contains("placeholder")` condition directly closes this path. Guard is tight, surgical, and correct.
+
+### Verdict Rationale
+
+All 7 checklist items verified PASS. No other changes introduced. Root cause is addressed. **Clear to ship.**

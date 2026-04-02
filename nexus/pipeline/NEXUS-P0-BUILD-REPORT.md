@@ -77,3 +77,27 @@ cd src/FortressNexus.Web && dotnet run
 # /health should return "OK" without auth
 # Security headers should be present on any response
 ```
+
+---
+
+## BUILD cycle 2 — 2026-04-01 | Commit 16acb3f
+
+**Engineer:** Tony Stark  
+**WI:** ADO#1517  
+**Build:** SUCCEEDED (0 warnings, 0 errors)
+
+### What Changed
+Tightened `AddAzureKeyVault` guard in `Program.cs` to prevent Fargate SIGSEGV (exit 139).
+
+**Root cause:** `DefaultAzureCredential` crashes when called with a placeholder URI (`https://placeholder.vault.azure.net/`). The original guard `!string.IsNullOrEmpty(vaultUri)` passed for placeholder strings.
+
+**Fix:** Guard now requires all four conditions:
+1. `vaultUri` is not null/empty
+2. Starts with `https://` (case-insensitive)
+3. Contains `.vault.azure.net` (case-insensitive)
+4. Does NOT contain `placeholder` (case-insensitive)
+
+Blank URI, placeholder URI, or misconfigured URI → Key Vault silently skipped → app starts normally.
+
+### File Changed
+- `src/FortressNexus.Web/Program.cs` — Key Vault guard tightened (4-condition check)

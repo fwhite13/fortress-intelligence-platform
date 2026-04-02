@@ -8,7 +8,7 @@ public class Submission
     public string Title { get; set; } = "";
     public string? FeatureArea { get; set; }
     public string NarrativeText { get; set; } = "";
-    public int MockupFileId { get; set; }
+    public int? MockupFileId { get; set; }
     public string SubmittedBy { get; set; } = "";
     public DateTime SubmittedAt { get; set; }
     public SubmissionStatus Status { get; set; } = SubmissionStatus.Draft;
@@ -17,4 +17,5 @@ public class Submission
     // Navigation
     public UploadedFile? MockupFile { get; set; }
     public List<SpecDocument> SpecDocuments { get; set; } = new();
+    public List<SubmissionFile> SubmissionFiles { get; set; } = new();
 }

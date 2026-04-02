@@ -1,3 +1,5 @@
+using FortressNexus.Web.Models.Enums;
+
 namespace FortressNexus.Web.Models.Entities;
 
 public class UploadedFile
@@ -11,7 +13,8 @@ public class UploadedFile
     public string UploadedBy { get; set; } = "";
     public DateTime UploadedAt { get; set; }
     public string? ProcessedText { get; set; }
+    public FileType FileType { get; set; } = FileType.Other;
 
     // Navigation
-    public List<Submission> Submissions { get; set; } = new();
+    public List<SubmissionFile> SubmissionFiles { get; set; } = new();
 }

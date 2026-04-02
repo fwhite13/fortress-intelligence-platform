@@ -1,0 +1,256 @@
+@page "/nexus/new"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@using Microsoft.AspNetCore.Components.Forms
+@using FortressNexus.Web.Models.Entities
+
+@inject IFileStorageService FileStorageService
+@inject ISubmissionService SubmissionService
+@inject NavigationManager Nav
+@inject UserContextService UserContextService
+@inject ISnackbar Snackbar
+
+<PageTitle>New Feature Submission — NEXUS</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="nexus-wizard-container">
+    <MudText Typo="Typo.h4" Class="nexus-wizard-title">New Feature Submission</MudText>
+    <MudText Typo="Typo.body2" Class="nexus-wizard-subtitle">Complete each step to submit your feature request for AI spec generation.</MudText>
+    <MudDivider Class="nexus-wizard-divider" />
+
+    @* Step indicators *@
+    <MudStack Row="true" Spacing="2" Justify="Justify.Center" Class="nexus-wizard-steps">
+        <MudChip T="string" Color="@(_activeStep == 0 ? Color.Primary : Color.Default)" Size="Size.Small" Class="nexus-wizard-step-chip">1. Details</MudChip>
+        <MudChip T="string" Color="@(_activeStep == 1 ? Color.Primary : Color.Default)" Size="Size.Small" Class="nexus-wizard-step-chip">2. Files</MudChip>
+        <MudChip T="string" Color="@(_activeStep == 2 ? Color.Primary : Color.Default)" Size="Size.Small" Class="nexus-wizard-step-chip">3. Review</MudChip>
+    </MudStack>
+
+    @* Step 1 — Details *@
+    @if (_activeStep == 0)
+    {
+        <MudStack Spacing="4" Class="nexus-wizard-step">
+            <MudTextField @bind-Value="_title"
+                          Label="Title"
+                          Required="true"
+                          RequiredError="Title is required"
+                          Placeholder="Brief descriptive title for this feature"
+                          Variant="Variant.Outlined"
+                          Class="nexus-field-title" />
+
+            <MudTextField @bind-Value="_featureArea"
+                          Label="Feature Area"
+                          Placeholder="e.g. FAIT, FIRM, FORMS (optional)"
+                          Variant="Variant.Outlined"
+                          Class="nexus-field-area" />
+
+            <MudTextField @bind-Value="_narrativeText"
+                          Label="Narrative"
+                          Required="true"
+                          RequiredError="Narrative is required"
+                          Placeholder="Describe what this feature should do and why it matters..."
+                          Variant="Variant.Outlined"
+                          Lines="8"
+                          Class="nexus-field-narrative" />
+
+            @if (!string.IsNullOrWhiteSpace(_step1Error))
+            {
+                <MudAlert Severity="Severity.Error" Class="nexus-wizard-step-error">@_step1Error</MudAlert>
+            }
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       OnClick="GoToStep2"
+                       Class="nexus-wizard-next-btn">
+                Next: Upload Files
+            </MudButton>
+        </MudStack>
+    }
+
+    @* Step 2 — Files *@
+    @if (_activeStep == 1)
+    {
+        <MudStack Spacing="4" Class="nexus-wizard-step">
+            <MudText Typo="Typo.body2" Class="nexus-wizard-step-desc">
+                Upload UI mockups, screenshots, or reference documents (optional — 0–10 files).
+            </MudText>
+
+            <FileUploadZone OnFilesSelected="HandleFilesSelected" />
+
+            @foreach (var (file, error) in _fileErrors)
+            {
+                <MudAlert Severity="Severity.Error" Class="nexus-wizard-file-error">@file.Name: @error</MudAlert>
+            }
+
+            @if (_isUploading)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="nexus-wizard-upload-progress" />
+                <MudText Typo="Typo.caption" Class="nexus-wizard-upload-status">Uploading files...</MudText>
+            }
+
+            <MudStack Row="true" Spacing="2" Class="nexus-wizard-nav-row">
+                <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="GoToStep1" Class="nexus-wizard-back-btn">Back</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GoToStep3" Disabled="@_isUploading" Class="nexus-wizard-next-btn">Next: Review</MudButton>
+            </MudStack>
+        </MudStack>
+    }
+
+    @* Step 3 — Review *@
+    @if (_activeStep == 2)
+    {
+        <MudStack Spacing="3" Class="nexus-wizard-step">
+            <MudText Typo="Typo.subtitle1" Class="nexus-wizard-review-heading">Review Your Submission</MudText>
+
+            <MudPaper Elevation="0" Class="nexus-wizard-review-card">
+                <MudText Typo="Typo.overline" Class="nexus-wizard-review-label">Title</MudText>
+                <MudText Typo="Typo.body1" Class="nexus-wizard-review-value">@_title</MudText>
+            </MudPaper>
+
+            @if (!string.IsNullOrWhiteSpace(_featureArea))
+            {
+                <MudPaper Elevation="0" Class="nexus-wizard-review-card">
+                    <MudText Typo="Typo.overline" Class="nexus-wizard-review-label">Feature Area</MudText>
+                    <MudText Typo="Typo.body1" Class="nexus-wizard-review-value">@_featureArea</MudText>
+                </MudPaper>
+            }
+
+            <MudPaper Elevation="0" Class="nexus-wizard-review-card">
+                <MudText Typo="Typo.overline" Class="nexus-wizard-review-label">Narrative (preview)</MudText>
+                <MudText Typo="Typo.body2" Class="nexus-wizard-review-value">
+                    @(_narrativeText.Length > 200 ? _narrativeText[..200] + "..." : _narrativeText)
+                </MudText>
+            </MudPaper>
+
+            <MudPaper Elevation="0" Class="nexus-wizard-review-card">
+                <MudText Typo="Typo.overline" Class="nexus-wizard-review-label">Files</MudText>
+                <MudText Typo="Typo.body2" Class="nexus-wizard-review-value">
+                    @(_uploadedFiles.Count == 0 ? "None (narrative-only)" : $"{_uploadedFiles.Count} file(s) uploaded")
+                </MudText>
+            </MudPaper>
+
+            @if (_isSubmitting)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="nexus-wizard-submit-progress" />
+            }
+
+            <MudStack Row="true" Spacing="2" Class="nexus-wizard-nav-row">
+                <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="GoToStep2" Disabled="@_isSubmitting" Class="nexus-wizard-back-btn">Back</MudButton>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Success"
+                           OnClick="HandleSubmit"
+                           Disabled="@(!CanSubmit || _isSubmitting)"
+                           Class="nexus-wizard-submit-btn">
+                    Submit for AI Spec Generation
+                </MudButton>
+            </MudStack>
+        </MudStack>
+    }
+</MudContainer>
+
+@code {
+    private int _activeStep;
+
+    private string _title = "";
+    private string? _featureArea;
+    private string _narrativeText = "";
+
+    private List<IBrowserFile> _pendingFiles = new();
+    private List<UploadedFile> _uploadedFiles = new();
+    private List<(IBrowserFile File, string Error)> _fileErrors = new();
+
+    private bool _isUploading;
+    private bool _isSubmitting;
+    private string? _step1Error;
+
+    private bool CanSubmit =>
+        !string.IsNullOrWhiteSpace(_title) &&
+        !string.IsNullOrWhiteSpace(_narrativeText) &&
+        _narrativeText.Trim().Length >= 5 &&
+        !_isUploading &&
+        !_isSubmitting;
+
+    private void GoToStep1() => _activeStep = 0;
+
+    private void GoToStep2()
+    {
+        _step1Error = null;
+        if (string.IsNullOrWhiteSpace(_title))
+        {
+            _step1Error = "Title is required.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_narrativeText) || _narrativeText.Trim().Length < 5)
+        {
+            _step1Error = "Narrative must be at least 5 characters.";
+            return;
+        }
+        _activeStep = 1;
+    }
+
+    private void GoToStep3() => _activeStep = 2;
+
+    private void HandleFilesSelected(IReadOnlyList<IBrowserFile> files)
+    {
+        _pendingFiles = files.ToList();
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (!CanSubmit) return;
+
+        _isSubmitting = true;
+        _fileErrors.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var upn = await UserContextService.GetUpnAsync();
+
+            // Upload pending files
+            _isUploading = true;
+            StateHasChanged();
+
+            _uploadedFiles.Clear();
+            foreach (var browserFile in _pendingFiles)
+            {
+                try
+                {
+                    var uploaded = await FileStorageService.UploadAsync(browserFile, upn);
+                    var saved = await SubmissionService.SaveUploadedFileAsync(uploaded);
+                    _uploadedFiles.Add(saved);
+                }
+                catch (Exception ex)
+                {
+                    _fileErrors.Add((browserFile, ex.Message));
+                }
+            }
+            _isUploading = false;
+
+            if (_fileErrors.Count > 0)
+            {
+                _isSubmitting = false;
+                StateHasChanged();
+                return;
+            }
+
+            // Create submission
+            var dto = new FortressNexus.Web.Models.DTOs.SubmissionCreateDto
+            {
+                Title = _title,
+                FeatureArea = _featureArea,
+                NarrativeText = _narrativeText,
+                FileIds = _uploadedFiles.Select(f => f.Id)
+            };
+
+            var submission = await SubmissionService.CreateAsync(dto, upn);
+
+            Nav.NavigateTo($"/nexus/{submission.Id}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Submission failed: {ex.Message}", Severity.Error);
+            _isSubmitting = false;
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+}

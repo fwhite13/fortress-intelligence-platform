@@ -1,0 +1,283 @@
+@page "/nexus/{Id:int}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@implements IDisposable
+
+@inject ISubmissionService SubmissionService
+@inject ISpecGenerationService SpecGenerationService
+@inject IFileStorageService FileStorageService
+@inject NavigationManager Nav
+@inject UserContextService UserContextService
+@inject ISnackbar Snackbar
+
+@using FortressNexus.Web.Models.Entities
+@using FortressNexus.Web.Models.Enums
+
+<PageTitle>@(_submission?.Title ?? "Submission") — NEXUS</PageTitle>
+
+@if (_loading)
+{
+    <MudContainer MaxWidth="MaxWidth.Large" Class="nexus-detail-container">
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="40px" Class="nexus-detail-skeleton-title" />
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="24px" Width="30%" Class="nexus-detail-skeleton-meta" />
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="200px" Class="nexus-detail-skeleton-body" />
+    </MudContainer>
+}
+else if (_error is not null)
+{
+    <MudContainer MaxWidth="MaxWidth.Large" Class="nexus-detail-container">
+        <MudAlert Severity="Severity.Error" Class="nexus-detail-error">@_error</MudAlert>
+    </MudContainer>
+}
+else if (_submission is not null)
+{
+    <MudContainer MaxWidth="MaxWidth.Large" Class="nexus-detail-container">
+
+        @* Header *@
+        <div class="nexus-detail-header">
+            <MudText Typo="Typo.h4" Class="nexus-detail-title">@_submission.Title</MudText>
+            <div class="nexus-detail-meta">
+                <MudChip T="string"
+                         Color="@GetStatusColor(_submission.Status)"
+                         Size="Size.Small"
+                         Class="nexus-detail-status-chip">
+                    @_submission.Status.ToString()
+                </MudChip>
+                <MudText Typo="Typo.caption" Class="nexus-detail-submitted">
+                    Submitted by @_submission.SubmittedBy on @_submission.SubmittedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
+                </MudText>
+                @if (!string.IsNullOrWhiteSpace(_submission.FeatureArea))
+                {
+                    <MudChip T="string" Size="Size.Small" Class="nexus-detail-area-chip">@_submission.FeatureArea</MudChip>
+                }
+            </div>
+        </div>
+
+        <MudDivider Class="nexus-detail-divider" />
+
+        @* Files *@
+        @if (_submission.SubmissionFiles.Count > 0)
+        {
+            <div class="nexus-detail-files">
+                <MudText Typo="Typo.subtitle2" Class="nexus-detail-section-label">Attached Files</MudText>
+                <MudList T="string" Dense="true" Class="nexus-detail-file-list">
+                    @foreach (var sf in _submission.SubmissionFiles.OrderBy(f => f.SortOrder))
+                    {
+                        var uf = sf.UploadedFile;
+                        if (uf is null) continue;
+                        <MudListItem T="string">
+                            <div class="nexus-detail-file-item">
+                                <MudIcon Icon="@GetFileTypeIcon(uf.FileType)" Color="Color.Primary" Size="Size.Small" />
+                                @if (_presignedUrls.TryGetValue(uf.S3Key, out var url))
+                                {
+                                    <a href="@url" target="_blank" class="nexus-detail-file-link">@uf.OriginalFileName</a>
+                                }
+                                else
+                                {
+                                    <MudText Typo="Typo.body2">@uf.OriginalFileName</MudText>
+                                }
+                                <MudText Typo="Typo.caption" Class="nexus-detail-file-type">@uf.FileType</MudText>
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            </div>
+        }
+
+        @* Actions *@
+        <div class="nexus-detail-actions">
+            @if (_submission.Status == SubmissionStatus.Pending)
+            {
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.AutoAwesome"
+                           OnClick="HandleGenerateSpec"
+                           Disabled="@_isGenerating"
+                           Class="nexus-detail-generate-btn">
+                    Generate Spec
+                </MudButton>
+            }
+
+            @if (_submission.Status == SubmissionStatus.Generating)
+            {
+                <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Small" Class="nexus-detail-generating-spinner" />
+                <MudText Typo="Typo.body2" Class="nexus-detail-generating-text">Generating spec...</MudText>
+            }
+
+            @if (_submission.Status == SubmissionStatus.AwaitingReview)
+            {
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.RateReview"
+                           OnClick="@(() => Nav.NavigateTo($"/nexus/{Id}/review"))"
+                           Class="nexus-detail-review-btn">
+                    Review Spec
+                </MudButton>
+            }
+
+            @* Download dropdown *@
+            @if (_activeSpec is not null)
+            {
+                <MudMenu Label="Download" StartIcon="@Icons.Material.Filled.Download" Variant="Variant.Outlined" Color="Color.Default" Class="nexus-detail-download-menu">
+                    <MudMenuItem OnClick="@(() => DownloadSpec("md"))">Markdown (.md)</MudMenuItem>
+                    <MudMenuItem OnClick="@(() => DownloadSpec("docx"))">Word (.docx)</MudMenuItem>
+                    <MudMenuItem Disabled="true">PDF (coming soon)</MudMenuItem>
+                </MudMenu>
+            }
+        </div>
+
+        @* Spec viewer *@
+        @if (_activeSpec is not null)
+        {
+            <MudDivider Class="nexus-detail-divider" />
+            <div class="nexus-detail-spec">
+                <MudText Typo="Typo.subtitle2" Class="nexus-detail-section-label">
+                    Specification v@(_activeSpec.Version)
+                    @if (_activeSpec.IsApproved) { <MudChip T="string" Color="Color.Success" Size="Size.Small" Class="nexus-detail-approved-chip">Approved</MudChip> }
+                </MudText>
+                <MudPaper Elevation="1" Class="nexus-detail-spec-viewer">
+                    <pre class="nexus-detail-spec-pre">@(_activeSpec.EditedContent ?? _activeSpec.Content)</pre>
+                </MudPaper>
+            </div>
+        }
+
+    </MudContainer>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Submission? _submission;
+    private SpecDocument? _activeSpec;
+    private bool _loading = true;
+    private string? _error;
+    private bool _isGenerating;
+    private Dictionary<string, string> _presignedUrls = new();
+    private System.Threading.Timer? _pollTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSubmissionAsync();
+    }
+
+    private async Task LoadSubmissionAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _submission = await SubmissionService.GetByIdAsync(Id);
+            if (_submission is null)
+            {
+                _error = "Submission not found.";
+                return;
+            }
+
+            // Load active spec
+            if (_submission.ActiveSpecDocumentId.HasValue)
+                _activeSpec = _submission.SpecDocuments.FirstOrDefault(d => d.Id == _submission.ActiveSpecDocumentId.Value);
+
+            // Generate presigned URLs for files
+            foreach (var sf in _submission.SubmissionFiles)
+            {
+                if (sf.UploadedFile is not null && !_presignedUrls.ContainsKey(sf.UploadedFile.S3Key))
+                {
+                    try
+                    {
+                        var url = await FileStorageService.GetPresignedUrlAsync(sf.UploadedFile.S3Key);
+                        _presignedUrls[sf.UploadedFile.S3Key] = url;
+                    }
+                    catch { /* presigned URL failure is non-fatal */ }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Error loading submission: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task HandleGenerateSpec()
+    {
+        _isGenerating = true;
+        StateHasChanged();
+
+        try
+        {
+            _ = Task.Run(async () => {
+                try
+                {
+                    await SpecGenerationService.GenerateAsync(Id);
+                }
+                catch (Exception ex)
+                {
+                    await InvokeAsync(() => {
+                        Snackbar.Add($"Spec generation failed: {ex.Message}", Severity.Error);
+                        _isGenerating = false;
+                        StateHasChanged();
+                        return Task.CompletedTask;
+                    });
+                }
+            });
+
+            // Start polling
+            _pollTimer = new System.Threading.Timer(async _ =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await LoadSubmissionAsync();
+                    StateHasChanged();
+
+                    if (_submission?.Status != SubmissionStatus.Generating)
+                    {
+                        _isGenerating = false;
+                        _pollTimer?.Dispose();
+                        _pollTimer = null;
+                    }
+                });
+            }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to start spec generation: {ex.Message}", Severity.Error);
+            _isGenerating = false;
+            StateHasChanged();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void DownloadSpec(string format)
+    {
+        if (_submission is null || _activeSpec is null) return;
+        Nav.NavigateTo($"/nexus/{Id}/export?format={format}", forceLoad: true);
+    }
+
+    private static Color GetStatusColor(SubmissionStatus status) => status switch
+    {
+        SubmissionStatus.Draft => Color.Default,
+        SubmissionStatus.Pending => Color.Info,
+        SubmissionStatus.Generating => Color.Warning,
+        SubmissionStatus.AwaitingReview => Color.Primary,
+        SubmissionStatus.Approved => Color.Success,
+        SubmissionStatus.Failed => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string GetFileTypeIcon(FileType fileType) => fileType switch
+    {
+        FileType.Html => Icons.Material.Filled.Code,
+        FileType.Image => Icons.Material.Filled.Image,
+        FileType.Pdf => Icons.Material.Filled.PictureAsPdf,
+        _ => Icons.Material.Filled.InsertDriveFile
+    };
+
+    public void Dispose()
+    {
+        _pollTimer?.Dispose();
+    }
+}

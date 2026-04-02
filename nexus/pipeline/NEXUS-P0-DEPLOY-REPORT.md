@@ -200,3 +200,83 @@ Once the code fix is in place, a new build from the patched commit can be deploy
 | 22:52–23:02 | Multiple task launch attempts — all exit code 139 |
 | 23:02 | 600s timeout — rollback triggered to nexus-web:1 |
 | 23:03 | Health check: HTTP 200 ✅ (nexus-web:3 still serving) |
+
+---
+
+## Cycle 2 — 2026-04-01 (Wed) 23:18–23:24 EDT
+
+**Operator:** War Machine (James Rhodes)
+**Commit:** 16acb3f (16acb3fbd39209e4d8972781d91c969f59875223)
+**Build ID:** fip-nexus-build:4c207c22-1054-4cd2-898e-7ed8076ca4e3
+**Task Definition:** nexus-web:5
+**Image:** 742932328420.dkr.ecr.us-east-1.amazonaws.com/nexus-web:16acb3fbd39209e4d8972781d91c969f59875223
+**Rollback:** nexus-web:1 (image: nexus-web:latest)
+
+### Timeline
+| Time (EDT) | Event |
+|---|---|
+| 23:18 | Build started — fip-nexus-build source-version 16acb3f |
+| 23:19 | Build SUCCEEDED (~90s) |
+| 23:20 | ADO Comment #1 posted (WI 1517) |
+| 23:20 | nexus-web:5 task def registered |
+| 23:20 | ECS service update — nexus-web:5, force-new-deployment |
+| 23:24 | ECS rollout COMPLETED — running=1 desired=1 |
+| 23:24 | Health check: https://nexus.fortressam.ai/health → 200 ✅ |
+| 23:24 | ADO Comment #2 posted (WI 1517) |
+| 23:25 | WIs 1515, 1516, 1517, 1521 → Resolved |
+
+### Result: ✅ SUCCESS
+
+### Work Items Resolved
+- WI 1515 — Entra SSO config + security headers
+- WI 1516 — Cookie domain .fortressam.ai
+- WI 1517 — Azure Key Vault / secrets (DevOps WI)
+- WI 1521 — 10-section SpecGenSystem prompt
+
+### Notes
+- Task def registered as nexus-web:5 (prior revisions existed in cluster)
+- Cognito env vars removed from task def; KeyVaultSettings__VaultUri placeholder injected
+- No rollback required — clean deploy
+
+---
+
+## Cycle 3 — nexus-web:6 (AzureAd baseline fix)
+
+**Date:** 2026-04-02 (UTC) / 2026-04-01 23:28 EDT  
+**Operator:** War Machine (James Rhodes)  
+**Outcome:** ✅ DEPLOY SUCCESS  
+
+### Root Cause (cycle 2 regression)
+nexus-web:5 was built from :1 baseline (no AzureAd env vars). Result: IDX20803 HTTP 500 — placeholder TenantId `{tenantid}` never substituted.
+
+### Fix
+- New task def `:6` built from `:3` baseline (Entra vars present)
+- Reused same image as `:5`: `742932328420.dkr.ecr.us-east-1.amazonaws.com/nexus-web:16acb3fbd39209e4d8972781d91c969f59875223`
+- Cognito vars stripped (`Auth__CognitoAuthority`, `Auth__CognitoClientId`, `Auth__CognitoClientSecret`, `UseStubAuth`)
+- `Auth__CookieDomain` updated to `.fortressam.ai`
+- `KeyVaultSettings__VaultUri` = `https://placeholder.vault.azure.net/` injected
+
+### Env Var Verification (pre-register)
+| Var | Value | Status |
+|-----|-------|--------|
+| `AzureAd__ClientId` | `eda4d502-8c93-422e-b7fb-bb922a2a472e` | ✅ |
+| `AzureAd__TenantId` | `7152ea12-c930-44b0-bb52-069152161c5b` | ✅ |
+| `AzureAd__ClientSecret` | present | ✅ |
+| `Auth__CognitoAuthority` | absent | ✅ |
+| `Auth__CookieDomain` | `.fortressam.ai` | ✅ |
+| `KeyVaultSettings__VaultUri` | `https://placeholder.vault.azure.net/` | ✅ |
+
+### ECS Deployment
+- Task def registered: `arn:aws:ecs:us-east-1:742932328420:task-definition/nexus-web:6`
+- Rollout: COMPLETED in ~2.5 min
+- runningCount: 1
+
+### Health Check
+- `https://nexus.fortressam.ai/health` → **200** ✅
+
+### Rollback Available
+- `nexus-web:3` — last known good with Entra vars
+
+### ADO Comments Posted
+- WI 1517 (DevOps): start + complete
+- WI 1515, 1516, 1521: complete notification

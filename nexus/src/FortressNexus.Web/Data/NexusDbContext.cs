@@ -10,6 +10,7 @@ public class NexusDbContext : DbContext
 
     public DbSet<UploadedFile> UploadedFiles => Set<UploadedFile>();
     public DbSet<Submission> Submissions => Set<Submission>();
+    public DbSet<SubmissionFile> SubmissionFiles => Set<SubmissionFile>();
     public DbSet<SpecDocument> SpecDocuments => Set<SpecDocument>();
     public DbSet<ArtifactSet> ArtifactSets => Set<ArtifactSet>();
     public DbSet<WorkItemRecord> WorkItemRecords => Set<WorkItemRecord>();
@@ -32,7 +33,11 @@ public class NexusDbContext : DbContext
             entity.Property(e => e.UploadedBy).HasColumnName("uploaded_by").HasMaxLength(100).IsRequired();
             entity.Property(e => e.UploadedAt).HasColumnName("uploaded_at").IsRequired();
             entity.Property(e => e.ProcessedText).HasColumnName("processed_text");
-            entity.Ignore(e => e.Submissions);
+            entity.Property(e => e.FileType).HasColumnName("file_type").HasConversion<int>().IsRequired();
+            entity.HasMany(e => e.SubmissionFiles)
+                .WithOne(sf => sf.UploadedFile)
+                .HasForeignKey(sf => sf.UploadedFileId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // Submission
@@ -44,7 +49,7 @@ public class NexusDbContext : DbContext
             entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(200).IsRequired();
             entity.Property(e => e.FeatureArea).HasColumnName("feature_area").HasMaxLength(100);
             entity.Property(e => e.NarrativeText).HasColumnName("narrative_text").IsRequired();
-            entity.Property(e => e.MockupFileId).HasColumnName("mockup_file_id").IsRequired();
+            entity.Property(e => e.MockupFileId).HasColumnName("mockup_file_id").IsRequired(false);
             entity.Property(e => e.SubmittedBy).HasColumnName("submitted_by").HasMaxLength(100).IsRequired();
             entity.Property(e => e.SubmittedAt).HasColumnName("submitted_at").IsRequired();
             entity.Property(e => e.Status).HasColumnName("status")
@@ -55,7 +60,23 @@ public class NexusDbContext : DbContext
             entity.HasOne(e => e.MockupFile)
                 .WithMany()
                 .HasForeignKey(e => e.MockupFileId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+            entity.HasMany(e => e.SubmissionFiles)
+                .WithOne(sf => sf.Submission)
+                .HasForeignKey(sf => sf.SubmissionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // SubmissionFile
+        modelBuilder.Entity<SubmissionFile>(entity =>
+        {
+            entity.ToTable("submission_files");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            entity.Property(e => e.SubmissionId).HasColumnName("submission_id").IsRequired();
+            entity.Property(e => e.UploadedFileId).HasColumnName("uploaded_file_id").IsRequired();
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order").IsRequired();
         });
 
         // SpecDocument
