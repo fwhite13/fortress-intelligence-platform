@@ -74,7 +74,7 @@
                 Upload UI mockups, screenshots, or reference documents (optional — 0–10 files).
             </MudText>
 
-            <FileUploadZone OnFilesSelected="HandleFilesSelected" />
+            <FileUploadZone OnFilesSelected="HandleFilesSelected" InitialFiles="@(_pendingFiles.AsReadOnly())" />
 
             @foreach (var (file, error) in _fileErrors)
             {
@@ -123,7 +123,7 @@
             <MudPaper Elevation="0" Class="nexus-wizard-review-card">
                 <MudText Typo="Typo.overline" Class="nexus-wizard-review-label">Files</MudText>
                 <MudText Typo="Typo.body2" Class="nexus-wizard-review-value">
-                    @(_uploadedFiles.Count == 0 ? "None (narrative-only)" : $"{_uploadedFiles.Count} file(s) uploaded")
+                    @(_pendingFiles.Count == 0 ? "None (narrative-only)" : $"{_pendingFiles.Count} file(s) selected")
                 </MudText>
             </MudPaper>
 
@@ -133,7 +133,7 @@
             }
 
             <MudStack Row="true" Spacing="2" Class="nexus-wizard-nav-row">
-                <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="GoToStep2" Disabled="@_isSubmitting" Class="nexus-wizard-back-btn">Back</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="BackToStep2" Disabled="@_isSubmitting" Class="nexus-wizard-back-btn">Back</MudButton>
                 <MudButton Variant="Variant.Filled"
                            Color="Color.Success"
                            OnClick="HandleSubmit"
@@ -186,7 +186,21 @@
         _activeStep = 1;
     }
 
-    private void GoToStep3() => _activeStep = 2;
+    private void GoToStep3()
+    {
+        _isSubmitting = false;
+        _isUploading = false;
+        _fileErrors.Clear();
+        _activeStep = 2;
+    }
+
+    private void BackToStep2()
+    {
+        _isSubmitting = false;
+        _isUploading = false;
+        _fileErrors.Clear();
+        _activeStep = 1;
+    }
 
     private void HandleFilesSelected(IReadOnlyList<IBrowserFile> files)
     {

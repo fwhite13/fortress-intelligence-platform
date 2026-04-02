@@ -51,6 +51,15 @@
     [Parameter] public string[] AcceptedTypes { get; set; } = ["text/html", "image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
     [Parameter] public long MaxFileSizeBytes { get; set; } = 10 * 1024 * 1024;
     [Parameter] public int MaxFiles { get; set; } = 10;
+    [Parameter] public IReadOnlyList<IBrowserFile>? InitialFiles { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (InitialFiles is { Count: > 0 } && _selectedFiles.Count == 0)
+        {
+            _selectedFiles = InitialFiles.ToList();
+        }
+    }
 
     private List<IBrowserFile> _selectedFiles = new();
     private string _errorMessage = "";
