@@ -89,7 +89,7 @@
 
             <MudStack Row="true" Spacing="2" Class="nexus-wizard-nav-row">
                 <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="GoToStep1" Class="nexus-wizard-back-btn">Back</MudButton>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GoToStep3" Disabled="@_isUploading" Class="nexus-wizard-next-btn">Next: Review</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => GoToStep3()" Disabled="@_isUploading" Class="nexus-wizard-next-btn">Next: Review</MudButton>
             </MudStack>
         </MudStack>
     }
@@ -186,11 +186,40 @@
         _activeStep = 1;
     }
 
-    private void GoToStep3()
+    private async Task GoToStep3()
     {
         _isSubmitting = false;
         _isUploading = false;
         _fileErrors.Clear();
+
+        if (_pendingFiles.Count > 0)
+        {
+            _isUploading = true;
+            StateHasChanged();
+
+            var upn = await UserContextService.GetUpnAsync();
+            _uploadedFiles.Clear();
+            foreach (var browserFile in _pendingFiles)
+            {
+                try
+                {
+                    var uploaded = await FileStorageService.UploadAsync(browserFile, upn);
+                    var saved = await SubmissionService.SaveUploadedFileAsync(uploaded);
+                    _uploadedFiles.Add(saved);
+                }
+                catch (Exception ex)
+                {
+                    _fileErrors.Add((browserFile, ex.Message));
+                    Snackbar.Add($"Failed to upload '{browserFile.Name}': {ex.Message}", Severity.Error);
+                }
+            }
+            _isUploading = false;
+            StateHasChanged();
+
+            if (_fileErrors.Count > 0)
+                return; // Stay on Step 2, errors shown in the @foreach above FileUploadZone
+        }
+
         _activeStep = 2;
     }
 
@@ -212,41 +241,12 @@
         if (!CanSubmit) return;
 
         _isSubmitting = true;
-        _fileErrors.Clear();
         StateHasChanged();
 
         try
         {
             var upn = await UserContextService.GetUpnAsync();
 
-            // Upload pending files
-            _isUploading = true;
-            StateHasChanged();
-
-            _uploadedFiles.Clear();
-            foreach (var browserFile in _pendingFiles)
-            {
-                try
-                {
-                    var uploaded = await FileStorageService.UploadAsync(browserFile, upn);
-                    var saved = await SubmissionService.SaveUploadedFileAsync(uploaded);
-                    _uploadedFiles.Add(saved);
-                }
-                catch (Exception ex)
-                {
-                    _fileErrors.Add((browserFile, ex.Message));
-                }
-            }
-            _isUploading = false;
-
-            if (_fileErrors.Count > 0)
-            {
-                _isSubmitting = false;
-                StateHasChanged();
-                return;
-            }
-
-            // Create submission
             var dto = new FortressNexus.Web.Models.DTOs.SubmissionCreateDto
             {
                 Title = _title,
@@ -263,7 +263,6 @@
         {
             Snackbar.Add($"Submission failed: {ex.Message}", Severity.Error);
             _isSubmitting = false;
-            _isUploading = false;
             StateHasChanged();
         }
     }
