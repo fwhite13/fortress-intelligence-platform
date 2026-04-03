@@ -54,6 +54,7 @@ public class BriefingSchedulerService : BackgroundService
 
                 var scheduledMinutes = schedule.DeliveryTimeUtc.Hour * 60 + schedule.DeliveryTimeUtc.Minute;
                 var delta = Math.Abs(nowMinutes - scheduledMinutes);
+                delta = Math.Min(delta, 1440 - delta);  // handle midnight rollover
 
                 if (delta > 1)
                 {
