@@ -19,7 +19,7 @@ public class FileStorageService : IFileStorageService
         ["text/html", "image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10MB
 
-    private string Bucket => _config["Nexus:S3Bucket"] ?? "nexus-uploads-dev";
+    private string Bucket => _config["Nexus:S3Bucket"] ?? "fortress-nexus-uploads-dev";
 
     public FileStorageService(IAmazonS3 s3, IConfiguration config, ILogger<FileStorageService> logger)
     {
