@@ -265,6 +265,7 @@ builder.Services.AddScoped<IMcpToolService, McpToolService>();
 builder.Services.AddSingleton<McpHttpTransport>();
 builder.Services.AddSingleton<BraveSearchClient>();
 builder.Services.AddHostedService<ManifestRefreshService>();
+builder.Services.AddHostedService<BriefingSchedulerService>();
 builder.Services.AddMemoryCache();
 
 // Named HttpClient for DevOps test connection — short timeout so bad org URL fails fast
