@@ -123,17 +123,17 @@ public class FileStorageService : IFileStorageService
         };
     }
 
-    public async Task<Stream> DownloadAsync(string s3Key)
+    public async Task<Stream> DownloadAsync(string s3Key, string bucketName)
     {
-        var response = await _s3.GetObjectAsync(Bucket, s3Key);
+        var response = await _s3.GetObjectAsync(bucketName, s3Key);
         return response.ResponseStream;
     }
 
-    public async Task<string> GetPresignedUrlAsync(string s3Key, int expiryMinutes = 15)
+    public async Task<string> GetPresignedUrlAsync(string s3Key, string bucketName, int expiryMinutes = 15)
     {
         var request = new GetPreSignedUrlRequest
         {
-            BucketName = Bucket,
+            BucketName = bucketName,
             Key = s3Key,
             Expires = DateTime.UtcNow.AddMinutes(expiryMinutes)
         };

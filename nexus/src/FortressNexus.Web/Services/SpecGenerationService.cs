@@ -158,7 +158,7 @@ public class SpecGenerationService : ISpecGenerationService
                         // Vision call per image — with 60s per-call timeout
                         try
                         {
-                            var imageStream = await _fileStorage.DownloadAsync(file.S3Key);
+                            var imageStream = await _fileStorage.DownloadAsync(file.S3Key, file.S3Bucket);
                             using var ms = new MemoryStream();
                             await imageStream.CopyToAsync(ms);
                             var imageBytes = ms.ToArray();

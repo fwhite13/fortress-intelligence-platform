@@ -186,7 +186,7 @@ else if (_submission is not null)
                 {
                     try
                     {
-                        var url = await FileStorageService.GetPresignedUrlAsync(sf.UploadedFile.S3Key);
+                        var url = await FileStorageService.GetPresignedUrlAsync(sf.UploadedFile.S3Key, sf.UploadedFile.S3Bucket);
                         _presignedUrls[sf.UploadedFile.S3Key] = url;
                     }
                     catch { /* presigned URL failure is non-fatal */ }
