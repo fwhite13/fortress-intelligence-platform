@@ -1,3 +1,4 @@
+using Serilog;
 using Amazon.S3;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
@@ -14,6 +15,11 @@ using Azure.Extensions.AspNetCore.Configuration.Secrets;
 using Microsoft.AspNetCore.Authentication.Cookies;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog((ctx, cfg) =>
+    cfg.ReadFrom.Configuration(ctx.Configuration)
+       .Enrich.FromLogContext()
+       .WriteTo.Console());
 
 // Razor Components + Interactive Server
 builder.Services.AddRazorComponents()
@@ -122,6 +128,7 @@ builder.Services.AddScoped<IArtifactGenerationService, ArtifactGenerationService
 builder.Services.AddScoped<UserContextService>();
 builder.Services.AddScoped<IAdoService, StubAdoService>();
 builder.Services.AddScoped<ISpecExporter, MarkdownExporter>();
+builder.Services.AddScoped<PdfExporter>();
 builder.Services.AddScoped<BedrockService>();
 builder.Services.AddScoped<IMockupSectionizer, MockupSectionizerService>();
 builder.Services.AddScoped<ISpecService, SpecService>();
@@ -162,6 +169,9 @@ app.Use(async (context, next) =>
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["Content-Security-Policy"] = "frame-ancestors 'none'";
+    context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
     await next();
 });
 app.UseRouting();

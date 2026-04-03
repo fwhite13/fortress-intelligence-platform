@@ -17,21 +17,26 @@ public class SubmissionExportController : ControllerBase
 {
     private readonly NexusDbContext _db;
     private readonly ISpecExporter _markdownExporter;
+    private readonly PdfExporter _pdfExporter;
     private readonly ILogger<SubmissionExportController> _logger;
 
     public SubmissionExportController(
         NexusDbContext db,
         ISpecExporter markdownExporter,
+        PdfExporter pdfExporter,
         ILogger<SubmissionExportController> logger)
     {
         _db = db;
         _markdownExporter = markdownExporter;
+        _pdfExporter = pdfExporter;
         _logger = logger;
     }
 
     [HttpGet]
     public async Task<IActionResult> Export(int id, [FromQuery] string format)
     {
+        _logger.LogInformation("[EXPORT] Export requested for submission {SubmissionId} format={Format}", id, format);
+
         var submission = await _db.Submissions
             .Include(s => s.SpecDocuments)
             .FirstOrDefaultAsync(s => s.Id == id);
@@ -69,7 +74,10 @@ public class SubmissionExportController : ControllerBase
             }
 
             case "pdf":
-                return StatusCode(501, "PDF export not yet implemented.");
+            {
+                var (content, mimeType, filename) = await _pdfExporter.ExportAsync(specDoc);
+                return File(content, mimeType, $"{baseFilename}.pdf");
+            }
 
             default:
                 return BadRequest($"Unknown export format '{format}'. Supported: md, docx, pdf.");

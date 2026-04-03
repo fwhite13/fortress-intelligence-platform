@@ -60,6 +60,8 @@ public class StubAdoService : IAdoService
     public Task<List<WorkItemRecord>> CreateWorkItemBatchAsync(ArtifactSet artifactSet, List<AdoWorkItemDto> items)
     {
         _logger.LogInformation("[StubAdoService] CreateWorkItemBatchAsync: {Count} items", items.Count);
+        _logger.LogInformation("[StubAdoService] CreateWorkItemBatchAsync items: {ItemsJson}",
+            System.Text.Json.JsonSerializer.Serialize(items));
         var records = items.Select(dto => new WorkItemRecord
         {
             ArtifactSetId = artifactSet.Id,

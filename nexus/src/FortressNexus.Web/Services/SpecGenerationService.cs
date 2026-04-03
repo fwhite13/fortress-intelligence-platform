@@ -80,8 +80,8 @@ public class SpecGenerationService : ISpecGenerationService
             submission.Status = SubmissionStatus.AwaitingReview;
             await _db.SaveChangesAsync();
 
-            _logger.LogInformation("[SPEC_GEN] Generated SpecDocument {SpecId} v{Version} for Submission {SubId}",
-                specDoc.Id, specDoc.Version, submissionId);
+            _logger.LogInformation("[SPEC_GEN] Generated SpecDocument {SpecDocumentId} v{Version} for Submission {SubmissionId} — PromptTokens={PromptTokens} CompletionTokens={CompletionTokens}",
+                specDoc.Id, specDoc.Version, submissionId, result.PromptTokens, result.CompletionTokens);
 
             return specDoc;
         }

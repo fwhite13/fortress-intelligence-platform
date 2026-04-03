@@ -9,6 +9,8 @@
 @inject NavigationManager Nav
 @inject UserContextService UserContextService
 @inject ISnackbar Snackbar
+@inject IArtifactGenerationService ArtifactGenerationService
+@inject IAdoService AdoService
 
 @using FortressNexus.Web.Models.Entities
 @using FortressNexus.Web.Models.Enums
@@ -115,13 +117,25 @@ else if (_submission is not null)
                 </MudButton>
             }
 
+            @if (_submission.Status == SubmissionStatus.Approved || _submission.Status == SubmissionStatus.ArtifactsCreated)
+            {
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Secondary"
+                           StartIcon="@Icons.Material.Filled.WorkOutline"
+                           OnClick="HandleGenerateWorkItems"
+                           Disabled="@_isGeneratingWorkItems"
+                           Class="nexus-detail-generate-wi-btn">
+                    Generate Work Items
+                </MudButton>
+            }
+
             @* Download dropdown *@
             @if (_activeSpec is not null)
             {
                 <MudMenu Label="Download" StartIcon="@Icons.Material.Filled.Download" Variant="Variant.Outlined" Color="Color.Default" Class="nexus-detail-download-menu">
                     <MudMenuItem OnClick="@(() => DownloadSpec("md"))">Markdown (.md)</MudMenuItem>
                     <MudMenuItem OnClick="@(() => DownloadSpec("docx"))">Word (.docx)</MudMenuItem>
-                    <MudMenuItem Disabled="true">PDF (coming soon)</MudMenuItem>
+                    <MudMenuItem OnClick="@(() => DownloadSpec("pdf"))">PDF (.pdf)</MudMenuItem>
                 </MudMenu>
             }
         </div>
@@ -154,6 +168,7 @@ else if (_submission is not null)
     private bool _loading = true;
     private string? _error;
     private bool _isGenerating;
+    private bool _isGeneratingWorkItems;
     private Dictionary<string, string> _presignedUrls = new();
     private System.Threading.Timer? _pollTimer;
 
@@ -251,6 +266,41 @@ else if (_submission is not null)
         }
 
         return Task.CompletedTask;
+    }
+
+    private async Task HandleGenerateWorkItems()
+    {
+        if (_activeSpec is null || _submission is null) return;
+
+        _isGeneratingWorkItems = true;
+        StateHasChanged();
+
+        try
+        {
+            var workItems = await ArtifactGenerationService.GenerateWorkItemsAsync(_activeSpec.Id);
+
+            var stubArtifactSet = new ArtifactSet
+            {
+                SpecDocumentId = _activeSpec.Id,
+                AdoOrganization = "stub",
+                AdoProjectName = "NEXUS",
+                ProcessTemplateTypeId = "6b724908-ef14-45cf-84f8-768b5384da45",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = "nexus-ui"
+            };
+
+            var records = await AdoService.CreateWorkItemBatchAsync(stubArtifactSet, workItems);
+            Snackbar.Add($"{records.Count} work items created in ADO.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Work item generation failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isGeneratingWorkItems = false;
+            StateHasChanged();
+        }
     }
 
     private void DownloadSpec(string format)

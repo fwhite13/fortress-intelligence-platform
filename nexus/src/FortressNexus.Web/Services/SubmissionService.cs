@@ -47,8 +47,8 @@ public class SubmissionService : ISubmissionService
         if (fileIds.Count > 0)
             await _db.SaveChangesAsync();
 
-        _logger.LogInformation("NEXUS: Created submission {Id} for {Upn} with {Count} files",
-            submission.Id, userUpn, fileIds.Count);
+        _logger.LogInformation("[SUBMISSION] Created submission {SubmissionId} Title={Title} for {UserUpn} with {FileCount} files",
+            submission.Id, submission.Title, userUpn, fileIds.Count);
         return submission;
     }
 
@@ -83,11 +83,12 @@ public class SubmissionService : ISubmissionService
         var submission = await _db.Submissions.FindAsync(id);
         if (submission is null)
         {
-            _logger.LogWarning("NEXUS: UpdateStatus — submission {Id} not found", id);
+            _logger.LogWarning("[SUBMISSION] UpdateStatusAsync — submission {SubmissionId} not found", id);
             return;
         }
         submission.Status = status;
         await _db.SaveChangesAsync();
+        _logger.LogInformation("[SUBMISSION] Status changed for submission {SubmissionId} to {Status}", id, status);
     }
 
     public async Task SetActiveSpecDocumentAsync(int submissionId, int specDocumentId)
@@ -95,7 +96,7 @@ public class SubmissionService : ISubmissionService
         var submission = await _db.Submissions.FindAsync(submissionId);
         if (submission is null)
         {
-            _logger.LogWarning("NEXUS: SetActiveSpec — submission {Id} not found", submissionId);
+            _logger.LogWarning("[SUBMISSION] SetActiveSpecDocumentAsync — submission {SubmissionId} not found", submissionId);
             return;
         }
         submission.ActiveSpecDocumentId = specDocumentId;
