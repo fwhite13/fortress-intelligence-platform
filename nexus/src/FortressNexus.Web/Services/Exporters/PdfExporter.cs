@@ -17,7 +17,6 @@ public class PdfExporter : ISpecExporter
         var font = builder.AddStandard14Font(Standard14Font.Helvetica);
         var fontBold = builder.AddStandard14Font(Standard14Font.HelveticaBold);
 
-        double pageWidth = 595;
         double leftMargin = 50;
         double rightMargin = 545;
         double y = 780;
@@ -25,6 +24,8 @@ public class PdfExporter : ISpecExporter
         double titleFontSize = 16;
         double bodyFontSize = 10;
         double maxLineWidth = rightMargin - leftMargin;
+        // Helvetica 10pt: ~5.6 pts/char average → ~88 chars safe
+        int maxCharsPerLine = (int)(maxLineWidth / 5.6);
 
         // Title
         page.AddText(title, titleFontSize, new UglyToad.PdfPig.Core.PdfPoint(leftMargin, y), fontBold);
@@ -53,7 +54,7 @@ public class PdfExporter : ISpecExporter
             else if (line.StartsWith("# ")) line = line[2..];
 
             // Truncate very long lines
-            if (line.Length > 120) line = line[..120] + "...";
+            if (line.Length > maxCharsPerLine) line = line[..maxCharsPerLine] + "...";
 
             if (string.IsNullOrWhiteSpace(line))
             {

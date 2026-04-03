@@ -316,6 +316,7 @@ else if (_submission is not null)
         SubmissionStatus.Generating => Color.Warning,
         SubmissionStatus.AwaitingReview => Color.Primary,
         SubmissionStatus.Approved => Color.Success,
+        SubmissionStatus.ArtifactsCreated => Color.Success,
         SubmissionStatus.Failed => Color.Error,
         _ => Color.Default
     };
