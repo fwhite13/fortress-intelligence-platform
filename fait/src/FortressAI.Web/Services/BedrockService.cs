@@ -9,20 +9,20 @@ using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime.Documents;
 using FortressAI.Shared.Models;
 using FortressAI.Web.Services.Mcp;
+using Microsoft.Extensions.Configuration;
 
 namespace FortressAI.Web.Services;
 
 public class BedrockService : IDisposable
 {
-    // Haiku not subscribed in this account — use Sonnet for title generation (same model as chat)
-    private const string TitleModelId = "us.anthropic.claude-sonnet-4-6";
-
     private readonly AmazonBedrockRuntimeClient _client;
     private readonly ILogger<BedrockService> _logger;
+    private readonly IConfiguration _config;
 
-    public BedrockService(ILogger<BedrockService> logger)
+    public BedrockService(ILogger<BedrockService> logger, IConfiguration config)
     {
         _logger = logger;
+        _config = config;
         _client = new AmazonBedrockRuntimeClient(new AmazonBedrockRuntimeConfig
         {
             RegionEndpoint = RegionEndpoint.USEast1
@@ -296,8 +296,9 @@ public class BedrockService : IDisposable
     /// Used for classification, summarization, and other non-streaming tasks.
     /// </summary>
     public async Task<string> InvokeClaudeAsync(string prompt, int maxTokens = 1000, string? systemPrompt = null,
-        string modelId = "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+        string? modelId = null)
     {
+        modelId ??= _config.GetValue<string>("Bedrock:InvokeModelId", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")!;
         var requestObj = new JsonObject
         {
             ["anthropic_version"] = "bedrock-2023-05-31",
@@ -362,7 +363,7 @@ public class BedrockService : IDisposable
         var json = requestObj.ToJsonString();
         var request = new InvokeModelRequest
         {
-            ModelId = TitleModelId,
+            ModelId = _config.GetValue<string>("Bedrock:TitleModelId", "us.anthropic.claude-sonnet-4-6")!,
             ContentType = "application/json",
             Accept = "application/json",
             Body = new MemoryStream(Encoding.UTF8.GetBytes(json))

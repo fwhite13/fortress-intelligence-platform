@@ -10,23 +10,21 @@ namespace FortressAI.Web.Services;
 /// Converts a raw user message + recent conversation history into 2–3 semantically
 /// precise search queries optimized for vector KB retrieval.
 ///
-/// Uses Claude Haiku 4.5 (us.anthropic.claude-haiku-4-5-20251001-v1:0) — lightweight,
-/// fast, and cost-effective for query generation. Model ID is sourced from ModelInfo.cs.
+/// Uses Claude Haiku 4.5 by default — lightweight, fast, and cost-effective for query generation.
+/// Model ID configurable via KnowledgeBase:KbQueryModelId (default: us.anthropic.claude-haiku-4-5-20251001-v1:0).
 /// </summary>
 public class KbQueryService
 {
     private readonly AmazonBedrockRuntimeClient _client;
     private readonly ILogger<KbQueryService> _logger;
     private readonly int _timeoutMs;
-
-    // Claude Haiku 4.5 — fast and cost-effective for query generation.
-    // Model ID from ModelInfo.cs (claude-haiku-4-5). HARDCODED — never use the user's selected model here.
-    private const string QueryModelId = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+    private readonly string _queryModelId;
 
     public KbQueryService(IConfiguration config, ILogger<KbQueryService> logger)
     {
         _logger = logger;
         _timeoutMs = config.GetValue<int>("KnowledgeBase:QueryGenerationTimeoutMs", 5000);
+        _queryModelId = config.GetValue<string>("KnowledgeBase:KbQueryModelId", "us.anthropic.claude-haiku-4-5-20251001-v1:0")!;
         _client = new AmazonBedrockRuntimeClient(new AmazonBedrockRuntimeConfig
         {
             RegionEndpoint = RegionEndpoint.USEast1
@@ -57,7 +55,7 @@ public class KbQueryService
 
             var request = new InvokeModelRequest
             {
-                ModelId = QueryModelId,
+                ModelId = _queryModelId,
                 ContentType = "application/json",
                 Accept = "application/json",
                 Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(

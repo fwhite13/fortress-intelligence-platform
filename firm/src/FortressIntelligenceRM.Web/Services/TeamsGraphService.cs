@@ -543,7 +543,7 @@ Transcript:
             var bodyBytes = Encoding.UTF8.GetBytes(requestBody);
             var response = await _bedrockRuntime.InvokeModelAsync(new InvokeModelRequest
             {
-                ModelId = "anthropic.claude-3-sonnet-20240229-v1:0",
+                ModelId = _config.GetValue<string>("Bedrock:SummaryModelId", "anthropic.claude-3-sonnet-20240229-v1:0")!,
                 ContentType = "application/json",
                 Accept = "application/json",
                 Body = new MemoryStream(bodyBytes)
@@ -586,7 +586,7 @@ Transcript:
                 ActionItemsJson = summaryRoot.TryGetProperty("actionItemsJson", out var ai) ? ai.GetString() : null,
                 KeyDecisionsJson = summaryRoot.TryGetProperty("keyDecisionsJson", out var kd) ? kd.GetString() : null,
                 FollowUpsJson = summaryRoot.TryGetProperty("followUpsJson", out var fu) ? fu.GetString() : null,
-                ModelUsed = "anthropic.claude-3-sonnet-20240229-v1:0"
+                ModelUsed = _config.GetValue<string>("Bedrock:SummaryModelId", "anthropic.claude-3-sonnet-20240229-v1:0")!
             };
         }
         catch (Exception ex)
