@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace FortressIntelligenceRM.Web.Controllers;
@@ -905,6 +906,7 @@ public class TranscriptSegmentPayload
 
 public class SummaryPayload
 {
+    [JsonPropertyName("summaryText")]
     public string? SummaryText { get; set; }
     public string? ActionItemsJson { get; set; }
     public string? KeyDecisionsJson { get; set; }
