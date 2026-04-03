@@ -451,7 +451,7 @@ public class TeamsGraphService : IHostedService, IDisposable
 
     // ── Bedrock Summarization ─────────────────────────────────────────────────
 
-    private async Task<BedrockSummaryResult?> SummarizeAsync(string transcriptText, long meetingId, CancellationToken ct = default)
+    internal async Task<BedrockSummaryResult?> SummarizeAsync(string transcriptText, long meetingId, CancellationToken ct = default)
     {
         try
         {
@@ -654,7 +654,7 @@ Transcript:
         public long? EndTimeMs { get; set; }
     }
 
-    private class BedrockSummaryResult
+    internal class BedrockSummaryResult
     {
         public string? SummaryText { get; set; }
         public string? ActionItemsJson { get; set; }

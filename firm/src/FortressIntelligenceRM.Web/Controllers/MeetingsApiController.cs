@@ -24,6 +24,7 @@ public class MeetingsApiController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MeetingsApiController> _logger;
     private readonly IFirmBotService _firmBotService;
+    private readonly TeamsGraphService _teamsGraphService;
 
     public MeetingsApiController(
         MeetingService meetingService,
@@ -34,7 +35,8 @@ public class MeetingsApiController : ControllerBase
         IConfiguration config,
         IHttpClientFactory httpClientFactory,
         ILogger<MeetingsApiController> logger,
-        IFirmBotService firmBotService)
+        IFirmBotService firmBotService,
+        TeamsGraphService teamsGraphService)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
@@ -45,6 +47,7 @@ public class MeetingsApiController : ControllerBase
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _firmBotService = firmBotService;
+        _teamsGraphService = teamsGraphService;
     }
 
 [HttpPost("/api/meetings/join")]
@@ -715,6 +718,90 @@ public class MeetingsApiController : ControllerBase
         await using var db = await _dbFactory.CreateDbContextAsync();
         await db.Database.ExecuteSqlRawAsync("DELETE FROM firm_meetings WHERE id = {0}", id);
         return NoContent();
+    }
+
+    [HttpPost("{id}/reprocess-summary")]
+    [Authorize]
+    public async Task<IActionResult> ReprocessSummary(long id)
+    {
+        var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
+        if (error != null) return error;
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        // Build transcript text — try S3 first, fall back to DB rows
+        string transcriptText;
+        if (!string.IsNullOrEmpty(meeting!.TranscriptS3Key))
+        {
+            var s3Text = await _s3Service.GetTranscriptTextAsync(meeting.TranscriptS3Key);
+            if (!string.IsNullOrEmpty(s3Text))
+            {
+                transcriptText = s3Text;
+            }
+            else
+            {
+                transcriptText = await BuildTranscriptFromDbAsync(db, id);
+            }
+        }
+        else
+        {
+            transcriptText = await BuildTranscriptFromDbAsync(db, id);
+        }
+
+        if (string.IsNullOrWhiteSpace(transcriptText))
+            return BadRequest(new { error = "No transcript available to summarize" });
+
+        // Call Bedrock summarization
+        var summary = await _teamsGraphService.SummarizeAsync(transcriptText, id);
+        if (summary == null)
+            return StatusCode(500, new { error = "Summarization failed" });
+
+        // Upsert summary record
+        var existing = await db.Summaries.FirstOrDefaultAsync(s => s.MeetingId == id);
+        if (existing == null)
+        {
+            db.Summaries.Add(new FirmMeetingSummary
+            {
+                MeetingId = id,
+                SummaryText = summary.SummaryText ?? "",
+                ActionItemsJson = summary.ActionItemsJson ?? "[]",
+                KeyDecisionsJson = summary.KeyDecisionsJson ?? "[]",
+                FollowUpsJson = summary.FollowUpsJson ?? "[]",
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+        else
+        {
+            existing.SummaryText = summary.SummaryText ?? "";
+            existing.ActionItemsJson = summary.ActionItemsJson ?? "[]";
+            existing.KeyDecisionsJson = summary.KeyDecisionsJson ?? "[]";
+            existing.FollowUpsJson = summary.FollowUpsJson ?? "[]";
+        }
+        await db.SaveChangesAsync();
+
+        // Set meeting status to Complete
+        await _meetingService.UpdateStatusAsync(id, MeetingStatus.Complete);
+
+        _logger.LogInformation("FIRM: ReprocessSummary complete for meeting {Id}", id);
+        return Ok(new { meetingId = id, summary = summary.SummaryText });
+    }
+
+    private async Task<string> BuildTranscriptFromDbAsync(FirmDbContext db, long meetingId)
+    {
+        var segments = await db.Transcripts
+            .Where(t => t.MeetingId == meetingId)
+            .OrderBy(t => t.StartTimeMs)
+            .ToListAsync();
+        var sb = new StringBuilder();
+        foreach (var seg in segments)
+        {
+            var speaker = seg.SpeakerName ?? seg.SpeakerLabel ?? "Unknown";
+            var ts = seg.StartTimeMs.HasValue
+                ? TimeSpan.FromMilliseconds(seg.StartTimeMs.Value).ToString(@"hh\:mm\:ss")
+                : "00:00:00";
+            sb.AppendLine($"[{ts}] {speaker}: {seg.Text}");
+        }
+        return sb.ToString();
     }
 
     public record PushToKbRequest(string DocType, List<string> KbScopes);
