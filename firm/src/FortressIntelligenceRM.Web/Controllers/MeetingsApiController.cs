@@ -727,6 +727,9 @@ public class MeetingsApiController : ControllerBase
         var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
         if (error != null) return error;
 
+        if (meeting!.Status is not (MeetingStatus.Complete or MeetingStatus.Failed or MeetingStatus.Summarizing))
+            return BadRequest(new { error = "Meeting must be in Complete, Failed, or Summarizing state to reprocess" });
+
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         // Build transcript text — try S3 first, fall back to DB rows
@@ -767,6 +770,7 @@ public class MeetingsApiController : ControllerBase
                 ActionItemsJson = summary.ActionItemsJson ?? "[]",
                 KeyDecisionsJson = summary.KeyDecisionsJson ?? "[]",
                 FollowUpsJson = summary.FollowUpsJson ?? "[]",
+                ModelUsed = summary.ModelUsed,
                 CreatedAt = DateTime.UtcNow
             });
         }
@@ -776,10 +780,19 @@ public class MeetingsApiController : ControllerBase
             existing.ActionItemsJson = summary.ActionItemsJson ?? "[]";
             existing.KeyDecisionsJson = summary.KeyDecisionsJson ?? "[]";
             existing.FollowUpsJson = summary.FollowUpsJson ?? "[]";
+            existing.ModelUsed = summary.ModelUsed;
         }
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: ReprocessSummary save failed for meeting {Id}", id);
+            return StatusCode(500, new { error = "Failed to save summary" });
+        }
 
-        // Set meeting status to Complete
+        // Set meeting status to Complete (only runs if save succeeded)
         await _meetingService.UpdateStatusAsync(id, MeetingStatus.Complete);
 
         _logger.LogInformation("FIRM: ReprocessSummary complete for meeting {Id}", id);

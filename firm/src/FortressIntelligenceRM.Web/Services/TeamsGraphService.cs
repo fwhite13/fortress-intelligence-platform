@@ -585,7 +585,8 @@ Transcript:
                 SummaryText = summaryRoot.TryGetProperty("summaryText", out var st) ? st.GetString() : null,
                 ActionItemsJson = summaryRoot.TryGetProperty("actionItemsJson", out var ai) ? ai.GetString() : null,
                 KeyDecisionsJson = summaryRoot.TryGetProperty("keyDecisionsJson", out var kd) ? kd.GetString() : null,
-                FollowUpsJson = summaryRoot.TryGetProperty("followUpsJson", out var fu) ? fu.GetString() : null
+                FollowUpsJson = summaryRoot.TryGetProperty("followUpsJson", out var fu) ? fu.GetString() : null,
+                ModelUsed = "anthropic.claude-3-sonnet-20240229-v1:0"
             };
         }
         catch (Exception ex)
@@ -660,6 +661,7 @@ Transcript:
         public string? ActionItemsJson { get; set; }
         public string? KeyDecisionsJson { get; set; }
         public string? FollowUpsJson { get; set; }
+        public string? ModelUsed { get; set; }
     }
 
     private class MeetingIdRow
