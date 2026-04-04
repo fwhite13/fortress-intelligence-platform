@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # run-cc.sh — CC pipeline wrapper
 # Sets required env vars for all Tony/Clint/Rhodey CC invocations.
-# Usage: cat brief.md | ./scripts/run-cc.sh [--bare] [-- extra claude args]
-# Or:    ./scripts/run-cc.sh --bare --model opus < brief.md
+# Usage: cat brief.md | ./scripts/run-cc.sh [-- extra claude args]
+# Or:    ./scripts/run-cc.sh --model opus < brief.md
 
 set -euo pipefail
 
@@ -20,14 +20,19 @@ export CLAUDE_CODE_USE_BEDROCK="${CLAUDE_CODE_USE_BEDROCK:-1}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 
 # Parse args
-BARE_MODE=0
 EXTRA_ARGS=()
 MODEL_ARGS=(--model sonnet)  # default
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --bare) BARE_MODE=1; shift ;;
-    --model) MODEL_ARGS=(--model "$2"); shift 2 ;;
+    --model)
+      if [[ -z "${2:-}" ]]; then
+        echo "Error: --model requires an argument" >&2
+        exit 1
+      fi
+      MODEL_ARGS=(--model "$2")
+      shift 2
+      ;;
     --) shift; EXTRA_ARGS+=("$@"); break ;;
     *) EXTRA_ARGS+=("$1"); shift ;;
   esac
@@ -35,9 +40,7 @@ done
 
 # Build command
 CMD=(claude "${MODEL_ARGS[@]}" --print --dangerously-skip-permissions)
-if [[ $BARE_MODE -eq 1 ]]; then
-  CMD+=(--bare)
-fi
+# --bare not supported in current claude version; CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 covers the non-interactive use case
 CMD+=("${EXTRA_ARGS[@]}")
 
 exec "${CMD[@]}"

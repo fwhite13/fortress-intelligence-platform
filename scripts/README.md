@@ -19,17 +19,10 @@ Sets required env vars for all Tony/Clint/Rhodey CC invocations.
 # Standard (full mode, model sonnet):
 cat brief.md | ./scripts/run-cc.sh
 
-# Bare mode (pure code tasks — no CLAUDE.md, no memory):
-cat brief.md | ./scripts/run-cc.sh --bare
-
 # Different model:
 cat brief.md | ./scripts/run-cc.sh --model opus
-
-# Combined:
-cat brief.md | ./scripts/run-cc.sh --bare --model opus
 ```
 
-### When to use --bare:
-- Tony/Clint pure implementation tasks where the WI is fully self-contained
-- DO NOT use for Rhodey (needs project conventions)
-- DO NOT use for tasks that reference prior decisions or expect project context
+### Bare mode
+
+Not available in current claude version. `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is set automatically by this wrapper for all invocations.

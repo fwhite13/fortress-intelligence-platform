@@ -7,21 +7,11 @@ All pipeline CC invocations use `scripts/run-cc.sh` (never call `claude` directl
 ```bash
 # Standard:
 cat brief.md | ./scripts/run-cc.sh
-
-# Bare mode (pure code tasks):
-cat brief.md | ./scripts/run-cc.sh --bare
 ```
 
-## When to Use --bare Mode
+## Bare Mode
 
-Use `--bare` for Tony/Clint pure implementation tasks where:
-- The WI is fully self-contained (no need for project conventions from CLAUDE.md)
-- No reference to prior decisions or accumulated context needed
-
-Do NOT use `--bare` for:
-- Rhodey (needs project conventions for deploy targets, credential names)
-- Tasks referencing architectural decisions
-- Multi-file refactors where context matters
+Not available in current claude version (`claude 2.1.73` does not support `--bare`). `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` is set automatically by `run-cc.sh` for all invocations — this covers the non-interactive use case.
 
 ## Required Env Vars
 
