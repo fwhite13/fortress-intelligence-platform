@@ -15,6 +15,7 @@
 - NEVER build FAIT/FIRM/FORMS/NEXUS/FAMOS Docker images locally
 - ALL Docker builds go through AWS CodeBuild (buildspec.yml in each service)
 - Local `docker build` is PROHIBITED for these services — CodeBuild only
+- **Exception:** `firm-vpbot` (Node/TypeScript, no CodeBuild project) — local Docker build + ECR push IS the correct deploy method. See git-rules.md for commit procedure.
 
 ## Auth-Bypass Paths (bypassPermissions spec)
 These paths are NEVER to be touched by pipeline agents under bypassPermissions:
