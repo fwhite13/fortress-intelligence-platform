@@ -1,0 +1,90 @@
+@using FortressNexus.Web.Models.Entities
+@using FortressNexus.Web.Services.Discovery
+
+@inject IDiscoveryService DiscoveryService
+@inject UserContextService UserContextService
+
+<div class="nexus-discovery-step">
+    <MudText Typo="Typo.body1" Class="nexus-discovery-intro mb-4">
+        Before generating your spec, NEXUS has a few clarifying questions. These help produce a more complete spec with fewer gaps for Elise to fill in manually.
+    </MudText>
+
+    @if (_loading)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="nexus-discovery-loading-text mb-2">Analyzing your submission…</MudText>
+        @for (int i = 0; i < 3; i++)
+        {
+            <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="120px" Class="mb-3" />
+        }
+    }
+    else if (_failed || Session == null || !Session.Questions.Any())
+    {
+        <MudAlert Severity="Severity.Info" Class="nexus-discovery-empty-alert">
+            Couldn't generate questions — continuing to spec generation.
+        </MudAlert>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="HandleSkip" Class="mt-3 nexus-discovery-continue-btn">
+            Continue
+        </MudButton>
+    }
+    else
+    {
+        @foreach (var question in Session.Questions.OrderBy(q => q.SortOrder))
+        {
+            <DiscoveryQuestionCard Question="question"
+                                   Answer="@(_answers.GetValueOrDefault(question.Id))"
+                                   OnAnswerChanged="@((val) => _answers[question.Id] = val)" />
+        }
+
+        <div class="nexus-discovery-actions mt-4">
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       OnClick="HandleContinue"
+                       Disabled="@(!CanContinue)"
+                       Class="nexus-discovery-continue-btn">
+                Continue
+            </MudButton>
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Default"
+                       OnClick="HandleSkip"
+                       Class="nexus-discovery-skip-link ml-3">
+                Generate Spec Anyway
+            </MudButton>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DiscoverySession? Session { get; set; }
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public EventCallback OnCompleted { get; set; }
+    [Parameter] public EventCallback OnSkipped { get; set; }
+
+    private Dictionary<Guid, string> _answers = new();
+    private bool _loading => IsLoading;
+    private bool _failed;
+
+    private bool CanContinue => Session == null || !Session.Questions
+        .Where(q => q.IsBlocking)
+        .Any(q => string.IsNullOrWhiteSpace(_answers.GetValueOrDefault(q.Id)));
+
+    private async Task HandleContinue()
+    {
+        if (Session != null)
+        {
+            var oid = await UserContextService.GetUpnAsync();
+            var pairs = _answers.Select(kv => (kv.Key, (string?)kv.Value));
+            await DiscoveryService.SaveAnswersAsync(Session.Id, pairs, oid);
+        }
+        await OnCompleted.InvokeAsync();
+    }
+
+    private async Task HandleSkip()
+    {
+        if (Session != null)
+        {
+            var oid = await UserContextService.GetUpnAsync();
+            await DiscoveryService.SkipDiscoveryAsync(Session.Id, oid);
+        }
+        await OnSkipped.InvokeAsync();
+    }
+}

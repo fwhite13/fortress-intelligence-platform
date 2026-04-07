@@ -1,0 +1,46 @@
+@using FortressNexus.Web.Models.Entities
+
+<MudCard Class="nexus-discovery-card mb-3" Elevation="1">
+    <MudCardContent>
+        <div class="nexus-discovery-card-header">
+            <MudChip T="string" Size="Size.Small" Color="@GetCategoryColor(Question.Category)" Class="nexus-discovery-category-chip">
+                @Question.Category
+            </MudChip>
+            @if (Question.IsBlocking)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined" Class="nexus-discovery-required-chip">Required</MudChip>
+            }
+            else
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined" Class="nexus-discovery-optional-chip">Optional</MudChip>
+            }
+        </div>
+        <MudText Typo="Typo.body1" Class="nexus-discovery-question-text mt-2">@Question.QuestionText</MudText>
+        <MudTextField T="string"
+                      Value="@Answer"
+                      ValueChanged="@((val) => OnAnswerChanged.InvokeAsync(val))"
+                      Label="Your answer"
+                      Placeholder="Type your answer here..."
+                      Lines="3"
+                      MaxLength="2000"
+                      Counter="2000"
+                      Variant="Variant.Outlined"
+                      Class="nexus-discovery-answer-field mt-2" />
+    </MudCardContent>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public DiscoveryQuestion Question { get; set; } = null!;
+    [Parameter] public string? Answer { get; set; }
+    [Parameter] public EventCallback<string> OnAnswerChanged { get; set; }
+
+    private static Color GetCategoryColor(string category) => category switch
+    {
+        "Users & Access" => Color.Primary,
+        "Scope" => Color.Info,
+        "Conflict" => Color.Warning,
+        "Assumption" => Color.Secondary,
+        "Edge Case" => Color.Tertiary,
+        _ => Color.Default
+    };
+}

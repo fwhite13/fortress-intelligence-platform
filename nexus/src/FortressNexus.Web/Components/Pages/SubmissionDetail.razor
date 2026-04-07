@@ -11,9 +11,12 @@
 @inject ISnackbar Snackbar
 @inject IArtifactGenerationService ArtifactGenerationService
 @inject IAdoService AdoService
+@inject IDiscoveryService DiscoveryService
 
 @using FortressNexus.Web.Models.Entities
 @using FortressNexus.Web.Models.Enums
+@using FortressNexus.Web.Services.Discovery
+@using FortressNexus.Web.Components.Nexus
 
 <PageTitle>@(_submission?.Title ?? "Submission") — NEXUS</PageTitle>
 
@@ -83,6 +86,16 @@ else if (_submission is not null)
                         </MudListItem>
                     }
                 </MudList>
+            </div>
+        }
+
+        @* Discovery panel — only show if submission has a discovery session *@
+        @if (_discoverySession != null || !string.IsNullOrEmpty(_submission.DiscoveryStatus))
+        {
+            <MudDivider Class="nexus-detail-divider" />
+            <div class="nexus-detail-discovery">
+                <MudText Typo="Typo.subtitle2" Class="nexus-detail-section-label">Discovery</MudText>
+                <DiscoveryAnswersSummary Session="_discoverySession" />
             </div>
         }
 
@@ -170,6 +183,7 @@ else if (_submission is not null)
     private bool _isGenerating;
     private bool _isGeneratingWorkItems;
     private Dictionary<string, string> _presignedUrls = new();
+    private DiscoverySession? _discoverySession;
     private System.Threading.Timer? _pollTimer;
 
     protected override async Task OnInitializedAsync()
@@ -206,6 +220,13 @@ else if (_submission is not null)
                     }
                     catch { /* presigned URL failure is non-fatal */ }
                 }
+            }
+
+            // Load discovery session if present
+            if (!string.IsNullOrEmpty(_submission.DiscoveryStatus))
+            {
+                try { _discoverySession = await DiscoveryService.GetSessionAsync(_submission.Id); }
+                catch { /* non-fatal */ }
             }
         }
         catch (Exception ex)

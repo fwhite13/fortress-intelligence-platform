@@ -1,0 +1,36 @@
+@using FortressNexus.Web.Models.Entities
+
+@if (Session == null)
+{
+    @* No discovery for this submission — render nothing *@
+}
+else if (Session.Status == "Skipped" || Session.SkippedByUser)
+{
+    <MudAlert Severity="Severity.Info" Class="nexus-discovery-summary-skipped">
+        Discovery skipped — spec generated from narrative and files only.
+    </MudAlert>
+}
+else if (Session.Questions.Any())
+{
+    <MudExpansionPanels Class="nexus-discovery-summary-panels">
+        <MudExpansionPanel Text="Discovery Answers">
+            @foreach (var q in Session.Questions.OrderBy(q => q.SortOrder))
+            {
+                <div class="nexus-discovery-summary-item mb-3">
+                    <div class="nexus-discovery-summary-q">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="nexus-discovery-summary-category">@q.Category</MudChip>
+                        <MudText Typo="Typo.body2" Class="nexus-discovery-summary-question-text">@q.QuestionText</MudText>
+                    </div>
+                    <MudText Typo="Typo.body2" Color="@(q.Answer == null ? Color.Secondary : Color.Default)"
+                             Class="nexus-discovery-summary-answer">
+                        @(q.Answer?.AnswerText ?? "[Not answered]")
+                    </MudText>
+                </div>
+            }
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+}
+
+@code {
+    [Parameter] public DiscoverySession? Session { get; set; }
+}

@@ -4,9 +4,12 @@
 
 @using Microsoft.AspNetCore.Components.Forms
 @using FortressNexus.Web.Models.Entities
+@using FortressNexus.Web.Services.Discovery
+@using FortressNexus.Web.Components.Nexus
 
 @inject IFileStorageService FileStorageService
 @inject ISubmissionService SubmissionService
+@inject IDiscoveryService DiscoveryService
 @inject NavigationManager Nav
 @inject UserContextService UserContextService
 @inject ISnackbar Snackbar
@@ -22,10 +25,11 @@
     <MudStack Row="true" Spacing="2" Justify="Justify.Center" Class="nexus-wizard-steps">
         <MudChip T="string" Color="@(_activeStep == 0 ? Color.Primary : Color.Default)" Size="Size.Small" Class="nexus-wizard-step-chip">1. Details</MudChip>
         <MudChip T="string" Color="@(_activeStep == 1 ? Color.Primary : Color.Default)" Size="Size.Small" Class="nexus-wizard-step-chip">2. Files</MudChip>
-        <MudChip T="string" Color="@(_activeStep == 2 ? Color.Primary : Color.Default)" Size="Size.Small" Class="nexus-wizard-step-chip">3. Review</MudChip>
+        <MudChip T="string" Color="@(_activeStep == 2 ? Color.Primary : Color.Default)" Size="Size.Small" Class="nexus-wizard-step-chip">3. Discovery</MudChip>
+        <MudChip T="string" Color="@(_activeStep == 3 ? Color.Primary : Color.Default)" Size="Size.Small" Class="nexus-wizard-step-chip">4. Review</MudChip>
     </MudStack>
 
-    @* Step 1 — Details *@
+    @* Step 0 — Details *@
     @if (_activeStep == 0)
     {
         <MudStack Spacing="4" Class="nexus-wizard-step">
@@ -66,7 +70,7 @@
         </MudStack>
     }
 
-    @* Step 2 — Files *@
+    @* Step 1 — Files *@
     @if (_activeStep == 1)
     {
         <MudStack Spacing="4" Class="nexus-wizard-step">
@@ -89,13 +93,25 @@
 
             <MudStack Row="true" Spacing="2" Class="nexus-wizard-nav-row">
                 <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="GoToStep1" Class="nexus-wizard-back-btn">Back</MudButton>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => GoToStep3()" Disabled="@_isUploading" Class="nexus-wizard-next-btn">Next: Review</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GoToStep2Discovery" Disabled="@_isUploading" Class="nexus-wizard-next-btn">Next: Discovery</MudButton>
             </MudStack>
         </MudStack>
     }
 
-    @* Step 3 — Review *@
+    @* Step 2 — Discovery *@
     @if (_activeStep == 2)
+    {
+        <DiscoveryStep Session="_discoverySession"
+                       IsLoading="_discoveryLoading"
+                       OnCompleted="GoToStep3Confirm"
+                       OnSkipped="GoToStep3Confirm" />
+        <div class="nexus-wizard-nav mt-3">
+            <MudButton Variant="Variant.Outlined" OnClick="BackToStep1Files">Back</MudButton>
+        </div>
+    }
+
+    @* Step 3 — Review *@
+    @if (_activeStep == 3)
     {
         <MudStack Spacing="3" Class="nexus-wizard-step">
             <MudText Typo="Typo.subtitle1" Class="nexus-wizard-review-heading">Review Your Submission</MudText>
@@ -127,13 +143,19 @@
                 </MudText>
             </MudPaper>
 
+            @* Discovery answers summary *@
+            @if (_discoverySession != null)
+            {
+                <DiscoveryAnswersSummary Session="_discoverySession" />
+            }
+
             @if (_isSubmitting)
             {
                 <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="nexus-wizard-submit-progress" />
             }
 
             <MudStack Row="true" Spacing="2" Class="nexus-wizard-nav-row">
-                <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="BackToStep2" Disabled="@_isSubmitting" Class="nexus-wizard-back-btn">Back</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="BackToStep2Discovery" Disabled="@_isSubmitting" Class="nexus-wizard-back-btn">Back</MudButton>
                 <MudButton Variant="Variant.Filled"
                            Color="Color.Success"
                            OnClick="HandleSubmit"
@@ -161,6 +183,10 @@
     private bool _isSubmitting;
     private string? _step1Error;
 
+    private int? _submissionId;
+    private DiscoverySession? _discoverySession;
+    private bool _discoveryLoading;
+
     private bool CanSubmit =>
         !string.IsNullOrWhiteSpace(_title) &&
         !string.IsNullOrWhiteSpace(_narrativeText) &&
@@ -186,18 +212,19 @@
         _activeStep = 1;
     }
 
-    private async Task GoToStep3()
+    private async Task GoToStep2Discovery()
     {
         _isSubmitting = false;
         _isUploading = false;
         _fileErrors.Clear();
+
+        var upn = await UserContextService.GetUpnAsync();
 
         if (_pendingFiles.Count > 0)
         {
             _isUploading = true;
             StateHasChanged();
 
-            var upn = await UserContextService.GetUpnAsync();
             _uploadedFiles.Clear();
             foreach (var browserFile in _pendingFiles)
             {
@@ -217,18 +244,70 @@
             StateHasChanged();
 
             if (_fileErrors.Count > 0)
-                return; // Stay on Step 2, errors shown in the @foreach above FileUploadZone
+                return; // Stay on Step 1, errors shown
+        }
+
+        // Create submission now so we have an ID for discovery
+        if (_submissionId == null)
+        {
+            try
+            {
+                var dto = new FortressNexus.Web.Models.DTOs.SubmissionCreateDto
+                {
+                    Title = _title,
+                    FeatureArea = _featureArea,
+                    NarrativeText = _narrativeText,
+                    FileIds = _uploadedFiles.Select(f => f.Id)
+                };
+                var submission = await SubmissionService.CreateAsync(dto, upn);
+                _submissionId = submission.Id;
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Submission creation failed: {ex.Message}", Severity.Error);
+                return;
+            }
         }
 
         _activeStep = 2;
+        _discoveryLoading = true;
+        StateHasChanged();
+
+        // Fire InitiateDiscoveryAsync in background — fire-and-poll
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DiscoveryService.InitiateDiscoveryAsync(_submissionId!.Value);
+                // Poll until QuestionsReady or timeout (15s)
+                var deadline = DateTime.UtcNow.AddSeconds(15);
+                while (DateTime.UtcNow < deadline)
+                {
+                    _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
+                    if (_discoverySession?.Status is "QuestionsReady" or "Failed") break;
+                    await Task.Delay(1000);
+                }
+            }
+            catch (Exception)
+            {
+                // Graceful skip — session stays null
+            }
+            finally
+            {
+                _discoveryLoading = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        });
     }
 
-    private void BackToStep2()
+    private void GoToStep3Confirm() => _activeStep = 3;
+
+    private void BackToStep1Files() => _activeStep = 1;
+
+    private void BackToStep2Discovery()
     {
         _isSubmitting = false;
-        _isUploading = false;
-        _fileErrors.Clear();
-        _activeStep = 1;
+        _activeStep = 2;
     }
 
     private void HandleFilesSelected(IReadOnlyList<IBrowserFile> files)
@@ -239,31 +318,9 @@
     private async Task HandleSubmit()
     {
         if (!CanSubmit) return;
+        if (_submissionId == null) return;
 
-        _isSubmitting = true;
-        StateHasChanged();
-
-        try
-        {
-            var upn = await UserContextService.GetUpnAsync();
-
-            var dto = new FortressNexus.Web.Models.DTOs.SubmissionCreateDto
-            {
-                Title = _title,
-                FeatureArea = _featureArea,
-                NarrativeText = _narrativeText,
-                FileIds = _uploadedFiles.Select(f => f.Id)
-            };
-
-            var submission = await SubmissionService.CreateAsync(dto, upn);
-
-            Nav.NavigateTo($"/nexus/{submission.Id}");
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Submission failed: {ex.Message}", Severity.Error);
-            _isSubmitting = false;
-            StateHasChanged();
-        }
+        // Submission already created in GoToStep2Discovery
+        Nav.NavigateTo($"/nexus/{_submissionId.Value}");
     }
 }
