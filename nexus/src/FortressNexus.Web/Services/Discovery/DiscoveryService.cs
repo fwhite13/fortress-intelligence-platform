@@ -99,15 +99,29 @@ public class DiscoveryService : IDiscoveryService
 
         foreach (var (questionId, answerText) in answers)
         {
-            var answer = new DiscoveryAnswer
+            // Check for existing answer
+            var existing = await db.DiscoveryAnswers
+                .FirstOrDefaultAsync(a => a.DiscoveryQuestionId == questionId, ct);
+
+            if (existing != null)
             {
-                Id = Guid.NewGuid(),
-                DiscoveryQuestionId = questionId,
-                AnswerText = answerText,
-                AnsweredBy = answeredByOid,
-                AnsweredAt = now
-            };
-            db.DiscoveryAnswers.Add(answer);
+                // Update existing
+                existing.AnswerText = answerText;
+                existing.AnsweredBy = answeredByOid;
+                existing.AnsweredAt = now;
+            }
+            else
+            {
+                // Insert new
+                db.DiscoveryAnswers.Add(new DiscoveryAnswer
+                {
+                    Id = Guid.NewGuid(),
+                    DiscoveryQuestionId = questionId,
+                    AnswerText = answerText,
+                    AnsweredBy = answeredByOid,
+                    AnsweredAt = now
+                });
+            }
         }
 
         var session = await db.DiscoverySessions

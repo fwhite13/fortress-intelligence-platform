@@ -9,9 +9,6 @@ public class BedrockKnowledgeBaseService : IKnowledgeBaseService
     private readonly IConfiguration _config;
     private readonly ILogger<BedrockKnowledgeBaseService> _logger;
 
-    // TODO: Replace with actual FORGE KB ID once confirmed by Fred
-    private const string FallbackKbId = "TODO_FORGE_KB_ID";
-
     public BedrockKnowledgeBaseService(
         IAmazonBedrockAgentRuntime client,
         IConfiguration config,
@@ -27,7 +24,12 @@ public class BedrockKnowledgeBaseService : IKnowledgeBaseService
     {
         try
         {
-            var kbId = _config["Nexus:DiscoveryKnowledgeBaseId"] ?? FallbackKbId;
+            var kbId = _config["Nexus:DiscoveryKnowledgeBaseId"];
+            if (string.IsNullOrWhiteSpace(kbId) || kbId.StartsWith("TODO_"))
+            {
+                _logger.LogError("[KB_RETRIEVE] DiscoveryKnowledgeBaseId is not configured — KB retrieval skipped");
+                return Enumerable.Empty<KbPassage>();
+            }
 
             _logger.LogInformation("[KB_RETRIEVE] Query: {Query}, KB: {KbId}", query, kbId);
 
