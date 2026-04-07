@@ -220,7 +220,7 @@
 
         var upn = await UserContextService.GetUpnAsync();
 
-        if (_pendingFiles.Count > 0)
+        if (_submissionId == null && _pendingFiles.Count > 0)
         {
             _isUploading = true;
             StateHasChanged();
@@ -273,31 +273,39 @@
         _discoveryLoading = true;
         StateHasChanged();
 
-        // Fire InitiateDiscoveryAsync in background — fire-and-poll
-        _ = Task.Run(async () =>
+        // Fire InitiateDiscoveryAsync in background — fire-and-poll (only on first entry)
+        if (_discoverySession == null)
         {
-            try
+            _ = Task.Run(async () =>
             {
-                await DiscoveryService.InitiateDiscoveryAsync(_submissionId!.Value);
-                // Poll until QuestionsReady or timeout (15s)
-                var deadline = DateTime.UtcNow.AddSeconds(15);
-                while (DateTime.UtcNow < deadline)
+                try
                 {
-                    _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
-                    if (_discoverySession?.Status is "QuestionsReady" or "Failed") break;
-                    await Task.Delay(1000);
+                    await DiscoveryService.InitiateDiscoveryAsync(_submissionId!.Value);
+                    // Poll until QuestionsReady or timeout (15s)
+                    var deadline = DateTime.UtcNow.AddSeconds(15);
+                    while (DateTime.UtcNow < deadline)
+                    {
+                        _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
+                        if (_discoverySession?.Status is "QuestionsReady" or "Failed") break;
+                        await Task.Delay(1000);
+                    }
                 }
-            }
-            catch (Exception)
-            {
-                // Graceful skip — session stays null
-            }
-            finally
-            {
-                _discoveryLoading = false;
-                await InvokeAsync(StateHasChanged);
-            }
-        });
+                catch (Exception)
+                {
+                    // Graceful skip — session stays null
+                }
+                finally
+                {
+                    _discoveryLoading = false;
+                    await InvokeAsync(StateHasChanged);
+                }
+            });
+        }
+        else
+        {
+            // Already have a session — just clear the loading flag
+            _discoveryLoading = false;
+        }
     }
 
     private void GoToStep3Confirm() => _activeStep = 3;
@@ -315,12 +323,13 @@
         _pendingFiles = files.ToList();
     }
 
-    private async Task HandleSubmit()
+    private Task HandleSubmit()
     {
-        if (!CanSubmit) return;
-        if (_submissionId == null) return;
+        if (!CanSubmit) return Task.CompletedTask;
+        if (_submissionId == null) return Task.CompletedTask;
 
         // Submission already created in GoToStep2Discovery
         Nav.NavigateTo($"/nexus/{_submissionId.Value}");
+        return Task.CompletedTask;
     }
 }

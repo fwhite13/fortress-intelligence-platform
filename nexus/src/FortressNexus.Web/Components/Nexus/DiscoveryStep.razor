@@ -17,7 +17,7 @@
             <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="120px" Class="mb-3" />
         }
     }
-    else if (_failed || Session == null || !Session.Questions.Any())
+    else if (Session == null || !Session.Questions.Any())
     {
         <MudAlert Severity="Severity.Info" Class="nexus-discovery-empty-alert">
             Couldn't generate questions — continuing to spec generation.
@@ -61,7 +61,6 @@
 
     private Dictionary<Guid, string> _answers = new();
     private bool _loading => IsLoading;
-    private bool _failed;
 
     private bool CanContinue => Session == null || !Session.Questions
         .Where(q => q.IsBlocking)
