@@ -15,6 +15,7 @@ public class SpecGenerationService : ISpecGenerationService
     private readonly IMockupSectionizer _sectionizer;
     private readonly IConfiguration _config;
     private readonly ILogger<SpecGenerationService> _logger;
+    private readonly FortressNexus.Web.Services.Discovery.IDiscoveryService? _discoveryService;
 
     public SpecGenerationService(
         NexusDbContext db,
@@ -22,7 +23,8 @@ public class SpecGenerationService : ISpecGenerationService
         IFileStorageService fileStorage,
         IMockupSectionizer sectionizer,
         IConfiguration config,
-        ILogger<SpecGenerationService> logger)
+        ILogger<SpecGenerationService> logger,
+        FortressNexus.Web.Services.Discovery.IDiscoveryService? discoveryService = null)
     {
         _db = db;
         _bedrock = bedrock;
@@ -30,6 +32,7 @@ public class SpecGenerationService : ISpecGenerationService
         _sectionizer = sectionizer;
         _config = config;
         _logger = logger;
+        _discoveryService = discoveryService;
     }
 
     public async Task<SpecDocument> GenerateAsync(int submissionId)
@@ -56,6 +59,21 @@ public class SpecGenerationService : ISpecGenerationService
 
             // 4. Build multi-file prompt
             var userPrompt = await BuildPromptAsync(submission, systemPrompt, overallCts.Token);
+
+            // 4b. Inject discovery context if available
+            if (_discoveryService != null)
+            {
+                try
+                {
+                    var discoveryContext = await _discoveryService.BuildSpecContextAsync(submissionId, overallCts.Token);
+                    if (!string.IsNullOrEmpty(discoveryContext))
+                        userPrompt = userPrompt + "\n\n" + discoveryContext;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[SPEC_GEN] Discovery context load failed — continuing without it");
+                }
+            }
 
             // 5. Call AI
             var result = await _bedrock.InvokeAsync(systemPrompt, userPrompt);

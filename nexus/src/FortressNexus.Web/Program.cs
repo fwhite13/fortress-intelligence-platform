@@ -1,4 +1,5 @@
 using Serilog;
+using Amazon.BedrockAgentRuntime;
 using Amazon.S3;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
@@ -86,6 +87,10 @@ var serverVersion = new MySqlServerVersion(new Version(8, 0, 28));
 builder.Services.AddDbContext<NexusDbContext>(options =>
     options.UseMySql(csb.ConnectionString, serverVersion,
         mysqlOptions => mysqlOptions.EnableRetryOnFailure(3)));
+// DbContextFactory — required for background/fire-and-forget scoped DB work (Discovery service)
+builder.Services.AddDbContextFactory<NexusDbContext>(options =>
+    options.UseMySql(csb.ConnectionString, serverVersion,
+        mysqlOptions => mysqlOptions.EnableRetryOnFailure(3)));
 
 // DataProtection: shared key ring points to fred_dev (FAIT's DB) — same DataProtectionKeys table
 // SharedKeyRingDbContext reads from fred_dev via FIP_KEYRING_DB_NAME env var
@@ -134,6 +139,12 @@ builder.Services.AddScoped<IMockupSectionizer, MockupSectionizerService>();
 builder.Services.AddScoped<ISpecService, SpecService>();
 builder.Services.Configure<FortressNexus.Web.Services.Discovery.DiscoveryInferenceConfig>(
     builder.Configuration.GetSection("Bedrock:Discovery"));
+builder.Services.AddSingleton<Amazon.BedrockAgentRuntime.IAmazonBedrockAgentRuntime>(_ =>
+    new Amazon.BedrockAgentRuntime.AmazonBedrockAgentRuntimeClient());
+builder.Services.AddScoped<FortressNexus.Web.Services.Discovery.IKnowledgeBaseService,
+    FortressNexus.Web.Services.Discovery.BedrockKnowledgeBaseService>();
+builder.Services.AddScoped<FortressNexus.Web.Services.Discovery.IDiscoveryService,
+    FortressNexus.Web.Services.Discovery.DiscoveryService>();
 
 // DB initialization (CREATE TABLE IF NOT EXISTS at startup)
 builder.Services.AddHostedService<DatabaseInitializationService>();
