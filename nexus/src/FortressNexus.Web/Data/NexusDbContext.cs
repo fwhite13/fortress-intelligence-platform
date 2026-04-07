@@ -14,6 +14,9 @@ public class NexusDbContext : DbContext
     public DbSet<SpecDocument> SpecDocuments => Set<SpecDocument>();
     public DbSet<ArtifactSet> ArtifactSets => Set<ArtifactSet>();
     public DbSet<WorkItemRecord> WorkItemRecords => Set<WorkItemRecord>();
+    public DbSet<DiscoverySession> DiscoverySessions => Set<DiscoverySession>();
+    public DbSet<DiscoveryQuestion> DiscoveryQuestions => Set<DiscoveryQuestion>();
+    public DbSet<DiscoveryAnswer> DiscoveryAnswers => Set<DiscoveryAnswer>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -57,6 +60,7 @@ public class NexusDbContext : DbContext
                 .HasMaxLength(50)
                 .IsRequired();
             entity.Property(e => e.ActiveSpecDocumentId).HasColumnName("active_spec_document_id");
+            entity.Property(e => e.DiscoveryStatus).HasColumnName("discovery_status").HasMaxLength(50);
             entity.HasOne(e => e.MockupFile)
                 .WithMany()
                 .HasForeignKey(e => e.MockupFileId)
@@ -66,6 +70,11 @@ public class NexusDbContext : DbContext
                 .WithOne(sf => sf.Submission)
                 .HasForeignKey(sf => sf.SubmissionId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.DiscoverySession)
+                  .WithOne(ds => ds.Submission)
+                  .HasForeignKey<DiscoverySession>(ds => ds.SubmissionId)
+                  .OnDelete(DeleteBehavior.Cascade)
+                  .IsRequired(false);
         });
 
         // SubmissionFile
@@ -145,6 +154,59 @@ public class NexusDbContext : DbContext
                 .WithMany(a => a.WorkItemRecords)
                 .HasForeignKey(e => e.ArtifactSetId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // DiscoverySession
+        modelBuilder.Entity<DiscoverySession>(entity =>
+        {
+            entity.ToTable("discovery_sessions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.SubmissionId).HasColumnName("submission_id");
+            entity.Property(e => e.Status).HasColumnName("status").HasMaxLength(50);
+            entity.Property(e => e.KbQueryUsed).HasColumnName("kb_query_used").HasMaxLength(1000);
+            entity.Property(e => e.KbPassagesRetrieved).HasColumnName("kb_passages_retrieved");
+            entity.Property(e => e.QuestionCount).HasColumnName("question_count");
+            entity.Property(e => e.SkippedByUser).HasColumnName("skipped_by_user");
+            entity.Property(e => e.GeneratedAt).HasColumnName("generated_at");
+            entity.Property(e => e.AnsweredAt).HasColumnName("answered_at");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.HasMany(e => e.Questions)
+                  .WithOne(q => q.Session)
+                  .HasForeignKey(q => q.DiscoverySessionId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // DiscoveryQuestion
+        modelBuilder.Entity<DiscoveryQuestion>(entity =>
+        {
+            entity.ToTable("discovery_questions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.DiscoverySessionId).HasColumnName("discovery_session_id");
+            entity.Property(e => e.SortOrder).HasColumnName("sort_order");
+            entity.Property(e => e.QuestionText).HasColumnName("question_text").HasMaxLength(1000);
+            entity.Property(e => e.Category).HasColumnName("category").HasMaxLength(50);
+            entity.Property(e => e.IsBlocking).HasColumnName("is_blocking");
+            entity.Property(e => e.Rationale).HasColumnName("rationale").HasMaxLength(500);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.HasOne(e => e.Answer)
+                  .WithOne(a => a.Question)
+                  .HasForeignKey<DiscoveryAnswer>(a => a.DiscoveryQuestionId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // DiscoveryAnswer
+        modelBuilder.Entity<DiscoveryAnswer>(entity =>
+        {
+            entity.ToTable("discovery_answers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.DiscoveryQuestionId).HasColumnName("discovery_question_id");
+            entity.Property(e => e.AnswerText).HasColumnName("answer_text").HasMaxLength(2000);
+            entity.Property(e => e.AnsweredBy).HasColumnName("answered_by").HasMaxLength(255);
+            entity.Property(e => e.AnsweredAt).HasColumnName("answered_at");
         });
     }
 }

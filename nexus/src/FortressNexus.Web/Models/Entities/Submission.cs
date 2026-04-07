@@ -13,9 +13,11 @@ public class Submission
     public DateTime SubmittedAt { get; set; }
     public SubmissionStatus Status { get; set; } = SubmissionStatus.Draft;
     public int? ActiveSpecDocumentId { get; set; }
+    public string? DiscoveryStatus { get; set; }
 
     // Navigation
     public UploadedFile? MockupFile { get; set; }
     public List<SpecDocument> SpecDocuments { get; set; } = new();
     public List<SubmissionFile> SubmissionFiles { get; set; } = new();
+    public DiscoverySession? DiscoverySession { get; set; }
 }

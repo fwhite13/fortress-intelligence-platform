@@ -132,6 +132,8 @@ builder.Services.AddScoped<PdfExporter>();
 builder.Services.AddScoped<BedrockService>();
 builder.Services.AddScoped<IMockupSectionizer, MockupSectionizerService>();
 builder.Services.AddScoped<ISpecService, SpecService>();
+builder.Services.Configure<FortressNexus.Web.Services.Discovery.DiscoveryInferenceConfig>(
+    builder.Configuration.GetSection("Bedrock:Discovery"));
 
 // DB initialization (CREATE TABLE IF NOT EXISTS at startup)
 builder.Services.AddHostedService<DatabaseInitializationService>();
