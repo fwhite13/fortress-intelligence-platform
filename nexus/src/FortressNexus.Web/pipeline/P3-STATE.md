@@ -3,7 +3,7 @@
 **Started:** 2026-04-08 12:16 EDT
 **Repo:** ~/projects/fip/nexus/src/FortressNexus.Web/
 
-## Current Stage: BUILDING — WI #1654
+## Current Stage: DEPLOYING — WI #1654
 ## Risk Level: medium
 ## Pipeline Path: full (no approval gate — Fred tests live)
 ## Review Cycles: 0

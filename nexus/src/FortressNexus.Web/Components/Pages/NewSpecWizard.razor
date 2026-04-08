@@ -139,6 +139,22 @@
         <MudStack Spacing="3" Class="nexus-wizard-step">
             <MudText Typo="Typo.subtitle1" Class="nexus-wizard-review-heading">Review Your Submission</MudText>
 
+            @if (_isResume)
+            {
+                @if (_hasChanges)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="nexus-wizard-resume-notice">
+                        Changes detected — your spec will be regenerated.
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="nexus-wizard-resume-notice">
+                        No changes detected — your existing spec will be submitted as-is.
+                    </MudAlert>
+                }
+            }
+
             <MudPaper Elevation="0" Class="nexus-wizard-review-card">
                 <MudText Typo="Typo.overline" Class="nexus-wizard-review-label">Title</MudText>
                 <MudText Typo="Typo.body1" Class="nexus-wizard-review-value">@_title</MudText>
@@ -228,6 +244,12 @@
         _narrativeText.Trim().Length >= 5 &&
         !_isUploading &&
         !_isSubmitting;
+
+    private bool _hasChanges => _isResume && (
+        _narrativeText.Trim() != _originalNarrative.Trim() ||
+        _filesToDelete.Count > 0 ||
+        _pendingFiles.Count > 0
+    );
 
     protected override async Task OnInitializedAsync()
     {
