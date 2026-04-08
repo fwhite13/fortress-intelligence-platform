@@ -737,7 +737,11 @@ Use write tools only when the user explicitly asks to create, update, or modify 
                 var hasM365Tools = availableTools.Any(t => t.FullName.StartsWith("m365__", StringComparison.OrdinalIgnoreCase));
                 if (hasM365Tools)
                 {
-                    var m365Guidance = @"
+                    var userEmail = Session.CurrentUser?.Email;
+                    var ownEmailBullet = string.IsNullOrEmpty(userEmail)
+                        ? "- The authenticated user's email address is not available in this session — use m365 tools to look up recipient addresses as needed."
+                        : "- The authenticated user's own email address is provided in your context (see system prompt). Use it as the canonical source — do not look it up.";
+                    var m365Guidance = $@"
 ## Microsoft 365 Tools Available
 You have access to the user's Microsoft 365 account via Graph API tools:
 - `m365__list_emails` — list recent inbox emails (supports top/filter params)
@@ -753,7 +757,7 @@ Use these tools proactively when the user asks about their email, inbox, calenda
 - If you need a recipient's email address and do not have it from the conversation context, you MUST either:
   (a) Call `m365__list_emails` or search the inbox to look up the person, OR
   (b) Ask the user to provide the email address directly.
-- The authenticated user's own email address is provided in your context (see system prompt). Use it as the canonical source — do not look it up.
+{ownEmailBullet}
 - Never use personal email domains (gmail.com, outlook.com, hotmail.com, yahoo.com, etc.) for work contacts unless the user explicitly provides such an address.";
                     effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
                         ? m365Guidance

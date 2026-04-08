@@ -1,87 +1,112 @@
-# FAIT WI #1669 — Build Report
-**Date:** 2026-04-08
-**Issue:** AI fabricated `rnethery@outlook.com` instead of calling m365 tool
+# Build Report — FAIT WI #1669
+## AI fabricates email address instead of calling m365 tool
+
+**Date:** 2026-04-08  
+**Engineer:** Tony Stark (software-engineer)  
+**Commit:** `c4971f8`  
+**Build:** ✅ 0 errors, 31 warnings (all pre-existing)
 
 ---
 
 ## Where the System Prompt Lives
 
-The system prompt is assembled in `ChatView.razor` (~line 480–752) via:
+The FAIT AI system prompt is assembled dynamically in `ChatView.razor` each time a message is sent. There is no single `.txt` file — the prompt is built in layers:
 
-1. `BuildSystemPromptFromProject(project)` — project-level instructions
-2. `AssistantConfigService.GetPersonalitySystemPrompt(...)` — personality prefix (now includes user email)
-3. Artifact instructions
-4. KB context
-5. m365 guidance block (if m365 tools available)
+1. **Project instructions** — `BuildSystemPromptFromProject(project)` (~line 963)
+2. **Personality prefix** — `AssistantConfigService.GetPersonalitySystemPrompt(config, displayName, email)` (~line 486)
+3. **Artifact instructions** — `GetArtifactSystemPrompt()` (~line 1294)
+4. **KB context** — injected when KB toggles are on
+5. **Tool guidance** — injected per-tool-server when MCP tools are available:
+   - DevOps guidance (~line 714)
+   - **M365 guidance (~line 744)** ← primary injection point for email rules
+   - Search guidance (~line 791)
 
 ---
 
 ## How `CURRENT_USER_EMAIL` Is Now Surfaced to the AI
 
-`Session.CurrentUser` (type `AppUser`) exposes an `Email` string property.
-`ChatView.razor` now passes `Session.CurrentUser?.Email` as the third argument to `GetPersonalitySystemPrompt`.
-The method appends the following sentence to the personality prefix when the value is non-null:
+**Before this fix:** `GetPersonalitySystemPrompt` only accepted `userDisplayName`. User email was never passed to the AI.
 
-> "The authenticated user's own email address is {userEmail}. Use this as the canonical source for the current user's email — do not look it up or guess it."
+**After this fix:**
 
-This appears early in the system prompt, before any tool guidance.
+### `AssistantConfigService.cs` — signature change
+```csharp
+// BEFORE
+public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null)
+
+// AFTER
+public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null, string? userEmail = null)
+```
+
+New injection (appended to personality prefix when email is non-null):
+```csharp
+if (!string.IsNullOrWhiteSpace(userEmail))
+    prefix += $" The authenticated user's own email address is {userEmail}. Use this as the canonical source for the current user's email — do not look it up or guess it.";
+```
+
+### `ChatView.razor` — call site update (~line 486)
+```csharp
+// BEFORE
+var personalityPrefix = ConfigSvc.GetPersonalitySystemPrompt(_assistantConfig, Session.CurrentUser?.DisplayName);
+
+// AFTER
+var personalityPrefix = ConfigSvc.GetPersonalitySystemPrompt(_assistantConfig, Session.CurrentUser?.DisplayName, Session.CurrentUser?.Email);
+```
+
+`Session.CurrentUser` is a `UserSessionService` holding the authenticated `AppUser` record. `AppUser.Email` is populated from Entra claims during login and stored in the database. This email appears in the system prompt on **every** chat request.
 
 ---
 
-## Changes Made
+## Anti-Fabrication Instruction Added to M365 Guidance
 
-### Fix 1 — `AssistantConfigService.cs`
+The `m365Guidance` block in `ChatView.razor` (~line 744) was extended with:
 
-**File:** `src/FortressAI.Web/Services/AssistantConfigService.cs`
-
-```diff
-- public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null)
-+ public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null, string? userEmail = null)
-  {
-      ...
-      if (!string.IsNullOrWhiteSpace(userDisplayName))
-          prefix += $" The user's name is {userDisplayName}. Address them by name occasionally to personalize responses.";
-+
-+     if (!string.IsNullOrWhiteSpace(userEmail))
-+         prefix += $" The authenticated user's own email address is {userEmail}. Use this as the canonical source for the current user's email — do not look it up or guess it.";
+```
+**CRITICAL — Email addresses:**
+- NEVER fabricate, guess, or infer email addresses. This is a strict rule with no exceptions.
+- If you need a recipient's email address and do not have it from the conversation context, you MUST either:
+  (a) Call `m365__list_emails` or search the inbox to look up the person, OR
+  (b) Ask the user to provide the email address directly.
+- The authenticated user's own email address is provided in your context (see system prompt). Use it as the canonical source — do not look it up.
+- Never use personal email domains (gmail.com, outlook.com, hotmail.com, yahoo.com, etc.) for work contacts unless the user explicitly provides such an address.
 ```
 
-### Fix 2 — `ChatView.razor` — Call site update
+This block is only injected when m365 tools are available for the session, which is the exact context where email address handling matters.
 
-**File:** `src/FortressAI.Web/Components/Chat/ChatView.razor` (~line 486)
+---
 
-```diff
-- var personalityPrefix = ConfigSvc.GetPersonalitySystemPrompt(_assistantConfig, Session.CurrentUser?.DisplayName);
-+ var personalityPrefix = ConfigSvc.GetPersonalitySystemPrompt(_assistantConfig, Session.CurrentUser?.DisplayName, Session.CurrentUser?.Email);
-```
+## Files Changed
 
-### Fix 3 — `ChatView.razor` — Anti-fabrication guard in m365 guidance
-
-**File:** `src/FortressAI.Web/Components/Chat/ChatView.razor` (~line 740)
-
-Added to the end of the `m365Guidance` string:
-
-```diff
-  Use these tools proactively when the user asks about their email, inbox, calendar, meetings, or scheduling. Always confirm before sending emails or creating events.
-+
-+ **CRITICAL — Email addresses:**
-+ - NEVER fabricate, guess, or infer email addresses. This is a strict rule with no exceptions.
-+ - If you need a recipient's email address and do not have it from the conversation context, you MUST either:
-+   (a) Call `m365__list_emails` or search the inbox to look up the person, OR
-+   (b) Ask the user to provide the email address directly.
-+ - The authenticated user's own email address is provided in your context (see system prompt). Use it as the canonical source — do not look it up.
-+ - Never use personal email domains (gmail.com, outlook.com, hotmail.com, yahoo.com, etc.) for work contacts unless the user explicitly provides such an address.
-```
+| File | Change |
+|------|--------|
+| `src/FortressAI.Web/Services/AssistantConfigService.cs` | Added `userEmail` param; inject email sentence into personality prefix |
+| `src/FortressAI.Web/Components/Chat/ChatView.razor` | Pass `Session.CurrentUser?.Email` to `GetPersonalitySystemPrompt`; extend m365 guidance with anti-fabrication block |
 
 ---
 
 ## Build Result
 
 ```
+dotnet build ~/projects/fip/fait/
 Build succeeded.
-  31 Warning(s)
-  0 Error(s)
-Time Elapsed 00:00:05.85
+    0 Error(s)
+    31 Warning(s) — all pre-existing
 ```
 
-All 31 warnings are pre-existing (CS1998, CS8602, CS8604, MUD0002). No new warnings introduced.
+---
+
+## Known Edge Cases / Things Clint Should Scrutinize
+
+- The email injection is in the **personality prefix** (always-on system prompt), not just the m365 guidance block. This is intentional — the AI should know the user's email even if m365 tools aren't active (e.g., for drafting email text).
+- `AppUser.Email` is populated from Entra claims (`preferred_username` / `upn`) during the MSAL login flow. For stub/test auth users it may be whatever was seeded. Non-Entra users have it set at account creation.
+- No migration needed — `AppUser.Email` has always been stored.
+
+---
+
+## How to Test Locally
+
+1. Log in as Rob Nethery (or any Entra user with m365 connected)
+2. Enable m365 tools in the chat interface
+3. Ask: "Send an email to me" — FAIT should use the injected email, not fabricate one
+4. Ask: "Send an email to John Smith" — FAIT should call `m365__list_emails` to find John's address, not guess it
+5. Ask FAIT what your email address is — it should report the correct address from context
