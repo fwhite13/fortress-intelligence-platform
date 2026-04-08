@@ -483,7 +483,7 @@
             // Inject personality prefix from assistant config
             if (_assistantConfig != null)
             {
-                var personalityPrefix = ConfigSvc.GetPersonalitySystemPrompt(_assistantConfig, Session.CurrentUser?.DisplayName);
+                var personalityPrefix = ConfigSvc.GetPersonalitySystemPrompt(_assistantConfig, Session.CurrentUser?.DisplayName, Session.CurrentUser?.Email);
                 systemPrompt = string.IsNullOrEmpty(systemPrompt)
                     ? personalityPrefix
                     : personalityPrefix + "\n\n" + systemPrompt;
@@ -746,7 +746,15 @@ You have access to the user's Microsoft 365 account via Graph API tools:
 - `m365__list_calendar_events` — list calendar events in a date range
 - `m365__create_calendar_event` — create a new calendar event
 
-Use these tools proactively when the user asks about their email, inbox, calendar, meetings, or scheduling. Always confirm before sending emails or creating events.";
+Use these tools proactively when the user asks about their email, inbox, calendar, meetings, or scheduling. Always confirm before sending emails or creating events.
+
+**CRITICAL — Email addresses:**
+- NEVER fabricate, guess, or infer email addresses. This is a strict rule with no exceptions.
+- If you need a recipient's email address and do not have it from the conversation context, you MUST either:
+  (a) Call `m365__list_emails` or search the inbox to look up the person, OR
+  (b) Ask the user to provide the email address directly.
+- The authenticated user's own email address is provided in your context (see system prompt). Use it as the canonical source — do not look it up.
+- Never use personal email domains (gmail.com, outlook.com, hotmail.com, yahoo.com, etc.) for work contacts unless the user explicitly provides such an address.";
                     effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
                         ? m365Guidance
                         : effectiveSystemPrompt + "\n\n" + m365Guidance;
