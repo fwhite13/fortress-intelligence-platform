@@ -70,7 +70,7 @@ public class AssistantConfigService
         return config;
     }
 
-    public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null)
+    public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null, string? userEmail = null)
     {
         var todayStr = DateTimeOffset.Now.ToString("dddd, MMMM d, yyyy");
         var datePrefix = $"Today's date is {todayStr}.\n\n";
@@ -86,6 +86,9 @@ public class AssistantConfigService
 
         if (!string.IsNullOrWhiteSpace(userDisplayName))
             prefix += $" The user's name is {userDisplayName}. Address them by name occasionally to personalize responses.";
+
+        if (!string.IsNullOrWhiteSpace(userEmail))
+            prefix += $" The authenticated user's own email address is {userEmail}. Use this as the canonical source for the current user's email — do not look it up or guess it.";
 
         prefix += " When asked to create, write, or generate a document or file, output the content directly in your chat response as formatted markdown — do not attempt to use tools to save it. If tool calls are needed but keep failing, explain what you tried and provide the output directly in your response.";
 
