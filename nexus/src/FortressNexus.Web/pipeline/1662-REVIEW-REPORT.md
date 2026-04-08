@@ -140,3 +140,82 @@ No other changes required. The migration, Pomelo config, factory, and snapshot a
 ---
 
 *Reviewed by Hawkeye using Claude Code CLI (CC Sonnet) — adversarial review spec at `/tmp/clint-brief-1662.md`*
+
+---
+
+## Review Report — Cycle 2
+
+**Commit reviewed:** `90fa325`
+**Date:** 2026-04-08
+**Reviewer:** Hawkeye (code-reviewer)
+**Cycle:** 2 of 2 — Verification of I1 fix
+
+### Verdict: ✅ PASS
+
+---
+
+### What Was Verified
+
+Cycle 1 issued NEEDS-CHANGES on a single issue (I1): all 17 raw status string literals in `DiscoveryService.cs`, `NewSpecWizard.razor`, and `DiscoveryAnswersSummary.razor` needed to be replaced with `DiscoverySessionStatus.*` constants. Tony fixed this in commit `90fa325`.
+
+---
+
+### Task-by-Task Results
+
+| Task | Check | Result |
+|------|-------|--------|
+| 1 | Raw string literals remaining | ✅ PASS — Zero remaining across all 3 files |
+| 2 | Constant references correct (no typos) | ✅ PASS — All 16 usages verified correct |
+| 3 | Diff scope (only expected files changed) | ✅ PASS — 3 source files + 3 pipeline artifacts |
+| 4 | `_Imports.razor` has `@using FortressNexus.Web.Models.Enums` | ✅ PASS — Found at Components/_Imports.razor:18 |
+| 5 | `dotnet build` clean | ✅ PASS — 0 errors, 0 warnings |
+
+---
+
+### Constant References Verified
+
+**DiscoveryService.cs** — 13 usages (+ `using FortressNexus.Web.Models.Enums;` at line 8):
+- L54, L64: `DiscoverySessionStatus.Pending` ✓
+- L134, L138: `DiscoverySessionStatus.Answered` ✓
+- L155, L159, L168: `DiscoverySessionStatus.Skipped` ✓
+- L278, L280, L345, L347: `DiscoverySessionStatus.Failed` ✓
+- L331, L337: `DiscoverySessionStatus.QuestionsReady` ✓
+
+**NewSpecWizard.razor** — 2 usages (L289):
+- `DiscoverySessionStatus.QuestionsReady` ✓
+- `DiscoverySessionStatus.Failed` ✓
+
+**DiscoveryAnswersSummary.razor** — 1 usage:
+- L7: `DiscoverySessionStatus.Skipped` ✓
+
+---
+
+### Scope Check
+
+Diff `d42d0ed..90fa325` touched 6 files:
+- 3 source files — exactly as expected
+- 3 pipeline artifacts (`1662-BUILD-REPORT.md`, `1662-REVIEW-REPORT.md`, `P3-STATE.md`) — benign, no source impact
+
+No scope creep.
+
+---
+
+### I1 Resolution Confirmed
+
+All 17 literals replaced. No raw strings remain. Build is clean. Namespace resolution confirmed via `_Imports.razor`. I1 is fully resolved.
+
+---
+
+### Final Check-by-Check Summary
+
+| Check | Verdict |
+|-------|---------|
+| 1. Zero raw literals remaining | ✅ PASS |
+| 2. Constant references correct | ✅ PASS |
+| 3. Build clean | ✅ PASS |
+| 4. Diff scope clean | ✅ PASS |
+| 5. `_Imports.razor` namespace confirmed | ✅ PASS |
+
+---
+
+*Reviewed by Hawkeye using Claude Code CLI (CC Sonnet) — adversarial review spec at `/tmp/clint-brief-1662-c2.md`*

@@ -11,6 +11,14 @@ namespace FortressNexus.Web.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropForeignKey(
+                name: "FK_discovery_questions_discovery_sessions_discovery_session_id",
+                table: "discovery_questions");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_discovery_answers_discovery_questions_discovery_question_id",
+                table: "discovery_answers");
+
             migrationBuilder.AlterColumn<Guid>(
                 name: "id",
                 table: "discovery_sessions",
@@ -60,11 +68,35 @@ namespace FortressNexus.Web.Migrations
                 oldClrType: typeof(string),
                 oldType: "varchar(36)")
                 .OldAnnotation("MySql:CharSet", "utf8mb4");
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_discovery_questions_discovery_sessions_discovery_session_id",
+                table: "discovery_questions",
+                column: "discovery_session_id",
+                principalTable: "discovery_sessions",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Cascade);
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_discovery_answers_discovery_questions_discovery_question_id",
+                table: "discovery_answers",
+                column: "discovery_question_id",
+                principalTable: "discovery_questions",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Cascade);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropForeignKey(
+                name: "FK_discovery_questions_discovery_sessions_discovery_session_id",
+                table: "discovery_questions");
+
+            migrationBuilder.DropForeignKey(
+                name: "FK_discovery_answers_discovery_questions_discovery_question_id",
+                table: "discovery_answers");
+
             migrationBuilder.AlterColumn<string>(
                 name: "id",
                 table: "discovery_sessions",
@@ -114,6 +146,22 @@ namespace FortressNexus.Web.Migrations
                 oldType: "char(36)")
                 .Annotation("MySql:CharSet", "utf8mb4")
                 .OldAnnotation("Relational:Collation", "ascii_general_ci");
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_discovery_questions_discovery_sessions_discovery_session_id",
+                table: "discovery_questions",
+                column: "discovery_session_id",
+                principalTable: "discovery_sessions",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Cascade);
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_discovery_answers_discovery_questions_discovery_question_id",
+                table: "discovery_answers",
+                column: "discovery_question_id",
+                principalTable: "discovery_questions",
+                principalColumn: "id",
+                onDelete: ReferentialAction.Cascade);
         }
     }
 }

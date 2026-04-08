@@ -3,7 +3,7 @@
 **Started:** 2026-04-08 12:16 EDT
 **Repo:** ~/projects/fip/nexus/src/FortressNexus.Web/
 
-## Current Stage: BUILDING (cycle 2) — WI #1662
+## Current Stage: BUILDING (cycle 3) — WI #1662
 ## Risk Level: medium
 ## Pipeline Path: full (no approval gate — Fred tests live)
 ## Review Cycles: 0
@@ -38,7 +38,10 @@
 | PLAN | ✅ DONE | All | Jarvis | 2026-04-08 | 2026-04-08 | Spec v1.3, WI map created |
 | BUILD | ✅ DONE | #1662 | Tony | 12:16 EDT | 12:26 EDT | d42d0ed — migration + status constants |
 | REVIEW | ↩️ NEEDS-CHANGES | #1662 | Clint | 12:26 EDT | 12:35 EDT | I1: constants unadopted — 17 literals in 3 files |
-| BUILD | 🔄 ACTIVE | #1662 | Tony | 12:35 EDT | — | Cycle 2 — adopt DiscoverySessionStatus.* |
+| BUILD | ✅ DONE | #1662 | Tony | 12:35 EDT | 12:38 EDT | 90fa325 — 17 literals replaced |
+| REVIEW | ✅ DONE | #1662 | Clint | 12:38 EDT | 12:41 EDT | PASS — 0 raw literals, build clean |
+| DEPLOY | ⚠️ PARTIAL | #1662 | Rhodey | 12:41 EDT | 12:58 EDT | nexus-web:16 healthy; migration failed — FK order bug |
+| BUILD | 🔄 ACTIVE | #1662 | Tony | 12:58 EDT | — | Cycle 3 — fix FK drop/re-add in migration |
 
 ---
 
