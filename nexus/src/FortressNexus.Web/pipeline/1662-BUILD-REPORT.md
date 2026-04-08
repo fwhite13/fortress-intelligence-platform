@@ -126,3 +126,54 @@ WI#1662 Add Phase3 schema anchor migration and DiscoverySessionStatus constants
 ```
 [Tony Stark — BUILD cycle 1] commit d42d0ed. WI#1662 complete — DiscoverySessionStatus constants class added (Pending/QuestionsReady/Answered/Skipped/Failed/Superseded), EF migration AddPhase3ResumeChanges scaffolded (non-empty: aligns Discovery entity Guid IDs from varchar(36) to char(36) in snapshot — per WI, not reverted), NexusDbContextDesignTimeFactory added to unblock EF tooling, build 0 errors, pushed to main.
 ```
+
+---
+
+## Cycle 2 — Constants Adoption
+
+**Date:** 2026-04-08
+**Agent:** Tony Stark
+**Commit:** `90fa325`
+
+### Issue Addressed
+Clint (code-reviewer) flagged I1: `DiscoverySessionStatus.cs` constants class was 100% unadopted — all 17 raw string literals across 3 files still used magic strings.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `Services/Discovery/DiscoveryService.cs` | Added `using FortressNexus.Web.Models.Enums;`; replaced 13 raw string literals with `DiscoverySessionStatus.*` constants |
+| `Components/Pages/NewSpecWizard.razor` | Replaced 2 raw literals in `is` pattern match with constants |
+| `Components/Nexus/DiscoveryAnswersSummary.razor` | Replaced 1 raw literal `"Skipped"` comparison with constant |
+
+### Namespace Note
+`_Imports.razor` already contained `@using FortressNexus.Web.Models.Enums` — no per-file `@using` required in Razor files.
+
+### Replacement Summary
+- `"Pending"` → `DiscoverySessionStatus.Pending` (2 occurrences in DiscoveryService.cs)
+- `"Answered"` → `DiscoverySessionStatus.Answered` (2 occurrences in DiscoveryService.cs)
+- `"Skipped"` → `DiscoverySessionStatus.Skipped` (3 occurrences: 2 in DiscoveryService.cs, 1 in DiscoveryAnswersSummary.razor)
+- `"Failed"` → `DiscoverySessionStatus.Failed` (4 occurrences: 3 in DiscoveryService.cs, 1 in NewSpecWizard.razor)
+- `"QuestionsReady"` → `DiscoverySessionStatus.QuestionsReady` (3 occurrences: 2 in DiscoveryService.cs, 1 in NewSpecWizard.razor)
+
+### Build Result
+
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:04.05
+```
+
+**Result: PASS**
+
+### Git Commit
+
+**Hash:** `90fa325`
+
+```
+chore(nexus#1662): adopt DiscoverySessionStatus constants in service and components
+```
+
+**Pushed:** `origin/main` ✓
