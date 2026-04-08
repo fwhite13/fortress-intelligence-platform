@@ -148,7 +148,7 @@ else if (_submission is not null)
                 <MudExpansionPanels>
                     <MudExpansionPanel Text="Previous Version">
                         <MudAlert Severity="Severity.Info" Variant="Variant.Text">
-                            @if (_submission.SpecDocuments.OrderByDescending(d => d.Version).Skip(1).FirstOrDefault() is { } prevSpec)
+                            @if (_historicalSpecs.FirstOrDefault() is { } prevSpec)
                             {
                                 <MudText Typo="Typo.body2">
                                     @(prevSpec.EditedContent ?? prevSpec.Content)
@@ -476,8 +476,8 @@ else if (_submission is not null)
                 _submission!.Id,
                 await UserContextService.GetUpnAsync(),
                 await UserContextService.IsAdminAsync());
-            Nav.NavigateTo("/nexus");
             Snackbar.Add("Submission deleted.", Severity.Success);
+            Nav.NavigateTo("/nexus");
         }
         catch (UnauthorizedAccessException)
         {
