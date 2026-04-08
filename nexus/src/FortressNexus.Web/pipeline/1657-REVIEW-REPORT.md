@@ -189,3 +189,143 @@ return await db.DiscoverySessions
 ## Summary
 
 The service-layer implementation is clean and logically correct. The single critical failure is that this WI did not update the DB schema to support multiple sessions per submission — the unique index that enforced the old 1:1 relationship is still in place and will immediately crash `InitiateDiscoveryAsync` after supersede. Fix is a small migration + one method update. No architectural rework needed.
+
+---
+
+---
+
+## Review Report — NEXUS WI #1657
+**Superseded status + re-discovery trigger**
+**Reviewer:** Hawkeye | **Cycle:** 2 | **Commit:** `3dc9f58` | **Date:** 2026-04-08
+
+---
+
+## Verdict: NEEDS-CHANGES
+
+The two critical Cycle 1 issues are correctly fixed. One important issue remains: the EF model still declares a `1:1` relationship between `Submission` and `DiscoverySession` after the unique index was dropped (enabling `1:N` at the DB layer). The `NexusDbContext.cs` `HasOne/WithOne` configuration was not updated.
+
+---
+
+## Spec Compliance Check
+
+**Files expected in scope:** Migration `.cs`, migration `.Designer.cs`, `NexusDbContextModelSnapshot.cs`, `DiscoveryService.cs`
+
+| File | Status |
+|------|--------|
+| `Migrations/20260408180000_DropDiscoverySessionsUniqueSubmissionIndex.cs` | ✅ Present |
+| `Migrations/20260408180000_DropDiscoverySessionsUniqueSubmissionIndex.Designer.cs` | ✅ Present |
+| `Migrations/NexusDbContextModelSnapshot.cs` | ✅ Updated (IsUnique removed) |
+| `Services/Discovery/DiscoveryService.cs` | ✅ Updated (Where + OrderBy added) |
+| `Data/NexusDbContext.cs` | ⚠️ NOT updated — WithOne/WithOne still in place (see Important I1) |
+
+**Out of scope:** Pipeline docs touched (fine). No unexpected application logic changes.
+
+**Spec compliance verdict:** ✅ PARTIALLY COMPLIANT — the Cycle 1 critical fixes are present; one omission (NexusDbContext.cs relationship cardinality) creates a model-schema mismatch.
+
+---
+
+## Consistency Audit
+
+| Check | Result |
+|-------|--------|
+| Migration index name vs. previous migration `20260407180206_AddDiscoveryConversation.cs` line 121 | ✅ Exact match: `IX_discovery_sessions_submission_id` |
+| `NexusDbContextModelSnapshot.cs` — `IsUnique()` gone from DiscoverySession index | ✅ Confirmed: `b.HasIndex("SubmissionId")` with no `.IsUnique()` |
+| `NexusDbContext.cs` relationship cardinality updated | ❌ Still `HasOne/WithOne` — see I1 |
+| `GetSessionAsync` uses `DiscoverySessionStatus.Superseded` constant | ✅ Enum constant, not raw string |
+| All `GetSessionAsync` call sites use `int` submissionId | ✅ All four call sites verified |
+
+---
+
+## Critical Issues — 0
+
+None. The Cycle 1 critical (Duplicate entry crash) is resolved.
+
+---
+
+## Important Issues — 1
+
+### I1: `NexusDbContext.cs` relationship not updated from 1:1 to 1:N
+
+**File:** `Data/NexusDbContext.cs` (lines 73–77)
+**Category:** model/schema consistency
+
+**Issue:** The unique index was dropped, enabling multiple `DiscoverySession` rows per `Submission` at the DB level. However, the EF model was not updated:
+
+```csharp
+// NexusDbContext.cs line 73-77 — STILL UNCHANGED
+entity.HasOne(e => e.DiscoverySession)
+      .WithOne(ds => ds.Submission)
+      .HasForeignKey<DiscoverySession>(ds => ds.SubmissionId)
+      .OnDelete(DeleteBehavior.Cascade)
+      .IsRequired(false);
+```
+
+The snapshot reflects the same mismatch (`WithOne("DiscoverySession")` on the Submission side, line ~539).
+
+**Impact:** Current code paths (`GetSessionAsync`, `InitiateDiscoveryAsync`, `SupersedeSessionAsync`) all query `DiscoverySessions` directly and are unaffected. However, `submission.DiscoverySession` nav property — used anywhere a `Submission` is loaded with `.Include(s => s.DiscoverySession)` — will silently return only one row when multiple sessions exist. EF will not throw; it will just return an indeterminate session. This is a correctness landmine for any future code touching submissions after re-discovery.
+
+The snapshot's `NexusDbContextModelSnapshot.cs` will self-resolve once `NexusDbContext.cs` is fixed and the snapshot regenerated.
+
+**Fix:**
+
+In `NexusDbContext.cs`, update the Submission→DiscoverySession relationship (currently inside the `Submission` entity block, around line 73):
+
+```diff
+- entity.HasOne(e => e.DiscoverySession)
+-       .WithOne(ds => ds.Submission)
+-       .HasForeignKey<DiscoverySession>(ds => ds.SubmissionId)
+-       .OnDelete(DeleteBehavior.Cascade)
+-       .IsRequired(false);
++ entity.HasMany(e => e.DiscoverySessions)
++       .WithOne(ds => ds.Submission)
++       .HasForeignKey(ds => ds.SubmissionId)
++       .OnDelete(DeleteBehavior.Cascade);
+```
+
+In `Models/Entities/Submission.cs`, update the nav property:
+```diff
+- public DiscoverySession? DiscoverySession { get; set; }
++ public ICollection<DiscoverySession> DiscoverySessions { get; set; } = [];
+```
+
+After making these changes:
+1. Run `dotnet ef migrations add UpdateDiscoverySessionRelationship` — verify the generated migration has **no `migrationBuilder` calls** (no DB changes needed; only model metadata changes). If EF emits DB changes, something is misconfigured.
+2. Run `dotnet build` — 0 errors.
+3. Regenerate snapshot: `dotnet ef database update` or let the Designer pick it up.
+
+Note: Any existing code that references `submission.DiscoverySession` (singular) will need to be updated to `.DiscoverySessions.FirstOrDefault(...)`.
+
+---
+
+## Nitpicks — 0
+
+---
+
+## Positive Observations
+
+- **Migration is correct.** Index name exactly matches the previous migration's `CreateIndex` name. `Up()` drops then recreates non-unique. `Down()` is fully symmetric. `unique: false` is valid EF Core syntax.
+- **`GetSessionAsync` is clean.** The Where/OrderBy/Include chain is correct EF Core 8 syntax. Using the enum constant (not a raw string) for the status filter is the right pattern. All four call sites pass `int` — no type confusion.
+- **Build is clean.** `dotnet build` — 0 errors, 0 warnings.
+- **Snapshot index block is correct.** `b.HasIndex("SubmissionId")` with no `.IsUnique()` — exactly what's needed.
+
+---
+
+## What Tony Needs to Fix
+
+### Fix I1 (required for PASS):
+
+1. Update `NexusDbContext.cs` — change `HasOne/WithOne` to `HasMany/WithOne` for the `Submission→DiscoverySession` relationship (see diff above).
+2. Update `Submission.cs` entity — change `DiscoverySession?` nav property to `ICollection<DiscoverySession>`.
+3. Run `dotnet ef migrations add UpdateDiscoverySessionRelationship` — verify empty migration (no DB ops).
+4. Run `dotnet build` — 0 errors.
+5. Regenerate or confirm snapshot is updated.
+6. Check for any call sites using `submission.DiscoverySession` (singular) — update to `.DiscoverySessions.FirstOrDefault(...)`.
+
+This is a small change (~15 lines) with no DB migration delta expected.
+
+---
+
+## Summary
+
+Cycle 1 critical issues resolved. One important omission: `NexusDbContext.cs` relationship cardinality was not updated to match the new 1:N schema. The fix is small and low-risk. Build is clean.
+

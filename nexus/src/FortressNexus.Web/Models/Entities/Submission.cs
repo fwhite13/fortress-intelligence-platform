@@ -19,5 +19,5 @@ public class Submission
     public UploadedFile? MockupFile { get; set; }
     public List<SpecDocument> SpecDocuments { get; set; } = new();
     public List<SubmissionFile> SubmissionFiles { get; set; } = new();
-    public DiscoverySession? DiscoverySession { get; set; }
+    public ICollection<DiscoverySession> DiscoverySessions { get; set; } = new List<DiscoverySession>();
 }

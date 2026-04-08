@@ -70,11 +70,10 @@ public class NexusDbContext : DbContext
                 .WithOne(sf => sf.Submission)
                 .HasForeignKey(sf => sf.SubmissionId)
                 .OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne(e => e.DiscoverySession)
+            entity.HasMany(e => e.DiscoverySessions)
                   .WithOne(ds => ds.Submission)
-                  .HasForeignKey<DiscoverySession>(ds => ds.SubmissionId)
-                  .OnDelete(DeleteBehavior.Cascade)
-                  .IsRequired(false);
+                  .HasForeignKey(ds => ds.SubmissionId)
+                  .OnDelete(DeleteBehavior.Cascade);
         });
 
         // SubmissionFile
