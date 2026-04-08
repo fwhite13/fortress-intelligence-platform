@@ -1,3 +1,5 @@
+using Amazon.S3;
+using Amazon.S3.Model;
 using FortressAI.Shared.Models;
 using FortressAI.Web.Data;
 using Microsoft.EntityFrameworkCore;
@@ -8,11 +10,73 @@ public class ForgeService
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<ForgeService> _logger;
+    private readonly IAmazonS3 _s3;
+    private readonly KbDocumentService _kbDocumentService;
 
-    public ForgeService(IDbContextFactory<AppDbContext> dbFactory, ILogger<ForgeService> logger)
+    public ForgeService(IDbContextFactory<AppDbContext> dbFactory, ILogger<ForgeService> logger, IAmazonS3 s3, KbDocumentService kbDocumentService)
     {
         _dbFactory = dbFactory;
         _logger = logger;
+        _s3 = s3;
+        _kbDocumentService = kbDocumentService;
+    }
+
+    // ── S3 Sync Helpers ───────────────────────────────────────────────────────
+
+    private static string GetNoteS3Key(KbEntry entry) => entry.Tier switch
+    {
+        KbTier.Team      => $"kb-docs/teams/{entry.TeamId}/note-{entry.Id}.txt",
+        KbTier.Corporate => $"kb-docs/fortress/note-{entry.Id}.txt",
+        KbTier.Developer => $"kb-docs/dev/note-{entry.Id}.txt",
+        _                => $"kb-docs/personal/{entry.UserId}/note-{entry.Id}.txt"
+    };
+
+    private static string GetNoteMetadataKey(KbEntry entry) => $"{GetNoteS3Key(entry)}.metadata.json";
+
+    private async Task UploadNoteToS3Async(KbEntry entry)
+    {
+        const string BucketName = "fortress-tools";
+        var s3Key = GetNoteS3Key(entry);
+
+        var noteText = $"# {entry.Title}\n\n{entry.Content}";
+        if (!string.IsNullOrWhiteSpace(entry.Tags))
+            noteText += $"\n\nTags: {entry.Tags}";
+
+        await _s3.PutObjectAsync(new PutObjectRequest
+        {
+            BucketName = BucketName,
+            Key = s3Key,
+            ContentBody = noteText,
+            ContentType = "text/plain"
+        });
+
+        var metadataDict = entry.Tier == KbTier.Team
+            ? new Dictionary<string, object> { ["teamId"] = entry.TeamId!.Value.ToString() }
+            : new Dictionary<string, object> { ["ownerId"] = entry.UserId.ToString() };
+
+        var metadata = new { metadataAttributes = metadataDict };
+        var metadataJson = System.Text.Json.JsonSerializer.Serialize(metadata, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+
+        await _s3.PutObjectAsync(new PutObjectRequest
+        {
+            BucketName = BucketName,
+            Key = GetNoteMetadataKey(entry),
+            ContentBody = metadataJson,
+            ContentType = "application/json"
+        });
+
+        _logger.LogInformation("[ForgeService] Wrote note {EntryId} to S3: {S3Key}", entry.Id, s3Key);
+    }
+
+    private async Task DeleteNoteFromS3Async(KbEntry entry)
+    {
+        const string BucketName = "fortress-tools";
+        var s3Key = GetNoteS3Key(entry);
+
+        await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = BucketName, Key = s3Key });
+        await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = BucketName, Key = GetNoteMetadataKey(entry) });
+
+        _logger.LogInformation("[ForgeService] Deleted note {EntryId} from S3: {S3Key}", entry.Id, s3Key);
     }
 
     // ── Access Control ────────────────────────────────────────────────────────
@@ -146,6 +210,26 @@ public class ForgeService
         await db.SaveChangesAsync();
 
         _logger.LogInformation("Created KbEntry {Id} (Tier={Tier}) for user {UserId}", entry.Id, tier, userId);
+
+        // Write note to S3 + trigger ingestion so it's retrievable by Bedrock
+        try
+        {
+            await UploadNoteToS3Async(entry);
+            var ingestTier = entry.Tier switch
+            {
+                KbTier.Team      => KbTier.Team,
+                KbTier.Corporate => KbTier.Corporate,
+                KbTier.Developer => KbTier.Developer,
+                _                => KbTier.Personal
+            };
+            _ = await _kbDocumentService.StartIngestionAsync(ingestTier);
+            _logger.LogInformation("[ForgeService] Note {EntryId} synced to S3 and ingestion triggered", entry.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[ForgeService] Failed to sync note {EntryId} to S3 — note saved in DB but may not be retrievable by AI", entry.Id);
+        }
+
         return entry;
     }
 
@@ -167,6 +251,25 @@ public class ForgeService
 
         await db.SaveChangesAsync();
         _logger.LogInformation("Updated KbEntry {Id} by user {UserId}", entryId, userId);
+
+        try
+        {
+            await UploadNoteToS3Async(entry);
+            var ingestTier = entry.Tier switch
+            {
+                KbTier.Team      => KbTier.Team,
+                KbTier.Corporate => KbTier.Corporate,
+                KbTier.Developer => KbTier.Developer,
+                _                => KbTier.Personal
+            };
+            _ = await _kbDocumentService.StartIngestionAsync(ingestTier);
+            _logger.LogInformation("[ForgeService] Note {EntryId} synced to S3 and ingestion triggered", entry.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[ForgeService] Failed to sync note {EntryId} to S3 — note saved in DB but may not be retrievable by AI", entry.Id);
+        }
+
         return entry;
     }
 
@@ -180,6 +283,24 @@ public class ForgeService
 
         if (!await CanWriteEntryAsync(userId, entry))
             throw new UnauthorizedAccessException($"User {userId} cannot delete KbEntry {entryId}.");
+
+        // Remove from S3 so Bedrock re-ingestion will exclude this note
+        try
+        {
+            await DeleteNoteFromS3Async(entry);
+            var ingestTier = entry.Tier switch
+            {
+                KbTier.Team      => KbTier.Team,
+                KbTier.Corporate => KbTier.Corporate,
+                KbTier.Developer => KbTier.Developer,
+                _                => KbTier.Personal
+            };
+            _ = await _kbDocumentService.StartIngestionAsync(ingestTier);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[ForgeService] Failed to delete note {EntryId} from S3 — stale content may remain in vector store", entryId);
+        }
 
         db.KbEntries.Remove(entry);
         await db.SaveChangesAsync();
