@@ -101,3 +101,62 @@ Build succeeded.
 ---
 
 *Build complete. Sending to Clint Barton for review.*
+
+---
+
+## Cycle 2 — Unique Index Fix
+
+**Date:** 2026-04-08  
+**Engineer:** Tony Stark (software-engineer)  
+**Commit:** `3dc9f58`  
+**Trigger:** Clint review FAIL — critical runtime bug (MySQL duplicate key crash on re-discovery)
+
+---
+
+### What Was Fixed
+
+Two targeted changes to resolve the unique index crash introduced by the Phase 2 1:1 design assumption:
+
+1. **New EF Core migration** `DropDiscoverySessionsUniqueSubmissionIndex` — drops the unique constraint on `IX_discovery_sessions_submission_id`, replaces it with a non-unique index for query performance. `Down()` reverses the operation.
+
+2. **`GetSessionAsync` in `DiscoveryService.cs`** — now filters out `Superseded` sessions and orders by `CreatedAt` descending, so after a resume+supersede the NEW session is returned (not the old one).
+
+---
+
+### Root Cause
+
+Phase 2 created `discovery_sessions` with `unique: true` on `submission_id` (1 session per submission). Phase 3 allows 1:many (multiple sessions over time; older ones `Superseded`). The unique constraint was never dropped, causing every `InitiateDiscoveryAsync` on a previously-submitted submission to crash with a MySQL duplicate key error.
+
+---
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `Migrations/20260408180000_DropDiscoverySessionsUniqueSubmissionIndex.cs` | New migration: Up() drop+recreate non-unique; Down() reverses |
+| `Migrations/20260408180000_DropDiscoverySessionsUniqueSubmissionIndex.Designer.cs` | Snapshot with updated index (no IsUnique) |
+| `Migrations/NexusDbContextModelSnapshot.cs` | Removed `.IsUnique()` from DiscoverySession SubmissionId index |
+| `Services/Discovery/DiscoveryService.cs` | `GetSessionAsync` now excludes Superseded + OrderByDescending(CreatedAt) |
+
+---
+
+### Acceptance Criteria Verification
+
+- [x] Migration `DropDiscoverySessionsUniqueSubmissionIndex` created — ✅
+- [x] Migration Up(): DROP unique index → CREATE non-unique index — ✅
+- [x] Migration Down(): reverse (non-unique → unique) — ✅
+- [x] `NexusDbContextModelSnapshot.cs` updated — `.IsUnique()` removed — ✅
+- [x] `GetSessionAsync` filters `Status != Superseded` — ✅
+- [x] `GetSessionAsync` orders by `CreatedAt` descending — ✅
+- [x] `dotnet build` 0 errors, 0 warnings — ✅
+
+### Build Output
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+```
+
+---
+
+*Cycle 2 complete. Sending to Clint Barton for re-review.*
