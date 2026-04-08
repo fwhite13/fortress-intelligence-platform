@@ -527,6 +527,8 @@
                     try
                     {
                         await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating);
+                        // TODO(WI #1655): persist updated narrative + file changes before regen
+                        // Currently reads NarrativeText from DB — user's in-session edits not yet saved
                         await SpecGenerationService.GenerateAsync(_submissionId.Value);
                         // GenerateAsync sets status to AwaitingReview internally — no need to set here
                     }
