@@ -3,7 +3,7 @@
 **Started:** 2026-04-08 12:16 EDT
 **Repo:** ~/projects/fip/nexus/src/FortressNexus.Web/
 
-## Current Stage: BUILDING — WI #1653
+## Current Stage: BUILDING — WI #1654
 ## Risk Level: medium
 ## Pipeline Path: full (no approval gate — Fred tests live)
 ## Review Cycles: 0
@@ -15,8 +15,8 @@
 | # | WI | Title | Status |
 |---|-----|-------|--------|
 | 1 | #1662 | DB migration: Superseded status + Phase 3 schema | ✅ CLOSED |
-| 2 | #1653 | NewSpecWizard ResumeSubmissionId param + on-init load | ⏳ QUEUED |
-| 3 | #1654 | Pre-populate narrative + existing files in resume mode | ⏳ QUEUED |
+| 2 | #1653 | NewSpecWizard ResumeSubmissionId param + on-init load | ✅ CLOSED |
+| 3 | #1654 | Pre-populate narrative + existing files in resume mode | 🔄 ACTIVE |
 | 4 | #1656 | _hasChanges change detection on Confirm step | ⏳ QUEUED |
 | 5 | #1657 | Superseded status + mark prior session on re-discovery | ⏳ QUEUED |
 | 6 | #1659 | Spec regen: new SpecDocument at Version+1 | ⏳ QUEUED |

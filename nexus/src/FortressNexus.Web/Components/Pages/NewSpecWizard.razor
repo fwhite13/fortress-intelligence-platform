@@ -79,6 +79,28 @@
                 Upload UI mockups, screenshots, or reference documents (optional — 0–10 files).
             </MudText>
 
+            @if (_isResume && _uploadedFiles.Count > 0)
+            {
+                <MudText Typo="Typo.subtitle2" Class="nexus-existing-files-heading">Previously Uploaded Files</MudText>
+                <MudList T="string" Dense="true" Class="nexus-existing-files-list">
+                    @foreach (var existingFile in _uploadedFiles.Where(f => !_filesToDelete.Contains(f.Id)))
+                    {
+                        var capturedFile = existingFile;
+                        <MudListItem T="string">
+                            <div class="nexus-existing-file-item">
+                                <MudText Typo="Typo.body2">@capturedFile.OriginalFileName</MudText>
+                                <MudIconButton Icon="@Icons.Material.Filled.Close"
+                                               Size="Size.Small"
+                                               Color="Color.Error"
+                                               OnClick="@(() => RemoveExistingFile(capturedFile.Id))"
+                                               Class="nexus-existing-file-remove-btn"
+                                               aria-label="Remove file" />
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+
             <FileUploadZone OnFilesSelected="HandleFilesSelected" InitialFiles="@(_pendingFiles.AsReadOnly())" />
 
             @foreach (var (file, error) in _fileErrors)
@@ -140,7 +162,7 @@
             <MudPaper Elevation="0" Class="nexus-wizard-review-card">
                 <MudText Typo="Typo.overline" Class="nexus-wizard-review-label">Files</MudText>
                 <MudText Typo="Typo.body2" Class="nexus-wizard-review-value">
-                    @(_pendingFiles.Count == 0 ? "None (narrative-only)" : $"{_pendingFiles.Count} file(s) selected")
+                    @(TotalFileCount == 0 ? "None (narrative-only)" : $"{TotalFileCount} file(s)")
                 </MudText>
             </MudPaper>
 
@@ -191,10 +213,14 @@
     private bool _isResume = false;
     private string _originalNarrative = string.Empty;
     private HashSet<int> _originalFileIds = new();
+    private HashSet<int> _filesToDelete = new();
     private SpecDocument? _existingSpecDocument;
 
     private DiscoverySession? _discoverySession;
     private bool _discoveryLoading;
+
+    private int TotalFileCount =>
+        (_isResume ? _uploadedFiles.Count(f => !_filesToDelete.Contains(f.Id)) : 0) + _pendingFiles.Count;
 
     private bool CanSubmit =>
         !string.IsNullOrWhiteSpace(_title) &&
@@ -397,6 +423,13 @@
     private void HandleFilesSelected(IReadOnlyList<IBrowserFile> files)
     {
         _pendingFiles = files.ToList();
+    }
+
+    private void RemoveExistingFile(int fileId)
+    {
+        _filesToDelete.Add(fileId);
+        // Optimistic UI — file disappears from list immediately
+        // Actual DB/S3 deletion is deferred to submit (WI #1655)
     }
 
     private Task HandleSubmit()
