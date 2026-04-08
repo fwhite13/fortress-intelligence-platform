@@ -453,7 +453,30 @@
     {
         _filesToDelete.Add(fileId);
         // Optimistic UI — file disappears from list immediately
-        // Actual DB/S3 deletion is deferred to submit (WI #1655)
+        // Actual DB/S3 deletion applied in ApplyResumeChangesAsync() at submit
+    }
+
+    private async Task ApplyResumeChangesAsync()
+    {
+        // 1. Persist updated narrative
+        try
+        {
+            await SubmissionService.UpdateNarrativeAsync(_submissionId!.Value, _narrativeText);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Warning: narrative save failed — {ex.Message}", Severity.Warning);
+        }
+
+        // 2. Delete flagged files from S3 + DB
+        var toDelete = _filesToDelete.ToList(); // snapshot to avoid mutation during iteration
+        foreach (var fileId in toDelete)
+        {
+            await SubmissionService.DeleteUploadedFileAsync(_submissionId!.Value, fileId);
+        }
+
+        // 3. Clear the set to prevent double-delete
+        _filesToDelete.Clear();
     }
 
     private async Task HandleSubmit()
@@ -468,10 +491,11 @@
         {
             if (_isResume && _hasChanges)
             {
-                // TODO(WI #1655): Delete files marked for removal from S3 + DB here
-
                 if (!_regenPending)
                 {
+                    // Apply pending changes (narrative + file deletions) before re-discovery
+                    await ApplyResumeChangesAsync();
+
                     // === FIRST PASS: Send user through new Discovery session ===
                     // Supersede the prior discovery session if one exists
                     if (_discoverySession != null)
@@ -527,8 +551,7 @@
                     try
                     {
                         await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating);
-                        // TODO(WI #1655): persist updated narrative + file changes before regen
-                        // Currently reads NarrativeText from DB — user's in-session edits not yet saved
+                        await ApplyResumeChangesAsync();
                         await SpecGenerationService.GenerateAsync(_submissionId.Value);
                         // GenerateAsync sets status to AwaitingReview internally — no need to set here
                     }
@@ -548,7 +571,8 @@
 
             if (_isResume && !_hasChanges && _existingSpecDocument != null)
             {
-                // Skip-regen path: existing spec, no changes — promote Draft → AwaitingReview directly
+                // Skip-regen path: existing spec, no changes — persist narrative then promote Draft → AwaitingReview
+                await SubmissionService.UpdateNarrativeAsync(_submissionId.Value, _narrativeText);
                 await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.AwaitingReview);
                 Nav.NavigateTo($"/nexus/{ResumeSubmissionId}");
                 return;

@@ -1,3 +1,5 @@
+using Amazon.S3;
+using Amazon.S3.Model;
 using FortressNexus.Web.Data;
 using FortressNexus.Web.Models.DTOs;
 using FortressNexus.Web.Models.Entities;
@@ -10,11 +12,13 @@ public class SubmissionService : ISubmissionService
 {
     private readonly NexusDbContext _db;
     private readonly ILogger<SubmissionService> _logger;
+    private readonly IAmazonS3 _s3;
 
-    public SubmissionService(NexusDbContext db, ILogger<SubmissionService> logger)
+    public SubmissionService(NexusDbContext db, ILogger<SubmissionService> logger, IAmazonS3 s3)
     {
         _db = db;
         _logger = logger;
+        _s3 = s3;
     }
 
     public async Task<Submission> CreateAsync(SubmissionCreateDto dto, string userUpn)
@@ -108,5 +112,83 @@ public class SubmissionService : ISubmissionService
         _db.UploadedFiles.Add(file);
         await _db.SaveChangesAsync();
         return file;
+    }
+
+    public async Task UpdateNarrativeAsync(int submissionId, string narrativeText)
+    {
+        var submission = await _db.Submissions.FindAsync(submissionId);
+        if (submission is null)
+        {
+            _logger.LogWarning("[SUBMISSION] UpdateNarrativeAsync — submission {SubmissionId} not found", submissionId);
+            return;
+        }
+        submission.NarrativeText = narrativeText;
+        await _db.SaveChangesAsync();
+        _logger.LogInformation("[SUBMISSION] Narrative updated for submission {SubmissionId}", submissionId);
+    }
+
+    public async Task DeleteUploadedFileAsync(int submissionId, int fileId)
+    {
+        // Load the UploadedFile with its S3 metadata
+        var uploadedFile = await _db.UploadedFiles
+            .Include(f => f.SubmissionFiles)
+            .FirstOrDefaultAsync(f => f.Id == fileId);
+
+        if (uploadedFile is null)
+        {
+            _logger.LogWarning("[SUBMISSION] DeleteUploadedFileAsync — UploadedFile {FileId} not found", fileId);
+            return;
+        }
+
+        // 1. Delete from S3 (non-fatal)
+        try
+        {
+            var deleteRequest = new DeleteObjectRequest
+            {
+                BucketName = uploadedFile.S3Bucket,
+                Key = uploadedFile.S3Key
+            };
+            await _s3.DeleteObjectAsync(deleteRequest);
+            _logger.LogInformation("[SUBMISSION] S3 object deleted: bucket={Bucket} key={Key} (fileId={FileId})",
+                uploadedFile.S3Bucket, uploadedFile.S3Key, fileId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[SUBMISSION] S3 delete failed for fileId={FileId} key={Key} — proceeding with DB deletion",
+                fileId, uploadedFile.S3Key);
+        }
+
+        // 2. Delete SubmissionFile junction record(s) for this submission (cascade is Restrict, must delete manually)
+        try
+        {
+            var junctionRecords = uploadedFile.SubmissionFiles
+                .Where(sf => sf.SubmissionId == submissionId)
+                .ToList();
+            if (junctionRecords.Count > 0)
+            {
+                _db.SubmissionFiles.RemoveRange(junctionRecords);
+                await _db.SaveChangesAsync();
+                _logger.LogInformation("[SUBMISSION] Deleted {Count} SubmissionFile record(s) for fileId={FileId} submissionId={SubmissionId}",
+                    junctionRecords.Count, fileId, submissionId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[SUBMISSION] SubmissionFile deletion failed for fileId={FileId} submissionId={SubmissionId} — proceeding",
+                fileId, submissionId);
+        }
+
+        // 3. Delete the UploadedFile record
+        try
+        {
+            _db.UploadedFiles.Remove(uploadedFile);
+            await _db.SaveChangesAsync();
+            _logger.LogInformation("[SUBMISSION] UploadedFile record deleted: fileId={FileId}", fileId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[SUBMISSION] UploadedFile record deletion failed for fileId={FileId} — orphaned DB record accepted",
+                fileId);
+        }
     }
 }

@@ -86,3 +86,24 @@ Three changes:
 4. Complete discovery → hit Submit again
 5. Confirm: new `SpecDocument` row inserted at `Version = 2`, old row untouched
 6. Confirm submission status transitions: `Generating` → `AwaitingReview`
+
+---
+
+## Cycle 2 — Review Fix
+
+**Date:** 2026-04-08  
+**Commit:** `21058b8`  
+**Review verdict:** NEEDS-CHANGES — missing TODO comment  
+**Build:** ✅ 0 errors, 0 warnings
+
+### What changed
+Added two comment lines at the `GenerateAsync` call site in Pass 2 of `HandleSubmit`:
+
+```csharp
+// TODO(WI #1655): persist updated narrative + file changes before regen
+// Currently reads NarrativeText from DB — user's in-session edits not yet saved
+await SpecGenerationService.GenerateAsync(_submissionId.Value);
+```
+
+These were removed during Cycle 1 Pass 2 implementation and are now restored.  
+No logic changes — comment-only fix.
