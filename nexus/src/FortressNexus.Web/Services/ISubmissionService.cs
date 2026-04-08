@@ -15,5 +15,5 @@ public interface ISubmissionService
     Task<UploadedFile> SaveUploadedFileAsync(UploadedFile file);
     Task UpdateNarrativeAsync(int submissionId, string narrativeText);
     Task DeleteUploadedFileAsync(int submissionId, int fileId);
-    Task DeleteSubmissionAsync(int id);
+    Task DeleteSubmissionAsync(int id, string callerUpn, bool callerIsAdmin);
 }

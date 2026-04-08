@@ -13,6 +13,7 @@
 @inject IAdoService AdoService
 @inject IDiscoveryService DiscoveryService
 @inject IDialogService DialogService
+@inject ILogger<SubmissionDetail> Logger
 
 @using FortressNexus.Web.Models.Entities
 @using FortressNexus.Web.Models.Enums
@@ -328,10 +329,11 @@ else if (_submission is not null)
             if (_submission.ActiveSpecDocumentId.HasValue)
                 _activeSpec = _submission.SpecDocuments.FirstOrDefault(d => d.Id == _submission.ActiveSpecDocumentId.Value);
 
-            // WI #1652: historical specs (all versions except latest)
+            // WI #1652: historical specs — all versions EXCEPT the active spec (by ID, not position)
+            // If ActiveSpecDocumentId is null, all docs are historical (show them all in the accordion)
             _historicalSpecs = _submission.SpecDocuments
+                .Where(d => d.Id != _submission.ActiveSpecDocumentId)
                 .OrderByDescending(d => d.Version)
-                .Skip(1)
                 .ToList();
 
             // Generate presigned URLs for files
@@ -468,9 +470,24 @@ else if (_submission is not null)
 
         if (confirmed != true) return;
 
-        await SubmissionService.DeleteSubmissionAsync(Id);
-        Snackbar.Add("Submission deleted.", Severity.Success);
-        Nav.NavigateTo("/nexus");
+        try
+        {
+            await SubmissionService.DeleteSubmissionAsync(
+                _submission!.Id,
+                await UserContextService.GetUpnAsync(),
+                await UserContextService.IsAdminAsync());
+            Nav.NavigateTo("/nexus");
+            Snackbar.Add("Submission deleted.", Severity.Success);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Snackbar.Add("You don't have permission to delete this submission.", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting submission {Id}", _submission?.Id);
+            Snackbar.Add("Delete failed. Please try again.", Severity.Error);
+        }
     }
 
     private void DownloadSpec(string format)

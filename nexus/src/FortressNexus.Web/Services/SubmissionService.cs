@@ -192,8 +192,19 @@ public class SubmissionService : ISubmissionService
         }
     }
 
-    public async Task DeleteSubmissionAsync(int id)
+    public async Task DeleteSubmissionAsync(int id, string callerUpn, bool callerIsAdmin)
     {
+        // Security guard: load minimal record first for auth checks
+        var submissionCheck = await _db.Submissions.FindAsync(id)
+            ?? throw new KeyNotFoundException($"Submission {id} not found");
+
+        if (submissionCheck.Status != SubmissionStatus.Draft)
+            throw new InvalidOperationException("Only Draft submissions can be deleted");
+
+        if (!callerIsAdmin && submissionCheck.SubmittedBy != callerUpn)
+            throw new UnauthorizedAccessException("Not authorized to delete this submission");
+
+        // Now load full graph for cascade deletion
         var submission = await _db.Submissions
             .Include(s => s.SubmissionFiles)
                 .ThenInclude(sf => sf.UploadedFile)
