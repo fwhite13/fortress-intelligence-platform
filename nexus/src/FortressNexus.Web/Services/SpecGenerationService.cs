@@ -78,11 +78,17 @@ public class SpecGenerationService : ISpecGenerationService
             // 5. Call AI
             var result = await _bedrock.InvokeAsync(systemPrompt, userPrompt);
 
-            // 6. Create SpecDocument
+            // 6. Create SpecDocument — compute next version (MAX+1, starts at 1 if none exist)
+            var nextVersion = await _db.SpecDocuments
+                .Where(s => s.SubmissionId == submissionId)
+                .Select(s => (int?)s.Version)
+                .MaxAsync() ?? 0;
+            nextVersion += 1;
+
             var specDoc = new SpecDocument
             {
                 SubmissionId = submissionId,
-                Version = 1,
+                Version = nextVersion,
                 Content = result.Text,
                 GeneratedAt = DateTime.UtcNow,
                 GeneratedBy = "ai",

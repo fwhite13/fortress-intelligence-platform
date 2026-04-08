@@ -11,6 +11,7 @@
 @inject IFileStorageService FileStorageService
 @inject ISubmissionService SubmissionService
 @inject IDiscoveryService DiscoveryService
+@inject ISpecGenerationService SpecGenerationService
 @inject NavigationManager Nav
 @inject UserContextService UserContextService
 @inject ISnackbar Snackbar
@@ -227,6 +228,7 @@
     // Resume mode
     [Parameter] public int? ResumeSubmissionId { get; set; }
     private bool _isResume = false;
+    private bool _regenPending = false; // true after re-discovery initiated; triggers regen on next Submit
     private string _originalNarrative = string.Empty;
     private HashSet<int> _originalFileIds = new();
     private HashSet<int> _filesToDelete = new();
@@ -467,50 +469,79 @@
             if (_isResume && _hasChanges)
             {
                 // TODO(WI #1655): Delete files marked for removal from S3 + DB here
-                // TODO(WI #1659): Save updated narrative + title back to Submission record here
 
-                // Supersede the prior discovery session if one exists
-                if (_discoverySession != null)
+                if (!_regenPending)
                 {
-                    await DiscoveryService.SupersedeSessionAsync(_discoverySession.Id);
-                    _discoverySession = null; // Clear so GoToStep2Discovery fires a fresh discovery
+                    // === FIRST PASS: Send user through new Discovery session ===
+                    // Supersede the prior discovery session if one exists
+                    if (_discoverySession != null)
+                    {
+                        await DiscoveryService.SupersedeSessionAsync(_discoverySession.Id);
+                        _discoverySession = null;
+                    }
+
+                    // Kick off new discovery session
+                    await DiscoveryService.InitiateDiscoveryAsync(_submissionId.Value);
+
+                    // Mark regen pending — next Submit will trigger spec regen instead of re-discovery
+                    _regenPending = true;
+
+                    // Navigate back to Discovery step
+                    _isSubmitting = false;
+                    _activeStep = 2;
+                    _discoveryLoading = true;
+                    StateHasChanged();
+
+                    // Poll for the new session in background
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var deadline = DateTime.UtcNow.AddSeconds(15);
+                            while (DateTime.UtcNow < deadline)
+                            {
+                                _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
+                                if (_discoverySession?.Status is DiscoverySessionStatus.QuestionsReady or DiscoverySessionStatus.Failed)
+                                    break;
+                                await Task.Delay(1000);
+                            }
+                        }
+                        catch
+                        {
+                            // Graceful — session stays null
+                        }
+                        finally
+                        {
+                            _discoveryLoading = false;
+                            await InvokeAsync(StateHasChanged);
+                        }
+                    });
+
+                    return;
                 }
-
-                // Kick off new discovery session
-                await DiscoveryService.InitiateDiscoveryAsync(_submissionId.Value);
-
-                // Navigate back to Step 3 (Discovery) so the user goes through the new session
-                _isSubmitting = false;
-                _activeStep = 2;
-                _discoveryLoading = true;
-                StateHasChanged();
-
-                // Poll for the new session in background
-                _ = Task.Run(async () =>
+                else
                 {
+                    // === SECOND PASS: User completed new Discovery — regenerate spec at Version+1 ===
+                    // TODO(WI #1661): Replace this synchronous call with background job + progress UI
+
                     try
                     {
-                        var deadline = DateTime.UtcNow.AddSeconds(15);
-                        while (DateTime.UtcNow < deadline)
-                        {
-                            _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
-                            if (_discoverySession?.Status is DiscoverySessionStatus.QuestionsReady or DiscoverySessionStatus.Failed)
-                                break;
-                            await Task.Delay(1000);
-                        }
+                        await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating);
+                        await SpecGenerationService.GenerateAsync(_submissionId.Value);
+                        // GenerateAsync sets status to AwaitingReview internally — no need to set here
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Graceful — session stays null
+                        Snackbar.Add($"Spec regeneration failed: {ex.Message}", Severity.Error);
+                        await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed);
+                        _isSubmitting = false;
+                        StateHasChanged();
+                        return;
                     }
-                    finally
-                    {
-                        _discoveryLoading = false;
-                        await InvokeAsync(StateHasChanged);
-                    }
-                });
 
-                return;
+                    Nav.NavigateTo($"/nexus/{_submissionId.Value}");
+                    return;
+                }
             }
 
             // No-changes resume or new submission — navigate to submission detail

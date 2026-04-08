@@ -329,3 +329,87 @@ This is a small change (~15 lines) with no DB migration delta expected.
 
 Cycle 1 critical issues resolved. One important omission: `NexusDbContext.cs` relationship cardinality was not updated to match the new 1:N schema. The fix is small and low-risk. Build is clean.
 
+
+---
+
+## Review Report — NEXUS WI #1657
+**HasMany relationship fix**
+**Reviewer:** Hawkeye | **Cycle:** 3 | **Commit:** `681e5d2` | **Date:** 2026-04-08
+
+---
+
+## Verdict: PASS
+
+All Cycle 2 NEEDS-CHANGES items resolved. `HasMany/WithOne` configuration is correct and complete. Build clean. Snapshot regenerated.
+
+---
+
+## Spec Compliance Check
+
+**Files changed in commit `681e5d2`:**
+
+| File | Status |
+|------|--------|
+| `Data/NexusDbContext.cs` | ✅ Updated — `HasOne/WithOne` → `HasMany/WithOne`, `IsRequired(false)` removed |
+| `Models/Entities/Submission.cs` | ✅ Updated — `DiscoverySession?` → `ICollection<DiscoverySession>` |
+| `pipeline/1657-BUILD-REPORT.md` | ✅ Build report appended (pipeline artifact) |
+| `pipeline/1657-REVIEW-REPORT.md` | ✅ Review report appended by pipeline (expected) |
+
+**Out of scope:** ✅ No unexpected files touched.
+
+**Acceptance criteria:**
+- ✅ `HasMany(e => e.DiscoverySessions).WithOne(ds => ds.Submission).HasForeignKey(ds => ds.SubmissionId).OnDelete(DeleteBehavior.Cascade)` — exact fluent chain verified
+- ✅ `ICollection<DiscoverySession> DiscoverySessions` — correct type, plural, initialized to `new List<DiscoverySession>()`
+- ✅ No `.IsRequired(false)` on the relationship — removed
+- ✅ No orphaned singular nav references in application code — zero hits outside migrations/snapshots
+- ✅ Build: 0 errors, 0 warnings
+- ✅ Snapshot updated: `WithMany("DiscoverySessions")` at snapshot line 539, `b.Navigation("DiscoverySessions")` at line 620
+
+**Spec compliance verdict:** ✅ COMPLIANT
+
+---
+
+## Consistency Audit
+
+| Check | Result |
+|-------|--------|
+| `NexusDbContext.cs` HasMany chain — all 4 fluent calls | ✅ `HasMany` / `.WithOne(ds => ds.Submission)` / `.HasForeignKey(ds => ds.SubmissionId)` / `.OnDelete(DeleteBehavior.Cascade)` |
+| `Submission.cs` nav property type | ✅ `ICollection<DiscoverySession>`, initialized |
+| `.IsRequired(false)` gone | ✅ Not present on DiscoverySessions relationship |
+| `HasForeignKey` uses lambda form (not generic type param) | ✅ `HasForeignKey(ds => ds.SubmissionId)` |
+| No duplicate inverse declaration in DiscoverySession block | ✅ DiscoverySession block only declares Questions relationship |
+| Snapshot `WithMany("DiscoverySessions")` | ✅ Confirmed |
+| Snapshot `b.Navigation("DiscoverySessions")` on Submission | ✅ Confirmed |
+| Orphaned `.DiscoverySession` (singular nav) in app code | ✅ Zero hits |
+
+---
+
+## Critical Issues — 0
+
+None.
+
+---
+
+## Important Issues — 0
+
+None. All Cycle 2 NEEDS-CHANGES items resolved.
+
+---
+
+## Nitpicks — 0
+
+---
+
+## Positive Observations
+
+- **Exact fix requested.** The diff is surgical — exactly the 5 lines changed that were called out in Cycle 2 feedback (HasOne→HasMany, remove `<DiscoverySession>` generic param, remove `.IsRequired(false)`; plus Submission.cs nav property).
+- **Snapshot auto-regenerated correctly.** `WithMany("DiscoverySessions")` and `Navigation("DiscoverySessions")` both present, no stale `WithOne` entries.
+- **Lambda FK form is correct.** `HasForeignKey(ds => ds.SubmissionId)` — type-safe, consistent with the rest of the codebase's relationship configs.
+- **No callers needed updating** — consistent with Tony's cycle 2 analysis that no application code was using the old singular nav property directly.
+
+---
+
+## Summary
+
+Clean targeted fix. Three-cycle arc complete: C1 diagnosed DB unique constraint crash → C2 diagnosed HasMany model mismatch → C3 fixes the model. Final state is correct, consistent, and build-clean.
+

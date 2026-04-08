@@ -536,9 +536,10 @@ namespace FortressNexus.Web.Migrations
             modelBuilder.Entity("FortressNexus.Web.Models.Entities.DiscoverySession", b =>
                 {
                     b.HasOne("FortressNexus.Web.Models.Entities.Submission", "Submission")
-                        .WithOne("DiscoverySession")
-                        .HasForeignKey("FortressNexus.Web.Models.Entities.DiscoverySession", "SubmissionId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .WithMany("DiscoverySessions")
+                        .HasForeignKey("SubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Submission");
                 });
@@ -616,7 +617,7 @@ namespace FortressNexus.Web.Migrations
 
             modelBuilder.Entity("FortressNexus.Web.Models.Entities.Submission", b =>
                 {
-                    b.Navigation("DiscoverySession");
+                    b.Navigation("DiscoverySessions");
 
                     b.Navigation("SpecDocuments");
 
