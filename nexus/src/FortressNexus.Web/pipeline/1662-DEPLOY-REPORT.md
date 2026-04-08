@@ -194,3 +194,123 @@ migrationBuilder.AddForeignKey(
 The current deployment (`nexus-web:16`) is running the new code. Once the migration file is fixed, a `dotnet ef migrations add` is NOT needed — the existing migration file just needs to be corrected, rebuilt, and the next deploy will apply it cleanly.
 
 **App is NOT broken.** The service is healthy and serving requests. The schema migration simply didn't apply.
+
+---
+
+## Redeploy — Migration Fix (Cycle 3)
+
+**Date:** 2026-04-08 13:08–13:21 EDT  
+**Deployed by:** War Machine (Rhodey / devops)  
+**Commit:** `bcbf62dc379de062d1ef273f660e228589b26d12` (HEAD of main — docs on top of fix `109cf13`)
+
+---
+
+### Pre-Deploy Snapshot
+
+| Field | Value |
+|-------|-------|
+| Live task definition | `nexus-web:16` |
+| Live image | `742932328420.dkr.ecr.us-east-1.amazonaws.com/nexus-web:d1e364685dc0899db9f688a610cc8a29a0bf89cc` |
+| Service state | HEALTHY, steady state, 1/1 running |
+| Migration state | NOT applied (all 5 columns `varchar(36)`) |
+
+### Rollback Plan (documented pre-deploy)
+
+```bash
+source /home/fredw/projects/ai/projects/fortress_tools/.env.deployer
+aws ecs update-service --cluster fortress-tools-cluster --service nexus-web \
+  --task-definition nexus-web:16 --force-new-deployment \
+  --profile fortress-tools-deployer --region us-east-1
+```
+
+---
+
+### Build
+
+| Field | Value |
+|-------|-------|
+| CodeBuild project | `fip-nexus-build` |
+| Build ID | `fip-nexus-build:77c76e79-1e7c-4438-b523-539b8bcb4d6b` |
+| Build result | **SUCCEEDED** |
+| Build duration | ~77 seconds (13:09:43 → 13:11:00 EDT) |
+| Resolved source | `bcbf62dc379de062d1ef273f660e228589b26d12` (HEAD) |
+| New image tag | `bcbf62dc379de062d1ef273f660e228589b26d12` |
+| New image digest | `sha256:0858d90a56ffdc796f6aa728a59c263a1bf2adec640b098385d6471b2475437a` |
+
+---
+
+### ECS Deployment
+
+| Field | Value |
+|-------|-------|
+| New task definition | `nexus-web:17` |
+| Task definition ARN | `arn:aws:ecs:us-east-1:742932328420:task-definition/nexus-web:17` |
+| Deployment ID | `ecs-svc/3927136914782130043` |
+| Running task | `4fda7c442acf42c9a9c034cb90a63d0f` |
+| Rollout state | **COMPLETED** |
+| Service stabilized at | 2026-04-08T13:21 EDT |
+
+---
+
+### ✅ Migration Status: APPLIED
+
+**CloudWatch log stream:** `ecs/nexus-web/4fda7c442acf42c9a9c034cb90a63d0f`
+
+```
+[17:18:59 INF] [NEXUS] Running EF Core migrations on startup...
+[17:19:03 INF] [NEXUS] EF Core migrations complete.
+```
+
+**Evidence of success:**
+- `EF Core migrations complete.` — clean exit, no exceptions
+- **No `MySqlException`** (cycle 2 failure produced an explicit `MySqlException (0x80004005)` in the log — absent here)
+- **No `ERR` level entries** in startup logs
+- EF Core only emits individual migration names at Verbose log level; at Info level, the clean "migrations complete" with no errors is the success signal
+
+**Contrast with failed run (cycle 2):**
+```
+[16:54:16 ERR] Failed executing DbCommand (4ms)
+ALTER TABLE `discovery_sessions` MODIFY COLUMN `id` char(36)...
+MySqlConnector.MySqlException (0x80004005): Referencing column 'discovery_session_id'...
+```
+Nothing like this appears in the cycle 3 logs.
+
+---
+
+### Health Check
+
+| Check | Result |
+|-------|--------|
+| `curl https://nexus.fortressam.ai/` | **HTTP 403** (auth required — expected, app is live) |
+| ECS health check | HEALTHY |
+| Service steady state | REACHED @ 13:21 EDT |
+
+---
+
+### Final DB State
+
+| Item | Status |
+|------|--------|
+| Migration `AddPhase3ResumeChanges` | ✅ **APPLIED** |
+| discovery_sessions.id | `char(36)` (was `varchar(36)`) |
+| discovery_questions.id | `char(36)` (was `varchar(36)`) |
+| discovery_questions.discovery_session_id | `char(36)` (was `varchar(36)`) |
+| discovery_answers.id | `char(36)` (was `varchar(36)`) |
+| discovery_answers.discovery_question_id | `char(36)` (was `varchar(36)`) |
+| FK constraints | Intact (drop/re-add in migration) |
+| Data rows affected | 0 (all tables empty) |
+
+---
+
+### Summary
+
+| Item | Status |
+|------|--------|
+| Pre-deploy snapshot | ✅ Captured |
+| Rollback plan | ✅ Documented |
+| CodeBuild | ✅ SUCCEEDED (#77c76e79) |
+| ECR push | ✅ `bcbf62d` digest pushed |
+| Task def | ✅ `nexus-web:17` registered |
+| ECS deploy | ✅ COMPLETED, HEALTHY |
+| Health check | ✅ HTTP 403 (expected) |
+| Migration `AddPhase3ResumeChanges` | ✅ **APPLIED** — no exceptions |

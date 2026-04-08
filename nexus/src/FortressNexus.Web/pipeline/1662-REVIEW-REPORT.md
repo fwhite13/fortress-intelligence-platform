@@ -219,3 +219,82 @@ All 17 literals replaced. No raw strings remain. Build is clean. Namespace resol
 ---
 
 *Reviewed by Hawkeye using Claude Code CLI (CC Sonnet) — adversarial review spec at `/tmp/clint-brief-1662-c2.md`*
+
+---
+
+## Review Report — Cycle 3
+
+**Commit reviewed:** `109cf13`
+**Date:** 2026-04-08
+**Reviewer:** Hawkeye (code-reviewer)
+**Cycle:** 3 — Targeted FK fix review (migration deploy failure)
+
+### Verdict: ✅ PASS
+
+---
+
+### Background
+
+Cycle 2 issued PASS on the migration content, but the migration failed on MySQL deploy:
+
+> `ER_FK_INCOMPATIBLE_COLUMNS`: MySQL rejected `MODIFY COLUMN` on `discovery_sessions.id` because `discovery_questions.discovery_session_id` had a FK referencing it with an incompatible type.
+
+Tony's fix: wrap the 5 `AlterColumn` calls in `Up()` and `Down()` with `DropForeignKey` before and `AddForeignKey` after for the two FKs that reference the columns being altered.
+
+---
+
+### Build
+
+`dotnet build` — **0 errors, 0 warnings** ✅
+
+---
+
+### CC Review Results (all 6 checks)
+
+| Check | Verdict | Notes |
+|-------|---------|-------|
+| 1. SQL operation order in Up() | ✅ PASS | DropFK×2 → AlterColumn×5 → AddFK×2 — exact required order |
+| 2. FK names vs. origin migration | ✅ PASS | Both names match `20260407180206_AddDiscoveryConversation.cs` exactly |
+| 3. AddForeignKey params correctness | ✅ PASS | table/column/principalTable/principalColumn/Cascade all correct |
+| 4. Down() symmetry | ✅ PASS | DropFK×2 → AlterColumn×5 → AddFK×2 — perfectly symmetric |
+| 5. Third FK exclusion justified | ✅ PASS | `FK_discovery_sessions_submissions_submission_id` touches no altered columns |
+| 6. Commit scope | ✅ PASS | 1 migration file + 3 pipeline docs — no unexpected source changes |
+
+---
+
+### Check Detail
+
+**Check 1 — Up() operation order:**
+1. `DropForeignKey` — `FK_discovery_questions_discovery_sessions_discovery_session_id`
+2. `DropForeignKey` — `FK_discovery_answers_discovery_questions_discovery_question_id`
+3. `AlterColumn` — `discovery_sessions.id`
+4. `AlterColumn` — `discovery_questions.discovery_session_id`
+5. `AlterColumn` — `discovery_questions.id`
+6. `AlterColumn` — `discovery_answers.discovery_question_id`
+7. `AlterColumn` — `discovery_answers.id`
+8. `AddForeignKey` — `FK_discovery_questions_discovery_sessions_discovery_session_id`
+9. `AddForeignKey` — `FK_discovery_answers_discovery_questions_discovery_question_id`
+
+**Check 2 — FK name match:**
+- `FK_discovery_questions_discovery_sessions_discovery_session_id` — exact match ✅
+- `FK_discovery_answers_discovery_questions_discovery_question_id` — exact match ✅
+
+**Check 3 — AddForeignKey params:**
+- FK#1: `table=discovery_questions`, `column=discovery_session_id`, `principalTable=discovery_sessions`, `principalColumn=id`, `onDelete=Cascade` ✅
+- FK#2: `table=discovery_answers`, `column=discovery_question_id`, `principalTable=discovery_questions`, `principalColumn=id`, `onDelete=Cascade` ✅
+
+**Check 4 — Down() sequence:** Identical structure to Up() — DropFK×2 → AlterColumn×5 → AddFK×2. Symmetric. ✅
+
+**Check 5 — Third FK exclusion:** `FK_discovery_sessions_submissions_submission_id` references `submissions.id` (INT principal) via `discovery_sessions.submission_id` (INT FK column). Neither column is in the set being altered. Exclusion is correct. ✅
+
+**Check 6 — Scope:** `20260408162324_AddPhase3ResumeChanges.cs` + 3 pipeline docs. Clean. ✅
+
+---
+
+### Summary
+
+The fix is surgically correct. The two FKs that reference columns being modified are dropped before the alters and re-added after, in both `Up()` and `Down()`. Names match the origin migration exactly. The third FK (submissions) is correctly left untouched. This migration is ready to deploy.
+
+---
+
+*Reviewed by Hawkeye using Claude Code CLI (CC Sonnet) — adversarial review spec at `/tmp/clint-brief-1662-c3.md`*

@@ -26,4 +26,10 @@ public class UserContextService
         var authState = await _authStateProvider.GetAuthenticationStateAsync();
         return authState.User.IsInRole(NexusRoles.Reviewer);
     }
+
+    public async Task<bool> IsAdminAsync()
+    {
+        var authState = await _authStateProvider.GetAuthenticationStateAsync();
+        return authState.User.IsInRole(NexusRoles.Admin);
+    }
 }

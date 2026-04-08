@@ -3,7 +3,7 @@
 **Started:** 2026-04-08 12:16 EDT
 **Repo:** ~/projects/fip/nexus/src/FortressNexus.Web/
 
-## Current Stage: BUILDING (cycle 3) — WI #1662
+## Current Stage: BUILDING — WI #1653
 ## Risk Level: medium
 ## Pipeline Path: full (no approval gate — Fred tests live)
 ## Review Cycles: 0
@@ -14,7 +14,7 @@
 
 | # | WI | Title | Status |
 |---|-----|-------|--------|
-| 1 | #1662 | DB migration: Superseded status + Phase 3 schema | 🔄 ACTIVE |
+| 1 | #1662 | DB migration: Superseded status + Phase 3 schema | ✅ CLOSED |
 | 2 | #1653 | NewSpecWizard ResumeSubmissionId param + on-init load | ⏳ QUEUED |
 | 3 | #1654 | Pre-populate narrative + existing files in resume mode | ⏳ QUEUED |
 | 4 | #1656 | _hasChanges change detection on Confirm step | ⏳ QUEUED |
@@ -41,7 +41,10 @@
 | BUILD | ✅ DONE | #1662 | Tony | 12:35 EDT | 12:38 EDT | 90fa325 — 17 literals replaced |
 | REVIEW | ✅ DONE | #1662 | Clint | 12:38 EDT | 12:41 EDT | PASS — 0 raw literals, build clean |
 | DEPLOY | ⚠️ PARTIAL | #1662 | Rhodey | 12:41 EDT | 12:58 EDT | nexus-web:16 healthy; migration failed — FK order bug |
-| BUILD | 🔄 ACTIVE | #1662 | Tony | 12:58 EDT | — | Cycle 3 — fix FK drop/re-add in migration |
+| BUILD | ✅ DONE | #1662 | Tony | 12:58 EDT | 13:04 EDT | 109cf13 — FK drop/re-add fix |
+| REVIEW | ✅ DONE | #1662 | Clint | 13:04 EDT | 13:08 EDT | PASS — FK names/order/symmetry all clean |
+| DEPLOY | ✅ DONE | #1662 | Rhodey | 13:08 EDT | 13:21 EDT | nexus-web:17, migration APPLIED ✅ |
+| CONFIRM | ✅ DONE | #1662 | Maria | 13:22 EDT | 13:22 EDT | WI Closed |
 
 ---
 

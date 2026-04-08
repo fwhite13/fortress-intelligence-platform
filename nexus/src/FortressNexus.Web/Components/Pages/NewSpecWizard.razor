@@ -1,3 +1,4 @@
+@page "/nexus/{ResumeSubmissionId:int}/resume"
 @page "/nexus/new"
 @attribute [Authorize]
 @rendermode InteractiveServer
@@ -184,6 +185,14 @@
     private string? _step1Error;
 
     private int? _submissionId;
+
+    // Resume mode
+    [Parameter] public int? ResumeSubmissionId { get; set; }
+    private bool _isResume = false;
+    private string _originalNarrative = string.Empty;
+    private HashSet<int> _originalFileIds = new();
+    private SpecDocument? _existingSpecDocument;
+
     private DiscoverySession? _discoverySession;
     private bool _discoveryLoading;
 
@@ -193,6 +202,73 @@
         _narrativeText.Trim().Length >= 5 &&
         !_isUploading &&
         !_isSubmitting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (ResumeSubmissionId is null)
+            return; // New-submission flow — nothing to do
+
+        // --- Resume mode ---
+        var submission = await SubmissionService.GetByIdAsync(ResumeSubmissionId.Value);
+        if (submission is null)
+        {
+            Snackbar.Add("Submission not found.", Severity.Error);
+            Nav.NavigateTo("/nexus");
+            return;
+        }
+
+        // Auth guard: only the owner or a NexusAdmin can resume
+        var currentUpn = await UserContextService.GetUpnAsync();
+        var isAdmin = await UserContextService.IsAdminAsync();
+        if (!isAdmin && submission.SubmittedBy != currentUpn)
+        {
+            Snackbar.Add("You do not have permission to resume this submission.", Severity.Warning);
+            Nav.NavigateTo("/nexus");
+            return;
+        }
+
+        // Populate wizard fields from the submission
+        _title = submission.Title;
+        _featureArea = submission.FeatureArea;
+        _narrativeText = submission.NarrativeText;
+        _submissionId = submission.Id;
+
+        // Load existing uploaded files
+        _uploadedFiles = submission.SubmissionFiles
+            .OrderBy(sf => sf.SortOrder)
+            .Select(sf => sf.UploadedFile!)
+            .Where(f => f is not null)
+            .ToList();
+
+        // Load discovery session if present
+        if (!string.IsNullOrEmpty(submission.DiscoveryStatus))
+        {
+            try
+            {
+                _discoverySession = await DiscoveryService.GetSessionAsync(submission.Id);
+            }
+            catch
+            {
+                // Non-fatal — discovery session load failure does not block resume
+            }
+        }
+
+        // Latest spec document (if any)
+        _existingSpecDocument = submission.SpecDocuments
+            .OrderByDescending(d => d.Version)
+            .FirstOrDefault();
+
+        // Set resume flag
+        _isResume = true;
+
+        // Snapshot originals for change detection (WI #1656)
+        _originalNarrative = submission.NarrativeText;
+        _originalFileIds = new HashSet<int>(
+            submission.SubmissionFiles
+                .Select(sf => sf.UploadedFileId)
+                .Where(id => id > 0)
+        );
+    }
 
     private void GoToStep1() => _activeStep = 0;
 
