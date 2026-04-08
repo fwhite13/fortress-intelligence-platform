@@ -286,7 +286,7 @@
                     while (DateTime.UtcNow < deadline)
                     {
                         _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
-                        if (_discoverySession?.Status is "QuestionsReady" or "Failed") break;
+                        if (_discoverySession?.Status is DiscoverySessionStatus.QuestionsReady or DiscoverySessionStatus.Failed) break;
                         await Task.Delay(1000);
                     }
                 }

@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using FortressNexus.Web.Data;
 using FortressNexus.Web.Models.Entities;
+using FortressNexus.Web.Models.Enums;
 
 namespace FortressNexus.Web.Services.Discovery;
 
@@ -50,7 +51,7 @@ public class DiscoveryService : IDiscoveryService
         {
             Id = Guid.NewGuid(),
             SubmissionId = submissionId,
-            Status = "Pending",
+            Status = DiscoverySessionStatus.Pending,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -60,7 +61,7 @@ public class DiscoveryService : IDiscoveryService
 
         var submission = await db.Submissions.FindAsync(new object[] { submissionId }, ct)
             ?? throw new KeyNotFoundException($"Submission {submissionId} not found");
-        submission.DiscoveryStatus = "Pending";
+        submission.DiscoveryStatus = DiscoverySessionStatus.Pending;
 
         await db.SaveChangesAsync(ct);
 
@@ -130,11 +131,11 @@ public class DiscoveryService : IDiscoveryService
 
         if (session != null)
         {
-            session.Status = "Answered";
+            session.Status = DiscoverySessionStatus.Answered;
             session.AnsweredAt = now;
             session.UpdatedAt = now;
             if (session.Submission != null)
-                session.Submission.DiscoveryStatus = "Answered";
+                session.Submission.DiscoveryStatus = DiscoverySessionStatus.Answered;
         }
 
         await db.SaveChangesAsync(ct);
@@ -151,11 +152,11 @@ public class DiscoveryService : IDiscoveryService
 
         if (session == null) return;
 
-        session.Status = "Skipped";
+        session.Status = DiscoverySessionStatus.Skipped;
         session.SkippedByUser = true;
         session.UpdatedAt = DateTime.UtcNow;
         if (session.Submission != null)
-            session.Submission.DiscoveryStatus = "Skipped";
+            session.Submission.DiscoveryStatus = DiscoverySessionStatus.Skipped;
 
         await db.SaveChangesAsync(ct);
         _logger.LogInformation("[DISCOVERY] Session {SessionId} skipped by {User}", sessionId, skippedByOid);
@@ -164,7 +165,7 @@ public class DiscoveryService : IDiscoveryService
     public async Task<string> BuildSpecContextAsync(int submissionId, CancellationToken ct = default)
     {
         var session = await GetSessionAsync(submissionId, ct);
-        if (session == null || session.Status == "Skipped" || !session.Questions.Any())
+        if (session == null || session.Status == DiscoverySessionStatus.Skipped || !session.Questions.Any())
             return string.Empty;
 
         var sb = new StringBuilder();
@@ -274,9 +275,9 @@ public class DiscoveryService : IDiscoveryService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[DISCOVERY_GEN] Bedrock call failed for session {SessionId}", sessionId);
-            session.Status = "Failed";
+            session.Status = DiscoverySessionStatus.Failed;
             session.UpdatedAt = DateTime.UtcNow;
-            submission.DiscoveryStatus = "Failed";
+            submission.DiscoveryStatus = DiscoverySessionStatus.Failed;
             await db.SaveChangesAsync(ct);
             return;
         }
@@ -327,13 +328,13 @@ public class DiscoveryService : IDiscoveryService
                 });
             }
 
-            session.Status = "QuestionsReady";
+            session.Status = DiscoverySessionStatus.QuestionsReady;
             session.QuestionCount = parsed.Questions.Count;
             session.KbQueryUsed = kbQuery;
             session.KbPassagesRetrieved = passages.Count;
             session.GeneratedAt = DateTime.UtcNow;
             session.UpdatedAt = DateTime.UtcNow;
-            submission.DiscoveryStatus = "QuestionsReady";
+            submission.DiscoveryStatus = DiscoverySessionStatus.QuestionsReady;
 
             _logger.LogInformation(
                 "[DISCOVERY_GEN] Session {SessionId}: {QuestionCount} questions generated, {KbCount} KB passages used",
@@ -341,9 +342,9 @@ public class DiscoveryService : IDiscoveryService
         }
         else
         {
-            session.Status = "Failed";
+            session.Status = DiscoverySessionStatus.Failed;
             session.UpdatedAt = DateTime.UtcNow;
-            submission.DiscoveryStatus = "Failed";
+            submission.DiscoveryStatus = DiscoverySessionStatus.Failed;
 
             _logger.LogWarning("[DISCOVERY_GEN] Session {SessionId}: parse produced no questions — status=Failed",
                 sessionId);

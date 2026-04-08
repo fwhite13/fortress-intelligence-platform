@@ -4,7 +4,7 @@
 {
     @* No discovery for this submission — render nothing *@
 }
-else if (Session.Status == "Skipped" || Session.SkippedByUser)
+else if (Session.Status == DiscoverySessionStatus.Skipped || Session.SkippedByUser)
 {
     <MudAlert Severity="Severity.Info" Class="nexus-discovery-summary-skipped">
         Discovery skipped — spec generated from narrative and files only.

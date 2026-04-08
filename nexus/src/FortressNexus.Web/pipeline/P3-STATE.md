@@ -3,7 +3,7 @@
 **Started:** 2026-04-08 12:16 EDT
 **Repo:** ~/projects/fip/nexus/src/FortressNexus.Web/
 
-## Current Stage: BUILDING — WI #1662
+## Current Stage: BUILDING (cycle 2) — WI #1662
 ## Risk Level: medium
 ## Pipeline Path: full (no approval gate — Fred tests live)
 ## Review Cycles: 0
@@ -36,7 +36,9 @@
 | Stage | Status | WI | Agent | Started | Completed | Notes |
 |-------|--------|----|-------|---------|-----------|-------|
 | PLAN | ✅ DONE | All | Jarvis | 2026-04-08 | 2026-04-08 | Spec v1.3, WI map created |
-| BUILD | 🔄 ACTIVE | #1662 | Tony | 12:16 EDT | — | DB migration foundation |
+| BUILD | ✅ DONE | #1662 | Tony | 12:16 EDT | 12:26 EDT | d42d0ed — migration + status constants |
+| REVIEW | ↩️ NEEDS-CHANGES | #1662 | Clint | 12:26 EDT | 12:35 EDT | I1: constants unadopted — 17 literals in 3 files |
+| BUILD | 🔄 ACTIVE | #1662 | Tony | 12:35 EDT | — | Cycle 2 — adopt DiscoverySessionStatus.* |
 
 ---
 
