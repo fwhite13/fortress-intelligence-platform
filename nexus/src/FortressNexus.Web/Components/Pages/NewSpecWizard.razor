@@ -194,12 +194,18 @@
                 <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="nexus-wizard-submit-progress" />
             }
 
+            @if (_isResume && _regenInProgress)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="nexus-wizard-regen-progress" />
+                <MudText Typo="Typo.caption" Class="nexus-wizard-regen-status">@_regenStatusMessage</MudText>
+            }
+
             <MudStack Row="true" Spacing="2" Class="nexus-wizard-nav-row">
                 <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="BackToStep2Discovery" Disabled="@_isSubmitting" Class="nexus-wizard-back-btn">Back</MudButton>
                 <MudButton Variant="Variant.Filled"
                            Color="Color.Success"
                            OnClick="HandleSubmit"
-                           Disabled="@(!CanSubmit || _isSubmitting)"
+                           Disabled="@(!CanSubmit || _isSubmitting || _regenInProgress)"
                            Class="nexus-wizard-submit-btn">
                     Submit for AI Spec Generation
                 </MudButton>
@@ -229,6 +235,8 @@
     [Parameter] public int? ResumeSubmissionId { get; set; }
     private bool _isResume = false;
     private bool _regenPending = false; // true after re-discovery initiated; triggers regen on next Submit
+    private bool _regenInProgress = false;
+    private string _regenStatusMessage = "Processing\u2026";
     private string _originalNarrative = string.Empty;
     private HashSet<int> _originalFileIds = new();
     private HashSet<int> _filesToDelete = new();
@@ -546,7 +554,9 @@
                 else
                 {
                     // === SECOND PASS: User completed new Discovery — regenerate spec at Version+1 ===
-                    // TODO(WI #1661): Replace this synchronous call with background job + progress UI
+                    _regenInProgress = true;
+                    _regenStatusMessage = "Processing\u2026";
+                    StateHasChanged();
 
                     try
                     {
@@ -559,11 +569,15 @@
                     {
                         Snackbar.Add($"Spec regeneration failed: {ex.Message}", Severity.Error);
                         await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed);
+                        _regenInProgress = false;
                         _isSubmitting = false;
                         StateHasChanged();
                         return;
                     }
 
+                    _regenStatusMessage = "Complete";
+                    StateHasChanged();
+                    await Task.Delay(800);
                     Nav.NavigateTo($"/nexus/{_submissionId.Value}");
                     return;
                 }
