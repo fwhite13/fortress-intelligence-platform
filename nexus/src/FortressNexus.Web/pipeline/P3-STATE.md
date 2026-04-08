@@ -22,10 +22,10 @@
 | 3 | #1654 | Pre-populate narrative + existing files in resume mode | ✅ CLOSED |
 | 4 | #1656 | _hasChanges change detection on Confirm step | ✅ CLOSED |
 | 5 | #1657 | Superseded status + mark prior session on re-discovery | ✅ CLOSED |
-| 6 | #1659 | Spec regen: new SpecDocument at Version+1 | 🔄 DEPLOYING |
-| 7 | #1660 | Skip-regen path: Draft→AwaitingReview direct | 🔄 DEPLOYING |
-| 8 | #1655 | Soft-delete files + narrative update on resume submit | 🔄 ACTIVE |
-| 9 | #1661 | Live MudProgressLinear on Confirm during regen | ⏳ QUEUED |
+| 6 | #1659 | Spec regen: new SpecDocument at Version+1 | ✅ CLOSED |
+| 7 | #1660 | Skip-regen path: Draft→AwaitingReview direct | ✅ CLOSED |
+| 8 | #1655 | Soft-delete files + narrative update on resume submit | 🔄 DEPLOYING |
+| 9 | #1661 | Live MudProgressLinear on Confirm during regen | 🔄 DEPLOYING (with #1655) |
 | 10 | #1650 | SubmissionDetail Continue Submission CTA + preview | ⏳ QUEUED |
 | 11 | #1651 | SubmissionDetail Delete Submission button + hard delete | ⏳ QUEUED |
 | 12 | #1652 | SubmissionDetail Version History accordion | ⏳ QUEUED |

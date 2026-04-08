@@ -12,6 +12,7 @@
 @inject IArtifactGenerationService ArtifactGenerationService
 @inject IAdoService AdoService
 @inject IDiscoveryService DiscoveryService
+@inject IDialogService DialogService
 
 @using FortressNexus.Web.Models.Entities
 @using FortressNexus.Web.Models.Enums
@@ -89,18 +90,89 @@ else if (_submission is not null)
             </div>
         }
 
-        @* Discovery panel — only show if submission has a discovery session *@
+        @* WI #1650: Narrative preview — only for Draft with narrative text *@
+        @if (_submission.Status == SubmissionStatus.Draft && !string.IsNullOrEmpty(_submission.NarrativeText))
+        {
+            <MudDivider Class="nexus-detail-divider" />
+            <div class="nexus-detail-narrative">
+                <MudText Typo="Typo.subtitle2" Class="nexus-detail-section-label">Your Narrative</MudText>
+                <MudPaper Elevation="0" Class="nexus-detail-narrative-preview">
+                    <MudText Typo="Typo.body2">@_submission.NarrativeText</MudText>
+                </MudPaper>
+            </div>
+        }
+
+        @* WI #1658: Discovery panel — modified with history toggle *@
         @if (_discoverySession != null || !string.IsNullOrEmpty(_submission.DiscoveryStatus))
         {
             <MudDivider Class="nexus-detail-divider" />
             <div class="nexus-detail-discovery">
-                <MudText Typo="Typo.subtitle2" Class="nexus-detail-section-label">Discovery</MudText>
-                <DiscoveryAnswersSummary Session="_discoverySession" />
+                <div class="nexus-detail-discovery-header">
+                    <MudText Typo="Typo.subtitle2" Class="nexus-detail-section-label">Discovery</MudText>
+                    @if (_allDiscoverySessions.Count > 1)
+                    {
+                        <MudSwitch T="bool"
+                                   @bind-Value="_showDiscoveryHistory"
+                                   Label="Show history"
+                                   Color="Color.Primary"
+                                   Class="nexus-detail-discovery-history-toggle" />
+                    }
+                </div>
+                @if (_showDiscoveryHistory)
+                {
+                    @foreach (var session in _allDiscoverySessions)
+                    {
+                        <div class="nexus-detail-discovery-session mb-3">
+                            <MudText Typo="Typo.caption"
+                                     Color="@(session.Status != DiscoverySessionStatus.Superseded ? Color.Default : Color.Secondary)"
+                                     Class="nexus-detail-discovery-session-label">
+                                @(session.Status != DiscoverySessionStatus.Superseded ? "Active session" : $"Superseded — {session.CreatedAt.ToLocalTime():yyyy-MM-dd}")
+                            </MudText>
+                            <DiscoveryAnswersSummary Session="session" />
+                        </div>
+                    }
+                }
+                else
+                {
+                    <DiscoveryAnswersSummary Session="_discoverySession" />
+                }
+            </div>
+        }
+
+        @* WI #1650: Previous version panel — shown during Generating when prior spec exists *@
+        @if (_submission.Status == SubmissionStatus.Generating && _submission.SpecDocuments.Count > 1)
+        {
+            <MudDivider Class="nexus-detail-divider" />
+            <div class="nexus-detail-prev-version">
+                <MudExpansionPanels>
+                    <MudExpansionPanel Text="Previous Version">
+                        <MudAlert Severity="Severity.Info" Variant="Variant.Text">
+                            @if (_submission.SpecDocuments.OrderByDescending(d => d.Version).Skip(1).FirstOrDefault() is { } prevSpec)
+                            {
+                                <MudText Typo="Typo.body2">
+                                    @(prevSpec.EditedContent ?? prevSpec.Content)
+                                </MudText>
+                            }
+                        </MudAlert>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
             </div>
         }
 
         @* Actions *@
         <div class="nexus-detail-actions">
+            @* WI #1650: Continue Submission button — for Draft status *@
+            @if (_submission.Status == SubmissionStatus.Draft)
+            {
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Edit"
+                           OnClick="@(() => Nav.NavigateTo($"/nexus/{Id}/resume"))"
+                           Class="nexus-detail-continue-btn">
+                    Continue Submission
+                </MudButton>
+            }
+
             @if (_submission.Status == SubmissionStatus.Pending)
             {
                 <MudButton Variant="Variant.Filled"
@@ -151,6 +223,18 @@ else if (_submission is not null)
                     <MudMenuItem OnClick="@(() => DownloadSpec("pdf"))">PDF (.pdf)</MudMenuItem>
                 </MudMenu>
             }
+
+            @* WI #1651: Delete Submission button — Draft only, owner or admin *@
+            @if (_submission.Status == SubmissionStatus.Draft && (_submission.SubmittedBy == _currentUserUpn || _isAdmin))
+            {
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.DeleteForever"
+                           OnClick="HandleDeleteSubmissionAsync"
+                           Class="nexus-detail-delete-btn">
+                    Delete Submission
+                </MudButton>
+            }
         </div>
 
         @* Spec viewer *@
@@ -170,6 +254,31 @@ else if (_submission is not null)
             </div>
         }
 
+        @* WI #1652: Version History accordion — shown when more than one spec version exists *@
+        @if (_historicalSpecs.Count > 0)
+        {
+            <MudDivider Class="nexus-detail-divider" />
+            <div class="nexus-detail-version-history">
+                <MudText Typo="Typo.subtitle2" Class="nexus-detail-section-label">Version History</MudText>
+                <MudExpansionPanels>
+                    @foreach (var spec in _historicalSpecs)
+                    {
+                        <MudExpansionPanel Text="@($"v{spec.Version} — {spec.GeneratedAt.ToLocalTime():yyyy-MM-dd}")">
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                Generated: @spec.GeneratedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
+                            </MudText>
+                            @if (!string.IsNullOrEmpty(spec.Content))
+                            {
+                                <MudText Typo="Typo.body2" Class="nexus-version-history-preview">
+                                    @(spec.Content.Length > 200 ? spec.Content[..200] + "…" : spec.Content)
+                                </MudText>
+                            }
+                        </MudExpansionPanel>
+                    }
+                </MudExpansionPanels>
+            </div>
+        }
+
     </MudContainer>
 }
 
@@ -185,6 +294,17 @@ else if (_submission is not null)
     private Dictionary<string, string> _presignedUrls = new();
     private DiscoverySession? _discoverySession;
     private System.Threading.Timer? _pollTimer;
+
+    // WI #1651
+    private string? _currentUserUpn;
+    private bool _isAdmin;
+
+    // WI #1658
+    private bool _showDiscoveryHistory = false;
+    private List<DiscoverySession> _allDiscoverySessions = new();
+
+    // WI #1652
+    private List<SpecDocument> _historicalSpecs = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -208,6 +328,12 @@ else if (_submission is not null)
             if (_submission.ActiveSpecDocumentId.HasValue)
                 _activeSpec = _submission.SpecDocuments.FirstOrDefault(d => d.Id == _submission.ActiveSpecDocumentId.Value);
 
+            // WI #1652: historical specs (all versions except latest)
+            _historicalSpecs = _submission.SpecDocuments
+                .OrderByDescending(d => d.Version)
+                .Skip(1)
+                .ToList();
+
             // Generate presigned URLs for files
             foreach (var sf in _submission.SubmissionFiles)
             {
@@ -225,9 +351,17 @@ else if (_submission is not null)
             // Load discovery session if present
             if (!string.IsNullOrEmpty(_submission.DiscoveryStatus))
             {
-                try { _discoverySession = await DiscoveryService.GetSessionAsync(_submission.Id); }
+                try
+                {
+                    _discoverySession = await DiscoveryService.GetSessionAsync(_submission.Id);
+                    _allDiscoverySessions = await DiscoveryService.GetAllSessionsAsync(_submission.Id);
+                }
                 catch { /* non-fatal */ }
             }
+
+            // WI #1650/#1651: current user context
+            _currentUserUpn = await UserContextService.GetUpnAsync();
+            _isAdmin = await UserContextService.IsAdminAsync();
         }
         catch (Exception ex)
         {
@@ -322,6 +456,21 @@ else if (_submission is not null)
             _isGeneratingWorkItems = false;
             StateHasChanged();
         }
+    }
+
+    private async Task HandleDeleteSubmissionAsync()
+    {
+        bool? confirmed = await DialogService.ShowMessageBox(
+            "Delete Submission",
+            "This is permanent — all files and any generated spec will be deleted. Are you sure?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        await SubmissionService.DeleteSubmissionAsync(Id);
+        Snackbar.Add("Submission deleted.", Severity.Success);
+        Nav.NavigateTo("/nexus");
     }
 
     private void DownloadSpec(string format)

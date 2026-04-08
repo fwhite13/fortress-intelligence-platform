@@ -94,6 +94,17 @@ public class DiscoveryService : IDiscoveryService
             .FirstOrDefaultAsync(ct);
     }
 
+    public async Task<List<DiscoverySession>> GetAllSessionsAsync(int submissionId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.DiscoverySessions
+            .Where(s => s.SubmissionId == submissionId)
+            .OrderByDescending(s => s.CreatedAt)
+            .Include(s => s.Questions)
+                .ThenInclude(q => q.Answer)
+            .ToListAsync(ct);
+    }
+
     public async Task SaveAnswersAsync(Guid sessionId,
         IEnumerable<(Guid QuestionId, string? Answer)> answers,
         string answeredByOid, CancellationToken ct = default)

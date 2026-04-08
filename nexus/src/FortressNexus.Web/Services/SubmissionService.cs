@@ -191,4 +191,65 @@ public class SubmissionService : ISubmissionService
                 fileId);
         }
     }
+
+    public async Task DeleteSubmissionAsync(int id)
+    {
+        var submission = await _db.Submissions
+            .Include(s => s.SubmissionFiles)
+                .ThenInclude(sf => sf.UploadedFile)
+            .Include(s => s.SpecDocuments)
+                .ThenInclude(sd => sd.ArtifactSets)
+                    .ThenInclude(a => a.WorkItemRecords)
+            .Include(s => s.DiscoverySessions)
+                .ThenInclude(ds => ds.Questions)
+                    .ThenInclude(q => q.Answer)
+            .FirstOrDefaultAsync(s => s.Id == id);
+
+        if (submission is null) return;
+
+        // Collect UploadedFile records before cascade removes SubmissionFiles
+        var uploadedFiles = submission.SubmissionFiles
+            .Where(sf => sf.UploadedFile is not null)
+            .Select(sf => sf.UploadedFile!)
+            .DistinctBy(uf => uf.Id)
+            .ToList();
+
+        // S3 cleanup (non-fatal)
+        foreach (var uf in uploadedFiles)
+        {
+            try
+            {
+                await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = uf.S3Bucket, Key = uf.S3Key });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[SUBMISSION_DELETE] S3 delete failed for key={Key}", uf.S3Key);
+            }
+        }
+
+        // Clear ActiveSpecDocumentId to allow SpecDocument deletion
+        submission.ActiveSpecDocumentId = null;
+
+        // Explicit delete: WorkItemRecords → ArtifactSets → SpecDocuments
+        foreach (var sd in submission.SpecDocuments)
+        {
+            foreach (var a in sd.ArtifactSets)
+            {
+                _db.WorkItemRecords.RemoveRange(a.WorkItemRecords);
+                _db.ArtifactSets.Remove(a);
+            }
+            _db.SpecDocuments.Remove(sd);
+        }
+        await _db.SaveChangesAsync();
+
+        // Remove Submission — cascades SubmissionFiles + DiscoverySessions (→Questions→Answers)
+        _db.Submissions.Remove(submission);
+        await _db.SaveChangesAsync();
+
+        // Now safe to delete UploadedFile records (SubmissionFiles junction already gone)
+        _db.UploadedFiles.RemoveRange(uploadedFiles);
+        await _db.SaveChangesAsync();
+
+        _logger.LogInformation("[SUBMISSION_DELETE] Submission {SubmissionId} hard-deleted", id);
+    }
 }
