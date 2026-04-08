@@ -177,3 +177,87 @@ chore(nexus#1662): adopt DiscoverySessionStatus constants in service and compone
 ```
 
 **Pushed:** `origin/main` ✓
+
+---
+
+## Cycle 3 — Migration FK Constraint Order Fix
+
+**Date:** 2026-04-08
+**Agent:** Tony Stark
+**Commit:** `109cf13`
+
+### Issue Addressed
+
+The migration `20260408162324_AddPhase3ResumeChanges.cs` failed on deploy (nexus-web:16) with:
+
+```
+MySqlException: Referencing column 'discovery_session_id' and referenced column 'id'
+in foreign key constraint 'FK_discovery_questions_discovery_sessions_discovery_session_id'
+are incompatible.
+```
+
+**Root cause:** MySQL requires both sides of a FK constraint to have matching column types during the transition. The original migration tried to `MODIFY COLUMN discovery_sessions.id` from `varchar(36)` to `char(36)` while `discovery_questions.discovery_session_id` still referenced it as `varchar(36)`. MySQL rejected the type change because the FK endpoints were incompatible.
+
+### Fix Applied
+
+Updated both `Up()` and `Down()` methods to wrap the 5 `AlterColumn` calls with explicit `DropForeignKey` / `AddForeignKey` calls.
+
+**FKs dropped/re-added:**
+1. `FK_discovery_questions_discovery_sessions_discovery_session_id` (table: `discovery_questions`)
+2. `FK_discovery_answers_discovery_questions_discovery_question_id` (table: `discovery_answers`)
+
+**Third FK analysis — `FK_discovery_sessions_submissions_submission_id`:**
+This FK references `submissions.id` (principal) from `discovery_sessions.submission_id` (FK column). The migration only alters `discovery_sessions.id` — a different column. Since neither the FK column (`submission_id`) nor the principal column (`submissions.id`) is being modified, this FK does **NOT** need to be dropped/re-added. ✓ Confirmed — not touched.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `Migrations/20260408162324_AddPhase3ResumeChanges.cs` | Added DropForeignKey × 2 before AlterColumns; AddForeignKey × 2 after AlterColumns in both Up() and Down() |
+
+### Build Result
+
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:04.38
+```
+
+**Result: PASS**
+
+### Migration SQL Order Verification (`dotnet ef migrations script --idempotent`)
+
+Confirmed correct MySQL execution order for `AddPhase3ResumeChanges`:
+
+```sql
+-- 1. DROP FK constraints first
+ALTER TABLE `discovery_questions` DROP FOREIGN KEY `FK_discovery_questions_discovery_sessions_discovery_session_id`;
+ALTER TABLE `discovery_answers` DROP FOREIGN KEY `FK_discovery_answers_discovery_questions_discovery_question_id`;
+
+-- 2. MODIFY COLUMNs
+ALTER TABLE `discovery_sessions` MODIFY COLUMN `id` char(36) COLLATE ascii_general_ci NOT NULL;
+ALTER TABLE `discovery_questions` MODIFY COLUMN `discovery_session_id` char(36) COLLATE ascii_general_ci NOT NULL;
+ALTER TABLE `discovery_questions` MODIFY COLUMN `id` char(36) COLLATE ascii_general_ci NOT NULL;
+ALTER TABLE `discovery_answers` MODIFY COLUMN `discovery_question_id` char(36) COLLATE ascii_general_ci NOT NULL;
+ALTER TABLE `discovery_answers` MODIFY COLUMN `id` char(36) COLLATE ascii_general_ci NOT NULL;
+
+-- 3. RE-ADD FK constraints
+ALTER TABLE `discovery_questions` ADD CONSTRAINT `FK_discovery_questions_discovery_sessions_discovery_session_id`
+    FOREIGN KEY (`discovery_session_id`) REFERENCES `discovery_sessions` (`id`) ON DELETE CASCADE;
+ALTER TABLE `discovery_answers` ADD CONSTRAINT `FK_discovery_answers_discovery_questions_discovery_question_id`
+    FOREIGN KEY (`discovery_question_id`) REFERENCES `discovery_questions` (`id`) ON DELETE CASCADE;
+```
+
+**Order: DROP FK → MODIFY COLUMNs → ADD FK ✓**
+
+### Git Commit
+
+**Hash:** `109cf13`
+
+```
+fix(nexus#1662): wrap AlterColumn calls with DropForeignKey/AddForeignKey in migration
+```
+
+**Pushed:** `origin/main` ✓
