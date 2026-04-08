@@ -86,9 +86,12 @@ public class DiscoveryService : IDiscoveryService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.DiscoverySessions
+            .Where(s => s.SubmissionId == submissionId
+                   && s.Status != DiscoverySessionStatus.Superseded)
+            .OrderByDescending(s => s.CreatedAt)
             .Include(s => s.Questions)
                 .ThenInclude(q => q.Answer)
-            .FirstOrDefaultAsync(s => s.SubmissionId == submissionId, ct);
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task SaveAnswersAsync(Guid sessionId,
