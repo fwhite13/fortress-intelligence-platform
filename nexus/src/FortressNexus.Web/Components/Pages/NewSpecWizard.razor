@@ -403,6 +403,19 @@
             }
         }
 
+        // Persist narrative edit before advancing (resume mode only)
+        if (_isResume && _submissionId.HasValue)
+        {
+            try
+            {
+                await SubmissionService.UpdateNarrativeAsync(_submissionId.Value, _narrativeText);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Warning: narrative save failed — {ex.Message}", Severity.Warning);
+            }
+        }
+
         _activeStep = 2;
         _discoveryLoading = true;
         StateHasChanged();

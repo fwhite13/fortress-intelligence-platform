@@ -3,7 +3,7 @@
 **Started:** 2026-04-08 12:16 EDT
 **Repo:** ~/projects/fip/nexus/src/FortressNexus.Web/
 
-## Current Stage: DEPLOYING — WI #1657 | IN-REVIEW — WI #1659 + #1660
+## Current Stage: MANUAL GATE — WI #1663 (Fred post-auth verification)
 
 ## Session Context
 - Status "PendingReview" in spec = `SubmissionStatus.AwaitingReview` in code — use AwaitingReview in all subsequent WIs
@@ -24,13 +24,13 @@
 | 5 | #1657 | Superseded status + mark prior session on re-discovery | ✅ CLOSED |
 | 6 | #1659 | Spec regen: new SpecDocument at Version+1 | ✅ CLOSED |
 | 7 | #1660 | Skip-regen path: Draft→AwaitingReview direct | ✅ CLOSED |
-| 8 | #1655 | Soft-delete files + narrative update on resume submit | 🔄 DEPLOYING |
-| 9 | #1661 | Live MudProgressLinear on Confirm during regen | 🔄 DEPLOYING (with #1655) |
-| 10 | #1650 | SubmissionDetail Continue Submission CTA + preview | ⏳ QUEUED |
-| 11 | #1651 | SubmissionDetail Delete Submission button + hard delete | ⏳ QUEUED |
-| 12 | #1652 | SubmissionDetail Version History accordion | ⏳ QUEUED |
-| 13 | #1658 | Show history toggle for superseded sessions | ⏳ QUEUED |
-| 14 | #1663 | Natasha QA pass | ⏳ QUEUED |
+| 8 | #1655 | Soft-delete files + narrative update on resume submit | ✅ CLOSED |
+| 9 | #1661 | Live MudProgressLinear on Confirm during regen | ✅ CLOSED |
+| 10 | #1650 | SubmissionDetail Continue Submission CTA + preview | ✅ CLOSED |
+| 11 | #1651 | SubmissionDetail Delete Submission button + hard delete | ✅ CLOSED |
+| 12 | #1652 | SubmissionDetail Version History accordion | ✅ CLOSED |
+| 13 | #1658 | Show history toggle for superseded sessions | ✅ CLOSED |
+| 14 | #1663 | Natasha QA pass | ⏳ MANUAL GATE (Fred) |
 
 ---
 
