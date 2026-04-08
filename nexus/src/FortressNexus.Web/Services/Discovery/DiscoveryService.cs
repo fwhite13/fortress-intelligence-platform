@@ -162,6 +162,22 @@ public class DiscoveryService : IDiscoveryService
         _logger.LogInformation("[DISCOVERY] Session {SessionId} skipped by {User}", sessionId, skippedByOid);
     }
 
+    public async Task SupersedeSessionAsync(Guid sessionId, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var session = await db.DiscoverySessions
+            .FirstOrDefaultAsync(s => s.Id == sessionId, ct);
+
+        if (session == null) return;
+
+        session.Status = DiscoverySessionStatus.Superseded;
+        session.UpdatedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync(ct);
+        _logger.LogInformation("[DISCOVERY] Session {SessionId} superseded for submission {SubmissionId}",
+            sessionId, session.SubmissionId);
+    }
+
     public async Task<string> BuildSpecContextAsync(int submissionId, CancellationToken ct = default)
     {
         var session = await GetSessionAsync(submissionId, ct);

@@ -9,5 +9,6 @@ public interface IDiscoveryService
     Task SaveAnswersAsync(Guid sessionId, IEnumerable<(Guid QuestionId, string? Answer)> answers,
         string answeredByOid, CancellationToken ct = default);
     Task SkipDiscoveryAsync(Guid sessionId, string skippedByOid, CancellationToken ct = default);
+    Task SupersedeSessionAsync(Guid sessionId, CancellationToken ct = default);
     Task<string> BuildSpecContextAsync(int submissionId, CancellationToken ct = default);
 }

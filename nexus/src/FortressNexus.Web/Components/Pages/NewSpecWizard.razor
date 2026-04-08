@@ -454,13 +454,73 @@
         // Actual DB/S3 deletion is deferred to submit (WI #1655)
     }
 
-    private Task HandleSubmit()
+    private async Task HandleSubmit()
     {
-        if (!CanSubmit) return Task.CompletedTask;
-        if (_submissionId == null) return Task.CompletedTask;
+        if (!CanSubmit) return;
+        if (_submissionId == null) return;
 
-        // Submission already created in GoToStep2Discovery
-        Nav.NavigateTo($"/nexus/{_submissionId.Value}");
-        return Task.CompletedTask;
+        _isSubmitting = true;
+        StateHasChanged();
+
+        try
+        {
+            if (_isResume && _hasChanges)
+            {
+                // TODO(WI #1655): Delete files marked for removal from S3 + DB here
+                // TODO(WI #1659): Save updated narrative + title back to Submission record here
+
+                // Supersede the prior discovery session if one exists
+                if (_discoverySession != null)
+                {
+                    await DiscoveryService.SupersedeSessionAsync(_discoverySession.Id);
+                    _discoverySession = null; // Clear so GoToStep2Discovery fires a fresh discovery
+                }
+
+                // Kick off new discovery session
+                await DiscoveryService.InitiateDiscoveryAsync(_submissionId.Value);
+
+                // Navigate back to Step 3 (Discovery) so the user goes through the new session
+                _isSubmitting = false;
+                _activeStep = 2;
+                _discoveryLoading = true;
+                StateHasChanged();
+
+                // Poll for the new session in background
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var deadline = DateTime.UtcNow.AddSeconds(15);
+                        while (DateTime.UtcNow < deadline)
+                        {
+                            _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
+                            if (_discoverySession?.Status is DiscoverySessionStatus.QuestionsReady or DiscoverySessionStatus.Failed)
+                                break;
+                            await Task.Delay(1000);
+                        }
+                    }
+                    catch
+                    {
+                        // Graceful — session stays null
+                    }
+                    finally
+                    {
+                        _discoveryLoading = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                });
+
+                return;
+            }
+
+            // No-changes resume or new submission — navigate to submission detail
+            Nav.NavigateTo($"/nexus/{_submissionId.Value}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Submit failed: {ex.Message}", Severity.Error);
+            _isSubmitting = false;
+            StateHasChanged();
+        }
     }
 }
