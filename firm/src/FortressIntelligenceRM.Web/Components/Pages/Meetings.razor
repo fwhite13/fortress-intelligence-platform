@@ -580,7 +580,13 @@
             }
             else
             {
-                _ = VpBotService.TriggerBotAsync(meetingId, meeting.MeetingUrl ?? "");
+                var taskArn = await VpBotService.TriggerBotAsync(meetingId, meeting.MeetingUrl ?? "");
+                if (taskArn == null)
+                {
+                    // TriggerBotAsync returned null — ECS launch failed (it logged internally)
+                    Snackbar.Add("Failed to launch recording bot. Please try again.", Severity.Error);
+                    return;
+                }
                 await MeetingService.UpdateStatusAsync(meetingId, MeetingStatus.Pending);
                 Snackbar.Add("Bot is joining!", Severity.Success);
             }
