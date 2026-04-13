@@ -6,6 +6,7 @@
 @inject ISnackbar Snackbar
 @inject ILogger<MeetingDetail> Logger
 @inject IHttpClientFactory HttpClientFactory
+@inject IJSRuntime JS
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
@@ -41,7 +42,7 @@
             </MudStack>
             <MudStack Row Class="mb-4" Style="gap: 24px; flex-wrap: wrap;">
                 <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
-                    @_meeting.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
+                    @(_localCreatedAt ?? _meeting.CreatedAt.ToString("MMM d, yyyy h:mm tt"))
                 </MudText>
                 @if (_meeting.DurationSeconds.HasValue)
                 {
@@ -215,6 +216,7 @@
     [Parameter] public long Id { get; set; }
     private FirmMeeting? _meeting;
     private bool _loading = true;
+    private string? _localCreatedAt;
     private bool _pushingTranscript = false;
     private bool _pushingSummary = false;
 
@@ -257,6 +259,19 @@
             if (user == null) { Navigation.NavigateTo("/meetings"); return; }
 
             _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
+
+            if (_meeting != null)
+            {
+                try
+                {
+                    var utcStr = _meeting.CreatedAt.ToUniversalTime().ToString("O");
+                    _localCreatedAt = await JS.InvokeAsync<string>("firmUtils.formatLocalDateTime", utcStr);
+                }
+                catch
+                {
+                    _localCreatedAt = _meeting.CreatedAt.ToString("MMM d, yyyy h:mm tt");
+                }
+            }
 
             // Load KB push status
             if (_meeting != null && _meeting.Status == MeetingStatus.Complete)

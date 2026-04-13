@@ -58,7 +58,7 @@
                                 <MudText Typo="Typo.subtitle2" Style="color: var(--color-text-primary);">@upcomingCard.Subject</MudText>
                             </div>
                             <MudText Typo="Typo.caption" Class="mb-2" Style="color: var(--color-text-secondary);">
-                                @FormatEastern(upcomingCard.StartDateTime) – @FormatEasternTimeOnly(upcomingCard.EndDateTime)
+                                @(_localStartTimes.TryGetValue(upcomingCard.CalendarEventId, out var st) ? st : upcomingCard.StartDateTime) – @(_localEndTimes.TryGetValue(upcomingCard.CalendarEventId, out var et) ? et : upcomingCard.EndDateTime)
                             </MudText>
                             <MudChip T="string"
                                      Color="@(upcomingCard.Platform == "teams" ? Color.Info : Color.Warning)"
@@ -110,7 +110,7 @@
                     <MudText Style="color: var(--color-text-primary);">@(context.Title ?? $"Meeting — {context.CreatedAt:yyyy-MM-dd}")</MudText>
                 </MudTd>
                 <MudTd DataLabel="Date">
-                    <MudText Style="color: var(--color-text-secondary);">@context.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</MudText>
+                    <MudText Style="color: var(--color-text-secondary);">@(_localCreatedTimes.TryGetValue(context.Id, out var ct) ? ct : context.CreatedAt.ToString("MMM d, yyyy h:mm tt"))</MudText>
                 </MudTd>
                 <MudTd DataLabel="Duration">
                     <MudText Style="color: var(--color-text-secondary);">@FormatDuration(context.DurationSeconds)</MudText>
@@ -266,6 +266,7 @@
                 return;
             }
             _meetings = await MeetingService.GetMeetingsAsync(Guid.Parse(_userId));
+            await PreFormatMeetingTimesAsync();
         }
         catch (Exception ex)
         {
@@ -311,6 +312,7 @@
                          && !calendarEventIds.Contains(m.CalendarEventId))
                 .Select(m => m.Id)
                 .ToHashSet();
+            await PreFormatMeetingTimesAsync();
         }
         catch (Exception ex)
         {
@@ -683,6 +685,42 @@
         }
         // Imminent/past meeting (or unparseable) — open dialog for immediate join
         await OpenJoinDialogPrefilled(card.JoinUrl);
+    }
+
+    private async Task PreFormatMeetingTimesAsync()
+    {
+        _localCreatedTimes.Clear();
+        _localStartTimes.Clear();
+        _localEndTimes.Clear();
+
+        // Pre-format CreatedAt for each FIRM meeting
+        foreach (var m in _meetings)
+        {
+            try
+            {
+                var utcStr = m.CreatedAt.ToUniversalTime().ToString("O");
+                _localCreatedTimes[m.Id] = await JS.InvokeAsync<string>("firmUtils.formatLocalDateTime", utcStr);
+            }
+            catch { _localCreatedTimes[m.Id] = m.CreatedAt.ToString("MMM d, yyyy h:mm tt"); }
+        }
+
+        // Pre-format upcoming meeting start/end times
+        if (_upcomingMeetings != null)
+        {
+            foreach (var c in _upcomingMeetings)
+            {
+                try
+                {
+                    _localStartTimes[c.CalendarEventId] = await JS.InvokeAsync<string>("firmUtils.formatLocalTime", c.StartDateTime);
+                }
+                catch { _localStartTimes[c.CalendarEventId] = c.StartDateTime; }
+                try
+                {
+                    _localEndTimes[c.CalendarEventId] = await JS.InvokeAsync<string>("firmUtils.formatLocalTimeOnly", c.EndDateTime);
+                }
+                catch { _localEndTimes[c.CalendarEventId] = c.EndDateTime; }
+            }
+        }
     }
 
     public void Dispose() => _pollTimer?.Dispose();
