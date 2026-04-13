@@ -673,7 +673,21 @@
                 return;
             }
 
-            // New submission (or resume with no changes but no prior spec) — normal flow
+            // New submission (or resume with no prior spec) — generate spec
+            try
+            {
+                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating);
+                await SpecGenerationService.GenerateAsync(_submissionId.Value);
+                // GenerateAsync sets status to AwaitingReview internally
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Spec generation failed: {ex.Message}", Severity.Error);
+                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed);
+                _isSubmitting = false;
+                StateHasChanged();
+                return;
+            }
             Nav.NavigateTo($"/nexus/{_submissionId.Value}");
         }
         catch (Exception ex)
