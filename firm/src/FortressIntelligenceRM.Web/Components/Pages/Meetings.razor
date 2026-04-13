@@ -551,20 +551,42 @@
 
     private async Task JoinNow(long meetingId)
     {
+        if (string.IsNullOrEmpty(_userId))
+        {
+            Snackbar.Add("User identity not resolved. Please refresh the page.", Severity.Error);
+            return;
+        }
         try
         {
-            var http = HttpClientFactory.CreateClient("local");
-            var response = await http.PostAsync($"/api/meetings/{meetingId}/join", null);
-            if (response.IsSuccessStatusCode)
-                await LoadMeetings();
+            var meeting = await MeetingService.GetMeetingAsync(meetingId, Guid.Parse(_userId));
+            if (meeting == null)
+            {
+                Snackbar.Add("Meeting not found.", Severity.Error);
+                return;
+            }
+            if (meeting.Status != MeetingStatus.Scheduled)
+            {
+                Snackbar.Add($"Meeting is not in Scheduled state (current: {meeting.Status}).", Severity.Warning);
+                return;
+            }
+
+            if (meeting.Platform == "teams")
+            {
+                await MeetingService.UpdateStatusAsync(meetingId, MeetingStatus.WaitingTranscript);
+                Snackbar.Add("Mode A meeting — start the Teams meeting when ready. FIRM will capture the transcript automatically.", Severity.Info);
+            }
             else
             {
-                var error = await response.Content.ReadAsStringAsync();
-                Snackbar.Add($"Failed to join: {error}", Severity.Error);
+                _ = VpBotService.TriggerBotAsync(meetingId, meeting.MeetingUrl ?? "");
+                await MeetingService.UpdateStatusAsync(meetingId, MeetingStatus.Pending);
+                Snackbar.Add("Bot is joining!", Severity.Success);
             }
+
+            await LoadMeetings();
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "FIRM: JoinNow failed for meeting {Id}", meetingId);
             Snackbar.Add($"Error: {ex.Message}", Severity.Error);
         }
     }
