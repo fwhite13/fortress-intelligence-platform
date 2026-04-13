@@ -27,12 +27,17 @@ public class OrgContextController : ControllerBase
         var tenantId = GetTenantId();
         if (string.IsNullOrEmpty(tenantId)) return BadRequest(new { error = "Tenant ID not available" });
 
-        var ctx = await _orgContextService.GetContextAsync(tenantId);
+        var entries = await _orgContextService.GetContextAsync(tenantId);
+        var updatedAt = await _orgContextService.GetUpdatedAtAsync(tenantId);
+        var updatedBy = await _orgContextService.GetUpdatedByAsync(tenantId);
+
         return Ok(new
         {
-            wikiContent = ctx?.WikiContent ?? "",
-            updatedAt = ctx?.UpdatedAt,
-            updatedBy = ctx?.UpdatedBy
+            entries,
+            wikiContent = System.Text.Json.JsonSerializer.Serialize(entries,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)),
+            updatedAt,
+            updatedBy
         });
     }
 
@@ -49,7 +54,33 @@ public class OrgContextController : ControllerBase
             ?? User.FindFirst("oid")?.Value
             ?? "unknown";
 
-        await _orgContextService.UpsertContextAsync(tenantId, request.WikiContent ?? "", updatedBy);
+        // Try to parse as JSON entries first; if not, wrap plain text as a single entry
+        List<OrgContextEntry> entries;
+        var content = request.WikiContent ?? "";
+        if (content.TrimStart().StartsWith('['))
+        {
+            try
+            {
+                entries = System.Text.Json.JsonSerializer.Deserialize<List<OrgContextEntry>>(
+                    content,
+                    new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+                    ?? [];
+            }
+            catch
+            {
+                entries = [new OrgContextEntry(Term: "Content", Description: content)];
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(content))
+        {
+            entries = [new OrgContextEntry(Term: "Content", Description: content)];
+        }
+        else
+        {
+            entries = [];
+        }
+
+        await _orgContextService.UpsertContextAsync(tenantId, entries, updatedBy);
         _logger.LogInformation("[OrgContext] Upserted wiki for tenant {TenantId} by {User}", tenantId, updatedBy);
         return Ok(new { success = true });
     }

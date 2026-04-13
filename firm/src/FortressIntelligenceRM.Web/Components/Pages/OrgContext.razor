@@ -1,73 +1,161 @@
 @page "/org-context"
 @attribute [Authorize]
-@inject IHttpClientFactory HttpClientFactory
+@inject IOrgContextService OrgContextService
 @inject ISnackbar Snackbar
 @inject IConfiguration Configuration
 @inject AuthenticationStateProvider AuthStateProvider
+@inject IDialogService DialogService
+@using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
-@using System.Text.Json
-@using System.Net.Http.Json
+@using MudBlazor
 
-<PageTitle>Org Context — FIRM</PageTitle>
+<PageTitle>Settings — FIRM</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
-    <MudText Typo="Typo.h5" Class="mb-2" Style="color: var(--color-text-primary); font-weight: 600;">
+    <MudText Typo="Typo.h5" Class="mb-2 org-context-title">
         Organization Context Wiki
     </MudText>
-    <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--color-text-secondary);">
-        This content is injected into AI transcription and summarization prompts to improve accuracy of names, roles, acronyms, and product names specific to your organization.
+    <MudText Typo="Typo.body2" Class="mb-4 org-context-subtitle">
+        Entries are injected into AI prompts to improve accuracy of names, roles, acronyms, and product names specific to your organization.
     </MudText>
 
-    @if (!_isAdmin)
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Class="mb-4" />
+    }
+    else if (!_isAdmin)
     {
         <MudAlert Severity="Severity.Info" Class="mb-4">
             You do not have admin access to edit org context. Contact your administrator.
         </MudAlert>
-        @if (!string.IsNullOrWhiteSpace(_wikiContent))
+
+        @if (_entries.Count > 0)
         {
-            <MudPaper Class="pa-4" Style="background: var(--color-bg-card);" Elevation="0">
-                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color: var(--color-text-secondary);">Current Context (read-only)</MudText>
-                <pre style="white-space: pre-wrap; color: var(--color-text-primary); font-size: 13px;">@_wikiContent</pre>
+            <MudPaper Class="pa-4 org-context-card" Elevation="0">
+                <MudText Typo="Typo.subtitle2" Class="mb-2 org-context-subtitle">Current Context (read-only)</MudText>
+                <MudTable Items="_entries" Dense="true" Hover="true" Class="org-context-table">
+                    <HeaderContent>
+                        <MudTh>Term</MudTh>
+                        <MudTh>Description</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Term">@context.Term</MudTd>
+                        <MudTd DataLabel="Description">@context.Description</MudTd>
+                    </RowTemplate>
+                </MudTable>
             </MudPaper>
         }
     }
     else
     {
-        <MudPaper Class="pa-4 mb-4" Style="background: var(--color-bg-card);" Elevation="0">
-            <MudTextField @bind-Value="_wikiContent"
-                          Label="Organization Wiki Content"
-                          Lines="12"
-                          Variant="Variant.Outlined"
-                          Placeholder="Enter names, roles, acronyms, product names, and other org-specific context that will help the AI accurately transcribe and summarize your meetings..."
-                          FullWidth="true"
-                          Class="mb-3"
-                          Style="font-family: monospace; font-size: 13px;" />
+        <MudPaper Class="pa-4 mb-4 org-context-card" Elevation="0">
+            <div class="d-flex justify-space-between align-center mb-3">
+                <MudText Typo="Typo.subtitle1" Class="org-context-section-title">Context Entries</MudText>
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="OpenAddDialog"
+                           Class="org-context-add-btn">
+                    Add Entry
+                </MudButton>
+            </div>
+
+            @if (_entries.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="org-context-empty mb-4">
+                    No entries yet. Click "Add Entry" to get started.
+                </MudText>
+            }
+            else
+            {
+                <MudTable Items="_entries" Dense="true" Hover="true" Class="org-context-table mb-3">
+                    <HeaderContent>
+                        <MudTh>Term</MudTh>
+                        <MudTh>Description</MudTh>
+                        <MudTh Class="org-context-actions-col">Actions</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Term">@context.Term</MudTd>
+                        <MudTd DataLabel="Description">@context.Description</MudTd>
+                        <MudTd DataLabel="Actions">
+                            <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                           Size="Size.Small"
+                                           Color="Color.Default"
+                                           OnClick="@(() => OpenEditDialog(context))"
+                                           Title="Edit" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                           Size="Size.Small"
+                                           Color="Color.Error"
+                                           OnClick="@(() => DeleteEntry(context))"
+                                           Title="Delete" />
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
 
             @if (_updatedAt.HasValue)
             {
-                <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);" Class="mb-2">
+                <MudText Typo="Typo.caption" Class="org-context-timestamp mb-2">
                     Last updated: @_updatedAt.Value.ToString("MMM d, yyyy h:mm tt") UTC by @(_updatedBy ?? "unknown")
                 </MudText>
             }
 
             <MudButton Variant="Variant.Filled"
                        Color="Color.Warning"
-                       OnClick="SaveAsync"
+                       OnClick="SaveAllAsync"
                        Disabled="_saving"
                        StartIcon="@Icons.Material.Filled.Save"
-                       Class="mt-2">
-                @(_saving ? "Saving..." : "Save Context")
+                       Class="mt-2 org-context-save-btn">
+                @(_saving ? "Saving..." : "Save All")
             </MudButton>
         </MudPaper>
     }
 </MudContainer>
 
+@* Add/Edit Dialog *@
+<MudDialog @bind-IsVisible="_dialogVisible" Options="_dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_editingEntry == null ? "Add Entry" : "Edit Entry")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_dialogTerm"
+                      Label="Term"
+                      Variant="Variant.Outlined"
+                      FullWidth="true"
+                      Class="mb-3"
+                      Placeholder="e.g. Fred White" />
+        <MudTextField @bind-Value="_dialogDescription"
+                      Label="Description"
+                      Variant="Variant.Outlined"
+                      FullWidth="true"
+                      Lines="3"
+                      Placeholder="e.g. AI/Technical Lead, Director of Technology Strategy" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseDialog" Color="Color.Default">Cancel</MudButton>
+        <MudButton OnClick="SaveDialogEntry" Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(string.IsNullOrWhiteSpace(_dialogTerm))">
+            Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
-    private string _wikiContent = "";
+    private List<OrgContextEntry> _entries = [];
     private DateTime? _updatedAt;
     private string? _updatedBy;
     private bool _isAdmin;
+    private bool _loading = true;
     private bool _saving;
+
+    // Dialog state
+    private bool _dialogVisible;
+    private string _dialogTerm = "";
+    private string _dialogDescription = "";
+    private OrgContextEntry? _editingEntry;
+    private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+
+    private string _tenantId = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -80,50 +168,103 @@
         _isAdmin = (!string.IsNullOrEmpty(adminOid) && string.Equals(adminOid, userOid, StringComparison.OrdinalIgnoreCase))
                    || user.IsInRole("admin") || user.IsInRole("Admin") || user.HasClaim("roles", "admin");
 
+        _tenantId = user.FindFirst("tid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? Configuration["Firm:GraphTenantId"]
+            ?? "";
+
         await LoadAsync();
     }
 
     private async Task LoadAsync()
     {
+        _loading = true;
         try
         {
-            var client = HttpClientFactory.CreateClient("local");
-            var response = await client.GetAsync("/api/org-context");
-            if (response.IsSuccessStatusCode)
+            if (!string.IsNullOrEmpty(_tenantId))
             {
-                var json = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-                _wikiContent = root.TryGetProperty("wikiContent", out var wc) ? wc.GetString() ?? "" : "";
-                if (root.TryGetProperty("updatedAt", out var ua) && ua.ValueKind != JsonValueKind.Null)
-                    _updatedAt = ua.GetDateTime();
-                if (root.TryGetProperty("updatedBy", out var ub) && ub.ValueKind != JsonValueKind.Null)
-                    _updatedBy = ub.GetString();
+                _entries = await OrgContextService.GetContextAsync(_tenantId);
+                _updatedAt = await OrgContextService.GetUpdatedAtAsync(_tenantId);
+                _updatedBy = await OrgContextService.GetUpdatedByAsync(_tenantId);
             }
         }
         catch (Exception ex)
         {
             Snackbar.Add($"Failed to load org context: {ex.Message}", Severity.Error);
         }
+        finally
+        {
+            _loading = false;
+        }
     }
 
-    private async Task SaveAsync()
+    private void OpenAddDialog()
+    {
+        _editingEntry = null;
+        _dialogTerm = "";
+        _dialogDescription = "";
+        _dialogVisible = true;
+    }
+
+    private void OpenEditDialog(OrgContextEntry entry)
+    {
+        _editingEntry = entry;
+        _dialogTerm = entry.Term;
+        _dialogDescription = entry.Description;
+        _dialogVisible = true;
+    }
+
+    private void CloseDialog()
+    {
+        _dialogVisible = false;
+    }
+
+    private void SaveDialogEntry()
+    {
+        var term = _dialogTerm.Trim();
+        var desc = _dialogDescription.Trim();
+
+        if (_editingEntry != null)
+        {
+            var idx = _entries.IndexOf(_editingEntry);
+            if (idx >= 0)
+                _entries[idx] = new OrgContextEntry(term, desc);
+        }
+        else
+        {
+            _entries.Add(new OrgContextEntry(term, desc));
+        }
+
+        _dialogVisible = false;
+    }
+
+    private void DeleteEntry(OrgContextEntry entry)
+    {
+        _entries.Remove(entry);
+    }
+
+    private async Task SaveAllAsync()
     {
         _saving = true;
         try
         {
-            var client = HttpClientFactory.CreateClient("local");
-            var response = await client.PutAsJsonAsync("/api/org-context", new { wikiContent = _wikiContent });
-            if (response.IsSuccessStatusCode)
+            if (string.IsNullOrEmpty(_tenantId))
             {
-                Snackbar.Add("Org context saved successfully.", Severity.Success);
-                await LoadAsync();
+                Snackbar.Add("Tenant ID not available. Cannot save.", Severity.Error);
+                return;
             }
-            else
-            {
-                var body = await response.Content.ReadAsStringAsync();
-                Snackbar.Add($"Save failed: {response.StatusCode} — {body}", Severity.Error);
-            }
+
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            var updatedBy = user.FindFirst("preferred_username")?.Value
+                ?? user.FindFirst(ClaimTypes.Email)?.Value
+                ?? user.FindFirst("oid")?.Value
+                ?? "unknown";
+
+            await OrgContextService.UpsertContextAsync(_tenantId, _entries, updatedBy);
+            _updatedAt = DateTime.UtcNow;
+            _updatedBy = updatedBy;
+            Snackbar.Add("Org context saved successfully.", Severity.Success);
         }
         catch (Exception ex)
         {

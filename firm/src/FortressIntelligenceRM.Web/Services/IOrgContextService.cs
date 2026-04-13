@@ -1,14 +1,11 @@
 namespace FortressIntelligenceRM.Web.Services;
 
+public record OrgContextEntry(string Term, string Description);
+
 public interface IOrgContextService
 {
-    Task<OrgContextDto?> GetContextAsync(string tenantId);
-    Task UpsertContextAsync(string tenantId, string content, string updatedBy);
-}
-
-public class OrgContextDto
-{
-    public string? WikiContent { get; set; }
-    public DateTime? UpdatedAt { get; set; }
-    public string? UpdatedBy { get; set; }
+    Task<List<OrgContextEntry>> GetContextAsync(string tenantId);
+    Task<DateTime?> GetUpdatedAtAsync(string tenantId);
+    Task<string?> GetUpdatedByAsync(string tenantId);
+    Task UpsertContextAsync(string tenantId, List<OrgContextEntry> entries, string updatedBy);
 }

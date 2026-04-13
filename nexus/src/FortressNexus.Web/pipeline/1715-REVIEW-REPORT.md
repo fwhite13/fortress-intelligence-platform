@@ -216,3 +216,76 @@ Both fixes are CSS-only. No Razor changes, no logic changes, no build structure 
 - **CSS geometry is correct.** The overlay dimensions and anchor point are exactly right; only the delivery mechanism needs fixing.
 - **Scope is tight.** Exactly two files, no scope creep. Build report is thorough.
 - **Tony correctly identified the scoped CSS limitation for child-component classes.** That analysis was accurate; it just didn't extend to `.file-upload-input-overlay` being the same situation.
+
+---
+
+## Review Report — ADO #1715 — Cycle 2
+
+**Reviewer:** Hawkeye (Clint Barton)
+**Review Cycle:** 2
+**Commit:** `6950ca2`
+**Date:** 2026-04-13
+**Scope:** CSS-only targeted review
+
+---
+
+## Verdict: ✅ PASS
+
+---
+
+## What Tony Fixed
+
+Two CSS rules in `FileUploadZone.razor.css` now use the `::deep` combinator to pierce Blazor's scoped CSS boundary into MudFileUpload's render tree:
+
+1. `.file-upload-zone ::deep .file-upload-input-overlay` — the overlay rule
+2. `.file-upload-zone ::deep .file-upload-list-item` — the list item rule (also gained `position: relative; z-index: 2`)
+
+Both issues raised in Cycle 1 (C1 + I1) have been addressed.
+
+---
+
+## CC Review Summary
+
+All 5 targeted checks verified clean by Claude Code CLI (Sonnet):
+
+| Check | Result |
+|-------|--------|
+| `::deep` syntax correct in both rules | ✅ PASS |
+| Overlay rule: all 8 properties present and correct | ✅ PASS |
+| List item rule: `position: relative`, `z-index: 2` present; stacking correct | ✅ PASS |
+| Parent `.file-upload-zone` has `position: relative` | ✅ PASS |
+| No changes to `FileUploadZone.razor` | ✅ PASS |
+
+---
+
+## Detailed Findings
+
+### Check 1 — `::deep` Syntax
+Both selectors use the correct Blazor syntax with proper whitespace:
+- Overlay: `.file-upload-zone ::deep .file-upload-input-overlay` ✅
+- List item: `.file-upload-zone ::deep .file-upload-list-item` ✅
+No `:deep`, `>>>`, or `/deep/` variants present.
+
+### Check 2 — Overlay Rule Completeness
+All 8 required properties confirmed present in `.file-upload-zone ::deep .file-upload-input-overlay`:
+`position: absolute`, `top: 0`, `left: 0`, `width: 100%`, `height: 100%`, `opacity: 0`, `cursor: pointer`, `z-index: 1` — all correct.
+
+### Check 3 — Z-Index Stacking
+Overlay sits at `z-index: 1`; list items sit at `z-index: 2`. Items render above the invisible overlay, making remove buttons clickable. Stacking is logically correct.
+
+### Check 4 — Positioning Context
+`.file-upload-zone` has `position: relative` (line 2 of the CSS). The absolute-positioned overlay is properly anchored.
+
+### Check 5 — Razor File Unchanged
+Git diff for `6950ca2` shows zero changes to `FileUploadZone.razor`. CSS-only fix as specified.
+
+---
+
+## Cycle 1 Issues — Resolution Status
+
+| Issue | Severity | Resolution |
+|-------|----------|------------|
+| C1: Scoped CSS couldn't reach MudFileUpload's `<input>` | Critical | ✅ Fixed — `::deep` combinator added to both rules |
+| I1: Remove buttons blocked by overlay (z-index) | Important | ✅ Fixed — `position: relative; z-index: 2` added to list item rule |
+
+Both issues fully resolved. No new issues introduced.

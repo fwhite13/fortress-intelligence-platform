@@ -1,1 +1,18 @@
-@* NavMenu — not used in this layout (app bar only) *@
+@using MudBlazor
+@inject NavigationManager NavManager
+
+<MudNavMenu>
+    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
+        Dashboard
+    </MudNavLink>
+    <MudNavLink Href="/meetings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.VideoLibrary">
+        Meetings
+    </MudNavLink>
+
+    <MudDivider Class="my-2" />
+
+    <MudText Typo="Typo.overline" Class="px-4 nav-section-label">Settings</MudText>
+    <MudNavLink Href="/org-context" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">
+        Org Context
+    </MudNavLink>
+</MudNavMenu>
