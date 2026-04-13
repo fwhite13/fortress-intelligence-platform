@@ -1,0 +1,81 @@
+/* Markdown rendering for Summary tab (ADO #1785) */
+.firm-summary-markdown {
+    color: var(--color-text-primary);
+    line-height: 1.7;
+}
+
+.firm-summary-markdown h1,
+.firm-summary-markdown h2,
+.firm-summary-markdown h3 {
+    color: var(--color-gold);
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.firm-summary-markdown h4,
+.firm-summary-markdown h5,
+.firm-summary-markdown h6 {
+    color: var(--color-text-primary);
+    margin-top: 1rem;
+    margin-bottom: 0.4rem;
+}
+
+.firm-summary-markdown p {
+    margin-bottom: 0.75rem;
+}
+
+.firm-summary-markdown ul,
+.firm-summary-markdown ol {
+    padding-left: 1.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.firm-summary-markdown li {
+    margin-bottom: 0.25rem;
+}
+
+.firm-summary-markdown table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1rem;
+}
+
+.firm-summary-markdown th,
+.firm-summary-markdown td {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--color-border, #333);
+}
+
+.firm-summary-markdown th {
+    background: var(--color-bg-card, #1a1a1a);
+    color: var(--color-gold);
+    font-weight: 600;
+}
+
+.firm-summary-markdown blockquote {
+    border-left: 3px solid var(--color-gold);
+    padding-left: 1rem;
+    margin: 1rem 0;
+    color: var(--color-text-secondary);
+}
+
+.firm-summary-markdown hr {
+    border: none;
+    border-top: 1px solid var(--color-border, #333);
+    margin: 1.5rem 0;
+}
+
+.firm-summary-markdown code {
+    background: var(--color-bg-card, #1a1a1a);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.firm-summary-markdown pre {
+    background: var(--color-bg-card, #1a1a1a);
+    padding: 1rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin-bottom: 1rem;
+}

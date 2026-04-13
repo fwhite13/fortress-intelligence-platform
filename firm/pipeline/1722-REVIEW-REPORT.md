@@ -250,3 +250,172 @@ The `else if` warning condition does not re-check `!string.IsNullOrEmpty(meeting
 ### Verdict: PASS
 
 Both Cycle 1 issues correctly resolved. No new bugs introduced. Ships.
+
+---
+
+## Cycle 3 — SharePanel Direct Service Injection
+
+**Verdict: NEEDS-CHANGES**
+**Cycle:** 3
+**Reviewer:** Hawkeye (Clint Barton)
+**Commit:** `0edf3b1`
+**Date:** 2026-04-13
+**Risk:** Medium (Blazor component refactor, new service methods)
+
+---
+
+### Spec Compliance Check
+
+**Scope:** `SharePanel.razor` + `FirmBotService.cs` (contains `IFirmBotService`). No other files.
+
+**git show 0edf3b1 --stat (application files):**
+- `Components/Pages/SharePanel.razor` — 146 lines changed ✅
+- `Services/FirmBotService.cs` — 57 lines added ✅
+
+✅ Scope compliant. Only the expected files modified.
+
+---
+
+### Consistency Audit
+
+**HttpClientFactory elimination:**
+- `grep HttpClientFactory SharePanel.razor` → zero results ✅
+
+**IFirmBotService interface vs concrete:**
+- `GetChannelPostHistoryAsync(long meetingId)` → interface ✅, concrete ✅, signatures match ✅
+- `PostMeetingToChannelAsync(long meetingId, Guid initiatedByUserId, string teamId, string teamName, string channelId, string channelName, string docType)` → interface ✅, concrete ✅, signatures match ✅
+
+**PushDocumentAsync call mapping:**
+- Signature: `(long meetingId, string userId, string faitUserId, string docType, IEnumerable<string> kbScopes)`
+- Actual call: `(MeetingId, _user.Id.ToString(), _user.FaitUserId, docType, kbScopes)` ✅
+
+**SQL column aliases vs projection type:**
+- `ChannelPostHistoryRow2` fields: `TeamName`, `ChannelName`, `DocType`, `PostedAt`, `Success`
+- SQL aliases: `team_name AS TeamName`, `channel_name AS ChannelName`, `doc_type AS DocType`, `posted_at AS PostedAt`, `success AS Success` ✅
+
+---
+
+### CC Review Summary
+
+CC ran full adversarial review of all changed files plus `Program.cs`, `MeetingDetail.razor`, and `FirmKbService.cs` for reference.
+
+**Dismissed as false positives:** None. Both CC findings are confirmed real issues.
+
+**Confirmed real issues:** 2 (one Critical, one Important).
+
+---
+
+### Critical Issues — 1
+
+#### C1: Singleton `FirmBotService` Captures Scoped `S3Service` — Captive Dependency
+
+- **File:** `Program.cs` (lines 77 + 85) + `Services/FirmBotService.cs` (constructor)
+- **Category:** Correctness / Lifetime
+- **Issue:** `FirmBotService` is registered as `AddSingleton<IFirmBotService, FirmBotService>()`. It now injects `S3Service` in its constructor. `S3Service` is registered as `AddScoped<S3Service>()`. This is a classic captive dependency — the root DI container must resolve `S3Service` to construct the Singleton, which creates a root-scope instance of `S3Service` that is never properly lifecycle-managed per circuit.
+- **Evidence:**
+  ```csharp
+  // Program.cs line 77
+  builder.Services.AddScoped<S3Service>();
+  // Program.cs line 85
+  builder.Services.AddSingleton<IFirmBotService, FirmBotService>();
+
+  // FirmBotService constructor
+  public FirmBotService(
+      IDbContextFactory<FirmDbContext> dbFactory,
+      IBotFrameworkHttpAdapter adapter,
+      IConfiguration config,
+      S3Service s3Service,   // ← Scoped captured by Singleton
+      ILogger<FirmBotService> logger)
+  ```
+- **Impact:** In dev (`ValidateScopes = true`): throws `InvalidOperationException: Cannot consume scoped service 'S3Service' from singleton 'IFirmBotService'` at startup. In prod (`ValidateScopes = false`): one `S3Service` instance lives in the root scope for the process lifetime — but since `S3Service` only wraps `IAmazonS3 + IConfiguration + ILogger` (all Singletons/safe), runtime behavior will be correct in practice. Still a DI contract violation that must be fixed — if `S3Service` ever gains per-request state this will become a live bug immediately.
+- **Fix:** Change `S3Service` registration to `AddSingleton` in `Program.cs`:
+  ```diff
+  - builder.Services.AddScoped<S3Service>();
+  + builder.Services.AddSingleton<S3Service>();
+  ```
+  `S3Service` only injects `IAmazonS3` (Singleton via `AddAWSService`), `IConfiguration` (Singleton), and `ILogger` (Singleton) — there is no per-request state, so Singleton lifetime is correct per MEMORY.md (AWS SDK clients must be Singleton). This is a one-line fix.
+
+---
+
+### Important Issues — 1
+
+#### I1: `channelName` Always Recorded as `""` — History Display Permanently Broken
+
+- **File:** `Components/Pages/SharePanel.razor` (PostToChannels, ~line 246)
+- **Category:** Correctness / Data loss
+- **Issue:** `PostMeetingToChannelAsync` receives `channelName` as `""` hardcoded because `ChannelRowState` has no `ChannelName` property (channels come from Graph — now empty). The `firm_meeting_channel_posts` table stores `channel_name = ""` for every row inserted through this path. History display in the component renders `h.ChannelName` — which will always be blank.
+- **Evidence:**
+  ```csharp
+  // ChannelRowState (line 295) — no ChannelName field
+  private class ChannelRowState
+  {
+      public string? TeamId { get; set; }
+      public string? ChannelId { get; set; }
+      public string DocType { get; set; } = "summary";
+      public List<ChannelItem> Channels { get; set; } = new();
+      // ← No ChannelName
+  }
+
+  // PostToChannels (~line 246)
+  await BotService.PostMeetingToChannelAsync(
+      MeetingId, _user.Id,
+      row.TeamId ?? "",
+      team?.DisplayName ?? "",
+      row.ChannelId ?? "",
+      "",          // ← channelName always ""
+      docType);
+  ```
+- **Impact:** Post history shows blank channel names permanently. Any future channel name lookup from the history record (e.g., for display or audit) will have missing data that cannot be reconstructed.
+- **Fix:** Add `ChannelName` to `ChannelRowState`, and populate it from the `ChannelItem` when a channel is selected in `OnTeamSelected`. When channel list is empty (current state), default to `""` is acceptable — but structure should be in place:
+  ```csharp
+  private class ChannelRowState
+  {
+      public string? TeamId { get; set; }
+      public string? ChannelId { get; set; }
+      public string? ChannelName { get; set; }  // ← add this
+      // ...
+  }
+  ```
+  In OnTeamSelected (or when user selects a channel): `row.ChannelName = selectedChannel?.DisplayName`.
+
+---
+
+### Nitpicks — 1
+
+- **N1:** `LoadKbRows()` and `LoadTeams()` return `Task.CompletedTask` but are called with `await` in `OnInitializedAsync`. Minor: could be `void` methods since they're synchronous, but `Task` return is fine — Blazor can await them cleanly and it keeps the signature consistent with future async expansion. Not blocking.
+
+---
+
+### Positive Observations
+
+- ✅ `faitUserId` null guard is excellent — actionable message, early return, correct placement before the service loop.
+- ✅ `_user == null` guards on both `PushToKb` and `PostToChannels` — consistent and correct.
+- ✅ Per-row try/catch in `PushToKb` loop is a good pattern — one KB row failure doesn't kill the entire batch.
+- ✅ `GetChannelPostHistoryAsync` is parameterized SQL (no injection risk), aliases match projection type exactly.
+- ✅ User loading pattern matches `MeetingDetail.razor` exactly — same claim names, same order.
+- ✅ `OnTeamSelected` simplified to synchronous correctly (no channels to load from Graph anymore).
+
+---
+
+### Acceptance Criteria Verification
+
+- [x] **Zero HttpClientFactory.CreateClient("local")** — ✅ Verified clean
+- [x] **PushDocumentAsync correct parameters** — ✅ All 5 params correct
+- [x] **faitUserId null guard** — ✅ Guard present with actionable message
+- [x] **IFirmBotService interface updated** — ✅ Both methods added with matching signatures
+- [x] **No crash on empty dropdowns** — ✅ All null-coalesced correctly
+- [ ] **DI lifetimes correct** — ❌ Singleton/Scoped mismatch (C1)
+
+---
+
+### What to Fix
+
+**C1 (Required):** In `Program.cs`, change line 77:
+```diff
+- builder.Services.AddScoped<S3Service>();
++ builder.Services.AddSingleton<S3Service>();
+```
+`S3Service` has no per-circuit state. All its dependencies are Singleton-safe. One-line fix.
+
+**I1 (Should fix):** Add `ChannelName` property to `ChannelRowState`. Pass it through to `PostMeetingToChannelAsync`. Currently always `""` — history records will be missing channel name data.
+

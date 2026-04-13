@@ -110,15 +110,16 @@
                             }
                         </MudText>
                     }
-                    else
+                    else if (!string.IsNullOrEmpty(_meeting.Summary.SummaryText))
                     {
-                        @if (!string.IsNullOrEmpty(_meeting.Summary.SummaryText))
-                        {
-                            <MudText Typo="Typo.h6" Style="color: var(--color-gold);" Class="mb-2">Overview</MudText>
-                            <MudText Style="color: var(--color-text-primary); line-height: 1.7;" Class="mb-6">
-                                @_meeting.Summary.SummaryText
-                            </MudText>
-                        }
+                        <div class="firm-summary-markdown">
+                            @RenderMarkdown(_meeting.Summary.SummaryText)
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(_meeting.Summary.KeyDecisionsJson) ||
+                             !string.IsNullOrEmpty(_meeting.Summary.ActionItemsJson))
+                    {
+                        @* Legacy fallback: structured sections for pre-#1723 meetings that lack SummaryText *@
                         @if (!string.IsNullOrEmpty(_meeting.Summary.KeyDecisionsJson))
                         {
                             var decisions = TryDeserializeStringList(_meeting.Summary.KeyDecisionsJson);
@@ -173,6 +174,12 @@
                                 </MudList>
                             }
                         }
+                    }
+                    else
+                    {
+                        <MudText Style="color: var(--color-text-secondary); text-align: center; padding: 40px 0;">
+                            No summary available.
+                        </MudText>
                     }
                 </MudPaper>
             </MudTabPanel>
@@ -403,6 +410,16 @@
         [property: JsonPropertyName("description")] string? Description,
         [property: JsonPropertyName("owner")] string? Owner,
         [property: JsonPropertyName("deadline")] string? Deadline);
+
+    private MarkupString RenderMarkdown(string? markdown)
+    {
+        if (string.IsNullOrEmpty(markdown)) return new MarkupString("");
+        var pipeline = new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .Build();
+        var html = Markdown.ToHtml(markdown, pipeline);
+        return new MarkupString(html);
+    }
 
     private RenderFragment StatusBadge(MeetingStatus status) => builder =>
     {

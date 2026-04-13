@@ -6,6 +6,7 @@
     <RootNamespace>FortressIntelligenceRM.Web</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.1.2" />
     <ProjectReference Include="..\..\..\shared\FipShared\FipShared.csproj" />
     <PackageReference Include="MudBlazor" Version="7.*" />
 <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="8.*" />
