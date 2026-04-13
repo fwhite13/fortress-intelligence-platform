@@ -267,12 +267,13 @@ public class MeetingsApiController : ControllerBase
 
             // Write summary to S3 so DownloadSummary and KB push can find it
             // Key convention mirrors DownloadSummary: TranscriptS3Key with "transcript.json" → "summary.md"
-            var summaryMeeting = await db.Meetings.FindAsync(payload.MeetingId);
+            // Guard: only derive key if "transcript.json" is actually in the key (Replace is a no-op otherwise)
             if (!string.IsNullOrEmpty(payload.Summary.SummaryText) &&
-                summaryMeeting != null &&
-                !string.IsNullOrEmpty(summaryMeeting.TranscriptS3Key))
+                meeting != null &&
+                !string.IsNullOrEmpty(meeting.TranscriptS3Key) &&
+                meeting.TranscriptS3Key.Contains("transcript.json"))
             {
-                var summaryS3Key = summaryMeeting.TranscriptS3Key.Replace("transcript.json", "summary.md");
+                var summaryS3Key = meeting.TranscriptS3Key.Replace("transcript.json", "summary.md");
                 try
                 {
                     await _s3Service.UploadTextAsync(summaryS3Key, payload.Summary.SummaryText, "text/markdown");
@@ -283,6 +284,10 @@ public class MeetingsApiController : ControllerBase
                     // Non-fatal: summary is already in DB; S3 write failure should not fail the callback
                     _logger.LogWarning(s3Ex, "FIRM: Failed to write summary to S3 for meeting {Id} (non-fatal, summary is in DB)", payload.MeetingId);
                 }
+            }
+            else if (!string.IsNullOrEmpty(payload.Summary?.SummaryText) && meeting != null)
+            {
+                _logger.LogWarning("FIRM: Cannot derive summary S3 key — TranscriptS3Key does not contain 'transcript.json': {Key}", meeting.TranscriptS3Key);
             }
         }
 
