@@ -87,7 +87,7 @@
                     : new List<UploadedFile>();
             }
 
-            @if (visibleExisting.Count > 0 || _pendingFiles.Count > 0)
+            @if (visibleExisting.Count > 0 || (_isResume && _pendingFiles.Count > 0))
             {
                 <MudText Typo="Typo.subtitle2" Class="nexus-existing-files-heading">Attached Files</MudText>
                 <MudList T="string" Dense="true" Class="nexus-existing-files-list">
@@ -106,19 +106,23 @@
                             </div>
                         </MudListItem>
                     }
-                    @foreach (var pendingFile in _pendingFiles)
+                    @if (_isResume)
                     {
-                        var capturedPending = pendingFile;
-                        <MudListItem T="string">
-                            <div class="nexus-existing-file-item">
-                                <MudText Typo="Typo.body2">@capturedPending.Name</MudText>
-                            </div>
-                        </MudListItem>
+                        @foreach (var pendingFile in _pendingFiles)
+                        {
+                            var capturedPending = pendingFile;
+                            <MudListItem T="string">
+                                <div class="nexus-existing-file-item">
+                                    <MudText Typo="Typo.body2">@capturedPending.Name</MudText>
+                                </div>
+                            </MudListItem>
+                        }
                     }
                 </MudList>
             }
 
-            <FileUploadZone OnFilesSelected="HandleFilesSelected" />
+            <FileUploadZone OnFilesSelected="HandleFilesSelected"
+                            InitialFiles="@(_isResume ? null : _pendingFiles.AsReadOnly())" />
 
             @foreach (var (file, error) in _fileErrors)
             {
@@ -483,40 +487,47 @@
 
     private async Task HandleFilesSelected(IReadOnlyList<IBrowserFile> files)
     {
-        if (_isResume && _submissionId.HasValue)
+        if (_isUploading) return;   // ← guard against concurrent invocations
+        _isUploading = true;        // ← before any await
+        try
         {
-            // Resume mode: immediately upload new files and persist junction records
-            var upn = await UserContextService.GetUpnAsync();
-            _isUploading = true;
-            StateHasChanged();
-
-            _pendingFiles.Clear();
-            _fileErrors.Clear();
-
-            foreach (var browserFile in files)
+            if (_isResume && _submissionId.HasValue)
             {
-                try
-                {
-                    var uploaded = await FileStorageService.UploadAsync(browserFile, upn);
-                    var saved = await SubmissionService.SaveUploadedFileAsync(uploaded);
-                    var sortOrder = _uploadedFiles.Count(f => !_filesToDelete.Contains(f.Id)) + _pendingFiles.Count;
-                    await SubmissionService.AddFileToSubmissionAsync(_submissionId.Value, saved.Id, sortOrder);
-                    _uploadedFiles.Add(saved);
-                }
-                catch (Exception ex)
-                {
-                    _fileErrors.Add((browserFile, ex.Message));
-                    Snackbar.Add($"Failed to upload '{browserFile.Name}': {ex.Message}", Severity.Error);
-                }
-            }
+                // Resume mode: immediately upload new files and persist junction records
+                var upn = await UserContextService.GetUpnAsync();
+                StateHasChanged();
 
-            _isUploading = false;
-            StateHasChanged();
+                _pendingFiles.Clear();
+                _fileErrors.Clear();
+
+                foreach (var browserFile in files)
+                {
+                    try
+                    {
+                        var uploaded = await FileStorageService.UploadAsync(browserFile, upn);
+                        var saved = await SubmissionService.SaveUploadedFileAsync(uploaded);
+                        var sortOrder = _uploadedFiles.Count(f => !_filesToDelete.Contains(f.Id)) + _pendingFiles.Count;
+                        await SubmissionService.AddFileToSubmissionAsync(_submissionId.Value, saved.Id, sortOrder);
+                        _uploadedFiles.Add(saved);
+                    }
+                    catch (Exception ex)
+                    {
+                        _fileErrors.Add((browserFile, ex.Message));
+                        Snackbar.Add($"Failed to upload '{browserFile.Name}': {ex.Message}", Severity.Error);
+                    }
+                }
+
+                StateHasChanged();
+            }
+            else
+            {
+                // New submission mode: buffer for upload on GoToStep2Discovery
+                _pendingFiles = files.ToList();
+            }
         }
-        else
+        finally
         {
-            // New submission mode: buffer for upload on GoToStep2Discovery
-            _pendingFiles = files.ToList();
+            _isUploading = false;
         }
     }
 
