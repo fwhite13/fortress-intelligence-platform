@@ -1,0 +1,49 @@
+@using MudBlazor
+@using FortressIntelligenceRM.Web.Services
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(Entry == null ? "Add Entry" : "Edit Entry")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_term"
+                      Label="Term"
+                      Variant="Variant.Outlined"
+                      FullWidth="true"
+                      Class="mb-3"
+                      Placeholder="e.g. Fred White" />
+        <MudTextField @bind-Value="_description"
+                      Label="Description"
+                      Variant="Variant.Outlined"
+                      FullWidth="true"
+                      Lines="3"
+                      Placeholder="e.g. AI/Technical Lead, Director of Technology Strategy" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Color="Color.Default">Cancel</MudButton>
+        <MudButton OnClick="Submit" Color="Color.Primary" Variant="Variant.Filled"
+                   Disabled="@(string.IsNullOrWhiteSpace(_term))">
+            Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public OrgContextEntry? Entry { get; set; }
+
+    private string _term = "";
+    private string _description = "";
+
+    protected override void OnInitialized()
+    {
+        if (Entry != null)
+        {
+            _term = Entry.Term;
+            _description = Entry.Description;
+        }
+    }
+
+    private void Submit() => MudDialog.Close(DialogResult.Ok((_term.Trim(), _description.Trim())));
+    private void Cancel() => MudDialog.Cancel();
+}

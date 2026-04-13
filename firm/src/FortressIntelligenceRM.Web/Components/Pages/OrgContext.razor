@@ -54,7 +54,7 @@
                 <MudButton Variant="Variant.Filled"
                            Color="Color.Primary"
                            StartIcon="@Icons.Material.Filled.Add"
-                           OnClick="OpenAddDialog"
+                           OnClick="@(async () => await OpenAddDialog())"
                            Class="org-context-add-btn">
                     Add Entry
                 </MudButton>
@@ -81,7 +81,7 @@
                             <MudIconButton Icon="@Icons.Material.Filled.Edit"
                                            Size="Size.Small"
                                            Color="Color.Default"
-                                           OnClick="@(() => OpenEditDialog(context))"
+                                           OnClick="@(async () => await OpenEditDialog(context))"
                                            Title="Edit" />
                             <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                            Size="Size.Small"
@@ -112,34 +112,6 @@
     }
 </MudContainer>
 
-@* Add/Edit Dialog *@
-<MudDialog @bind-IsVisible="_dialogVisible" Options="_dialogOptions">
-    <TitleContent>
-        <MudText Typo="Typo.h6">@(_editingEntry == null ? "Add Entry" : "Edit Entry")</MudText>
-    </TitleContent>
-    <DialogContent>
-        <MudTextField @bind-Value="_dialogTerm"
-                      Label="Term"
-                      Variant="Variant.Outlined"
-                      FullWidth="true"
-                      Class="mb-3"
-                      Placeholder="e.g. Fred White" />
-        <MudTextField @bind-Value="_dialogDescription"
-                      Label="Description"
-                      Variant="Variant.Outlined"
-                      FullWidth="true"
-                      Lines="3"
-                      Placeholder="e.g. AI/Technical Lead, Director of Technology Strategy" />
-    </DialogContent>
-    <DialogActions>
-        <MudButton OnClick="CloseDialog" Color="Color.Default">Cancel</MudButton>
-        <MudButton OnClick="SaveDialogEntry" Color="Color.Primary" Variant="Variant.Filled"
-                   Disabled="@(string.IsNullOrWhiteSpace(_dialogTerm))">
-            Save
-        </MudButton>
-    </DialogActions>
-</MudDialog>
-
 @code {
     private List<OrgContextEntry> _entries = [];
     private DateTime? _updatedAt;
@@ -147,13 +119,6 @@
     private bool _isAdmin;
     private bool _loading = true;
     private bool _saving;
-
-    // Dialog state
-    private bool _dialogVisible;
-    private string _dialogTerm = "";
-    private string _dialogDescription = "";
-    private OrgContextEntry? _editingEntry;
-    private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
 
     private string _tenantId = "";
 
@@ -198,44 +163,31 @@
         }
     }
 
-    private void OpenAddDialog()
+    private async Task OpenAddDialog()
     {
-        _editingEntry = null;
-        _dialogTerm = "";
-        _dialogDescription = "";
-        _dialogVisible = true;
-    }
-
-    private void OpenEditDialog(OrgContextEntry entry)
-    {
-        _editingEntry = entry;
-        _dialogTerm = entry.Term;
-        _dialogDescription = entry.Description;
-        _dialogVisible = true;
-    }
-
-    private void CloseDialog()
-    {
-        _dialogVisible = false;
-    }
-
-    private void SaveDialogEntry()
-    {
-        var term = _dialogTerm.Trim();
-        var desc = _dialogDescription.Trim();
-
-        if (_editingEntry != null)
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+        var dialog = await DialogService.ShowAsync<OrgContextEntryDialog>("Add Entry", options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: (string term, string description) })
         {
-            var idx = _entries.IndexOf(_editingEntry);
+            _entries.Add(new OrgContextEntry(term, description));
+            await SaveEntriesAsync();
+        }
+    }
+
+    private async Task OpenEditDialog(OrgContextEntry entry)
+    {
+        var parameters = new DialogParameters<OrgContextEntryDialog> { { x => x.Entry, entry } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true };
+        var dialog = await DialogService.ShowAsync<OrgContextEntryDialog>("Edit Entry", parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: (string term, string description) })
+        {
+            var idx = _entries.IndexOf(entry);
             if (idx >= 0)
-                _entries[idx] = new OrgContextEntry(term, desc);
+                _entries[idx] = new OrgContextEntry(term, description);
+            await SaveEntriesAsync();
         }
-        else
-        {
-            _entries.Add(new OrgContextEntry(term, desc));
-        }
-
-        _dialogVisible = false;
     }
 
     private void DeleteEntry(OrgContextEntry entry)
@@ -243,7 +195,7 @@
         _entries.Remove(entry);
     }
 
-    private async Task SaveAllAsync()
+    private async Task SaveEntriesAsync()
     {
         _saving = true;
         try
@@ -274,5 +226,10 @@
         {
             _saving = false;
         }
+    }
+
+    private async Task SaveAllAsync()
+    {
+        await SaveEntriesAsync();
     }
 }
