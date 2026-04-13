@@ -115,3 +115,57 @@ In `JoinNow`, Mode B branch (~line 583): await `TriggerBotAsync`, check the retu
 ---
 
 _Hawkeye — Cycle 1 complete._
+
+---
+
+## Cycle 2 — Review Report
+
+**Commit:** `08bec1a`  
+**Reviewer:** Hawkeye (code-reviewer) | Cycle 2  
+**Date:** 2026-04-13  
+**Scope:** Targeted — `Meetings.razor` Mode B null-check fix only
+
+---
+
+### Verdict: ✅ PASS
+
+---
+
+### What Was Fixed
+
+Cycle 1 issued NEEDS-CHANGES for a single Important issue: `TriggerBotAsync` was fire-and-forget with no null check. If ECS launch failed, the meeting was set to `Pending` with a false success toast and no rollback.
+
+Tony's fix: await the call, assign to `taskArn`, check for `null`, and early-return with an error Snackbar if null — leaving the meeting in `Scheduled`. Happy path (non-null) proceeds to `UpdateStatusAsync(Pending)` + success toast, unchanged.
+
+---
+
+### CC Review Results (6/6 checks — all PASS)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `TriggerBotAsync` is awaited | ✅ PASS — `var taskArn = await VpBotService.TriggerBotAsync(...)` confirmed |
+| 2 | Null check → error toast + `return` (no status update) | ✅ PASS — `taskArn == null` → `Snackbar.Error` → `return`; `UpdateStatusAsync(Pending)` unreachable on null path |
+| 3 | Happy path intact | ✅ PASS — `UpdateStatusAsync(Pending)` + success toast both present, correct order |
+| 4 | Mode A path unchanged | ✅ PASS — Teams block (`WaitingTranscript` + info toast) unmodified |
+| 5 | Scope — only lines ~580–592 changed | ✅ PASS — No other methods or files touched |
+| 6 | Async correctness | ✅ PASS — Method is `async Task`; early `return` on null correctly bypasses `LoadMeetings()` (intended) |
+
+---
+
+### Issues Found
+
+**Critical:** 0  
+**Important:** 0  
+**Nitpicks:** 0
+
+---
+
+### Notes
+
+- Implementation matches the pattern already established in `JoinMeetingDirectAsync` (lines 513–549). Consistent.
+- Early `return` on ECS failure intentionally skips `LoadMeetings()` — meeting state hasn't changed, no point refreshing the list. This is correct.
+- Build confirmed 0 errors (per build report).
+
+---
+
+_Hawkeye — Cycle 2 complete. Ships._

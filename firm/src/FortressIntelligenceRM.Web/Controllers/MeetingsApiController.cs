@@ -390,32 +390,51 @@ public class MeetingsApiController : ControllerBase
         if (!string.IsNullOrEmpty(summary.SummaryText))
         {
             mdSb.AppendLine(summary.SummaryText);
-        }
-        else
-        {
-            // Fallback: assemble from structured fields if summaryText is empty
-            mdSb.AppendLine("# Meeting Summary");
             mdSb.AppendLine();
-            if (!string.IsNullOrEmpty(summary.KeyDecisionsJson))
+        }
+
+        // Always append structured sections
+        if (!string.IsNullOrEmpty(summary.KeyDecisionsJson))
+        {
+            try
             {
-                mdSb.AppendLine("## Decisions Made");
                 var decisions = JsonSerializer.Deserialize<List<string>>(summary.KeyDecisionsJson);
-                decisions?.ForEach(d => mdSb.AppendLine($"- {d}"));
-                mdSb.AppendLine();
+                if (decisions?.Any() == true)
+                {
+                    mdSb.AppendLine("## Decisions Made");
+                    decisions.ForEach(d => mdSb.AppendLine($"- {d}"));
+                    mdSb.AppendLine();
+                }
             }
-            if (!string.IsNullOrEmpty(summary.ActionItemsJson))
+            catch { /* Non-fatal — skip section if JSON is malformed */ }
+        }
+        if (!string.IsNullOrEmpty(summary.ActionItemsJson))
+        {
+            try
             {
-                mdSb.AppendLine("## Action Items");
                 var items = JsonSerializer.Deserialize<List<ActionItem>>(summary.ActionItemsJson);
-                items?.ForEach(i => mdSb.AppendLine($"- **{i.Owner}**: {i.Description} _(due: {i.Deadline ?? "TBD"})_"));
-                mdSb.AppendLine();
+                if (items?.Any() == true)
+                {
+                    mdSb.AppendLine("## Action Items");
+                    items.ForEach(i => mdSb.AppendLine($"- **{i.Owner ?? "TBD"}**: {i.Description} _(due: {i.Deadline ?? "TBD"})_"));
+                    mdSb.AppendLine();
+                }
             }
-            if (!string.IsNullOrEmpty(summary.FollowUpsJson))
+            catch { /* Non-fatal — skip section if JSON is malformed */ }
+        }
+        if (!string.IsNullOrEmpty(summary.FollowUpsJson))
+        {
+            try
             {
-                mdSb.AppendLine("## Follow-ups");
                 var followUps = JsonSerializer.Deserialize<List<string>>(summary.FollowUpsJson);
-                followUps?.ForEach(f => mdSb.AppendLine($"- {f}"));
+                if (followUps?.Any() == true)
+                {
+                    mdSb.AppendLine("## Follow-ups");
+                    followUps.ForEach(f => mdSb.AppendLine($"- {f}"));
+                    mdSb.AppendLine();
+                }
             }
+            catch { /* Non-fatal — skip section if JSON is malformed */ }
         }
 
         // Generate slug from meeting title for filename
@@ -920,7 +939,10 @@ public class SummaryPayload
 
 public class ActionItem
 {
+    [JsonPropertyName("description")]
     public string? Description { get; set; }
+    [JsonPropertyName("owner")]
     public string? Owner { get; set; }
+    [JsonPropertyName("deadline")]
     public string? Deadline { get; set; }
 }

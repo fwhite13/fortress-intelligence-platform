@@ -163,3 +163,68 @@ If the `alterStatements` block already has a try-catch pattern that only handles
 ---
 
 _Hawkeye — REVIEW cycle 1 — 2026-04-13_
+
+---
+
+## Review Report — Cycle 2 — ADO #1709
+
+**Reviewer:** Hawkeye (Clint Barton)  
+**Commit:** `fa68ab1`  
+**Cycle:** 2 (Targeted — CASCADE FK fix)  
+**Date:** 2026-04-13  
+
+---
+
+## Verdict: PASS
+
+All 6 targeted checks pass. The fix is correct, complete, syntactically valid, idempotent, and scoped appropriately.
+
+---
+
+## Targeted Review Summary
+
+### CHECK 1: All 5 child tables present ✅
+All five FK ALTER statements are present in `alterStatements` (lines 181–185):
+- `firm_meeting_participants`
+- `firm_meeting_transcripts`
+- `firm_meeting_summaries`
+- `firm_meeting_kb_pushes`
+- `firm_meeting_channel_posts`
+
+### CHECK 2: FK column name correctness ✅
+All ALTER statements use `FOREIGN KEY (meeting_id)`. Cross-referenced against each table's `CREATE TABLE` block — `meeting_id BIGINT NOT NULL` confirmed in all 5 DDL definitions. Column name consistent throughout.
+
+### CHECK 3: Idempotency — error 1826 catch ✅
+- `ex.Number == 1826` added to the catch clause
+- Catch wraps `ExecuteSqlRawAsync` **inside** the `foreach` loop body — per-statement, not wrapping the whole loop
+- On 1826: logs "already applied (idempotent)" and continues to next statement — correct behavior
+
+### CHECK 4: MySQL ALTER TABLE syntax validity ✅
+All 5 statements follow the correct pattern:
+`ALTER TABLE <table> ADD CONSTRAINT <name> FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE`
+
+| Table | Constraint Name | Column | References | CASCADE |
+|---|---|---|---|---|
+| firm_meeting_participants | fk_fmp_meeting_id | meeting_id | firm_meetings(id) | ✅ |
+| firm_meeting_transcripts | fk_fmt_meeting_id | meeting_id | firm_meetings(id) | ✅ |
+| firm_meeting_summaries | fk_fms_meeting_id | meeting_id | firm_meetings(id) | ✅ |
+| firm_meeting_kb_pushes | fk_fmkp_meeting_id | meeting_id | firm_meetings(id) | ✅ |
+| firm_meeting_channel_posts | fk_fmcp_meeting_id | meeting_id | firm_meetings(id) | ✅ |
+
+No trailing comma on last entry. Array properly closed.
+
+### CHECK 5: Scope ✅
+Fix is contained entirely in `DatabaseInitializationService.cs`. No other service files, controllers, or domain classes modified.
+
+### CHECK 6: Regression risk ✅
+5 new strings appended cleanly after the 9 existing `alterStatements` entries. No prior entries disturbed. Array termination correct.
+
+---
+
+## Issues Found
+
+None. All Cycle 1 findings addressed.
+
+---
+
+_Hawkeye — REVIEW cycle 2 — 2026-04-13_

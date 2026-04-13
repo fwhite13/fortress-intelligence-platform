@@ -658,6 +658,9 @@ Transcript:
     internal class BedrockSummaryResult
     {
         public string? SummaryText { get; set; }
+        // TODO: Notable Quotes are currently embedded in SummaryText markdown.
+        // If a separate QuotesJson field is needed in the future, update the prompt
+        // to output a "quotesJson" key and add QuotesJson to FirmMeetingSummary + DB.
         public string? ActionItemsJson { get; set; }
         public string? KeyDecisionsJson { get; set; }
         public string? FollowUpsJson { get; set; }
