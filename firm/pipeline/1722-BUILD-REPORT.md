@@ -192,3 +192,38 @@ Removed ALL `HttpClientFactory.CreateClient("local")` usages from `SharePanel.ra
 3. Check channel post history loads (no 403)
 4. Check bot install check works (no 403)
 5. Try pushing to KB — should call `FirmKbService.PushDocumentAsync` directly
+
+---
+
+## Cycle 4 — DI Lifetime + ChannelName Fix
+
+**Date:** 2026-04-13
+**Commit:** ba00149
+**Risk:** Low — two targeted fixes
+
+### What was built
+
+1. **S3Service DI lifetime fix (C1)** — Changed `AddScoped<S3Service>()` to `AddSingleton<S3Service>()` in `Program.cs`. Fixes captive dependency: `FirmBotService` (singleton) was capturing a scoped `S3Service`, which throws at startup in dev. Safe: `S3Service` depends only on `IAmazonS3` and `IConfiguration`, both singletons with no per-request state.
+
+2. **ChannelName in ChannelRowState (I1)** — `PostToChannels()` was passing `channelName: ""`, leaving `channel_name` blank in every `firm_meeting_channel_posts` DB row.
+   - Added `public string ChannelName { get; set; } = "";` to `ChannelRowState`
+   - Replaced `@bind-Value="row.ChannelId"` with `Value` + `ValueChanged` → `OnChannelSelected` handler
+   - `OnChannelSelected` looks up the `ChannelItem.DisplayName` and sets `row.ChannelName`
+   - `PostToChannels()` now passes `row.ChannelName` instead of `""`
+
+### Files changed
+- `src/FortressIntelligenceRM.Web/Program.cs` — line 77: `AddScoped` → `AddSingleton` for S3Service
+- `src/FortressIntelligenceRM.Web/Components/Pages/SharePanel.razor` — `ChannelRowState` field + `OnChannelSelected` handler + `PostToChannels` fix
+
+### CC sessions run
+1 session, sequential (fixes are in same files, no parallelization needed)
+
+### Acceptance criteria
+- [x] `Program.cs` — `AddSingleton<S3Service>()` ✓
+- [x] `ChannelRowState` — `ChannelName` field added and populated on channel selection ✓
+- [x] `dotnet build` — 0 errors (20 warnings, all pre-existing) ✓
+- [x] Build report updated ✓
+- [x] ADO comment posted ✓
+
+### Things Clint should scrutinize
+- `OnChannelSelected` sets `row.ChannelName` from `row.Channels.FirstOrDefault(c => c.Id == channelId)?.DisplayName`. Currently `row.Channels` is always empty (Teams channel listing is a TODO per Cycle 3 notes), so `ChannelName` will still be blank in practice until the channel list is populated. The plumbing is correct; it will work as soon as channels are loadable.

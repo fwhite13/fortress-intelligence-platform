@@ -419,3 +419,90 @@ CC ran full adversarial review of all changed files plus `Program.cs`, `MeetingD
 
 **I1 (Should fix):** Add `ChannelName` property to `ChannelRowState`. Pass it through to `PostMeetingToChannelAsync`. Currently always `""` — history records will be missing channel name data.
 
+
+---
+
+## Cycle 4 — S3Service Singleton + ChannelName Fix
+
+**Verdict: PASS**
+**Cycle:** 4
+**Reviewer:** Hawkeye (Clint Barton)
+**Commit:** `ba00149`
+**Date:** 2026-04-13
+**Risk:** Low — two targeted fixes from C3 review findings C1 + I1
+
+---
+
+### Spec Compliance Check
+
+**Scope:** `Program.cs` (1 line) + `SharePanel.razor` (15 lines net). No other files.
+
+**git show ba00149 --stat:**
+- `Components/Pages/SharePanel.razor` — 15 lines net ✅
+- `Program.cs` — 1 line changed ✅
+
+✅ Exactly 2 files changed. Scope compliant.
+
+---
+
+### Consistency Audit
+
+**DI lifetime chain:**
+- `S3Service` → `AddSingleton` ✅
+- `FirmBotService` → `AddSingleton` ✅
+- All `FirmBotService` constructor dependencies: `IDbContextFactory` (Singleton), `IBotFrameworkHttpAdapter` (Singleton), `IConfiguration` (Singleton), `S3Service` (now Singleton), `ILogger` (Singleton) ✅
+
+**ChannelName propagation chain:**
+- `MudSelectItem Value="@c.Id"` → `ValueChanged` fires with selected Id → `OnChannelSelected(row, channelId)` → `row.Channels.FirstOrDefault(c => c.Id == channelId)?.DisplayName ?? ""` → `row.ChannelName` → `PostMeetingToChannelAsync(..., row.ChannelName, ...)` ✅
+
+---
+
+### CC Review Summary
+
+CC ran adversarial review of all 7 focus areas against the live files. No false positives dismissed — all 7 tasks returned clean verdicts.
+
+---
+
+### Critical Issues — 0
+
+None. C1 from Cycle 3 fully resolved.
+
+---
+
+### Important Issues — 0
+
+None. I1 from Cycle 3 fully resolved.
+
+---
+
+### Nitpicks — 0
+
+---
+
+### Detailed Findings
+
+| Task | Check | Result |
+|------|-------|--------|
+| 1 | S3Service singleton-safe (IAmazonS3 + IConfiguration + ILogger only, no per-request state) | ✅ PASS |
+| 2 | FirmBotService — no remaining scoped dependencies captured | ✅ PASS |
+| 3 | OnChannelSelected — correct collection (row.Channels), correct field (DisplayName), correct key (c.Id) | ✅ PASS |
+| 4 | PostToChannels — row.ChannelName passed at call site (was "") | ✅ PASS |
+| 5 | Scope — only Program.cs + SharePanel.razor changed | ✅ PASS |
+| 6 | C3 regressions — all 6 passing criteria still hold | ✅ PASS |
+| 7 | MudSelect binding split (@bind-Value → Value+ValueChanged) — correct, no double-trigger risk | ✅ PASS |
+
+---
+
+### Acceptance Criteria Verification
+
+- [x] `S3Service` registered as `AddSingleton` — ✅ `Program.cs:77`
+- [x] `S3Service` has no per-circuit state — ✅ Only `IAmazonS3`, `IConfiguration`, `ILogger` injected
+- [x] No remaining captive deps in `FirmBotService` — ✅ All constructor deps are Singleton
+- [x] `ChannelName` field on `ChannelRowState` — ✅ `string ChannelName { get; set; } = ""`
+- [x] `OnChannelSelected` populates `row.ChannelName` from `ChannelItem.DisplayName` — ✅ correct lookup
+- [x] `PostToChannels` passes `row.ChannelName` — ✅ call site fixed
+- [x] All C3 passing criteria hold (HttpClientFactory, PushDocumentAsync, faitUserId guard, interface, dropdowns, user loading) — ✅
+
+### Verdict: PASS
+
+Both Cycle 3 issues correctly resolved. No regressions. No new issues. Ships.

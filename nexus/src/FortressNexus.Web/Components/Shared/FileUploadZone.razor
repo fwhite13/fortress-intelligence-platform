@@ -63,6 +63,11 @@
         }
     }
 
+    private static readonly HashSet<string> _allowedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".md", ".json", ".txt", ".pdf", ".html", ".png", ".jpg", ".jpeg", ".webp"
+    };
+
     private List<IBrowserFile> _selectedFiles = new();
     private string _errorMessage = "";
     private string _hint => $"Accepted: HTML, PNG, JPG, WEBP, PDF, MD, JSON, TXT — Max {MaxFileSizeBytes / 1024 / 1024}MB each, up to {MaxFiles} files";
@@ -79,9 +84,13 @@
                 _errorMessage = $"'{file.Name}' exceeds the maximum size of {MaxFileSizeBytes / 1024 / 1024}MB.";
                 return;
             }
-            if (!AcceptedTypes.Contains(file.ContentType.ToLowerInvariant()))
+            var mime = file.ContentType?.ToLowerInvariant() ?? "";
+            var ext = Path.GetExtension(file.Name)?.ToLowerInvariant() ?? "";
+            var mimeOk = !string.IsNullOrEmpty(mime) && AcceptedTypes.Contains(mime);
+            var extOk = _allowedExtensions.Contains(ext);
+            if (!mimeOk && !extOk)
             {
-                _errorMessage = $"'{file.Name}': type '{file.ContentType}' is not accepted.";
+                _errorMessage = $"'{file.Name}': file type not accepted. Allowed: HTML, PDF, MD, JSON, TXT, PNG, JPG, WEBP.";
                 return;
             }
         }
