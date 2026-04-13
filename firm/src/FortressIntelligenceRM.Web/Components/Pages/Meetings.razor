@@ -10,6 +10,7 @@
 @inject VpBotService VpBotService
 
 @inject CalendarService CalendarService
+@inject IJSRuntime JS
 
 @implements IDisposable
 @using FortressIntelligenceRM.Web.Models
@@ -185,6 +186,9 @@
     private bool _calendarLoading = true;
     private HashSet<long> _calendarRemovedMeetingIds = new();
     private HashSet<long> _stoppingMeetingIds = new();
+    private Dictionary<string, string> _localStartTimes = new();
+    private Dictionary<string, string> _localEndTimes = new();
+    private Dictionary<long, string> _localCreatedTimes = new();
 
 
     protected override async Task OnInitializedAsync()

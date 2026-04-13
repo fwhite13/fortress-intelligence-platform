@@ -177,7 +177,12 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_meetings ADD COLUMN calendar_event_id VARCHAR(500) NULL",
                 "ALTER TABLE firm_meetings MODIFY COLUMN created_by CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL",
                 "ALTER TABLE firm_meetings ADD COLUMN mode VARCHAR(2) NULL",
-                "ALTER TABLE firm_meetings ADD COLUMN graph_meeting_id VARCHAR(500) NULL"
+                "ALTER TABLE firm_meetings ADD COLUMN graph_meeting_id VARCHAR(500) NULL",
+                "ALTER TABLE firm_meeting_participants ADD CONSTRAINT fk_fmp_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
+                "ALTER TABLE firm_meeting_transcripts ADD CONSTRAINT fk_fmt_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
+                "ALTER TABLE firm_meeting_summaries ADD CONSTRAINT fk_fms_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
+                "ALTER TABLE firm_meeting_kb_pushes ADD CONSTRAINT fk_fmkp_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
+                "ALTER TABLE firm_meeting_channel_posts ADD CONSTRAINT fk_fmcp_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE"
             };
 
             foreach (var alterSql in alterStatements)
@@ -187,7 +192,7 @@ public class DatabaseInitializationService : IHostedService
                     await db.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
                     _logger.LogInformation("FIRM: Schema migration applied: {Sql}", alterSql);
                 }
-                catch (MySqlException ex) when (ex.Number == 1060 || ex.Number == 1061 || ex.Number == 1091)
+                catch (MySqlException ex) when (ex.Number == 1060 || ex.Number == 1061 || ex.Number == 1091 || ex.Number == 1826)
                 {
                     _logger.LogInformation("FIRM: Schema migration already applied (idempotent): {Sql}", alterSql);
                 }
