@@ -11,7 +11,7 @@
     box-sizing: border-box;
 }
 
-.file-upload-input-overlay {
+.file-upload-zone ::deep .file-upload-input-overlay {
     position: absolute;
     top: 0;
     left: 0;
@@ -30,7 +30,9 @@
     width: 100%;
 }
 
-.file-upload-list-item {
+.file-upload-zone ::deep .file-upload-list-item {
+    position: relative;
+    z-index: 2;
     display: flex;
     align-items: center;
     gap: 8px;

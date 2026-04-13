@@ -188,3 +188,126 @@ Non-blocking items (defer to follow-up):
 ---
 
 _Hawkeye — Cycle 1 complete._
+
+---
+
+## Review Report — ADO #1710 — Cycle 2
+
+**Reviewer:** Hawkeye (Clint Barton) — Cycle 2
+**Date:** 2026-04-13
+**Commits reviewed:** `70d04e9` (firm-utils.js fix) + `2c66557` (Blazor lifecycle fixes, co-landed with #1713)
+**Risk:** Low — targeted lifecycle fix, UI-only, 0 build errors
+
+---
+
+## Verdict: PASS ⚠️ (commit attribution note)
+
+---
+
+## CC Review Summary
+
+CC ran adversarial analysis against all three target files in the current working tree and traced the exact commits that introduced each change. All Cycle 1 issues are resolved correctly. One process anomaly noted: the C1 and C2 Blazor lifecycle fixes landed in commit `2c66557` (attributed to #1713) rather than `70d04e9` (the stated #1710 fix commit). The code is correct and ships. Commit hygiene needs a note in the WI.
+
+No false positives. CC findings align with Hawkeye judgment.
+
+---
+
+## Targeted Fix Verification
+
+### C1 Fix — MeetingDetail.razor `OnAfterRenderAsync` pattern
+
+**Fix landed in:** `2c66557` (co-landed with #1713 KB fix)
+
+| Check | Result |
+|---|---|
+| No `JS.InvokeAsync` in `OnInitializedAsync` | ✅ Confirmed — scanned full method, zero JS calls |
+| `OnAfterRenderAsync(bool firstRender)` override exists | ✅ Confirmed |
+| JS interop inside `if (firstRender)` block only | ✅ Confirmed — first line: `if (!firstRender) return;` |
+| `StateHasChanged()` called after interop | ✅ Confirmed — inside firstRender block |
+| `_meeting?.CreatedAt != null` null check before JS call | ✅ Confirmed |
+| Fallback in markup (`_localCreatedAt ?? ...`) | ✅ Confirmed |
+| No infinite re-render risk | ✅ Confirmed — guard prevents recursion |
+
+**C1: ✅ FIXED — correct implementation**
+
+---
+
+### C2 Fix — Meetings.razor `_jsReady` guard pattern
+
+**Fix landed in:** `2c66557` (co-landed with #1713 KB fix)
+
+| Check | Result |
+|---|---|
+| `private bool _jsReady = false` field exists | ✅ Confirmed |
+| `_jsReady = true` set BEFORE `PreFormatMeetingTimesAsync()` call | ✅ Confirmed — correct order |
+| `if (!_jsReady) return;` is FIRST statement in `PreFormatMeetingTimesAsync` | ✅ Confirmed |
+| Subsequent `LoadMeetings()` calls work (guard passes after init) | ✅ Confirmed — `_jsReady` stays true after first render |
+| No JS interop in initialization path before circuit ready | ✅ Confirmed |
+| `StateHasChanged()` called after | ✅ Confirmed |
+
+**C2: ✅ FIXED — correct implementation**
+
+---
+
+### I2 Fix — firm-utils.js null guard + offset stripping
+
+**Fix landed in:** `70d04e9` (correct commit)
+
+| Check | Result |
+|---|---|
+| `if (!isoUtc) return ''` first line in `formatLocalTime` | ✅ Confirmed |
+| `if (!isoUtc) return ''` first line in `formatLocalTimeOnly` | ✅ Confirmed |
+| `if (!isoUtc) return ''` first line in `formatLocalDateTime` | ✅ Confirmed |
+| Input already has Z → no double-Z | ✅ `endsWith('Z')` check prevents re-appending |
+| Input has `+00:00` → stripped + Z appended | ✅ `.replace(/\+00:00$/, '') + 'Z'` correct |
+| Bare datetime → Z appended | ✅ replace is no-op, Z appended correctly |
+
+**I2: ✅ FIXED — all three cases handled correctly**
+
+---
+
+### I1 Status — Dead code (non-blocking)
+
+`FormatEastern`, `FormatEasternTimeOnly`, `_easternTz` remain in `Meetings.razor`. Tony did not remove them. **Acceptable** — Cycle 1 marked this non-blocking. Deferred to follow-up.
+
+---
+
+## Scope Check
+
+| Expected | Actual | Result |
+|---|---|---|
+| `MeetingDetail.razor` modified | In `2c66557` | ✅ Present in tree |
+| `Meetings.razor` modified | In `2c66557` | ✅ Present in tree |
+| `firm-utils.js` modified | In `70d04e9` | ✅ Present in tree |
+| No unexpected files | `2c66557` also contains #1713 KB changes | ⚠️ See note below |
+
+**Note:** The #1710 Blazor lifecycle fixes were bundled into commit `2c66557` alongside the #1713 KB bypass work. The commit message references only `#1713`. This is a commit attribution anomaly — the code changes are correct and scoped to the right files, but the WI traceability is imperfect. `2c66557` effectively contains work for two tickets. No regression risk; no out-of-scope code written.
+
+---
+
+## Build
+
+✅ 0 errors, 12 warnings (all pre-existing) — confirmed in `pipeline/1710-BUILD-REPORT.md`
+
+---
+
+## Positive Observations
+
+- `OnAfterRenderAsync` pattern is textbook correct for Blazor Server interop — first render guard prevents infinite loops
+- `_jsReady` flag order is exactly right (`true` set before the call, guard is first line) — subtle ordering that Tony got correct
+- JS normalization logic handles all three input cases cleanly
+- Null guard placement in JS is exactly first-line, before any property access — no window for TypeError
+
+---
+
+## Commit Attribution Note
+
+Tony was directed to fix issues from Cycle 1 in a commit for #1710. The actual implementation split across two commits:
+- `70d04e9` — `firm-utils.js` only (correctly attributed to #1710)
+- `2c66557` — `MeetingDetail.razor` + `Meetings.razor` lifecycle fixes (commit message says `fix(firm#1713)`)
+
+This means the #1710 WI has no git commit directly linking the Blazor fixes to it. **Recommend Tony add a note in the #1710 WI referencing `2c66557` for traceability.** Does not block ship.
+
+---
+
+_Hawkeye — Cycle 2 complete. Code ships._
