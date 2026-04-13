@@ -81,3 +81,47 @@ Commit: `c6d7387`
 - **z-index conflict:** The overlay has `z-index: 1`. If any child elements in the file list also have elevated z-index, they may be blocked by the overlay when the file list is visible. Worth a quick visual check of the file list interactions.
 - **`file-upload-btn` z-index:** The button inside `ActivatorContent` sits inside the MudBlazor `<div @onclick="OpenFilePickerAsync">` wrapper — clicking the button triggers `OpenFilePickerAsync` via MudBlazor's `IActivatable` cascade, not via the overlay. This is correct but worth confirming the click doesn't also trigger duplicate file picker opens.
 - **CSS scoping:** The new `.razor.css` file uses Blazor's scoped CSS. The class names (like `file-upload-btn`) are applied as `Class=` on MudBlazor child components — these render in child component DOM scope, so Blazor scoped CSS won't apply to them automatically. This is pre-existing behavior (those classes had no CSS before). The scoped CSS for `.file-upload-zone` and `.file-upload-input-overlay` will work correctly since those are on elements in this component's own render tree.
+
+---
+
+## Cycle 2 — CSS Isolation Fix
+
+**Engineer:** Tony Stark
+**Build cycle:** 2
+**Commit:** `6950ca2`
+**Date:** 2026-04-13
+
+### What was fixed
+
+Blazor CSS isolation scoping issue in `FileUploadZone.razor.css`. Two rules were not matching at runtime because Blazor's scope attribute (`b-xxxx`) is only applied to elements the component renders directly. The `<input type="file">` is rendered by MudBlazor's `MudFileUpload` — not by `FileUploadZone` — so the scoped selectors `.file-upload-input-overlay[b-xxxx]` and `.file-upload-list-item[b-xxxx]` never matched.
+
+### Changes made
+
+**File:** `Components/Shared/FileUploadZone.razor.css`
+
+| Rule | Change |
+|------|--------|
+| `.file-upload-input-overlay` | Converted to `.file-upload-zone ::deep .file-upload-input-overlay` — `::deep` strips the scope attribute from the descendant selector, penetrating the MudBlazor child render tree |
+| `.file-upload-list-item` | Converted to `.file-upload-zone ::deep .file-upload-list-item` — added `position: relative` + `z-index: 2` so remove buttons sit above the overlay (which is at z-index: 1) |
+
+No changes to any `.razor` files.
+
+### Build result
+
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+```
+
+### Acceptance criteria
+
+- [x] C1: `.file-upload-input-overlay` uses `::deep` combinator — overlay CSS will now match the MudBlazor-rendered input
+- [x] I1: `.file-upload-list-item` uses `::deep` combinator with `z-index: 2` — remove buttons no longer blocked by overlay
+- [x] `dotnet build` — 0 errors, 0 warnings
+- [x] No changes to `.razor` file
+
+### Known edge cases / things Clint should scrutinize
+
+- `::deep` is a Blazor-specific combinator that compiles to a plain descendant selector at runtime (the scope attribute is simply omitted from the descendant half). This is the canonical Blazor fix for this pattern — no browser compatibility concerns.
+- The overlay (`z-index: 1`) covers the drop zone background. The list items (`z-index: 2`) sit above it. Any future additions to the file list area should also use `z-index: 2+` if they need to be interactive.
