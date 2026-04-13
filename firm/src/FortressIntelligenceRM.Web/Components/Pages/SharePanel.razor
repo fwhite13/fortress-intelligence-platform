@@ -54,7 +54,9 @@
                     <MudSelectItem Value="@t.Id">@t.DisplayName</MudSelectItem>
                 }
             </MudSelect>
-            <MudSelect @bind-Value="row.ChannelId" Label="Channel" Style="width:180px"
+            <MudSelect Value="row.ChannelId" Label="Channel" Style="width:180px"
+                       ValueChanged="@((string? v) => OnChannelSelected(row, v))"
+                       T="string?"
                        Disabled="@(row.Channels.Count == 0)">
                 @if (row.Channels.Count == 0 && !string.IsNullOrEmpty(row.TeamId))
                 {
@@ -243,7 +245,7 @@
                         row.TeamId ?? "",
                         team?.DisplayName ?? "",
                         row.ChannelId ?? "",
-                        "",
+                        row.ChannelName,
                         docType);
                 }
                 catch (Exception ex)
@@ -277,6 +279,14 @@
         StateHasChanged();
     }
 
+    private void OnChannelSelected(ChannelRowState row, string? channelId)
+    {
+        row.ChannelId = channelId;
+        var channel = row.Channels.FirstOrDefault(c => c.Id == channelId);
+        row.ChannelName = channel?.DisplayName ?? "";
+        StateHasChanged();
+    }
+
     private void AddChannelRow()
     {
         _channelRows.Add(new ChannelRowState());
@@ -297,6 +307,7 @@
         public string? TeamId { get; set; }
         public string? TeamName { get; set; }
         public string? ChannelId { get; set; }
+        public string ChannelName { get; set; } = "";
         public string DocType { get; set; } = "summary";
         public List<ChannelItem> Channels { get; set; } = new();
         public bool BotNotInstalled { get; set; }

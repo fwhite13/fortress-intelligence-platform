@@ -74,7 +74,7 @@ builder.Services.AddDbContextFactory<FipDbContext>(options =>
 // Application services
 builder.Services.AddScoped<MeetingService>();
 builder.Services.AddScoped<VpBotService>();
-builder.Services.AddScoped<S3Service>();
+builder.Services.AddSingleton<S3Service>();
 builder.Services.AddScoped<FirmKbService>();
 builder.Services.AddScoped<CalendarService>();
 builder.Services.AddSingleton<IOrgContextService, OrgContextService>();
