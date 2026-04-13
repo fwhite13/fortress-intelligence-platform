@@ -101,3 +101,37 @@ dotnet build — Build succeeded. 0 Error(s)
 **Built by:** Tony Stark  
 **Date:** 2026-04-13  
 **WI:** ADO #1713
+
+---
+
+## Cycle 2 — Dead Code Removal
+
+**Commit:** `c49726c`  
+**Date:** 2026-04-13  
+**Risk:** Trivial — two line deletions only
+
+### Changes Made
+
+| # | File | Change |
+|---|------|--------|
+| 1 | `Components/Pages/MeetingDetail.razor` | Removed unused `@inject IHttpClientFactory HttpClientFactory` (line 8) |
+| 2 | `Components/Pages/MeetingDetail.razor` | Removed orphaned `private record KbStatusResponse(...)` (line 377) |
+
+### Build Result
+```
+Build succeeded. 0 Error(s), 12 Warning(s)
+```
+All 12 warnings are pre-existing — no new warnings introduced.
+
+### Out-of-Scope Note
+`Meetings.razor` received a `_jsReady` JS-interop guard fix in commit `2c66557` that technically belongs to #1710. Already acknowledged by Clint — no action needed.
+
+### Acceptance Criteria
+- [x] `@inject IHttpClientFactory HttpClientFactory` removed
+- [x] `private record KbStatusResponse(...)` removed
+- [x] `dotnet build` — 0 errors
+- [x] No other changes made
+
+**Built by:** Tony Stark  
+**Cycle:** 2 of 2  
+**WI:** ADO #1713
