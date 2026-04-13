@@ -649,7 +649,14 @@
                     catch (Exception ex)
                     {
                         Snackbar.Add($"Spec regeneration failed: {ex.Message}", Severity.Error);
-                        await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed);
+                        try
+                        {
+                            await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed);
+                        }
+                        catch (Exception statusEx)
+                        {
+                            Console.Error.WriteLine($"NEXUS: Failed to set submission {_submissionId.Value} to Failed after regen error: {statusEx.Message}");
+                        }
                         _regenInProgress = false;
                         _isSubmitting = false;
                         StateHasChanged();
@@ -683,7 +690,14 @@
             catch (Exception ex)
             {
                 Snackbar.Add($"Spec generation failed: {ex.Message}", Severity.Error);
-                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed);
+                try
+                {
+                    await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed);
+                }
+                catch (Exception statusEx)
+                {
+                    Console.Error.WriteLine($"NEXUS: Failed to set submission {_submissionId.Value} to Failed after GenerateAsync error: {statusEx.Message}");
+                }
                 _isSubmitting = false;
                 StateHasChanged();
                 return;
