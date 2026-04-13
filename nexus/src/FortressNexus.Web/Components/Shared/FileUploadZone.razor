@@ -5,7 +5,9 @@
     <MudFileUpload T="IReadOnlyList<IBrowserFile>"
                    Accept=".html,.png,.jpg,.jpeg,.webp,.pdf,.md,.json,.txt"
                    MaximumFileCount="10"
-                   OnFilesChanged="HandleFilesChanged">
+                   OnFilesChanged="HandleFilesChanged"
+                   Hidden="false"
+                   InputClass="file-upload-input-overlay">
         <ActivatorContent>
             <MudButton Variant="Variant.Outlined"
                        Color="Color.Primary"
