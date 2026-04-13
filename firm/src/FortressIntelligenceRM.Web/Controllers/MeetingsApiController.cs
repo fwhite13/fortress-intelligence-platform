@@ -695,7 +695,7 @@ public class MeetingsApiController : ControllerBase
         }
     }
 
-    [HttpDelete("{id}")]
+    [HttpDelete("/api/meetings/{id}")]
     [Authorize]
     public async Task<IActionResult> RemoveMeeting(long id)
     {
@@ -712,9 +712,13 @@ public class MeetingsApiController : ControllerBase
         if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
 
         var meeting = await _meetingService.GetMeetingAsync(id, firmUser.Id);
-        if (meeting == null) return NotFound();
-        if (meeting.Status != MeetingStatus.Scheduled)
-            return Conflict(new { error = "Cannot remove a meeting that is in progress or complete" });
+        if (meeting == null) return NotFound(new { error = "Meeting not found" });
+
+        // Allow removing meetings in any terminal state (Scheduled, Complete, Failed)
+        // Reject only if meeting is actively in-progress
+        if (meeting.Status is MeetingStatus.Pending or MeetingStatus.Joining or MeetingStatus.Recording
+            or MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing or MeetingStatus.Summarizing)
+            return Conflict(new { error = "Cannot remove a meeting that is currently in progress" });
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         await db.Database.ExecuteSqlRawAsync("DELETE FROM firm_meetings WHERE id = {0}", id);

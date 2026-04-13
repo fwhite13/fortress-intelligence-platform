@@ -136,6 +136,9 @@
                         {
                             <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
                                        OnClick="@(() => JoinNow(context.Id))">Join Now</MudButton>
+                        }
+                        @if (context.Status is MeetingStatus.Scheduled or MeetingStatus.Complete or MeetingStatus.Failed)
+                        {
                             <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
                                        OnClick="@(() => RemoveMeeting(context.Id))">Remove</MudButton>
                         }
@@ -598,12 +601,21 @@
             var http = HttpClientFactory.CreateClient("local");
             var response = await http.DeleteAsync($"/api/meetings/{meetingId}");
             if (response.IsSuccessStatusCode)
+            {
                 await LoadMeetings();
+                Snackbar.Add("Meeting removed.", Severity.Success);
+            }
             else
-                Snackbar.Add("Failed to remove meeting", Severity.Error);
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                Snackbar.Add($"Failed to remove meeting: {error}", Severity.Error);
+                Logger.LogError("FIRM: RemoveMeeting failed for meeting {Id} — HTTP {Status}: {Body}",
+                    meetingId, (int)response.StatusCode, error);
+            }
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "FIRM: RemoveMeeting threw for meeting {Id}", meetingId);
             Snackbar.Add($"Error: {ex.Message}", Severity.Error);
         }
     }
