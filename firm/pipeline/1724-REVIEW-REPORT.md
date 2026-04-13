@@ -282,3 +282,27 @@ That's it. Everything else is correct.
 ---
 
 _Rollback: firm-web:62 if needed._
+
+---
+
+## Cycle 3 — 2026-04-13
+
+**Verdict: ✅ PASS**
+**Reviewer:** Hawkeye | **Commit:** 556268a
+
+### What Was Checked
+
+Tony's fix: `AddScoped<IOrgContextService, OrgContextService>()` → `AddSingleton`
+
+| Check | Result | Detail |
+|-------|--------|--------|
+| AddSingleton confirmed @ line 80 | ✅ PASS | Exact match: `builder.Services.AddSingleton<IOrgContextService, OrgContextService>();` |
+| No remaining AddScoped/AddTransient registrations | ✅ PASS | Single registration in Program.cs; no other DI config files exist |
+| Captive dependency check (Singleton safe) | ✅ PASS | Constructor injects `IDbContextFactory<FirmDbContext>` + `ILogger` — both Singleton-safe. Factory pattern used correctly (creates/disposes contexts per-call). No raw DbContext injected. |
+
+### CC Review Summary
+CC read Program.cs, Services/IOrgContextService.cs, and Services/OrgContextService.cs directly.
+All three checks passed. Fix is correct, complete, and architecturally sound.
+
+### Notes
+The use of `IDbContextFactory` rather than a raw `DbContext` is the correct pattern for Singleton services — no captive dependency issue. Ships clean.

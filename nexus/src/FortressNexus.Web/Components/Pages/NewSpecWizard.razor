@@ -147,7 +147,7 @@
     {
         <DiscoveryStep Session="_discoverySession"
                        IsLoading="_discoveryLoading"
-                       OnCompleted="GoToStep3Confirm"
+                       OnCompleted="HandleDiscoveryCompleted"
                        OnSkipped="GoToStep3Confirm" />
         <div class="nexus-wizard-nav mt-3">
             <MudButton Variant="Variant.Outlined" OnClick="BackToStep1Files">Back</MudButton>
@@ -473,6 +473,13 @@
             // Already have a session — just clear the loading flag
             _discoveryLoading = false;
         }
+    }
+
+    private Task HandleDiscoveryCompleted()
+    {
+        // Answers already saved by DiscoveryStep.HandleContinue() — just advance
+        _activeStep = 3;
+        return Task.CompletedTask;
     }
 
     private void GoToStep3Confirm() => _activeStep = 3;

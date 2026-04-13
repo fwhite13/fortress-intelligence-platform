@@ -148,3 +148,69 @@ cd ~/projects/fip/firm && dotnet build src/FortressIntelligenceRM.Web/
 # the summary prompt contains "Term: Description" formatted lines,
 # not raw JSON array syntax
 ```
+
+---
+
+# Build Report — ADO #1724 — Cycle 3 (DI Lifetime Fix)
+
+**Cycle:** 3
+**Builder:** Tony Stark
+**Commit:** `556268a`
+**Branch:** `origin/main`
+**Build Result:** ✅ 0 errors, 16 warnings (all pre-existing)
+
+---
+
+## What Was Built
+
+Fixed captive dependency: `IOrgContextService` was registered as `AddScoped` but `TeamsGraphService` is a singleton (`AddSingleton`). Changed one line in `Program.cs` to register `IOrgContextService` as `AddSingleton`.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `Program.cs` | Line 80: `AddScoped<IOrgContextService, OrgContextService>()` → `AddSingleton<IOrgContextService, OrgContextService>()` |
+
+---
+
+## Why It's Safe
+
+`OrgContextService.GetContextAsync` uses `IDbContextFactory<FirmDbContext>` which creates and disposes its own `DbContext` per call. There is no per-request state — making it a singleton is correct.
+
+---
+
+## Parallelization
+
+Not applicable — single-line fix.
+
+---
+
+## CC Sessions
+
+1 CC session (Claude Sonnet). One-line targeted change.
+
+---
+
+## Acceptance Criteria Verification
+
+- [x] `AddSingleton<IOrgContextService, OrgContextService>()` at Program.cs line 80 ✅
+- [x] `AddScoped<IOrgContextService` does NOT appear in Program.cs ✅
+- [x] `dotnet build` — 0 errors ✅
+
+---
+
+## Known Edge Cases / Things to Scrutinize
+
+None. This is a pure DI lifetime correction with no behavioral change.
+
+---
+
+## How to Test
+
+```bash
+cd ~/projects/fip/firm && dotnet build src/FortressIntelligenceRM.Web/
+# Confirm 0 errors. Run the app in dev mode — previously this would throw
+# InvalidOperationException about captive dependency; that exception is now gone.
+```

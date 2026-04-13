@@ -63,6 +63,20 @@
     private Dictionary<Guid, string> _answers = new();
     private bool _loading => IsLoading;
 
+    protected override void OnParametersSet()
+    {
+        if (Session?.Questions != null)
+        {
+            foreach (var q in Session.Questions)
+            {
+                if (q.Answer != null && !string.IsNullOrEmpty(q.Answer.AnswerText))
+                {
+                    _answers[q.Id] = q.Answer.AnswerText;
+                }
+            }
+        }
+    }
+
     private bool CanContinue => Session == null || !Session.Questions
         .Where(q => q.IsBlocking)
         .Any(q => string.IsNullOrWhiteSpace(_answers.GetValueOrDefault(q.Id)));
