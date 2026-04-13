@@ -130,7 +130,9 @@
         var userOid = user.FindFirst("oid")?.Value
             ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
         var adminOid = Configuration["Firm:AdminEntraOid"];
-        _isAdmin = (!string.IsNullOrEmpty(adminOid) && string.Equals(adminOid, userOid, StringComparison.OrdinalIgnoreCase))
+        var adminOids = (adminOid ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        _isAdmin = adminOids.Any(oid => string.Equals(oid, userOid, StringComparison.OrdinalIgnoreCase))
                    || user.IsInRole("admin") || user.IsInRole("Admin") || user.HasClaim("roles", "admin");
 
         _tenantId = user.FindFirst("tid")?.Value

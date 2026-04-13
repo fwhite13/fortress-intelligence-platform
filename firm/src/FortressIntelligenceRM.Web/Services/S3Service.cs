@@ -41,16 +41,30 @@ public class S3Service
             // Parse transcript JSON and format as plain text
             var doc = JsonDocument.Parse(json);
             var sb = new StringBuilder();
-            if (doc.RootElement.TryGetProperty("segments", out var segments))
+            JsonElement segmentsEl;
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
             {
-                foreach (var seg in segments.EnumerateArray())
-                {
-                    var speaker = seg.TryGetProperty("speaker_label", out var sl) ? sl.GetString() : "Unknown";
-                    var text = seg.TryGetProperty("text", out var t) ? t.GetString() : "";
-                    var startMs = seg.TryGetProperty("start_time_ms", out var sm) ? sm.GetInt64() : 0;
-                    var ts = TimeSpan.FromMilliseconds(startMs);
-                    sb.AppendLine($"[{ts:hh\\:mm\\:ss}] {speaker}: {text}");
-                }
+                // vpbot format: bare array
+                segmentsEl = doc.RootElement;
+            }
+            else if (doc.RootElement.TryGetProperty("segments", out var wrapped))
+            {
+                // legacy wrapped format
+                segmentsEl = wrapped;
+            }
+            else
+            {
+                return sb.ToString(); // unknown format, return empty
+            }
+
+            foreach (var seg in segmentsEl.EnumerateArray())
+            {
+                // Try both camelCase (vpbot) and snake_case (legacy)
+                var speaker = TryGetString(seg, "speakerLabel") ?? TryGetString(seg, "speaker_label") ?? "Unknown";
+                var text    = TryGetString(seg, "text") ?? "";
+                var startMs = TryGetLong(seg, "startTimeMs") ?? TryGetLong(seg, "start_time_ms") ?? 0L;
+                var ts = TimeSpan.FromMilliseconds(startMs);
+                sb.AppendLine($"[{ts:hh\\:mm\\:ss}] {speaker}: {text}");
             }
             return sb.ToString();
         }
@@ -75,6 +89,12 @@ public class S3Service
             return "";
         }
     }
+
+    private static string? TryGetString(JsonElement el, string prop)
+        => el.TryGetProperty(prop, out var v) ? v.GetString() : null;
+
+    private static long? TryGetLong(JsonElement el, string prop)
+        => el.TryGetProperty(prop, out var v) && v.TryGetInt64(out var n) ? n : null;
 
     public async Task<string> UploadTextAsync(string s3Key, string content, string contentType = "text/plain")
     {
