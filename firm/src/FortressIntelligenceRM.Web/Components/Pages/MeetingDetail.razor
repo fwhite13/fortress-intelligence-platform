@@ -264,31 +264,13 @@
 
             _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
 
-            if (_meeting != null)
-            {
-                try
-                {
-                    var utcStr = _meeting.CreatedAt.ToUniversalTime().ToString("O");
-                    _localCreatedAt = await JS.InvokeAsync<string>("firmUtils.formatLocalDateTime", utcStr);
-                }
-                catch
-                {
-                    _localCreatedAt = _meeting.CreatedAt.ToString("MMM d, yyyy h:mm tt");
-                }
-            }
-
             // Load KB push status
             if (_meeting != null && _meeting.Status == MeetingStatus.Complete)
             {
                 try
                 {
-                    var http = HttpClientFactory.CreateClient("local");
-                    var kbStatusResp = await http.GetFromJsonAsync<KbStatusResponse>($"/api/meetings/{Id}/kb-status");
-                    if (kbStatusResp != null)
-                    {
-                        _transcriptPushedTo = kbStatusResp.Transcript?.ToHashSet() ?? new();
-                        _summaryPushedTo    = kbStatusResp.Summary?.ToHashSet() ?? new();
-                    }
+                    _transcriptPushedTo = await FirmKbService.GetPushedScopesAsync(Id, "transcript");
+                    _summaryPushedTo    = await FirmKbService.GetPushedScopesAsync(Id, "summary");
                 }
                 catch { /* Non-fatal */ }
             }
@@ -302,6 +284,21 @@
         {
             _loading = false;
             StateHasChanged();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (_meeting?.CreatedAt != null)
+        {
+            try
+            {
+                _localCreatedAt = await JS.InvokeAsync<string>("firmUtils.formatLocalDateTime",
+                    _meeting.CreatedAt.ToUniversalTime().ToString("O"));
+                StateHasChanged();
+            }
+            catch { /* JS not ready — leave _localCreatedAt null, fallback in markup */ }
         }
     }
 
@@ -321,7 +318,7 @@
 
     private async Task PushTranscript()
     {
-        if (_pushingTranscript || _meeting == null) return;
+        if (_pushingTranscript || _meeting == null || _user == null) return;
         _pushingTranscript = true;
         try
         {
@@ -330,27 +327,27 @@
             if (_transcriptSelectTeam     && !_transcriptPushedTo.Contains("team"))     scopes.Add("team");
             if (!scopes.Any()) return;
 
-            var http = HttpClientFactory.CreateClient("local");
-            var resp = await http.PostAsJsonAsync($"/api/meetings/{_meeting.Id}/push-to-kb",
-                new { docType = "transcript", kbScopes = scopes });
-            if (resp.IsSuccessStatusCode)
+            if (string.IsNullOrEmpty(_user.FaitUserId))
             {
-                foreach (var s in scopes) _transcriptPushedTo.Add(s);
-                Snackbar.Add($"Transcript added to {string.Join(" + ", scopes.Select(s => s == "personal" ? "My KB" : "Team KB"))}!", Severity.Success);
+                Snackbar.Add("KB push requires your FAIT account to be linked. Please sign out and sign back in.", Severity.Error);
+                return;
             }
-            else
-            {
-                var body = await resp.Content.ReadAsStringAsync();
-                Snackbar.Add($"Failed: {body}", Severity.Error);
-            }
+
+            await FirmKbService.PushDocumentAsync(_meeting.Id, _user.Id.ToString(), _user.FaitUserId, "transcript", scopes);
+            foreach (var s in scopes) _transcriptPushedTo.Add(s);
+            Snackbar.Add($"Transcript added to {string.Join(" + ", scopes.Select(s => s == "personal" ? "My KB" : "Team KB"))}!", Severity.Success);
         }
-        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: PushTranscript failed for meeting {MeetingId}", _meeting?.Id);
+            Snackbar.Add($"Error pushing transcript: {ex.Message}", Severity.Error);
+        }
         finally { _pushingTranscript = false; StateHasChanged(); }
     }
 
     private async Task PushSummary()
     {
-        if (_pushingSummary || _meeting == null) return;
+        if (_pushingSummary || _meeting == null || _user == null) return;
         _pushingSummary = true;
         try
         {
@@ -359,21 +356,21 @@
             if (_summarySelectTeam     && !_summaryPushedTo.Contains("team"))     scopes.Add("team");
             if (!scopes.Any()) return;
 
-            var http = HttpClientFactory.CreateClient("local");
-            var resp = await http.PostAsJsonAsync($"/api/meetings/{_meeting.Id}/push-to-kb",
-                new { docType = "summary", kbScopes = scopes });
-            if (resp.IsSuccessStatusCode)
+            if (string.IsNullOrEmpty(_user.FaitUserId))
             {
-                foreach (var s in scopes) _summaryPushedTo.Add(s);
-                Snackbar.Add($"Summary added to {string.Join(" + ", scopes.Select(s => s == "personal" ? "My KB" : "Team KB"))}!", Severity.Success);
+                Snackbar.Add("KB push requires your FAIT account to be linked. Please sign out and sign back in.", Severity.Error);
+                return;
             }
-            else
-            {
-                var body = await resp.Content.ReadAsStringAsync();
-                Snackbar.Add($"Failed: {body}", Severity.Error);
-            }
+
+            await FirmKbService.PushDocumentAsync(_meeting.Id, _user.Id.ToString(), _user.FaitUserId, "summary", scopes);
+            foreach (var s in scopes) _summaryPushedTo.Add(s);
+            Snackbar.Add($"Summary added to {string.Join(" + ", scopes.Select(s => s == "personal" ? "My KB" : "Team KB"))}!", Severity.Success);
         }
-        catch (Exception ex) { Snackbar.Add($"Error: {ex.Message}", Severity.Error); }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: PushSummary failed for meeting {MeetingId}", _meeting?.Id);
+            Snackbar.Add($"Error pushing summary: {ex.Message}", Severity.Error);
+        }
         finally { _pushingSummary = false; StateHasChanged(); }
     }
 

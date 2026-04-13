@@ -189,6 +189,7 @@
     private Dictionary<string, string> _localStartTimes = new();
     private Dictionary<string, string> _localEndTimes = new();
     private Dictionary<long, string> _localCreatedTimes = new();
+    private bool _jsReady = false;
 
 
     protected override async Task OnInitializedAsync()
@@ -253,6 +254,14 @@
             await LoadMeetings();
         }
         StartPolling();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _jsReady = true;
+        await PreFormatMeetingTimesAsync();
+        StateHasChanged();
     }
 
     private async Task LoadMeetings()
@@ -689,6 +698,7 @@
 
     private async Task PreFormatMeetingTimesAsync()
     {
+        if (!_jsReady) return;  // JS not available during pre-render
         _localCreatedTimes.Clear();
         _localStartTimes.Clear();
         _localEndTimes.Clear();
