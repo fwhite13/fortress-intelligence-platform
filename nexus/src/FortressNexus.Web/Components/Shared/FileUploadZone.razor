@@ -3,7 +3,7 @@
 
 <div class="file-upload-zone">
     <MudFileUpload T="IReadOnlyList<IBrowserFile>"
-                   Accept=".html,.png,.jpg,.jpeg,.webp,.pdf"
+                   Accept=".html,.png,.jpg,.jpeg,.webp,.pdf,.md,.json,.txt"
                    MaximumFileCount="10"
                    OnFilesChanged="HandleFilesChanged">
         <ActivatorContent>
@@ -48,7 +48,7 @@
 @code {
     [Parameter] public EventCallback<IReadOnlyList<IBrowserFile>> OnFilesSelected { get; set; }
     [Parameter] public EventCallback<IBrowserFile> OnFileSelected { get; set; }
-    [Parameter] public string[] AcceptedTypes { get; set; } = ["text/html", "image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
+    [Parameter] public string[] AcceptedTypes { get; set; } = ["text/html", "image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf", "text/markdown", "text/x-markdown", "application/json", "text/plain"];
     [Parameter] public long MaxFileSizeBytes { get; set; } = 10 * 1024 * 1024;
     [Parameter] public int MaxFiles { get; set; } = 10;
     [Parameter] public IReadOnlyList<IBrowserFile>? InitialFiles { get; set; }
@@ -63,7 +63,7 @@
 
     private List<IBrowserFile> _selectedFiles = new();
     private string _errorMessage = "";
-    private string _hint => $"Accepted: HTML, PNG, JPG, WEBP, PDF — Max {MaxFileSizeBytes / 1024 / 1024}MB each, up to {MaxFiles} files";
+    private string _hint => $"Accepted: HTML, PNG, JPG, WEBP, PDF, MD, JSON, TXT — Max {MaxFileSizeBytes / 1024 / 1024}MB each, up to {MaxFiles} files";
 
     private async Task HandleFilesChanged(InputFileChangeEventArgs e)
     {
@@ -104,6 +104,8 @@
         {
             "text/html" => Icons.Material.Filled.Code,
             "application/pdf" => Icons.Material.Filled.PictureAsPdf,
+            "text/markdown" or "text/x-markdown" or "text/plain" => Icons.Material.Filled.Description,
+            "application/json" => Icons.Material.Filled.DataObject,
             var ct when ct.StartsWith("image/") => Icons.Material.Filled.Image,
             _ => Icons.Material.Filled.InsertDriveFile
         };

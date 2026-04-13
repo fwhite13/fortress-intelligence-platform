@@ -16,7 +16,7 @@ public class FileStorageService : IFileStorageService
     private readonly ILogger<FileStorageService> _logger;
 
     private static readonly string[] AllowedTypes =
-        ["text/html", "image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf"];
+        ["text/html", "image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf", "text/markdown", "text/x-markdown", "application/json", "text/plain"];
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10MB
 
     private string Bucket => _config["Nexus:S3Bucket"] ?? "fortress-nexus-uploads-dev";
@@ -63,7 +63,7 @@ public class FileStorageService : IFileStorageService
 
         var normalizedContentType = file.ContentType.ToLowerInvariant();
         if (!AllowedTypes.Contains(normalizedContentType))
-            throw new InvalidOperationException($"File type '{file.ContentType}' is not allowed. Accepted: HTML, PNG, JPG, JPEG, WEBP, PDF.");
+            throw new InvalidOperationException($"File type '{file.ContentType}' is not allowed. Accepted: HTML, PNG, JPG, JPEG, WEBP, PDF, MD, JSON, TXT.");
 
         var safeFileName = Path.GetFileName(file.Name);
         if (string.IsNullOrWhiteSpace(safeFileName))
