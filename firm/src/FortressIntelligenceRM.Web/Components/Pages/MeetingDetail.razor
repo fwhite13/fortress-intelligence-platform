@@ -5,7 +5,6 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ISnackbar Snackbar
 @inject ILogger<MeetingDetail> Logger
-@inject IHttpClientFactory HttpClientFactory
 @inject FirmKbService FirmKbService
 @inject IJSRuntime JS
 @using FortressIntelligenceRM.Web.Models
@@ -374,7 +373,6 @@
         finally { _pushingSummary = false; StateHasChanged(); }
     }
 
-    private record KbStatusResponse(List<string>? Transcript, List<string>? Summary);
 
     private static string FormatDuration(int? seconds)
     {
