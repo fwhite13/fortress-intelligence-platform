@@ -94,6 +94,10 @@ public class FileStorageService : IFileStorageService
                 processedText = null;
             }
         }
+        else if (fileType == FileType.Other)
+        {
+            processedText = Encoding.UTF8.GetString(fileBytes);
+        }
         // Image: processedText stays null (vision model handles it)
 
         using var uploadStream = new MemoryStream(fileBytes);
