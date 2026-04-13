@@ -1,0 +1,137 @@
+@page "/org-context"
+@attribute [Authorize]
+@inject IHttpClientFactory HttpClientFactory
+@inject ISnackbar Snackbar
+@inject IConfiguration Configuration
+@inject AuthenticationStateProvider AuthStateProvider
+@using System.Security.Claims
+@using System.Text.Json
+@using System.Net.Http.Json
+
+<PageTitle>Org Context — FIRM</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
+    <MudText Typo="Typo.h5" Class="mb-2" Style="color: var(--color-text-primary); font-weight: 600;">
+        Organization Context Wiki
+    </MudText>
+    <MudText Typo="Typo.body2" Class="mb-4" Style="color: var(--color-text-secondary);">
+        This content is injected into AI transcription and summarization prompts to improve accuracy of names, roles, acronyms, and product names specific to your organization.
+    </MudText>
+
+    @if (!_isAdmin)
+    {
+        <MudAlert Severity="Severity.Info" Class="mb-4">
+            You do not have admin access to edit org context. Contact your administrator.
+        </MudAlert>
+        @if (!string.IsNullOrWhiteSpace(_wikiContent))
+        {
+            <MudPaper Class="pa-4" Style="background: var(--color-bg-card);" Elevation="0">
+                <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color: var(--color-text-secondary);">Current Context (read-only)</MudText>
+                <pre style="white-space: pre-wrap; color: var(--color-text-primary); font-size: 13px;">@_wikiContent</pre>
+            </MudPaper>
+        }
+    }
+    else
+    {
+        <MudPaper Class="pa-4 mb-4" Style="background: var(--color-bg-card);" Elevation="0">
+            <MudTextField @bind-Value="_wikiContent"
+                          Label="Organization Wiki Content"
+                          Lines="12"
+                          Variant="Variant.Outlined"
+                          Placeholder="Enter names, roles, acronyms, product names, and other org-specific context that will help the AI accurately transcribe and summarize your meetings..."
+                          FullWidth="true"
+                          Class="mb-3"
+                          Style="font-family: monospace; font-size: 13px;" />
+
+            @if (_updatedAt.HasValue)
+            {
+                <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);" Class="mb-2">
+                    Last updated: @_updatedAt.Value.ToString("MMM d, yyyy h:mm tt") UTC by @(_updatedBy ?? "unknown")
+                </MudText>
+            }
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Warning"
+                       OnClick="SaveAsync"
+                       Disabled="_saving"
+                       StartIcon="@Icons.Material.Filled.Save"
+                       Class="mt-2">
+                @(_saving ? "Saving..." : "Save Context")
+            </MudButton>
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    private string _wikiContent = "";
+    private DateTime? _updatedAt;
+    private string? _updatedBy;
+    private bool _isAdmin;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        var userOid = user.FindFirst("oid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var adminOid = Configuration["Firm:AdminEntraOid"];
+        _isAdmin = (!string.IsNullOrEmpty(adminOid) && string.Equals(adminOid, userOid, StringComparison.OrdinalIgnoreCase))
+                   || user.IsInRole("admin") || user.IsInRole("Admin") || user.HasClaim("roles", "admin");
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("local");
+            var response = await client.GetAsync("/api/org-context");
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                _wikiContent = root.TryGetProperty("wikiContent", out var wc) ? wc.GetString() ?? "" : "";
+                if (root.TryGetProperty("updatedAt", out var ua) && ua.ValueKind != JsonValueKind.Null)
+                    _updatedAt = ua.GetDateTime();
+                if (root.TryGetProperty("updatedBy", out var ub) && ub.ValueKind != JsonValueKind.Null)
+                    _updatedBy = ub.GetString();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load org context: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            var client = HttpClientFactory.CreateClient("local");
+            var response = await client.PutAsJsonAsync("/api/org-context", new { wikiContent = _wikiContent });
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("Org context saved successfully.", Severity.Success);
+                await LoadAsync();
+            }
+            else
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                Snackbar.Add($"Save failed: {response.StatusCode} — {body}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

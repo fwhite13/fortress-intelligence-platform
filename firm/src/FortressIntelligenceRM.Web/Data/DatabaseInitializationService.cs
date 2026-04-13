@@ -146,6 +146,14 @@ public class DatabaseInitializationService : IHostedService
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_sub_id (subscription_id),
     INDEX idx_sub_expiry (expiry_datetime)
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                ("firm_org_context", @"CREATE TABLE IF NOT EXISTS firm_org_context (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    entra_tenant_id VARCHAR(36) NOT NULL,
+    wiki_content TEXT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    updated_by VARCHAR(256) NULL,
+    UNIQUE KEY uk_tenant (entra_tenant_id)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 

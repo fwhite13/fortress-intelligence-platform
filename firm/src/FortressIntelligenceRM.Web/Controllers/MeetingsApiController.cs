@@ -778,8 +778,22 @@ public class MeetingsApiController : ControllerBase
         if (string.IsNullOrWhiteSpace(transcriptText))
             return BadRequest(new { error = "No transcript available to summarize" });
 
+        // Inject org context for reprocess summarization
+        string? orgWikiContent = null;
+        try
+        {
+            var tenantId = User.FindFirst("tid")?.Value
+                ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+                ?? _config["Firm:GraphTenantId"];
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                var orgCtx = await db.OrgContexts.FirstOrDefaultAsync(o => o.EntraTenantId == tenantId);
+                orgWikiContent = orgCtx?.WikiContent;
+            }
+        }
+        catch { /* org context is non-critical */ }
         // Call Bedrock summarization
-        var summary = await _teamsGraphService.SummarizeAsync(transcriptText, id);
+        var summary = await _teamsGraphService.SummarizeAsync(transcriptText, id, orgWikiContent);
         if (summary == null)
             return StatusCode(500, new { error = "Summarization failed" });
 

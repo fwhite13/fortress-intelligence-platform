@@ -205,7 +205,22 @@ public class TeamsGraphService : IHostedService, IDisposable
         }
         var transcriptText = sb.ToString();
 
-        var summary = await SummarizeAsync(transcriptText, meetingId, ct);
+        // Fetch org context for prompt injection
+        string? orgWikiContent = null;
+        try
+        {
+            var tenantId = _config["Firm:GraphTenantId"];
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                var orgCtx = await db.OrgContexts.FirstOrDefaultAsync(o => o.EntraTenantId == tenantId, ct);
+                orgWikiContent = orgCtx?.WikiContent;
+            }
+        }
+        catch (Exception orgEx)
+        {
+            _logger.LogWarning(orgEx, "[TeamsGraph] Could not load org context for prompt injection — continuing without it");
+        }
+        var summary = await SummarizeAsync(transcriptText, meetingId, orgWikiContent, ct);
         if (summary != null)
         {
             await db.Database.ExecuteSqlRawAsync(
@@ -340,8 +355,23 @@ public class TeamsGraphService : IHostedService, IDisposable
             }
             var transcriptText = transcriptSb.ToString();
 
+            // Fetch org context for prompt injection
+            string? orgWikiContent = null;
+            try
+            {
+                var tenantId = _config["Firm:GraphTenantId"];
+                if (!string.IsNullOrEmpty(tenantId))
+                {
+                    var orgCtx = await db.OrgContexts.FirstOrDefaultAsync(o => o.EntraTenantId == tenantId, ct);
+                    orgWikiContent = orgCtx?.WikiContent;
+                }
+            }
+            catch (Exception orgEx)
+            {
+                _logger.LogWarning(orgEx, "[TeamsGraph] Could not load org context for prompt injection — continuing without it");
+            }
             // Summarize via Bedrock
-            var summary = await SummarizeAsync(transcriptText, meetingId.Value, ct);
+            var summary = await SummarizeAsync(transcriptText, meetingId.Value, orgWikiContent, ct);
             if (summary != null)
             {
                 await db.Database.ExecuteSqlRawAsync(
@@ -451,13 +481,17 @@ public class TeamsGraphService : IHostedService, IDisposable
 
     // ── Bedrock Summarization ─────────────────────────────────────────────────
 
-    internal async Task<BedrockSummaryResult?> SummarizeAsync(string transcriptText, long meetingId, CancellationToken ct = default)
+    internal async Task<BedrockSummaryResult?> SummarizeAsync(string transcriptText, long meetingId, string? orgWikiContent = null, CancellationToken ct = default)
     {
         try
         {
             _logger.LogInformation("[TeamsGraph] Summarizing transcript for meeting {MeetingId} via Bedrock.", meetingId);
 
-            var prompt = $@"You are an expert meeting analyst. Analyze the following transcript and produce a structured markdown meeting summary.
+            var orgContextBlock = string.IsNullOrWhiteSpace(orgWikiContent)
+                ? ""
+                : $"\n[Org Context — use to improve accuracy of names, roles, and terminology]\n{orgWikiContent}\n[End Org Context]\n\n";
+
+            var prompt = $@"{orgContextBlock}You are an expert meeting analyst. Analyze the following transcript and produce a structured markdown meeting summary.
 
 Output EXACTLY this JSON structure (no markdown wrapper, no code fences):
 {{

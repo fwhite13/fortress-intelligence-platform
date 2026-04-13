@@ -77,6 +77,7 @@ builder.Services.AddScoped<VpBotService>();
 builder.Services.AddScoped<S3Service>();
 builder.Services.AddScoped<FirmKbService>();
 builder.Services.AddScoped<CalendarService>();
+builder.Services.AddScoped<IOrgContextService, OrgContextService>();
 builder.Services.AddScoped<FipTokenService>();
 // Bot Framework
 builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();

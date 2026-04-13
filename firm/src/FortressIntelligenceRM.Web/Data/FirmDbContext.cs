@@ -15,6 +15,7 @@ public class FirmDbContext : DbContext
     public DbSet<FirmMeetingTranscript> Transcripts => Set<FirmMeetingTranscript>();
     public DbSet<FirmMeetingSummary> Summaries => Set<FirmMeetingSummary>();
     public DbSet<FirmMeetingKbPush> FirmMeetingKbPushes => Set<FirmMeetingKbPush>();
+    public DbSet<FirmOrgContext> OrgContexts => Set<FirmOrgContext>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -149,6 +150,18 @@ public class FirmDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("fk_fmkp_meeting");
             entity.HasIndex(e => new { e.MeetingId, e.DocType, e.KbScope }).HasDatabaseName("idx_fmkp_lookup");
+        });
+
+        modelBuilder.Entity<FirmOrgContext>(entity =>
+        {
+            entity.ToTable("firm_org_context");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            entity.Property(e => e.EntraTenantId).HasColumnName("entra_tenant_id").HasMaxLength(36).IsRequired();
+            entity.HasIndex(e => e.EntraTenantId).IsUnique().HasDatabaseName("uk_tenant");
+            entity.Property(e => e.WikiContent).HasColumnName("wiki_content");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by").HasMaxLength(256);
         });
 
     }

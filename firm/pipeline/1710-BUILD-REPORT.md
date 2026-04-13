@@ -106,3 +106,59 @@ Build succeeded.
 2. Load `/meetings` — meeting times in upcoming cards and in the table should match your browser timezone (not ET)
 3. Open a meeting detail — `CreatedAt` date should be in local timezone
 4. Test with a browser set to a non-ET timezone (e.g., UTC+5:30) to confirm
+
+---
+
+## Cycle 2 — Blazor Lifecycle Fix
+
+**Date:** 2026-04-13  
+**Engineer:** Tony Stark (software-engineer)  
+**Commit:** `70d04e9` (fix(firm#1710): move JS interop to OnAfterRenderAsync to fix Blazor pre-render lifecycle violations)  
+**Build:** ✅ 0 errors, 12 warnings (all pre-existing)
+
+---
+
+### Root Cause
+
+Cycle 1 introduced JS interop calls (`JS.InvokeAsync`) inside `OnInitializedAsync` and `LoadMeetings()` (called from `OnInitializedAsync`). In Blazor Server InteractiveServer mode, components pre-render server-side before the SignalR circuit establishes — JS interop is not available at that stage. The calls silently failed, causing:
+- **MeetingDetail.razor:** `_localCreatedAt` was null → fallback server time shown → flipped to local time after SignalR reconnect (~1-3s visual flash)
+- **Meetings.razor:** All `_localCreatedTimes`, `_localStartTimes`, `_localEndTimes` dictionaries populated with fallback values on first load
+
+---
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `Components/Pages/MeetingDetail.razor` | Removed JS interop block from `OnInitializedAsync`; added `OnAfterRenderAsync(firstRender: true)` to format `_localCreatedAt` after circuit connects |
+| `Components/Pages/Meetings.razor` | Added `_jsReady` bool flag; added `OnAfterRenderAsync(firstRender: true)` that sets `_jsReady = true` then calls `PreFormatMeetingTimesAsync()`; added `if (!_jsReady) return;` guard at top of `PreFormatMeetingTimesAsync()` |
+| `wwwroot/js/firm-utils.js` | Added `if (!isoUtc) return '';` null guard to all three functions; improved UTC normalization to strip `+00:00` offset (not just check for `Z` suffix) |
+
+---
+
+### Behavior After Fix
+
+- **Initial load:** Times show as fallback (blank/server formatted) until SignalR circuit connects
+- **After circuit connects:** `OnAfterRenderAsync(firstRender: true)` fires → sets `_jsReady = true` → calls `PreFormatMeetingTimesAsync()` → `StateHasChanged()` → UI updates with local timezone times
+- **Subsequent LoadMeetings() calls** (polling timer, Refresh button): `_jsReady` is already true → `PreFormatMeetingTimesAsync()` runs normally → times are correct
+- **No visual flash:** Times render correctly from first JS-ready render; no flip from Eastern to local
+
+---
+
+### Build Result
+
+```
+Build succeeded.
+0 Error(s)
+12 Warning(s) — all pre-existing
+```
+
+---
+
+### How to Test
+
+1. Set browser to a non-ET timezone (e.g., UTC+5:30 or Pacific)
+2. Load `/meetings` — on first paint times may show server fallback briefly, then flip to local timezone correctly (no ET flash)
+3. Refresh the page — same behavior, no ET flash on reload
+4. Open a meeting detail — CreatedAt shows correctly in local timezone without flip
+5. Confirm no console errors related to `firmUtils`
