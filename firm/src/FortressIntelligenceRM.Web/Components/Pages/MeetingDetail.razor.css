@@ -4,75 +4,75 @@
     line-height: 1.7;
 }
 
-.firm-summary-markdown h1,
-.firm-summary-markdown h2,
-.firm-summary-markdown h3 {
+.firm-summary-markdown ::deep h1,
+.firm-summary-markdown ::deep h2,
+.firm-summary-markdown ::deep h3 {
     color: var(--color-gold);
     margin-top: 1.5rem;
     margin-bottom: 0.5rem;
 }
 
-.firm-summary-markdown h4,
-.firm-summary-markdown h5,
-.firm-summary-markdown h6 {
+.firm-summary-markdown ::deep h4,
+.firm-summary-markdown ::deep h5,
+.firm-summary-markdown ::deep h6 {
     color: var(--color-text-primary);
     margin-top: 1rem;
     margin-bottom: 0.4rem;
 }
 
-.firm-summary-markdown p {
+.firm-summary-markdown ::deep p {
     margin-bottom: 0.75rem;
 }
 
-.firm-summary-markdown ul,
-.firm-summary-markdown ol {
+.firm-summary-markdown ::deep ul,
+.firm-summary-markdown ::deep ol {
     padding-left: 1.5rem;
     margin-bottom: 0.75rem;
 }
 
-.firm-summary-markdown li {
+.firm-summary-markdown ::deep li {
     margin-bottom: 0.25rem;
 }
 
-.firm-summary-markdown table {
+.firm-summary-markdown ::deep table {
     width: 100%;
     border-collapse: collapse;
     margin-bottom: 1rem;
 }
 
-.firm-summary-markdown th,
-.firm-summary-markdown td {
+.firm-summary-markdown ::deep th,
+.firm-summary-markdown ::deep td {
     padding: 0.5rem 0.75rem;
     border: 1px solid var(--color-border, #333);
 }
 
-.firm-summary-markdown th {
+.firm-summary-markdown ::deep th {
     background: var(--color-bg-card, #1a1a1a);
     color: var(--color-gold);
     font-weight: 600;
 }
 
-.firm-summary-markdown blockquote {
+.firm-summary-markdown ::deep blockquote {
     border-left: 3px solid var(--color-gold);
     padding-left: 1rem;
     margin: 1rem 0;
     color: var(--color-text-secondary);
 }
 
-.firm-summary-markdown hr {
+.firm-summary-markdown ::deep hr {
     border: none;
     border-top: 1px solid var(--color-border, #333);
     margin: 1.5rem 0;
 }
 
-.firm-summary-markdown code {
+.firm-summary-markdown ::deep code {
     background: var(--color-bg-card, #1a1a1a);
     padding: 0.1rem 0.3rem;
     border-radius: 3px;
     font-size: 0.9em;
 }
 
-.firm-summary-markdown pre {
+.firm-summary-markdown ::deep pre {
     background: var(--color-bg-card, #1a1a1a);
     padding: 1rem;
     border-radius: 4px;

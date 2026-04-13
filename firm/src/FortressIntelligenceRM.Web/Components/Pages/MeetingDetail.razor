@@ -416,6 +416,7 @@
         if (string.IsNullOrEmpty(markdown)) return new MarkupString("");
         var pipeline = new MarkdownPipelineBuilder()
             .UseAdvancedExtensions()
+            .DisableHtml()
             .Build();
         var html = Markdown.ToHtml(markdown, pipeline);
         return new MarkupString(html);
