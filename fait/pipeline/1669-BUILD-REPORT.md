@@ -110,3 +110,43 @@ Build succeeded.
 3. Ask: "Send an email to me" — FAIT should use the injected email, not fabricate one
 4. Ask: "Send an email to John Smith" — FAIT should call `m365__list_emails` to find John's address, not guess it
 5. Ask FAIT what your email address is — it should report the correct address from context
+
+---
+
+## Cycle 2 — Gate "email is in context" on non-null email
+
+**Date:** 2026-04-08
+**Engineer:** Tony Stark (software-engineer)
+**Commit:** `270f61f`
+**Build:** ✅ 0 errors, 31 warnings (all pre-existing)
+
+### Issue
+The `m365Guidance` block unconditionally stated "The authenticated user's own email address is provided in your context" — but that's only true when `Session.CurrentUser?.Email` is non-null and was actually injected by `GetPersonalitySystemPrompt`. When the email claim is missing, the sentence was a lie.
+
+### Fix Applied (`ChatView.razor`, lines 740–760)
+
+Added `var userEmail = Session.CurrentUser?.Email;` before the `m365Guidance` string is built.
+
+Added `var ownEmailBullet` conditional:
+- **Email available:** `"- The authenticated user's own email address is provided in your context (see system prompt). Use it as the canonical source — do not look it up."`
+- **Email null:** `"- The authenticated user's email address is not available in this session — use m365 tools to look up recipient addresses as needed."`
+
+Changed `m365Guidance` from `@"..."` to `$@"..."` (interpolated verbatim string) and replaced the hardcoded bullet with `{ownEmailBullet}`.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/FortressAI.Web/Components/Chat/ChatView.razor` | Lines 740–760: gate own-email bullet on `Session.CurrentUser?.Email` nullability |
+
+### Build Result
+```
+Build succeeded.
+    0 Error(s)
+    31 Warning(s) — all pre-existing
+```
+
+### Notes for Clint
+- One-liner conditional — no logic risk
+- No new variables escape the `hasM365Tools` scope
+- The `GetPersonalitySystemPrompt` email injection (line 486) is unchanged — this fix only corrects the guidance text in `m365Guidance` to be truthful about what was actually injected

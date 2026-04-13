@@ -192,6 +192,20 @@ public class SubmissionService : ISubmissionService
         }
     }
 
+    public async Task AddFileToSubmissionAsync(int submissionId, int uploadedFileId, int sortOrder)
+    {
+        var sf = new SubmissionFile
+        {
+            SubmissionId = submissionId,
+            UploadedFileId = uploadedFileId,
+            SortOrder = sortOrder
+        };
+        _db.SubmissionFiles.Add(sf);
+        await _db.SaveChangesAsync();
+        _logger.LogInformation("[SUBMISSION] Linked file {FileId} to submission {SubmissionId} at sort order {SortOrder}",
+            uploadedFileId, submissionId, sortOrder);
+    }
+
     public async Task DeleteSubmissionAsync(int id, string callerUpn, bool callerIsAdmin)
     {
         // Security guard: load minimal record first for auth checks

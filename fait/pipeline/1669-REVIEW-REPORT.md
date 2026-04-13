@@ -119,3 +119,61 @@ None.
 Solid fix. The email provenance is canonical, the null handling is airtight, and the anti-fabrication wording is unambiguous. The one real gap (I1) is that `m365Guidance` unconditionally promises the email is present even when it wasn't injected — a structural decoupling between the injection guard and the claim. Low probability in practice (OIDC users always have an email claim), but worth a targeted fix. Not blocking this cycle.
 
 **PASS — ships. I1 should be addressed in a follow-up or bundled with the next ChatView change.**
+
+---
+
+## Cycle 2 — Targeted Fix Review
+
+**Reviewer:** Hawkeye (Code Review Agent)
+**Date:** 2026-04-08 16:39 EDT
+**Commit:** `270f61f` — "fix(fait#1669): gate own-email bullet on non-null email in m365 guidance"
+**Cycle:** 2 (targeted — addresses I1 from Cycle 1)
+
+---
+
+### Verdict: ✅ PASS
+
+---
+
+### What Was Fixed
+
+Cycle 1 left Important Issue I1: `m365Guidance` unconditionally stated the user's email was available in context, even when `Session.CurrentUser?.Email` is null. Cycle 2 addresses this by:
+
+1. Extracting `var userEmail = Session.CurrentUser?.Email`
+2. Computing `ownEmailBullet` conditionally via `string.IsNullOrEmpty(userEmail)`
+3. Upgrading `m365Guidance` from `@"..."` to `$@"..."` to interpolate `{ownEmailBullet}`
+
+---
+
+### CC Review Findings
+
+| Check | Result | Notes |
+|-------|--------|-------|
+| `ownEmailBullet` logic (both branches) | ✅ PASS | Non-null → "provided in context"; null/empty → "not available, use tools". `string.IsNullOrEmpty` is correct — treats empty string as unusable. |
+| `$@"..."` escaping — no `\"` sequences | ✅ PASS | No `\"` in string body. Backtick-only formatting. `{ownEmailBullet}` single-brace interpolation is valid. |
+| Placement in `m365Guidance` | ✅ PASS | Correctly positioned after (a)/(b) lookup options, before personal-domains prohibition. Semantic flow is sound. |
+| Anti-fabrication block regression | ✅ PASS | All Cycle 1 CRITICAL block lines intact and unchanged. Only the old hardcoded bullet replaced with `{ownEmailBullet}`. |
+| Scope — only ChatView.razor in src/ | ✅ PASS | One src change. Pipeline docs + an unrelated nexus deploy report co-committed — no FAIT source impact. |
+| `Session.CurrentUser?.Email` safety | ✅ PASS | `Session` is injected, non-null at this point. `?.` on `CurrentUser` is correct for unauthenticated case. |
+
+---
+
+### Issues Found
+
+None. All 6 checks passed.
+
+---
+
+### Spec Fidelity
+
+I1 from Cycle 1 was: *"m365Guidance unconditionally promises the email is present even when it wasn't injected."* The fix gates the bullet correctly. Criterion met.
+
+---
+
+### Cycle 1 Issue Resolution
+
+| Issue | Status |
+|-------|--------|
+| I1: Unconditional email-present claim | ✅ Resolved — gated on `string.IsNullOrEmpty(userEmail)` |
+
+**All issues from Cycle 1 resolved. Ready to merge.**

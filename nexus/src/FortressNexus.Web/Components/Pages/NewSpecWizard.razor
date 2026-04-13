@@ -80,11 +80,18 @@
                 Upload UI mockups, screenshots, or reference documents (optional — 0–10 files).
             </MudText>
 
-            @if (_isResume && _uploadedFiles.Count > 0)
+            @* Unified file list — existing (resume) or pending (new submission) *@
+            @{
+                var visibleExisting = _isResume
+                    ? _uploadedFiles.Where(f => !_filesToDelete.Contains(f.Id)).ToList()
+                    : new List<UploadedFile>();
+            }
+
+            @if (visibleExisting.Count > 0 || _pendingFiles.Count > 0)
             {
-                <MudText Typo="Typo.subtitle2" Class="nexus-existing-files-heading">Previously Uploaded Files</MudText>
+                <MudText Typo="Typo.subtitle2" Class="nexus-existing-files-heading">Attached Files</MudText>
                 <MudList T="string" Dense="true" Class="nexus-existing-files-list">
-                    @foreach (var existingFile in _uploadedFiles.Where(f => !_filesToDelete.Contains(f.Id)))
+                    @foreach (var existingFile in visibleExisting)
                     {
                         var capturedFile = existingFile;
                         <MudListItem T="string">
@@ -99,10 +106,19 @@
                             </div>
                         </MudListItem>
                     }
+                    @foreach (var pendingFile in _pendingFiles)
+                    {
+                        var capturedPending = pendingFile;
+                        <MudListItem T="string">
+                            <div class="nexus-existing-file-item">
+                                <MudText Typo="Typo.body2">@capturedPending.Name</MudText>
+                            </div>
+                        </MudListItem>
+                    }
                 </MudList>
             }
 
-            <FileUploadZone OnFilesSelected="HandleFilesSelected" InitialFiles="@(_pendingFiles.AsReadOnly())" />
+            <FileUploadZone OnFilesSelected="HandleFilesSelected" />
 
             @foreach (var (file, error) in _fileErrors)
             {
@@ -258,7 +274,7 @@
     private bool _hasChanges => _isResume && (
         _narrativeText.Trim() != _originalNarrative.Trim() ||
         _filesToDelete.Count > 0 ||
-        _pendingFiles.Count > 0
+        _uploadedFiles.Any(f => !_originalFileIds.Contains(f.Id))
     );
 
     protected override async Task OnInitializedAsync()
@@ -465,9 +481,43 @@
         _activeStep = 2;
     }
 
-    private void HandleFilesSelected(IReadOnlyList<IBrowserFile> files)
+    private async Task HandleFilesSelected(IReadOnlyList<IBrowserFile> files)
     {
-        _pendingFiles = files.ToList();
+        if (_isResume && _submissionId.HasValue)
+        {
+            // Resume mode: immediately upload new files and persist junction records
+            var upn = await UserContextService.GetUpnAsync();
+            _isUploading = true;
+            StateHasChanged();
+
+            _pendingFiles.Clear();
+            _fileErrors.Clear();
+
+            foreach (var browserFile in files)
+            {
+                try
+                {
+                    var uploaded = await FileStorageService.UploadAsync(browserFile, upn);
+                    var saved = await SubmissionService.SaveUploadedFileAsync(uploaded);
+                    var sortOrder = _uploadedFiles.Count(f => !_filesToDelete.Contains(f.Id)) + _pendingFiles.Count;
+                    await SubmissionService.AddFileToSubmissionAsync(_submissionId.Value, saved.Id, sortOrder);
+                    _uploadedFiles.Add(saved);
+                }
+                catch (Exception ex)
+                {
+                    _fileErrors.Add((browserFile, ex.Message));
+                    Snackbar.Add($"Failed to upload '{browserFile.Name}': {ex.Message}", Severity.Error);
+                }
+            }
+
+            _isUploading = false;
+            StateHasChanged();
+        }
+        else
+        {
+            // New submission mode: buffer for upload on GoToStep2Discovery
+            _pendingFiles = files.ToList();
+        }
     }
 
     private void RemoveExistingFile(int fileId)

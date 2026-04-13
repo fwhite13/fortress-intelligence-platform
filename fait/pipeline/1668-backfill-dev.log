@@ -1,0 +1,33 @@
+2026-04-08 17:40:01,865 === WI #1668 BACKFILL START | env=dev | db=fait_dev | bucket=fortress-tools ===
+2026-04-08 17:40:01,871 Found credentials in shared credentials file: ~/.aws/credentials
+2026-04-08 17:40:02,860 [BACKFILL] Found 17 kb_entries in fait_dev
+2026-04-08 17:40:03,121 [BACKFILL] tier=Personal id=4 key=kb-docs/personal/08de7605-3f7d-427d-858a-637777b41018/note-4.txt status=uploaded
+2026-04-08 17:40:03,314 [BACKFILL] tier=Personal id=5 key=kb-docs/personal/559ae016-2833-4678-846e-e9da3c5007ab/note-5.txt status=uploaded
+2026-04-08 17:40:03,511 [BACKFILL] tier=Team id=6 key=kb-docs/teams/2/note-6.txt status=uploaded
+2026-04-08 17:40:03,655 [BACKFILL] tier=Personal id=48 key=kb-docs/personal/fc5c1759-3c33-4cff-a520-b4a38697d68f/note-48.txt status=uploaded
+2026-04-08 17:40:03,830 [BACKFILL] tier=Personal id=49 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-49.txt status=uploaded
+2026-04-08 17:40:03,988 [BACKFILL] tier=Personal id=50 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-50.txt status=uploaded
+2026-04-08 17:40:04,135 [BACKFILL] tier=Personal id=51 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-51.txt status=uploaded
+2026-04-08 17:40:04,282 [BACKFILL] tier=Personal id=52 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-52.txt status=uploaded
+2026-04-08 17:40:04,460 [BACKFILL] tier=Personal id=53 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-53.txt status=uploaded
+2026-04-08 17:40:04,621 [BACKFILL] tier=Personal id=54 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-54.txt status=uploaded
+2026-04-08 17:40:04,777 [BACKFILL] tier=Personal id=55 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-55.txt status=uploaded
+2026-04-08 17:40:04,930 [BACKFILL] tier=Personal id=56 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-56.txt status=uploaded
+2026-04-08 17:40:05,100 [BACKFILL] tier=Personal id=57 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-57.txt status=uploaded
+2026-04-08 17:40:05,300 [BACKFILL] tier=Personal id=58 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-58.txt status=uploaded
+2026-04-08 17:40:05,555 [BACKFILL] tier=Personal id=59 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-59.txt status=uploaded
+2026-04-08 17:40:05,724 [BACKFILL] tier=Personal id=60 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-60.txt status=uploaded
+2026-04-08 17:40:05,878 [BACKFILL] tier=Personal id=61 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-61.txt status=uploaded
+2026-04-08 17:40:05,878 
+2026-04-08 17:40:05,878 [BACKFILL COMPLETE]
+2026-04-08 17:40:05,878   Personal: 16 uploaded, 0 skipped, 0 errors
+2026-04-08 17:40:05,878   Team: 1 uploaded, 0 skipped, 0 errors
+2026-04-08 17:40:05,878   Corporate: 0 uploaded, 0 skipped, 0 errors
+2026-04-08 17:40:05,878   Developer: 0 uploaded, 0 skipped, 0 errors
+2026-04-08 17:40:05,879   Total: 17 uploaded, 0 skipped
+2026-04-08 17:40:05,879 
+2026-04-08 17:40:05,879 [INGESTION] Triggering ingestion for tier=Personal kb_id=ZCEZCJGHQC ds_id=3X5E9L4HAC
+2026-04-08 17:40:06,209 [INGESTION ERROR] tier=Personal error=An error occurred (AccessDeniedException) when calling the StartIngestionJob operation: User: arn:aws:iam::742932328420:user/fortress-tools-deployer is not authorized to perform: bedrock:StartIngestionJob on resource: arn:aws:bedrock:us-east-1:742932328420:knowledge-base/ZCEZCJGHQC because no identity-based policy allows the bedrock:StartIngestionJob action
+2026-04-08 17:40:06,209 [INGESTION] Triggering ingestion for tier=Team kb_id=NRGEACKSBJ ds_id=VYMEB3BA12
+2026-04-08 17:40:06,256 [INGESTION ERROR] tier=Team error=An error occurred (AccessDeniedException) when calling the StartIngestionJob operation: User: arn:aws:iam::742932328420:user/fortress-tools-deployer is not authorized to perform: bedrock:StartIngestionJob on resource: arn:aws:bedrock:us-east-1:742932328420:knowledge-base/NRGEACKSBJ because no identity-based policy allows the bedrock:StartIngestionJob action
+2026-04-08 17:40:06,256 === WI #1668 BACKFILL END ===

@@ -1,0 +1,49 @@
+2026-04-08 17:42:42,239 === WI #1668 BACKFILL START | env=prod | db=fait_prod | bucket=fortress-tools ===
+2026-04-08 17:42:42,244 Found credentials in shared credentials file: ~/.aws/credentials
+2026-04-08 17:42:42,279 Found credentials in shared credentials file: ~/.aws/credentials
+2026-04-08 17:42:42,602 [BACKFILL] Found 32 kb_entries in fait_prod
+2026-04-08 17:42:42,735 [BACKFILL] tier=Personal id=4 key=kb-docs/personal/08de7605-3f7d-427d-858a-637777b41018/note-4.txt status=skipped
+2026-04-08 17:42:42,806 [BACKFILL] tier=Personal id=5 key=kb-docs/personal/559ae016-2833-4678-846e-e9da3c5007ab/note-5.txt status=skipped
+2026-04-08 17:42:42,835 [BACKFILL] tier=Team id=6 key=kb-docs/teams/2/note-6.txt status=skipped
+2026-04-08 17:42:42,860 [BACKFILL] tier=Personal id=48 key=kb-docs/personal/fc5c1759-3c33-4cff-a520-b4a38697d68f/note-48.txt status=skipped
+2026-04-08 17:42:42,886 [BACKFILL] tier=Personal id=49 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-49.txt status=skipped
+2026-04-08 17:42:42,913 [BACKFILL] tier=Personal id=50 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-50.txt status=skipped
+2026-04-08 17:42:42,940 [BACKFILL] tier=Personal id=51 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-51.txt status=skipped
+2026-04-08 17:42:42,965 [BACKFILL] tier=Personal id=52 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-52.txt status=skipped
+2026-04-08 17:42:42,996 [BACKFILL] tier=Personal id=53 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-53.txt status=skipped
+2026-04-08 17:42:43,022 [BACKFILL] tier=Personal id=54 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-54.txt status=skipped
+2026-04-08 17:42:43,052 [BACKFILL] tier=Personal id=55 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-55.txt status=skipped
+2026-04-08 17:42:43,088 [BACKFILL] tier=Personal id=56 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-56.txt status=skipped
+2026-04-08 17:42:43,117 [BACKFILL] tier=Personal id=57 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-57.txt status=skipped
+2026-04-08 17:42:43,144 [BACKFILL] tier=Personal id=58 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-58.txt status=skipped
+2026-04-08 17:42:43,174 [BACKFILL] tier=Personal id=59 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-59.txt status=skipped
+2026-04-08 17:42:43,198 [BACKFILL] tier=Personal id=60 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-60.txt status=skipped
+2026-04-08 17:42:43,223 [BACKFILL] tier=Personal id=61 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-61.txt status=skipped
+2026-04-08 17:42:43,365 [BACKFILL] tier=Team id=62 key=kb-docs/teams/5/note-62.txt status=uploaded
+2026-04-08 17:42:43,513 [BACKFILL] tier=Team id=63 key=kb-docs/teams/5/note-63.txt status=uploaded
+2026-04-08 17:42:43,654 [BACKFILL] tier=Team id=64 key=kb-docs/teams/5/note-64.txt status=uploaded
+2026-04-08 17:42:43,791 [BACKFILL] tier=Team id=65 key=kb-docs/teams/5/note-65.txt status=uploaded
+2026-04-08 17:42:43,935 [BACKFILL] tier=Team id=66 key=kb-docs/teams/5/note-66.txt status=uploaded
+2026-04-08 17:42:44,071 [BACKFILL] tier=Team id=67 key=kb-docs/teams/5/note-67.txt status=uploaded
+2026-04-08 17:42:44,221 [BACKFILL] tier=Team id=68 key=kb-docs/teams/5/note-68.txt status=uploaded
+2026-04-08 17:42:44,387 [BACKFILL] tier=Team id=69 key=kb-docs/teams/5/note-69.txt status=uploaded
+2026-04-08 17:42:44,531 [BACKFILL] tier=Team id=70 key=kb-docs/teams/5/note-70.txt status=uploaded
+2026-04-08 17:42:44,768 [BACKFILL] tier=Team id=71 key=kb-docs/teams/5/note-71.txt status=uploaded
+2026-04-08 17:42:44,913 [BACKFILL] tier=Team id=72 key=kb-docs/teams/5/note-72.txt status=uploaded
+2026-04-08 17:42:45,053 [BACKFILL] tier=Team id=73 key=kb-docs/teams/5/note-73.txt status=uploaded
+2026-04-08 17:42:45,195 [BACKFILL] tier=Personal id=74 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-74.txt status=uploaded
+2026-04-08 17:42:45,335 [BACKFILL] tier=Personal id=75 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-75.txt status=uploaded
+2026-04-08 17:42:45,481 [BACKFILL] tier=Personal id=76 key=kb-docs/personal/5990625c-f5f4-4757-901e-3e9080fc2fb0/note-76.txt status=uploaded
+2026-04-08 17:42:45,481 
+2026-04-08 17:42:45,481 [BACKFILL COMPLETE]
+2026-04-08 17:42:45,481   Personal: 3 uploaded, 16 skipped, 0 errors
+2026-04-08 17:42:45,481   Team: 12 uploaded, 1 skipped, 0 errors
+2026-04-08 17:42:45,482   Corporate: 0 uploaded, 0 skipped, 0 errors
+2026-04-08 17:42:45,482   Developer: 0 uploaded, 0 skipped, 0 errors
+2026-04-08 17:42:45,482   Total: 15 uploaded, 17 skipped
+2026-04-08 17:42:45,482 
+2026-04-08 17:42:45,482 [INGESTION] Triggering ingestion for tier=Personal kb_id=ZCEZCJGHQC ds_id=3X5E9L4HAC
+2026-04-08 17:42:56,680 [INGESTION] tier=Personal job_id=AIWFGQTWLB status=STARTING
+2026-04-08 17:42:56,681 [INGESTION] Triggering ingestion for tier=Team kb_id=NRGEACKSBJ ds_id=VYMEB3BA12
+2026-04-08 17:43:06,931 [INGESTION] tier=Team job_id=XDHBOJFULN status=STARTING
+2026-04-08 17:43:06,931 === WI #1668 BACKFILL END ===
