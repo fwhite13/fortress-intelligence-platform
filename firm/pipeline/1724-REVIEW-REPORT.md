@@ -176,3 +176,109 @@ Same fix: replace raw `orgCtx?.WikiContent` read with service-layer call + prose
 - Add `if (!_isAdmin) return;` guard at top of `SaveAllAsync`
 - Add snackbar for empty `_tenantId` scenario
 - Add description validation in dialog if required field is intended
+
+---
+
+## Review Report — FIRM ADO #1724 — Cycle 2
+
+**Verdict: NEEDS-CHANGES**
+**Cycle:** 2
+**Reviewer:** Hawkeye (code-reviewer)
+**Commit:** d6a8b39
+**Date:** 2026-04-13
+
+---
+
+## CC Review Summary
+
+CC ran targeted adversarial review across `TeamsGraphService.cs`, `MeetingsApiController.cs`, and `Program.cs`. Six of seven checks passed. One critical blocker found: `IOrgContextService` registered as `AddScoped` but injected into `TeamsGraphService` which is `AddSingleton` — classic captive dependency bug. One-line fix required in `Program.cs`. All other checks (prose format, null/empty guard, both TGS locations, controller update, no raw DbSet reads, build) confirmed PASS.
+
+---
+
+## Spec Compliance Check
+
+**§ What was required (Cycle 1 NEEDS-CHANGES):**
+- Inject `IOrgContextService` into `TeamsGraphService` constructor ✅
+- Replace both raw EF reads in `TeamsGraphService` with `_orgContextService.GetContextAsync` + prose format ✅
+- Replace raw EF read in `MeetingsApiController.ReprocessSummary` with same pattern ✅
+
+**Spec compliance verdict:** ✅ Implementation correct — one DI registration error blocks PASS.
+
+---
+
+## Targeted Check Results
+
+| # | Check | Verdict | Notes |
+|---|-------|---------|-------|
+| 1 | Singleton Safety | ❌ FAIL | `IOrgContextService` = `AddScoped`, `TeamsGraphService` = `AddSingleton` — captive dependency |
+| 2 | Prose Formatting | ✅ PASS | `string.Join("\n", e => $"{e.Term}: {e.Description}")` — all 3 call sites |
+| 3 | Null/Empty Guard | ✅ PASS | `entries.Count > 0 ? string.Join(...) : null` — null when empty |
+| 4 | Both TGS Locations | ✅ PASS | Lines 218–220 AND 370–372 both updated |
+| 5 | ReprocessSummary | ✅ PASS | `MeetingsApiController.cs:818–820` updated |
+| 6 | No Direct OrgContexts Reads | ✅ PASS | Zero `db.OrgContexts` / `_db.OrgContexts` remaining |
+| 7 | Build | ✅ PASS | 0 errors, 16 pre-existing warnings |
+
+---
+
+## Critical Issues — 1
+
+### C1: DI Lifetime Violation — Scoped service injected into Singleton
+
+**File:** `Program.cs` line 80 vs line 131
+**Category:** Correctness — DI lifetime bug
+**Issue:**
+```csharp
+// Line 80 — WRONG
+builder.Services.AddScoped<IOrgContextService, OrgContextService>();
+
+// Line 131 — Singleton consumer
+builder.Services.AddSingleton<TeamsGraphService>();
+```
+`IOrgContextService` is registered as **Scoped** but is injected into `TeamsGraphService` which is a **Singleton**. ASP.NET Core's DI container with `ValidateScopes = true` (default in Development) will throw `InvalidOperationException` on first resolution. In production it silently captures the scoped instance for the application's lifetime.
+
+**Why Singleton is safe here:** `OrgContextService.GetContextAsync` uses `IDbContextFactory<FirmDbContext>` — it creates and disposes its own `DbContext` per call. It carries no per-request state. There is no correctness argument for Scoped over Singleton here.
+
+**Fix:**
+```diff
+- builder.Services.AddScoped<IOrgContextService, OrgContextService>();
++ builder.Services.AddSingleton<IOrgContextService, OrgContextService>();
+```
+
+---
+
+## Important Issues — 0
+
+All checks 2–6 passed cleanly.
+
+---
+
+## Nitpicks — 0
+
+None in scope for this cycle.
+
+---
+
+## Positive Observations
+
+- **Prose format is exactly right.** `string.Join("\n", entries.Select(e => $"{e.Term}: {e.Description}"))` at all three call sites.
+- **Null guard is correct.** Explicit `: null` in the ternary — empty list produces null, not `""`. The `string.IsNullOrEmpty` guard works correctly.
+- **Both TGS locations updated.** Lines 218 and 370 — no missed path.
+- **No remaining raw DbSet reads** in either file. Full abstraction through service layer achieved.
+- **Build is clean** — 0 errors. Warnings are pre-existing noise.
+
+---
+
+## What to Fix (NEEDS-CHANGES)
+
+### Required before merge — 1 change, 1 line:
+
+**`Program.cs:80`** — Change `AddScoped` to `AddSingleton`:
+```csharp
+builder.Services.AddSingleton<IOrgContextService, OrgContextService>();
+```
+
+That's it. Everything else is correct.
+
+---
+
+_Rollback: firm-web:62 if needed._

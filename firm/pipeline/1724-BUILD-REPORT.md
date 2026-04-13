@@ -80,3 +80,71 @@ dotnet run --project src/FortressIntelligenceRM.Web/
 # 7. Navigate as non-admin — should see read-only table
 # 8. Check left drawer — Settings section with Org Context link should appear
 ```
+
+---
+
+# Build Report — ADO #1724 — Cycle 2 (OrgContextService Injection Fix)
+
+**Cycle:** 2
+**Builder:** Tony Stark
+**Commit:** `d6a8b39`
+**Branch:** `origin/main`
+**Build Result:** ✅ 0 errors, 16 warnings (all pre-existing)
+
+---
+
+## What Was Built
+
+Replaced direct EF reads of `orgCtx?.WikiContent` in `TeamsGraphService.cs` and `MeetingsApiController.cs` with calls to `IOrgContextService.GetContextAsync()`. Entries are now formatted as prose (`Term: Description` per line) before injection into the Bedrock summarization prompt, eliminating the raw JSON regression from Cycle 1.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `Services/TeamsGraphService.cs` | Added `IOrgContextService` field + constructor injection. Replaced two `db.OrgContexts.FirstOrDefaultAsync(...)` / `orgCtx?.WikiContent` reads (in `ProcessVttForMeetingAsync` and `FetchAndProcessTranscriptAsync`) with `_orgContextService.GetContextAsync(tenantId)` + `string.Join("\n", ...)` prose formatting. |
+| `Controllers/MeetingsApiController.cs` | Added `IOrgContextService` field + constructor injection. Replaced one `db.OrgContexts.FirstOrDefaultAsync(...)` / `orgCtx?.WikiContent` read in `ReprocessSummary` with same service-based pattern. |
+
+---
+
+## Parallelization
+
+Not applicable — single-session targeted fix.
+
+---
+
+## CC Sessions
+
+1 CC session (Claude Sonnet). Both files in one spec.
+
+---
+
+## Acceptance Criteria Verification
+
+- [x] `TeamsGraphService.cs` — injects `IOrgContextService`, formats entries as prose ✅
+- [x] `MeetingsApiController.cs` — injects `IOrgContextService`, formats entries as prose ✅
+- [x] No direct `db.OrgContexts` reads remain in either file ✅
+- [x] `tenantId` resolution unchanged (config-based in TeamsGraphService, claims + config fallback in MeetingsApiController) ✅
+- [x] `dotnet build` — 0 errors ✅
+
+---
+
+## Known Edge Cases / Things to Scrutinize
+
+1. **Empty entries list** — If `GetContextAsync` returns an empty list, `orgWikiContent` is set to `null` and the prompt gets no org context block. This matches prior behavior when no org context row existed.
+2. **TeamsGraphService is a singleton** (IHostedService) — `IOrgContextService` creates its own `IDbContextFactory` scope internally, so there's no scoped-in-singleton violation. Verified: `OrgContextService` uses `IDbContextFactory<FirmDbContext>` (not `FirmDbContext` directly).
+3. **Pre-existing 16 warnings** — All `[Obsolete]` warnings on `PushTranscriptToKb` and `PushSummaryToKb` endpoints. Not introduced by this cycle.
+
+---
+
+## How to Test
+
+```bash
+# Verify build clean
+cd ~/projects/fip/firm && dotnet build src/FortressIntelligenceRM.Web/
+
+# Functional: trigger a reprocess on a completed meeting and verify
+# the summary prompt contains "Term: Description" formatted lines,
+# not raw JSON array syntax
+```
