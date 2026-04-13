@@ -78,3 +78,49 @@ curl -X POST https://[firm-host]/api/vp/callback \
   -d '{"meetingId":17,"status":"summary_complete","summary":{"summaryText":"Test summary"}}'
 ```
 Check CloudWatch logs for `FIRM: Summary written to S3 for meeting 17`.
+
+---
+
+## Cycle 2 — ADO #1722 — S3 key guard + redundant FindAsync cleanup
+
+**Commit:** `100575a`
+**Date:** 2026-04-13
+**Builder:** Tony Stark (software-engineer)
+**Risk:** Low — targeted fixes only
+
+### What Was Fixed
+
+**I1 — S3 key substring guard:**
+Added `meeting.TranscriptS3Key.Contains("transcript.json")` guard before calling `.Replace(...)`. If the key doesn't contain the expected substring, the `else if` branch logs a `LogWarning` instead of silently writing the summary to the wrong S3 key.
+
+**I2 — Redundant FindAsync removed:**
+The `var summaryMeeting = await db.Meetings.FindAsync(payload.MeetingId)` second lookup was removed. The `meeting` variable fetched earlier in the same handler (same EF DbContext / change tracker) is used directly, saving an unnecessary DB round-trip.
+
+### Files Changed
+
+- **`Controllers/MeetingsApiController.cs`** — Removed `summaryMeeting` variable and redundant `FindAsync`. Added `Contains("transcript.json")` guard on `meeting.TranscriptS3Key`. Added `else if` warning log when key pattern doesn't match.
+
+### Build Result
+
+`dotnet build` — 0 errors, 16 warnings (all pre-existing).
+
+### Diff Summary
+
+```
+src/FortressIntelligenceRM.Web/Controllers/MeetingsApiController.cs | 13 +++++++++----
+1 file changed, 9 insertions(+), 4 deletions(-)
+```
+
+### Acceptance Criteria
+
+- [x] `Contains("transcript.json")` guard in place — Replace only called when substring present
+- [x] Warning logged when key pattern doesn't match
+- [x] Redundant `FindAsync` removed — `meeting` reused from earlier in handler
+- [x] `dotnet build` — 0 errors
+- [x] No other code touched
+
+### Notes for Clint
+
+- `meeting` is fetched earlier in the handler under `await using var db = ...` — same DbContext, so change tracker holds it. No second DB hit needed.
+- The `else if` guard fires when `TranscriptS3Key` is null, empty, OR doesn't contain `"transcript.json"`. All three cases produce the warning log.
+- `DownloadSummary` also calls `.Replace("transcript.json", "summary.md")` directly without a guard — that's a pre-existing pattern in a different flow (reads from S3, falls through to DB if not found). Out of scope for this cycle.
