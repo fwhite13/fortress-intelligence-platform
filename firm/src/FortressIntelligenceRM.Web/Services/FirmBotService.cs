@@ -15,26 +15,32 @@ public interface IFirmBotService
     Task RemoveInstallationAsync(string? teamId, string? channelId);
     Task PostToChannelAsync(string teamId, string channelId, string content, string docType);
     Task<List<BotInstallationInfo>> GetInstallationsAsync();
+    Task<List<ChannelPostHistoryItem>> GetChannelPostHistoryAsync(long meetingId);
+    Task PostMeetingToChannelAsync(long meetingId, Guid initiatedByUserId, string teamId, string teamName, string channelId, string channelName, string docType);
 }
 
 public record BotInstallationInfo(long Id, string TeamId, string TeamName, string ChannelId, string ChannelName);
+public record ChannelPostHistoryItem(string TeamName, string ChannelName, string DocType, DateTime PostedAt, bool Success);
 
 public class FirmBotService : IFirmBotService
 {
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly IBotFrameworkHttpAdapter _adapter;
     private readonly IConfiguration _config;
+    private readonly S3Service _s3Service;
     private readonly ILogger<FirmBotService> _logger;
 
     public FirmBotService(
         IDbContextFactory<FirmDbContext> dbFactory,
         IBotFrameworkHttpAdapter adapter,
         IConfiguration config,
+        S3Service s3Service,
         ILogger<FirmBotService> logger)
     {
         _dbFactory = dbFactory;
         _adapter = adapter;
         _config = config;
+        _s3Service = s3Service;
         _logger = logger;
     }
 
@@ -121,9 +127,60 @@ public class FirmBotService : IFirmBotService
             .ToListAsync();
         return rows.Select(r => new BotInstallationInfo(r.Id, r.TeamId, r.TeamName, r.ChannelId, r.ChannelName)).ToList();
     }
+
+    public async Task<List<ChannelPostHistoryItem>> GetChannelPostHistoryAsync(long meetingId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var rows = await db.Database
+            .SqlQueryRaw<ChannelPostHistoryRow2>(
+                "SELECT team_name AS TeamName, channel_name AS ChannelName, doc_type AS DocType, posted_at AS PostedAt, success AS Success FROM firm_meeting_channel_posts WHERE meeting_id = {0} ORDER BY posted_at DESC",
+                meetingId)
+            .ToListAsync();
+        return rows.Select(r => new ChannelPostHistoryItem(r.TeamName, r.ChannelName, r.DocType, r.PostedAt, r.Success)).ToList();
+    }
+
+    public async Task PostMeetingToChannelAsync(long meetingId, Guid initiatedByUserId, string teamId, string teamName, string channelId, string channelName, string docType)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == meetingId);
+        if (meeting == null) throw new InvalidOperationException($"Meeting {meetingId} not found");
+
+        string content;
+        if (docType == "transcript")
+        {
+            var transcriptKey = meeting.TranscriptS3Key ?? "";
+            content = string.IsNullOrEmpty(transcriptKey) ? "" : await _s3Service.GetTranscriptTextAsync(transcriptKey);
+        }
+        else
+        {
+            var summary = await db.Summaries.OrderByDescending(s => s.CreatedAt).FirstOrDefaultAsync(s => s.MeetingId == meetingId);
+            content = summary?.SummaryText ?? "";
+        }
+
+        await PostToChannelAsync(teamId, channelId, content, docType);
+
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT INTO firm_meeting_channel_posts (meeting_id, initiated_by, team_id, team_name, channel_id, channel_name, doc_type, success) VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, 1)",
+            new MySqlParameter("@p0", meetingId),
+            new MySqlParameter("@p1", initiatedByUserId.ToString()),
+            new MySqlParameter("@p2", teamId),
+            new MySqlParameter("@p3", teamName),
+            new MySqlParameter("@p4", channelId),
+            new MySqlParameter("@p5", channelName),
+            new MySqlParameter("@p6", docType));
+    }
 }
 
 // Internal projection types for raw SQL queries
+internal class ChannelPostHistoryRow2
+{
+    public string TeamName { get; set; } = "";
+    public string ChannelName { get; set; } = "";
+    public string DocType { get; set; } = "";
+    public DateTime PostedAt { get; set; }
+    public bool Success { get; set; }
+}
+
 internal class BotInstallationRow
 {
     public string ConversationReferenceJson { get; set; } = "";
