@@ -50,7 +50,7 @@
 @code {
     [Parameter] public EventCallback<IReadOnlyList<IBrowserFile>> OnFilesSelected { get; set; }
     [Parameter] public EventCallback<IBrowserFile> OnFileSelected { get; set; }
-    [Parameter] public string[] AcceptedTypes { get; set; } = ["text/html", "image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf", "text/markdown", "text/x-markdown", "application/json", "text/plain"];
+    [Parameter] public string[] AcceptedTypes { get; set; } = ["text/html", "image/png", "image/jpeg", "image/webp", "application/pdf", "text/markdown", "text/x-markdown", "application/json", "text/plain"];
     [Parameter] public long MaxFileSizeBytes { get; set; } = 10 * 1024 * 1024;
     [Parameter] public int MaxFiles { get; set; } = 10;
     [Parameter] public IReadOnlyList<IBrowserFile>? InitialFiles { get; set; }
@@ -88,7 +88,8 @@
             var ext = Path.GetExtension(file.Name)?.ToLowerInvariant() ?? "";
             var mimeOk = !string.IsNullOrEmpty(mime) && AcceptedTypes.Contains(mime);
             var extOk = _allowedExtensions.Contains(ext);
-            if (!mimeOk && !extOk)
+            var valid = mimeOk || (string.IsNullOrEmpty(mime) && extOk);
+            if (!valid)
             {
                 _errorMessage = $"'{file.Name}': file type not accepted. Allowed: HTML, PDF, MD, JSON, TXT, PNG, JPG, WEBP.";
                 return;
