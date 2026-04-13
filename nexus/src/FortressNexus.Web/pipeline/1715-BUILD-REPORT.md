@@ -1,0 +1,83 @@
+# Build Report — ADO #1715: Drag-and-drop broken in FileUploadZone
+
+**Engineer:** Tony Stark  
+**Build cycle:** 1  
+**Commit:** `c6d7387`  
+**Date:** 2026-04-13
+
+---
+
+## What was built
+
+Fixed drag-and-drop in `FileUploadZone.razor` so dragging files onto the drop zone uploads them instead of opening them in the browser.
+
+---
+
+## Approach used: Option B — MudFileUpload built-in drag-drop (Hidden=false)
+
+MudBlazor 7.16.0's `MudFileUpload` has a `Hidden` parameter (defaults to `true`). The source explicitly documents: _"When `false`, files can be uploaded via drag-and-drop."_ When `Hidden=false`, the native `<input type="file">` is rendered in the DOM as a real element, making it a valid drag-and-drop target that the browser can dispatch `drop` events to — without any JS interop.
+
+The invisible overlay technique (absolute positioned, `opacity: 0`, `z-index: 1`, covering the full drop zone) ensures that drag events land on the `InputFile` element rather than the outer div. The browser's default behavior for dragging files onto a visible `<input type="file">` is to upload them — which is exactly what we want.
+
+**Why Option B over Option C (JS interop):**
+- Zero JS, zero new files in `wwwroot/js/`, zero App.razor changes
+- Uses the framework's built-in mechanism — more maintainable, no interop surface to break on upgrades
+- `DragEventArgs.DataTransfer.Files` is not directly accessible in Blazor Server, which would make Option C require a file serialization dance; Option B avoids this entirely
+
+---
+
+## Files changed
+
+| File | Change |
+|------|--------|
+| `Components/Shared/FileUploadZone.razor` | Added `Hidden="false"` and `InputClass="file-upload-input-overlay"` to `MudFileUpload` |
+| `Components/Shared/FileUploadZone.razor.css` | **Created** — scoped CSS with `position: relative` on `.file-upload-zone` and full-zone absolute overlay for `.file-upload-input-overlay`; also adds definitions for all class names already referenced by the component |
+
+No JS files added. No App.razor changes. No logic changes.
+
+---
+
+## Parallelization
+
+Not applicable — single-file change.
+
+---
+
+## Build result
+
+```
+Build succeeded.
+    0 Error(s)
+    0 Warning(s)
+```
+
+Commit: `c6d7387`
+
+---
+
+## Acceptance criteria
+
+- [x] Drag-and-drop routes files to `HandleFilesChanged` — via MudBlazor native `<input type="file">` with `Hidden=false`
+- [x] Click-to-browse still works — `ActivatorContent` button unchanged; calls `OpenFilePickerAsync` via existing MudBlazor `IActivatable` mechanism
+- [x] No JS interop added
+- [x] No inline styles — all CSS via classes in scoped `.razor.css` file
+- [x] `dotnet build` — 0 errors, 0 warnings
+- [x] Committed to `main` as `c6d7387`
+
+---
+
+## How to test locally
+
+1. `cd ~/projects/fip/nexus && docker-compose up nexus-web` (or run locally)
+2. Navigate to any page with `FileUploadZone`
+3. Drag a `.pdf`, `.png`, or `.html` file onto the dashed drop zone
+4. Verify: file appears in the list (not opened in browser)
+5. Verify: clicking the button still opens the OS file picker
+
+---
+
+## Known edge cases / things Clint should scrutinize
+
+- **z-index conflict:** The overlay has `z-index: 1`. If any child elements in the file list also have elevated z-index, they may be blocked by the overlay when the file list is visible. Worth a quick visual check of the file list interactions.
+- **`file-upload-btn` z-index:** The button inside `ActivatorContent` sits inside the MudBlazor `<div @onclick="OpenFilePickerAsync">` wrapper — clicking the button triggers `OpenFilePickerAsync` via MudBlazor's `IActivatable` cascade, not via the overlay. This is correct but worth confirming the click doesn't also trigger duplicate file picker opens.
+- **CSS scoping:** The new `.razor.css` file uses Blazor's scoped CSS. The class names (like `file-upload-btn`) are applied as `Class=` on MudBlazor child components — these render in child component DOM scope, so Blazor scoped CSS won't apply to them automatically. This is pre-existing behavior (those classes had no CSS before). The scoped CSS for `.file-upload-zone` and `.file-upload-input-overlay` will work correctly since those are on elements in this component's own render tree.
