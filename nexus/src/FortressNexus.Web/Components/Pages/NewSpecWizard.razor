@@ -448,8 +448,8 @@
                 try
                 {
                     await DiscoveryService.InitiateDiscoveryAsync(_submissionId!.Value);
-                    // Poll until QuestionsReady or timeout (15s)
-                    var deadline = DateTime.UtcNow.AddSeconds(15);
+                    // Poll until QuestionsReady or timeout (60s — Bedrock inference can take 20–40s)
+                    var deadline = DateTime.UtcNow.AddSeconds(60);
                     while (DateTime.UtcNow < deadline)
                     {
                         _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
@@ -603,7 +603,7 @@
                     {
                         try
                         {
-                            var deadline = DateTime.UtcNow.AddSeconds(15);
+                            var deadline = DateTime.UtcNow.AddSeconds(60);
                             while (DateTime.UtcNow < deadline)
                             {
                                 _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
