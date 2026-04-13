@@ -619,19 +619,16 @@
     {
         try
         {
-            var http = HttpClientFactory.CreateClient("local");
-            var response = await http.DeleteAsync($"/api/meetings/{meetingId}");
-            if (response.IsSuccessStatusCode)
+            var (success, error) = await MeetingService.RemoveMeetingAsync(meetingId, Guid.Parse(_userId!));
+            if (success)
             {
                 await LoadMeetings();
                 Snackbar.Add("Meeting removed.", Severity.Success);
             }
             else
             {
-                var error = await response.Content.ReadAsStringAsync();
                 Snackbar.Add($"Failed to remove meeting: {error}", Severity.Error);
-                Logger.LogError("FIRM: RemoveMeeting failed for meeting {Id} — HTTP {Status}: {Body}",
-                    meetingId, (int)response.StatusCode, error);
+                Logger.LogError("FIRM: RemoveMeeting failed for meeting {Id}: {Error}", meetingId, error);
             }
         }
         catch (Exception ex)

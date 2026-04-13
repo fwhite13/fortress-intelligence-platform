@@ -196,6 +196,21 @@ public class MeetingService
         return body?.UserId;
     }
 
+    public async Task<(bool success, string? error)> RemoveMeetingAsync(long id, Guid userId)
+    {
+        var meeting = await GetMeetingAsync(id, userId);
+        if (meeting == null)
+            return (false, "Meeting not found or access denied");
+
+        if (meeting.Status is MeetingStatus.Pending or MeetingStatus.Joining or MeetingStatus.Recording
+            or MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing or MeetingStatus.Summarizing)
+            return (false, "Cannot remove a meeting that is currently in progress");
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        await db.Database.ExecuteSqlRawAsync("DELETE FROM firm_meetings WHERE id = {0}", id);
+        return (true, null);
+    }
+
     public async Task UpdateModeAsync(long id, string mode)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
