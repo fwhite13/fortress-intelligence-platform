@@ -92,3 +92,41 @@ Build succeeded.
 4. Add a new file — it should appear in the same "Attached Files" list immediately (no separate section)
 5. Navigate back to Step 1 (Details) and return to Step 1 (Files) — new file should still appear (it is now persisted)
 6. Submit — verify no file data loss
+
+---
+
+## Cycle 2 — Race guard + dual-render fix
+
+**Commit:** `e39851c` — `fix(#1707): C2 race guard in HandleFilesSelected + restore InitialFiles for new-submission mode`
+
+### C1 — Race window in `HandleFilesSelected`
+
+**Problem:** `_isUploading = true` was set AFTER `await UserContextService.GetUpnAsync()` in the resume branch. Blazor Server yields on every `await`, so a second file-select event could enter the method concurrently → duplicate S3 uploads + duplicate `SubmissionFile` junction records.
+
+**Fix (3 lines, surgical):**
+- Added `if (_isUploading) return;` as the very first line of the method body
+- Moved `_isUploading = true;` immediately after the guard, before any `await`
+- Wrapped entire method body in `try { ... } finally { _isUploading = false; }` to guarantee reset
+
+### C2 — Dual rendering in new-submission mode
+
+**Problem:** `InitialFiles` was removed from `FileUploadZone` in Cycle 1. This left `FileUploadZone` rendering its own internal `_selectedFiles` list after user picks files, while the unified list above also rendered `_pendingFiles`. Same files appeared twice in new-submission mode.
+
+**Fix:**
+- Restored `InitialFiles="@(_isResume ? null : _pendingFiles.AsReadOnly())"` on `<FileUploadZone>` — in new-submission mode, the zone seeds its own internal list from `_pendingFiles`; in resume mode, null keeps zone list empty
+- Changed unified list condition from `_pendingFiles.Count > 0` to `_isResume && _pendingFiles.Count > 0`
+- Wrapped `_pendingFiles` foreach loop in `@if (_isResume)` — in new-submission mode, pending files render only inside the zone; in resume mode, they render only in the unified list
+
+**Result:** Each file appears exactly once regardless of mode.
+
+### Build Result
+```
+Build succeeded.
+0 Warning(s)
+0 Error(s)
+```
+
+### Files Changed (Cycle 2)
+| File | Change |
+|------|--------|
+| `src/FortressNexus.Web/Components/Pages/NewSpecWizard.razor` | Race guard + flag hoist in HandleFilesSelected; InitialFiles restored on FileUploadZone; _pendingFiles loop gated to resume mode |
