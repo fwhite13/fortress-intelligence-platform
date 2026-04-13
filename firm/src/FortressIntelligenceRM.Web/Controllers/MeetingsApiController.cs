@@ -26,6 +26,7 @@ public class MeetingsApiController : ControllerBase
     private readonly ILogger<MeetingsApiController> _logger;
     private readonly IFirmBotService _firmBotService;
     private readonly TeamsGraphService _teamsGraphService;
+    private readonly IOrgContextService _orgContextService;
 
     public MeetingsApiController(
         MeetingService meetingService,
@@ -37,7 +38,8 @@ public class MeetingsApiController : ControllerBase
         IHttpClientFactory httpClientFactory,
         ILogger<MeetingsApiController> logger,
         IFirmBotService firmBotService,
-        TeamsGraphService teamsGraphService)
+        TeamsGraphService teamsGraphService,
+        IOrgContextService orgContextService)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
@@ -49,6 +51,7 @@ public class MeetingsApiController : ControllerBase
         _logger = logger;
         _firmBotService = firmBotService;
         _teamsGraphService = teamsGraphService;
+        _orgContextService = orgContextService;
     }
 
 [HttpPost("/api/meetings/join")]
@@ -812,8 +815,10 @@ public class MeetingsApiController : ControllerBase
                 ?? _config["Firm:GraphTenantId"];
             if (!string.IsNullOrEmpty(tenantId))
             {
-                var orgCtx = await db.OrgContexts.FirstOrDefaultAsync(o => o.EntraTenantId == tenantId);
-                orgWikiContent = orgCtx?.WikiContent;
+                var orgEntries = await _orgContextService.GetContextAsync(tenantId);
+                orgWikiContent = orgEntries.Count > 0
+                    ? string.Join("\n", orgEntries.Select(e => $"{e.Term}: {e.Description}"))
+                    : null;
             }
         }
         catch { /* org context is non-critical */ }

@@ -16,6 +16,7 @@ public class TeamsGraphService : IHostedService, IDisposable
     private readonly ILogger<TeamsGraphService> _logger;
     private readonly IAmazonBedrockRuntime _bedrockRuntime;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IOrgContextService _orgContextService;
 
     private string? _accessToken;
     private DateTime _tokenExpiry = DateTime.MinValue;
@@ -25,13 +26,15 @@ public class TeamsGraphService : IHostedService, IDisposable
         IConfiguration config,
         ILogger<TeamsGraphService> logger,
         IAmazonBedrockRuntime bedrockRuntime,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IOrgContextService orgContextService)
     {
         _dbFactory = dbFactory;
         _config = config;
         _logger = logger;
         _bedrockRuntime = bedrockRuntime;
         _httpClientFactory = httpClientFactory;
+        _orgContextService = orgContextService;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -212,8 +215,10 @@ public class TeamsGraphService : IHostedService, IDisposable
             var tenantId = _config["Firm:GraphTenantId"];
             if (!string.IsNullOrEmpty(tenantId))
             {
-                var orgCtx = await db.OrgContexts.FirstOrDefaultAsync(o => o.EntraTenantId == tenantId, ct);
-                orgWikiContent = orgCtx?.WikiContent;
+                var orgEntries = await _orgContextService.GetContextAsync(tenantId);
+                orgWikiContent = orgEntries.Count > 0
+                    ? string.Join("\n", orgEntries.Select(e => $"{e.Term}: {e.Description}"))
+                    : null;
             }
         }
         catch (Exception orgEx)
@@ -362,8 +367,10 @@ public class TeamsGraphService : IHostedService, IDisposable
                 var tenantId = _config["Firm:GraphTenantId"];
                 if (!string.IsNullOrEmpty(tenantId))
                 {
-                    var orgCtx = await db.OrgContexts.FirstOrDefaultAsync(o => o.EntraTenantId == tenantId, ct);
-                    orgWikiContent = orgCtx?.WikiContent;
+                    var orgEntries = await _orgContextService.GetContextAsync(tenantId);
+                    orgWikiContent = orgEntries.Count > 0
+                        ? string.Join("\n", orgEntries.Select(e => $"{e.Term}: {e.Description}"))
+                        : null;
                 }
             }
             catch (Exception orgEx)
