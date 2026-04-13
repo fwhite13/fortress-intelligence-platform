@@ -75,4 +75,18 @@ public class S3Service
             return "";
         }
     }
+
+    public async Task<string> UploadTextAsync(string s3Key, string content, string contentType = "text/plain")
+    {
+        var request = new PutObjectRequest
+        {
+            BucketName = Bucket,
+            Key = s3Key,
+            ContentBody = content,
+            ContentType = contentType
+        };
+        await _s3.PutObjectAsync(request);
+        _logger.LogInformation("FIRM: Uploaded text to S3: {Key}", s3Key);
+        return s3Key;
+    }
 }

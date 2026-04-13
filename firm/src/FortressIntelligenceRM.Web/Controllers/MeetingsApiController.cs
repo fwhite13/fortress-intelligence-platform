@@ -264,6 +264,26 @@ public class MeetingsApiController : ControllerBase
                 existingSummary.ModelUsed = payload.Summary.ModelUsed;
             }
             await db.SaveChangesAsync();
+
+            // Write summary to S3 so DownloadSummary and KB push can find it
+            // Key convention mirrors DownloadSummary: TranscriptS3Key with "transcript.json" → "summary.md"
+            var summaryMeeting = await db.Meetings.FindAsync(payload.MeetingId);
+            if (!string.IsNullOrEmpty(payload.Summary.SummaryText) &&
+                summaryMeeting != null &&
+                !string.IsNullOrEmpty(summaryMeeting.TranscriptS3Key))
+            {
+                var summaryS3Key = summaryMeeting.TranscriptS3Key.Replace("transcript.json", "summary.md");
+                try
+                {
+                    await _s3Service.UploadTextAsync(summaryS3Key, payload.Summary.SummaryText, "text/markdown");
+                    _logger.LogInformation("FIRM: Summary written to S3 for meeting {Id}: {Key}", payload.MeetingId, summaryS3Key);
+                }
+                catch (Exception s3Ex)
+                {
+                    // Non-fatal: summary is already in DB; S3 write failure should not fail the callback
+                    _logger.LogWarning(s3Ex, "FIRM: Failed to write summary to S3 for meeting {Id} (non-fatal, summary is in DB)", payload.MeetingId);
+                }
+            }
         }
 
         // Fire-and-forget: notify FAIT so users with auto-add enabled get content pushed to KB
