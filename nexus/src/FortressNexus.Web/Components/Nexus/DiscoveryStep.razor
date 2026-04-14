@@ -31,7 +31,7 @@
     {
         @foreach (var question in Session.Questions.OrderBy(q => q.SortOrder))
         {
-            <DiscoveryQuestionCard Question="question"
+            <DiscoveryQuestionCard @key="question.Id" Question="question"
                                    Answer="@(_answers.GetValueOrDefault(question.Id))"
                                    OnAnswerChanged="@((val) => _answers[question.Id] = val)" />
         }
@@ -65,14 +65,17 @@
 
     protected override void OnParametersSet()
     {
-        if (Session?.Questions != null)
+        if (Session?.Questions == null) return;
+
+        foreach (var q in Session.Questions)
         {
-            foreach (var q in Session.Questions)
+            // Only restore from DB if user hasn't typed anything for this question yet.
+            // This prevents OnParametersSet re-runs (triggered by StateHasChanged) from
+            // overwriting user-typed answers that haven't been saved yet.
+            if (!_answers.ContainsKey(q.Id))
             {
                 if (q.Answer != null && !string.IsNullOrEmpty(q.Answer.AnswerText))
-                {
                     _answers[q.Id] = q.Answer.AnswerText;
-                }
             }
         }
     }
@@ -85,9 +88,18 @@
     {
         if (Session != null)
         {
-            var oid = await UserContextService.GetUpnAsync();
-            var pairs = _answers.Select(kv => (kv.Key, (string?)kv.Value));
-            await DiscoveryService.SaveAnswersAsync(Session.Id, pairs, oid);
+            try
+            {
+                var oid = await UserContextService.GetUpnAsync();
+                // Materialize to avoid deferred LINQ issues and capture snapshot of current answers
+                var pairs = _answers.Select(kv => (kv.Key, (string?)kv.Value)).ToList();
+                await DiscoveryService.SaveAnswersAsync(Session.Id, pairs, oid);
+            }
+            catch (Exception ex)
+            {
+                // Guard against circuit crash — log and continue so user isn't stuck
+                Console.Error.WriteLine($"[DISCOVERY] Failed to save answers for session {Session.Id}: {ex.Message}");
+            }
         }
         await OnCompleted.InvokeAsync();
     }

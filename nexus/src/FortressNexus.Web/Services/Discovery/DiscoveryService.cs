@@ -119,7 +119,10 @@ public class DiscoveryService : IDiscoveryService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var now = DateTime.UtcNow;
 
-        foreach (var (questionId, answerText) in answers)
+        var answerList = answers.ToList();
+        _logger.LogInformation("[DISCOVERY] SaveAnswersAsync: {Count} answers for session {SessionId}", answerList.Count, sessionId);
+
+        foreach (var (questionId, answerText) in answerList)
         {
             // Check for existing answer
             var existing = await db.DiscoveryAnswers
