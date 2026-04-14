@@ -38,12 +38,12 @@ public class ArtifactGenerationService : IArtifactGenerationService
         var systemPrompt = _config["Nexus:Prompts:ArtifactGenSystem"]
             ?? "Decompose the following software specification into Azure DevOps User Stories. Return ONLY a valid JSON array.";
 
-        var modelId = _config["FortressAI:ModelId"];
+        var resolvedModelId = _config["FortressAI:ModelId"] ?? "us.anthropic.claude-sonnet-4-6";
         var specContent = specDoc.EditedContent ?? specDoc.Content;
 
         try
         {
-            var (text, promptTokens, completionTokens) = await _bedrock.InvokeAsync(systemPrompt, specContent, 8192, modelId);
+            var (text, promptTokens, completionTokens) = await _bedrock.InvokeAsync(systemPrompt, specContent, 8192, resolvedModelId);
 
             _logger.LogInformation("[WI_GEN] Bedrock response received for SpecDocument {SpecDocumentId}: {PromptTokens} prompt + {CompletionTokens} completion tokens",
                 specDocumentId, promptTokens, completionTokens);

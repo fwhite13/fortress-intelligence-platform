@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System.Text;
 using FortressNexus.Web.Data;
 using FortressNexus.Web.Models;
@@ -15,6 +16,7 @@ public class SpecGenerationService : ISpecGenerationService
     private readonly IMockupSectionizer _sectionizer;
     private readonly IConfiguration _config;
     private readonly ILogger<SpecGenerationService> _logger;
+    private readonly SpecGenInferenceConfig _specGenConfig;
     private readonly FortressNexus.Web.Services.Discovery.IDiscoveryService? _discoveryService;
 
     public SpecGenerationService(
@@ -24,6 +26,7 @@ public class SpecGenerationService : ISpecGenerationService
         IMockupSectionizer sectionizer,
         IConfiguration config,
         ILogger<SpecGenerationService> logger,
+        IOptions<SpecGenInferenceConfig> specGenOptions,
         FortressNexus.Web.Services.Discovery.IDiscoveryService? discoveryService = null)
     {
         _db = db;
@@ -32,6 +35,7 @@ public class SpecGenerationService : ISpecGenerationService
         _sectionizer = sectionizer;
         _config = config;
         _logger = logger;
+        _specGenConfig = specGenOptions.Value;
         _discoveryService = discoveryService;
     }
 
@@ -76,7 +80,7 @@ public class SpecGenerationService : ISpecGenerationService
             }
 
             // 5. Call AI
-            var result = await _bedrock.InvokeAsync(systemPrompt, userPrompt);
+            var result = await _bedrock.InvokeAsync(systemPrompt, userPrompt, _specGenConfig.MaxTokens, _specGenConfig.ModelId);
 
             // 6. Create SpecDocument — compute next version (MAX+1, starts at 1 if none exist)
             var nextVersion = await _db.SpecDocuments
@@ -197,8 +201,10 @@ public class SpecGenerationService : ISpecGenerationService
                                     systemPrompt,
                                     $"Describe what you see in this UI mockup image for the feature: {submission.Title}",
                                     imageBytes,
-                                    file.ContentType);
-                                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(120));
+                                    file.ContentType,
+                                    _specGenConfig.VisionMaxTokens,
+                                    _specGenConfig.VisionModelId);
+                                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(_specGenConfig.TimeoutSeconds));
 
                                 if (await Task.WhenAny(callTask, timeoutTask) == timeoutTask)
                                 {

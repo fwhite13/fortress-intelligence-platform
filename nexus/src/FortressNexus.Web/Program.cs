@@ -139,6 +139,8 @@ builder.Services.AddScoped<IMockupSectionizer, MockupSectionizerService>();
 builder.Services.AddScoped<ISpecService, SpecService>();
 builder.Services.Configure<FortressNexus.Web.Services.Discovery.DiscoveryInferenceConfig>(
     builder.Configuration.GetSection("Bedrock:Discovery"));
+builder.Services.Configure<SpecGenInferenceConfig>(
+    builder.Configuration.GetSection("Bedrock:SpecGen"));
 builder.Services.AddSingleton<Amazon.BedrockAgentRuntime.IAmazonBedrockAgentRuntime>(_ =>
     new Amazon.BedrockAgentRuntime.AmazonBedrockAgentRuntimeClient());
 builder.Services.AddScoped<FortressNexus.Web.Services.Discovery.IKnowledgeBaseService,

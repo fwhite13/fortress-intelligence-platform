@@ -13,8 +13,6 @@ namespace FortressNexus.Web.Services;
 /// </summary>
 public class BedrockService : IDisposable
 {
-    private const string DefaultModelId = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
-
     private readonly AmazonBedrockRuntimeClient _client;
     private readonly ILogger<BedrockService> _logger;
 
@@ -34,10 +32,10 @@ public class BedrockService : IDisposable
     public async Task<(string Text, int PromptTokens, int CompletionTokens)> InvokeAsync(
         string systemPrompt,
         string userPrompt,
-        int maxTokens = 8192,
-        string? modelId = null)
+        int maxTokens,
+        string modelId)
     {
-        var model = modelId ?? DefaultModelId;
+        var model = modelId;
 
         var requestObj = new JsonObject
         {
@@ -96,8 +94,8 @@ public class BedrockService : IDisposable
         string userPrompt,
         byte[]? imageBytes,
         string mimeType,
-        int maxTokens = 8192,
-        string? modelId = null)
+        int maxTokens,
+        string modelId)
     {
         if (imageBytes == null || imageBytes.Length == 0)
         {
@@ -105,7 +103,7 @@ public class BedrockService : IDisposable
             return await InvokeAsync(systemPrompt, userPrompt, maxTokens, modelId);
         }
 
-        var model = modelId ?? DefaultModelId;
+        var model = modelId;
         var base64Image = Convert.ToBase64String(imageBytes);
 
         var contentArray = new JsonArray
