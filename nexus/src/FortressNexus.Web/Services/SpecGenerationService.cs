@@ -48,8 +48,8 @@ public class SpecGenerationService : ISpecGenerationService
         submission.Status = SubmissionStatus.Generating;
         await _db.SaveChangesAsync();
 
-        // Overall 5-minute timeout for generation
-        using var overallCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        // Overall 10-minute timeout for generation (vision retry worst case: 5 files × 120s × 3 attempts = ~18min, but typical is much less)
+        using var overallCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
         try
         {
@@ -111,7 +111,7 @@ public class SpecGenerationService : ISpecGenerationService
         }
         catch (OperationCanceledException) when (overallCts.IsCancellationRequested)
         {
-            _logger.LogError("[SPEC_GEN] Overall generation timeout (5min) for submission {SubId} — setting Failed", submissionId);
+            _logger.LogError("[SPEC_GEN] Overall generation timeout (10min) for submission {SubId} — setting Failed", submissionId);
             submission.Status = SubmissionStatus.Failed;
             await _db.SaveChangesAsync();
             throw;
@@ -179,7 +179,7 @@ public class SpecGenerationService : ISpecGenerationService
                         break;
 
                     case FileType.Image:
-                        // Vision call per image — with 60s per-call timeout
+                        // Vision call per image — 120s per-call timeout, up to 3 attempts with backoff
                         try
                         {
                             var imageStream = await _fileStorage.DownloadAsync(file.S3Key, file.S3Bucket);
@@ -187,23 +187,42 @@ public class SpecGenerationService : ISpecGenerationService
                             await imageStream.CopyToAsync(ms);
                             var imageBytes = ms.ToArray();
 
-                            var callTask = _bedrock.InvokeWithImageAsync(
-                                systemPrompt,
-                                $"Describe what you see in this UI mockup image for the feature: {submission.Title}",
-                                imageBytes,
-                                file.ContentType);
-                            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(60));
+                            (string Text, int PromptTokens, int CompletionTokens) visionResult = default;
+                            bool visionSucceeded = false;
+                            const int maxAttempts = 3;
 
-                            if (await Task.WhenAny(callTask, timeoutTask) == timeoutTask)
+                            for (int attempt = 1; attempt <= maxAttempts; attempt++)
                             {
-                                _logger.LogWarning("[SPEC_GEN] Vision call timed out for file {FileId} in submission {SubId} — skipping", file.Id, submission.Id);
-                                sb.AppendLine("*Image vision analysis timed out — skipped.*");
+                                var callTask = _bedrock.InvokeWithImageAsync(
+                                    systemPrompt,
+                                    $"Describe what you see in this UI mockup image for the feature: {submission.Title}",
+                                    imageBytes,
+                                    file.ContentType);
+                                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(120));
+
+                                if (await Task.WhenAny(callTask, timeoutTask) == timeoutTask)
+                                {
+                                    _logger.LogWarning("[SPEC_GEN] Vision call timed out (attempt {Attempt}/{Max}) for file {FileId}", attempt, maxAttempts, file.Id);
+                                    if (attempt < maxAttempts)
+                                        await Task.Delay(TimeSpan.FromSeconds(3 * attempt)); // backoff: 3s, 6s
+                                    continue;
+                                }
+
+                                visionResult = await callTask;
+                                visionSucceeded = true;
                                 break;
                             }
 
-                            var visionResult = await callTask;
-                            sb.AppendLine($"**Vision Analysis:**");
-                            sb.AppendLine(visionResult.Text);
+                            if (visionSucceeded)
+                            {
+                                sb.AppendLine($"**Vision Analysis:**");
+                                sb.AppendLine(visionResult.Text);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("[SPEC_GEN] Vision call failed all {Max} attempts for file {FileId} — skipping", maxAttempts, file.Id);
+                                sb.AppendLine("*Image vision analysis timed out — skipped.*");
+                            }
                         }
                         catch (Exception ex)
                         {

@@ -13,7 +13,7 @@ namespace FortressNexus.Web.Services;
 /// </summary>
 public class BedrockService : IDisposable
 {
-    private const string DefaultModelId = "us.anthropic.claude-sonnet-4-6";
+    private const string DefaultModelId = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
 
     private readonly AmazonBedrockRuntimeClient _client;
     private readonly ILogger<BedrockService> _logger;
