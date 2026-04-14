@@ -327,7 +327,7 @@ public class DiscoveryService : IDiscoveryService
 
                         try
                         {
-                            var imageStream = await _fileStorage.DownloadAsync(file.S3Key, file.S3Bucket);
+                            using var imageStream = await _fileStorage.DownloadAsync(file.S3Key, file.S3Bucket);
                             using var ms = new MemoryStream();
                             await imageStream.CopyToAsync(ms, ct);
                             var imageBytes = ms.ToArray();
