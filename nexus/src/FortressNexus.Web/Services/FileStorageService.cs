@@ -34,6 +34,7 @@ public class FileStorageService : IFileStorageService
             "text/html" => FileType.Html,
             var ct when ct.StartsWith("image/") => FileType.Image,
             "application/pdf" => FileType.Pdf,
+            "text/plain" or "text/markdown" or "text/x-markdown" or "application/json" => FileType.Text,
             _ => FileType.Other
         };
 
@@ -94,7 +95,7 @@ public class FileStorageService : IFileStorageService
                 processedText = null;
             }
         }
-        else if (fileType == FileType.Other)
+        else if (fileType == FileType.Text || fileType == FileType.Other)
         {
             processedText = Encoding.UTF8.GetString(fileBytes);
         }

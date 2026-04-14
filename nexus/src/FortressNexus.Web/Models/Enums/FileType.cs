@@ -5,5 +5,6 @@ public enum FileType
     Html,
     Image,
     Pdf,
+    Text,
     Other
 }

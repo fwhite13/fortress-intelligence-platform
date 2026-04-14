@@ -274,16 +274,51 @@ public class DiscoveryService : IDiscoveryService
         userPromptSb.AppendLine("## BA Narrative");
         userPromptSb.AppendLine(submission.NarrativeText);
 
-        var fileNames = submission.SubmissionFiles
-            .Select(sf => sf.UploadedFile?.OriginalFileName)
-            .Where(n => n != null)
+        var files = submission.SubmissionFiles
+            .Select(sf => sf.UploadedFile)
+            .Where(f => f != null)
             .ToList();
-        if (fileNames.Any())
+
+        if (files.Any())
         {
             userPromptSb.AppendLine();
             userPromptSb.AppendLine("## Attached Files");
-            foreach (var name in fileNames)
-                userPromptSb.AppendLine($"- {name}");
+
+            foreach (var file in files)
+            {
+                userPromptSb.AppendLine($"### {file!.OriginalFileName} ({file.FileType})");
+
+                switch (file.FileType)
+                {
+                    case FileType.Html:
+                    case FileType.Pdf:
+                    case FileType.Other: // FileType.Text added in #1814
+                        if (!string.IsNullOrWhiteSpace(file.ProcessedText))
+                        {
+                            // Truncate to 2000 chars to avoid overwhelming the question gen prompt
+                            var content = file.ProcessedText.Length > 2000
+                                ? file.ProcessedText[..2000] + "\n... [truncated]"
+                                : file.ProcessedText;
+                            userPromptSb.AppendLine("**Contents:**");
+                            userPromptSb.AppendLine(content);
+                        }
+                        else
+                        {
+                            userPromptSb.AppendLine("*[File content not available]*");
+                        }
+                        break;
+
+                    case FileType.Image:
+                        userPromptSb.AppendLine("*[Image file — visual content not included in question generation]*");
+                        break;
+
+                    default:
+                        userPromptSb.AppendLine("*[Binary or unsupported file type]*");
+                        break;
+                }
+
+                userPromptSb.AppendLine();
+            }
         }
 
         userPromptSb.AppendLine();
