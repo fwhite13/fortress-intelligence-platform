@@ -161,3 +161,87 @@ The actual `22d1dd2` commit only adds the `SpecGenerationService` switch cases. 
 ---
 
 _Reviewed by Hawkeye — cycle 1 — 2026-04-13_
+
+---
+
+## Review Cycle 2 — ADO #1814
+
+**Reviewer:** Hawkeye (code-reviewer)
+**Cycle:** 2
+**Commit:** `2708502`
+**Date:** 2026-04-13
+
+---
+
+## Verdict: ✅ PASS
+
+---
+
+## Spec Compliance Check
+
+### §2 Files Modified
+- `Services/Discovery/DiscoveryService.cs` — ✅ modified as required
+- `Services/SpecGenerationService.cs` — ✅ modified as required
+- `pipeline/*.md` (5 files) — pipeline artifacts, not production source, not a concern
+
+### §7 Acceptance Criteria
+- [x] **C1:** `case FileType.Text:` added in `DiscoveryService.GenerateQuestionsAsync` — ✅ Verified (line 295)
+- [x] **C1:** Fall-through to `case FileType.Other:` with no `break` — ✅ Verified (adjacent labels, no intervening statement)
+- [x] **C1:** Stale comment `// FileType.Text added in #1814` removed — ✅ Verified (grep clean)
+- [x] **I1:** `SpecGenerationService.BuildPromptAsync` `Other/default` case has zero `file.ProcessedText` references — ✅ Verified
+- [x] **I1:** `Other/default` emits only `**File Type: Unknown/Unsupported**` + static binary-skip message — ✅ Verified
+
+**Spec compliance verdict: ✅ COMPLIANT**
+
+---
+
+## Consistency Audit
+
+**Files Cross-Referenced:**
+- `DiscoveryService.cs` switch ↔ `FileType` enum — ✅ `Text` and `Other` both handled
+- `SpecGenerationService.cs` switch ↔ `FileType` enum — ✅ All cases accounted for
+- Null guard and truncation logic in `DiscoveryService` — ✅ Matches existing pattern from `Html`/`Pdf`/`Other`
+
+---
+
+## CC Findings
+
+All Cycle 1 issues verified fixed. No new defects found.
+
+**Nitpick (non-blocking):**
+- New inline comment on `case FileType.Text:` reads `// .md, .txt, .json — now routed here from FileType.Other stand-in`. Slightly inaccurate — Text was previously falling to `default:`, not `Other`. Not stale, not misleading in a harmful way. No action required.
+
+---
+
+## C1 Fix Detail
+
+```
+295: case FileType.Text:  // .md, .txt, .json — now routed here from FileType.Other stand-in
+296: case FileType.Other:
+     ↳ null guard + 2000-char truncation block (shared by fall-through)
+     ↳ fallback: *[File content not available]*
+```
+
+Fall-through confirmed intact. Both file types correctly include `ProcessedText` in discovery.
+
+---
+
+## I1 Fix Detail
+
+`SpecGenerationService.BuildPromptAsync` `Other/default` case now emits:
+- `**File Type: Unknown/Unsupported**`
+- `*[Binary or unsupported file type — content not included]*`
+
+Zero `file.ProcessedText` references. Conditional and `else` clause fully stripped.
+
+---
+
+## Positive Observations
+
+- Clean surgical fix — exactly the two lines changed that needed changing
+- New comment on `case FileType.Text:` documents the MIME types handled, which aids future maintainability
+- `SpecGenerationService` `Other/default` is now properly stateless — no hidden content emission path
+
+---
+
+_Reviewed by Hawkeye — cycle 2 — 2026-04-13_

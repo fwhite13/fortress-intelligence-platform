@@ -260,4 +260,63 @@ public class MeetingService
 
     private record ResolveFaitUserResponse(
         [property: System.Text.Json.Serialization.JsonPropertyName("userId")] string UserId);
+
+    /// <summary>
+    /// Triggers vpbot to re-download audio from S3 and run the full transcribe+summarize pipeline.
+    /// Returns (true, null) on success, (false, errorMessage) on failure.
+    /// </summary>
+    public async Task<(bool success, string? error)> RetranscribeAsync(long meetingId, Guid userId)
+    {
+        var meeting = await GetMeetingAsync(meetingId, userId);
+        if (meeting == null)
+            return (false, "Meeting not found or access denied");
+
+        if (string.IsNullOrEmpty(meeting.AudioS3Key))
+            return (false, "No audio recording available for this meeting");
+
+        var vpbotUrl = _config["Firm:VpBotUrl"] ?? _config["FIRM_VPBOT_URL"];
+        if (string.IsNullOrEmpty(vpbotUrl))
+            return (false, "VpBot URL not configured");
+
+        var botSecret = _config["Firm:BotCallbackSecret"] ?? "";
+
+        try
+        {
+            using var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Add("X-Bot-Secret", botSecret);
+            var payload = new
+            {
+                firmMeetingId = meetingId,
+                audioS3Key = meeting.AudioS3Key
+            };
+            var content = new StringContent(
+                System.Text.Json.JsonSerializer.Serialize(payload),
+                System.Text.Encoding.UTF8,
+                "application/json");
+
+            var response = await http.PostAsync($"{vpbotUrl}/api/meetings/retranscribe", content);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                return (false, $"VpBot error: {body}");
+            }
+
+            // Reset meeting status to allow callback pipeline
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var dbMeeting = await db.Meetings.FindAsync(meetingId);
+            if (dbMeeting != null)
+            {
+                dbMeeting.Status = MeetingStatus.Transcribing;
+                await db.SaveChangesAsync();
+            }
+
+            _logger.LogInformation("FIRM: RetranscribeAsync triggered for meeting {MeetingId}", meetingId);
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: RetranscribeAsync failed for meeting {MeetingId}", meetingId);
+            return (false, ex.Message);
+        }
+    }
 }

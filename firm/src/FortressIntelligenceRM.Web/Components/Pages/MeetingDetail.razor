@@ -7,6 +7,7 @@
 @inject ILogger<MeetingDetail> Logger
 @inject FirmKbService FirmKbService
 @inject IJSRuntime JS
+@inject IConfiguration Configuration
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
@@ -88,7 +89,21 @@
                             Audio
                         </MudButton>
                     }
+                    @if (_isAdmin && !string.IsNullOrEmpty(_meeting.AudioS3Key))
+                    {
+                        <MudButton Variant="Variant.Outlined"
+                                   StartIcon="@Icons.Material.Filled.Refresh"
+                                   Color="Color.Warning"
+                                   Disabled="_retranscribing"
+                                   OnClick="RetranscribeAsync">
+                            @(_retranscribing ? "Retranscribing..." : "Retranscribe")
+                        </MudButton>
+                    }
                 </MudStack>
+                @if (_retranscribeError != null)
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_retranscribeError</MudAlert>
+                }
                 <SharePanel MeetingId="@_meeting.Id" />
             }
         </MudPaper>
@@ -227,6 +242,9 @@
     private string? _localCreatedAt;
     private bool _pushingTranscript = false;
     private bool _pushingSummary = false;
+    private bool _isAdmin = false;
+    private bool _retranscribing = false;
+    private string? _retranscribeError = null;
     private FortressIntelligenceRM.Web.Models.FirmUser? _user;
 
     // KB push status (loaded from /kb-status on init)
@@ -267,6 +285,15 @@
             }
             if (user == null) { Navigation.NavigateTo("/meetings"); return; }
             _user = user;
+
+            // Admin check — same pattern as OrgContext.razor
+            var adminOid = Configuration["Firm:AdminEntraOid"];
+            var adminOids = (adminOid ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            _isAdmin = adminOids.Any(oid => string.Equals(oid, entraOid, StringComparison.OrdinalIgnoreCase))
+                       || claimsUser.IsInRole("admin")
+                       || claimsUser.IsInRole("Admin")
+                       || claimsUser.HasClaim("roles", "admin");
 
             _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
 
@@ -312,6 +339,71 @@
     {
         if (_meeting == null) return;
         Navigation.NavigateTo($"/api/meetings/{_meeting.Id}/audio", forceLoad: true);
+    }
+
+    private async Task RetranscribeAsync()
+    {
+        if (_meeting == null || _user == null || _retranscribing) return;
+
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"Retranscribe meeting '{_meeting.Title}'? This will overwrite the existing transcript and summary.");
+
+        if (!confirmed) return;
+
+        _retranscribing = true;
+        _retranscribeError = null;
+        StateHasChanged();
+
+        try
+        {
+            var (success, error) = await MeetingService.RetranscribeAsync(_meeting.Id, _user.Id);
+
+            if (success)
+            {
+                // Reload meeting to get updated status
+                _meeting = await MeetingService.GetMeetingAsync(_meeting.Id, _user.Id) ?? _meeting;
+                Snackbar.Add("Retranscription started. Check back in a few minutes.", Severity.Success);
+
+                // Background poll — check every 10s for up to 10 minutes
+                _ = Task.Run(async () =>
+                {
+                    for (int i = 0; i < 60; i++)
+                    {
+                        await Task.Delay(10_000);
+                        var updated = await MeetingService.GetMeetingAsync(_meeting.Id, _user!.Id);
+                        if (updated == null) break;
+                        if (updated.Status == MeetingStatus.Complete || updated.Status == MeetingStatus.Failed)
+                        {
+                            _meeting = updated;
+                            _retranscribing = false;
+                            if (updated.Status == MeetingStatus.Complete)
+                                await InvokeAsync(() => Snackbar.Add("Retranscription complete!", Severity.Success));
+                            else
+                                await InvokeAsync(() => { _retranscribeError = "Retranscription failed."; });
+                            await InvokeAsync(StateHasChanged);
+                            return;
+                        }
+                    }
+                    _retranscribing = false;
+                    await InvokeAsync(StateHasChanged);
+                });
+            }
+            else
+            {
+                _retranscribeError = $"Retranscribe failed: {error}";
+                _retranscribing = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: RetranscribeAsync UI error for meeting {MeetingId}", _meeting?.Id);
+            _retranscribeError = $"Error: {ex.Message}";
+            _retranscribing = false;
+        }
+        finally
+        {
+            StateHasChanged();
+        }
     }
 
     private bool TranscriptHasSelection() =>

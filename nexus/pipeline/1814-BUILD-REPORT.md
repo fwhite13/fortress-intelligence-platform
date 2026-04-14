@@ -53,3 +53,28 @@ No — single-file context dependency required sequential execution.
 3. Check the generated prompt (via logs or debug) for `**File Type: Text**` and
    `**File Contents: filename.md**` headers
 4. Verify a `.pdf` upload still gets `**File Type: PDF**` header with extracted text
+
+---
+
+## Cycle 2 — 2026-04-13
+
+### What was built
+Two surgical switch-case fixes resolving the FileType.Text routing gap introduced in Cycle 1.
+
+### Files changed
+- `Services/Discovery/DiscoveryService.cs` — Added `case FileType.Text:` as fall-through before `case FileType.Other:` in `GenerateQuestionsAsync`. Removed stale `// FileType.Text added in #1814` comment. Both Text and Other now share the content-inclusion block.
+- `Services/SpecGenerationService.cs` — `case FileType.Other: default:` in `BuildPromptAsync` no longer emits ProcessedText. Now emits "Unknown/Unsupported" label + binary-skip message only. Text files route to their own `FileType.Text` case above.
+
+### CC sessions run
+1 — single CC Sonnet run, both fixes in one pass.
+
+### Build result
+`dotnet build` — **0 errors, 0 warnings**
+
+### Commit
+`2708502`
+
+### Acceptance criteria
+- [x] `case FileType.Text:` present in DiscoveryService switch — verified by CC + build
+- [x] `Other`/`default` in SpecGenerationService emits binary-only skip message — verified by CC + build
+- [x] `dotnet build` 0 errors
