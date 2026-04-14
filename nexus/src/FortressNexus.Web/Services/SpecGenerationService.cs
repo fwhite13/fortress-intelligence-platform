@@ -80,7 +80,7 @@ public class SpecGenerationService : ISpecGenerationService
             }
 
             // 5. Call AI
-            var result = await _bedrock.InvokeAsync(systemPrompt, userPrompt, _specGenConfig.MaxTokens, _specGenConfig.ModelId);
+            var result = await _bedrock.InvokeAsync(systemPrompt, userPrompt, _specGenConfig.MaxTokens, _specGenConfig.ModelId, overallCts.Token);
 
             // 6. Create SpecDocument — compute next version (MAX+1, starts at 1 if none exist)
             var nextVersion = await _db.SpecDocuments
@@ -235,7 +235,7 @@ public class SpecGenerationService : ISpecGenerationService
                                 sb.AppendLine("*Image vision analysis timed out — skipped.*");
                             }
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                         {
                             _logger.LogWarning(ex, "[SPEC_GEN] Vision call failed for file {S3Key}", file.S3Key);
                             sb.AppendLine("*Image vision analysis failed — skipped.*");
