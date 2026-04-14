@@ -374,18 +374,20 @@
                         if (updated == null) break;
                         if (updated.Status == MeetingStatus.Complete || updated.Status == MeetingStatus.Failed)
                         {
-                            _meeting = updated;
-                            _retranscribing = false;
+                            await InvokeAsync(() =>
+                            {
+                                _meeting = updated;
+                                _retranscribing = false;
+                                StateHasChanged();
+                            });
                             if (updated.Status == MeetingStatus.Complete)
                                 await InvokeAsync(() => Snackbar.Add("Retranscription complete!", Severity.Success));
                             else
-                                await InvokeAsync(() => { _retranscribeError = "Retranscription failed."; });
-                            await InvokeAsync(StateHasChanged);
+                                await InvokeAsync(() => Snackbar.Add("Retranscription failed. Check logs.", Severity.Error));
                             return;
                         }
                     }
-                    _retranscribing = false;
-                    await InvokeAsync(StateHasChanged);
+                    await InvokeAsync(() => { _retranscribing = false; StateHasChanged(); });
                 });
             }
             else

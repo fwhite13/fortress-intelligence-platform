@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using FortressNexus.Web.Data;
 using FortressNexus.Web.Models.Entities;
 using FortressNexus.Web.Models.Enums;
+using FortressNexus.Web.Services;
 
 namespace FortressNexus.Web.Services.Discovery;
 
@@ -16,6 +17,8 @@ public class DiscoveryService : IDiscoveryService
     private readonly BedrockService _bedrock;
     private readonly IConfiguration _config;
     private readonly DiscoveryInferenceConfig _inferenceConfig;
+    private readonly IFileStorageService _fileStorage;
+    private readonly SpecGenInferenceConfig _specGenConfig;
     private readonly ILogger<DiscoveryService> _logger;
 
     // DTOs for JSON deserialization of Bedrock response
@@ -35,6 +38,8 @@ public class DiscoveryService : IDiscoveryService
         BedrockService bedrock,
         IConfiguration config,
         IOptions<DiscoveryInferenceConfig> inferenceConfig,
+        IOptions<SpecGenInferenceConfig> specGenConfig,
+        IFileStorageService fileStorage,
         ILogger<DiscoveryService> logger)
     {
         _dbFactory = dbFactory;
@@ -42,6 +47,8 @@ public class DiscoveryService : IDiscoveryService
         _bedrock = bedrock;
         _config = config;
         _inferenceConfig = inferenceConfig.Value;
+        _specGenConfig = specGenConfig.Value;
+        _fileStorage = fileStorage;
         _logger = logger;
     }
 
@@ -284,6 +291,7 @@ public class DiscoveryService : IDiscoveryService
             userPromptSb.AppendLine();
             userPromptSb.AppendLine("## Attached Files");
 
+            int imageCount = 0;
             foreach (var file in files)
             {
                 userPromptSb.AppendLine($"### {file!.OriginalFileName} ({file.FileType})");
@@ -310,7 +318,66 @@ public class DiscoveryService : IDiscoveryService
                         break;
 
                     case FileType.Image:
-                        userPromptSb.AppendLine("*[Image file — visual content not included in question generation]*");
+                        if (imageCount >= 3)
+                        {
+                            userPromptSb.AppendLine("*[Additional image — skipped (limit 3)]*");
+                            break;
+                        }
+                        imageCount++;
+
+                        try
+                        {
+                            var imageStream = await _fileStorage.DownloadAsync(file.S3Key, file.S3Bucket);
+                            using var ms = new MemoryStream();
+                            await imageStream.CopyToAsync(ms, ct);
+                            var imageBytes = ms.ToArray();
+
+                            string? imageDescription = null;
+                            const int maxVisionAttempts = 2;
+
+                            for (int attempt = 1; attempt <= maxVisionAttempts; attempt++)
+                            {
+                                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                                attemptCts.CancelAfter(TimeSpan.FromSeconds(_specGenConfig.TimeoutSeconds));
+
+                                try
+                                {
+                                    var visionResult = await _bedrock.InvokeWithImageAsync(
+                                        "You are a business analyst assistant. Describe the contents of this image concisely for the purpose of generating discovery questions about a software feature.",
+                                        $"Describe this image in the context of the feature: {submission.Title}",
+                                        imageBytes,
+                                        file.ContentType,
+                                        512,
+                                        _specGenConfig.VisionModelId,
+                                        attemptCts.Token);
+
+                                    imageDescription = visionResult.Text;
+                                    break;
+                                }
+                                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                                {
+                                    _logger.LogWarning("[DISCOVERY_GEN] Vision timeout on attempt {Attempt}/{Max} for file {FileId}", attempt, maxVisionAttempts, file.Id);
+                                    if (attempt < maxVisionAttempts)
+                                        await Task.Delay(TimeSpan.FromSeconds(3 * attempt), ct);
+                                }
+                            }
+
+                            if (imageDescription != null)
+                            {
+                                userPromptSb.AppendLine($"## Image: {file.OriginalFileName}");
+                                userPromptSb.AppendLine(imageDescription);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("[DISCOVERY_GEN] Vision failed all attempts for image {FileId} — skipping", file.Id);
+                                userPromptSb.AppendLine($"*[Image: {file.OriginalFileName} — vision timed out]*");
+                            }
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                        {
+                            _logger.LogWarning(ex, "[DISCOVERY_GEN] Vision call failed for image file {FileId}", file.Id);
+                            userPromptSb.AppendLine($"*[Image: {file.OriginalFileName} — vision failed]*");
+                        }
                         break;
 
                     default:
