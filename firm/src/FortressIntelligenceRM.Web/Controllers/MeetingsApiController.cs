@@ -886,7 +886,7 @@ public class MeetingsApiController : ControllerBase
 
     /// <summary>
     /// POST /api/meetings/{id}/retranscribe
-    /// Triggers vpbot to re-download audio from S3 and run the full transcribe+summarize pipeline.
+    /// Triggers the transcription pipeline for a meeting via MeetingService.
     /// </summary>
     [HttpPost("{id}/retranscribe")]
     [Authorize]
@@ -895,52 +895,16 @@ public class MeetingsApiController : ControllerBase
         var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
         if (error != null) return error;
 
-        if (string.IsNullOrEmpty(meeting!.AudioS3Key))
-            return BadRequest(new { error = "No audio recording available for this meeting" });
-
-        var vpbotUrl = _config["Firm:VpBotUrl"] ?? _config["FIRM_VPBOT_URL"];
-        if (string.IsNullOrEmpty(vpbotUrl))
-            return StatusCode(503, new { error = "VpBot URL not configured (Firm:VpBotUrl)" });
-
-        var botSecret = _config["Firm:BotCallbackSecret"] ?? "";
-
-        try
-        {
-            using var http = new HttpClient();
-            http.DefaultRequestHeaders.Add("X-Bot-Secret", botSecret);
-            var payload = new
+        var (success, serviceError) = await _meetingService.RetranscribeAsync(id, user!.Id);
+        if (!success)
+            return serviceError switch
             {
-                firmMeetingId = id,
-                audioS3Key = meeting.AudioS3Key
+                "Meeting not found or access denied" => NotFound(new { error = serviceError }),
+                "No audio recording available for this meeting" => BadRequest(new { error = serviceError }),
+                _ => StatusCode(500, new { error = serviceError })
             };
-            var content = new StringContent(
-                System.Text.Json.JsonSerializer.Serialize(payload),
-                System.Text.Encoding.UTF8,
-                "application/json");
 
-            var response = await http.PostAsync($"{vpbotUrl}/api/meetings/retranscribe", content);
-            if (!response.IsSuccessStatusCode)
-            {
-                var body = await response.Content.ReadAsStringAsync();
-                return StatusCode(502, new { error = $"VpBot error: {body}" });
-            }
-
-            // Reset meeting status to allow callback pipeline
-            await using var db = await _dbFactory.CreateDbContextAsync();
-            var dbMeeting = await db.Meetings.FindAsync(id);
-            if (dbMeeting != null)
-            {
-                dbMeeting.Status = MeetingStatus.Transcribing;
-                await db.SaveChangesAsync();
-            }
-
-            return Ok(new { status = "retranscribe_triggered", meetingId = id });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[Retranscribe] Failed to trigger retranscribe for meeting {Id}", id);
-            return StatusCode(500, new { error = ex.Message });
-        }
+        return Ok(new { status = "retranscribe_triggered", meetingId = id });
     }
 
     private async Task<string> BuildTranscriptFromDbAsync(FirmDbContext db, long meetingId)
