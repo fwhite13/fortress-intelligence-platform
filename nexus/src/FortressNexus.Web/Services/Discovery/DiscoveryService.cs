@@ -156,6 +156,7 @@ public class DiscoveryService : IDiscoveryService
         if (session != null)
         {
             session.Status = DiscoverySessionStatus.Answered;
+            session.SkippedByUser = false;
             session.AnsweredAt = now;
             session.UpdatedAt = now;
             if (session.Submission != null)

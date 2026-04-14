@@ -177,3 +177,56 @@ That's it. No other blockers. Everything else in the build is solid.
 ---
 
 _Review by Hawkeye — Clint Barton (code-reviewer) — ADO #1839 cycle 1_
+
+---
+
+## Cycle 2 Review — Commit 9fdee11
+**Date:** 2026-04-14 | **Reviewer:** Hawkeye | **Verdict:** PASS
+
+### What Tony Fixed
+- `@inject ISnackbar Snackbar` added to directives block
+- `HandleContinue` catch: `Snackbar.Add("Could not save...", Severity.Error)` + `return` — wizard no longer advances on save failure
+
+### CC Review Summary
+All three checks passed. No false positives. CC read the live file (not just the diff) and confirmed current state.
+
+### Check 1: `@inject ISnackbar Snackbar` — ✅ PASS
+- Present at line 7, correctly positioned with other `@inject` directives
+
+```razor
+5  @inject IDiscoveryService DiscoveryService
+6  @inject UserContextService UserContextService
+7  @inject ISnackbar Snackbar
+```
+
+### Check 2: catch block — Snackbar.Add + return — ✅ PASS
+- `Snackbar.Add("Could not save your answers. Please try again.", Severity.Error)` at line 101
+- `return;` at line 102, immediately after — no fall-through path to `OnCompleted.InvokeAsync()`
+
+```csharp
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"[DISCOVERY] Failed to save answers for session {Session.Id}: {ex.Message}");
+    Snackbar.Add("Could not save your answers. Please try again.", Severity.Error);
+    return; // do NOT advance — user must retry
+}
+```
+
+### Check 3: `OnCompleted.InvokeAsync()` placement — ✅ PASS
+- Appears exactly **once** at line 105, after the closing brace of the try/catch block
+- Not inside the `try` block, not duplicated
+
+```csharp
+    }         // end catch
+}             // end if (Session != null)
+await OnCompleted.InvokeAsync(); // only reached on success or null Session
+}             // end HandleContinue
+```
+
+### Verdict: PASS
+
+Fix is clean. Both required elements present in catch (`Snackbar.Add(Severity.Error)` + `return`), injection confirmed, `OnCompleted` only reachable on success. Ships.
+
+---
+
+_Review by Hawkeye — Clint Barton (code-reviewer) — ADO #1839 cycle 2_
