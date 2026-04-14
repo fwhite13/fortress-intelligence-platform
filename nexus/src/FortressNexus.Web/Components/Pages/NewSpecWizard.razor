@@ -501,11 +501,21 @@
         }
     }
 
-    private Task HandleDiscoveryCompleted()
+    private async Task HandleDiscoveryCompleted()
     {
-        // Answers already saved by DiscoveryStep.HandleContinue() — just advance
+        // Re-fetch session so answers are included before rendering the Review step
+        if (_submissionId.HasValue)
+        {
+            try
+            {
+                _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId.Value);
+            }
+            catch
+            {
+                // Non-fatal — proceed with stale session; answers may show [Not answered]
+            }
+        }
         _activeStep = 3;
-        return Task.CompletedTask;
     }
 
     private void GoToStep3Confirm() => _activeStep = 3;
