@@ -356,6 +356,23 @@ public class MeetingsApiController : ControllerBase
         return Ok();
     }
 
+    [HttpGet("/api/vp/org-context")]
+    [AllowAnonymous]
+    public async Task<IActionResult> VpGetOrgContext()
+    {
+        var expectedSecret = _config["Firm:BotCallbackSecret"];
+        var providedSecret = Request.Headers["X-Bot-Secret"].FirstOrDefault();
+        if (string.IsNullOrEmpty(expectedSecret) || providedSecret != expectedSecret)
+            return Unauthorized();
+
+        var tenantId = _config["AzureAd:TenantId"] ?? "";
+        if (string.IsNullOrEmpty(tenantId)) return Ok(new { names = Array.Empty<string>() });
+
+        var entries = await _orgContextService.GetContextAsync(tenantId);
+        var names = entries.Select(e => $"{e.Term}: {e.Description}").ToList();
+        return Ok(new { names });
+    }
+
     [HttpGet("/api/meetings/{id}/transcript/download")]
     [Authorize]
     public async Task<IActionResult> DownloadTranscript(long id)
