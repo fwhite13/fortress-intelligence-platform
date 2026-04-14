@@ -365,7 +365,7 @@ public class MeetingsApiController : ControllerBase
         if (string.IsNullOrEmpty(expectedSecret) || providedSecret != expectedSecret)
             return Unauthorized();
 
-        var tenantId = _config["AzureAd:TenantId"] ?? "";
+        var tenantId = _config["Firm:GraphTenantId"] ?? _config["AzureAd:TenantId"] ?? "";
         if (string.IsNullOrEmpty(tenantId)) return Ok(new { names = Array.Empty<string>() });
 
         var entries = await _orgContextService.GetContextAsync(tenantId);
