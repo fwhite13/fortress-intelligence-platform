@@ -149,7 +149,7 @@ public class SpecGenerationService : ISpecGenerationService
         // Pre-process large text files in parallel — summarize if > 40K chars
         var textFileIds = files
             .Where(f => f != null && (f!.FileType == FileType.Html || f.FileType == FileType.Pdf ||
-                                       f.FileType == FileType.Text || f.FileType == FileType.Other)
+                                       f.FileType == FileType.Text)
                                    && !string.IsNullOrWhiteSpace(f.ProcessedText))
             .Select(f => f!.Id)
             .ToHashSet();
