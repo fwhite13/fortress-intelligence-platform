@@ -49,3 +49,32 @@ No — single CC session, single file context (both changes in one pass).
 
 ## Commit
 `c0dd086` — `feat(firm#1817): add admin-only Retranscribe button in MeetingDetail + RetranscribeAsync in MeetingService`
+
+---
+
+## Cycle 2 — Thread-Safety + Snackbar Fix
+
+### What was built
+Two surgical fixes to `RetranscribeAsync`'s `Task.Run` poll loop in `MeetingDetail.razor`:
+1. **C1:** All background-thread field mutations wrapped in `InvokeAsync`
+2. **A1:** Failed status uses `Snackbar.Add(Severity.Error)` instead of setting `_retranscribeError` (which is inside `@if (MeetingStatus.Complete)` and never renders on Failed)
+
+### Files changed
+- `Components/Pages/MeetingDetail.razor`
+  - `_meeting = updated` moved inside `InvokeAsync` lambda (was missing InvokeAsync wrapper)
+  - `_retranscribing = false` moved inside `InvokeAsync` lambda (was on background thread — race condition)
+  - Removed separate `await InvokeAsync(StateHasChanged)` — merged into same lambda
+  - Failed path: `await InvokeAsync(() => Snackbar.Add("Retranscription failed. Check logs.", Severity.Error))` — replaces `_retranscribeError` assignment
+  - Loop-timeout path: `await InvokeAsync(() => { _retranscribing = false; StateHasChanged(); })` — was two separate calls with race condition
+
+### Acceptance criteria verification
+- [x] All background thread mutations in `Task.Run` block wrapped in `InvokeAsync`
+- [x] `_retranscribeError` NOT set in poll loop (only in sync failure path — fine, runs on UI thread)
+- [x] Failed status uses `Snackbar.Add` — visible regardless of meeting status
+- [x] `dotnet build` — 0 errors, 18 pre-existing warnings
+
+### CC sessions run
+1 CC session — `claude --model sonnet --print --dangerously-skip-permissions`
+
+### Commit
+`34a0ba4` — fixes bundled into nexus#1819 commit (same working tree, same push)
