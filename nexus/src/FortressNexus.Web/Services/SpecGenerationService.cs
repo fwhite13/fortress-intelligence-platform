@@ -164,6 +164,7 @@ public class SpecGenerationService : ISpecGenerationService
                 switch (file.FileType)
                 {
                     case FileType.Html:
+                        sb.AppendLine("**File Type: HTML**");
                         if (!string.IsNullOrWhiteSpace(file.ProcessedText))
                         {
                             // Sectionize for richer structure
@@ -183,6 +184,7 @@ public class SpecGenerationService : ISpecGenerationService
                         break;
 
                     case FileType.Image:
+                        sb.AppendLine("**File Type: Image**");
                         // Vision call per image — 120s per-call timeout, up to 3 attempts with backoff
                         try
                         {
@@ -242,9 +244,30 @@ public class SpecGenerationService : ISpecGenerationService
                         }
                         break;
 
+                    case FileType.Text:
+                        sb.AppendLine("**File Type: Text**");
+                        if (!string.IsNullOrWhiteSpace(file.ProcessedText))
+                        {
+                            sb.AppendLine($"**File Contents: {file.OriginalFileName}**");
+                            sb.AppendLine(file.ProcessedText);
+                        }
+                        else
+                        {
+                            sb.AppendLine("*Text file — no content available.*");
+                        }
+                        break;
+
                     case FileType.Pdf:
+                        sb.AppendLine("**File Type: PDF**");
+                        if (!string.IsNullOrWhiteSpace(file.ProcessedText))
+                            sb.AppendLine(file.ProcessedText);
+                        else
+                            sb.AppendLine("*PDF file — no text content available (extraction may have failed at upload time).*");
+                        break;
+
                     case FileType.Other:
                     default:
+                        sb.AppendLine("**File Type: Other**");
                         if (!string.IsNullOrWhiteSpace(file.ProcessedText))
                             sb.AppendLine(file.ProcessedText);
                         else
