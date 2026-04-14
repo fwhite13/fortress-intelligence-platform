@@ -19,7 +19,11 @@
             <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="120px" Class="mb-3" />
         }
     }
-    else if (Session == null || (Session.Status != DiscoverySessionStatus.Pending && !Session.Questions.Any()))
+    else if (Session == null || Session.SkippedByUser ||
+             (Session.Status != DiscoverySessionStatus.Pending &&
+              Session.Status != DiscoverySessionStatus.QuestionsReady &&
+              Session.Status != DiscoverySessionStatus.Answered &&
+              !Session.Questions.Any()))
     {
         <MudAlert Severity="Severity.Info" Class="nexus-discovery-empty-alert">
             Couldn't generate questions — continuing to spec generation.

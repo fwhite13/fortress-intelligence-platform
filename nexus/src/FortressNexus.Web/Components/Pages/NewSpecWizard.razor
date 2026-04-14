@@ -220,6 +220,17 @@
                 <MudText Typo="Typo.caption" Class="nexus-wizard-regen-status">@_regenStatusMessage</MudText>
             }
 
+            @if (_showRediscoveryConfirm)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                    Adding files or changing the narrative will re-run Discovery. Your existing answers will be cleared.
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
+                               OnClick="ConfirmRediscovery" Class="ml-2">Re-run Discovery</MudButton>
+                    <MudButton Size="Size.Small" Variant="Variant.Text"
+                               OnClick="@(() => _showRediscoveryConfirm = false)" Class="ml-1">Cancel</MudButton>
+                </MudAlert>
+            }
+
             <MudStack Row="true" Spacing="2" Class="nexus-wizard-nav-row">
                 <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="BackToStep2Discovery" Disabled="@_isSubmitting" Class="nexus-wizard-back-btn">Back</MudButton>
                 <MudButton Variant="Variant.Filled"
@@ -255,6 +266,7 @@
     [Parameter] public int? ResumeSubmissionId { get; set; }
     private bool _isResume = false;
     private bool _regenPending = false; // true after re-discovery initiated; triggers regen on next Submit
+    private bool _showRediscoveryConfirm = false;
     private bool _regenInProgress = false;
     private string _regenStatusMessage = "Processing\u2026";
     private string _originalNarrative = string.Empty;
@@ -278,7 +290,8 @@
     private bool _hasChanges => _isResume && (
         _narrativeText.Trim() != _originalNarrative.Trim() ||
         _filesToDelete.Count > 0 ||
-        _uploadedFiles.Any(f => !_originalFileIds.Contains(f.Id))
+        _uploadedFiles.Any(f => !_originalFileIds.Contains(f.Id)) ||
+        (_discoverySession != null && _discoverySession.Status == DiscoverySessionStatus.Answered)
     );
 
     protected override async Task OnInitializedAsync()
@@ -582,54 +595,10 @@
             {
                 if (!_regenPending)
                 {
-                    // Apply pending changes (narrative + file deletions) before re-discovery
-                    await ApplyResumeChangesAsync();
-
-                    // === FIRST PASS: Send user through new Discovery session ===
-                    // Supersede the prior discovery session if one exists
-                    if (_discoverySession != null)
-                    {
-                        await DiscoveryService.SupersedeSessionAsync(_discoverySession.Id);
-                        _discoverySession = null;
-                    }
-
-                    // Kick off new discovery session
-                    await DiscoveryService.InitiateDiscoveryAsync(_submissionId.Value);
-
-                    // Mark regen pending — next Submit will trigger spec regen instead of re-discovery
-                    _regenPending = true;
-
-                    // Navigate back to Discovery step
+                    // Show confirmation dialog before silently re-running discovery
+                    _showRediscoveryConfirm = true;
                     _isSubmitting = false;
-                    _activeStep = 2;
-                    _discoveryLoading = true;
                     StateHasChanged();
-
-                    // Poll for the new session in background
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            var deadline = DateTime.UtcNow.AddSeconds(60);
-                            while (DateTime.UtcNow < deadline)
-                            {
-                                _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
-                                if (_discoverySession?.Status is DiscoverySessionStatus.QuestionsReady or DiscoverySessionStatus.Failed)
-                                    break;
-                                await Task.Delay(1000);
-                            }
-                        }
-                        catch
-                        {
-                            // Graceful — session stays null
-                        }
-                        finally
-                        {
-                            _discoveryLoading = false;
-                            await InvokeAsync(StateHasChanged);
-                        }
-                    });
-
                     return;
                 }
                 else
@@ -710,5 +679,48 @@
             _isSubmitting = false;
             StateHasChanged();
         }
+    }
+
+    private async Task ConfirmRediscovery()
+    {
+        _showRediscoveryConfirm = false;
+        _isSubmitting = true;
+        StateHasChanged();
+
+        await ApplyResumeChangesAsync();
+
+        if (_discoverySession != null)
+        {
+            await DiscoveryService.SupersedeSessionAsync(_discoverySession.Id);
+            _discoverySession = null;
+        }
+
+        await DiscoveryService.InitiateDiscoveryAsync(_submissionId!.Value);
+        _regenPending = true;
+        _isSubmitting = false;
+        _activeStep = 2;
+        _discoveryLoading = true;
+        StateHasChanged();
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(60);
+                while (DateTime.UtcNow < deadline)
+                {
+                    _discoverySession = await DiscoveryService.GetSessionAsync(_submissionId!.Value);
+                    if (_discoverySession?.Status is DiscoverySessionStatus.QuestionsReady or DiscoverySessionStatus.Failed)
+                        break;
+                    await Task.Delay(1000);
+                }
+            }
+            catch { }
+            finally
+            {
+                _discoveryLoading = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        });
     }
 }

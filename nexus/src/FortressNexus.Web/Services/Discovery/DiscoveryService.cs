@@ -206,7 +206,7 @@ public class DiscoveryService : IDiscoveryService
     public async Task<string> BuildSpecContextAsync(int submissionId, CancellationToken ct = default)
     {
         var session = await GetSessionAsync(submissionId, ct);
-        if (session == null || session.Status == DiscoverySessionStatus.Skipped || !session.Questions.Any())
+        if (session == null || session.SkippedByUser || !session.Questions.Any())
             return string.Empty;
 
         var sb = new StringBuilder();
