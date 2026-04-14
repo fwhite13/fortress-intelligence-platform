@@ -456,6 +456,17 @@
         StateHasChanged();
 
         // Fire InitiateDiscoveryAsync in background — fire-and-poll (only on first entry)
+        // Supersede terminal sessions (Skipped, Failed, Superseded) — they need re-initiation
+        if (_discoverySession != null &&
+            _discoverySession.Status is DiscoverySessionStatus.Skipped
+                or DiscoverySessionStatus.Failed
+                or DiscoverySessionStatus.Superseded)
+        {
+            try { await DiscoveryService.SupersedeSessionAsync(_discoverySession.Id); }
+            catch { /* non-fatal — proceed with new session */ }
+            _discoverySession = null;
+        }
+
         if (_discoverySession == null)
         {
             _ = Task.Run(async () =>
@@ -463,7 +474,7 @@
                 try
                 {
                     await DiscoveryService.InitiateDiscoveryAsync(_submissionId!.Value);
-                    // Poll until QuestionsReady or timeout (60s — Bedrock inference can take 20–40s)
+                    // Poll until QuestionsReady or timeout (60s)
                     var deadline = DateTime.UtcNow.AddSeconds(60);
                     while (DateTime.UtcNow < deadline)
                     {
@@ -485,7 +496,7 @@
         }
         else
         {
-            // Already have a session — just clear the loading flag
+            // Already have an active session (Pending, QuestionsReady, Answered) — just clear loading
             _discoveryLoading = false;
         }
     }
