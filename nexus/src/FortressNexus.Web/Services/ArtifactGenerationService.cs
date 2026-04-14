@@ -38,7 +38,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
         var systemPrompt = _config["Nexus:Prompts:ArtifactGenSystem"]
             ?? "Decompose the following software specification into Azure DevOps User Stories. Return ONLY a valid JSON array.";
 
-        var resolvedModelId = _config["FortressAI:ModelId"] ?? "us.anthropic.claude-sonnet-4-6";
+        var resolvedModelId = _config["FortressAI:ModelId"] ?? "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
         var specContent = specDoc.EditedContent ?? specDoc.Content;
 
         try

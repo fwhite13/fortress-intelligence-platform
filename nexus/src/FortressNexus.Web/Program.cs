@@ -134,7 +134,7 @@ builder.Services.AddScoped<UserContextService>();
 builder.Services.AddScoped<IAdoService, StubAdoService>();
 builder.Services.AddScoped<ISpecExporter, MarkdownExporter>();
 builder.Services.AddScoped<PdfExporter>();
-builder.Services.AddScoped<BedrockService>();
+builder.Services.AddSingleton<BedrockService>();
 builder.Services.AddScoped<IMockupSectionizer, MockupSectionizerService>();
 builder.Services.AddScoped<ISpecService, SpecService>();
 builder.Services.Configure<FortressNexus.Web.Services.Discovery.DiscoveryInferenceConfig>(

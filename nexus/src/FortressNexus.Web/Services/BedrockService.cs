@@ -35,6 +35,9 @@ public class BedrockService : IDisposable
         int maxTokens,
         string modelId)
     {
+        if (string.IsNullOrWhiteSpace(modelId))
+            throw new ArgumentException("modelId must be provided — DefaultModelId has been removed.", nameof(modelId));
+
         var model = modelId;
 
         var requestObj = new JsonObject
@@ -97,6 +100,9 @@ public class BedrockService : IDisposable
         int maxTokens,
         string modelId)
     {
+        if (string.IsNullOrWhiteSpace(modelId))
+            throw new ArgumentException("modelId must be provided — DefaultModelId has been removed.", nameof(modelId));
+
         if (imageBytes == null || imageBytes.Length == 0)
         {
             _logger.LogWarning("[BEDROCK] InvokeWithImageAsync called but imageBytes is empty — falling back to text-only");
