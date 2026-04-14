@@ -4,6 +4,7 @@
 
 @inject IDiscoveryService DiscoveryService
 @inject UserContextService UserContextService
+@inject ISnackbar Snackbar
 
 <div class="nexus-discovery-step">
     <MudText Typo="Typo.body1" Class="nexus-discovery-intro mb-4">
@@ -91,17 +92,17 @@
             try
             {
                 var oid = await UserContextService.GetUpnAsync();
-                // Materialize to avoid deferred LINQ issues and capture snapshot of current answers
                 var pairs = _answers.Select(kv => (kv.Key, (string?)kv.Value)).ToList();
                 await DiscoveryService.SaveAnswersAsync(Session.Id, pairs, oid);
             }
             catch (Exception ex)
             {
-                // Guard against circuit crash — log and continue so user isn't stuck
                 Console.Error.WriteLine($"[DISCOVERY] Failed to save answers for session {Session.Id}: {ex.Message}");
+                Snackbar.Add("Could not save your answers. Please try again.", Severity.Error);
+                return; // do NOT advance — user must retry
             }
         }
-        await OnCompleted.InvokeAsync();
+        await OnCompleted.InvokeAsync(); // only reached on success or null Session
     }
 
     private async Task HandleSkip()
