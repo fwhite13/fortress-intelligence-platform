@@ -306,7 +306,20 @@ public class SpecGenerationService : ISpecGenerationService
                     case FileType.Pdf:
                         sb.AppendLine("**File Type: PDF**");
                         if (!string.IsNullOrWhiteSpace(file.ProcessedText))
-                            sb.AppendLine(file.ProcessedText);
+                        {
+                            string pdfContent;
+                            if (file.ProcessedText.Length > 40_000)
+                            {
+                                pdfContent = summaries.TryGetValue(file.Id, out var summary) && summary != null
+                                    ? $"[Summarized — original {file.ProcessedText.Length:N0} chars]\n{summary}"
+                                    : file.ProcessedText[..40_000] + "\n... [truncated — summarization failed]";
+                            }
+                            else
+                            {
+                                pdfContent = file.ProcessedText;
+                            }
+                            sb.AppendLine(pdfContent);
+                        }
                         else
                             sb.AppendLine("*PDF file — no text content available (extraction may have failed at upload time).*");
                         break;
