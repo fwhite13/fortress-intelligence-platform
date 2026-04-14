@@ -166,3 +166,93 @@ CC (Claude Code) performed the file-by-file analysis. CC findings confirmed by H
 - A1 (Scoped BedrockService) independently identified by CC — matches MEMORY.md documented anti-pattern
 - All PASS findings verified against actual file contents
 - No false positives from CC on this review
+
+---
+
+---
+
+# Review Report — NEXUS ADO #1807 — Cycle 2
+
+**Reviewer:** Hawkeye (Clint Barton)
+**Commit:** `8716afb`
+**ADO WI:** #1807 | **Cycle:** 2
+**Date:** 2026-04-13
+**Risk:** Medium → Resolved
+
+---
+
+## Verdict: ✅ PASS
+
+All three Cycle 1 issues resolved correctly. Zero regressions. Ready to merge.
+
+---
+
+## Checks
+
+| # | Check | Result |
+|---|-------|--------|
+| C3 | `sonnet-4-6` elimination — grep sweep across all `.cs` and `.json` source | ✅ PASS |
+| C1 | `ArgumentException` guard — first statement in both `InvokeAsync` and `InvokeWithImageAsync` | ✅ PASS |
+| A1 | `AddSingleton<BedrockService>()` — no captive scoped dependencies | ✅ PASS |
+| I4 | SpecGen model IDs in appsettings.json not regressed by sweep | ✅ PASS |
+| S5 | Scope gate — exactly 4 source files modified, no out-of-scope changes | ✅ PASS |
+
+---
+
+## Detail
+
+### CHECK 1: Sonnet-4-6 Elimination
+`grep -r "sonnet-4-6" ~/projects/fip/nexus/src/ --include="*.cs" --include="*.json" --exclude-dir={bin,obj}` → **zero matches**.
+
+All occurrences corrected:
+- `appsettings.json` `FortressAI:ModelId` → `"us.anthropic.claude-sonnet-4-5-20250929-v1:0"`
+- `appsettings.json` `Bedrock:DiscoveryModelId` → `"us.anthropic.claude-sonnet-4-5-20250929-v1:0"`
+- `appsettings.json` `Bedrock:Discovery:ModelId` → `"us.anthropic.claude-sonnet-4-5-20250929-v1:0"`
+- `ArtifactGenerationService.cs:41` fallback literal → `"us.anthropic.claude-sonnet-4-5-20250929-v1:0"`
+
+### CHECK 2: ArgumentException Guard Placement
+Both methods confirmed — guard is the absolute first statement, before any AWS SDK call, logging, or object construction:
+
+```csharp
+// InvokeAsync — first statement (line 38)
+if (string.IsNullOrWhiteSpace(modelId))
+    throw new ArgumentException("modelId must be provided — DefaultModelId has been removed.", nameof(modelId));
+
+// InvokeWithImageAsync — first statement (line 103)
+if (string.IsNullOrWhiteSpace(modelId))
+    throw new ArgumentException("modelId must be provided — DefaultModelId has been removed.", nameof(modelId));
+```
+
+### CHECK 3: Singleton + Captive Dependency
+`Program.cs:137` → `builder.Services.AddSingleton<BedrockService>()` ✅
+
+BedrockService constructor dependencies:
+| Dependency | Lifetime | Safe? |
+|---|---|---|
+| `ILogger<BedrockService>` | Singleton | ✅ |
+| `AmazonBedrockRuntimeClient` | Self-constructed (`new`) | ✅ |
+
+No scoped services. No captive dependency risk.
+
+### CHECK 4: SpecGen IDs Unchanged
+```json
+"SpecGen": {
+  "ModelId": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+  "VisionModelId": "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+}
+```
+Both untouched by the sonnet-4-6 sweep. ✅
+
+### CHECK 5: Scope
+Commit 8716afb touched exactly:
+- `Program.cs` ✅
+- `Services/ArtifactGenerationService.cs` ✅
+- `Services/BedrockService.cs` ✅
+- `appsettings.json` ✅
+- `pipeline/*.md` (docs, excluded from scope gate) ✅
+
+---
+
+## CC Review Notes
+
+CC (Claude Code) performed adversarial file-by-file analysis against all 5 checks. All checks returned PASS. No false positives. No regressions found.

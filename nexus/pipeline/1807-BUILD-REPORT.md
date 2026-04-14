@@ -83,3 +83,53 @@ dotnet build src/FortressNexus.Web/FortressNexus.Web.csproj
 # Run the app locally and check startup logs — should not see any DI resolution errors
 # for SpecGenerationService
 ```
+
+---
+
+## Build Report — ADO #1807 — Cycle 2
+
+**Date:** 2026-04-13
+**Commit:** `8716afb`
+**Risk:** Medium — three targeted fixes
+**Build result:** 0 errors, 0 warnings
+
+### What was built
+
+Three targeted fixes: stale Bedrock model IDs replaced throughout, null guard added to BedrockService, singleton registration for BedrockService.
+
+### Files changed
+
+- `appsettings.json` — Replaced all 3 stale `"us.anthropic.claude-sonnet-4-6"` values with `"us.anthropic.claude-sonnet-4-5-20250929-v1:0"` in: `FortressAI.ModelId`, `Bedrock.DiscoveryModelId`, `Bedrock.Discovery.ModelId`. SpecGen keys were already correct.
+- `Services/ArtifactGenerationService.cs` (line 41) — Updated hardcoded fallback literal from `"us.anthropic.claude-sonnet-4-6"` to `"us.anthropic.claude-sonnet-4-5-20250929-v1:0"`.
+- `Services/BedrockService.cs` — Added `string.IsNullOrWhiteSpace(modelId)` ArgumentException guard as first statement in both `InvokeAsync` and `InvokeWithImageAsync`.
+- `Program.cs` (line 137) — Changed `AddScoped<BedrockService>()` → `AddSingleton<BedrockService>()`. Safe: BedrockService holds only `AmazonBedrockRuntimeClient` (thread-safe) and `ILogger` (singleton-safe).
+
+### Parallelization used
+
+No — all four fixes touch related config/DI; sequential to avoid merge conflicts. Single CC session.
+
+### CC sessions run
+
+1 — single CC Sonnet session executed all four fixes and verified build.
+
+### Acceptance criteria verification
+
+- [x] All 3 stale `sonnet-4-6` IDs in appsettings.json replaced — verified via grep (source clean; bin/Release artifact is stale build output, not source)
+- [x] ArtifactGenerationService.cs fallback literal updated
+- [x] BedrockService.InvokeAsync — null guard added as first statement
+- [x] BedrockService.InvokeWithImageAsync — null guard added as first statement
+- [x] Program.cs: `AddSingleton<BedrockService>()` confirmed
+- [x] `dotnet build` — 0 errors, 0 warnings
+
+### Known edge cases / things Clint should scrutinize
+
+- `bin/Release/net8.0/appsettings.json` still contains old `sonnet-4-6` — this is a stale release build artifact (gitignored); not a source issue. A clean `dotnet publish` will regenerate it correctly.
+- BedrockService null guard throws `ArgumentException` — callers that were relying on a default model ID will now get a hard exception. This is intentional (by spec), but Clint should confirm no callers exist that pass null/empty modelId.
+
+### How to test locally
+
+```bash
+cd ~/projects/fip/nexus/src/FortressNexus.Web
+dotnet build   # should be 0 errors
+grep -r "sonnet-4-6" . --include="*.cs" --include="*.json"  # should return nothing from src
+```

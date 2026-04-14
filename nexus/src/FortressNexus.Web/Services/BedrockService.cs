@@ -33,7 +33,8 @@ public class BedrockService : IDisposable
         string systemPrompt,
         string userPrompt,
         int maxTokens,
-        string modelId)
+        string modelId,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(modelId))
             throw new ArgumentException("modelId must be provided — DefaultModelId has been removed.", nameof(modelId));
@@ -66,7 +67,7 @@ public class BedrockService : IDisposable
 
         _logger.LogInformation("[BEDROCK] Invoking model {Model}, maxTokens={MaxTokens}", model, maxTokens);
 
-        var response = await _client.InvokeModelAsync(request);
+        var response = await _client.InvokeModelAsync(request, cancellationToken);
         var responseJson = await new StreamReader(response.Body).ReadToEndAsync();
 
         using var doc = JsonDocument.Parse(responseJson);
@@ -98,7 +99,8 @@ public class BedrockService : IDisposable
         byte[]? imageBytes,
         string mimeType,
         int maxTokens,
-        string modelId)
+        string modelId,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(modelId))
             throw new ArgumentException("modelId must be provided — DefaultModelId has been removed.", nameof(modelId));
@@ -106,7 +108,7 @@ public class BedrockService : IDisposable
         if (imageBytes == null || imageBytes.Length == 0)
         {
             _logger.LogWarning("[BEDROCK] InvokeWithImageAsync called but imageBytes is empty — falling back to text-only");
-            return await InvokeAsync(systemPrompt, userPrompt, maxTokens, modelId);
+            return await InvokeAsync(systemPrompt, userPrompt, maxTokens, modelId, cancellationToken);
         }
 
         var model = modelId;
@@ -158,7 +160,7 @@ public class BedrockService : IDisposable
         _logger.LogInformation("[BEDROCK] Invoking model {Model} with image ({MimeType}, {Bytes} bytes), maxTokens={MaxTokens}",
             model, mimeType, imageBytes.Length, maxTokens);
 
-        var response = await _client.InvokeModelAsync(request);
+        var response = await _client.InvokeModelAsync(request, cancellationToken);
         var responseJson = await new StreamReader(response.Body).ReadToEndAsync();
 
         using var doc = JsonDocument.Parse(responseJson);

@@ -197,26 +197,31 @@ public class SpecGenerationService : ISpecGenerationService
 
                             for (int attempt = 1; attempt <= maxAttempts; attempt++)
                             {
-                                var callTask = _bedrock.InvokeWithImageAsync(
-                                    systemPrompt,
-                                    $"Describe what you see in this UI mockup image for the feature: {submission.Title}",
-                                    imageBytes,
-                                    file.ContentType,
-                                    _specGenConfig.VisionMaxTokens,
-                                    _specGenConfig.VisionModelId);
-                                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(_specGenConfig.TimeoutSeconds));
+                                using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                                attemptCts.CancelAfter(TimeSpan.FromSeconds(_specGenConfig.TimeoutSeconds));
 
-                                if (await Task.WhenAny(callTask, timeoutTask) == timeoutTask)
+                                try
                                 {
+                                    visionResult = await _bedrock.InvokeWithImageAsync(
+                                        systemPrompt,
+                                        $"Describe what you see in this UI mockup image for the feature: {submission.Title}",
+                                        imageBytes,
+                                        file.ContentType,
+                                        _specGenConfig.VisionMaxTokens,
+                                        _specGenConfig.VisionModelId,
+                                        attemptCts.Token);
+
+                                    visionSucceeded = true;
+                                    break;
+                                }
+                                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                                {
+                                    // Per-attempt timeout (not overall CTS cancel)
                                     _logger.LogWarning("[SPEC_GEN] Vision call timed out (attempt {Attempt}/{Max}) for file {FileId}", attempt, maxAttempts, file.Id);
                                     if (attempt < maxAttempts)
-                                        await Task.Delay(TimeSpan.FromSeconds(3 * attempt)); // backoff: 3s, 6s
-                                    continue;
+                                        await Task.Delay(TimeSpan.FromSeconds(3 * attempt), cancellationToken); // backoff: 3s, 6s
                                 }
-
-                                visionResult = await callTask;
-                                visionSucceeded = true;
-                                break;
+                                // OperationCanceledException with cancellationToken.IsCancellationRequested → rethrows, exits loop, caught by outer catch
                             }
 
                             if (visionSucceeded)
