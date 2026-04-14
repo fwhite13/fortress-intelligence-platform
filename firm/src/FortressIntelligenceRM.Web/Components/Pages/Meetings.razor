@@ -1,6 +1,5 @@
 @page "/meetings"
 @attribute [Authorize]
-@inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthStateProvider
 @inject MeetingService MeetingService
@@ -16,7 +15,6 @@
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
-@using System.Net.Http.Json
 
 <PageTitle>Meetings — FIRM</PageTitle>
 
@@ -644,17 +642,34 @@
         await InvokeAsync(StateHasChanged);
         try
         {
-            var http = HttpClientFactory.CreateClient("local");
-            var response = await http.PostAsync($"/api/vp/stop/{meetingId}", null);
-            var body = await response.Content.ReadAsStringAsync();
-            if (response.IsSuccessStatusCode)
+            if (string.IsNullOrEmpty(_userId))
             {
-                Snackbar.Add("Stop signal sent. Recording will finish processing shortly.", Severity.Info);
+                Snackbar.Add("User identity not resolved. Please refresh.", Severity.Warning);
+                return;
             }
-            else
+
+            var meeting = await MeetingService.GetMeetingAsync(meetingId, Guid.Parse(_userId));
+
+            if (meeting == null)
             {
-                Snackbar.Add($"Could not send stop signal: {body}", Severity.Warning);
+                Snackbar.Add("Meeting not found.", Severity.Warning);
+                return;
             }
+
+            if (meeting.Status != MeetingStatus.Recording)
+            {
+                Snackbar.Add("Meeting is not currently recording.", Severity.Warning);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(meeting.BotTaskArn))
+            {
+                Snackbar.Add("No active bot task found — recording may have already ended.", Severity.Info);
+                return;
+            }
+
+            await VpBotService.StopBotAsync(meeting.BotTaskArn);
+            Snackbar.Add("Stop signal sent. Recording will finish processing shortly.", Severity.Info);
         }
         catch (Exception ex)
         {

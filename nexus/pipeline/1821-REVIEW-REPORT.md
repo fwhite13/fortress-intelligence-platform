@@ -153,3 +153,64 @@ In `SpecGenerationService.cs`, either:
 If the intent is for SpecGen to NOT render `Other` file content (the deliberate #1814 decision), go with Option B — remove from pre-pass. That's a 2-word deletion. If the intent is for SpecGen to align with Discovery and render `Other` content, go with Option A.
 
 Clarify the intent from ADO #1814 and implement accordingly. Either fix is correct depending on product intent; the current state (summarize but discard) is wrong in both cases.
+
+---
+
+## Review Report — ADO #1821 — Cycle 2
+
+**Reviewer:** Hawkeye (code-reviewer)
+**Cycle:** 2
+**Date:** 2026-04-14
+**Commit:** `22dbbe4`
+**Focus:** One-line fix — remove `FileType.Other` from `BuildPromptAsync` pre-pass filter
+
+---
+
+### Verdict: PASS ✅
+
+The fix is correct and clean. Both checks passed.
+
+---
+
+### CC Review Summary
+
+CC (Sonnet) performed a targeted two-check adversarial review of `SpecGenerationService.cs` at commit `22dbbe4`. Both checks PASSED with no false positives.
+
+---
+
+### Check Results
+
+| # | Check | Lines | Result |
+|---|-------|-------|--------|
+| C1 | `FileType.Other` absent from pre-pass `.Where(...)` filter | 150–155 | ✅ PASS — only `Html \| Pdf \| Text` present |
+| C2 | `case FileType.Other:` still present and intact in switch | 327–331 | ✅ PASS — outputs "Unknown/Unsupported", untouched |
+
+---
+
+### Details
+
+**Check 1 — Pre-pass filter (lines 150–155):**
+```csharp
+f.FileType == FileType.Html || f.FileType == FileType.Pdf || f.FileType == FileType.Text
+```
+`FileType.Other` is absent. The wasted Bedrock inference path is eliminated.
+
+**Check 2 — Switch case (lines 327–331):**
+```
+case FileType.Other:
+default:
+    **File Type: Unknown/Unsupported**
+    *[Binary or unsupported file type — content not included]*
+    break;
+```
+Case is present and untouched. No accidental deletion.
+
+---
+
+### Spec Fidelity
+
+The Cycle 1 NEEDS-CHANGES feedback specified: remove `FileType.Other` from the pre-pass filter (Option B). Tony implemented exactly that. The switch case behavior is unchanged.
+
+---
+
+**PASS. Ships.**

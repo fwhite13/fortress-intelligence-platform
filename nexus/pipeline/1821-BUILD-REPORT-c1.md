@@ -71,6 +71,29 @@ Replaced the sequential 8K/20K truncation cap in `DiscoveryService` and the ungu
 
 ---
 
+---
+
+## Cycle 2 — ADO #1821 — SpecGen Pre-Pass Filter Fix
+
+**Commit:** `22dbbe4`
+**Build:** ✅ 0 errors, 1 pre-existing warning (CS8601, unrelated)
+
+### What changed
+Removed `|| f.FileType == FileType.Other` from the `.Where(...)` pre-pass filter in `SpecGenerationService.BuildPromptAsync` (line 152).
+
+### Why
+`FileType.Other` = binary/unknown files. SpecGen's `switch` has a `case FileType.Other:` that discards content as "unsupported". Running a Bedrock summarization pre-pass on files that will be silently dropped anyway wastes inference. The pre-pass filter now matches what SpecGen actually processes.
+
+### Files changed
+- `Services/SpecGenerationService.cs` — pre-pass `Where` filter: `FileType.Other` removed
+
+### Acceptance criteria
+- [x] `FileType.Other` no longer in pre-pass filter — verified via grep (only appears in `case FileType.Other:` switch at line 327, which is correct and untouched)
+- [x] `dotnet build` — 0 errors
+- [x] Single targeted change only — no other modifications
+
+---
+
 ## How to test locally
 
 ```bash
