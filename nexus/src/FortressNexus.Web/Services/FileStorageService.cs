@@ -17,6 +17,9 @@ public class FileStorageService : IFileStorageService
 
     private static readonly string[] AllowedTypes =
         ["text/html", "image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf", "text/markdown", "text/x-markdown", "application/json", "text/plain"];
+    private static readonly HashSet<string> AllowedExtensions =
+        new(StringComparer.OrdinalIgnoreCase)
+        { ".html", ".htm", ".png", ".jpg", ".jpeg", ".webp", ".pdf", ".md", ".json", ".txt" };
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10MB
 
     private string Bucket => _config["Nexus:S3Bucket"] ?? "fortress-nexus-uploads-dev";
@@ -28,15 +31,33 @@ public class FileStorageService : IFileStorageService
         _logger = logger;
     }
 
-    private static FileType DetectFileType(string contentType) =>
-        contentType.ToLowerInvariant() switch
+    private static FileType DetectFileType(string contentType, string fileName = "")
+    {
+        var ct = contentType.ToLowerInvariant();
+
+        // Primary: MIME-based detection
+        var mimeType = ct switch
         {
-            "text/html" => FileType.Html,
-            var ct when ct.StartsWith("image/") => FileType.Image,
+            "text/html" => (FileType?)FileType.Html,
+            var x when x.StartsWith("image/") => FileType.Image,
             "application/pdf" => FileType.Pdf,
             "text/plain" or "text/markdown" or "text/x-markdown" or "application/json" => FileType.Text,
+            _ => null
+        };
+
+        if (mimeType.HasValue) return mimeType.Value;
+
+        // Fallback: extension-based detection when MIME is empty or unrecognized
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        return ext switch
+        {
+            ".html" or ".htm" => FileType.Html,
+            ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" => FileType.Image,
+            ".pdf" => FileType.Pdf,
+            ".md" or ".txt" or ".json" => FileType.Text,
             _ => FileType.Other
         };
+    }
 
     private static string ExtractHtmlText(string htmlContent)
     {
@@ -62,8 +83,15 @@ public class FileStorageService : IFileStorageService
         if (file.Size > MaxFileSizeBytes)
             throw new InvalidOperationException($"File exceeds maximum size of 10MB. Actual size: {file.Size / 1024 / 1024}MB.");
 
-        var normalizedContentType = file.ContentType.ToLowerInvariant();
-        if (!AllowedTypes.Contains(normalizedContentType))
+        var normalizedContentType = file.ContentType?.ToLowerInvariant() ?? "";
+        var extension = Path.GetExtension(file.Name).ToLowerInvariant();
+
+        bool mimeOk = AllowedTypes.Contains(normalizedContentType);
+        bool extOk = AllowedExtensions.Contains(extension);
+
+        // Security rule: MIME must be valid OR (MIME is empty/missing AND extension is allowed)
+        // Matches #1787 FileUploadZone pattern — prevents renamed .exe bypass
+        if (!mimeOk && !(string.IsNullOrEmpty(normalizedContentType) && extOk))
             throw new InvalidOperationException($"File type '{file.ContentType}' is not allowed. Accepted: HTML, PNG, JPG, JPEG, WEBP, PDF, MD, JSON, TXT.");
 
         var safeFileName = Path.GetFileName(file.Name);
@@ -71,7 +99,7 @@ public class FileStorageService : IFileStorageService
             throw new InvalidOperationException("Invalid filename.");
 
         var s3Key = $"nexus/{uploaderUpn}/{Guid.NewGuid()}/{safeFileName}";
-        var fileType = DetectFileType(normalizedContentType);
+        var fileType = DetectFileType(normalizedContentType, file.Name);
         string? processedText = null;
 
         using var stream = file.OpenReadStream(MaxFileSizeBytes);
