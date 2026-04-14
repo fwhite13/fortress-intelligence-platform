@@ -1,0 +1,47 @@
+using Amazon.Batch;
+using Amazon.Batch.Model;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+
+namespace FortressIntelligenceRM.Web.Services;
+
+public interface IBatchTranscriptionService
+{
+    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, CancellationToken ct = default);
+}
+
+public class BatchTranscriptionService : IBatchTranscriptionService
+{
+    private readonly IAmazonBatch _batch;
+    private readonly ILogger<BatchTranscriptionService> _logger;
+    private const string JobQueue = "firm-transcription-queue";
+    private const string JobDefinition = "firm-transcription-job";
+
+    public BatchTranscriptionService(IAmazonBatch batch, ILogger<BatchTranscriptionService> logger)
+    {
+        _batch = batch;
+        _logger = logger;
+    }
+
+    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, CancellationToken ct = default)
+    {
+        var request = new SubmitJobRequest
+        {
+            JobName = $"retranscribe-meeting-{meetingId}-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}",
+            JobQueue = JobQueue,
+            JobDefinition = JobDefinition,
+            ContainerOverrides = new ContainerOverrides
+            {
+                Environment =
+                [
+                    new Amazon.Batch.Model.KeyValuePair { Name = "MEETING_ID", Value = meetingId.ToString() },
+                    new Amazon.Batch.Model.KeyValuePair { Name = "AUDIO_S3_KEY", Value = audioS3Key },
+                ]
+            }
+        };
+
+        var response = await _batch.SubmitJobAsync(request, ct);
+        _logger.LogInformation("FIRM: Batch retranscribe job {JobId} submitted for meeting {MeetingId}", response.JobId, meetingId);
+        return response.JobId;
+    }
+}

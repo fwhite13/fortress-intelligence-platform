@@ -11,13 +11,15 @@ public class MeetingService
     private readonly IConfiguration _config;
     private readonly ILogger<MeetingService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IBatchTranscriptionService _batchService;
 
-    public MeetingService(IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config, ILogger<MeetingService> logger, IHttpClientFactory httpClientFactory)
+    public MeetingService(IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config, ILogger<MeetingService> logger, IHttpClientFactory httpClientFactory, IBatchTranscriptionService batchService)
     {
         _dbFactory = dbFactory;
         _config = config;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
+        _batchService = batchService;
     }
 
     public async Task<List<FirmMeeting>> GetMeetingsAsync(Guid userId)
@@ -262,7 +264,8 @@ public class MeetingService
         [property: System.Text.Json.Serialization.JsonPropertyName("userId")] string UserId);
 
     /// <summary>
-    /// Triggers vpbot to re-download audio from S3 and run the full transcribe+summarize pipeline.
+    /// Submits an AWS Batch transcription job for the meeting's audio (ADO#1844).
+    /// Replaces the previous vpbot HTTP call — firm-web now submits Batch directly.
     /// Returns (true, null) on success, (false, errorMessage) on failure.
     /// </summary>
     public async Task<(bool success, string? error)> RetranscribeAsync(long meetingId, Guid userId)
@@ -274,71 +277,22 @@ public class MeetingService
         if (string.IsNullOrEmpty(meeting.AudioS3Key))
             return (false, "No audio recording available for this meeting");
 
-        var vpbotUrl = _config["Firm:VpBotUrl"] ?? _config["FIRM_VPBOT_URL"];
-        if (string.IsNullOrEmpty(vpbotUrl))
-            return (false, "VpBot URL not configured");
-
-        var botSecret = _config["Firm:BotCallbackSecret"] ?? "";
-
         try
         {
-            using var http = _httpClientFactory.CreateClient();
-            var payload = new
-            {
-                firmMeetingId = meetingId,
-                audioS3Key = meeting.AudioS3Key
-            };
-            var content = new StringContent(
-                System.Text.Json.JsonSerializer.Serialize(payload),
-                System.Text.Encoding.UTF8,
-                "application/json");
+            var audioS3Key = meeting.AudioS3Key;
+            var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key);
 
-            using var acceptCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{vpbotUrl}/api/meetings/retranscribe")
+            // Reset meeting status to Transcribing
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var dbMeeting = await db.Meetings.FindAsync(meetingId);
+            if (dbMeeting != null)
             {
-                Content = content
-            };
-            request.Headers.Add("X-Bot-Secret", botSecret);
-
-            // ResponseHeadersRead returns as soon as headers arrive — don't wait for body
-            HttpResponseMessage response;
-            bool acceptedOrTimeout = false;
-            try
-            {
-                response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, acceptCts.Token);
-                if (!response.IsSuccessStatusCode)
-                {
-                    string body;
-                    try { body = await response.Content.ReadAsStringAsync(); } catch { body = "(unreadable)"; }
-                    return (false, $"VpBot error {(int)response.StatusCode}: {body}");
-                }
-                acceptedOrTimeout = true;
-            }
-            catch (OperationCanceledException)
-            {
-                // vpbot didn't respond within 10s — it may still be processing
-                // Treat as accepted (fire-and-forget is working as designed)
-                _logger.LogWarning("FIRM: vpbot retranscribe accept timeout (10s) for meeting {MeetingId} — treating as accepted", meetingId);
-                acceptedOrTimeout = true;
+                dbMeeting.Status = MeetingStatus.Transcribing;
+                await db.SaveChangesAsync();
             }
 
-            if (acceptedOrTimeout)
-            {
-                // Reset meeting status to allow callback pipeline
-                await using var db = await _dbFactory.CreateDbContextAsync();
-                var dbMeeting = await db.Meetings.FindAsync(meetingId);
-                if (dbMeeting != null)
-                {
-                    dbMeeting.Status = MeetingStatus.Transcribing;
-                    await db.SaveChangesAsync();
-                }
-
-                _logger.LogInformation("FIRM: RetranscribeAsync triggered for meeting {MeetingId}", meetingId);
-                return (true, null);
-            }
-
-            // Should never reach here, but satisfy compiler
-            return (false, "Unexpected state");
+            _logger.LogInformation("FIRM: RetranscribeAsync submitted Batch job {JobId} for meeting {MeetingId}", jobId, meetingId);
+            return (true, null);
         }
         catch (Exception ex)
         {

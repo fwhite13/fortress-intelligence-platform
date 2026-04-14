@@ -6,6 +6,7 @@
     <RootNamespace>FortressIntelligenceRM.Web</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="AWSSDK.Batch" Version="3.7.400.4" />
     <PackageReference Include="Markdig" Version="1.1.2" />
     <ProjectReference Include="..\..\..\shared\FipShared\FipShared.csproj" />
     <PackageReference Include="MudBlazor" Version="7.*" />

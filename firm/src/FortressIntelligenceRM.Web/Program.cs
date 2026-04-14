@@ -8,6 +8,7 @@ using FortressIntelligenceRM.Web.Data;
 using FortressIntelligenceRM.Web.Services;
 using Microsoft.Bot.Builder;
 using Microsoft.Bot.Builder.Integration.AspNet.Core;
+using Amazon.Batch;
 using Amazon.ECS;
 using Amazon.S3;
 
@@ -93,6 +94,8 @@ builder.Services.AddHttpClient("local", client =>
 // AWS SDK services
 builder.Services.AddAWSService<IAmazonECS>();
 builder.Services.AddAWSService<IAmazonS3>();
+builder.Services.AddAWSService<IAmazonBatch>();
+builder.Services.AddScoped<IBatchTranscriptionService, BatchTranscriptionService>();
 builder.Services.AddAWSService<Amazon.BedrockAgent.IAmazonBedrockAgent>();
 builder.Services.AddAWSService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
 
