@@ -209,3 +209,84 @@ Two surgical edits. No other changes needed.
 - ✅ `finally { StateHasChanged(); }` correctly handles all early-return paths in the synchronous portion.
 - ✅ No self-HTTP anti-pattern anywhere. Tony got this right.
 - ✅ VpBot URL config key has dual-key fallback (`Firm:VpBotUrl` / `FIRM_VPBOT_URL`) — consistent with the rest of the service.
+
+---
+
+## Review Report — ADO#1817 — Cycle 2
+
+**Verdict: PASS**
+**Cycle:** 2
+**Reviewer:** Hawkeye (code-reviewer)
+**Commit:** b36c30a (build report) / 34a0ba4 (actual code fix)
+**Risk:** Low — two surgical, targeted wraps
+
+---
+
+## What Was Verified
+
+Tony applied exactly two fixes to the `Task.Run` poll loop in `RetranscribeAsync` (`MeetingDetail.razor`):
+
+1. **Completion/failure path** — `_meeting = updated`, `_retranscribing = false`, and `StateHasChanged()` consolidated into a single `InvokeAsync` lambda. Both `Snackbar.Add(...)` calls (Complete and Failed paths) also wrapped in individual `InvokeAsync` lambdas.
+2. **Loop-timeout path** — `_retranscribing = false` and `StateHasChanged()` moved into a single `InvokeAsync` lambda (were previously a bare mutation + separate `InvokeAsync(StateHasChanged)` call).
+
+---
+
+## CC Review Summary
+
+Ran adversarial CC review spec against the `Task.Run` lambda (lines 368–391). CC verified every checklist item:
+
+- All field mutations (`_meeting`, `_retranscribing`) are inside `InvokeAsync` — zero bare writes
+- All `Snackbar.Add` calls in the poll loop are inside `InvokeAsync`
+- `_retranscribeError` never set from background thread (poll loop only; sync/catch paths on UI thread — correct)
+- No double `StateHasChanged()` introduced
+- `if/else` for Snackbar is mutually exclusive — impossible for both to fire
+- `return` correctly placed after Snackbar calls
+
+No false positives dismissed. No new issues found.
+
+---
+
+## Spec Compliance Check
+
+**C1 (Critical — Cycle 1):** Bare field mutations on background thread → **✅ FIXED**
+- `_meeting = updated` now inside `InvokeAsync`
+- `_retranscribing = false` (completion path) now inside `InvokeAsync`
+- `_retranscribing = false` (timeout path) now inside `InvokeAsync`
+- `StateHasChanged()` consolidated into same `InvokeAsync` lambda (no orphaned separate call)
+
+**A1 (Minor — Cycle 1):** Failed poll path used `_retranscribeError` (invisible in `MeetingStatus.Failed` state) → **✅ FIXED**
+- Failed path now uses `Snackbar.Add("Retranscription failed. Check logs.", Severity.Error)` — visible regardless of meeting status
+
+**Scope:** Only `MeetingDetail.razor` touched. No unintended changes.
+
+---
+
+## Consistency Audit
+
+| Check | Result |
+|-------|--------|
+| No bare `_meeting =` in `Task.Run` | ✅ Clean |
+| No bare `_retranscribing =` in `Task.Run` | ✅ Clean |
+| No `_retranscribeError` in poll loop | ✅ Clean |
+| All `Snackbar.Add` in `Task.Run` inside `InvokeAsync` | ✅ Clean |
+| `_meeting.Id` read from background thread (stable ID — read-only) | ✅ Acceptable |
+| `return` correctly exits Task.Run lambda after Snackbar | ✅ Clean |
+
+---
+
+## Issues Found
+
+None. Both C1 sub-issues and A1 are resolved. No new issues introduced.
+
+---
+
+## Positive Observations
+
+- ✅ Single consolidated `InvokeAsync` for the three related mutations — cleaner than three separate `InvokeAsync` calls.
+- ✅ `Snackbar.Add` wrapped separately from the state mutation — correct: Snackbar dispatch can be its own render cycle without conflict.
+- ✅ Mutual exclusion on the `if/else` Snackbar paths — impossible for both to fire.
+- ✅ Remaining tech debt (no `CancellationToken` / `IDisposable`) tracked — not a blocker for this cycle.
+
+---
+
+**PASS — ships.**

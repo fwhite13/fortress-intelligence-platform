@@ -283,7 +283,6 @@ public class MeetingService
         try
         {
             using var http = _httpClientFactory.CreateClient();
-            http.DefaultRequestHeaders.Add("X-Bot-Secret", botSecret);
             var payload = new
             {
                 firmMeetingId = meetingId,
@@ -294,24 +293,52 @@ public class MeetingService
                 System.Text.Encoding.UTF8,
                 "application/json");
 
-            var response = await http.PostAsync($"{vpbotUrl}/api/meetings/retranscribe", content);
-            if (!response.IsSuccessStatusCode)
+            using var acceptCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{vpbotUrl}/api/meetings/retranscribe")
             {
-                var body = await response.Content.ReadAsStringAsync();
-                return (false, $"VpBot error: {body}");
+                Content = content
+            };
+            request.Headers.Add("X-Bot-Secret", botSecret);
+
+            // ResponseHeadersRead returns as soon as headers arrive — don't wait for body
+            HttpResponseMessage response;
+            bool acceptedOrTimeout = false;
+            try
+            {
+                response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, acceptCts.Token);
+                if (!response.IsSuccessStatusCode)
+                {
+                    string body;
+                    try { body = await response.Content.ReadAsStringAsync(); } catch { body = "(unreadable)"; }
+                    return (false, $"VpBot error {(int)response.StatusCode}: {body}");
+                }
+                acceptedOrTimeout = true;
+            }
+            catch (OperationCanceledException)
+            {
+                // vpbot didn't respond within 10s — it may still be processing
+                // Treat as accepted (fire-and-forget is working as designed)
+                _logger.LogWarning("FIRM: vpbot retranscribe accept timeout (10s) for meeting {MeetingId} — treating as accepted", meetingId);
+                acceptedOrTimeout = true;
             }
 
-            // Reset meeting status to allow callback pipeline
-            await using var db = await _dbFactory.CreateDbContextAsync();
-            var dbMeeting = await db.Meetings.FindAsync(meetingId);
-            if (dbMeeting != null)
+            if (acceptedOrTimeout)
             {
-                dbMeeting.Status = MeetingStatus.Transcribing;
-                await db.SaveChangesAsync();
+                // Reset meeting status to allow callback pipeline
+                await using var db = await _dbFactory.CreateDbContextAsync();
+                var dbMeeting = await db.Meetings.FindAsync(meetingId);
+                if (dbMeeting != null)
+                {
+                    dbMeeting.Status = MeetingStatus.Transcribing;
+                    await db.SaveChangesAsync();
+                }
+
+                _logger.LogInformation("FIRM: RetranscribeAsync triggered for meeting {MeetingId}", meetingId);
+                return (true, null);
             }
 
-            _logger.LogInformation("FIRM: RetranscribeAsync triggered for meeting {MeetingId}", meetingId);
-            return (true, null);
+            // Should never reach here, but satisfy compiler
+            return (false, "Unexpected state");
         }
         catch (Exception ex)
         {

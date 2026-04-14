@@ -246,8 +246,8 @@ public class DiscoveryService : IDiscoveryService
         }
 
         // 2. Build KB query
-        var narrativeTruncated = submission.NarrativeText.Length > 500
-            ? submission.NarrativeText[..500]
+        var narrativeTruncated = submission.NarrativeText.Length > 1500
+            ? submission.NarrativeText[..1500]
             : submission.NarrativeText;
         var kbQuery = $"{submission.Title}. {narrativeTruncated}";
 
@@ -286,6 +286,41 @@ public class DiscoveryService : IDiscoveryService
             .Where(f => f != null)
             .ToList();
 
+        // Pre-process large text files in parallel — summarize if > 40K chars
+        var textFileIds = files
+            .Where(f => f != null && (f.FileType == FileType.Html || f.FileType == FileType.Pdf ||
+                                       f.FileType == FileType.Text || f.FileType == FileType.Other)
+                                   && !string.IsNullOrWhiteSpace(f.ProcessedText))
+            .Select(f => f!.Id)
+            .ToHashSet();
+
+        var summarizeTasks = files
+            .Where(f => f != null && textFileIds.Contains(f!.Id) && f.ProcessedText!.Length > 40_000)
+            .Select(async f =>
+            {
+                var summaryPrompt = $"Summarize the following document for use as context in software feature discovery. Preserve key requirements, constraints, and technical details.\n\n{f!.ProcessedText}";
+                try
+                {
+                    using var sumCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    sumCts.CancelAfter(TimeSpan.FromSeconds(120));
+                    var result = await _bedrock.InvokeAsync(
+                        "You are a technical document summarizer.",
+                        summaryPrompt,
+                        maxTokens: 10_000,
+                        modelId: _inferenceConfig.ModelId,
+                        sumCts.Token);
+                    return (FileId: f.Id, Summary: result.Text);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning(ex, "[DISCOVERY_GEN] Summarization pre-pass failed for file {FileId} — using truncated verbatim", f.Id);
+                    return (FileId: f.Id, Summary: (string?)null);
+                }
+            });
+
+        var summaries = (await Task.WhenAll(summarizeTasks))
+            .ToDictionary(r => r.FileId, r => r.Summary);
+
         if (files.Any())
         {
             userPromptSb.AppendLine();
@@ -300,14 +335,22 @@ public class DiscoveryService : IDiscoveryService
                 {
                     case FileType.Html:
                     case FileType.Pdf:
-                    case FileType.Text:  // .md, .txt, .json — now routed here from FileType.Other stand-in
+                    case FileType.Text:
                     case FileType.Other:
                         if (!string.IsNullOrWhiteSpace(file.ProcessedText))
                         {
-                            // Truncate to 2000 chars to avoid overwhelming the question gen prompt
-                            var content = file.ProcessedText.Length > 2000
-                                ? file.ProcessedText[..2000] + "\n... [truncated]"
-                                : file.ProcessedText;
+                            string content;
+                            if (file.ProcessedText.Length > 40_000)
+                            {
+                                // Use summarization result, or fall back to first 40K if summarization failed
+                                content = summaries.TryGetValue(file.Id, out var summary) && summary != null
+                                    ? $"[Summarized — original {file.ProcessedText.Length:N0} chars]\n{summary}"
+                                    : file.ProcessedText[..40_000] + "\n... [truncated — summarization failed]";
+                            }
+                            else
+                            {
+                                content = file.ProcessedText; // verbatim, no truncation
+                            }
                             userPromptSb.AppendLine("**Contents:**");
                             userPromptSb.AppendLine(content);
                         }
@@ -318,9 +361,9 @@ public class DiscoveryService : IDiscoveryService
                         break;
 
                     case FileType.Image:
-                        if (imageCount >= 3)
+                        if (imageCount >= 5)
                         {
-                            userPromptSb.AppendLine("*[Additional image — skipped (limit 3)]*");
+                            userPromptSb.AppendLine("*[Additional image — skipped (limit 5)]*");
                             break;
                         }
                         imageCount++;
@@ -347,7 +390,7 @@ public class DiscoveryService : IDiscoveryService
                                         $"Describe this image in the context of the feature: {submission.Title}",
                                         imageBytes,
                                         file.ContentType,
-                                        512,
+                                        2000,
                                         _specGenConfig.VisionModelId,
                                         attemptCts.Token);
 

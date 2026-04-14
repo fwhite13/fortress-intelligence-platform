@@ -146,6 +146,41 @@ public class SpecGenerationService : ISpecGenerationService
             .Where(f => f is not null)
             .ToList();
 
+        // Pre-process large text files in parallel — summarize if > 40K chars
+        var textFileIds = files
+            .Where(f => f != null && (f!.FileType == FileType.Html || f.FileType == FileType.Pdf ||
+                                       f.FileType == FileType.Text || f.FileType == FileType.Other)
+                                   && !string.IsNullOrWhiteSpace(f.ProcessedText))
+            .Select(f => f!.Id)
+            .ToHashSet();
+
+        var summarizeTasks = files
+            .Where(f => f != null && textFileIds.Contains(f!.Id) && f.ProcessedText!.Length > 40_000)
+            .Select(async f =>
+            {
+                var summaryPrompt = $"Summarize the following document for use as context in software specification generation. Preserve key requirements, constraints, and technical details.\n\n{f!.ProcessedText}";
+                try
+                {
+                    using var sumCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    sumCts.CancelAfter(TimeSpan.FromSeconds(120));
+                    var result = await _bedrock.InvokeAsync(
+                        "You are a technical document summarizer.",
+                        summaryPrompt,
+                        maxTokens: 10_000,
+                        modelId: _specGenConfig.ModelId,
+                        sumCts.Token);
+                    return (FileId: f.Id, Summary: result.Text);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning(ex, "[SPEC_GEN] Summarization pre-pass failed for file {FileId} — using truncated verbatim", f.Id);
+                    return (FileId: f.Id, Summary: (string?)null);
+                }
+            });
+
+        var summaries = (await Task.WhenAll(summarizeTasks))
+            .ToDictionary(r => r.FileId, r => r.Summary);
+
         if (files.Count == 0)
         {
             sb.AppendLine();
@@ -249,7 +284,18 @@ public class SpecGenerationService : ISpecGenerationService
                         if (!string.IsNullOrWhiteSpace(file.ProcessedText))
                         {
                             sb.AppendLine($"**File Contents: {file.OriginalFileName}**");
-                            sb.AppendLine(file.ProcessedText);
+                            string textContent;
+                            if (file.ProcessedText.Length > 40_000)
+                            {
+                                textContent = summaries.TryGetValue(file.Id, out var summary) && summary != null
+                                    ? $"[Summarized — original {file.ProcessedText.Length:N0} chars]\n{summary}"
+                                    : file.ProcessedText[..40_000] + "\n... [truncated — summarization failed]";
+                            }
+                            else
+                            {
+                                textContent = file.ProcessedText;
+                            }
+                            sb.AppendLine(textContent);
                         }
                         else
                         {
