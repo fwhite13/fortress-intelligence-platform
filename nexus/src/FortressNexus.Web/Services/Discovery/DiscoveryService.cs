@@ -292,7 +292,8 @@ public class DiscoveryService : IDiscoveryService
                 {
                     case FileType.Html:
                     case FileType.Pdf:
-                    case FileType.Other: // FileType.Text added in #1814
+                    case FileType.Text:  // .md, .txt, .json — now routed here from FileType.Other stand-in
+                    case FileType.Other:
                         if (!string.IsNullOrWhiteSpace(file.ProcessedText))
                         {
                             // Truncate to 2000 chars to avoid overwhelming the question gen prompt

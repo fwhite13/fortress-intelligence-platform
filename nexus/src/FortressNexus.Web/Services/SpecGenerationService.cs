@@ -267,11 +267,8 @@ public class SpecGenerationService : ISpecGenerationService
 
                     case FileType.Other:
                     default:
-                        sb.AppendLine("**File Type: Other**");
-                        if (!string.IsNullOrWhiteSpace(file.ProcessedText))
-                            sb.AppendLine(file.ProcessedText);
-                        else
-                            sb.AppendLine("*No text content available for this file.*");
+                        sb.AppendLine("**File Type: Unknown/Unsupported**");
+                        sb.AppendLine("*[Binary or unsupported file type — content not included]*");
                         break;
                 }
             }
