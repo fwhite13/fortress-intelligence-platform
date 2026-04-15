@@ -242,9 +242,15 @@ public class SpecGenerationService : ISpecGenerationService
                                     _logger.LogInformation("[SPEC_GEN] Vision attempt {Attempt}/{Max} fileId={FileId} s3Key={S3Key} imageBytes={Bytes} timeout={TimeoutS}s",
                                         attempt, maxAttempts, file.Id, file.S3Key, imageBytes.Length, _specGenConfig.TimeoutSeconds);
 
+                                    string visionUserPrompt;
+                                    if (!string.IsNullOrWhiteSpace(file.UserDescription))
+                                        visionUserPrompt = $"Describe this UI mockup image. Context provided by submitter: {file.UserDescription}";
+                                    else
+                                        visionUserPrompt = $"Describe what you see in this UI mockup image for the feature: {submission.Title}";
+
                                     visionResult = await _bedrock.InvokeWithImageAsync(
                                         systemPrompt,
-                                        $"Describe what you see in this UI mockup image for the feature: {submission.Title}",
+                                        visionUserPrompt,
                                         imageBytes,
                                         file.ContentType,
                                         _specGenConfig.VisionMaxTokens,

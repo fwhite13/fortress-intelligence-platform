@@ -37,6 +37,7 @@ public class NexusDbContext : DbContext
             entity.Property(e => e.UploadedAt).HasColumnName("uploaded_at").IsRequired();
             entity.Property(e => e.ProcessedText).HasColumnName("processed_text");
             entity.Property(e => e.FileType).HasColumnName("file_type").HasConversion<int>().IsRequired();
+            entity.Property(e => e.UserDescription).HasColumnName("user_description").HasMaxLength(500);
             entity.HasMany(e => e.SubmissionFiles)
                 .WithOne(sf => sf.UploadedFile)
                 .HasForeignKey(sf => sf.UploadedFileId)

@@ -14,6 +14,7 @@ public class UploadedFile
     public DateTime UploadedAt { get; set; }
     public string? ProcessedText { get; set; }
     public FileType FileType { get; set; } = FileType.Other;
+    public string? UserDescription { get; set; }
 
     // Navigation
     public List<SubmissionFile> SubmissionFiles { get; set; } = new();

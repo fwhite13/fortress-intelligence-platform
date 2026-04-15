@@ -389,9 +389,15 @@ public class DiscoveryService : IDiscoveryService
 
                                 try
                                 {
+                                    string visionUserPrompt;
+                                    if (!string.IsNullOrWhiteSpace(file.UserDescription))
+                                        visionUserPrompt = $"Describe this image for discovery question generation. Context provided by submitter: {file.UserDescription}";
+                                    else
+                                        visionUserPrompt = $"Describe this image in the context of the feature: {submission.Title}";
+
                                     var visionResult = await _bedrock.InvokeWithImageAsync(
                                         "You are a business analyst assistant. Describe the contents of this image concisely for the purpose of generating discovery questions about a software feature.",
-                                        $"Describe this image in the context of the feature: {submission.Title}",
+                                        visionUserPrompt,
                                         imageBytes,
                                         file.ContentType,
                                         2000,

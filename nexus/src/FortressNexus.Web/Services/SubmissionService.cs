@@ -114,6 +114,12 @@ public class SubmissionService : ISubmissionService
         return file;
     }
 
+    public async Task UpdateUploadedFileAsync(UploadedFile file)
+    {
+        _db.UploadedFiles.Update(file);
+        await _db.SaveChangesAsync();
+    }
+
     public async Task UpdateNarrativeAsync(int submissionId, string narrativeText)
     {
         var submission = await _db.Submissions.FindAsync(submissionId);

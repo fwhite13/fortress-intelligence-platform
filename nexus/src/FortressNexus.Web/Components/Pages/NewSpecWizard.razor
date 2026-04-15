@@ -104,6 +104,18 @@
                                                Class="nexus-existing-file-remove-btn"
                                                aria-label="Remove file" />
                             </div>
+                            @if (capturedFile.FileType == FortressNexus.Web.Models.Enums.FileType.Image)
+                            {
+                                <MudTextField T="string"
+                                              Value="capturedFile.UserDescription"
+                                              ValueChanged="@(v => { capturedFile.UserDescription = v; _descriptionChanged = true; })"
+                                              Label="Image context (optional)"
+                                              Placeholder="What this image shows and why it's relevant to the spec"
+                                              Variant="Variant.Outlined"
+                                              Lines="2"
+                                              MaxLength="500"
+                                              Class="nexus-image-description-field mt-1" />
+                            }
                         </MudListItem>
                     }
                     @if (_isResume)
@@ -272,6 +284,7 @@
     private string _originalNarrative = string.Empty;
     private HashSet<int> _originalFileIds = new();
     private HashSet<int> _filesToDelete = new();
+    private bool _descriptionChanged = false;
     private SpecDocument? _existingSpecDocument;
 
     private DiscoverySession? _discoverySession;
@@ -290,7 +303,8 @@
     private bool _hasContentChanges => _isResume && (
         _narrativeText.Trim() != _originalNarrative.Trim() ||
         _filesToDelete.Count > 0 ||
-        _uploadedFiles.Any(f => !_originalFileIds.Contains(f.Id))
+        _uploadedFiles.Any(f => !_originalFileIds.Contains(f.Id)) ||
+        _descriptionChanged
     );
 
     private bool _hasChanges => _hasContentChanges ||
@@ -449,6 +463,22 @@
             {
                 Snackbar.Add($"Warning: narrative save failed — {ex.Message}", Severity.Warning);
             }
+
+            // Persist UserDescription changes for image files
+            if (_descriptionChanged)
+            {
+                foreach (var uploadedFile in _uploadedFiles)
+                {
+                    try
+                    {
+                        await SubmissionService.UpdateUploadedFileAsync(uploadedFile);
+                    }
+                    catch (Exception ex)
+                    {
+                        Snackbar.Add($"Warning: image description save failed for '{uploadedFile.OriginalFileName}' — {ex.Message}", Severity.Warning);
+                    }
+                }
+            }
         }
 
         _activeStep = 2;
@@ -498,6 +528,7 @@
         {
             // Already have an active session (Pending, QuestionsReady, Answered) — just clear loading
             _discoveryLoading = false;
+            StateHasChanged();
         }
     }
 
