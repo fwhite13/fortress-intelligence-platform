@@ -447,6 +447,8 @@ public class DiscoveryService : IDiscoveryService
 
         string userPrompt = userPromptSb.ToString();
 
+        _logger.LogInformation("[DISCOVERY_GEN] Full prompt ({Chars} chars):\n{Prompt}", userPrompt.Length, userPrompt);
+
         // 5. Call Bedrock
         string rawResponse;
         try
