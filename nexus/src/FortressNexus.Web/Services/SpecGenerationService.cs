@@ -239,6 +239,9 @@ public class SpecGenerationService : ISpecGenerationService
 
                                 try
                                 {
+                                    _logger.LogInformation("[SPEC_GEN] Vision attempt {Attempt}/{Max} fileId={FileId} s3Key={S3Key} imageBytes={Bytes} timeout={TimeoutS}s",
+                                        attempt, maxAttempts, file.Id, file.S3Key, imageBytes.Length, _specGenConfig.TimeoutSeconds);
+
                                     visionResult = await _bedrock.InvokeWithImageAsync(
                                         systemPrompt,
                                         $"Describe what you see in this UI mockup image for the feature: {submission.Title}",
@@ -249,6 +252,13 @@ public class SpecGenerationService : ISpecGenerationService
                                         attemptCts.Token);
 
                                     visionSucceeded = true;
+                                    break;
+                                }
+                                catch (Amazon.BedrockRuntime.AmazonBedrockRuntimeException bedrockEx)
+                                {
+                                    _logger.LogError("[SPEC_GEN] Vision Bedrock error (attempt {Attempt}/{Max}) fileId={FileId}: ErrorCode={ErrorCode} StatusCode={StatusCode}",
+                                        attempt, maxAttempts, file.Id, bedrockEx.ErrorCode, (int)bedrockEx.StatusCode);
+                                    // Bedrock errors (throttling, auth, model access) — don't retry, break out
                                     break;
                                 }
                                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

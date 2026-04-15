@@ -157,26 +157,54 @@ public class BedrockService : IDisposable
             Body = new MemoryStream(Encoding.UTF8.GetBytes(json))
         };
 
-        _logger.LogInformation("[BEDROCK] Invoking model {Model} with image ({MimeType}, {Bytes} bytes), maxTokens={MaxTokens}",
-            model, mimeType, imageBytes.Length, maxTokens);
+        var invokeStart = DateTimeOffset.UtcNow;
+        _logger.LogInformation("[BEDROCK] Vision invoke START {Timestamp:O} model={Model} mimeType={MimeType} imageBytes={Bytes} maxTokens={MaxTokens}",
+            invokeStart, model, mimeType, imageBytes.Length, maxTokens);
 
-        var response = await _client.InvokeModelAsync(request, cancellationToken);
-        var responseJson = await new StreamReader(response.Body).ReadToEndAsync();
-
-        using var doc = JsonDocument.Parse(responseJson);
-        var root = doc.RootElement;
-
-        var text = root.GetProperty("content")[0].GetProperty("text").GetString() ?? string.Empty;
-
-        int promptTokens = 0;
-        int completionTokens = 0;
-        if (root.TryGetProperty("usage", out var usage))
+        try
         {
-            if (usage.TryGetProperty("input_tokens", out var it)) promptTokens = it.GetInt32();
-            if (usage.TryGetProperty("output_tokens", out var ot)) completionTokens = ot.GetInt32();
-        }
+            var response = await _client.InvokeModelAsync(request, cancellationToken);
+            var responseJson = await new StreamReader(response.Body).ReadToEndAsync();
 
-        return (text, promptTokens, completionTokens);
+            using var doc = JsonDocument.Parse(responseJson);
+            var root = doc.RootElement;
+
+            var text = root.GetProperty("content")[0].GetProperty("text").GetString() ?? string.Empty;
+
+            int promptTokens = 0;
+            int completionTokens = 0;
+            if (root.TryGetProperty("usage", out var usage))
+            {
+                if (usage.TryGetProperty("input_tokens", out var it)) promptTokens = it.GetInt32();
+                if (usage.TryGetProperty("output_tokens", out var ot)) completionTokens = ot.GetInt32();
+            }
+
+            var elapsed = DateTimeOffset.UtcNow - invokeStart;
+            _logger.LogInformation("[BEDROCK] Vision invoke COMPLETE elapsed={ElapsedMs}ms model={Model} promptTokens={Pt} completionTokens={Ct}",
+                (int)elapsed.TotalMilliseconds, model, promptTokens, completionTokens);
+
+            return (text, promptTokens, completionTokens);
+        }
+        catch (Amazon.BedrockRuntime.AmazonBedrockRuntimeException bedrockEx)
+        {
+            _logger.LogError("[BEDROCK] Vision invoke FAILED — AmazonBedrockRuntimeException: ErrorCode={ErrorCode} StatusCode={StatusCode} Message={Message} model={Model}",
+                bedrockEx.ErrorCode, (int)bedrockEx.StatusCode, bedrockEx.Message, model);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            var elapsed = DateTimeOffset.UtcNow - invokeStart;
+            _logger.LogWarning("[BEDROCK] Vision invoke CANCELLED/TIMEOUT after {ElapsedMs}ms model={Model}",
+                (int)elapsed.TotalMilliseconds, model);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var elapsed = DateTimeOffset.UtcNow - invokeStart;
+            _logger.LogError(ex, "[BEDROCK] Vision invoke UNEXPECTED EXCEPTION after {ElapsedMs}ms ExceptionType={ExType} model={Model}",
+                (int)elapsed.TotalMilliseconds, ex.GetType().FullName, model);
+            throw;
+        }
     }
 
     public void Dispose() => _client.Dispose();
