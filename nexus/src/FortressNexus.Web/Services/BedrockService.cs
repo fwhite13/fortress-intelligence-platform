@@ -21,7 +21,8 @@ public class BedrockService : IDisposable
         _logger = logger;
         _client = new AmazonBedrockRuntimeClient(new AmazonBedrockRuntimeConfig
         {
-            RegionEndpoint = RegionEndpoint.USEast1
+            RegionEndpoint = RegionEndpoint.USEast1,
+            Timeout = TimeSpan.FromSeconds(600)
         });
     }
 
@@ -136,6 +137,7 @@ public class BedrockService : IDisposable
         var requestObj = new JsonObject
         {
             ["anthropic_version"] = "bedrock-2023-05-31",
+            ["anthropic_beta"] = new JsonArray { "output-128k-2025-02-19" },
             ["max_tokens"] = maxTokens,
             ["system"] = systemPrompt,
             ["messages"] = new JsonArray
@@ -191,11 +193,12 @@ public class BedrockService : IDisposable
                 bedrockEx.ErrorCode, (int)bedrockEx.StatusCode, bedrockEx.Message, model);
             throw;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException oce)
         {
             var elapsed = DateTimeOffset.UtcNow - invokeStart;
-            _logger.LogWarning("[BEDROCK] Vision invoke CANCELLED/TIMEOUT after {ElapsedMs}ms model={Model}",
-                (int)elapsed.TotalMilliseconds, model);
+            var reason = cancellationToken.IsCancellationRequested ? "caller-cancelled" : "per-attempt-timeout";
+            _logger.LogWarning("[BEDROCK] Vision invoke CANCELLED/TIMEOUT after {ElapsedMs}ms model={Model} reason={Reason} token={TokenId}",
+                (int)elapsed.TotalMilliseconds, model, reason, oce.CancellationToken.GetHashCode());
             throw;
         }
         catch (Exception ex)
