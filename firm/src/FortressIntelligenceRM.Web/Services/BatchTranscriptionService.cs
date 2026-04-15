@@ -13,13 +13,15 @@ public interface IBatchTranscriptionService
 public class BatchTranscriptionService : IBatchTranscriptionService
 {
     private readonly IAmazonBatch _batch;
+    private readonly IConfiguration _config;
     private readonly ILogger<BatchTranscriptionService> _logger;
     private const string JobQueue = "firm-transcription-queue";
     private const string JobDefinition = "firm-transcription-job";
 
-    public BatchTranscriptionService(IAmazonBatch batch, ILogger<BatchTranscriptionService> logger)
+    public BatchTranscriptionService(IAmazonBatch batch, IConfiguration config, ILogger<BatchTranscriptionService> logger)
     {
         _batch = batch;
+        _config = config;
         _logger = logger;
     }
 
@@ -36,6 +38,8 @@ public class BatchTranscriptionService : IBatchTranscriptionService
                 [
                     new Amazon.Batch.Model.KeyValuePair { Name = "MEETING_ID", Value = meetingId.ToString() },
                     new Amazon.Batch.Model.KeyValuePair { Name = "AUDIO_S3_KEY", Value = audioS3Key },
+                    new Amazon.Batch.Model.KeyValuePair { Name = "BOT_CALLBACK_SECRET", Value = _config["Firm:BotCallbackSecret"] ?? "" },
+                    new Amazon.Batch.Model.KeyValuePair { Name = "FIRM_CALLBACK_URL", Value = _config["Firm:CallbackUrl"] ?? "https://firm.dev.fortressam.ai/api/vp/callback" },
                 ]
             }
         };
