@@ -27,6 +27,10 @@ public class BatchTranscriptionService : IBatchTranscriptionService
 
     public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, CancellationToken ct = default)
     {
+        var callbackSecret = _config["Firm:BotCallbackSecret"] ?? "";
+        if (string.IsNullOrEmpty(callbackSecret))
+            _logger.LogWarning("FIRM: BotCallbackSecret is not configured — Batch job callback will return 401");
+
         var request = new SubmitJobRequest
         {
             JobName = $"retranscribe-meeting-{meetingId}-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}",
@@ -38,7 +42,7 @@ public class BatchTranscriptionService : IBatchTranscriptionService
                 [
                     new Amazon.Batch.Model.KeyValuePair { Name = "MEETING_ID", Value = meetingId.ToString() },
                     new Amazon.Batch.Model.KeyValuePair { Name = "AUDIO_S3_KEY", Value = audioS3Key },
-                    new Amazon.Batch.Model.KeyValuePair { Name = "BOT_CALLBACK_SECRET", Value = _config["Firm:BotCallbackSecret"] ?? "" },
+                    new Amazon.Batch.Model.KeyValuePair { Name = "BOT_CALLBACK_SECRET", Value = callbackSecret },
                     new Amazon.Batch.Model.KeyValuePair { Name = "FIRM_CALLBACK_URL", Value = _config["Firm:CallbackUrl"] ?? "https://firm.dev.fortressam.ai/api/vp/callback" },
                 ]
             }
