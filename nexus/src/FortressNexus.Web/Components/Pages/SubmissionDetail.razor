@@ -14,6 +14,7 @@
 @inject IDiscoveryService DiscoveryService
 @inject IDialogService DialogService
 @inject ILogger<SubmissionDetail> Logger
+@inject IJSRuntime JS
 
 @using FortressNexus.Web.Models.Entities
 @using FortressNexus.Web.Models.Enums
@@ -219,9 +220,9 @@ else if (_submission is not null)
             @if (_activeSpec is not null)
             {
                 <MudMenu Label="Download" StartIcon="@Icons.Material.Filled.Download" Variant="Variant.Outlined" Color="Color.Default" Class="nexus-detail-download-menu">
-                    <MudMenuItem OnClick="@(() => DownloadSpec("md"))">Markdown (.md)</MudMenuItem>
-                    <MudMenuItem OnClick="@(() => DownloadSpec("docx"))">Word (.docx)</MudMenuItem>
-                    <MudMenuItem OnClick="@(() => DownloadSpec("pdf"))">PDF (.pdf)</MudMenuItem>
+                    <MudMenuItem OnClick="@(async () => await DownloadSpec("md"))">Markdown (.md)</MudMenuItem>
+                    <MudMenuItem OnClick="@(async () => await DownloadSpec("docx"))">Word (.docx)</MudMenuItem>
+                    <MudMenuItem OnClick="@(async () => await DownloadSpec("pdf"))">PDF (.pdf)</MudMenuItem>
                 </MudMenu>
             }
 
@@ -490,10 +491,11 @@ else if (_submission is not null)
         }
     }
 
-    private void DownloadSpec(string format)
+    private async Task DownloadSpec(string format)
     {
         if (_submission is null || _activeSpec is null) return;
-        Nav.NavigateTo($"/nexus/{Id}/export?format={format}", forceLoad: true);
+        var url = $"/nexus/{Id}/export?format={format}";
+        await JS.InvokeVoidAsync("open", url, "_self");
     }
 
     private static Color GetStatusColor(SubmissionStatus status) => status switch
