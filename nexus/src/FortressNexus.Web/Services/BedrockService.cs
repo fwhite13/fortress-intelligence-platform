@@ -45,6 +45,7 @@ public class BedrockService : IDisposable
         var requestObj = new JsonObject
         {
             ["anthropic_version"] = "bedrock-2023-05-31",
+            ["anthropic_beta"] = new JsonArray { "output-128k-2025-02-19" },
             ["max_tokens"] = maxTokens,
             ["system"] = systemPrompt,
             ["messages"] = new JsonArray
