@@ -391,9 +391,9 @@ public class DiscoveryService : IDiscoveryService
                                 {
                                     string visionUserPrompt;
                                     if (!string.IsNullOrWhiteSpace(file.UserDescription))
-                                        visionUserPrompt = $"Describe this image for discovery question generation. Context provided by submitter: {file.UserDescription}";
+                                        visionUserPrompt = $"Describe the UI elements, layout, labels, and interactions visible in this image. Submitter note: {file.UserDescription}. Be specific and complete. Do not generate questions or recommendations.";
                                     else
-                                        visionUserPrompt = $"Describe this image in the context of the feature: {submission.Title}";
+                                        visionUserPrompt = "Describe the UI elements, layout, labels, and interactions visible in this image. Be specific and complete. Do not generate questions or recommendations.";
 
                                     var visionResult = await _bedrock.InvokeWithImageAsync(
                                         "You are a business analyst assistant. Describe the contents of this image concisely for the purpose of generating discovery questions about a software feature.",
@@ -405,6 +405,8 @@ public class DiscoveryService : IDiscoveryService
                                         attemptCts.Token);
 
                                     imageDescription = visionResult.Text;
+                                    _logger.LogInformation("[DISCOVERY_GEN] Image description for {FileName} (attempt {Attempt}): {Description}",
+                                        file.OriginalFileName, attempt, imageDescription);
                                     break;
                                 }
                                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
