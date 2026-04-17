@@ -55,6 +55,8 @@ public class BatchTranscriptionService : IBatchTranscriptionService
         if (orgWikiJson != null)
             envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "ORG_WIKI_JSON", Value = orgWikiJson });
 
+        envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "HUGGINGFACE_OFFLINE", Value = "1" });
+
         var request = new SubmitJobRequest
         {
             JobName = $"retranscribe-meeting-{meetingId}-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}",
