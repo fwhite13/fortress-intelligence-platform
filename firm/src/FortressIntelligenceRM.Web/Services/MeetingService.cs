@@ -280,7 +280,8 @@ public class MeetingService
         try
         {
             var audioS3Key = meeting.AudioS3Key;
-            var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key);
+            var meetingDate = meeting.StartedAt ?? meeting.ScheduledAt;
+            var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate);
 
             // Reset meeting status to Transcribing
             await using var db = await _dbFactory.CreateDbContextAsync();

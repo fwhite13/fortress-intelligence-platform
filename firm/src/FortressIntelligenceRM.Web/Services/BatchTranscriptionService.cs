@@ -7,7 +7,7 @@ namespace FortressIntelligenceRM.Web.Services;
 
 public interface IBatchTranscriptionService
 {
-    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, CancellationToken ct = default);
+    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, CancellationToken ct = default);
 }
 
 public class BatchTranscriptionService : IBatchTranscriptionService
@@ -27,7 +27,7 @@ public class BatchTranscriptionService : IBatchTranscriptionService
         _logger = logger;
     }
 
-    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, CancellationToken ct = default)
+    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, CancellationToken ct = default)
     {
         var callbackSecret = _config["Firm:BotCallbackSecret"] ?? "";
         if (string.IsNullOrEmpty(callbackSecret))
@@ -49,6 +49,7 @@ public class BatchTranscriptionService : IBatchTranscriptionService
             new Amazon.Batch.Model.KeyValuePair { Name = "AUDIO_S3_KEY", Value = audioS3Key },
             new Amazon.Batch.Model.KeyValuePair { Name = "BOT_CALLBACK_SECRET", Value = callbackSecret },
             new Amazon.Batch.Model.KeyValuePair { Name = "FIRM_CALLBACK_URL", Value = _config["Firm:CallbackUrl"] ?? "http://firm.fip.internal:8080/api/vp/callback" },
+            new Amazon.Batch.Model.KeyValuePair { Name = "MEETING_DATE", Value = meetingDate?.ToString("yyyy-MM-dd") ?? "" },
         };
 
         if (orgWikiJson != null)
