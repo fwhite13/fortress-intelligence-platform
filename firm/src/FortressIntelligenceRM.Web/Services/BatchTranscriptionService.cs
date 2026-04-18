@@ -51,7 +51,6 @@ public class BatchTranscriptionService : IBatchTranscriptionService
             new Amazon.Batch.Model.KeyValuePair { Name = "FIRM_CALLBACK_URL", Value = _config["Firm:CallbackUrl"] ?? "http://firm.fip.internal:8080/api/vp/callback" },
             new Amazon.Batch.Model.KeyValuePair { Name = "MEETING_DATE", Value = meetingDate?.ToString("yyyy-MM-dd") ?? "" },
             new Amazon.Batch.Model.KeyValuePair { Name = "PYANNOTE_CACHE", Value = "/app/.cache/huggingface/hub" },
-            new Amazon.Batch.Model.KeyValuePair { Name = "HF_HUB_OFFLINE", Value = "1" },
         };
 
         if (orgWikiJson != null)
