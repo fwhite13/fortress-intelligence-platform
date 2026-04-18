@@ -10,6 +10,7 @@ public class FirmMeetingSummary
     public string? ActionItemsJson { get; set; }
     public string? KeyDecisionsJson { get; set; }
     public string? FollowUpsJson { get; set; }
+    public string? OpenQuestionsJson { get; set; }
     [MaxLength(100)]
     public string? ModelUsed { get; set; }
     public DateTime CreatedAt { get; set; }

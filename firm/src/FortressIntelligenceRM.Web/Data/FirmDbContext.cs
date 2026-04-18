@@ -125,6 +125,7 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.ActionItemsJson).HasColumnName("action_items_json");
             entity.Property(e => e.KeyDecisionsJson).HasColumnName("key_decisions_json");
             entity.Property(e => e.FollowUpsJson).HasColumnName("follow_ups_json");
+            entity.Property(e => e.OpenQuestionsJson).HasColumnName("open_questions_json");
             entity.Property(e => e.ModelUsed).HasColumnName("model_used").HasMaxLength(100);
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.HasOne(e => e.Meeting)

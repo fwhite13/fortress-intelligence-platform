@@ -189,6 +189,22 @@
                                 </MudList>
                             }
                         }
+                        @if (!string.IsNullOrEmpty(_meeting.Summary.OpenQuestionsJson))
+                        {
+                            var openQuestions = TryDeserializeStringList(_meeting.Summary.OpenQuestionsJson);
+                            @if (openQuestions.Any())
+                            {
+                                <MudText Typo="Typo.h6" Style="color: var(--color-gold);" Class="mb-2">Open Questions</MudText>
+                                <MudList T="string">
+                                    @foreach (var q in openQuestions)
+                                    {
+                                        <MudListItem T="string" Style="color: var(--color-text-primary);">
+                                            <MudIcon Icon="@Icons.Material.Filled.HelpOutline" Size="Size.Small" Class="mr-2" />@q
+                                        </MudListItem>
+                                    }
+                                </MudList>
+                            }
+                        }
                     }
                     else
                     {

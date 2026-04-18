@@ -97,6 +97,7 @@ public class DatabaseInitializationService : IHostedService
                     action_items_json JSON NULL,
                     key_decisions_json JSON NULL,
                     follow_ups_json JSON NULL,
+                    open_questions_json JSON NULL,
                     model_used VARCHAR(100) NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
@@ -190,7 +191,8 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_meeting_transcripts ADD CONSTRAINT fk_fmt_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
                 "ALTER TABLE firm_meeting_summaries ADD CONSTRAINT fk_fms_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
                 "ALTER TABLE firm_meeting_kb_pushes ADD CONSTRAINT fk_fmkp_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
-                "ALTER TABLE firm_meeting_channel_posts ADD CONSTRAINT fk_fmcp_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE"
+                "ALTER TABLE firm_meeting_channel_posts ADD CONSTRAINT fk_fmcp_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
+                "ALTER TABLE firm_meeting_summaries ADD COLUMN IF NOT EXISTS open_questions_json JSON NULL"
             };
 
             foreach (var alterSql in alterStatements)

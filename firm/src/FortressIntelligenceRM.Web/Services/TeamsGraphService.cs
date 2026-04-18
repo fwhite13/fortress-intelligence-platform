@@ -229,14 +229,16 @@ public class TeamsGraphService : IHostedService, IDisposable
         if (summary != null)
         {
             await db.Database.ExecuteSqlRawAsync(
-                @"INSERT INTO firm_meeting_summaries (meeting_id, summary_text, action_items_json, key_decisions_json, follow_ups_json, created_at)
-                  VALUES ({0}, {1}, {2}, {3}, {4}, UTC_TIMESTAMP())
+                @"INSERT INTO firm_meeting_summaries (meeting_id, summary_text, action_items_json, key_decisions_json, follow_ups_json, open_questions_json, created_at)
+                  VALUES ({0}, {1}, {2}, {3}, {4}, {5}, UTC_TIMESTAMP())
                   ON DUPLICATE KEY UPDATE summary_text = VALUES(summary_text),
                       action_items_json = VALUES(action_items_json),
                       key_decisions_json = VALUES(key_decisions_json),
-                      follow_ups_json = VALUES(follow_ups_json)",
+                      follow_ups_json = VALUES(follow_ups_json),
+                      open_questions_json = VALUES(open_questions_json)",
                 meetingId, summary.SummaryText ?? "", summary.ActionItemsJson ?? "[]",
-                summary.KeyDecisionsJson ?? "[]", summary.FollowUpsJson ?? "[]");
+                summary.KeyDecisionsJson ?? "[]", summary.FollowUpsJson ?? "[]",
+                summary.OpenQuestionsJson ?? "[]");
         }
 
         await db.Database.ExecuteSqlRawAsync(
@@ -382,17 +384,19 @@ public class TeamsGraphService : IHostedService, IDisposable
             if (summary != null)
             {
                 await db.Database.ExecuteSqlRawAsync(
-                    @"INSERT INTO firm_meeting_summaries (meeting_id, summary_text, action_items_json, key_decisions_json, follow_ups_json, created_at)
-                      VALUES ({0}, {1}, {2}, {3}, {4}, UTC_TIMESTAMP())
+                    @"INSERT INTO firm_meeting_summaries (meeting_id, summary_text, action_items_json, key_decisions_json, follow_ups_json, open_questions_json, created_at)
+                      VALUES ({0}, {1}, {2}, {3}, {4}, {5}, UTC_TIMESTAMP())
                       ON DUPLICATE KEY UPDATE summary_text = VALUES(summary_text),
                           action_items_json = VALUES(action_items_json),
                           key_decisions_json = VALUES(key_decisions_json),
-                          follow_ups_json = VALUES(follow_ups_json)",
+                          follow_ups_json = VALUES(follow_ups_json),
+                          open_questions_json = VALUES(open_questions_json)",
                     meetingId.Value,
                     summary.SummaryText ?? "",
                     summary.ActionItemsJson ?? "[]",
                     summary.KeyDecisionsJson ?? "[]",
-                    summary.FollowUpsJson ?? "[]");
+                    summary.FollowUpsJson ?? "[]",
+                    summary.OpenQuestionsJson ?? "[]");
             }
 
             // Mark complete
@@ -627,6 +631,7 @@ Transcript:
                 ActionItemsJson = summaryRoot.TryGetProperty("actionItemsJson", out var ai) ? ai.GetString() : null,
                 KeyDecisionsJson = summaryRoot.TryGetProperty("keyDecisionsJson", out var kd) ? kd.GetString() : null,
                 FollowUpsJson = summaryRoot.TryGetProperty("followUpsJson", out var fu) ? fu.GetString() : null,
+                OpenQuestionsJson = summaryRoot.TryGetProperty("openQuestionsJson", out var oq) ? oq.GetString() : null,
                 ModelUsed = _config.GetValue<string>("Bedrock:SummaryModelId", "anthropic.claude-3-sonnet-20240229-v1:0")!
             };
         }
@@ -705,6 +710,7 @@ Transcript:
         public string? ActionItemsJson { get; set; }
         public string? KeyDecisionsJson { get; set; }
         public string? FollowUpsJson { get; set; }
+        public string? OpenQuestionsJson { get; set; }
         public string? ModelUsed { get; set; }
     }
 

@@ -258,6 +258,7 @@ public class MeetingsApiController : ControllerBase
                     ActionItemsJson = payload.Summary.ActionItemsJson,
                     KeyDecisionsJson = payload.Summary.KeyDecisionsJson,
                     FollowUpsJson = payload.Summary.FollowUpsJson,
+                    OpenQuestionsJson = payload.Summary.OpenQuestionsJson,
                     ModelUsed = payload.Summary.ModelUsed,
                     CreatedAt = DateTime.UtcNow
                 });
@@ -268,6 +269,7 @@ public class MeetingsApiController : ControllerBase
                 existingSummary.ActionItemsJson = payload.Summary.ActionItemsJson;
                 existingSummary.KeyDecisionsJson = payload.Summary.KeyDecisionsJson;
                 existingSummary.FollowUpsJson = payload.Summary.FollowUpsJson;
+                existingSummary.OpenQuestionsJson = payload.Summary.OpenQuestionsJson;
                 existingSummary.ModelUsed = payload.Summary.ModelUsed;
             }
             await db.SaveChangesAsync();
@@ -480,6 +482,21 @@ public class MeetingsApiController : ControllerBase
                 {
                     mdSb.AppendLine("## Follow-ups");
                     followUps.ForEach(f => mdSb.AppendLine($"- {f}"));
+                    mdSb.AppendLine();
+                }
+            }
+            catch { /* Non-fatal — skip section if JSON is malformed */ }
+        }
+
+        if (!string.IsNullOrEmpty(summary.OpenQuestionsJson))
+        {
+            try
+            {
+                var questions = JsonSerializer.Deserialize<List<string>>(summary.OpenQuestionsJson);
+                if (questions?.Any() == true)
+                {
+                    mdSb.AppendLine("## Open Questions");
+                    questions.ForEach(q => mdSb.AppendLine($"- {q}"));
                     mdSb.AppendLine();
                 }
             }
@@ -859,6 +876,7 @@ public class MeetingsApiController : ControllerBase
                 ActionItemsJson = summary.ActionItemsJson ?? "[]",
                 KeyDecisionsJson = summary.KeyDecisionsJson ?? "[]",
                 FollowUpsJson = summary.FollowUpsJson ?? "[]",
+                OpenQuestionsJson = summary.OpenQuestionsJson ?? "[]",
                 ModelUsed = summary.ModelUsed,
                 CreatedAt = DateTime.UtcNow
             });
@@ -869,6 +887,7 @@ public class MeetingsApiController : ControllerBase
             existing.ActionItemsJson = summary.ActionItemsJson ?? "[]";
             existing.KeyDecisionsJson = summary.KeyDecisionsJson ?? "[]";
             existing.FollowUpsJson = summary.FollowUpsJson ?? "[]";
+            existing.OpenQuestionsJson = summary.OpenQuestionsJson ?? "[]";
             existing.ModelUsed = summary.ModelUsed;
         }
         try
@@ -1022,6 +1041,7 @@ public class SummaryPayload
     public string? ActionItemsJson { get; set; }
     public string? KeyDecisionsJson { get; set; }
     public string? FollowUpsJson { get; set; }
+    public string? OpenQuestionsJson { get; set; }
     public string? ModelUsed { get; set; }
 }
 
