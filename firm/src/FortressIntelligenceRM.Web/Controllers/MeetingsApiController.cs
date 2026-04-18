@@ -225,6 +225,10 @@ public class MeetingsApiController : ControllerBase
         // Write transcript on transcription_complete
         if (meetingStatus == MeetingStatus.Summarizing && payload.Segments != null)
         {
+            // Clear existing transcript rows for this meeting before inserting new segments
+            var existingTranscripts = db.Transcripts.Where(t => t.MeetingId == payload.MeetingId);
+            db.Transcripts.RemoveRange(existingTranscripts);
+
             foreach (var seg in payload.Segments)
             {
                 db.Transcripts.Add(new FirmMeetingTranscript
