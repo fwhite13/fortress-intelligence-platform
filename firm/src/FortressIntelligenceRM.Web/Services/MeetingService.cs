@@ -71,7 +71,9 @@ public class MeetingService
         if (errorMessage != null) meeting.ErrorMessage = errorMessage;
         if (status == MeetingStatus.Recording && meeting.StartedAt == null)
             meeting.StartedAt = DateTime.UtcNow;
-        if (status is MeetingStatus.Complete or MeetingStatus.Failed)
+        // Only set EndedAt/DurationSeconds on recording-end transitions (bot leaving the meeting)
+        // Do NOT overwrite on retranscription callbacks (Summarizing, Complete)
+        if (status is MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing or MeetingStatus.Failed)
         {
             meeting.EndedAt ??= DateTime.UtcNow;
             if (meeting.StartedAt != null)
