@@ -266,6 +266,28 @@ public class MeetingService
         [property: System.Text.Json.Serialization.JsonPropertyName("userId")] string UserId);
 
     /// <summary>
+    /// Submits an AWS Batch transcription job for the given meeting's audio (ADO#2179).
+    /// Fetches the meeting record to get AudioS3Key and StartedAt, then submits the Batch job.
+    /// Returns the Batch job ID. Throws if AudioS3Key is null/empty.
+    /// </summary>
+    public async Task<string> SubmitTranscriptionJobAsync(long meetingId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.FindAsync(meetingId);
+        if (meeting == null)
+            throw new InvalidOperationException($"Meeting {meetingId} not found");
+
+        if (string.IsNullOrEmpty(meeting.AudioS3Key))
+            throw new InvalidOperationException($"Meeting {meetingId} has no AudioS3Key — cannot submit transcription job");
+
+        var audioS3Key = meeting.AudioS3Key;
+        var meetingDate = meeting.StartedAt ?? meeting.ScheduledAt;
+        var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate);
+        _logger.LogInformation("FIRM: SubmitTranscriptionJobAsync submitted Batch job {JobId} for meeting {MeetingId}", jobId, meetingId);
+        return jobId;
+    }
+
+    /// <summary>
     /// Submits an AWS Batch transcription job for the meeting's audio (ADO#1844).
     /// Replaces the previous vpbot HTTP call — firm-web now submits Batch directly.
     /// Returns (true, null) on success, (false, errorMessage) on failure.
@@ -281,9 +303,7 @@ public class MeetingService
 
         try
         {
-            var audioS3Key = meeting.AudioS3Key;
-            var meetingDate = meeting.StartedAt ?? meeting.ScheduledAt;
-            var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate);
+            var jobId = await SubmitTranscriptionJobAsync(meetingId);
 
             // Reset meeting status to Transcribing
             await using var db = await _dbFactory.CreateDbContextAsync();

@@ -184,6 +184,24 @@ public class MeetingsApiController : ControllerBase
             await db.SaveChangesAsync();
         }
 
+        // ADO#2179: When recording_complete arrives, firm-web submits the Batch transcription job.
+        // UpdateStatusAsync above already stamped EndedAt/DurationSeconds (status → Transcribing).
+        // AudioS3Key was just persisted above — SubmitTranscriptionJobAsync will read it from DB.
+        if (payload.Status.Equals("recording_complete", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var batchJobId = await _meetingService.SubmitTranscriptionJobAsync(payload.MeetingId);
+                _logger.LogInformation("FIRM: VpCallback submitted Batch job {JobId} for meeting {MeetingId} on recording_complete", batchJobId, payload.MeetingId);
+            }
+            catch (Exception batchEx)
+            {
+                _logger.LogError(batchEx, "FIRM: VpCallback failed to submit Batch job for meeting {MeetingId} — meeting is Transcribing but no Batch job running", payload.MeetingId);
+                // Do not rethrow — return Ok() so bot doesn't retry the callback endlessly.
+                // The retranscribe endpoint can be used manually to recover.
+            }
+        }
+
         // Write participants on recording status
         if (meetingStatus == MeetingStatus.Recording && payload.Participants != null)
         {
