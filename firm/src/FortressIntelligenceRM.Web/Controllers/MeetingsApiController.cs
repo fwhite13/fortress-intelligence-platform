@@ -181,7 +181,26 @@ public class MeetingsApiController : ControllerBase
             if (!string.IsNullOrEmpty(payload.AudioS3Key)) meeting.AudioS3Key = payload.AudioS3Key;
             if (!string.IsNullOrEmpty(payload.TranscriptS3Key)) meeting.TranscriptS3Key = payload.TranscriptS3Key;
             meeting.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync();
+            try
+            {
+                await db.SaveChangesAsync();
+            }
+            catch (Exception s3KeySaveEx)
+            {
+                _logger.LogWarning(s3KeySaveEx, "FIRM: S3 key save failed for meeting {Id} — retrying once", payload.MeetingId);
+                await Task.Delay(500);
+                try
+                {
+                    // Retry on same DbContext — reliable for transient connection errors only.
+                    // Constraint violations or concurrency conflicts will re-throw on retry.
+                    await db.SaveChangesAsync();
+                }
+                catch (Exception retryEx)
+                {
+                    _logger.LogError(retryEx, "FIRM: S3 key save retry also failed for meeting {Id} — continuing", payload.MeetingId);
+                    // Do not rethrow — return Ok() to bot so it doesn't retry callback
+                }
+            }
         }
 
         // ADO#2179: When recording_complete arrives, firm-web submits the Batch transcription job.
