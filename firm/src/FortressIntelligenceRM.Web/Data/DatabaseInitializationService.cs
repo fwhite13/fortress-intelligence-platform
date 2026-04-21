@@ -192,7 +192,7 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_meeting_summaries ADD CONSTRAINT fk_fms_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
                 "ALTER TABLE firm_meeting_kb_pushes ADD CONSTRAINT fk_fmkp_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
                 "ALTER TABLE firm_meeting_channel_posts ADD CONSTRAINT fk_fmcp_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
-                "ALTER TABLE firm_meeting_summaries ADD COLUMN IF NOT EXISTS open_questions_json JSON NULL"
+                "ALTER TABLE firm_meeting_summaries ADD COLUMN open_questions_json JSON NULL"
             };
 
             foreach (var alterSql in alterStatements)
