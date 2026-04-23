@@ -26,7 +26,7 @@ async function buildApp() {
       customOptions: {
         allErrors: true,
         coerceTypes: false,
-        useDefaults: false,
+        useDefaults: true, // useDefaults: true — AJV populates schema defaults so rendering code can trust them
         strict: false,
       },
     },
@@ -34,7 +34,12 @@ async function buildApp() {
   app.setErrorHandler((error, request, reply) => {
     if (error.validation) {
       const details = error.validation.map((v) => ({
-        field: v.instancePath ? v.instancePath.replace(/^\//, '').replace(/\//g, '.') : v.params?.missingProperty || 'unknown',
+        field: v.keyword === 'required'
+          ? [
+              v.instancePath.replace(/^\//, '').replace(/\//g, '.'),
+              v.params?.missingProperty
+            ].filter(Boolean).join('.')
+          : v.instancePath.replace(/^\//, '').replace(/\//g, '.') || v.params?.missingProperty || 'unknown',
         message: v.message || 'Validation error',
       }))
       return reply.code(400).send({
@@ -141,5 +146,33 @@ test('POST /proposals/generate with valid quotes → 200', async (t) => {
   assert.equal(response.statusCode, 200)
   const body = JSON.parse(response.body)
   assert.equal(body.status, 'stub')
+  await app.close()
+})
+
+test('POST /proposals/generate nested missing field → details[].field = "insured.name"', async (t) => {
+  const app = await buildApp()
+  // Provide insured object but omit the required insured.name field
+  const payload = {
+    ...validPayload,
+    insured: {
+      address: {
+        street1: '123 Main St',
+        city: 'Springfield',
+        state: 'IL',
+        zip: '62701',
+      },
+    },
+  }
+  const response = await app.inject({
+    method: 'POST',
+    url: '/proposals/generate',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  assert.equal(response.statusCode, 400)
+  const body = JSON.parse(response.body)
+  assert.equal(body.error, 'VALIDATION_ERROR')
+  const nameError = body.details.find((d) => d.field === 'insured.name')
+  assert.ok(nameError, `Expected a detail with field "insured.name", got: ${JSON.stringify(body.details)}`)
   await app.close()
 })

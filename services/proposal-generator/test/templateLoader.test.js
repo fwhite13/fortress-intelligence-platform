@@ -140,3 +140,30 @@ test('TL4: NoSuchKey for LOB partial → throws LOB_PARTIAL_MISSING', async (t) 
     }
   )
 })
+
+test('TL5: active:false template → throws TEMPLATE_NOT_FOUND', async (t) => {
+  clearCache()
+  mockSendFn = async (command) => {
+    if (command.params.Key === 'verticals/nba-v1/meta.json')
+      return makeMetaResponse({ active: false })
+    throw new Error('Unexpected S3 command')
+  }
+  await assert.rejects(
+    () => loadTemplate('nba-v1', [], null),
+    (err) => { assert.equal(err.code, 'TEMPLATE_NOT_FOUND'); return true }
+  )
+})
+
+test('TL6: missing meta.json → throws TEMPLATE_NOT_FOUND', async (t) => {
+  clearCache()
+  mockSendFn = async (command) => {
+    if (command.params.Key === 'verticals/missing-v1/meta.json') {
+      const e = new Error('NoSuchKey'); e.name = 'NoSuchKey'; throw e
+    }
+    throw new Error('Unexpected S3 command')
+  }
+  await assert.rejects(
+    () => loadTemplate('missing-v1', [], null),
+    (err) => { assert.equal(err.code, 'TEMPLATE_NOT_FOUND'); return true }
+  )
+})

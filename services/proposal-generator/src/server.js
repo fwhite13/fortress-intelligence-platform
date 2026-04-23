@@ -17,7 +17,7 @@ const app = Fastify({
     customOptions: {
       allErrors: true,
       coerceTypes: false,
-      useDefaults: false,
+      useDefaults: true, // useDefaults: true — AJV populates schema defaults so rendering code can trust them
       strict: false,
     },
   },
@@ -31,7 +31,12 @@ await app.register(templatesRoute, { prefix: '/templates' })
 app.setErrorHandler((error, request, reply) => {
   if (error.validation) {
     const details = error.validation.map((v) => ({
-      field: v.instancePath ? v.instancePath.replace(/^\//, '').replace(/\//g, '.') : v.params?.missingProperty || 'unknown',
+      field: v.keyword === 'required'
+        ? [
+            v.instancePath.replace(/^\//, '').replace(/\//g, '.'),
+            v.params?.missingProperty
+          ].filter(Boolean).join('.')
+        : v.instancePath.replace(/^\//, '').replace(/\//g, '.') || v.params?.missingProperty || 'unknown',
       message: v.message || 'Validation error',
     }))
     return reply.code(400).send({
