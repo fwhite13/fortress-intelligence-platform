@@ -1,0 +1,91 @@
+// src/services/assembleTemplateData.js
+import { formatDate, LOB_DISPLAY_NAMES } from '../utils/formatAttribute.js'
+import { buildPremiumSummary } from '../utils/premiumSummary.js'
+import { buildMarketResponseData } from '../utils/marketResponse.js'
+
+function formatAddress(address) {
+  if (!address) return ''
+  const parts = [address.street1, address.city, address.state, address.zip].filter(Boolean)
+  // Format: "123 Main St, Atlanta, GA 30301"
+  if (parts.length >= 3) {
+    const [street, city, state, zip] = [address.street1, address.city, address.state, address.zip]
+    return [street, `${city}, ${state} ${zip}`.trim()].filter(Boolean).join(', ')
+  }
+  return parts.join(', ')
+}
+
+function generateProposalNumber() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const seq = Math.floor(Math.random() * 99999).toString().padStart(5, '0')
+  return `PROP-${year}-${seq}`
+}
+
+/**
+ * Assemble the full template data object for docxtemplater.
+ */
+export function assembleTemplateData(payload, templateMeta, logoBuffer, lobSectionsXml, boilerplateSectionsXml, logger) {
+  const insured = payload.insured || {}
+  const address = insured.address || {}
+  const contact = insured.primaryContact || {}
+  const period = payload.policyPeriod || {}
+  const metadata = payload.metadata || {}
+
+  const effectiveDate = formatDate(period.effectiveDate || '')
+  const expirationDate = formatDate(period.expirationDate || '')
+
+  return {
+    // Flat insured fields
+    insuredName: insured.name || '',
+    insuredDba: insured.dba || null,
+    insuredEntityType: insured.entityType || null,
+    insuredFein: insured.fein || null,
+    insuredAddressStreet1: address.street1 || '',
+    insuredAddressCity: address.city || '',
+    insuredAddressState: address.state || '',
+    insuredAddressZip: address.zip || '',
+    insuredAddressFull: formatAddress(address),
+    insuredContactName: contact.name || null,
+    insuredContactTitle: contact.title || null,
+    insuredContactEmail: contact.email || null,
+    insuredContactPhone: contact.phone || null,
+
+    // Policy period
+    effectiveDate,
+    expirationDate,
+    policyPeriodDisplay: effectiveDate && expirationDate ? `${effectiveDate} \u2013 ${expirationDate}` : '',
+
+    // Metadata
+    amName: metadata.amName || '',
+    amEmail: metadata.amEmail || '',
+    proposalNumber: payload.proposalNumber || generateProposalNumber(),
+    generatedDate: formatDate(new Date().toISOString()),
+    templateVersion: templateMeta?.version || '',
+
+    // Narratives (passthrough, null-safe)
+    narratives: payload.narratives || {},
+
+    // Team
+    team: payload.team || [],
+    hasTeam: (payload.team || []).length > 0,
+
+    // Premium summary
+    premiumSummary: buildPremiumSummary(payload.quotes || []),
+
+    // Market responses
+    marketResponses: buildMarketResponseData(payload.marketResponses),
+    hasMarketResponses: (payload.marketResponses || []).length > 0,
+
+    // Bill payment
+    billPaymentOptions: payload.billPaymentOptions || null,
+    hasBillPaymentOptions: !!payload.billPaymentOptions,
+
+    // Injected XML sections
+    lobSectionsXml: lobSectionsXml || '',
+    boilerplateSectionsXml: boilerplateSectionsXml || '',
+
+    // Logo (base64 for image module)
+    verticalLogoBase64: logoBuffer ? logoBuffer.toString('base64') : null,
+    hasLogo: !!logoBuffer,
+  }
+}

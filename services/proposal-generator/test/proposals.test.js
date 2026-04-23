@@ -16,6 +16,18 @@ mock.module('../src/services/templateLoader.js', {
   },
 })
 
+// Mock documentRenderer — the route now calls renderDocument instead of loadTemplate directly
+mock.module('../src/services/documentRenderer.js', {
+  namedExports: {
+    renderDocument: async (payload, s3Client, logger) => ({
+      docxBuffer: Buffer.from('fake-docx'),
+      proposalId: 'prop_TEST01234567890123456',
+      proposalNumber: 'PROP-TEST',
+      templateVersion: '1.2.0',
+    }),
+  },
+})
+
 // Import Fastify and build test app AFTER mock
 const { default: Fastify } = await import('fastify')
 const { default: proposalsRoute } = await import('../src/routes/proposals.js')
@@ -82,7 +94,7 @@ const validPayload = {
   ],
 }
 
-test('POST /proposals/generate with valid payload → 200', async (t) => {
+test('POST /proposals/generate with valid payload → 200 docx', async (t) => {
   const app = await buildApp()
   const response = await app.inject({
     method: 'POST',
@@ -91,11 +103,11 @@ test('POST /proposals/generate with valid payload → 200', async (t) => {
     body: JSON.stringify(validPayload),
   })
   assert.equal(response.statusCode, 200)
-  const body = JSON.parse(response.body)
-  assert.match(body.proposalId, /^prop_[A-Z0-9]{26}$/)
-  assert.equal(body.templateId, validPayload.templateId)
-  assert.equal(body.templateVersion, '1.2.0')
-  assert.equal(body.status, 'stub')
+  assert.equal(
+    response.headers['content-type'],
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  )
+  assert.ok(response.headers['content-disposition'].includes('PROP-TEST.docx'))
   await app.close()
 })
 
@@ -144,8 +156,10 @@ test('POST /proposals/generate with valid quotes → 200', async (t) => {
     body: JSON.stringify(payload),
   })
   assert.equal(response.statusCode, 200)
-  const body = JSON.parse(response.body)
-  assert.equal(body.status, 'stub')
+  assert.equal(
+    response.headers['content-type'],
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  )
   await app.close()
 })
 

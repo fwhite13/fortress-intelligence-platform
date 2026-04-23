@@ -1,8 +1,8 @@
 import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { ulid } from 'ulid'
-import { loadTemplate } from '../services/templateLoader.js'
+import { S3Client } from '@aws-sdk/client-s3'
+import { renderDocument } from '../services/documentRenderer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const schema = JSON.parse(
@@ -12,6 +12,8 @@ const schema = JSON.parse(
 // Strip $schema to prevent AJV from trying to fetch draft-07 meta-schema
 const { $schema, $id, ...bodySchema } = schema
 
+const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' })
+
 export default async function proposalsRoute(fastify, options) {
   fastify.post('/generate', {
     schema: {
@@ -19,20 +21,24 @@ export default async function proposalsRoute(fastify, options) {
     },
   }, async (request, reply) => {
     const payload = request.body
+    const logger = request.log
 
-    const proposalId = 'prop_' + ulid()
+    let result
+    try {
+      result = await renderDocument(payload, s3Client, logger)
+    } catch (err) {
+      if (err.code === 'GENERATION_FAILED') {
+        return reply.code(500).send({
+          error: 'GENERATION_FAILED',
+          message: err.message || 'Template rendering failed',
+        })
+      }
+      // TEMPLATE_NOT_FOUND and LOB_PARTIAL_MISSING are caught by the error handler
+      throw err
+    }
 
-    const result = await loadTemplate(
-      payload.templateId,
-      payload.quotes || [],
-      payload.templateConfig
-    )
-
-    return reply.code(200).send({
-      proposalId,
-      templateId: payload.templateId,
-      templateVersion: result.meta.version,
-      status: 'stub',
-    })
+    reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    reply.header('Content-Disposition', `attachment; filename="${result.proposalNumber}.docx"`)
+    return reply.code(200).send(result.docxBuffer)
   })
 }
