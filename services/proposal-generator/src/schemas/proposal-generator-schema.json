@@ -1,0 +1,676 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://api.fortressam.ai/schemas/proposal-generator/v1/request.json",
+  "title": "ProposalGenerateRequest",
+  "description": "Full payload for POST /proposals/generate — everything the rendering engine needs to produce a commercial insurance proposal document.",
+  "type": "object",
+  "required": ["templateId", "insured", "policyPeriod", "quotes"],
+  "additionalProperties": false,
+  "properties": {
+    "templateId": {
+      "type": "string",
+      "description": "Maps to a master template in S3 (e.g. 'gabc-v1', 'default-v1'). Drives vertical branding, cover page layout, and default boilerplate selections.",
+      "examples": ["gabc-v1", "nba-v1", "default-v1"]
+    },
+    "proposalNumber": {
+      "type": ["string", "null"],
+      "description": "Portal-assigned proposal number. If null, the service generates one.",
+      "examples": ["PROP-2026-00142"]
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Generation metadata — who requested it, when, from what portal version.",
+      "required": ["amName", "amEmail"],
+      "additionalProperties": false,
+      "properties": {
+        "amName": {
+          "type": "string",
+          "description": "Account Manager full name.",
+          "examples": ["Adam Renfroe"]
+        },
+        "amEmail": {
+          "type": "string",
+          "format": "email",
+          "description": "Account Manager email.",
+          "examples": ["arenfroe@fortressam.ai"]
+        },
+        "amTitle": {
+          "type": ["string", "null"],
+          "description": "Account Manager title for the cover page.",
+          "examples": ["Managing Partner"]
+        },
+        "generatedAt": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "ISO 8601 timestamp. If null, the service uses current time."
+        },
+        "portalVersion": {
+          "type": ["string", "null"],
+          "description": "FAM OS portal version for traceability.",
+          "examples": ["2.4.1"]
+        }
+      }
+    },
+    "insured": {
+      "$ref": "#/definitions/Insured"
+    },
+    "policyPeriod": {
+      "$ref": "#/definitions/PolicyPeriod"
+    },
+    "team": {
+      "type": ["array", "null"],
+      "description": "Account service team for the Team Sheet section. If null/empty, section is omitted.",
+      "items": {
+        "$ref": "#/definitions/TeamMember"
+      }
+    },
+    "narratives": {
+      "type": ["object", "null"],
+      "description": "AM-authored freetext sections. Keys map to template placeholder names. Any key present is injected; missing keys are omitted from the output.",
+      "additionalProperties": {
+        "type": ["string", "null"]
+      },
+      "properties": {
+        "executive_summary": {
+          "type": ["string", "null"],
+          "description": "Executive summary section."
+        },
+        "recommendations": {
+          "type": ["string", "null"],
+          "description": "Recommendations section."
+        },
+        "special_notes": {
+          "type": ["string", "null"],
+          "description": "Special notes / caveats."
+        }
+      }
+    },
+    "quotes": {
+      "type": "array",
+      "description": "Selected quotes to include in the proposal. Multiple quotes per LOB supported — each gets its own coverage section. Order determines section order in the document.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/Quote"
+      }
+    },
+    "marketResponses": {
+      "type": ["array", "null"],
+      "description": "Structured market response list — which carriers were approached and their status. Rendered as the 'Market List Response' table.",
+      "items": {
+        "$ref": "#/definitions/MarketResponse"
+      }
+    },
+    "billPaymentOptions": {
+      "$ref": "#/definitions/BillPaymentOptions"
+    },
+    "templateConfig": {
+      "$ref": "#/definitions/TemplateConfig"
+    },
+    "outputFormat": {
+      "type": "string",
+      "enum": ["docx", "pdf", "both"],
+      "default": "docx",
+      "description": "Desired output format. 'both' returns docx + PDF."
+    }
+  },
+  "definitions": {
+    "Insured": {
+      "type": "object",
+      "description": "Primary insured information for cover page and named insured references.",
+      "required": ["name", "address"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Legal name of the primary named insured.",
+          "examples": ["Green Acres Baptist Church"]
+        },
+        "dba": {
+          "type": ["string", "null"],
+          "description": "DBA / trade name."
+        },
+        "entityType": {
+          "type": ["string", "null"],
+          "description": "Legal entity type.",
+          "examples": ["corporation", "llc", "partnership", "sole_proprietor", "nonprofit", "trust", "government"]
+        },
+        "fein": {
+          "type": ["string", "null"],
+          "description": "Federal Employer Identification Number.",
+          "pattern": "^[0-9]{2}-?[0-9]{7}$",
+          "examples": ["75-1092783"]
+        },
+        "address": {
+          "$ref": "#/definitions/Address"
+        },
+        "primaryContact": {
+          "$ref": "#/definitions/Contact"
+        },
+        "additionalNamedInsureds": {
+          "type": ["array", "null"],
+          "description": "Additional named insured entities. Per-quote named insured overrides live on the quote object.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [["Green Acres Foundation", "Green Acres Retreat Center, LLC"]]
+        }
+      }
+    },
+    "Address": {
+      "type": "object",
+      "required": ["street1", "city", "state", "zip"],
+      "additionalProperties": false,
+      "properties": {
+        "street1": { "type": "string" },
+        "street2": { "type": ["string", "null"] },
+        "city": { "type": "string" },
+        "state": { "type": "string", "minLength": 2, "maxLength": 2 },
+        "zip": { "type": "string" }
+      }
+    },
+    "Contact": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "title": { "type": ["string", "null"] },
+        "email": { "type": ["string", "null"], "format": "email" },
+        "phone": { "type": ["string", "null"] }
+      }
+    },
+    "PolicyPeriod": {
+      "type": "object",
+      "description": "Overall proposal policy period shown on cover page.",
+      "required": ["effectiveDate", "expirationDate"],
+      "additionalProperties": false,
+      "properties": {
+        "effectiveDate": {
+          "type": "string",
+          "format": "date",
+          "description": "ISO 8601 date (YYYY-MM-DD)."
+        },
+        "expirationDate": {
+          "type": "string",
+          "format": "date"
+        }
+      }
+    },
+    "TeamMember": {
+      "type": "object",
+      "required": ["name", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "examples": ["Adam Renfroe"] },
+        "role": { "type": "string", "examples": ["Managing Partner", "Account Manager", "Director of Claims"] },
+        "email": { "type": ["string", "null"], "format": "email" },
+        "phone": { "type": ["string", "null"] },
+        "photoUrl": { "type": ["string", "null"], "description": "URL or S3 key for team member headshot." }
+      }
+    },
+    "Quote": {
+      "type": "object",
+      "description": "A single selected quote / coverage line. Multiple quotes per LOB are supported (e.g. two Property policies from different carriers).",
+      "required": ["lineOfBusiness", "carrier"],
+      "additionalProperties": false,
+      "properties": {
+        "lineOfBusiness": {
+          "type": "string",
+          "description": "LOB key — drives which LOB partial template is rendered.",
+          "enum": [
+            "GeneralLiability",
+            "WorkersCompensation",
+            "CommercialProperty",
+            "CommercialAuto",
+            "InlandMarine",
+            "Umbrella",
+            "Excess",
+            "Cyber",
+            "DirectorsOfficers",
+            "EmploymentPractices",
+            "ManagementLiability",
+            "ProfessionalLiability",
+            "Crime",
+            "ForeignPackage",
+            "KidnapRansom",
+            "ParticipantAccident",
+            "ActiveAssailant",
+            "Pollution",
+            "BuildersRisk",
+            "Other"
+          ]
+        },
+        "sectionTitle": {
+          "type": ["string", "null"],
+          "description": "Override the default section heading derived from lineOfBusiness. Useful when two quotes share a LOB (e.g. 'Property — Main Campus' vs 'Property — Retreat Center').",
+          "examples": ["Property — Retreat Center"]
+        },
+        "carrier": {
+          "$ref": "#/definitions/CarrierInfo"
+        },
+        "quoteNumber": {
+          "type": ["string", "null"],
+          "examples": ["QT-08064496"]
+        },
+        "policyNumber": {
+          "type": ["string", "null"],
+          "examples": ["LHD954048"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["quoted", "bound", "indication"],
+          "default": "quoted"
+        },
+        "isAdmitted": {
+          "type": "boolean",
+          "description": "true = admitted carrier; false = surplus lines (triggers surplus disclaimer)."
+        },
+        "namedInsured": {
+          "type": ["string", "null"],
+          "description": "Per-quote named insured override. If null, falls back to insured.name."
+        },
+        "additionalNamedInsureds": {
+          "type": ["array", "null"],
+          "description": "Per-quote additional named insureds, if different from the top-level insured.",
+          "items": { "type": "string" }
+        },
+        "policyPeriod": {
+          "$ref": "#/definitions/PolicyPeriod",
+          "description": "Per-quote policy period override. If null, uses the top-level policyPeriod."
+        },
+        "premium": {
+          "type": ["number", "null"],
+          "description": "Base premium in dollars (no cents rounding — use full precision)."
+        },
+        "taxes": {
+          "type": ["number", "null"],
+          "description": "Surplus lines taxes, state taxes, etc."
+        },
+        "fees": {
+          "type": ["number", "null"],
+          "description": "Broker/service fees."
+        },
+        "surcharges": {
+          "type": ["number", "null"],
+          "description": "Stamping fees, other surcharges."
+        },
+        "totalCost": {
+          "type": ["number", "null"],
+          "description": "premium + taxes + fees + surcharges. If null, renderer calculates it."
+        },
+        "attributes": {
+          "type": ["array", "null"],
+          "description": "Universal EAV key-value pairs for coverage limits, deductibles, mod factors, etc. Rendered as the primary limits table in the LOB section.",
+          "items": {
+            "$ref": "#/definitions/Attribute"
+          }
+        },
+        "coverages": {
+          "type": ["array", "null"],
+          "description": "Included/excluded coverages checklist (e.g. additional coverages, sublimits).",
+          "items": {
+            "$ref": "#/definitions/Coverage"
+          }
+        },
+        "scheduleItems": {
+          "type": ["array", "null"],
+          "description": "Locations, buildings, vehicles, equipment, employee classes, etc. Supports nested items (e.g. buildings within locations).",
+          "items": {
+            "$ref": "#/definitions/ScheduleItem"
+          }
+        },
+        "endorsements": {
+          "type": ["array", "null"],
+          "description": "Policy endorsements / forms.",
+          "items": {
+            "$ref": "#/definitions/Endorsement"
+          }
+        },
+        "deductibles": {
+          "type": ["array", "null"],
+          "description": "Top-level deductibles for this quote (beyond what's in attributes).",
+          "items": {
+            "$ref": "#/definitions/Deductible"
+          }
+        },
+        "coverageParts": {
+          "type": ["array", "null"],
+          "description": "Sub-coverage parts within a composite LOB (e.g. ForeignPackage with GL + Auto + WC sub-sections). Each part is rendered as a sub-section within the parent LOB partial.",
+          "items": {
+            "$ref": "#/definitions/CoveragePart"
+          }
+        },
+        "notes": {
+          "type": ["string", "null"],
+          "description": "Free-text notes rendered at the bottom of the LOB section."
+        },
+        "sourceRequestId": {
+          "type": ["string", "null"],
+          "description": "Fortress AI extraction projectRequestId for traceability back to the source quote document."
+        }
+      }
+    },
+    "CarrierInfo": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full carrier legal name.",
+          "examples": ["Texas Mutual Insurance Company", "Scottsdale Insurance Company", "Landmark American Insurance Company"]
+        },
+        "amBestRating": {
+          "type": ["string", "null"],
+          "description": "AM Best rating string (e.g. 'A++ Superior XV', 'A- Excellent VIII').",
+          "examples": ["A Excellent XV", "A++ Superior XV", "A- Excellent VIII"]
+        },
+        "naic": {
+          "type": ["string", "null"],
+          "description": "NAIC company code."
+        }
+      }
+    },
+    "Attribute": {
+      "type": "object",
+      "description": "Universal EAV pair from the quote extraction pipeline. Format drives display rendering.",
+      "required": ["key", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Machine-readable key.",
+          "examples": ["each_occurrence", "general_aggregate", "el_each_accident", "emr"]
+        },
+        "value": {
+          "type": ["string", "number", "boolean", "null"],
+          "description": "Attribute value. Strings are formatted per the format field."
+        },
+        "label": {
+          "type": ["string", "null"],
+          "description": "Human-readable label for rendering. If null, derived from key."
+        },
+        "format": {
+          "type": "string",
+          "enum": ["currency", "currency_short", "decimal", "percent", "text", "date", "boolean"],
+          "default": "text",
+          "description": "Display format. See Appendix B in the spec."
+        },
+        "dataType": {
+          "type": ["string", "null"],
+          "enum": ["decimal", "int", "string", "boolean", "date", null],
+          "description": "Source data type from the extraction pipeline."
+        }
+      }
+    },
+    "Coverage": {
+      "type": "object",
+      "description": "Individual coverage line — included/excluded toggle with optional limit and premium.",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "examples": ["Commercial General Liability", "Hired & Non-Owned Auto", "Host Liquor Liability"]
+        },
+        "isIncluded": {
+          "type": "boolean",
+          "default": true
+        },
+        "limit": {
+          "type": ["string", "number", "null"],
+          "description": "Coverage limit (can be a formatted string like '$1,000,000' or a number)."
+        },
+        "deductible": {
+          "type": ["string", "number", "null"]
+        },
+        "premium": {
+          "type": ["number", "null"]
+        },
+        "description": {
+          "type": ["string", "null"]
+        },
+        "attributes": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/Attribute" }
+        }
+      }
+    },
+    "ScheduleItem": {
+      "type": "object",
+      "description": "A scheduled item — location, building, vehicle, equipment, employee class, etc. Supports nesting (locations contain buildings).",
+      "required": ["itemType"],
+      "additionalProperties": false,
+      "properties": {
+        "itemType": {
+          "type": "string",
+          "description": "Discriminator for what kind of schedule item this is.",
+          "enum": [
+            "location",
+            "building",
+            "vehicle",
+            "equipment",
+            "employee_class",
+            "gl_classification",
+            "driver",
+            "other"
+          ]
+        },
+        "itemNumber": {
+          "type": ["integer", "null"],
+          "description": "Sequence number within the schedule."
+        },
+        "description": {
+          "type": ["string", "null"],
+          "examples": ["Church Retreat Center", "Clerical Office Employees NOC"]
+        },
+        "attributes": {
+          "type": ["array", "null"],
+          "description": "EAV attributes specific to this item (address fields, class codes, payroll, VIN, etc.).",
+          "items": { "$ref": "#/definitions/Attribute" }
+        },
+        "scheduleItems": {
+          "type": ["array", "null"],
+          "description": "Nested schedule items (e.g. buildings within a location).",
+          "items": { "$ref": "#/definitions/ScheduleItem" }
+        }
+      }
+    },
+    "Endorsement": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "formNumber": {
+          "type": ["string", "null"],
+          "examples": ["CG 20 10", "CG 20 28", "RSG 94122"]
+        },
+        "name": {
+          "type": "string",
+          "examples": ["Additional Insured — Owners, Lessees or Contractors"]
+        },
+        "isIncluded": {
+          "type": "boolean",
+          "default": true
+        },
+        "description": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "Deductible": {
+      "type": "object",
+      "description": "A deductible entry with optional percentage and type.",
+      "additionalProperties": false,
+      "properties": {
+        "deductibleType": {
+          "type": ["string", "null"],
+          "enum": ["flat", "percentage", "per_occurrence", "per_claim", "per_incident", "aggregate", null],
+          "examples": ["flat", "percentage"]
+        },
+        "amount": {
+          "type": ["number", "null"],
+          "description": "Flat dollar amount."
+        },
+        "percentage": {
+          "type": ["number", "null"],
+          "description": "Percentage deductible (e.g. 5 = 5%)."
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "Human-readable description for complex deductible structures.",
+          "examples": ["$25,000 per occurrence; 5% Wind/Hail per building, subject to $50,000 minimum"]
+        },
+        "insideOrOutsideLimit": {
+          "type": ["string", "null"],
+          "enum": ["inside", "outside", null]
+        }
+      }
+    },
+    "CoveragePart": {
+      "type": "object",
+      "description": "Sub-coverage part within a composite LOB (e.g. ForeignPackage). Mirrors the Quote structure for the sub-section.",
+      "required": ["lineOfBusiness"],
+      "additionalProperties": false,
+      "properties": {
+        "lineOfBusiness": {
+          "type": "string",
+          "description": "Sub-LOB identifier for routing to the correct partial template.",
+          "examples": ["GeneralLiability", "CommercialAuto", "WorkersCompensation"]
+        },
+        "sectionTitle": {
+          "type": ["string", "null"]
+        },
+        "premium": {
+          "type": ["number", "null"]
+        },
+        "attributes": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/Attribute" }
+        },
+        "coverages": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/Coverage" }
+        },
+        "scheduleItems": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/ScheduleItem" }
+        },
+        "endorsements": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/Endorsement" }
+        },
+        "deductibles": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/definitions/Deductible" }
+        },
+        "notes": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "MarketResponse": {
+      "type": "object",
+      "description": "A carrier's response to the marketing effort.",
+      "required": ["carrierName", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "carrierName": {
+          "type": "string",
+          "examples": ["Wesco Insurance Company", "Church Mutual", "GuideOne Insurance"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["quoted", "declined", "no_response", "not_competitive", "indication"],
+          "description": "Carrier response status."
+        },
+        "reason": {
+          "type": ["string", "null"],
+          "description": "Reason for declination or non-competitiveness.",
+          "examples": ["Declined due to loss history", "Not competitive on property rates", "Does not write this class"]
+        },
+        "lineOfBusiness": {
+          "type": ["string", "null"],
+          "description": "If the response is LOB-specific, indicate which LOB.",
+          "examples": ["GeneralLiability", "CommercialProperty"]
+        }
+      }
+    },
+    "BillPaymentOptions": {
+      "type": ["object", "null"],
+      "description": "Bill payment options section. v1: simple header + optional freetext. Future: structured per-carrier payment plans.",
+      "additionalProperties": false,
+      "properties": {
+        "sectionTitle": {
+          "type": "string",
+          "default": "Bill Payment Options",
+          "description": "Section heading text."
+        },
+        "content": {
+          "type": ["string", "null"],
+          "description": "v1: freetext content for the section. Null = render header only (blank page placeholder)."
+        },
+        "perCarrier": {
+          "type": ["array", "null"],
+          "description": "Future: structured per-carrier payment option entries.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "carrierName": { "type": "string" },
+              "paymentTerms": { "type": "string" },
+              "installmentOptions": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    },
+    "TemplateConfig": {
+      "type": ["object", "null"],
+      "description": "Template rendering configuration — boilerplate selections, team sheet reference, section ordering.",
+      "additionalProperties": false,
+      "properties": {
+        "boilerplateSelections": {
+          "type": ["array", "null"],
+          "description": "Array of boilerplate block keys to include. Replaces the template's default set when provided.",
+          "items": {
+            "type": "string"
+          },
+          "examples": [["about_fortress", "am_best_disclaimer", "e_o_disclosure", "surplus_lines_disclaimer"]]
+        },
+        "boilerplateExclusions": {
+          "type": ["array", "null"],
+          "description": "Boilerplate keys to explicitly exclude (applied after selections or after the template default set).",
+          "items": {
+            "type": "string"
+          },
+          "examples": [["lloyds_disclaimer"]]
+        },
+        "teamSheetKey": {
+          "type": ["string", "null"],
+          "description": "Boilerplate key for the team sheet / service team section. Typically per-FAM-OS-client.",
+          "examples": ["team_sheet_gabc", "team_sheet_nba"]
+        },
+        "premiumSummaryStyle": {
+          "type": "string",
+          "enum": ["standard", "detailed"],
+          "default": "standard",
+          "description": "'standard' = LOB + Premium columns. 'detailed' = LOB + Exposure + Premium columns."
+        },
+        "includeToc": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to generate a Table of Contents page."
+        },
+        "includeCoverPage": {
+          "type": "boolean",
+          "default": true
+        },
+        "includeRecommendations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to include the recommendations checklist section."
+        }
+      }
+    }
+  }
+}
