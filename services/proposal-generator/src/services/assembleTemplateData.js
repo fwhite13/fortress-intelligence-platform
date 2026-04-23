@@ -59,7 +59,7 @@ export function assembleTemplateData(payload, templateMeta, logoBuffer, lobSecti
     amName: metadata.amName || '',
     amEmail: metadata.amEmail || '',
     proposalNumber: payload.proposalNumber || generateProposalNumber(),
-    generatedDate: formatDate(new Date().toISOString()),
+    generatedDate: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
     templateVersion: templateMeta?.version || '',
 
     // Narratives (passthrough, null-safe)

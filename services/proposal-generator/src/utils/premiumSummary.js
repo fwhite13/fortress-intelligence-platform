@@ -33,6 +33,8 @@ export function buildPremiumSummary(quotes) {
     const lobQuotes = lobGroups.get(lob)
     let subtotalPremium = 0
     let subtotalCost = 0
+    let subtotalTaxes = 0
+    let subtotalFees = 0
 
     const formattedQuotes = lobQuotes.map(q => {
       const premium = Number(q.premium) || 0
@@ -42,6 +44,8 @@ export function buildPremiumSummary(quotes) {
 
       subtotalPremium += premium
       subtotalCost += totalCost
+      subtotalTaxes += taxes
+      subtotalFees += fees
       grandTotalPremium += premium
       grandTotalTaxes += taxes
       grandTotalFees += fees
@@ -61,6 +65,8 @@ export function buildPremiumSummary(quotes) {
       displayName: LOB_DISPLAY_NAMES[lob] || lob,
       quotes: formattedQuotes,
       subtotalPremium: formatAttribute(subtotalPremium, 'currency'),
+      subtotalTaxes: formatAttribute(subtotalTaxes, 'currency'),
+      subtotalFees: formatAttribute(subtotalFees, 'currency'),
       subtotalTotalCost: formatAttribute(subtotalCost, 'currency'),
     }
   })

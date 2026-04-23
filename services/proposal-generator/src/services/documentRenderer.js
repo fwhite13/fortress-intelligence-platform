@@ -12,6 +12,13 @@ import { assembleTemplateData } from './assembleTemplateData.js'
 const require = createRequire(import.meta.url)
 const ImageModule = require('docxtemplater-image-module-free')
 
+function generateProposalNumber() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const seq = Math.floor(Math.random() * 99999).toString().padStart(5, '0')
+  return `PROP-${year}-${seq}`
+}
+
 const TEMPLATE_BUCKET = process.env.TEMPLATE_BUCKET || 'fip-proposal-templates'
 
 async function streamToBuffer(stream) {
@@ -33,7 +40,10 @@ async function loadLogo(s3Client, templateId, logger) {
       const response = await s3Client.send(new GetObjectCommand({ Bucket: TEMPLATE_BUCKET, Key: key }))
       return await streamToBuffer(response.Body)
     } catch (err) {
-      // Not found — try next extension
+      if (err.name !== 'NoSuchKey' && err.$metadata?.httpStatusCode !== 404) {
+        logger?.warn({ templateId, ext, err: err.message }, 'Unexpected error loading logo — continuing without logo')
+      }
+      // continue to next extension
     }
   }
   logger?.debug({ templateId }, 'No vertical logo found — proceeding without logo')
@@ -81,11 +91,12 @@ export async function renderDocument(payload, s3Client, logger) {
   // Step 3: Build template data (needed for boilerplate variable substitution)
   // We'll assemble it twice — once for boilerplate vars (before boilerplate is rendered),
   // and once fully after. Use a preliminary version for boilerplate substitution.
+  const resolvedProposalNumber = payload.proposalNumber || generateProposalNumber()
   const prelimTemplateData = {
     insuredName: payload.insured?.name || '',
     amName: payload.metadata?.amName || '',
     amEmail: payload.metadata?.amEmail || '',
-    proposalNumber: payload.proposalNumber || '',
+    proposalNumber: resolvedProposalNumber,
     generatedDate: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
   }
 
@@ -106,6 +117,7 @@ export async function renderDocument(payload, s3Client, logger) {
   const logoBuffer = await loadLogo(s3Client, templateId, logger)
 
   // Step 6: Assemble full template data
+  payload.proposalNumber = resolvedProposalNumber
   const templateData = assembleTemplateData(payload, meta, logoBuffer, lobSectionsXml, boilerplateSectionsXml, logger)
 
   // Step 7: Render master template
