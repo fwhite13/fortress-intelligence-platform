@@ -25,9 +25,6 @@ const app = Fastify({
 
 await app.register(cors)
 
-await app.register(proposalsRoute, { prefix: '/proposals' })
-await app.register(templatesRoute, { prefix: '/templates' })
-
 app.setErrorHandler((error, request, reply) => {
   if (error.validation) {
     const details = error.validation.map((v) => ({
@@ -60,6 +57,9 @@ app.setErrorHandler((error, request, reply) => {
     message: 'An unexpected error occurred',
   })
 })
+
+await app.register(proposalsRoute, { prefix: '/proposals' })
+await app.register(templatesRoute, { prefix: '/templates' })
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', version: '1.0.0' }
