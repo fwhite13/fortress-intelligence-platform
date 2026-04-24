@@ -211,10 +211,7 @@ export async function renderLobPartial(quote, lobDocxBuffer, logger) {
     glClassifications: buildGlClassifications(quote.scheduleItems || []),
     wcEmployeeClasses: buildWcEmployeeClasses(quote.scheduleItems || []),
     propertySchedule: buildPropertySchedule(quote.scheduleItems || []),
-    namedInsureds: (Array.isArray(quote.namedInsured)
-      ? quote.namedInsured
-      : quote.namedInsured ? [quote.namedInsured] : []
-    ).map(n => ({ name: typeof n === 'string' ? n : (n.name || '') })),
+    namedInsureds: (quote.additionalNamedInsureds || []).map(n => ({ name: typeof n === 'string' ? n : (n.name || '') })),
     effectiveDate: formatDate((quote.policyPeriod || {}).effectiveDate || ''),
     expirationDate: formatDate((quote.policyPeriod || {}).expirationDate || ''),
     notes: quote.notes || null,
