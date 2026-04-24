@@ -213,7 +213,7 @@ def create_master_docx(output_path):
     p7.add_run('Date: ')
     p7.add_run('{generatedDate}')
 
-    doc.add_paragraph('Fortress Agency Management')
+    doc.add_paragraph('NBA Insurance Services')
     doc.add_page_break()
 
     # --- Section 2: Table of Contents ---
@@ -299,7 +299,7 @@ def create_master_docx(output_path):
     # --- Section 5: Coverage Details (LOB injection point) ---
     doc.add_heading('Coverage Details', level=1)
     p_lob = doc.add_paragraph()
-    p_lob.add_run('{%lobSectionsXml}')
+    p_lob.add_run('{@lobSectionsXml}')
     doc.add_page_break()
 
     # --- Section 6: Market Response (conditional) ---
@@ -404,7 +404,7 @@ def create_master_docx(output_path):
 
     # --- Section 9: Boilerplate injection ---
     p_bp = doc.add_paragraph()
-    p_bp.add_run('{%boilerplateSectionsXml}')
+    p_bp.add_run('{@boilerplateSectionsXml}')
 
     # --- Footer ---
     section = doc.sections[0]
@@ -709,9 +709,9 @@ def main():
         "blocks": {
             "about_fortress": {
                 "id": "about_fortress",
-                "displayName": "About Fortress AM",
+                "displayName": "About NBA Insurance Services",
                 "type": "wordml",
-                "content": '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>About Fortress Agency Management</w:t></w:r></w:p><w:p><w:r><w:t>Fortress Agency Management is a full-service independent insurance agency serving commercial clients across the Southeast. Our team of experienced professionals delivers tailored risk management solutions and dedicated service. We are proud to serve {insuredName} and look forward to a continued partnership.</w:t></w:r></w:p>',
+                "content": '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>About NBA Insurance Services</w:t></w:r></w:p><w:p><w:r><w:t>NBA Insurance Services is a full-service independent insurance agency serving commercial clients across the Southeast. Our team of experienced professionals delivers tailored risk management solutions and dedicated service. We are proud to serve {insuredName} and look forward to a continued partnership.</w:t></w:r></w:p>',
                 "variables": ["insuredName"],
                 "notes": "Standard About Fortress section."
             },
@@ -719,7 +719,7 @@ def main():
                 "id": "am_best_disclaimer",
                 "displayName": "AM Best Rating Disclaimer",
                 "type": "text",
-                "content": "Carrier financial strength ratings are provided by A.M. Best Company as of the date of this proposal and are subject to change. Fortress AM makes no representations regarding carrier solvency.",
+                "content": "Carrier financial strength ratings are provided by A.M. Best Company as of the date of this proposal and are subject to change. NBA Insurance Services makes no representations regarding carrier solvency.",
                 "variables": [],
                 "notes": "Required on all proposals."
             },
@@ -833,11 +833,11 @@ Outer loop uses paragraph style, inner loop can use table row style:
 
 ## Raw XML Injection
 
-`{%lobSectionsXml}` and `{%boilerplateSectionsXml}` must each be in their **own dedicated paragraph** with **NO other text**.
+`{@lobSectionsXml}` and `{@boilerplateSectionsXml}` must each be in their **own dedicated paragraph** with **NO other text**.
 
 ```python
 p = doc.add_paragraph()
-p.add_run('{%lobSectionsXml}')  # Nothing else in this paragraph
+p.add_run('{@lobSectionsXml}')  # Nothing else in this paragraph
 ```
 
 ## Data Contract Notes

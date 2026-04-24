@@ -73,11 +73,11 @@ Outer loop uses paragraph style, inner loop can use table row style:
 
 ## Raw XML Injection
 
-`{%lobSectionsXml}` and `{%boilerplateSectionsXml}` must each be in their **own dedicated paragraph** with **NO other text**.
+`{@lobSectionsXml}` and `{@boilerplateSectionsXml}` must each be in their **own dedicated paragraph** with **NO other text**.
 
 ```python
 p = doc.add_paragraph()
-p.add_run('{%lobSectionsXml}')  # Nothing else in this paragraph
+p.add_run('{@lobSectionsXml}')  # Nothing else in this paragraph
 ```
 
 ## Data Contract Notes
