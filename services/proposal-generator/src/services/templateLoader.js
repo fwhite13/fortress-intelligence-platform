@@ -4,7 +4,7 @@ import { LRUCache } from 'lru-cache'
 export const TEMPLATE_BUCKET = process.env.TEMPLATE_BUCKET || 'fortress-tools'
 export const TEMPLATE_PREFIX = process.env.TEMPLATE_PREFIX || 'fip-proposal-templates'
 
-export export const s3 = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' })
+export const s3 = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' })
 
 export const LOB_PARTIAL_MAP = new Map([
   ['GeneralLiability',      'general-liability.docx'],
