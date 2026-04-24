@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
 import { LRUCache } from 'lru-cache'
 
 export const TEMPLATE_BUCKET = process.env.TEMPLATE_BUCKET || 'fortress-tools'
@@ -58,13 +58,46 @@ async function fetchS3Json(key) {
   return JSON.parse(buf.toString('utf-8'))
 }
 
+/**
+ * Resolve templateId to its meta.json S3 key by scanning the verticals/ prefix.
+ * Folder name may differ from templateId (e.g. folder='nba', templateId='nba-v1').
+ * Result is cached for the LRU TTL.
+ */
+async function resolveTemplateMetaKey(templateId) {
+  const cacheKey = `__meta_key__${templateId}`
+  const cached = cache.get(cacheKey)
+  if (cached) return cached
+
+  const listResult = await s3.send(new ListObjectsV2Command({
+    Bucket: TEMPLATE_BUCKET,
+    Prefix: `${TEMPLATE_PREFIX}/verticals/`,
+  }))
+
+  const metaKeys = (listResult.Contents || [])
+    .map(obj => obj.Key)
+    .filter(key => /\/meta\.json$/.test(key))
+
+  for (const key of metaKeys) {
+    const meta = await fetchS3Json(key)
+    if (meta.templateId === templateId) {
+      cache.set(cacheKey, key)
+      return key
+    }
+  }
+
+  return null
+}
+
 export async function loadTemplate(templateId, quotes, templateConfig) {
   const safeQuotes = quotes || []
 
-  // 1. Load meta.json
+  // 1. Resolve meta.json path (folder name may differ from templateId)
   let meta
+  let metaKey
   try {
-    meta = await fetchS3Json(`${TEMPLATE_PREFIX}/verticals/${templateId}/meta.json`)
+    metaKey = await resolveTemplateMetaKey(templateId)
+    if (!metaKey) throw new Error('not found')
+    meta = await fetchS3Json(metaKey)
   } catch (err) {
     const e = new Error(`Template '${templateId}' not found`)
     e.code = 'TEMPLATE_NOT_FOUND'
@@ -79,10 +112,14 @@ export async function loadTemplate(templateId, quotes, templateConfig) {
     throw e
   }
 
-  // 2. Load master.docx
+  // 2. Load master.docx — use s3Key from meta if present, else fall back to vertical folder
+  const masterKey = meta.s3Key
+    ? `${TEMPLATE_PREFIX}/${meta.s3Key}`
+    : `${TEMPLATE_PREFIX}/verticals/${meta.vertical || templateId}/master.docx`
+
   let masterDocx
   try {
-    masterDocx = await fetchS3Buffer(`${TEMPLATE_PREFIX}/verticals/${templateId}/master.docx`)
+    masterDocx = await fetchS3Buffer(masterKey)
   } catch (err) {
     const e = new Error(`Template '${templateId}' not found`)
     e.code = 'TEMPLATE_NOT_FOUND'
