@@ -60,9 +60,7 @@ Item {itemNumber}          <- content paragraph
 Outer loop uses paragraph style, inner loop can use table row style:
 
 ```
-{#premiumSummary.byLob}                    <- paragraph
-  | {#quotes}{carrier} | {premium}{/quotes} |  <- table row
-{/premiumSummary.byLob}                    <- paragraph
+{#premiumRows}{coverageLabel} | {exposureHighlights} | {formattedPremium}{/premiumRows}
 ```
 
 ## Conditional Section Patterns
@@ -85,7 +83,7 @@ p.add_run('{@lobSectionsXml}')  # Nothing else in this paragraph
 - `carrier` is an **OBJECT** — use `{carrier.name}`, `{carrier.amBestRating}`
 - `deductibles[].formattedValue` — use `{formattedValue}` for display (shows "$25,000" for flat, "5%" for percentage)
 - `scheduleItems[].children` may be null (e.g., WC) — only include children loop if LOB has nested items
-- `premiumSummary.byLob[].quotes[].carrier` is a string (carrier name), not an object
+- `premiumRows[].formattedPremium` — pre-formatted premium string for display; use `{formattedPremium}` in table row loops
 
 ## Verification
 

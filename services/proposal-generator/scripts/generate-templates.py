@@ -211,7 +211,7 @@ def set_cell_color(cell, hex_color):
 
 
 def add_section_banner(doc, title):
-    """Add a full-width dark blue banner with white bold uppercase text."""
+    """Add a full-width dark blue banner with white bold text."""
     section = doc.sections[0]
     # page_width/margins are Length objects (EMU); arithmetic returns raw EMU int
     text_width_emu = section.page_width - section.left_margin - section.right_margin
@@ -246,7 +246,7 @@ def add_section_banner(doc, title):
     # Clear and set paragraph
     para = cell.paragraphs[0]
     para.clear()
-    run = para.add_run(title.upper())
+    run = para.add_run(title)  # callers pass uppercase literals; LOB partials pass {sectionTitle} tag
     run.bold = True
     run.font.size = Pt(14)
     run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
@@ -284,7 +284,7 @@ def add_named_insured_section(doc):
     p_open.add_run('{#namedInsureds}')
 
     p_item = doc.add_paragraph(style='List Bullet')
-    p_item.add_run('\u2022 {name}')
+    p_item.add_run('{name}')
 
     p_close = doc.add_paragraph()
     p_close.add_run('{/namedInsureds}')
