@@ -1,7 +1,5 @@
-import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
-import { TEMPLATE_BUCKET, TEMPLATE_PREFIX } from '../services/templateLoader.js'
-
-const s3 = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' })
+import { ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
+import { s3, TEMPLATE_BUCKET, TEMPLATE_PREFIX } from '../services/templateLoader.js'
 
 async function streamToString(stream) {
   const chunks = []
