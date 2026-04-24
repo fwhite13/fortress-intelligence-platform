@@ -155,6 +155,34 @@ function extractBodyXml(docxBuffer) {
 }
 
 /**
+ * Inject a bookmark at the beginning of LOB partial XML for TOC PAGEREF targets.
+ * @param {string} xmlStr - body XML string from extractBodyXml()
+ * @param {string} lineOfBusiness - the LOB key (e.g. 'GeneralLiability')
+ * @returns {string} modified XML with bookmark prepended before first <w:p
+ */
+function injectLobBookmark(xmlStr, lineOfBusiness) {
+  const bookmarkNames = {
+    'GeneralLiability': '_Toc_GeneralLiability',
+    'general_liability': '_Toc_GeneralLiability',
+    'gl': '_Toc_GeneralLiability',
+    'WorkersCompensation': '_Toc_WorkersComp',
+    'workers_compensation': '_Toc_WorkersComp',
+    'wc': '_Toc_WorkersComp',
+    'CommercialProperty': '_Toc_CommercialProperty',
+    'commercial_property': '_Toc_CommercialProperty',
+    'property': '_Toc_CommercialProperty',
+  }
+  const bmName = bookmarkNames[lineOfBusiness] || `_Toc_${(lineOfBusiness || '').replace(/[^a-zA-Z0-9]/g, '')}`
+  // Use a stable ID based on bookmark name (high numbers to avoid collision with master template)
+  const bmId = Math.abs(bmName.split('').reduce((a, c) => a * 31 + c.charCodeAt(0), 0) % 9000) + 1000
+  const ns = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+  const bookmarkXml = `<w:bookmarkStart w:id="${bmId}" w:name="${bmName}" ${ns}/><w:bookmarkEnd w:id="${bmId}" ${ns}/>`
+  // Inject before first <w:p (handles both <w:p  and <w:p>)
+  const injected = xmlStr.replace(/(<w:p[ >])/, bookmarkXml + '$1')
+  return injected !== xmlStr ? injected : bookmarkXml + xmlStr
+}
+
+/**
  * Render a LOB partial docx with quote data and extract the body XML.
  * @param {Object} quote - quote object from payload
  * @param {Buffer} lobDocxBuffer - the partial .docx buffer
@@ -230,5 +258,7 @@ export async function renderLobPartial(quote, lobDocxBuffer, logger) {
   doc.render(templateData)
   const rendered = doc.getZip().generate({ type: 'nodebuffer' })
 
-  return extractBodyXml(rendered)
+  let bodyXml = extractBodyXml(rendered)
+  bodyXml = injectLobBookmark(bodyXml, quote.lineOfBusiness || quote.lob || '')
+  return bodyXml
 }

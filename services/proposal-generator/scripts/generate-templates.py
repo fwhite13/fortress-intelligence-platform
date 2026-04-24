@@ -274,6 +274,93 @@ def add_carrier_info_paragraphs(doc, fields=None):
         p.paragraph_format.space_after = Pt(2)
 
 
+def add_dot_leader_tab(paragraph, position_inches=6.0):
+    """Add a right-aligned dot-leader tab stop to a paragraph."""
+    pPr = paragraph._p.get_or_add_pPr()
+    tabs = OxmlElement('w:tabs')
+    tab = OxmlElement('w:tab')
+    tab.set(qn('w:val'), 'right')
+    tab.set(qn('w:leader'), 'dot')
+    tab.set(qn('w:pos'), str(int(position_inches * 1440)))  # twips
+    tabs.append(tab)
+    pPr.append(tabs)
+
+
+def add_pageref_field(paragraph, bookmark_name):
+    """Add a PAGEREF field code to a paragraph."""
+    p = paragraph._p
+    # fldChar begin
+    r1 = OxmlElement('w:r')
+    fc1 = OxmlElement('w:fldChar')
+    fc1.set(qn('w:fldCharType'), 'begin')
+    r1.append(fc1)
+    p.append(r1)
+    # instrText
+    r2 = OxmlElement('w:r')
+    it = OxmlElement('w:instrText')
+    it.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+    it.text = f' PAGEREF {bookmark_name} \\h '
+    r2.append(it)
+    p.append(r2)
+    # fldChar separate
+    r3 = OxmlElement('w:r')
+    fc3 = OxmlElement('w:fldChar')
+    fc3.set(qn('w:fldCharType'), 'separate')
+    r3.append(fc3)
+    p.append(r3)
+    # placeholder text "1"
+    r4 = OxmlElement('w:r')
+    t = OxmlElement('w:t')
+    t.text = '1'
+    r4.append(t)
+    p.append(r4)
+    # fldChar end
+    r5 = OxmlElement('w:r')
+    fc5 = OxmlElement('w:fldChar')
+    fc5.set(qn('w:fldCharType'), 'end')
+    r5.append(fc5)
+    p.append(r5)
+
+
+def add_toc_entry(doc, display_name, bookmark_name, indent=False):
+    """Add a single TOC entry with dot leader and PAGEREF field."""
+    p = doc.add_paragraph()
+    if indent:
+        p.paragraph_format.left_indent = Inches(0.25)
+    # Display name
+    run = p.add_run(display_name)
+    # Tab character
+    p.add_run('\t')
+    # Dot-leader tab stop
+    add_dot_leader_tab(p)
+    # PAGEREF field
+    add_pageref_field(p, bookmark_name)
+    return p
+
+
+_bookmark_counter = [0]  # mutable list for closure
+
+
+def add_bookmark(paragraph, bookmark_name):
+    """Insert a bookmark at the start of a paragraph."""
+    _bookmark_counter[0] += 1
+    bm_id = str(_bookmark_counter[0])
+    # bookmarkStart goes before the first run
+    bm_start = OxmlElement('w:bookmarkStart')
+    bm_start.set(qn('w:id'), bm_id)
+    bm_start.set(qn('w:name'), bookmark_name)
+    # bookmarkEnd goes after the last run
+    bm_end = OxmlElement('w:bookmarkEnd')
+    bm_end.set(qn('w:id'), bm_id)
+    p = paragraph._p
+    # Insert bookmarkStart before first child
+    if len(p) > 0:
+        p.insert(0, bm_start)
+    else:
+        p.append(bm_start)
+    p.append(bm_end)
+
+
 def add_named_insured_section(doc):
     """Add a Named Insured bullet list section using docxtemplater loop."""
     p_heading = doc.add_paragraph()
@@ -335,30 +422,23 @@ def create_master_docx(output_path):
     doc.add_paragraph('NBA Insurance Services')
     doc.add_page_break()
 
-    # --- Section 2: Table of Contents (manual — no Word field codes) ---
+    # --- Section 2: Table of Contents (PAGEREF field codes with dot leaders) ---
     doc.add_heading('Table of Contents', level=1)
 
     toc_entries = [
-        ('Your Service Team', False),
-        ('Premium Summary', False),
-        ('Market Response', False),
-        ('Executive Summary', False),
-        ('Coverage Details', False),
-        ('    General Liability', True),
-        ("    Workers' Compensation", True),
-        ('    Commercial Property', True),
-        ('Recommendations', False),
-        ('About NBA Insurance Services', False),
+        ('Your Service Team',      '_Toc_ServiceTeam',        False),
+        ('Premium Summary',        '_Toc_PremiumSummary',     False),
+        ('Market Response',        '_Toc_MarketResponse',     False),
+        ('Executive Summary',      '_Toc_ExecSummary',        False),
+        ('Coverage Details',       '_Toc_CoverageDetails',    False),
+        ('General Liability',      '_Toc_GeneralLiability',   True),
+        ("Workers Compensation",   '_Toc_WorkersComp',        True),
+        ('Commercial Property',    '_Toc_CommercialProperty', True),
+        ('Recommendations',        '_Toc_Recommendations',    False),
+        ('About Fortress',         '_Toc_About',              False),
     ]
-    for entry_text, is_sub in toc_entries:
-        p_toc = doc.add_paragraph()
-        p_toc.paragraph_format.left_indent = Pt(18) if is_sub else Pt(0)
-        # Compute dot leaders to fill ~55 chars total width (adjust based on indent)
-        max_width = 50 if not is_sub else 46
-        dots_needed = max(5, max_width - len(entry_text.strip()))
-        dot_leaders = ' ' + ('.' * dots_needed) + ' \u2014'
-        run_toc = p_toc.add_run(entry_text.strip() + dot_leaders)
-        run_toc.font.size = Pt(11)
+    for display, bm, indent in toc_entries:
+        add_toc_entry(doc, display, bm, indent=indent)
 
     doc.add_page_break()
 
@@ -366,7 +446,8 @@ def create_master_docx(output_path):
     p_team_open = doc.add_paragraph()
     p_team_open.add_run('{#hasTeam}')
 
-    doc.add_heading('Your Service Team', level=1)
+    p_service_heading = doc.add_heading('Your Service Team', level=1)
+    add_bookmark(p_service_heading, '_Toc_ServiceTeam')
 
     team_table = doc.add_table(rows=2, cols=3)
     team_table.style = 'Table Grid'
@@ -405,6 +486,10 @@ def create_master_docx(output_path):
 
     # --- Section 4: Premium Summary ---
     add_section_banner(doc, 'PREMIUM SUMMARY')
+    p_bm_ps = doc.add_paragraph()
+    p_bm_ps.paragraph_format.space_before = Pt(0)
+    p_bm_ps.paragraph_format.space_after = Pt(0)
+    add_bookmark(p_bm_ps, '_Toc_PremiumSummary')
 
     # Single unified premium table
     ps_table = doc.add_table(rows=2, cols=3)
@@ -450,6 +535,10 @@ def create_master_docx(output_path):
     p_mr_open.add_run('{#hasMarketResponses}')
 
     add_section_banner(doc, 'MARKET RESPONSE')
+    p_bm_mr = doc.add_paragraph()
+    p_bm_mr.paragraph_format.space_before = Pt(0)
+    p_bm_mr.paragraph_format.space_after = Pt(0)
+    add_bookmark(p_bm_mr, '_Toc_MarketResponse')
 
     mr_table = doc.add_table(rows=2, cols=4)
     mr_table.style = 'Table Grid'
@@ -480,6 +569,10 @@ def create_master_docx(output_path):
 
     # --- Section 6: Executive Summary ---
     add_section_banner(doc, 'EXECUTIVE SUMMARY')
+    p_bm_es = doc.add_paragraph()
+    p_bm_es.paragraph_format.space_before = Pt(0)
+    p_bm_es.paragraph_format.space_after = Pt(0)
+    add_bookmark(p_bm_es, '_Toc_ExecSummary')
     p_exec = doc.add_paragraph()
     p_exec.add_run('{narratives.executive_summary}')
     doc.add_page_break()
@@ -498,17 +591,29 @@ def create_master_docx(output_path):
 
     # --- Section 7: Coverage Details (LOB injection point) ---
     add_section_banner(doc, 'COVERAGE DETAILS')
+    p_bm_cd = doc.add_paragraph()
+    p_bm_cd.paragraph_format.space_before = Pt(0)
+    p_bm_cd.paragraph_format.space_after = Pt(0)
+    add_bookmark(p_bm_cd, '_Toc_CoverageDetails')
     p_lob = doc.add_paragraph()
     p_lob.add_run('{@lobSectionsXml}')
     doc.add_page_break()
 
     # --- Section 8: Recommendations ---
     add_section_banner(doc, 'RECOMMENDATIONS')
+    p_bm_rec = doc.add_paragraph()
+    p_bm_rec.paragraph_format.space_before = Pt(0)
+    p_bm_rec.paragraph_format.space_after = Pt(0)
+    add_bookmark(p_bm_rec, '_Toc_Recommendations')
     p_rec = doc.add_paragraph()
     p_rec.add_run('{narratives.recommendations}')
     doc.add_page_break()
 
     # --- Section 9: Boilerplate injection ---
+    p_bm_about = doc.add_paragraph()
+    p_bm_about.paragraph_format.space_before = Pt(0)
+    p_bm_about.paragraph_format.space_after = Pt(0)
+    add_bookmark(p_bm_about, '_Toc_About')
     p_bp = doc.add_paragraph()
     p_bp.add_run('{@boilerplateSectionsXml}')
 
