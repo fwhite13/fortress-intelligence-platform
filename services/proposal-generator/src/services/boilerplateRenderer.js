@@ -15,6 +15,17 @@ function substituteVars(content, templateData) {
 }
 
 /**
+ * Same as substituteVars but XML-escapes each substituted value.
+ */
+function substituteVarsEscaped(content, templateData) {
+  return content.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (match, key) => {
+    const val = templateData[key]
+    const str = val !== null && val !== undefined ? String(val) : ''
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  })
+}
+
+/**
  * Extract body XML from a .docx buffer (strips sectPr).
  */
 function extractBodyXml(docxBuffer) {
@@ -75,7 +86,7 @@ export async function renderBoilerplate(boilerplateJson, selections, exclusions,
           .replace(/>/g, '&gt;')
         xmlParts.push(`<w:p><w:r><w:t xml:space="preserve">${escaped}</w:t></w:r></w:p>`)
       } else if (block.type === 'wordml') {
-        const substituted = substituteVars(block.content || '', templateData)
+        const substituted = substituteVarsEscaped(block.content || '', templateData)
         xmlParts.push(substituted)
       } else if (block.type === 'partial') {
         const key = block.partialKey

@@ -284,6 +284,18 @@ def create_master_docx(output_path):
     p_exec.add_run('{narratives.executive_summary}')
     doc.add_page_break()
 
+    # --- Section 4b: Special Notes (conditional) ---
+    p_sn_open = doc.add_paragraph()
+    p_sn_open.add_run('{#narratives.special_notes}')
+
+    doc.add_heading('Special Notes', level=2)
+
+    p_sn_content = doc.add_paragraph()
+    p_sn_content.add_run('{narratives.special_notes}')
+
+    p_sn_close = doc.add_paragraph()
+    p_sn_close.add_run('{/narratives.special_notes}')
+
     # --- Section 5: Coverage Details (LOB injection point) ---
     doc.add_heading('Coverage Details', level=1)
     p_lob = doc.add_paragraph()
@@ -355,7 +367,7 @@ def create_master_docx(output_path):
     q_row.cells[1].paragraphs[0].clear()
     q_row.cells[1].paragraphs[0].add_run('{premium}')
     q_row.cells[2].paragraphs[0].clear()
-    q_row.cells[2].paragraphs[0].add_run('{taxes}')
+    q_row.cells[2].paragraphs[0].add_run('{taxes} / {fees}')
     q_row.cells[3].paragraphs[0].clear()
     q_row.cells[3].paragraphs[0].add_run('{totalCost}{/quotes}')
 
@@ -365,7 +377,7 @@ def create_master_docx(output_path):
     sub_row.cells[1].paragraphs[0].clear()
     sub_row.cells[1].paragraphs[0].add_run('{subtotalPremium}')
     sub_row.cells[2].paragraphs[0].clear()
-    sub_row.cells[2].paragraphs[0].add_run('{subtotalTaxes}')
+    sub_row.cells[2].paragraphs[0].add_run('{subtotalTaxes} / {subtotalFees}')
     sub_row.cells[3].paragraphs[0].clear()
     sub_row.cells[3].paragraphs[0].add_run('{subtotalTotalCost}')
 
@@ -383,7 +395,7 @@ def create_master_docx(output_path):
     gt_row.cells[1].paragraphs[0].clear()
     gt_row.cells[1].paragraphs[0].add_run('{premiumSummary.grandTotalPremium}')
     gt_row.cells[2].paragraphs[0].clear()
-    gt_row.cells[2].paragraphs[0].add_run('{premiumSummary.grandTotalTaxes}')
+    gt_row.cells[2].paragraphs[0].add_run('{premiumSummary.grandTotalTaxes} / {premiumSummary.grandTotalFees}')
     gt_row.cells[3].paragraphs[0].clear()
     gt_row.cells[3].paragraphs[0].add_run('{premiumSummary.grandTotalCost}')
     apply_table_formatting(gt_table, has_header=False)
@@ -468,7 +480,7 @@ def create_general_liability_docx(output_path):
     ded_row.cells[0].paragraphs[0].clear()
     ded_row.cells[0].paragraphs[0].add_run('{#deductibles}{deductibleType}')
     ded_row.cells[1].paragraphs[0].clear()
-    ded_row.cells[1].paragraphs[0].add_run('{description}{/deductibles}')
+    ded_row.cells[1].paragraphs[0].add_run('{formattedValue}{/deductibles}')
     apply_table_formatting(ded_table)
 
     p_no_ded = doc.add_paragraph()
@@ -625,13 +637,13 @@ def create_commercial_property_docx(output_path):
     ded_table = doc.add_table(rows=2, cols=2)
     ded_table.style = 'Table Grid'
     ded_table.rows[0].cells[0].text = 'Deductible Type'
-    ded_table.rows[0].cells[1].text = 'Description'
+    ded_table.rows[0].cells[1].text = 'Details'
     set_repeat_header(ded_table.rows[0])
     ded_row = ded_table.rows[1]
     ded_row.cells[0].paragraphs[0].clear()
     ded_row.cells[0].paragraphs[0].add_run('{#deductibles}{deductibleType}')
     ded_row.cells[1].paragraphs[0].clear()
-    ded_row.cells[1].paragraphs[0].add_run('{description}{/deductibles}')
+    ded_row.cells[1].paragraphs[0].add_run('{formattedValue}{/deductibles}')
     apply_table_formatting(ded_table)
 
     # 5. Location / Building Schedule (nested with children)
@@ -831,7 +843,7 @@ p.add_run('{%lobSectionsXml}')  # Nothing else in this paragraph
 ## Data Contract Notes
 
 - `carrier` is an **OBJECT** — use `{carrier.name}`, `{carrier.amBestRating}`
-- `deductibles[].formattedValue` will be empty — use `{description}` instead
+- `deductibles[].formattedValue` — use `{formattedValue}` for display (shows "$25,000" for flat, "5%" for percentage)
 - `scheduleItems[].children` may be null (e.g., WC) — only include children loop if LOB has nested items
 - `premiumSummary.byLob[].quotes[].carrier` is a string (carrier name), not an object
 

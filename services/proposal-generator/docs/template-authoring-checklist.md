@@ -83,7 +83,7 @@ p.add_run('{%lobSectionsXml}')  # Nothing else in this paragraph
 ## Data Contract Notes
 
 - `carrier` is an **OBJECT** — use `{carrier.name}`, `{carrier.amBestRating}`
-- `deductibles[].formattedValue` will be empty — use `{description}` instead
+- `deductibles[].formattedValue` — use `{formattedValue}` for display (shows "$25,000" for flat, "5%" for percentage)
 - `scheduleItems[].children` may be null (e.g., WC) — only include children loop if LOB has nested items
 - `premiumSummary.byLob[].quotes[].carrier` is a string (carrier name), not an object
 

@@ -74,7 +74,9 @@ export async function renderLobPartial(quote, lobDocxBuffer, logger) {
   const templateData = {
     sectionTitle,
     lineOfBusiness: quote.lineOfBusiness || '',
-    carrier: quote.carrier || '',
+    carrier: typeof quote.carrier === 'string'
+      ? { name: quote.carrier, amBestRating: '', naic: '' }
+      : (quote.carrier || {}),
     quoteNumber: quote.quoteNumber || null,
     policyNumber: quote.policyNumber || null,
     status: quote.status || '',
