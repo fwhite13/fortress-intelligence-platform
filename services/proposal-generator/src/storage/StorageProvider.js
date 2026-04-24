@@ -1,8 +1,21 @@
 // src/storage/StorageProvider.js
 
 /**
- * Abstract base class for storage providers.
- * Implement this interface to support different storage backends (S3, Azure Blob, etc.)
+ * StorageProvider — base class for storage backends.
+ *
+ * Implementing classes MUST set these properties in their constructor:
+ * @property {string} templateBucket — bucket/container holding templates
+ * @property {string} templatePrefix — key prefix for templates (e.g. 'fip-proposal-templates')
+ * @property {string} outputBucket — bucket/container for generated proposals
+ * @property {string} outputPrefix — key prefix for output (e.g. 'proposals')
+ * @property {number} signedUrlExpiry — signed URL expiry in seconds (e.g. 7200)
+ *
+ * Abstract methods (must implement):
+ * - getTemplate(key)
+ * - getTemplateMetadata(templateId)
+ * - getBoilerplateRegistry()
+ * - putProposal(key, buffer, contentType)
+ * - getSignedUrl(key, expiresInSeconds)
  */
 export class StorageProvider {
   /** @returns {Promise<Buffer>} */

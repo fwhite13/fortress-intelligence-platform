@@ -85,7 +85,7 @@ export async function renderBoilerplate(boilerplateJson, selections, exclusions,
           logger?.warn({ blockId }, 'Boilerplate partial missing partialKey — skipping')
           continue
         }
-        const buf = await storageProvider.getBuffer(storageProvider.templateBucket, key)
+        const buf = await storageProvider.getBuffer(storageProvider.templateBucket, `${storageProvider.templatePrefix}/${key}`)
 
         // Render the partial as a mini-template with templateData
         const zip = new PizZip(buf)
