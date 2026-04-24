@@ -1,7 +1,7 @@
 // src/services/lobRenderer.js
 import PizZip from 'pizzip'
 import Docxtemplater from 'docxtemplater'
-import { formatAttribute, LOB_DISPLAY_NAMES } from '../utils/formatAttribute.js'
+import { formatAttribute, formatDate, LOB_DISPLAY_NAMES } from '../utils/formatAttribute.js'
 
 /**
  * Format a numeric string as USD currency: $1,234,567
@@ -12,6 +12,16 @@ function formatCurrency(value) {
   const num = parseFloat(value)
   if (isNaN(num)) return value
   return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+}
+
+/**
+ * Format enum-style string values for display.
+ * "replacement_cost" -> "Replacement Cost"
+ * "special" -> "Special"
+ */
+function formatEnumValue(val) {
+  if (!val || typeof val !== 'string') return val
+  return val.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 /**
@@ -94,6 +104,33 @@ function buildWcEmployeeClasses(scheduleItems) {
 }
 
 /**
+ * Build property schedule rows: each building under each location becomes one flat row.
+ * Handles nested scheduleItems: location -> building children.
+ */
+function buildPropertySchedule(scheduleItems = []) {
+  const rows = []
+  let locNum = 0
+  for (const item of scheduleItems) {
+    if (item.itemType === 'location') {
+      locNum++
+      const locAttrs = Object.fromEntries((item.attributes || []).map(a => [a.key, a.value]))
+      const buildings = (item.scheduleItems || []).filter(b => b.itemType === 'building')
+      buildings.forEach((bld, bldIdx) => {
+        const b = Object.fromEntries((bld.attributes || []).map(a => [a.key, a.value]))
+        rows.push({
+          locationNumber: String(locNum),
+          buildingNumber: String(bldIdx + 1),
+          description: b.building_description || b.description || '',
+          address: [locAttrs.address_street1, locAttrs.address_city, locAttrs.address_state].filter(Boolean).join(', '),
+          buildingLimit: b.building_limit ? formatCurrency(parseFloat(b.building_limit)) : '',
+        })
+      })
+    }
+  }
+  return rows
+}
+
+/**
  * Extract the inner body XML from a rendered .docx buffer.
  * Returns everything between <w:body> and </w:body>, excluding the final <w:sectPr>.
  * @param {Buffer} docxBuffer
@@ -151,7 +188,9 @@ export async function renderLobPartial(quote, lobDocxBuffer, logger) {
     totalCost: formatAttribute(quote.totalCost, 'currency'),
     attributes: (quote.attributes || []).map(a => ({
       ...a,
-      formattedValue: formatAttribute(a.value, a.format),
+      formattedValue: a.format === 'text'
+        ? formatEnumValue(formatAttribute(a.value, a.format))
+        : formatAttribute(a.value, a.format),
     })),
     coverages: quote.coverages || [],
     endorsements: quote.endorsements || [],
@@ -171,6 +210,13 @@ export async function renderLobPartial(quote, lobDocxBuffer, logger) {
     scheduleLocations: buildScheduleLocations(quote.scheduleItems || []),
     glClassifications: buildGlClassifications(quote.scheduleItems || []),
     wcEmployeeClasses: buildWcEmployeeClasses(quote.scheduleItems || []),
+    propertySchedule: buildPropertySchedule(quote.scheduleItems || []),
+    namedInsureds: (Array.isArray(quote.namedInsured)
+      ? quote.namedInsured
+      : quote.namedInsured ? [quote.namedInsured] : []
+    ).map(n => ({ name: typeof n === 'string' ? n : (n.name || '') })),
+    effectiveDate: formatDate((quote.policyPeriod || {}).effectiveDate || ''),
+    expirationDate: formatDate((quote.policyPeriod || {}).expirationDate || ''),
     notes: quote.notes || null,
   }
 

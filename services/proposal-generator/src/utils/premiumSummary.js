@@ -2,83 +2,73 @@
 import { formatAttribute, LOB_DISPLAY_NAMES } from './formatAttribute.js'
 
 /**
- * Aggregate premium data across all quotes.
- * Groups quotes by lineOfBusiness, computes subtotals and grand totals.
- * All monetary values returned as currency-formatted strings.
+ * Format a numeric value as USD currency: $1,234,567
+ */
+function formatCurrency(value) {
+  if (value == null || value === '') return '$0'
+  const num = Number(value)
+  if (isNaN(num)) return '$0'
+  return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+/**
+ * Get exposure highlights string for a quote, based on LOB.
+ */
+function getExposureHighlights(quote) {
+  const lob = quote.lineOfBusiness
+  const attrs = Object.fromEntries((quote.attributes || []).map(a => [a.key, a.value]))
+
+  if (lob === 'GeneralLiability') {
+    const occ = attrs.each_occurrence ? formatCurrency(attrs.each_occurrence) : ''
+    const agg = attrs.general_aggregate ? formatCurrency(attrs.general_aggregate) : ''
+    if (occ && agg) return `${occ} Each Occurrence / ${agg} General Aggregate`
+    if (occ) return `${occ} Each Occurrence`
+    return ''
+  }
+
+  if (lob === 'WorkersCompensation') {
+    return 'Statutory'
+  }
+
+  if (lob === 'CommercialProperty') {
+    const tiv = attrs.total_insured_value || attrs.building_limit
+    return tiv ? `${formatCurrency(tiv)} TIV` : ''
+  }
+
+  // Default: first attribute value
+  if (quote.attributes && quote.attributes.length > 0) {
+    return quote.attributes[0].value || ''
+  }
+  return ''
+}
+
+/**
+ * Build the unified flat premium summary table.
+ * Returns: { premiumRows: [...], grandTotal: '$X' }
  */
 export function buildPremiumSummary(quotes) {
   if (!quotes || quotes.length === 0) {
-    return { byLob: [], grandTotalPremium: '$0', grandTotalTaxes: '$0', grandTotalFees: '$0', grandTotalCost: '$0' }
+    return { premiumRows: [], grandTotal: '$0.00' }
   }
 
-  // Group by lineOfBusiness, preserving order of first appearance
-  const lobOrder = []
-  const lobGroups = new Map()
+  let grandTotal = 0
 
-  for (const quote of quotes) {
-    const lob = quote.lineOfBusiness
-    if (!lobGroups.has(lob)) {
-      lobOrder.push(lob)
-      lobGroups.set(lob, [])
-    }
-    lobGroups.get(lob).push(quote)
-  }
+  const premiumRows = quotes.map(quote => {
+    const premium = Number(quote.premium) || 0
+    grandTotal += premium
 
-  let grandTotalPremium = 0
-  let grandTotalTaxes = 0
-  let grandTotalFees = 0
-  let grandTotalCost = 0
-
-  const byLob = lobOrder.map(lob => {
-    const lobQuotes = lobGroups.get(lob)
-    let subtotalPremium = 0
-    let subtotalCost = 0
-    let subtotalTaxes = 0
-    let subtotalFees = 0
-
-    const formattedQuotes = lobQuotes.map(q => {
-      const premium = Number(q.premium) || 0
-      const taxes = Number(q.taxes) || 0
-      const fees = Number(q.fees) || 0
-      const totalCost = Number(q.totalCost) || 0
-
-      subtotalPremium += premium
-      subtotalCost += totalCost
-      subtotalTaxes += taxes
-      subtotalFees += fees
-      grandTotalPremium += premium
-      grandTotalTaxes += taxes
-      grandTotalFees += fees
-      grandTotalCost += totalCost
-
-      // carrier is an object {name, amBestRating, naic} — extract name for display
-      const carrierName = (q.carrier && typeof q.carrier === 'object') ? (q.carrier.name || '') : (q.carrier || '')
-
-      return {
-        carrier: carrierName,
-        premium: formatAttribute(premium, 'currency'),
-        taxes: formatAttribute(taxes, 'currency'),
-        fees: formatAttribute(fees, 'currency'),
-        totalCost: formatAttribute(totalCost, 'currency'),
-      }
-    })
+    const displayName = LOB_DISPLAY_NAMES[quote.lineOfBusiness] || quote.lineOfBusiness || ''
+    const exposureHighlights = getExposureHighlights(quote)
 
     return {
-      lineOfBusiness: lob,
-      displayName: LOB_DISPLAY_NAMES[lob] || lob,
-      quotes: formattedQuotes,
-      subtotalPremium: formatAttribute(subtotalPremium, 'currency'),
-      subtotalTaxes: formatAttribute(subtotalTaxes, 'currency'),
-      subtotalFees: formatAttribute(subtotalFees, 'currency'),
-      subtotalTotalCost: formatAttribute(subtotalCost, 'currency'),
+      coverageLabel: displayName,
+      exposureHighlights,
+      formattedPremium: formatCurrency(premium),
     }
   })
 
   return {
-    byLob,
-    grandTotalPremium: formatAttribute(grandTotalPremium, 'currency'),
-    grandTotalTaxes: formatAttribute(grandTotalTaxes, 'currency'),
-    grandTotalFees: formatAttribute(grandTotalFees, 'currency'),
-    grandTotalCost: formatAttribute(grandTotalCost, 'currency'),
+    premiumRows,
+    grandTotal: formatCurrency(grandTotal),
   }
 }

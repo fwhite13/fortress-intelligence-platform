@@ -200,6 +200,96 @@ def add_notes_section(doc):
     doc.add_paragraph('{/notes}')
 
 
+def set_cell_color(cell, hex_color):
+    """Set explicit font color on all runs in a cell."""
+    for para in cell.paragraphs:
+        for run in para.runs:
+            rPr = run._r.get_or_add_rPr()
+            color_el = OxmlElement('w:color')
+            color_el.set(qn('w:val'), hex_color)
+            rPr.append(color_el)
+
+
+def add_section_banner(doc, title):
+    """Add a full-width dark blue banner with white bold uppercase text."""
+    section = doc.sections[0]
+    # page_width/margins are Length objects (EMU); arithmetic returns raw EMU int
+    text_width_emu = section.page_width - section.left_margin - section.right_margin
+    # 1 twip = 635 EMU
+    width_twips = str(int(text_width_emu // 635))
+
+    banner_table = doc.add_table(rows=1, cols=1)
+    banner_table.style = 'Table Grid'
+
+    # Set table width to full text width via raw XML
+    tbl = banner_table._tbl
+    tblPr = tbl.find(qn('w:tblPr'))
+    if tblPr is None:
+        tblPr = OxmlElement('w:tblPr')
+        tbl.insert(0, tblPr)
+    tblW = OxmlElement('w:tblW')
+    tblW.set(qn('w:w'), width_twips)
+    tblW.set(qn('w:type'), 'dxa')
+    tblPr.append(tblW)
+
+    cell = banner_table.rows[0].cells[0]
+    set_cell_shading(cell, '1F3864')
+
+    # Set cell width too
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    tcW = OxmlElement('w:tcW')
+    tcW.set(qn('w:w'), width_twips)
+    tcW.set(qn('w:type'), 'dxa')
+    tcPr.append(tcW)
+
+    # Clear and set paragraph
+    para = cell.paragraphs[0]
+    para.clear()
+    run = para.add_run(title.upper())
+    run.bold = True
+    run.font.size = Pt(14)
+    run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+    para.paragraph_format.space_before = Pt(4)
+    para.paragraph_format.space_after = Pt(4)
+
+
+def add_carrier_info_paragraphs(doc, fields=None):
+    """Add carrier info as bold label + value paragraph pairs (no table)."""
+    if fields is None:
+        fields = [
+            ('CARRIER', '{carrier.name}'),
+            ('A.M. BEST RATING', '{carrier.amBestRating}'),
+            ('POLICY PERIOD', '{effectiveDate} \u2014 {expirationDate}'),
+            ('COVERAGE', '{sectionTitle}'),
+        ]
+    for label, value in fields:
+        p = doc.add_paragraph()
+        run_label = p.add_run(label + '    ')
+        run_label.bold = True
+        run_label.font.size = Pt(10)
+        run_value = p.add_run(value)
+        run_value.bold = False
+        run_value.font.size = Pt(10)
+        p.paragraph_format.space_after = Pt(2)
+
+
+def add_named_insured_section(doc):
+    """Add a Named Insured bullet list section using docxtemplater loop."""
+    p_heading = doc.add_paragraph()
+    p_heading.style = doc.styles['Heading 3']
+    p_heading.add_run('Named Insured')
+
+    p_open = doc.add_paragraph()
+    p_open.add_run('{#namedInsureds}')
+
+    p_item = doc.add_paragraph(style='List Bullet')
+    p_item.add_run('\u2022 {name}')
+
+    p_close = doc.add_paragraph()
+    p_close.add_run('{/namedInsureds}')
+
+
 # ---------------------------------------------------------------------------
 # Master template
 # ---------------------------------------------------------------------------
@@ -263,7 +353,11 @@ def create_master_docx(output_path):
     for entry_text, is_sub in toc_entries:
         p_toc = doc.add_paragraph()
         p_toc.paragraph_format.left_indent = Pt(18) if is_sub else Pt(0)
-        run_toc = p_toc.add_run(entry_text)
+        # Compute dot leaders to fill ~55 chars total width (adjust based on indent)
+        max_width = 50 if not is_sub else 46
+        dots_needed = max(5, max_width - len(entry_text.strip()))
+        dot_leaders = ' ' + ('.' * dots_needed) + ' \u2014'
+        run_toc = p_toc.add_run(entry_text.strip() + dot_leaders)
         run_toc.font.size = Pt(11)
 
     doc.add_page_break()
@@ -309,63 +403,44 @@ def create_master_docx(output_path):
     p_team_close = doc.add_paragraph()
     p_team_close.add_run('{/hasTeam}')
 
-    # --- Section 4: Premium Summary (moved up — before Exec Summary) ---
-    doc.add_heading('Premium Summary', level=1)
+    # --- Section 4: Premium Summary ---
+    add_section_banner(doc, 'PREMIUM SUMMARY')
 
-    p_byLob_open = doc.add_paragraph()
-    p_byLob_open.add_run('{#premiumSummary.byLob}')
-
-    p_lob_name = doc.add_paragraph()
-    p_lob_name.style = doc.styles['Heading 2']
-    p_lob_name.add_run('{displayName}')
-
-    ps_table = doc.add_table(rows=3, cols=4)
+    # Single unified premium table
+    ps_table = doc.add_table(rows=2, cols=3)
     ps_table.style = 'Table Grid'
 
     hdr = ps_table.rows[0]
-    hdr.cells[0].text = 'Carrier'
-    hdr.cells[1].text = 'Premium'
-    hdr.cells[2].text = 'Taxes & Fees'
-    hdr.cells[3].text = 'Total'
+    hdr.cells[0].text = 'COVERAGE'
+    hdr.cells[1].text = 'EXPOSURE / HIGHLIGHTS'
+    hdr.cells[2].text = 'PREMIUM'
     set_repeat_header(hdr)
 
-    q_row = ps_table.rows[1]
-    q_row.cells[0].paragraphs[0].clear()
-    q_row.cells[0].paragraphs[0].add_run('{#quotes}{carrier}')
-    q_row.cells[1].paragraphs[0].clear()
-    q_row.cells[1].paragraphs[0].add_run('{premium}')
-    q_row.cells[2].paragraphs[0].clear()
-    q_row.cells[2].paragraphs[0].add_run('{taxes} / {fees}')
-    q_row.cells[3].paragraphs[0].clear()
-    q_row.cells[3].paragraphs[0].add_run('{totalCost}{/quotes}')
-
-    sub_row = ps_table.rows[2]
-    sub_row.cells[0].paragraphs[0].clear()
-    sub_row.cells[0].paragraphs[0].add_run('Subtotal')
-    sub_row.cells[1].paragraphs[0].clear()
-    sub_row.cells[1].paragraphs[0].add_run('{subtotalPremium}')
-    sub_row.cells[2].paragraphs[0].clear()
-    sub_row.cells[2].paragraphs[0].add_run('{subtotalTaxes} / {subtotalFees}')
-    sub_row.cells[3].paragraphs[0].clear()
-    sub_row.cells[3].paragraphs[0].add_run('{subtotalTotalCost}')
-
+    # Template row — docxtemplater repeats for each premiumRows item
+    data_row = ps_table.rows[1]
+    data_row.cells[0].paragraphs[0].clear()
+    data_row.cells[0].paragraphs[0].add_run('{#premiumRows}{coverageLabel}')
+    data_row.cells[1].paragraphs[0].clear()
+    data_row.cells[1].paragraphs[0].add_run('{exposureHighlights}')
+    data_row.cells[2].paragraphs[0].clear()
+    data_row.cells[2].paragraphs[0].add_run('{formattedPremium}{/premiumRows}')
     apply_table_formatting(ps_table)
 
-    p_byLob_close = doc.add_paragraph()
-    p_byLob_close.add_run('{/premiumSummary.byLob}')
-
-    # Grand Total table
-    gt_table = doc.add_table(rows=1, cols=4)
+    # Grand Total row in its own 1-row table
+    gt_table = doc.add_table(rows=1, cols=3)
     gt_table.style = 'Table Grid'
     gt_row = gt_table.rows[0]
     gt_row.cells[0].paragraphs[0].clear()
-    gt_row.cells[0].paragraphs[0].add_run('Grand Total')
+    gt_row.cells[0].paragraphs[0].add_run('TOTAL')
     gt_row.cells[1].paragraphs[0].clear()
-    gt_row.cells[1].paragraphs[0].add_run('{premiumSummary.grandTotalPremium}')
+    gt_row.cells[1].paragraphs[0].add_run('')
     gt_row.cells[2].paragraphs[0].clear()
-    gt_row.cells[2].paragraphs[0].add_run('{premiumSummary.grandTotalTaxes} / {premiumSummary.grandTotalFees}')
-    gt_row.cells[3].paragraphs[0].clear()
-    gt_row.cells[3].paragraphs[0].add_run('{premiumSummary.grandTotalCost}')
+    gt_row.cells[2].paragraphs[0].add_run('{grandTotal}')
+    # Bold the total row
+    for cell in gt_row.cells:
+        for para in cell.paragraphs:
+            for run in para.runs:
+                run.bold = True
     apply_table_formatting(gt_table, has_header=False)
 
     doc.add_page_break()
@@ -374,7 +449,7 @@ def create_master_docx(output_path):
     p_mr_open = doc.add_paragraph()
     p_mr_open.add_run('{#hasMarketResponses}')
 
-    doc.add_heading('Market Response', level=1)
+    add_section_banner(doc, 'MARKET RESPONSE')
 
     mr_table = doc.add_table(rows=2, cols=4)
     mr_table.style = 'Table Grid'
@@ -404,7 +479,7 @@ def create_master_docx(output_path):
     p_mr_close.add_run('{/hasMarketResponses}')
 
     # --- Section 6: Executive Summary ---
-    doc.add_heading('Executive Summary', level=1)
+    add_section_banner(doc, 'EXECUTIVE SUMMARY')
     p_exec = doc.add_paragraph()
     p_exec.add_run('{narratives.executive_summary}')
     doc.add_page_break()
@@ -422,13 +497,13 @@ def create_master_docx(output_path):
     p_sn_close.add_run('{/narratives.special_notes}')
 
     # --- Section 7: Coverage Details (LOB injection point) ---
-    doc.add_heading('Coverage Details', level=1)
+    add_section_banner(doc, 'COVERAGE DETAILS')
     p_lob = doc.add_paragraph()
     p_lob.add_run('{@lobSectionsXml}')
     doc.add_page_break()
 
     # --- Section 8: Recommendations ---
-    doc.add_heading('Recommendations', level=1)
+    add_section_banner(doc, 'RECOMMENDATIONS')
     p_rec = doc.add_paragraph()
     p_rec.add_run('{narratives.recommendations}')
     doc.add_page_break()
@@ -473,18 +548,14 @@ def create_general_liability_docx(output_path):
     """Create general-liability.docx LOB partial template."""
     doc = Document()
 
-    # 1. Section heading
-    p_heading = doc.add_paragraph()
-    p_heading.style = doc.styles['Heading 1']
-    p_heading.add_run('{sectionTitle}')
+    # 1. Section heading — dark blue banner
+    add_section_banner(doc, '{sectionTitle}')
 
-    # 2. Carrier info table
-    add_carrier_info_table(doc, [
-        ('Carrier', '{carrier.name}'),
-        ('AM Best Rating', '{carrier.amBestRating}'),
-        ('Admitted/Surplus', '{#isAdmitted}Admitted{/isAdmitted}{^isAdmitted}Surplus Lines{/isAdmitted}'),
-        ('Quote #', '{#quoteNumber}{quoteNumber}{/quoteNumber}{^quoteNumber}\u2014{/quoteNumber}'),
-    ])
+    # 2. Carrier info paragraphs
+    add_carrier_info_paragraphs(doc)
+
+    # Named Insured list
+    add_named_insured_section(doc)
 
     # 3. Coverage Limits
     doc.add_heading('Coverage Limits', level=2)
@@ -599,18 +670,14 @@ def create_workers_comp_docx(output_path):
     """Create workers-compensation.docx LOB partial template."""
     doc = Document()
 
-    # 1. Section heading
-    p_heading = doc.add_paragraph()
-    p_heading.style = doc.styles['Heading 1']
-    p_heading.add_run('{sectionTitle}')
+    # 1. Section heading — dark blue banner
+    add_section_banner(doc, '{sectionTitle}')
 
-    # 2. Carrier info table
-    add_carrier_info_table(doc, [
-        ('Carrier', '{carrier.name}'),
-        ('AM Best Rating', '{carrier.amBestRating}'),
-        ('Admitted/Surplus', '{#isAdmitted}Admitted{/isAdmitted}{^isAdmitted}Surplus Lines{/isAdmitted}'),
-        ('Quote #', '{#quoteNumber}{quoteNumber}{/quoteNumber}{^quoteNumber}\u2014{/quoteNumber}'),
-    ])
+    # 2. Carrier info paragraphs
+    add_carrier_info_paragraphs(doc)
+
+    # Named Insured list
+    add_named_insured_section(doc)
 
     # 3. Coverage and Limits
     doc.add_heading('Coverage and Limits', level=2)
@@ -675,19 +742,20 @@ def create_commercial_property_docx(output_path):
     """Create commercial-property.docx LOB partial template."""
     doc = Document()
 
-    # 1. Section heading
-    p_heading = doc.add_paragraph()
-    p_heading.style = doc.styles['Heading 1']
-    p_heading.add_run('{sectionTitle}')
+    # 1. Section heading — dark blue banner
+    add_section_banner(doc, '{sectionTitle}')
 
-    # 2. Carrier info table (5 rows — includes policy #)
-    add_carrier_info_table(doc, [
-        ('Carrier', '{carrier.name}'),
-        ('AM Best Rating', '{carrier.amBestRating}'),
-        ('Admitted/Surplus', '{#isAdmitted}Admitted{/isAdmitted}{^isAdmitted}Surplus Lines{/isAdmitted}'),
-        ('Quote #', '{#quoteNumber}{quoteNumber}{/quoteNumber}{^quoteNumber}\u2014{/quoteNumber}'),
-        ('Policy #', '{#policyNumber}{policyNumber}{/policyNumber}{^policyNumber}\u2014{/policyNumber}'),
+    # 2. Carrier info paragraphs (Property adds policy # field)
+    add_carrier_info_paragraphs(doc, fields=[
+        ('CARRIER', '{carrier.name}'),
+        ('A.M. BEST RATING', '{carrier.amBestRating}'),
+        ('POLICY PERIOD', '{effectiveDate} \u2014 {expirationDate}'),
+        ('COVERAGE', '{sectionTitle}'),
+        ('POLICY #', '{#policyNumber}{policyNumber}{/policyNumber}{^policyNumber}\u2014{/policyNumber}'),
     ])
+
+    # Named Insured list
+    add_named_insured_section(doc)
 
     # 3. Property Details
     doc.add_heading('Property Details', level=2)
@@ -717,8 +785,26 @@ def create_commercial_property_docx(output_path):
     ded_row.cells[1].paragraphs[0].add_run('{formattedValue}{/deductibles}')
     apply_table_formatting(ded_table)
 
-    # 5. Location / Building Schedule (nested with children)
-    add_schedule_section(doc, 'Location / Building Schedule', heading_level=2, include_children=True)
+    # 5. Location / Building Schedule — horizontal 5-col grid
+    doc.add_heading('Location / Building Schedule', level=2)
+    prop_sched_table = doc.add_table(rows=2, cols=5)
+    prop_sched_table.style = 'Table Grid'
+    prop_sched_headers = ['Location #', 'Building #', 'Description', 'Address', 'Building Limit']
+    for i, h in enumerate(prop_sched_headers):
+        prop_sched_table.rows[0].cells[i].text = h
+    set_repeat_header(prop_sched_table.rows[0])
+    prop_row = prop_sched_table.rows[1]
+    prop_keys = [
+        '{#propertySchedule}{locationNumber}',
+        '{buildingNumber}',
+        '{description}',
+        '{address}',
+        '{buildingLimit}{/propertySchedule}',
+    ]
+    for i, k in enumerate(prop_keys):
+        prop_row.cells[i].paragraphs[0].clear()
+        prop_row.cells[i].paragraphs[0].add_run(k)
+    apply_table_formatting(prop_sched_table)
 
     # 6. Endorsements
     add_endorsements_table(doc)

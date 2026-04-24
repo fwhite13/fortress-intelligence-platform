@@ -71,15 +71,12 @@ export function assembleTemplateData(payload, templateMeta, logoBuffer, lobSecti
     team: payload.team || [],
     hasTeam: (payload.team || []).length > 0,
 
-    // Premium summary — flat keys required for docxtemplater literal key lookup
+    // Premium summary — new flat table shape
     ...(() => {
       const ps = buildPremiumSummary(payload.quotes || [])
       return {
-        'premiumSummary.byLob': ps.byLob,
-        'premiumSummary.grandTotalPremium': ps.grandTotalPremium,
-        'premiumSummary.grandTotalTaxes': ps.grandTotalTaxes,
-        'premiumSummary.grandTotalFees': ps.grandTotalFees,
-        'premiumSummary.grandTotalCost': ps.grandTotalCost,
+        premiumRows: ps.premiumRows,
+        grandTotal: ps.grandTotal,
       }
     })(),
 
