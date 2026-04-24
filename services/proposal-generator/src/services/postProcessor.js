@@ -87,6 +87,8 @@ export async function postProcess(docxBuffer, proposalId, outputFormat, logger) 
 
   try {
     await mkdir(workDir, { recursive: true })
+    const loOutDir = join(workDir, 'out')
+    await mkdir(loOutDir, { recursive: true })
     await writeFile(inputPath, docxWithFields)
 
     // Step 1: Field update (re-save as docx to update TOC etc.)
@@ -97,12 +99,11 @@ export async function postProcess(docxBuffer, proposalId, outputFormat, logger) 
         '--norestore',
         '--infilter=Microsoft Word 2007-2019 XML',
         '--convert-to', 'docx',
-        '--outdir', workDir,
+        '--outdir', loOutDir,
         inputPath,
       ], { timeout: SOFFICE_TIMEOUT_MS })
 
-      const outputDocxPath = join(workDir, 'input.docx')
-      updatedDocxBuffer = await readFile(outputDocxPath)
+      updatedDocxBuffer = await readFile(join(loOutDir, 'input.docx'))
       logger?.info({ proposalId }, 'LibreOffice field update complete')
     } catch (err) {
       logger?.warn({ proposalId, err: err.message }, 'LibreOffice field update failed — using injectUpdateFields fallback')
@@ -114,15 +115,15 @@ export async function postProcess(docxBuffer, proposalId, outputFormat, logger) 
     let pdfBuffer = null
     if (outputFormat === 'pdf' || outputFormat === 'both') {
       try {
+        const pdfSourcePath = join(workDir, 'pdf-source.docx')
+        await writeFile(pdfSourcePath, updatedDocxBuffer)
         await execFileAsync(SOFFICE_PATH, [
           '--headless',
           '--convert-to', 'pdf',
-          '--outdir', workDir,
-          inputPath,
+          '--outdir', loOutDir,
+          pdfSourcePath,
         ], { timeout: SOFFICE_TIMEOUT_MS })
-
-        const pdfPath = join(workDir, 'input.pdf')
-        pdfBuffer = await readFile(pdfPath)
+        pdfBuffer = await readFile(join(loOutDir, 'pdf-source.pdf'))
         logger?.info({ proposalId }, 'LibreOffice PDF conversion complete')
       } catch (err) {
         logger?.warn({ proposalId, err: err.message }, 'LibreOffice PDF conversion failed')
