@@ -51,18 +51,42 @@ def set_keep_lines(cell):
         pPr.append(keepLines)
 
 
-def apply_table_formatting(table, has_header=True):
-    """Apply all required table formatting to every row/cell."""
+def set_cell_shading(cell, fill_color):
+    """Apply background color to a table cell."""
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), fill_color)
+    tcPr.append(shd)
+
+
+HEADER_BG = 'BDD7EE'   # light blue
+CURRENCY_COLS = {'premium', 'total', 'payroll', 'rate', 'taxes', 'fees', 'cost', 'subtotal'}
+
+
+def apply_table_formatting(table, has_header=True, header_bg=HEADER_BG):
+    """Apply all required table formatting: header shading/bold, keepNext, keepLines."""
     for i, row in enumerate(table.rows):
         is_header = has_header and i == 0
         is_last = i == len(table.rows) - 1
         if is_header:
             set_repeat_header(row)
-        for cell in row.cells:
+        for j, cell in enumerate(row.cells):
             set_keep_lines(cell)
+            if is_header and header_bg:
+                set_cell_shading(cell, header_bg)
             for para in cell.paragraphs:
                 if not is_last:
                     set_keep_with_next(para)
+                if is_header:
+                    for run in para.runs:
+                        run.bold = True
+                    # If cell was set via .text = '...' (no explicit runs), bold the implicit run
+                    if not para.runs and para.text:
+                        run = para.runs[0] if para.runs else para.add_run(para.text)
+                        run.bold = True
 
 
 def inject_update_fields(docx_path):
@@ -137,6 +161,11 @@ def add_carrier_info_table(doc, rows_data):
     carrier_table.style = 'Table Grid'
     for i, (label, value) in enumerate(rows_data):
         carrier_table.rows[i].cells[0].text = label
+        set_cell_shading(carrier_table.rows[i].cells[0], HEADER_BG)
+        # Bold the label
+        for para in carrier_table.rows[i].cells[0].paragraphs:
+            for run in para.runs:
+                run.bold = True
         carrier_table.rows[i].cells[1].paragraphs[0].clear()
         carrier_table.rows[i].cells[1].paragraphs[0].add_run(value)
     apply_table_formatting(carrier_table, has_header=False)
@@ -216,24 +245,26 @@ def create_master_docx(output_path):
     doc.add_paragraph('NBA Insurance Services')
     doc.add_page_break()
 
-    # --- Section 2: Table of Contents ---
-    toc_heading = doc.add_heading('Table of Contents', level=1)
+    # --- Section 2: Table of Contents (manual — no Word field codes) ---
+    doc.add_heading('Table of Contents', level=1)
 
-    toc_para = doc.add_paragraph()
-    run = toc_para.add_run()
-
-    fldChar_begin = OxmlElement('w:fldChar')
-    fldChar_begin.set(qn('w:fldCharType'), 'begin')
-    run._r.append(fldChar_begin)
-
-    instrText = OxmlElement('w:instrText')
-    instrText.set(qn('xml:space'), 'preserve')
-    instrText.text = ' TOC \\o "1-3" \\h \\z \\u '
-    run._r.append(instrText)
-
-    fldChar_end = OxmlElement('w:fldChar')
-    fldChar_end.set(qn('w:fldCharType'), 'end')
-    run._r.append(fldChar_end)
+    toc_entries = [
+        ('Your Service Team', False),
+        ('Premium Summary', False),
+        ('Market Response', False),
+        ('Executive Summary', False),
+        ('Coverage Details', False),
+        ('    General Liability', True),
+        ("    Workers' Compensation", True),
+        ('    Commercial Property', True),
+        ('Recommendations', False),
+        ('About NBA Insurance Services', False),
+    ]
+    for entry_text, is_sub in toc_entries:
+        p_toc = doc.add_paragraph()
+        p_toc.paragraph_format.left_indent = Pt(18) if is_sub else Pt(0)
+        run_toc = p_toc.add_run(entry_text)
+        run_toc.font.size = Pt(11)
 
     doc.add_page_break()
 
@@ -278,70 +309,7 @@ def create_master_docx(output_path):
     p_team_close = doc.add_paragraph()
     p_team_close.add_run('{/hasTeam}')
 
-    # --- Section 4: Executive Summary ---
-    doc.add_heading('Executive Summary', level=1)
-    p_exec = doc.add_paragraph()
-    p_exec.add_run('{narratives.executive_summary}')
-    doc.add_page_break()
-
-    # --- Section 4b: Special Notes (conditional) ---
-    p_sn_open = doc.add_paragraph()
-    p_sn_open.add_run('{#narratives.special_notes}')
-
-    doc.add_heading('Special Notes', level=2)
-
-    p_sn_content = doc.add_paragraph()
-    p_sn_content.add_run('{narratives.special_notes}')
-
-    p_sn_close = doc.add_paragraph()
-    p_sn_close.add_run('{/narratives.special_notes}')
-
-    # --- Section 5: Coverage Details (LOB injection point) ---
-    doc.add_heading('Coverage Details', level=1)
-    p_lob = doc.add_paragraph()
-    p_lob.add_run('{@lobSectionsXml}')
-    doc.add_page_break()
-
-    # --- Section 6: Market Response (conditional) ---
-    p_mr_open = doc.add_paragraph()
-    p_mr_open.add_run('{#hasMarketResponses}')
-
-    doc.add_heading('Market Response', level=1)
-
-    mr_table = doc.add_table(rows=2, cols=4)
-    mr_table.style = 'Table Grid'
-
-    hdr = mr_table.rows[0]
-    hdr.cells[0].text = 'Carrier'
-    hdr.cells[1].text = 'Line of Business'
-    hdr.cells[2].text = 'Status'
-    hdr.cells[3].text = 'Notes / Reason'
-    set_repeat_header(hdr)
-
-    row = mr_table.rows[1]
-    row.cells[0].paragraphs[0].clear()
-    row.cells[0].paragraphs[0].add_run('{#marketResponses}{carrierName}')
-    row.cells[1].paragraphs[0].clear()
-    row.cells[1].paragraphs[0].add_run('{lobDisplay}')
-    row.cells[2].paragraphs[0].clear()
-    row.cells[2].paragraphs[0].add_run('{statusDisplay}')
-    row.cells[3].paragraphs[0].clear()
-    row.cells[3].paragraphs[0].add_run('{reason}{/marketResponses}')
-
-    apply_table_formatting(mr_table)
-
-    doc.add_page_break()
-
-    p_mr_close = doc.add_paragraph()
-    p_mr_close.add_run('{/hasMarketResponses}')
-
-    # --- Section 7: Recommendations ---
-    doc.add_heading('Recommendations', level=1)
-    p_rec = doc.add_paragraph()
-    p_rec.add_run('{narratives.recommendations}')
-    doc.add_page_break()
-
-    # --- Section 8: Premium Summary ---
+    # --- Section 4: Premium Summary (moved up — before Exec Summary) ---
     doc.add_heading('Premium Summary', level=1)
 
     p_byLob_open = doc.add_paragraph()
@@ -400,6 +368,69 @@ def create_master_docx(output_path):
     gt_row.cells[3].paragraphs[0].add_run('{premiumSummary.grandTotalCost}')
     apply_table_formatting(gt_table, has_header=False)
 
+    doc.add_page_break()
+
+    # --- Section 5: Market Response (moved up — before Exec Summary) ---
+    p_mr_open = doc.add_paragraph()
+    p_mr_open.add_run('{#hasMarketResponses}')
+
+    doc.add_heading('Market Response', level=1)
+
+    mr_table = doc.add_table(rows=2, cols=4)
+    mr_table.style = 'Table Grid'
+
+    hdr = mr_table.rows[0]
+    hdr.cells[0].text = 'Carrier'
+    hdr.cells[1].text = 'Line of Business'
+    hdr.cells[2].text = 'Status'
+    hdr.cells[3].text = 'Notes / Reason'
+    set_repeat_header(hdr)
+
+    row = mr_table.rows[1]
+    row.cells[0].paragraphs[0].clear()
+    row.cells[0].paragraphs[0].add_run('{#marketResponses}{carrierName}')
+    row.cells[1].paragraphs[0].clear()
+    row.cells[1].paragraphs[0].add_run('{lobDisplay}')
+    row.cells[2].paragraphs[0].clear()
+    row.cells[2].paragraphs[0].add_run('{statusDisplay}')
+    row.cells[3].paragraphs[0].clear()
+    row.cells[3].paragraphs[0].add_run('{reason}{/marketResponses}')
+
+    apply_table_formatting(mr_table)
+
+    doc.add_page_break()
+
+    p_mr_close = doc.add_paragraph()
+    p_mr_close.add_run('{/hasMarketResponses}')
+
+    # --- Section 6: Executive Summary ---
+    doc.add_heading('Executive Summary', level=1)
+    p_exec = doc.add_paragraph()
+    p_exec.add_run('{narratives.executive_summary}')
+    doc.add_page_break()
+
+    # --- Section 6b: Special Notes (conditional) ---
+    p_sn_open = doc.add_paragraph()
+    p_sn_open.add_run('{#narratives.special_notes}')
+
+    doc.add_heading('Special Notes', level=2)
+
+    p_sn_content = doc.add_paragraph()
+    p_sn_content.add_run('{narratives.special_notes}')
+
+    p_sn_close = doc.add_paragraph()
+    p_sn_close.add_run('{/narratives.special_notes}')
+
+    # --- Section 7: Coverage Details (LOB injection point) ---
+    doc.add_heading('Coverage Details', level=1)
+    p_lob = doc.add_paragraph()
+    p_lob.add_run('{@lobSectionsXml}')
+    doc.add_page_break()
+
+    # --- Section 8: Recommendations ---
+    doc.add_heading('Recommendations', level=1)
+    p_rec = doc.add_paragraph()
+    p_rec.add_run('{narratives.recommendations}')
     doc.add_page_break()
 
     # --- Section 9: Boilerplate injection ---
@@ -503,8 +534,46 @@ def create_general_liability_docx(output_path):
     cov_row.cells[2].paragraphs[0].add_run('{limit}{/coverages}')
     apply_table_formatting(cov_table)
 
-    # 6. Schedule of Locations (with children)
-    add_schedule_section(doc, 'Schedule of Locations', heading_level=2, include_children=True)
+    # 6. Schedule of Locations — horizontal grid
+    doc.add_heading('Schedule of Locations', level=2)
+    loc_table = doc.add_table(rows=2, cols=4)
+    loc_table.style = 'Table Grid'
+    loc_headers = ['Location #', 'Street', 'City', 'State']
+    for i, h in enumerate(loc_headers):
+        loc_table.rows[0].cells[i].text = h
+    set_repeat_header(loc_table.rows[0])
+    loc_row = loc_table.rows[1]
+    loc_keys = [
+        '{#scheduleLocations}{itemNumber}',
+        '{streetAddress}',
+        '{city}',
+        '{state}{/scheduleLocations}',
+    ]
+    for i, k in enumerate(loc_keys):
+        loc_row.cells[i].paragraphs[0].clear()
+        loc_row.cells[i].paragraphs[0].add_run(k)
+    apply_table_formatting(loc_table)
+
+    # 6b. Basis of Premium (GL classifications) — horizontal grid
+    doc.add_heading('Basis of Premium', level=2)
+    bop_table = doc.add_table(rows=2, cols=5)
+    bop_table.style = 'Table Grid'
+    bop_headers = ['Class Code', 'Description', 'Exposure', 'Rate', 'Premium']
+    for i, h in enumerate(bop_headers):
+        bop_table.rows[0].cells[i].text = h
+    set_repeat_header(bop_table.rows[0])
+    bop_row = bop_table.rows[1]
+    bop_keys = [
+        '{#glClassifications}{classCode}',
+        '{classDescription}',
+        '{exposure}',
+        '{rate}',
+        '{glPremium}{/glClassifications}',
+    ]
+    for i, k in enumerate(bop_keys):
+        bop_row.cells[i].paragraphs[0].clear()
+        bop_row.cells[i].paragraphs[0].add_run(k)
+    apply_table_formatting(bop_table)
 
     # 7. Endorsements
     add_endorsements_table(doc)
@@ -557,28 +626,30 @@ def create_workers_comp_docx(output_path):
     attr_row.cells[1].paragraphs[0].add_run('{formattedValue}{/attributes}')
     apply_table_formatting(limits_table)
 
-    # 4. Employee Classification Schedule (flat - no children)
+    # 4. Employee Classification Schedule — horizontal grid
     doc.add_heading('Employee Classification Schedule', level=2)
 
-    doc.add_paragraph('{#scheduleItems}')
+    sched_table = doc.add_table(rows=2, cols=6)
+    sched_table.style = 'Table Grid'
+    wc_headers = ['State', 'Class Code', 'Description', 'Payroll', 'Rate', 'Premium']
+    for i, h in enumerate(wc_headers):
+        sched_table.rows[0].cells[i].text = h
+    set_repeat_header(sched_table.rows[0])
 
-    p_item_hdr = doc.add_paragraph()
-    p_item_hdr.style = doc.styles['Heading 3']
-    p_item_hdr.add_run('{description}')
+    row = sched_table.rows[1]
+    wc_keys = [
+        '{#wcEmployeeClasses}{state}',
+        '{classCode}',
+        '{classDescription}',
+        '{payroll}',
+        '{ratePerHundred}',
+        '{estimatedPremium}{/wcEmployeeClasses}',
+    ]
+    for i, k in enumerate(wc_keys):
+        row.cells[i].paragraphs[0].clear()
+        row.cells[i].paragraphs[0].add_run(k)
 
-    fa_table = doc.add_table(rows=2, cols=2)
-    fa_table.style = 'Table Grid'
-    fa_table.rows[0].cells[0].text = 'Field'
-    fa_table.rows[0].cells[1].text = 'Value'
-    set_repeat_header(fa_table.rows[0])
-    fa_row = fa_table.rows[1]
-    fa_row.cells[0].paragraphs[0].clear()
-    fa_row.cells[0].paragraphs[0].add_run('{#formattedAttributes}{label}')
-    fa_row.cells[1].paragraphs[0].clear()
-    fa_row.cells[1].paragraphs[0].add_run('{formattedValue}{/formattedAttributes}')
-    apply_table_formatting(fa_table)
-
-    doc.add_paragraph('{/scheduleItems}')
+    apply_table_formatting(sched_table)
 
     # 5. Endorsements
     add_endorsements_table(doc)

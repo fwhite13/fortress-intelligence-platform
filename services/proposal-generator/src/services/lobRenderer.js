@@ -4,37 +4,93 @@ import Docxtemplater from 'docxtemplater'
 import { formatAttribute, LOB_DISPLAY_NAMES } from '../utils/formatAttribute.js'
 
 /**
- * Build schedule items with formattedValue on attributes, and process children.
+ * Format a numeric string as USD currency: $1,234,567
+ * Returns empty string for null/undefined/empty.
  */
-function buildScheduleItems(scheduleItems) {
+function formatCurrency(value) {
+  if (value == null || value === '') return ''
+  const num = parseFloat(value)
+  if (isNaN(num)) return value
+  return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+}
+
+/**
+ * Flatten location-type schedule items into {itemNumber, streetAddress, city, state, zip}.
+ */
+function buildScheduleLocations(scheduleItems) {
   if (!scheduleItems || scheduleItems.length === 0) return []
+  return scheduleItems
+    .filter(i => i.itemType === 'location')
+    .map(item => {
+      const attrs = Object.fromEntries((item.attributes || []).map(a => [a.key, a.value]))
+      return {
+        itemNumber: item.itemNumber || '',
+        streetAddress: attrs.address_street1 || '',
+        city: attrs.address_city || '',
+        state: attrs.address_state || '',
+        zip: attrs.address_zip || '',
+      }
+    })
+}
 
-  return scheduleItems.map(item => {
-    const formattedAttributes = (item.attributes || []).map(a => ({
-      ...a,
-      formattedValue: formatAttribute(a.value, a.format),
-    }))
-
-    const children = (item.children || []).map(child => ({
-      itemType: child.itemType || '',
-      itemNumber: child.itemNumber || null,
-      description: child.description || '',
-      address: child.address || null,
-      formattedAttributes: (child.attributes || []).map(a => ({
-        ...a,
-        formattedValue: formatAttribute(a.value, a.format),
-      })),
-    }))
-
-    return {
-      itemType: item.itemType || '',
-      itemNumber: item.itemNumber || null,
-      description: item.description || '',
-      address: item.address || null,
-      formattedAttributes,
-      children,
+/**
+ * Flatten GL classification items into flat keys for docxtemplater.
+ * GL classifications appear as nested scheduleItems UNDER each location item.
+ */
+function buildGlClassifications(scheduleItems) {
+  if (!scheduleItems || scheduleItems.length === 0) return []
+  const results = []
+  for (const item of scheduleItems) {
+    // Top-level gl_classification items
+    if (item.itemType === 'gl_classification') {
+      const attrs = Object.fromEntries((item.attributes || []).map(a => [a.key, a.value]))
+      results.push({
+        classCode: attrs.class_code || '',
+        classDescription: attrs.class_description || item.description || '',
+        exposure: attrs.estimated_exposure != null ? String(attrs.estimated_exposure) : (attrs.exposure || ''),
+        exposureBasis: attrs.premium_basis || attrs.exposure_basis || '',
+        rate: attrs.rate ? `$${attrs.rate}` : '',
+        glPremium: formatCurrency(attrs.estimated_premium || attrs.premium),
+      })
     }
-  })
+    // Nested gl_classification items under location.scheduleItems
+    if (item.itemType === 'location' && item.scheduleItems) {
+      for (const nested of item.scheduleItems) {
+        if (nested.itemType === 'gl_classification') {
+          const attrs = Object.fromEntries((nested.attributes || []).map(a => [a.key, a.value]))
+          results.push({
+            classCode: attrs.class_code || '',
+            classDescription: attrs.class_description || nested.description || '',
+            exposure: attrs.estimated_exposure != null ? String(attrs.estimated_exposure) : (attrs.exposure || ''),
+            exposureBasis: attrs.premium_basis || attrs.exposure_basis || '',
+            rate: attrs.rate ? `$${attrs.rate}` : '',
+            glPremium: formatCurrency(attrs.estimated_premium || attrs.premium),
+          })
+        }
+      }
+    }
+  }
+  return results
+}
+
+/**
+ * Flatten WC employee_class schedule items into flat keys for docxtemplater.
+ */
+function buildWcEmployeeClasses(scheduleItems) {
+  if (!scheduleItems || scheduleItems.length === 0) return []
+  return scheduleItems
+    .filter(i => i.itemType === 'employee_class')
+    .map(item => {
+      const attrs = Object.fromEntries((item.attributes || []).map(a => [a.key, a.value]))
+      return {
+        state: attrs.state || '',
+        classCode: attrs.class_code || '',
+        classDescription: attrs.class_description || item.description || '',
+        payroll: formatCurrency(attrs.payroll),
+        ratePerHundred: attrs.rate_per_hundred ? `$${attrs.rate_per_hundred}` : '',
+        estimatedPremium: formatCurrency(attrs.estimated_premium),
+      }
+    })
 }
 
 /**
@@ -112,7 +168,9 @@ export async function renderLobPartial(quote, lobDocxBuffer, logger) {
       return { ...d, formattedValue }
     }),
     coverageParts: quote.coverageParts || [],
-    scheduleItems: buildScheduleItems(quote.scheduleItems || []),
+    scheduleLocations: buildScheduleLocations(quote.scheduleItems || []),
+    glClassifications: buildGlClassifications(quote.scheduleItems || []),
+    wcEmployeeClasses: buildWcEmployeeClasses(quote.scheduleItems || []),
     notes: quote.notes || null,
   }
 
