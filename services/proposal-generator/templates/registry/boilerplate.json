@@ -1,0 +1,33 @@
+{
+  "version": "1.0.0",
+  "blocks": {
+    "about_fortress": {
+      "id": "about_fortress",
+      "displayName": "About Fortress AM",
+      "type": "wordml",
+      "content": "<w:p><w:pPr><w:pStyle w:val=\"Heading1\"/></w:pPr><w:r><w:t>About Fortress Agency Management</w:t></w:r></w:p><w:p><w:r><w:t>Fortress Agency Management is a full-service independent insurance agency serving commercial clients across the Southeast. Our team of experienced professionals delivers tailored risk management solutions and dedicated service. We are proud to serve {insuredName} and look forward to a continued partnership.</w:t></w:r></w:p>",
+      "variables": [
+        "insuredName"
+      ],
+      "notes": "Standard About Fortress section."
+    },
+    "am_best_disclaimer": {
+      "id": "am_best_disclaimer",
+      "displayName": "AM Best Rating Disclaimer",
+      "type": "text",
+      "content": "Carrier financial strength ratings are provided by A.M. Best Company as of the date of this proposal and are subject to change. Fortress AM makes no representations regarding carrier solvency.",
+      "variables": [],
+      "notes": "Required on all proposals."
+    },
+    "e_o_disclosure": {
+      "id": "e_o_disclosure",
+      "displayName": "E&O Disclosure",
+      "type": "text",
+      "content": "This proposal is prepared for the exclusive use of {insuredName} and is based on information provided by the insured. Coverage is not bound until confirmed in writing by the issuing carrier.",
+      "variables": [
+        "insuredName"
+      ],
+      "notes": "Required on all proposals."
+    }
+  }
+}

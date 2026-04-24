@@ -1,0 +1,11 @@
+Generated: 2026-04-24T02:40:06Z
+
+Files:
+  - templates/verticals/nba/master.docx
+  - templates/verticals/nba/meta.json
+  - templates/lob-partials/general-liability.docx
+  - templates/lob-partials/workers-compensation.docx
+  - templates/lob-partials/commercial-property.docx
+  - templates/registry/boilerplate.json
+  - templates/upload-to-s3.sh
+  - docs/template-authoring-checklist.md

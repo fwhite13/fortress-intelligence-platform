@@ -1,0 +1,18 @@
+{
+  "templateId": "nba-v1",
+  "vertical": "nba",
+  "displayName": "NBA \u2014 Standard Proposal",
+  "version": "1.0.0",
+  "s3Key": "verticals/nba/master.docx",
+  "lobPartials": [
+    "GeneralLiability",
+    "WorkersCompensation",
+    "CommercialProperty"
+  ],
+  "defaultBoilerplate": [
+    "about_fortress",
+    "am_best_disclaimer",
+    "e_o_disclosure"
+  ],
+  "active": true
+}

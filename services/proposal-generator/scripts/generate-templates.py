@@ -1,0 +1,869 @@
+#!/usr/bin/env python3
+"""
+Generate all docxtemplater-compatible proposal templates.
+Run from: /home/fredw/projects/fip/services/proposal-generator
+Usage: python3 scripts/generate-templates.py
+"""
+
+import os
+import json
+import shutil
+import zipfile
+import tempfile
+from pathlib import Path
+from datetime import datetime, timezone
+
+try:
+    from docx import Document
+    from docx.shared import Inches, Pt, RGBColor, Emu
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+except ImportError:
+    print("ERROR: python-docx is required. Install with: pip install python-docx")
+    raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+
+def set_keep_with_next(paragraph):
+    """Set keepNext on paragraph - prevents orphan rows in tables."""
+    pPr = paragraph._p.get_or_add_pPr()
+    keepNext = OxmlElement('w:keepNext')
+    pPr.append(keepNext)
+
+
+def set_repeat_header(row):
+    """Mark row as repeat header (tblHeader)."""
+    trPr = row._tr.get_or_add_trPr()
+    tblHeader = OxmlElement('w:tblHeader')
+    trPr.append(tblHeader)
+
+
+def set_keep_lines(cell):
+    """Set keepLines on all paragraphs in cell."""
+    for paragraph in cell.paragraphs:
+        pPr = paragraph._p.get_or_add_pPr()
+        keepLines = OxmlElement('w:keepLines')
+        pPr.append(keepLines)
+
+
+def apply_table_formatting(table, has_header=True):
+    """Apply all required table formatting to every row/cell."""
+    for i, row in enumerate(table.rows):
+        is_header = has_header and i == 0
+        is_last = i == len(table.rows) - 1
+        if is_header:
+            set_repeat_header(row)
+        for cell in row.cells:
+            set_keep_lines(cell)
+            for para in cell.paragraphs:
+                if not is_last:
+                    set_keep_with_next(para)
+
+
+def inject_update_fields(docx_path):
+    """Inject updateFields setting so Word auto-updates TOC on open."""
+    tmp = docx_path + '.tmp'
+    with zipfile.ZipFile(docx_path, 'r') as zin:
+        with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == 'word/settings.xml':
+                    data_str = data.decode('utf-8')
+                    if 'w:updateFields' not in data_str:
+                        data_str = data_str.replace(
+                            '</w:settings>',
+                            '<w:updateFields w:val="true"/></w:settings>'
+                        )
+                    data = data_str.encode('utf-8')
+                zout.writestr(item, data)
+    shutil.move(tmp, docx_path)
+
+
+def add_schedule_section(doc, heading_text, heading_level=2, include_children=True):
+    """Add a schedule items section with optional children loop."""
+    doc.add_heading(heading_text, level=heading_level)
+
+    p_sched_open = doc.add_paragraph('{#scheduleItems}')
+
+    p_item_hdr = doc.add_paragraph()
+    p_item_hdr.style = doc.styles['Heading 3']
+    p_item_hdr.add_run('Item {itemNumber}: {description}')
+
+    # formattedAttributes sub-loop table
+    fa_table = doc.add_table(rows=2, cols=2)
+    fa_table.style = 'Table Grid'
+    fa_table.rows[0].cells[0].text = 'Field'
+    fa_table.rows[0].cells[1].text = 'Value'
+    set_repeat_header(fa_table.rows[0])
+    fa_row = fa_table.rows[1]
+    fa_row.cells[0].paragraphs[0].clear()
+    fa_row.cells[0].paragraphs[0].add_run('{#formattedAttributes}{label}')
+    fa_row.cells[1].paragraphs[0].clear()
+    fa_row.cells[1].paragraphs[0].add_run('{formattedValue}{/formattedAttributes}')
+    apply_table_formatting(fa_table)
+
+    if include_children:
+        p_child_open = doc.add_paragraph('{#children}')
+
+        p_child_hdr = doc.add_paragraph()
+        p_child_hdr.style = doc.styles['Heading 4']
+        p_child_hdr.add_run('Sub-item {itemNumber}: {description}')
+
+        child_fa_table = doc.add_table(rows=2, cols=2)
+        child_fa_table.style = 'Table Grid'
+        child_fa_table.rows[0].cells[0].text = 'Field'
+        child_fa_table.rows[0].cells[1].text = 'Value'
+        set_repeat_header(child_fa_table.rows[0])
+        c_fa_row = child_fa_table.rows[1]
+        c_fa_row.cells[0].paragraphs[0].clear()
+        c_fa_row.cells[0].paragraphs[0].add_run('{#formattedAttributes}{label}')
+        c_fa_row.cells[1].paragraphs[0].clear()
+        c_fa_row.cells[1].paragraphs[0].add_run('{formattedValue}{/formattedAttributes}')
+        apply_table_formatting(child_fa_table)
+
+        doc.add_paragraph('{/children}')
+
+    doc.add_paragraph('{/scheduleItems}')
+
+
+def add_carrier_info_table(doc, rows_data):
+    """Add a carrier info table with label/value rows."""
+    carrier_table = doc.add_table(rows=len(rows_data), cols=2)
+    carrier_table.style = 'Table Grid'
+    for i, (label, value) in enumerate(rows_data):
+        carrier_table.rows[i].cells[0].text = label
+        carrier_table.rows[i].cells[1].paragraphs[0].clear()
+        carrier_table.rows[i].cells[1].paragraphs[0].add_run(value)
+    apply_table_formatting(carrier_table, has_header=False)
+    return carrier_table
+
+
+def add_endorsements_table(doc):
+    """Add the standard endorsements section."""
+    doc.add_heading('Endorsements', level=2)
+    end_table = doc.add_table(rows=2, cols=2)
+    end_table.style = 'Table Grid'
+    end_table.rows[0].cells[0].text = 'Form #'
+    end_table.rows[0].cells[1].text = 'Endorsement'
+    set_repeat_header(end_table.rows[0])
+    end_row = end_table.rows[1]
+    end_row.cells[0].paragraphs[0].clear()
+    end_row.cells[0].paragraphs[0].add_run('{#endorsements}{formNumber}')
+    end_row.cells[1].paragraphs[0].clear()
+    end_row.cells[1].paragraphs[0].add_run('{name}{/endorsements}')
+    apply_table_formatting(end_table)
+    return end_table
+
+
+def add_notes_section(doc):
+    """Add the conditional notes paragraph."""
+    p_notes = doc.add_paragraph()
+    p_notes.add_run('{#notes}')
+    p_notes_content = doc.add_paragraph()
+    run = p_notes_content.add_run('Notes: ')
+    run.bold = True
+    p_notes_content.add_run('{notes}')
+    doc.add_paragraph('{/notes}')
+
+
+# ---------------------------------------------------------------------------
+# Master template
+# ---------------------------------------------------------------------------
+
+def create_master_docx(output_path):
+    """Create the master proposal template."""
+    doc = Document()
+
+    # Remove default empty paragraph if present
+    if doc.paragraphs:
+        p = doc.paragraphs[0]._element
+        p.getparent().remove(p)
+
+    # --- Section 1: Cover Page ---
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.style = doc.styles['Heading 1']
+    run = p.add_run('Insurance Proposal')
+    run.bold = True
+    run.font.size = Pt(28)
+
+    p2 = doc.add_paragraph('Prepared for:')
+
+    p3 = doc.add_paragraph()
+    run3 = p3.add_run('{insuredName}')
+    run3.bold = True
+    run3.font.size = Pt(16)
+
+    p4 = doc.add_paragraph()
+    p4.add_run('Policy Period: ')
+    p4.add_run('{policyPeriodDisplay}')
+
+    p5 = doc.add_paragraph()
+    p5.add_run('Prepared by: ')
+    p5.add_run('{amName}')
+    p6 = doc.add_paragraph()
+    p6.add_run('{amEmail}')
+
+    p7 = doc.add_paragraph()
+    p7.add_run('Date: ')
+    p7.add_run('{generatedDate}')
+
+    doc.add_paragraph('Fortress Agency Management')
+    doc.add_page_break()
+
+    # --- Section 2: Table of Contents ---
+    toc_heading = doc.add_heading('Table of Contents', level=1)
+
+    toc_para = doc.add_paragraph()
+    run = toc_para.add_run()
+
+    fldChar_begin = OxmlElement('w:fldChar')
+    fldChar_begin.set(qn('w:fldCharType'), 'begin')
+    run._r.append(fldChar_begin)
+
+    instrText = OxmlElement('w:instrText')
+    instrText.set(qn('xml:space'), 'preserve')
+    instrText.text = ' TOC \\o "1-3" \\h \\z \\u '
+    run._r.append(instrText)
+
+    fldChar_end = OxmlElement('w:fldChar')
+    fldChar_end.set(qn('w:fldCharType'), 'end')
+    run._r.append(fldChar_end)
+
+    doc.add_page_break()
+
+    # --- Section 3: Team Sheet (conditional) ---
+    p_team_open = doc.add_paragraph()
+    p_team_open.add_run('{#hasTeam}')
+
+    doc.add_heading('Your Service Team', level=1)
+
+    team_table = doc.add_table(rows=2, cols=3)
+    team_table.style = 'Table Grid'
+
+    # Header row
+    hdr_cells = team_table.rows[0].cells
+    hdr_cells[0].text = 'Name / Role'
+    hdr_cells[1].text = 'Email'
+    hdr_cells[2].text = 'Phone'
+    set_repeat_header(team_table.rows[0])
+    for cell in team_table.rows[0].cells:
+        set_keep_lines(cell)
+        for para in cell.paragraphs:
+            set_keep_with_next(para)
+
+    # Template row — docxtemplater repeats this row for each team member
+    row = team_table.rows[1]
+    c0 = row.cells[0]
+    c0.paragraphs[0].clear()
+    c0.paragraphs[0].add_run('{#team}{name}')
+    c0.add_paragraph().add_run('{role}')
+    c1 = row.cells[1]
+    c1.paragraphs[0].clear()
+    c1.paragraphs[0].add_run('{email}')
+    c2 = row.cells[2]
+    c2.paragraphs[0].clear()
+    c2.paragraphs[0].add_run('{phone}{/team}')
+
+    for cell in row.cells:
+        set_keep_lines(cell)
+
+    doc.add_page_break()
+
+    p_team_close = doc.add_paragraph()
+    p_team_close.add_run('{/hasTeam}')
+
+    # --- Section 4: Executive Summary ---
+    doc.add_heading('Executive Summary', level=1)
+    p_exec = doc.add_paragraph()
+    p_exec.add_run('{narratives.executive_summary}')
+    doc.add_page_break()
+
+    # --- Section 5: Coverage Details (LOB injection point) ---
+    doc.add_heading('Coverage Details', level=1)
+    p_lob = doc.add_paragraph()
+    p_lob.add_run('{%lobSectionsXml}')
+    doc.add_page_break()
+
+    # --- Section 6: Market Response (conditional) ---
+    p_mr_open = doc.add_paragraph()
+    p_mr_open.add_run('{#hasMarketResponses}')
+
+    doc.add_heading('Market Response', level=1)
+
+    mr_table = doc.add_table(rows=2, cols=4)
+    mr_table.style = 'Table Grid'
+
+    hdr = mr_table.rows[0]
+    hdr.cells[0].text = 'Carrier'
+    hdr.cells[1].text = 'Line of Business'
+    hdr.cells[2].text = 'Status'
+    hdr.cells[3].text = 'Notes / Reason'
+    set_repeat_header(hdr)
+
+    row = mr_table.rows[1]
+    row.cells[0].paragraphs[0].clear()
+    row.cells[0].paragraphs[0].add_run('{#marketResponses}{carrierName}')
+    row.cells[1].paragraphs[0].clear()
+    row.cells[1].paragraphs[0].add_run('{lobDisplay}')
+    row.cells[2].paragraphs[0].clear()
+    row.cells[2].paragraphs[0].add_run('{statusDisplay}')
+    row.cells[3].paragraphs[0].clear()
+    row.cells[3].paragraphs[0].add_run('{reason}{/marketResponses}')
+
+    apply_table_formatting(mr_table)
+
+    doc.add_page_break()
+
+    p_mr_close = doc.add_paragraph()
+    p_mr_close.add_run('{/hasMarketResponses}')
+
+    # --- Section 7: Recommendations ---
+    doc.add_heading('Recommendations', level=1)
+    p_rec = doc.add_paragraph()
+    p_rec.add_run('{narratives.recommendations}')
+    doc.add_page_break()
+
+    # --- Section 8: Premium Summary ---
+    doc.add_heading('Premium Summary', level=1)
+
+    p_byLob_open = doc.add_paragraph()
+    p_byLob_open.add_run('{#premiumSummary.byLob}')
+
+    p_lob_name = doc.add_paragraph()
+    p_lob_name.style = doc.styles['Heading 2']
+    p_lob_name.add_run('{displayName}')
+
+    ps_table = doc.add_table(rows=3, cols=4)
+    ps_table.style = 'Table Grid'
+
+    hdr = ps_table.rows[0]
+    hdr.cells[0].text = 'Carrier'
+    hdr.cells[1].text = 'Premium'
+    hdr.cells[2].text = 'Taxes & Fees'
+    hdr.cells[3].text = 'Total'
+    set_repeat_header(hdr)
+
+    q_row = ps_table.rows[1]
+    q_row.cells[0].paragraphs[0].clear()
+    q_row.cells[0].paragraphs[0].add_run('{#quotes}{carrier}')
+    q_row.cells[1].paragraphs[0].clear()
+    q_row.cells[1].paragraphs[0].add_run('{premium}')
+    q_row.cells[2].paragraphs[0].clear()
+    q_row.cells[2].paragraphs[0].add_run('{taxes}')
+    q_row.cells[3].paragraphs[0].clear()
+    q_row.cells[3].paragraphs[0].add_run('{totalCost}{/quotes}')
+
+    sub_row = ps_table.rows[2]
+    sub_row.cells[0].paragraphs[0].clear()
+    sub_row.cells[0].paragraphs[0].add_run('Subtotal')
+    sub_row.cells[1].paragraphs[0].clear()
+    sub_row.cells[1].paragraphs[0].add_run('{subtotalPremium}')
+    sub_row.cells[2].paragraphs[0].clear()
+    sub_row.cells[2].paragraphs[0].add_run('{subtotalTaxes}')
+    sub_row.cells[3].paragraphs[0].clear()
+    sub_row.cells[3].paragraphs[0].add_run('{subtotalTotalCost}')
+
+    apply_table_formatting(ps_table)
+
+    p_byLob_close = doc.add_paragraph()
+    p_byLob_close.add_run('{/premiumSummary.byLob}')
+
+    # Grand Total table
+    gt_table = doc.add_table(rows=1, cols=4)
+    gt_table.style = 'Table Grid'
+    gt_row = gt_table.rows[0]
+    gt_row.cells[0].paragraphs[0].clear()
+    gt_row.cells[0].paragraphs[0].add_run('Grand Total')
+    gt_row.cells[1].paragraphs[0].clear()
+    gt_row.cells[1].paragraphs[0].add_run('{premiumSummary.grandTotalPremium}')
+    gt_row.cells[2].paragraphs[0].clear()
+    gt_row.cells[2].paragraphs[0].add_run('{premiumSummary.grandTotalTaxes}')
+    gt_row.cells[3].paragraphs[0].clear()
+    gt_row.cells[3].paragraphs[0].add_run('{premiumSummary.grandTotalCost}')
+    apply_table_formatting(gt_table, has_header=False)
+
+    doc.add_page_break()
+
+    # --- Section 9: Boilerplate injection ---
+    p_bp = doc.add_paragraph()
+    p_bp.add_run('{%boilerplateSectionsXml}')
+
+    # --- Footer ---
+    section = doc.sections[0]
+    footer = section.footer
+    footer_para = footer.paragraphs[0]
+    footer_para.clear()
+
+    pPr = footer_para._p.get_or_add_pPr()
+    tabs = OxmlElement('w:tabs')
+
+    tab1 = OxmlElement('w:tab')
+    tab1.set(qn('w:val'), 'center')
+    tab1.set(qn('w:pos'), '4680')
+    tabs.append(tab1)
+
+    tab2 = OxmlElement('w:tab')
+    tab2.set(qn('w:val'), 'right')
+    tab2.set(qn('w:pos'), '9360')
+    tabs.append(tab2)
+    pPr.append(tabs)
+
+    run = footer_para.add_run('{amName}\t{proposalNumber}\t{generatedDate}')
+    run.font.size = Pt(9)
+
+    doc.save(output_path)
+    inject_update_fields(output_path)
+    print(f"  Created: {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# LOB Partial: General Liability
+# ---------------------------------------------------------------------------
+
+def create_general_liability_docx(output_path):
+    """Create general-liability.docx LOB partial template."""
+    doc = Document()
+
+    # 1. Section heading
+    p_heading = doc.add_paragraph()
+    p_heading.style = doc.styles['Heading 1']
+    p_heading.add_run('{sectionTitle}')
+
+    # 2. Carrier info table
+    add_carrier_info_table(doc, [
+        ('Carrier', '{carrier.name}'),
+        ('AM Best Rating', '{carrier.amBestRating}'),
+        ('Admitted/Surplus', '{#isAdmitted}Admitted{/isAdmitted}{^isAdmitted}Surplus Lines{/isAdmitted}'),
+        ('Quote #', '{#quoteNumber}{quoteNumber}{/quoteNumber}{^quoteNumber}\u2014{/quoteNumber}'),
+    ])
+
+    # 3. Coverage Limits
+    doc.add_heading('Coverage Limits', level=2)
+    limits_table = doc.add_table(rows=2, cols=2)
+    limits_table.style = 'Table Grid'
+    limits_table.rows[0].cells[0].text = 'Coverage'
+    limits_table.rows[0].cells[1].text = 'Limit'
+    set_repeat_header(limits_table.rows[0])
+    attr_row = limits_table.rows[1]
+    attr_row.cells[0].paragraphs[0].clear()
+    attr_row.cells[0].paragraphs[0].add_run('{#attributes}{label}')
+    attr_row.cells[1].paragraphs[0].clear()
+    attr_row.cells[1].paragraphs[0].add_run('{formattedValue}{/attributes}')
+    apply_table_formatting(limits_table)
+
+    # 4. Deductibles
+    doc.add_heading('Deductibles', level=2)
+    ded_table = doc.add_table(rows=2, cols=2)
+    ded_table.style = 'Table Grid'
+    ded_table.rows[0].cells[0].text = 'Deductible'
+    ded_table.rows[0].cells[1].text = 'Details'
+    set_repeat_header(ded_table.rows[0])
+    ded_row = ded_table.rows[1]
+    ded_row.cells[0].paragraphs[0].clear()
+    ded_row.cells[0].paragraphs[0].add_run('{#deductibles}{deductibleType}')
+    ded_row.cells[1].paragraphs[0].clear()
+    ded_row.cells[1].paragraphs[0].add_run('{description}{/deductibles}')
+    apply_table_formatting(ded_table)
+
+    p_no_ded = doc.add_paragraph()
+    p_no_ded.add_run('{^deductibles}None{/deductibles}')
+
+    # 5. Additional Coverages
+    doc.add_heading('Additional Coverages', level=2)
+    cov_table = doc.add_table(rows=2, cols=3)
+    cov_table.style = 'Table Grid'
+    cov_table.rows[0].cells[0].text = 'Coverage'
+    cov_table.rows[0].cells[1].text = 'Included'
+    cov_table.rows[0].cells[2].text = 'Limit'
+    set_repeat_header(cov_table.rows[0])
+    cov_row = cov_table.rows[1]
+    cov_row.cells[0].paragraphs[0].clear()
+    cov_row.cells[0].paragraphs[0].add_run('{#coverages}{name}')
+    cov_row.cells[1].paragraphs[0].clear()
+    cov_row.cells[1].paragraphs[0].add_run('{#isIncluded}\u2713{/isIncluded}{^isIncluded}Excluded{/isIncluded}')
+    cov_row.cells[2].paragraphs[0].clear()
+    cov_row.cells[2].paragraphs[0].add_run('{limit}{/coverages}')
+    apply_table_formatting(cov_table)
+
+    # 6. Schedule of Locations (with children)
+    add_schedule_section(doc, 'Schedule of Locations', heading_level=2, include_children=True)
+
+    # 7. Endorsements
+    add_endorsements_table(doc)
+
+    # 8. Premium
+    p_premium = doc.add_paragraph()
+    run = p_premium.add_run('Estimated Annual Premium: {premium}')
+    run.bold = True
+
+    # 9. Notes (conditional)
+    add_notes_section(doc)
+
+    doc.add_page_break()
+    doc.save(output_path)
+    print(f"  Created: {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# LOB Partial: Workers' Compensation
+# ---------------------------------------------------------------------------
+
+def create_workers_comp_docx(output_path):
+    """Create workers-compensation.docx LOB partial template."""
+    doc = Document()
+
+    # 1. Section heading
+    p_heading = doc.add_paragraph()
+    p_heading.style = doc.styles['Heading 1']
+    p_heading.add_run('{sectionTitle}')
+
+    # 2. Carrier info table
+    add_carrier_info_table(doc, [
+        ('Carrier', '{carrier.name}'),
+        ('AM Best Rating', '{carrier.amBestRating}'),
+        ('Admitted/Surplus', '{#isAdmitted}Admitted{/isAdmitted}{^isAdmitted}Surplus Lines{/isAdmitted}'),
+        ('Quote #', '{#quoteNumber}{quoteNumber}{/quoteNumber}{^quoteNumber}\u2014{/quoteNumber}'),
+    ])
+
+    # 3. Coverage and Limits
+    doc.add_heading('Coverage and Limits', level=2)
+    limits_table = doc.add_table(rows=2, cols=2)
+    limits_table.style = 'Table Grid'
+    limits_table.rows[0].cells[0].text = 'Coverage'
+    limits_table.rows[0].cells[1].text = 'Limit'
+    set_repeat_header(limits_table.rows[0])
+    attr_row = limits_table.rows[1]
+    attr_row.cells[0].paragraphs[0].clear()
+    attr_row.cells[0].paragraphs[0].add_run('{#attributes}{label}')
+    attr_row.cells[1].paragraphs[0].clear()
+    attr_row.cells[1].paragraphs[0].add_run('{formattedValue}{/attributes}')
+    apply_table_formatting(limits_table)
+
+    # 4. Employee Classification Schedule (flat - no children)
+    doc.add_heading('Employee Classification Schedule', level=2)
+
+    doc.add_paragraph('{#scheduleItems}')
+
+    p_item_hdr = doc.add_paragraph()
+    p_item_hdr.style = doc.styles['Heading 3']
+    p_item_hdr.add_run('{description}')
+
+    fa_table = doc.add_table(rows=2, cols=2)
+    fa_table.style = 'Table Grid'
+    fa_table.rows[0].cells[0].text = 'Field'
+    fa_table.rows[0].cells[1].text = 'Value'
+    set_repeat_header(fa_table.rows[0])
+    fa_row = fa_table.rows[1]
+    fa_row.cells[0].paragraphs[0].clear()
+    fa_row.cells[0].paragraphs[0].add_run('{#formattedAttributes}{label}')
+    fa_row.cells[1].paragraphs[0].clear()
+    fa_row.cells[1].paragraphs[0].add_run('{formattedValue}{/formattedAttributes}')
+    apply_table_formatting(fa_table)
+
+    doc.add_paragraph('{/scheduleItems}')
+
+    # 5. Endorsements
+    add_endorsements_table(doc)
+
+    # 6. Premium
+    p_premium = doc.add_paragraph()
+    run = p_premium.add_run('Estimated Annual Premium: {premium} (subject to audit)')
+    run.bold = True
+
+    # 7. Notes (conditional)
+    add_notes_section(doc)
+
+    doc.add_page_break()
+    doc.save(output_path)
+    print(f"  Created: {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# LOB Partial: Commercial Property
+# ---------------------------------------------------------------------------
+
+def create_commercial_property_docx(output_path):
+    """Create commercial-property.docx LOB partial template."""
+    doc = Document()
+
+    # 1. Section heading
+    p_heading = doc.add_paragraph()
+    p_heading.style = doc.styles['Heading 1']
+    p_heading.add_run('{sectionTitle}')
+
+    # 2. Carrier info table (5 rows — includes policy #)
+    add_carrier_info_table(doc, [
+        ('Carrier', '{carrier.name}'),
+        ('AM Best Rating', '{carrier.amBestRating}'),
+        ('Admitted/Surplus', '{#isAdmitted}Admitted{/isAdmitted}{^isAdmitted}Surplus Lines{/isAdmitted}'),
+        ('Quote #', '{#quoteNumber}{quoteNumber}{/quoteNumber}{^quoteNumber}\u2014{/quoteNumber}'),
+        ('Policy #', '{#policyNumber}{policyNumber}{/policyNumber}{^policyNumber}\u2014{/policyNumber}'),
+    ])
+
+    # 3. Property Details
+    doc.add_heading('Property Details', level=2)
+    limits_table = doc.add_table(rows=2, cols=2)
+    limits_table.style = 'Table Grid'
+    limits_table.rows[0].cells[0].text = 'Coverage'
+    limits_table.rows[0].cells[1].text = 'Limit'
+    set_repeat_header(limits_table.rows[0])
+    attr_row = limits_table.rows[1]
+    attr_row.cells[0].paragraphs[0].clear()
+    attr_row.cells[0].paragraphs[0].add_run('{#attributes}{label}')
+    attr_row.cells[1].paragraphs[0].clear()
+    attr_row.cells[1].paragraphs[0].add_run('{formattedValue}{/attributes}')
+    apply_table_formatting(limits_table)
+
+    # 4. Deductibles
+    doc.add_heading('Deductibles', level=2)
+    ded_table = doc.add_table(rows=2, cols=2)
+    ded_table.style = 'Table Grid'
+    ded_table.rows[0].cells[0].text = 'Deductible Type'
+    ded_table.rows[0].cells[1].text = 'Description'
+    set_repeat_header(ded_table.rows[0])
+    ded_row = ded_table.rows[1]
+    ded_row.cells[0].paragraphs[0].clear()
+    ded_row.cells[0].paragraphs[0].add_run('{#deductibles}{deductibleType}')
+    ded_row.cells[1].paragraphs[0].clear()
+    ded_row.cells[1].paragraphs[0].add_run('{description}{/deductibles}')
+    apply_table_formatting(ded_table)
+
+    # 5. Location / Building Schedule (nested with children)
+    add_schedule_section(doc, 'Location / Building Schedule', heading_level=2, include_children=True)
+
+    # 6. Endorsements
+    add_endorsements_table(doc)
+
+    # 7. Premium
+    p_premium = doc.add_paragraph()
+    run = p_premium.add_run('Estimated Annual Premium: {premium} | Total Cost: {totalCost}')
+    run.bold = True
+
+    # 8. Notes (conditional)
+    add_notes_section(doc)
+
+    doc.add_page_break()
+    doc.save(output_path)
+    print(f"  Created: {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    base_dir = Path(__file__).resolve().parent.parent
+    templates_dir = base_dir / 'templates'
+
+    # Create output directories
+    (templates_dir / 'verticals' / 'nba').mkdir(parents=True, exist_ok=True)
+    (templates_dir / 'lob-partials').mkdir(parents=True, exist_ok=True)
+    (templates_dir / 'registry').mkdir(parents=True, exist_ok=True)
+    (base_dir / 'docs').mkdir(parents=True, exist_ok=True)
+
+    print("Generating proposal templates...")
+
+    # Generate .docx files
+    create_master_docx(str(templates_dir / 'verticals' / 'nba' / 'master.docx'))
+    create_general_liability_docx(str(templates_dir / 'lob-partials' / 'general-liability.docx'))
+    create_workers_comp_docx(str(templates_dir / 'lob-partials' / 'workers-compensation.docx'))
+    create_commercial_property_docx(str(templates_dir / 'lob-partials' / 'commercial-property.docx'))
+
+    # meta.json
+    meta_path = templates_dir / 'verticals' / 'nba' / 'meta.json'
+    meta = {
+        "templateId": "nba-v1",
+        "vertical": "nba",
+        "displayName": "NBA \u2014 Standard Proposal",
+        "version": "1.0.0",
+        "s3Key": "verticals/nba/master.docx",
+        "lobPartials": ["GeneralLiability", "WorkersCompensation", "CommercialProperty"],
+        "defaultBoilerplate": ["about_fortress", "am_best_disclaimer", "e_o_disclosure"],
+        "active": True
+    }
+    meta_path.write_text(json.dumps(meta, indent=2) + '\n')
+    print(f"  Created: {meta_path}")
+
+    # boilerplate.json
+    bp_path = templates_dir / 'registry' / 'boilerplate.json'
+    boilerplate = {
+        "version": "1.0.0",
+        "blocks": {
+            "about_fortress": {
+                "id": "about_fortress",
+                "displayName": "About Fortress AM",
+                "type": "wordml",
+                "content": '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>About Fortress Agency Management</w:t></w:r></w:p><w:p><w:r><w:t>Fortress Agency Management is a full-service independent insurance agency serving commercial clients across the Southeast. Our team of experienced professionals delivers tailored risk management solutions and dedicated service. We are proud to serve {insuredName} and look forward to a continued partnership.</w:t></w:r></w:p>',
+                "variables": ["insuredName"],
+                "notes": "Standard About Fortress section."
+            },
+            "am_best_disclaimer": {
+                "id": "am_best_disclaimer",
+                "displayName": "AM Best Rating Disclaimer",
+                "type": "text",
+                "content": "Carrier financial strength ratings are provided by A.M. Best Company as of the date of this proposal and are subject to change. Fortress AM makes no representations regarding carrier solvency.",
+                "variables": [],
+                "notes": "Required on all proposals."
+            },
+            "e_o_disclosure": {
+                "id": "e_o_disclosure",
+                "displayName": "E&O Disclosure",
+                "type": "text",
+                "content": "This proposal is prepared for the exclusive use of {insuredName} and is based on information provided by the insured. Coverage is not bound until confirmed in writing by the issuing carrier.",
+                "variables": ["insuredName"],
+                "notes": "Required on all proposals."
+            }
+        }
+    }
+    bp_path.write_text(json.dumps(boilerplate, indent=2) + '\n')
+    print(f"  Created: {bp_path}")
+
+    # upload-to-s3.sh
+    upload_path = templates_dir / 'upload-to-s3.sh'
+    upload_script = '''#!/bin/bash
+# Upload all proposal-generator templates to S3
+BUCKET="fortress-tools"
+PREFIX="fip-proposal-templates"
+TEMPLATES_DIR="$(dirname "$0")"
+
+aws s3 cp "$TEMPLATES_DIR/verticals/nba/master.docx" "s3://$BUCKET/$PREFIX/verticals/nba/master.docx" --profile fortress-tools-deployer
+aws s3 cp "$TEMPLATES_DIR/verticals/nba/meta.json"   "s3://$BUCKET/$PREFIX/verticals/nba/meta.json"   --profile fortress-tools-deployer
+aws s3 cp "$TEMPLATES_DIR/lob-partials/general-liability.docx"    "s3://$BUCKET/$PREFIX/lob-partials/general-liability.docx"    --profile fortress-tools-deployer
+aws s3 cp "$TEMPLATES_DIR/lob-partials/workers-compensation.docx" "s3://$BUCKET/$PREFIX/lob-partials/workers-compensation.docx" --profile fortress-tools-deployer
+aws s3 cp "$TEMPLATES_DIR/lob-partials/commercial-property.docx"  "s3://$BUCKET/$PREFIX/lob-partials/commercial-property.docx"  --profile fortress-tools-deployer
+aws s3 cp "$TEMPLATES_DIR/registry/boilerplate.json" "s3://$BUCKET/$PREFIX/registry/boilerplate.json" --profile fortress-tools-deployer
+echo "Done."
+'''
+    upload_path.write_text(upload_script)
+    upload_path.chmod(0o755)
+    print(f"  Created: {upload_path}")
+
+    # docs/template-authoring-checklist.md
+    checklist_path = base_dir / 'docs' / 'template-authoring-checklist.md'
+    checklist = '''# Template Authoring Checklist
+
+## Prerequisites
+
+- Python 3.8+ with `python-docx` installed (`pip install python-docx`)
+- Run from: `/home/fredw/projects/fip/services/proposal-generator`
+- Command: `python3 scripts/generate-templates.py`
+
+## Single-Run Rule
+
+Every `{tag}` must be contained in ONE Word run. Never split a tag across formatting boundaries.
+
+**How to verify:** Open the `.docx` as a ZIP, inspect `word/document.xml`, and confirm each `{...}` tag appears within a single `<w:t>` element. python-docx programmatic creation guarantees this when you set the full tag string in one `add_run()` call.
+
+**Do NOT:**
+```python
+p.add_run('{insured')
+p.add_run('Name}')  # BROKEN: tag split across two runs
+```
+
+**Do:**
+```python
+p.add_run('{insuredName}')  # Correct: single run
+```
+
+## Table Formatting Requirements
+
+Every table must have these Word XML properties applied:
+
+| Property | Where | Purpose |
+|----------|-------|---------|
+| `w:keepNext` | All paragraph runs in rows (except last row) | Prevents orphan rows across page breaks |
+| `w:tblHeader` | Header rows | Repeats header on each page |
+| `w:keepLines` | All table cells | Keeps cell content together |
+
+Use `apply_table_formatting(table, has_header=True)` to apply all at once.
+
+## Loop Syntax Patterns
+
+### Table Row Loops
+
+Place `{#array}` in the **first cell** and `{/array}` in the **last cell** of the row to repeat.
+
+```
+| {#items}{name} | {value}{/items} |   <- entire row repeats
+```
+
+### Paragraph Loops (paragraphLoop: true)
+
+Place `{#array}` and `{/array}` on their **own standalone paragraphs**. Content paragraphs go between them.
+
+```
+{#scheduleItems}           <- own paragraph
+Item {itemNumber}          <- content paragraph
+{/scheduleItems}           <- own paragraph
+```
+
+### Nested Loops
+
+Outer loop uses paragraph style, inner loop can use table row style:
+
+```
+{#premiumSummary.byLob}                    <- paragraph
+  | {#quotes}{carrier} | {premium}{/quotes} |  <- table row
+{/premiumSummary.byLob}                    <- paragraph
+```
+
+## Conditional Section Patterns
+
+- Truthy: `{#field}...{/field}` — renders when field is truthy
+- Falsy: `{^field}...{/field}` — renders when field is null/false/empty
+- Inline conditional: `{#isAdmitted}Admitted{/isAdmitted}{^isAdmitted}Surplus Lines{/isAdmitted}`
+
+## Raw XML Injection
+
+`{%lobSectionsXml}` and `{%boilerplateSectionsXml}` must each be in their **own dedicated paragraph** with **NO other text**.
+
+```python
+p = doc.add_paragraph()
+p.add_run('{%lobSectionsXml}')  # Nothing else in this paragraph
+```
+
+## Data Contract Notes
+
+- `carrier` is an **OBJECT** — use `{carrier.name}`, `{carrier.amBestRating}`
+- `deductibles[].formattedValue` will be empty — use `{description}` instead
+- `scheduleItems[].children` may be null (e.g., WC) — only include children loop if LOB has nested items
+- `premiumSummary.byLob[].quotes[].carrier` is a string (carrier name), not an object
+
+## Verification
+
+After generating templates:
+
+1. Check file sizes are > 0: `ls -la templates/**/*.docx`
+2. Validate ZIP structure: `python3 -c "import zipfile; zipfile.ZipFile(\'templates/verticals/nba/master.docx\').testzip()"`
+3. Inspect XML for split runs: unzip and search for split `{` / `}` across `<w:t>` elements
+'''
+    checklist_path.write_text(checklist)
+    print(f"  Created: {checklist_path}")
+
+    # Write .generated marker
+    gen_path = templates_dir / '.generated'
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    generated_files = [
+        'templates/verticals/nba/master.docx',
+        'templates/verticals/nba/meta.json',
+        'templates/lob-partials/general-liability.docx',
+        'templates/lob-partials/workers-compensation.docx',
+        'templates/lob-partials/commercial-property.docx',
+        'templates/registry/boilerplate.json',
+        'templates/upload-to-s3.sh',
+        'docs/template-authoring-checklist.md',
+    ]
+    gen_path.write_text(f"Generated: {now}\n\nFiles:\n" + '\n'.join(f"  - {f}" for f in generated_files) + '\n')
+    print(f"  Created: {gen_path}")
+
+    print("\nSUCCESS: All templates generated")
+
+
+if __name__ == '__main__':
+    main()
