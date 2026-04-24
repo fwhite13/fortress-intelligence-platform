@@ -62,15 +62,26 @@ export function assembleTemplateData(payload, templateMeta, logoBuffer, lobSecti
     generatedDate: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
     templateVersion: templateMeta?.version || '',
 
-    // Narratives (passthrough, null-safe)
-    narratives: payload.narratives || {},
+    // Narratives — flat keys required for docxtemplater literal key lookup
+    'narratives.executive_summary': payload.narratives?.executive_summary || '',
+    'narratives.recommendations': payload.narratives?.recommendations || '',
+    'narratives.special_notes': payload.narratives?.special_notes || null,
 
     // Team
     team: payload.team || [],
     hasTeam: (payload.team || []).length > 0,
 
-    // Premium summary
-    premiumSummary: buildPremiumSummary(payload.quotes || []),
+    // Premium summary — flat keys required for docxtemplater literal key lookup
+    ...(() => {
+      const ps = buildPremiumSummary(payload.quotes || [])
+      return {
+        'premiumSummary.byLob': ps.byLob,
+        'premiumSummary.grandTotalPremium': ps.grandTotalPremium,
+        'premiumSummary.grandTotalTaxes': ps.grandTotalTaxes,
+        'premiumSummary.grandTotalFees': ps.grandTotalFees,
+        'premiumSummary.grandTotalCost': ps.grandTotalCost,
+      }
+    })(),
 
     // Market responses
     marketResponses: buildMarketResponseData(payload.marketResponses),

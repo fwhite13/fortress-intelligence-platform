@@ -74,9 +74,16 @@ export async function renderLobPartial(quote, lobDocxBuffer, logger) {
   const templateData = {
     sectionTitle,
     lineOfBusiness: quote.lineOfBusiness || '',
-    carrier: typeof quote.carrier === 'string'
-      ? { name: quote.carrier, amBestRating: '', naic: '' }
-      : (quote.carrier || {}),
+    ...(() => {
+      const c = typeof quote.carrier === 'string'
+        ? { name: quote.carrier, amBestRating: '', naic: '' }
+        : (quote.carrier || {})
+      return {
+        'carrier.name': c.name || '',
+        'carrier.amBestRating': c.amBestRating || '',
+        'carrier.naic': c.naic || null,
+      }
+    })(),
     quoteNumber: quote.quoteNumber || null,
     policyNumber: quote.policyNumber || null,
     status: quote.status || '',
