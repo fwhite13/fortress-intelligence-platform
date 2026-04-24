@@ -51,8 +51,11 @@ export function buildPremiumSummary(quotes) {
       grandTotalFees += fees
       grandTotalCost += totalCost
 
+      // carrier is an object {name, amBestRating, naic} — extract name for display
+      const carrierName = (q.carrier && typeof q.carrier === 'object') ? (q.carrier.name || '') : (q.carrier || '')
+
       return {
-        carrier: q.carrier || '',
+        carrier: carrierName,
         premium: formatAttribute(premium, 'currency'),
         taxes: formatAttribute(taxes, 'currency'),
         fees: formatAttribute(fees, 'currency'),

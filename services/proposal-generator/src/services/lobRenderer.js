@@ -90,10 +90,18 @@ export async function renderLobPartial(quote, lobDocxBuffer, logger) {
     })),
     coverages: quote.coverages || [],
     endorsements: quote.endorsements || [],
-    deductibles: (quote.deductibles || []).map(d => ({
-      ...d,
-      formattedValue: formatAttribute(d.value, d.format),
-    })),
+    deductibles: (quote.deductibles || []).map(d => {
+      // Compute a display value: percentage deductibles show as "5%", flat as "$25,000"
+      let formattedValue = ''
+      if (d.percentage != null) {
+        formattedValue = `${d.percentage}%`
+      } else if (d.amount != null && d.amount !== 0) {
+        formattedValue = formatAttribute(String(d.amount), 'currency')
+      } else if (d.description) {
+        formattedValue = d.description
+      }
+      return { ...d, formattedValue }
+    }),
     coverageParts: quote.coverageParts || [],
     scheduleItems: buildScheduleItems(quote.scheduleItems || []),
     notes: quote.notes || null,
