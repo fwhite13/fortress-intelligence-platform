@@ -1,7 +1,6 @@
 // src/services/boilerplateRenderer.js
 import PizZip from 'pizzip'
 import Docxtemplater from 'docxtemplater'
-import { GetObjectCommand } from '@aws-sdk/client-s3'
 
 /**
  * Simple {varName} substitution in a string.
@@ -39,18 +38,10 @@ function extractBodyXml(docxBuffer) {
   return bodyContent.trim()
 }
 
-async function streamToBuffer(stream) {
-  const chunks = []
-  for await (const chunk of stream) {
-    chunks.push(chunk instanceof Buffer ? chunk : Buffer.from(chunk))
-  }
-  return Buffer.concat(chunks)
-}
-
 /**
  * Render all boilerplate blocks into a concatenated WordML XML string.
  */
-export async function renderBoilerplate(boilerplateJson, selections, exclusions, defaultBoilerplate, templateData, s3Client, bucketName, logger) {
+export async function renderBoilerplate(boilerplateJson, selections, exclusions, defaultBoilerplate, templateData, storageProvider, logger) {
   const blocks = boilerplateJson?.blocks || {}
 
   // Determine active block IDs
@@ -94,8 +85,7 @@ export async function renderBoilerplate(boilerplateJson, selections, exclusions,
           logger?.warn({ blockId }, 'Boilerplate partial missing partialKey — skipping')
           continue
         }
-        const response = await s3Client.send(new GetObjectCommand({ Bucket: bucketName, Key: key }))
-        const buf = await streamToBuffer(response.Body)
+        const buf = await storageProvider.getBuffer(storageProvider.templateBucket, key)
 
         // Render the partial as a mini-template with templateData
         const zip = new PizZip(buf)

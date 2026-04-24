@@ -3,10 +3,8 @@ import PizZip from 'pizzip'
 import Docxtemplater from 'docxtemplater'
 import { createRequire } from 'module'
 import { ulid } from 'ulid'
-import { GetObjectCommand } from '@aws-sdk/client-s3'
-import { loadTemplate, LOB_PARTIAL_MAP, TEMPLATE_BUCKET, TEMPLATE_PREFIX } from './templateLoader.js'
+import { loadTemplate } from './templateLoader.js'
 import { postProcess } from './postProcessor.js'
-import { uploadProposal } from './s3Output.js'
 import { renderLobPartial } from './lobRenderer.js'
 import { renderBoilerplate } from './boilerplateRenderer.js'
 import { assembleTemplateData } from './assembleTemplateData.js'
@@ -21,24 +19,15 @@ function generateProposalNumber() {
   return `PROP-${year}-${seq}`
 }
 
-async function streamToBuffer(stream) {
-  const chunks = []
-  for await (const chunk of stream) {
-    chunks.push(chunk instanceof Buffer ? chunk : Buffer.from(chunk))
-  }
-  return Buffer.concat(chunks)
-}
-
 /**
  * Try to load the vertical logo from S3.
  * Tries .png first, then .svg. Returns null if not found.
  */
-async function loadLogo(s3Client, templateId, logger) {
+async function loadLogo(storageProvider, templateId, logger) {
   for (const ext of ['png', 'svg']) {
-    const key = `${TEMPLATE_PREFIX}/verticals/${templateId}/logo.${ext}`
+    const key = `${storageProvider.templatePrefix}/verticals/${templateId}/logo.${ext}`
     try {
-      const response = await s3Client.send(new GetObjectCommand({ Bucket: TEMPLATE_BUCKET, Key: key }))
-      return await streamToBuffer(response.Body)
+      return await storageProvider.getBuffer(storageProvider.templateBucket, key)
     } catch (err) {
       if (err.name !== 'NoSuchKey' && err.$metadata?.httpStatusCode !== 404) {
         logger?.warn({ templateId, ext, err: err.message }, 'Unexpected error loading logo — continuing without logo')
@@ -55,11 +44,11 @@ async function loadLogo(s3Client, templateId, logger) {
  * boilerplate rendering, data assembly, and master template rendering.
  *
  * @param {Object} payload - validated request payload
- * @param {S3Client} s3Client - AWS S3 client
+ * @param {StorageProvider} storageProvider - storage provider instance
  * @param {Object} logger - pino logger
  * @returns {Promise<{ proposalId: string, proposalNumber: string, templateVersion: string, outputFormat: string, outputs: Object, warnings: string[] }>}
  */
-export async function renderDocument(payload, s3Client, logger) {
+export async function renderDocument(payload, storageProvider, logger) {
   const templateId = payload.templateId
   const quotes = payload.quotes || []
   const outputFormat = payload.outputFormat || 'docx'
@@ -68,7 +57,8 @@ export async function renderDocument(payload, s3Client, logger) {
   const { meta, masterDocx, lobPartials, boilerplateRegistry, selectedBoilerplate } = await loadTemplate(
     templateId,
     quotes,
-    payload.templateConfig
+    payload.templateConfig,
+    storageProvider
   )
 
   // Step 2: Render LOB partials → collect body XML in order
@@ -109,13 +99,12 @@ export async function renderDocument(payload, s3Client, logger) {
     exclusions,
     meta.defaultBoilerplate,
     prelimTemplateData,
-    s3Client,
-    TEMPLATE_BUCKET,
+    storageProvider,
     logger
   )
 
   // Step 5: Load vertical logo (graceful — null if not found)
-  const logoBuffer = await loadLogo(s3Client, templateId, logger)
+  const logoBuffer = await loadLogo(storageProvider, templateId, logger)
 
   // Step 6: Assemble full template data
   payload.proposalNumber = resolvedProposalNumber
@@ -166,27 +155,25 @@ export async function renderDocument(payload, s3Client, logger) {
     logger
   )
 
-  // Step 9: Upload to S3
+  // Step 9: Upload to storage
   const outputs = {}
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const expiresAt = new Date(Date.now() + storageProvider.signedUrlExpiry * 1000).toISOString()
 
   if (processedDocx) {
-    outputs.docx = await uploadProposal(
-      s3Client,
-      processedDocx,
-      proposalId,
-      'docx',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    )
+    const docxKey = `${storageProvider.outputPrefix}/${year}/${month}/${proposalId}.docx`
+    await storageProvider.putProposal(docxKey, processedDocx, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    const docxUrl = await storageProvider.getSignedUrl(docxKey)
+    outputs.docx = { s3Key: docxKey, downloadUrl: docxUrl, expiresAt }
   }
 
   if (pdfBuffer) {
-    outputs.pdf = await uploadProposal(
-      s3Client,
-      pdfBuffer,
-      proposalId,
-      'pdf',
-      'application/pdf'
-    )
+    const pdfKey = `${storageProvider.outputPrefix}/${year}/${month}/${proposalId}.pdf`
+    await storageProvider.putProposal(pdfKey, pdfBuffer, 'application/pdf')
+    const pdfUrl = await storageProvider.getSignedUrl(pdfKey)
+    outputs.pdf = { s3Key: pdfKey, downloadUrl: pdfUrl, expiresAt }
   }
 
   return {

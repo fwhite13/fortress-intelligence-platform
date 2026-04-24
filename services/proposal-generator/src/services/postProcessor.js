@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile)
 
 const TMPFS_BASE = process.env.PROPOSALS_TMPFS || '/tmp/proposals'
 const SOFFICE_PATH = process.env.SOFFICE_PATH || 'soffice'
-const SOFFICE_TIMEOUT_MS = 10000  // 10 seconds
+const SOFFICE_TIMEOUT_MS = parseInt(process.env.SOFFICE_TIMEOUT_MS || '30000', 10)
 
 /**
  * Inject <w:updateFields w:val="true"/> into word/settings.xml of a .docx buffer.
@@ -92,6 +92,7 @@ export async function postProcess(docxBuffer, proposalId, outputFormat, logger) 
     await writeFile(inputPath, docxWithFields)
 
     // Step 1: Field update (re-save as docx to update TOC etc.)
+    const env = { ...process.env, HOME: process.env.HOME || '/tmp' }
     let updatedDocxBuffer = docxWithFields  // fallback
     try {
       await execFileAsync(SOFFICE_PATH, [
@@ -101,7 +102,7 @@ export async function postProcess(docxBuffer, proposalId, outputFormat, logger) 
         '--convert-to', 'docx',
         '--outdir', loOutDir,
         inputPath,
-      ], { timeout: SOFFICE_TIMEOUT_MS })
+      ], { timeout: SOFFICE_TIMEOUT_MS, env })
 
       updatedDocxBuffer = await readFile(join(loOutDir, 'input.docx'))
       logger?.info({ proposalId }, 'LibreOffice field update complete')
@@ -122,7 +123,7 @@ export async function postProcess(docxBuffer, proposalId, outputFormat, logger) 
           '--convert-to', 'pdf',
           '--outdir', loOutDir,
           pdfSourcePath,
-        ], { timeout: SOFFICE_TIMEOUT_MS })
+        ], { timeout: SOFFICE_TIMEOUT_MS, env })
         pdfBuffer = await readFile(join(loOutDir, 'pdf-source.pdf'))
         logger?.info({ proposalId }, 'LibreOffice PDF conversion complete')
       } catch (err) {

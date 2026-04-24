@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { S3Client } from '@aws-sdk/client-s3'
+import { createStorageProvider } from '../config.js'
 import { renderDocument } from '../services/documentRenderer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -9,10 +9,10 @@ const schema = JSON.parse(
   readFileSync(join(__dirname, '../schemas/proposal-generator-schema.json'), 'utf-8')
 )
 
-// Strip $schema to prevent AJV from trying to fetch draft-07 meta-schema
 const { $schema, $id, ...bodySchema } = schema
 
-const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' })
+// Initialize storage provider once at startup
+const storageProvider = await createStorageProvider()
 
 export default async function proposalsRoute(fastify, options) {
   fastify.post('/generate', {
@@ -25,7 +25,7 @@ export default async function proposalsRoute(fastify, options) {
 
     let result
     try {
-      result = await renderDocument(payload, s3Client, logger)
+      result = await renderDocument(payload, storageProvider, logger)
     } catch (err) {
       if (err.code === 'GENERATION_FAILED') {
         return reply.code(500).send({
@@ -33,7 +33,6 @@ export default async function proposalsRoute(fastify, options) {
           message: err.message || 'Template rendering failed',
         })
       }
-      // TEMPLATE_NOT_FOUND and LOB_PARTIAL_MISSING are caught by the error handler
       throw err
     }
 

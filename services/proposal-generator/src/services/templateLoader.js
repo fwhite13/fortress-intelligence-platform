@@ -1,10 +1,4 @@
-import { S3Client, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3'
-import { LRUCache } from 'lru-cache'
-
-export const TEMPLATE_BUCKET = process.env.TEMPLATE_BUCKET || 'fortress-tools'
-export const TEMPLATE_PREFIX = process.env.TEMPLATE_PREFIX || 'fip-proposal-templates'
-
-export const s3 = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' })
+// src/services/templateLoader.js
 
 export const LOB_PARTIAL_MAP = new Map([
   ['GeneralLiability',      'general-liability.docx'],
@@ -29,75 +23,27 @@ export const LOB_PARTIAL_MAP = new Map([
   ['Other',                 'other.docx'],
 ])
 
-const cache = new LRUCache({ max: 20, ttl: 5 * 60 * 1000 })
-
-export function clearCache() {
-  cache.clear()
-}
-
-async function streamToBuffer(stream) {
-  const chunks = []
-  for await (const chunk of stream) {
-    chunks.push(chunk instanceof Buffer ? chunk : Buffer.from(chunk))
-  }
-  return Buffer.concat(chunks)
-}
-
-async function fetchS3Buffer(key) {
-  const cached = cache.get(key)
-  if (cached) return cached
-
-  const response = await s3.send(new GetObjectCommand({ Bucket: TEMPLATE_BUCKET, Key: key }))
-  const buf = await streamToBuffer(response.Body)
-  cache.set(key, buf)
-  return buf
-}
-
-async function fetchS3Json(key) {
-  const buf = await fetchS3Buffer(key)
-  return JSON.parse(buf.toString('utf-8'))
+export function clearCache(storageProvider) {
+  if (storageProvider?.clearCache) storageProvider.clearCache()
 }
 
 /**
- * Resolve templateId to its meta.json S3 key by scanning the verticals/ prefix.
- * Folder name may differ from templateId (e.g. folder='nba', templateId='nba-v1').
- * Result is cached for the LRU TTL.
+ * Load template assets via storageProvider.
+ *
+ * @param {string} templateId
+ * @param {Array} quotes
+ * @param {object} templateConfig
+ * @param {StorageProvider} storageProvider
  */
-async function resolveTemplateMetaKey(templateId) {
-  const cacheKey = `__meta_key__${templateId}`
-  const cached = cache.get(cacheKey)
-  if (cached) return cached
-
-  const listResult = await s3.send(new ListObjectsV2Command({
-    Bucket: TEMPLATE_BUCKET,
-    Prefix: `${TEMPLATE_PREFIX}/verticals/`,
-  }))
-
-  const metaKeys = (listResult.Contents || [])
-    .map(obj => obj.Key)
-    .filter(key => /\/meta\.json$/.test(key))
-
-  for (const key of metaKeys) {
-    const meta = await fetchS3Json(key)
-    if (meta.templateId === templateId) {
-      cache.set(cacheKey, key)
-      return key
-    }
-  }
-
-  return null
-}
-
-export async function loadTemplate(templateId, quotes, templateConfig) {
+export async function loadTemplate(templateId, quotes, templateConfig, storageProvider) {
   const safeQuotes = quotes || []
+  const templatePrefix = storageProvider.templatePrefix
 
-  // 1. Resolve meta.json path (folder name may differ from templateId)
+  // 1. Resolve meta.json
   let meta
-  let metaKey
   try {
-    metaKey = await resolveTemplateMetaKey(templateId)
-    if (!metaKey) throw new Error('not found')
-    meta = await fetchS3Json(metaKey)
+    meta = await storageProvider.getTemplateMetadata(templateId)
+    if (!meta) throw new Error('not found')
   } catch (err) {
     const e = new Error(`Template '${templateId}' not found`)
     e.code = 'TEMPLATE_NOT_FOUND'
@@ -112,14 +58,14 @@ export async function loadTemplate(templateId, quotes, templateConfig) {
     throw e
   }
 
-  // 2. Load master.docx — use s3Key from meta if present, else fall back to vertical folder
+  // 2. Load master.docx
   const masterKey = meta.s3Key
-    ? `${TEMPLATE_PREFIX}/${meta.s3Key}`
-    : `${TEMPLATE_PREFIX}/verticals/${meta.vertical || templateId}/master.docx`
+    ? `${templatePrefix}/${meta.s3Key}`
+    : `${templatePrefix}/verticals/${meta.vertical || templateId}/master.docx`
 
   let masterDocx
   try {
-    masterDocx = await fetchS3Buffer(masterKey)
+    masterDocx = await storageProvider.getTemplate(masterKey)
   } catch (err) {
     const e = new Error(`Template '${templateId}' not found`)
     e.code = 'TEMPLATE_NOT_FOUND'
@@ -146,7 +92,10 @@ export async function loadTemplate(templateId, quotes, templateConfig) {
     }
 
     try {
-      const buf = await fetchS3Buffer(`${TEMPLATE_PREFIX}/lob-partials/${lobKey}`)
+      const buf = await storageProvider.getBuffer(
+        storageProvider.templateBucket,
+        `${templatePrefix}/lob-partials/${lobKey}`
+      )
       lobPartials.set(lob, buf)
     } catch (err) {
       if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) {
@@ -160,12 +109,7 @@ export async function loadTemplate(templateId, quotes, templateConfig) {
   }
 
   // 4. Load boilerplate registry
-  let boilerplateRegistry = { blocks: {} }
-  try {
-    boilerplateRegistry = await fetchS3Json(`${TEMPLATE_PREFIX}/registry/boilerplate.json`)
-  } catch (err) {
-    // non-fatal
-  }
+  const boilerplateRegistry = await storageProvider.getBoilerplateRegistry()
 
   // 5. Resolve selectedBoilerplate
   let selectedBoilerplate = templateConfig?.boilerplateSelections ?? meta.defaultBoilerplate ?? []
