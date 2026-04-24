@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import proposalsRoute from './routes/proposals.js'
 import templatesRoute from './routes/templates.js'
+import { checkSidecarHealth } from './services/postProcessor.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PORT = parseInt(process.env.PORT || '3000', 10)
@@ -60,6 +61,10 @@ app.setErrorHandler((error, request, reply) => {
 
 await app.register(proposalsRoute, { prefix: '/proposals' })
 await app.register(templatesRoute, { prefix: '/templates' })
+
+app.addHook('onReady', async () => {
+  await checkSidecarHealth(app.log)
+})
 
 app.get('/health', async (request, reply) => {
   return { status: 'ok', version: '1.0.0' }

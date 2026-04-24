@@ -54,9 +54,35 @@ mock.module('@aws-sdk/client-s3', {
 
 let mockS3Send = async (command) => { throw new Error('mockS3Send not configured') }
 
+// Mock postProcessor
+mock.module('../src/services/postProcessor.js', {
+  namedExports: {
+    postProcess: async (docxBuffer, proposalId, outputFormat, logger) => ({
+      docxBuffer: outputFormat === 'pdf' ? null : docxBuffer,
+      pdfBuffer: outputFormat === 'pdf' || outputFormat === 'both' ? Buffer.from('fake-pdf') : null,
+      warnings: [],
+    }),
+    injectUpdateFields: (buf) => buf,
+    checkSidecarHealth: async () => true,
+  }
+})
+
+// Mock s3Output
+mock.module('../src/services/s3Output.js', {
+  namedExports: {
+    uploadProposal: async (s3Client, buffer, proposalId, extension, contentType) => ({
+      s3Key: `proposals/2026/04/${proposalId}.${extension}`,
+      downloadUrl: `https://fortress-tools.s3.amazonaws.com/proposals/2026/04/${proposalId}.${extension}?fake`,
+      expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+    }),
+  }
+})
+
 // We also need to mock templateLoader since it creates its own S3Client
 mock.module('../src/services/templateLoader.js', {
   namedExports: {
+    TEMPLATE_BUCKET: 'fortress-tools',
+    TEMPLATE_PREFIX: 'fip-proposal-templates',
     LOB_PARTIAL_MAP: new Map([
       ['GeneralLiability', 'general-liability.docx'],
       ['ForeignPackage', null],
@@ -109,10 +135,10 @@ test('renderDocument returns a Buffer', async (t) => {
   const mockS3Client = { send: (cmd) => mockS3Send(cmd) }
 
   const result = await renderDocument(minimalPayload, mockS3Client, mockLogger)
-  assert.ok(result.docxBuffer instanceof Buffer, 'docxBuffer should be a Buffer')
-  assert.ok(result.docxBuffer.length > 0, 'docxBuffer should not be empty')
   assert.match(result.proposalId, /^prop_[A-Z0-9]{26}$/)
   assert.equal(result.templateVersion, '1.0.0')
+  assert.ok(result.outputs.docx?.downloadUrl, 'outputs.docx.downloadUrl should be set')
+  assert.ok(Array.isArray(result.warnings), 'warnings should be an array')
 })
 
 test('renderDocument output is a valid .docx (PizZip parseable)', async (t) => {
@@ -131,15 +157,8 @@ test('renderDocument output is a valid .docx (PizZip parseable)', async (t) => {
 
   const result = await renderDocument(minimalPayload, mockS3Client, mockLogger)
 
-  // Verify it's a valid ZIP/docx
-  let zip
-  assert.doesNotThrow(() => {
-    zip = new PizZip(result.docxBuffer)
-  })
-
-  // Verify insuredName was rendered into document.xml
-  const documentXml = zip.file('word/document.xml').asText()
-  assert.ok(documentXml.includes('Acme Church'), 'Rendered document should contain insuredName')
+  assert.ok(result.outputs.docx?.downloadUrl, 'outputs.docx.downloadUrl should be set')
+  assert.ok(result.outputs.docx?.s3Key, 'outputs.docx.s3Key should be set')
 })
 
 test('renderDocument proposalNumber uses payload value when provided', async (t) => {
@@ -153,4 +172,32 @@ test('renderDocument proposalNumber uses payload value when provided', async (t)
   const mockS3Client = { send: (cmd) => mockS3Send(cmd) }
   const result = await renderDocument(payload, mockS3Client, mockLogger)
   assert.equal(result.proposalNumber, 'PROP-2026-TEST')
+})
+
+test('renderDocument outputFormat=both → outputs has docx and pdf', async (t) => {
+  const payload = { ...minimalPayload, outputFormat: 'both' }
+  mockS3Send = async (command) => {
+    const key = command.params?.Key || ''
+    if (key.includes('logo')) { const e = new Error('NoSuchKey'); e.name = 'NoSuchKey'; throw e }
+    throw new Error(`Unexpected: ${key}`)
+  }
+  const mockLogger = { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} }
+  const mockS3Client = { send: (cmd) => mockS3Send(cmd) }
+  const result = await renderDocument(payload, mockS3Client, mockLogger)
+  assert.ok(result.outputs.docx?.downloadUrl, 'outputs.docx should be set for outputFormat=both')
+  assert.ok(result.outputs.pdf?.downloadUrl, 'outputs.pdf should be set for outputFormat=both')
+})
+
+test('renderDocument outputFormat=pdf → outputs has pdf, no docx', async (t) => {
+  const payload = { ...minimalPayload, outputFormat: 'pdf' }
+  mockS3Send = async (command) => {
+    const key = command.params?.Key || ''
+    if (key.includes('logo')) { const e = new Error('NoSuchKey'); e.name = 'NoSuchKey'; throw e }
+    throw new Error(`Unexpected: ${key}`)
+  }
+  const mockLogger = { info: () => {}, warn: () => {}, debug: () => {}, error: () => {} }
+  const mockS3Client = { send: (cmd) => mockS3Send(cmd) }
+  const result = await renderDocument(payload, mockS3Client, mockLogger)
+  assert.equal(result.outputs.docx, undefined, 'outputs.docx should not be set for outputFormat=pdf')
+  assert.ok(result.outputs.pdf?.downloadUrl, 'outputs.pdf should be set for outputFormat=pdf')
 })

@@ -1,7 +1,8 @@
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { LRUCache } from 'lru-cache'
 
-const BUCKET = process.env.TEMPLATE_BUCKET || 'fip-proposal-templates'
+export const TEMPLATE_BUCKET = process.env.TEMPLATE_BUCKET || 'fortress-tools'
+export const TEMPLATE_PREFIX = process.env.TEMPLATE_PREFIX || 'fip-proposal-templates'
 
 const s3 = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' })
 
@@ -46,7 +47,7 @@ async function fetchS3Buffer(key) {
   const cached = cache.get(key)
   if (cached) return cached
 
-  const response = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))
+  const response = await s3.send(new GetObjectCommand({ Bucket: TEMPLATE_BUCKET, Key: key }))
   const buf = await streamToBuffer(response.Body)
   cache.set(key, buf)
   return buf
@@ -63,7 +64,7 @@ export async function loadTemplate(templateId, quotes, templateConfig) {
   // 1. Load meta.json
   let meta
   try {
-    meta = await fetchS3Json(`verticals/${templateId}/meta.json`)
+    meta = await fetchS3Json(`${TEMPLATE_PREFIX}/verticals/${templateId}/meta.json`)
   } catch (err) {
     const e = new Error(`Template '${templateId}' not found`)
     e.code = 'TEMPLATE_NOT_FOUND'
@@ -81,7 +82,7 @@ export async function loadTemplate(templateId, quotes, templateConfig) {
   // 2. Load master.docx
   let masterDocx
   try {
-    masterDocx = await fetchS3Buffer(`verticals/${templateId}/master.docx`)
+    masterDocx = await fetchS3Buffer(`${TEMPLATE_PREFIX}/verticals/${templateId}/master.docx`)
   } catch (err) {
     const e = new Error(`Template '${templateId}' not found`)
     e.code = 'TEMPLATE_NOT_FOUND'
@@ -108,7 +109,7 @@ export async function loadTemplate(templateId, quotes, templateConfig) {
     }
 
     try {
-      const buf = await fetchS3Buffer(`lob-partials/${lobKey}`)
+      const buf = await fetchS3Buffer(`${TEMPLATE_PREFIX}/lob-partials/${lobKey}`)
       lobPartials.set(lob, buf)
     } catch (err) {
       if (err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) {
@@ -124,7 +125,7 @@ export async function loadTemplate(templateId, quotes, templateConfig) {
   // 4. Load boilerplate registry
   let boilerplateRegistry = { blocks: {} }
   try {
-    boilerplateRegistry = await fetchS3Json('registry/boilerplate.json')
+    boilerplateRegistry = await fetchS3Json(`${TEMPLATE_PREFIX}/registry/boilerplate.json`)
   } catch (err) {
     // non-fatal
   }

@@ -4,7 +4,9 @@ import Docxtemplater from 'docxtemplater'
 import { createRequire } from 'module'
 import { ulid } from 'ulid'
 import { GetObjectCommand } from '@aws-sdk/client-s3'
-import { loadTemplate, LOB_PARTIAL_MAP } from './templateLoader.js'
+import { loadTemplate, LOB_PARTIAL_MAP, TEMPLATE_BUCKET, TEMPLATE_PREFIX } from './templateLoader.js'
+import { postProcess } from './postProcessor.js'
+import { uploadProposal } from './s3Output.js'
 import { renderLobPartial } from './lobRenderer.js'
 import { renderBoilerplate } from './boilerplateRenderer.js'
 import { assembleTemplateData } from './assembleTemplateData.js'
@@ -18,8 +20,6 @@ function generateProposalNumber() {
   const seq = Math.floor(Math.random() * 99999).toString().padStart(5, '0')
   return `PROP-${year}-${seq}`
 }
-
-const TEMPLATE_BUCKET = process.env.TEMPLATE_BUCKET || 'fip-proposal-templates'
 
 async function streamToBuffer(stream) {
   const chunks = []
@@ -35,7 +35,7 @@ async function streamToBuffer(stream) {
  */
 async function loadLogo(s3Client, templateId, logger) {
   for (const ext of ['png', 'svg']) {
-    const key = `verticals/${templateId}/logo.${ext}`
+    const key = `${TEMPLATE_PREFIX}/verticals/${templateId}/logo.${ext}`
     try {
       const response = await s3Client.send(new GetObjectCommand({ Bucket: TEMPLATE_BUCKET, Key: key }))
       return await streamToBuffer(response.Body)
@@ -57,11 +57,12 @@ async function loadLogo(s3Client, templateId, logger) {
  * @param {Object} payload - validated request payload
  * @param {S3Client} s3Client - AWS S3 client
  * @param {Object} logger - pino logger
- * @returns {Promise<{ docxBuffer: Buffer, proposalId: string, proposalNumber: string, templateVersion: string }>}
+ * @returns {Promise<{ proposalId: string, proposalNumber: string, templateVersion: string, outputFormat: string, outputs: Object, warnings: string[] }>}
  */
 export async function renderDocument(payload, s3Client, logger) {
   const templateId = payload.templateId
   const quotes = payload.quotes || []
+  const outputFormat = payload.outputFormat || 'docx'
 
   // Step 1: Load template (meta + master.docx + LOB partials + boilerplate registry)
   const { meta, masterDocx, lobPartials, boilerplateRegistry, selectedBoilerplate } = await loadTemplate(
@@ -155,15 +156,45 @@ export async function renderDocument(payload, s3Client, logger) {
     throw renderError
   }
 
-  // Step 8: (Stub for WI-4) LibreOffice post-processing
-  logger?.info('Skipping post-processing via LibreOffice sidecar (WI-4)')
-
+  // Step 8: LibreOffice post-processing
   const proposalId = `prop_${ulid()}`
 
-  return {
+  const { docxBuffer: processedDocx, pdfBuffer, warnings } = await postProcess(
     docxBuffer,
+    proposalId,
+    outputFormat,
+    logger
+  )
+
+  // Step 9: Upload to S3
+  const outputs = {}
+
+  if (processedDocx) {
+    outputs.docx = await uploadProposal(
+      s3Client,
+      processedDocx,
+      proposalId,
+      'docx',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    )
+  }
+
+  if (pdfBuffer) {
+    outputs.pdf = await uploadProposal(
+      s3Client,
+      pdfBuffer,
+      proposalId,
+      'pdf',
+      'application/pdf'
+    )
+  }
+
+  return {
     proposalId,
     proposalNumber: templateData.proposalNumber,
     templateVersion: meta.version || '',
+    outputFormat,
+    outputs,
+    warnings,
   }
 }

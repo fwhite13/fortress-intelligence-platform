@@ -20,10 +20,18 @@ mock.module('../src/services/templateLoader.js', {
 mock.module('../src/services/documentRenderer.js', {
   namedExports: {
     renderDocument: async (payload, s3Client, logger) => ({
-      docxBuffer: Buffer.from('fake-docx'),
       proposalId: 'prop_TEST01234567890123456',
       proposalNumber: 'PROP-TEST',
       templateVersion: '1.2.0',
+      outputFormat: 'docx',
+      outputs: {
+        docx: {
+          s3Key: 'proposals/2026/04/prop_TEST01234567890123456.docx',
+          downloadUrl: 'https://fortress-tools.s3.amazonaws.com/proposals/2026/04/prop_TEST01234567890123456.docx?fake',
+          expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        }
+      },
+      warnings: [],
     }),
   },
 })
@@ -94,7 +102,7 @@ const validPayload = {
   ],
 }
 
-test('POST /proposals/generate with valid payload → 200 docx', async (t) => {
+test('POST /proposals/generate with valid payload → 200 JSON with presigned URL', async (t) => {
   const app = await buildApp()
   const response = await app.inject({
     method: 'POST',
@@ -103,11 +111,9 @@ test('POST /proposals/generate with valid payload → 200 docx', async (t) => {
     body: JSON.stringify(validPayload),
   })
   assert.equal(response.statusCode, 200)
-  assert.equal(
-    response.headers['content-type'],
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  )
-  assert.ok(response.headers['content-disposition'].includes('PROP-TEST.docx'))
+  const body = JSON.parse(response.body)
+  assert.equal(body.proposalId, 'prop_TEST01234567890123456')
+  assert.ok(body.downloadUrl.startsWith('https://'), 'downloadUrl should be a URL')
   await app.close()
 })
 
@@ -156,10 +162,8 @@ test('POST /proposals/generate with valid quotes → 200', async (t) => {
     body: JSON.stringify(payload),
   })
   assert.equal(response.statusCode, 200)
-  assert.equal(
-    response.headers['content-type'],
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-  )
+  const body = JSON.parse(response.body)
+  assert.ok(body.downloadUrl, 'downloadUrl should be set')
   await app.close()
 })
 

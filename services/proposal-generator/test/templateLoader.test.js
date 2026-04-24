@@ -43,11 +43,11 @@ test('TL1: correct S3 keys for templateId + quotes', async (t) => {
   mockSendFn = async (command) => {
     const key = command.params.Key
     calledKeys.push(key)
-    if (key === 'verticals/nba-v1/meta.json') return makeMetaResponse()
-    if (key === 'verticals/nba-v1/master.docx') return makeBufferResponse()
-    if (key === 'lob-partials/general-liability.docx') return makeBufferResponse()
-    if (key === 'lob-partials/workers-compensation.docx') return makeBufferResponse()
-    if (key === 'registry/boilerplate.json') return makeMetaResponse({ active: true, blocks: {} })
+    if (key === 'fip-proposal-templates/verticals/nba-v1/meta.json') return makeMetaResponse()
+    if (key === 'fip-proposal-templates/verticals/nba-v1/master.docx') return makeBufferResponse()
+    if (key === 'fip-proposal-templates/lob-partials/general-liability.docx') return makeBufferResponse()
+    if (key === 'fip-proposal-templates/lob-partials/workers-compensation.docx') return makeBufferResponse()
+    if (key === 'fip-proposal-templates/registry/boilerplate.json') return makeMetaResponse({ active: true, blocks: {} })
     throw new Error(`Unexpected key: ${key}`)
   }
 
@@ -56,11 +56,11 @@ test('TL1: correct S3 keys for templateId + quotes', async (t) => {
     { lineOfBusiness: 'WorkersCompensation' },
   ], null)
 
-  assert.ok(calledKeys.includes('verticals/nba-v1/meta.json'))
-  assert.ok(calledKeys.includes('verticals/nba-v1/master.docx'))
-  assert.ok(calledKeys.includes('lob-partials/general-liability.docx'))
-  assert.ok(calledKeys.includes('lob-partials/workers-compensation.docx'))
-  assert.ok(calledKeys.includes('registry/boilerplate.json'))
+  assert.ok(calledKeys.includes('fip-proposal-templates/verticals/nba-v1/meta.json'))
+  assert.ok(calledKeys.includes('fip-proposal-templates/verticals/nba-v1/master.docx'))
+  assert.ok(calledKeys.includes('fip-proposal-templates/lob-partials/general-liability.docx'))
+  assert.ok(calledKeys.includes('fip-proposal-templates/lob-partials/workers-compensation.docx'))
+  assert.ok(calledKeys.includes('fip-proposal-templates/registry/boilerplate.json'))
   assert.equal(result.lobPartials.size, 2)
   assert.ok(result.lobPartials.has('GeneralLiability'))
   assert.ok(result.lobPartials.has('WorkersCompensation'))
@@ -73,9 +73,9 @@ test('TL2: cache hit on second call — fewer S3 fetches', async (t) => {
   mockSendFn = async (command) => {
     sendCount++
     const key = command.params.Key
-    if (key === 'verticals/nba-v1/meta.json') return makeMetaResponse()
-    if (key === 'verticals/nba-v1/master.docx') return makeBufferResponse()
-    if (key === 'registry/boilerplate.json') {
+    if (key === 'fip-proposal-templates/verticals/nba-v1/meta.json') return makeMetaResponse()
+    if (key === 'fip-proposal-templates/verticals/nba-v1/master.docx') return makeBufferResponse()
+    if (key === 'fip-proposal-templates/registry/boilerplate.json') {
       const noSuchKey = new Error('NoSuchKey')
       noSuchKey.name = 'NoSuchKey'
       throw noSuchKey
@@ -97,9 +97,9 @@ test('TL3: ForeignPackage → warning logged, no error', async (t) => {
 
   mockSendFn = async (command) => {
     const key = command.params.Key
-    if (key === 'verticals/nba-v1/meta.json') return makeMetaResponse()
-    if (key === 'verticals/nba-v1/master.docx') return makeBufferResponse()
-    if (key === 'registry/boilerplate.json') {
+    if (key === 'fip-proposal-templates/verticals/nba-v1/meta.json') return makeMetaResponse()
+    if (key === 'fip-proposal-templates/verticals/nba-v1/master.docx') return makeBufferResponse()
+    if (key === 'fip-proposal-templates/registry/boilerplate.json') {
       const noSuchKey = new Error('NoSuchKey')
       noSuchKey.name = 'NoSuchKey'
       throw noSuchKey
@@ -116,15 +116,15 @@ test('TL4: NoSuchKey for LOB partial → throws LOB_PARTIAL_MISSING', async (t) 
 
   mockSendFn = async (command) => {
     const key = command.params.Key
-    if (key === 'verticals/nba-v1/meta.json') return makeMetaResponse()
-    if (key === 'verticals/nba-v1/master.docx') return makeBufferResponse()
-    if (key === 'lob-partials/cyber.docx') {
+    if (key === 'fip-proposal-templates/verticals/nba-v1/meta.json') return makeMetaResponse()
+    if (key === 'fip-proposal-templates/verticals/nba-v1/master.docx') return makeBufferResponse()
+    if (key === 'fip-proposal-templates/lob-partials/cyber.docx') {
       const noSuchKey = new Error('NoSuchKey')
       noSuchKey.name = 'NoSuchKey'
       noSuchKey.Code = 'NoSuchKey'
       throw noSuchKey
     }
-    if (key === 'registry/boilerplate.json') {
+    if (key === 'fip-proposal-templates/registry/boilerplate.json') {
       const noSuchKey = new Error('NoSuchKey')
       noSuchKey.name = 'NoSuchKey'
       throw noSuchKey
@@ -144,7 +144,7 @@ test('TL4: NoSuchKey for LOB partial → throws LOB_PARTIAL_MISSING', async (t) 
 test('TL5: active:false template → throws TEMPLATE_NOT_FOUND', async (t) => {
   clearCache()
   mockSendFn = async (command) => {
-    if (command.params.Key === 'verticals/nba-v1/meta.json')
+    if (command.params.Key === 'fip-proposal-templates/verticals/nba-v1/meta.json')
       return makeMetaResponse({ active: false })
     throw new Error('Unexpected S3 command')
   }
@@ -157,7 +157,7 @@ test('TL5: active:false template → throws TEMPLATE_NOT_FOUND', async (t) => {
 test('TL6: missing meta.json → throws TEMPLATE_NOT_FOUND', async (t) => {
   clearCache()
   mockSendFn = async (command) => {
-    if (command.params.Key === 'verticals/missing-v1/meta.json') {
+    if (command.params.Key === 'fip-proposal-templates/verticals/missing-v1/meta.json') {
       const e = new Error('NoSuchKey'); e.name = 'NoSuchKey'; throw e
     }
     throw new Error('Unexpected S3 command')

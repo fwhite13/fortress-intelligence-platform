@@ -37,8 +37,16 @@ export default async function proposalsRoute(fastify, options) {
       throw err
     }
 
-    reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-    reply.header('Content-Disposition', `attachment; filename="${result.proposalNumber}.docx"`)
-    return reply.code(200).send(result.docxBuffer)
+    return reply.code(200).send({
+      proposalId: result.proposalId,
+      proposalNumber: result.proposalNumber,
+      templateId: payload.templateId,
+      templateVersion: result.templateVersion,
+      downloadUrl: result.outputs.docx?.downloadUrl || null,
+      downloadUrlPdf: result.outputs.pdf?.downloadUrl || null,
+      downloadUrlExpiresAt: result.outputs.docx?.expiresAt || result.outputs.pdf?.expiresAt || null,
+      generatedAt: new Date().toISOString(),
+      warnings: result.warnings || [],
+    })
   })
 }
