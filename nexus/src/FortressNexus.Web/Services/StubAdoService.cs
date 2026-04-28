@@ -68,7 +68,21 @@ public class StubAdoService : IAdoService
         _logger.LogInformation("[StubAdoService] CreateWorkItemBatchAsync: {Count} items", items.Count);
         _logger.LogInformation("[StubAdoService] CreateWorkItemBatchAsync items: {ItemsJson}",
             System.Text.Json.JsonSerializer.Serialize(items));
-        var records = items.Select(dto => new WorkItemRecord
+
+        // Step 1: Sort DTOs — Epics first, then Features, Stories, Tasks, Test Cases
+        var orderedItems = items
+            .OrderBy(w => w.WorkItemType switch {
+                "Epic" => 0,
+                "Feature" => 1,
+                "User Story" => 2,
+                "Task" => 3,
+                "Test Case" => 4,
+                _ => 5
+            })
+            .ToList();
+
+        // Step 2: Create records (two-pass: create all, then resolve predecessors)
+        var records = orderedItems.Select(dto => new WorkItemRecord
         {
             ArtifactSetId = artifactSet.Id,
             AdoWorkItemId = Random.Shared.Next(1000, 9999),
@@ -83,6 +97,33 @@ public class StubAdoService : IAdoService
             ParentTitle = dto.ParentTitle,
             PredecessorTitles = dto.PredecessorTitles
         }).ToList();
+
+        // Step 3: Build title→ID map from all created records
+        var titleToAdoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var record in records)
+        {
+            titleToAdoId[record.Title] = record.AdoWorkItemId;
+        }
+
+        // Step 4: Predecessor resolution pass
+        foreach (var record in records)
+        {
+            foreach (var predecessorTitle in record.PredecessorTitles ?? [])
+            {
+                if (titleToAdoId.TryGetValue(predecessorTitle, out int predecessorAdoId))
+                {
+                    _logger.LogInformation(
+                        "Predecessor '{PredTitle}' resolved to ID {PredId} for WI '{WiTitle}'",
+                        predecessorTitle, predecessorAdoId, record.Title);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "UNRESOLVED PREDECESSOR: '{PredTitle}' could not be resolved for WI '{WiTitle}' (ADO ID {AdoId})",
+                        predecessorTitle, record.Title, record.AdoWorkItemId);
+                }
+            }
+        }
 
         artifactSet.ExternalDependencyCount = records.Count(w => w.IsExternalDependency);
 

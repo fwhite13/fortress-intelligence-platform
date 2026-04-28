@@ -1,6 +1,6 @@
 # Pipeline State: ADO#2498
 
-## Current Stage: BUILDING (cycle 2)
+## Current Stage: VERIFYING
 ## Risk Level: medium
 ## Pipeline Path: full
 ## Review Cycles: 1
@@ -19,6 +19,7 @@
 | PLAN  | ✅ DONE | Jarvis/Maria | 07:57 | 07:58 | Spec verified, WI #2498 created |
 | BUILD | ✅ DONE | Tony | 07:58 | ~08:00 | Commit d4c0656, clean build |
 | REVIEW | ❌ NEEDS-CHANGES | Clint | 09:04 | 09:12 | C1: WorkItemRecord missing ParentTitle; C2: PredecessorTitles not mapped in StubAdoService |
-| BUILD C2 | 🔄 ACTIVE | Tony | 09:12 | — | Dispatched cycle 2 |
-| DEPLOY | ⏳ PENDING | Rhodey | — | — | |
+| BUILD C2 | ✅ DONE | Tony | 09:12 | ~09:15 | Commit a965b58 — ParentTitle + PredecessorTitles fixes |
+| REVIEW C2 | ✅ DONE | Clint | 10:15 | 10:19 | PASS — 22 checks, 0 failures, no regressions |
+| DEPLOY | ✅ DONE | Rhodey | 10:19 | 10:29 | Build c06a2cea, commit a965b58, migration AddWorkItemRecordParentTitle APPLIED |
 | VERIFY | ⏳ PENDING | Natasha | — | — | |
