@@ -1,6 +1,8 @@
+using FortressIntelligenceRM.Web.Data;
 using FortressIntelligenceRM.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace FortressIntelligenceRM.Web.Controllers;
@@ -12,12 +14,14 @@ public class OrgContextController : ControllerBase
 {
     private readonly IOrgContextService _orgContextService;
     private readonly IConfiguration _config;
+    private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly ILogger<OrgContextController> _logger;
 
-    public OrgContextController(IOrgContextService orgContextService, IConfiguration config, ILogger<OrgContextController> logger)
+    public OrgContextController(IOrgContextService orgContextService, IConfiguration config, IDbContextFactory<FirmDbContext> dbFactory, ILogger<OrgContextController> logger)
     {
         _orgContextService = orgContextService;
         _config = config;
+        _dbFactory = dbFactory;
         _logger = logger;
     }
 
@@ -44,7 +48,7 @@ public class OrgContextController : ControllerBase
     [HttpPut]
     public async Task<IActionResult> Put([FromBody] OrgContextRequest request)
     {
-        if (!IsAdmin()) return Forbid();
+        if (!await IsAdminAsync()) return Forbid();
 
         var tenantId = GetTenantId();
         if (string.IsNullOrEmpty(tenantId)) return BadRequest(new { error = "Tenant ID not available" });
@@ -93,14 +97,29 @@ public class OrgContextController : ControllerBase
             ?? _config["Firm:GraphTenantId"];
     }
 
-    private bool IsAdmin()
+    private async Task<bool> IsAdminAsync()
     {
         var userOid = User.FindFirst("oid")?.Value
             ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+        // Primary: check DB is_admin flag
+        if (!string.IsNullOrEmpty(userOid))
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var firmUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == userOid);
+            if (firmUser?.IsAdmin == true)
+                return true;
+        }
+
+        // Fallback: Firm:AdminEntraOid config (bootstrap)
         var adminOid = _config["Firm:AdminEntraOid"];
         if (!string.IsNullOrEmpty(adminOid) && !string.IsNullOrEmpty(userOid))
-            return string.Equals(adminOid, userOid, StringComparison.OrdinalIgnoreCase);
-        // Fallback: check roles claim
+        {
+            var adminOids = adminOid.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (adminOids.Any(oid => string.Equals(oid, userOid, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+
         return User.IsInRole("admin") || User.IsInRole("Admin") || User.HasClaim("roles", "admin");
     }
 }

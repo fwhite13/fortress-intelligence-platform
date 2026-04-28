@@ -273,7 +273,7 @@ public class MeetingService
     public async Task<string> SubmitTranscriptionJobAsync(long meetingId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var meeting = await db.Meetings.FindAsync(meetingId);
+        var meeting = await db.Meetings.Include(m => m.CreatedByUser).FirstOrDefaultAsync(m => m.Id == meetingId);
         if (meeting == null)
             throw new InvalidOperationException($"Meeting {meetingId} not found");
 
@@ -282,7 +282,8 @@ public class MeetingService
 
         var audioS3Key = meeting.AudioS3Key;
         var meetingDate = meeting.StartedAt ?? meeting.ScheduledAt;
-        var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate);
+        var creatorEntraOid = meeting.CreatorEntraOid ?? meeting.CreatedByUser?.EntraOid;
+        var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate, creatorEntraOid);
         _logger.LogInformation("FIRM: SubmitTranscriptionJobAsync submitted Batch job {JobId} for meeting {MeetingId}", jobId, meetingId);
         return jobId;
     }

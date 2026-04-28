@@ -29,6 +29,8 @@ public class FirmMeeting
     [MaxLength(500)]
     public string? BotTaskArn { get; set; }
     public Guid CreatedBy { get; set; }
+    [MaxLength(128)]
+    public string? CreatorEntraOid { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public FirmUser? CreatedByUser { get; set; }

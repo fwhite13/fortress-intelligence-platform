@@ -16,5 +16,6 @@ public class FirmUser
     public DateTime UpdatedAt { get; set; }
     public DateTime? LastLoginAt { get; set; }
     public string? FaitUserId { get; set; }
+    public bool IsAdmin { get; set; }
     public ICollection<FirmMeeting> Meetings { get; set; } = new List<FirmMeeting>();
 }

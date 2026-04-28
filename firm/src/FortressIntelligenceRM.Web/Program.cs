@@ -79,6 +79,7 @@ builder.Services.AddSingleton<S3Service>();
 builder.Services.AddScoped<FirmKbService>();
 builder.Services.AddScoped<CalendarService>();
 builder.Services.AddSingleton<IOrgContextService, OrgContextService>();
+builder.Services.AddSingleton<IUserWikiService, UserWikiService>();
 builder.Services.AddScoped<FipTokenService>();
 // Bot Framework
 builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();

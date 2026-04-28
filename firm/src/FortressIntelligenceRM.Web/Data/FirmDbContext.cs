@@ -16,6 +16,7 @@ public class FirmDbContext : DbContext
     public DbSet<FirmMeetingSummary> Summaries => Set<FirmMeetingSummary>();
     public DbSet<FirmMeetingKbPush> FirmMeetingKbPushes => Set<FirmMeetingKbPush>();
     public DbSet<FirmOrgContext> OrgContexts => Set<FirmOrgContext>();
+    public DbSet<FirmUserWiki> UserWikis => Set<FirmUserWiki>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -36,6 +37,7 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.LastLoginAt).HasColumnName("last_login_at");
             entity.Property(e => e.FaitUserId).HasColumnName("fait_user_id").HasMaxLength(36);
+            entity.Property(e => e.IsAdmin).HasColumnName("is_admin").HasDefaultValue(false);
         });
 
         modelBuilder.Entity<FirmMeeting>(entity =>
@@ -66,6 +68,7 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.StartDatetime).HasColumnName("start_datetime");
             entity.Property(e => e.CalendarEventId).HasColumnName("calendar_event_id").HasMaxLength(500);
             entity.Property(e => e.Mode).HasColumnName("mode").HasMaxLength(2);
+            entity.Property(e => e.CreatorEntraOid).HasColumnName("creator_entra_oid").HasMaxLength(128);
             entity.HasOne(e => e.CreatedByUser)
                 .WithMany(u => u.Meetings)
                 .HasForeignKey(e => e.CreatedBy)
@@ -163,6 +166,19 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.WikiContent).HasColumnName("wiki_content");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedBy).HasColumnName("updated_by").HasMaxLength(256);
+        });
+
+        modelBuilder.Entity<FirmUserWiki>(entity =>
+        {
+            entity.ToTable("firm_user_wiki");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            entity.Property(e => e.EntraOid).HasColumnName("entra_oid").HasMaxLength(128).IsRequired();
+            entity.Property(e => e.EntraTenantId).HasColumnName("entra_tenant_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.WikiContent).HasColumnName("wiki_content");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedBy).HasColumnName("updated_by").HasMaxLength(256);
+            entity.HasIndex(e => new { e.EntraOid, e.EntraTenantId }).IsUnique().HasDatabaseName("idx_user_wiki_user");
         });
 
     }

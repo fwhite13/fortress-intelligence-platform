@@ -7,7 +7,7 @@ namespace FortressIntelligenceRM.Web.Services;
 
 public interface IBatchTranscriptionService
 {
-    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, CancellationToken ct = default);
+    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, CancellationToken ct = default);
 }
 
 public class BatchTranscriptionService : IBatchTranscriptionService
@@ -15,31 +15,45 @@ public class BatchTranscriptionService : IBatchTranscriptionService
     private readonly IAmazonBatch _batch;
     private readonly IConfiguration _config;
     private readonly IOrgContextService _orgContextService;
+    private readonly IUserWikiService _userWikiService;
     private readonly ILogger<BatchTranscriptionService> _logger;
     private const string JobQueue = "firm-transcription-queue";
     private const string JobDefinition = "firm-transcription-job";
 
-    public BatchTranscriptionService(IAmazonBatch batch, IConfiguration config, IOrgContextService orgContextService, ILogger<BatchTranscriptionService> logger)
+    public BatchTranscriptionService(IAmazonBatch batch, IConfiguration config, IOrgContextService orgContextService, IUserWikiService userWikiService, ILogger<BatchTranscriptionService> logger)
     {
         _batch = batch;
         _config = config;
         _orgContextService = orgContextService;
+        _userWikiService = userWikiService;
         _logger = logger;
     }
 
-    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, CancellationToken ct = default)
+    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, CancellationToken ct = default)
     {
         var callbackSecret = _config["Firm:BotCallbackSecret"] ?? "";
         if (string.IsNullOrEmpty(callbackSecret))
             _logger.LogWarning("FIRM: BotCallbackSecret is not configured — Batch job callback will return 401");
 
-        string? orgWikiJson = null;
         var tenantId = _config["Firm:GraphTenantId"] ?? "";
+
+        // Build merged wiki JSON (org + personal)
+        string? wikiJson = null;
         if (!string.IsNullOrEmpty(tenantId))
         {
             var orgEntries = await _orgContextService.GetContextAsync(tenantId);
-            orgWikiJson = orgEntries.Count > 0
-                ? System.Text.Json.JsonSerializer.Serialize(orgEntries)
+            var userWikiEntries = !string.IsNullOrEmpty(creatorEntraOid)
+                ? await _userWikiService.GetEntriesAsync(creatorEntraOid, tenantId)
+                : new List<OrgContextEntry>();
+
+            var allContext = new List<object>();
+            if (orgEntries.Count > 0)
+                allContext.Add(new { source = "organization", entries = orgEntries });
+            if (userWikiEntries.Count > 0)
+                allContext.Add(new { source = "personal", entries = userWikiEntries.Select(e => new { e.Term, e.Description }) });
+
+            wikiJson = allContext.Count > 0
+                ? System.Text.Json.JsonSerializer.Serialize(allContext)
                 : null;
         }
 
@@ -53,8 +67,8 @@ public class BatchTranscriptionService : IBatchTranscriptionService
             new Amazon.Batch.Model.KeyValuePair { Name = "PYANNOTE_CACHE", Value = "/app/.cache/huggingface/hub" },
         };
 
-        if (orgWikiJson != null)
-            envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "ORG_WIKI_JSON", Value = orgWikiJson });
+        if (wikiJson != null)
+            envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "WIKI_JSON", Value = wikiJson });
 
         var request = new SubmitJobRequest
         {

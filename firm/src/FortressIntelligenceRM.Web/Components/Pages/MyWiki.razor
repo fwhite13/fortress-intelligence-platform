@@ -1,59 +1,35 @@
-@page "/org-context"
+@page "/my-wiki"
 @attribute [Authorize]
-@inject IOrgContextService OrgContextService
+@inject IUserWikiService UserWikiService
 @inject ISnackbar Snackbar
 @inject IConfiguration Configuration
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IDialogService DialogService
-@inject IDbContextFactory<FortressIntelligenceRM.Web.Data.FirmDbContext> DbFactory
 @using FortressIntelligenceRM.Web.Services
-@using FortressIntelligenceRM.Web.Data
-@using Microsoft.EntityFrameworkCore
 @using System.Security.Claims
 @using MudBlazor
 
-<PageTitle>Settings — FIRM</PageTitle>
+<PageTitle>My Wiki — FIRM</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
     <MudText Typo="Typo.h5" Class="mb-2 org-context-title">
-        Organization Context Wiki
+        My Wiki
     </MudText>
     <MudText Typo="Typo.body2" Class="mb-4 org-context-subtitle">
-        Entries are injected into AI prompts to improve accuracy of names, roles, acronyms, and product names specific to your organization.
+        Your personal knowledge base. Add terms, names, acronyms, and context that are specific to your work. These entries help the AI produce more accurate transcriptions and summaries for your meetings.
     </MudText>
 
     @if (_loading)
     {
         <MudProgressLinear Indeterminate="true" Class="mb-4" />
     }
-    else if (!_isAdmin)
-    {
-        <MudAlert Severity="Severity.Info" Class="mb-4">
-            You do not have admin access to edit org context. Contact your administrator.
-        </MudAlert>
-
-        @if (_entries.Count > 0)
-        {
-            <MudPaper Class="pa-4 org-context-card" Elevation="0">
-                <MudText Typo="Typo.subtitle2" Class="mb-2 org-context-subtitle">Current Context (read-only)</MudText>
-                <MudTable Items="_entries" Dense="true" Hover="true" Class="org-context-table">
-                    <HeaderContent>
-                        <MudTh>Term</MudTh>
-                        <MudTh>Description</MudTh>
-                    </HeaderContent>
-                    <RowTemplate>
-                        <MudTd DataLabel="Term">@context.Term</MudTd>
-                        <MudTd DataLabel="Description">@context.Description</MudTd>
-                    </RowTemplate>
-                </MudTable>
-            </MudPaper>
-        }
-    }
     else
     {
         <MudPaper Class="pa-4 mb-4 org-context-card" Elevation="0">
             <div class="d-flex justify-space-between align-center mb-3">
-                <MudText Typo="Typo.subtitle1" Class="org-context-section-title">Context Entries</MudText>
+                <MudText Typo="Typo.subtitle1" Class="org-context-section-title">
+                    @(_entries.Count > 0 ? $"{_entries.Count} entries" : "")
+                </MudText>
                 <MudButton Variant="Variant.Filled"
                            Color="Color.Primary"
                            StartIcon="@Icons.Material.Filled.Add"
@@ -66,7 +42,7 @@
             @if (_entries.Count == 0)
             {
                 <MudText Typo="Typo.body2" Class="org-context-empty mb-4">
-                    No entries yet. Click "Add Entry" to get started.
+                    No entries yet. Add terms and definitions that the AI should know about when processing your meetings — like team member names, project codenames, or industry jargon.
                 </MudText>
             }
             else
@@ -99,7 +75,7 @@
             @if (_updatedAt.HasValue)
             {
                 <MudText Typo="Typo.caption" Class="org-context-timestamp mb-2">
-                    Last updated: @_updatedAt.Value.ToString("MMM d, yyyy h:mm tt") UTC by @(_updatedBy ?? "unknown")
+                    Last updated: @_updatedAt.Value.ToString("MMM d, yyyy h:mm tt") UTC
                 </MudText>
             }
 
@@ -118,11 +94,10 @@
 @code {
     private List<OrgContextEntry> _entries = [];
     private DateTime? _updatedAt;
-    private string? _updatedBy;
-    private bool _isAdmin;
     private bool _loading = true;
     private bool _saving;
 
+    private string _entraOid = "";
     private string _tenantId = "";
 
     protected override async Task OnInitializedAsync()
@@ -130,27 +105,9 @@
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         var user = authState.User;
 
-        var userOid = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
-
-        // Primary: check DB is_admin flag
-        if (!string.IsNullOrEmpty(userOid))
-        {
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var firmUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == userOid);
-            if (firmUser?.IsAdmin == true)
-                _isAdmin = true;
-        }
-
-        // Fallback: Firm:AdminEntraOid config (bootstrap)
-        if (!_isAdmin)
-        {
-            var adminOid = Configuration["Firm:AdminEntraOid"];
-            var adminOids = (adminOid ?? "")
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            _isAdmin = adminOids.Any(oid => string.Equals(oid, userOid, StringComparison.OrdinalIgnoreCase))
-                       || user.IsInRole("admin") || user.IsInRole("Admin") || user.HasClaim("roles", "admin");
-        }
+        _entraOid = user.FindFirst("oid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? "";
 
         _tenantId = user.FindFirst("tid")?.Value
             ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
@@ -165,16 +122,15 @@
         _loading = true;
         try
         {
-            if (!string.IsNullOrEmpty(_tenantId))
+            if (!string.IsNullOrEmpty(_entraOid) && !string.IsNullOrEmpty(_tenantId))
             {
-                _entries = await OrgContextService.GetContextAsync(_tenantId);
-                _updatedAt = await OrgContextService.GetUpdatedAtAsync(_tenantId);
-                _updatedBy = await OrgContextService.GetUpdatedByAsync(_tenantId);
+                _entries = await UserWikiService.GetEntriesAsync(_entraOid, _tenantId);
+                _updatedAt = await UserWikiService.GetUpdatedAtAsync(_entraOid, _tenantId);
             }
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Failed to load org context: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Failed to load personal wiki: {ex.Message}", Severity.Error);
         }
         finally
         {
@@ -219,9 +175,9 @@
         _saving = true;
         try
         {
-            if (string.IsNullOrEmpty(_tenantId))
+            if (string.IsNullOrEmpty(_entraOid) || string.IsNullOrEmpty(_tenantId))
             {
-                Snackbar.Add("Tenant ID not available. Cannot save.", Severity.Error);
+                Snackbar.Add("User identity not available. Cannot save.", Severity.Error);
                 return;
             }
 
@@ -229,13 +185,11 @@
             var user = authState.User;
             var updatedBy = user.FindFirst("preferred_username")?.Value
                 ?? user.FindFirst(ClaimTypes.Email)?.Value
-                ?? user.FindFirst("oid")?.Value
-                ?? "unknown";
+                ?? _entraOid;
 
-            await OrgContextService.UpsertContextAsync(_tenantId, _entries, updatedBy);
+            await UserWikiService.UpsertEntriesAsync(_entraOid, _tenantId, _entries, updatedBy);
             _updatedAt = DateTime.UtcNow;
-            _updatedBy = updatedBy;
-            Snackbar.Add("Org context saved successfully.", Severity.Success);
+            Snackbar.Add("Personal wiki saved successfully.", Severity.Success);
         }
         catch (Exception ex)
         {
