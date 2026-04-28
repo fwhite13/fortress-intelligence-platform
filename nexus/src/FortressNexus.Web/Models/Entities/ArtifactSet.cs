@@ -14,6 +14,7 @@ public class ArtifactSet
     public string CreatedBy { get; set; } = "";
     public ArtifactSetStatus Status { get; set; } = ArtifactSetStatus.Pending;
     public string? ErrorDetail { get; set; }
+    public int ExternalDependencyCount { get; set; } = 0;
 
     // Navigation
     public SpecDocument? SpecDocument { get; set; }

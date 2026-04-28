@@ -1,6 +1,9 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using FortressNexus.Web.Models.Entities;
 using FortressNexus.Web.Models.Enums;
+using FortressNexus.Web.Services;
 
 namespace FortressNexus.Web.Data;
 
@@ -131,6 +134,7 @@ public class NexusDbContext : DbContext
                 .HasMaxLength(50)
                 .IsRequired();
             entity.Property(e => e.ErrorDetail).HasColumnName("error_detail");
+            entity.Property(e => e.ExternalDependencyCount).HasColumnName("external_dependency_count").IsRequired();
             entity.HasOne(e => e.SpecDocument)
                 .WithMany(s => s.ArtifactSets)
                 .HasForeignKey(e => e.SpecDocumentId)
@@ -150,6 +154,30 @@ public class NexusDbContext : DbContext
             entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(500).IsRequired();
             entity.Property(e => e.Status).HasColumnName("status").HasMaxLength(50).IsRequired();
             entity.Property(e => e.ErrorDetail).HasColumnName("error_detail").HasMaxLength(1000);
+            entity.Property(e => e.PredecessorTitles).HasColumnName("predecessor_titles")
+                .HasColumnType("json")
+                .HasConversion(
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null))
+                .Metadata.SetValueComparer(new ValueComparer<List<string>?>(
+                    (a, b) => JsonSerializer.Serialize(a, (JsonSerializerOptions?)null) == JsonSerializer.Serialize(b, (JsonSerializerOptions?)null),
+                    v => v == null ? 0 : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null).GetHashCode(),
+                    v => v == null ? null : JsonSerializer.Deserialize<List<string>>(JsonSerializer.Serialize(v, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null)));
+            entity.Property(e => e.IsExternalDependency).HasColumnName("is_external_dependency").IsRequired();
+            entity.Property(e => e.ExternalOwner).HasColumnName("external_owner").HasMaxLength(100);
+            entity.Property(e => e.WiTemplate).HasColumnName("wi_template")
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .IsRequired();
+            entity.Property(e => e.TestedByTitles).HasColumnName("tested_by_titles")
+                .HasColumnType("json")
+                .HasConversion(
+                    v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                    v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null))
+                .Metadata.SetValueComparer(new ValueComparer<List<string>?>(
+                    (a, b) => JsonSerializer.Serialize(a, (JsonSerializerOptions?)null) == JsonSerializer.Serialize(b, (JsonSerializerOptions?)null),
+                    v => v == null ? 0 : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null).GetHashCode(),
+                    v => v == null ? null : JsonSerializer.Deserialize<List<string>>(JsonSerializer.Serialize(v, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null)));
             entity.HasOne(e => e.ArtifactSet)
                 .WithMany(a => a.WorkItemRecords)
                 .HasForeignKey(e => e.ArtifactSetId)
