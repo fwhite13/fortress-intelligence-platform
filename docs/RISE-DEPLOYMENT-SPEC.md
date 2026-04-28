@@ -16,7 +16,7 @@ Portal URL:          fip.fortressam.ai                     portal.refugems.ai
 Notetaker URL:       firm.fip.fortressam.ai                notetaker.refugems.ai
 Entra Tenant:        7152ea12-c930-...                     d2bf3425-f8ab-...
 Aurora Cluster:      fortress-ai-cluster                   refuge-ai-cluster (new)
-AWS Account:         742932328420                           <refuge-account-id>
+AWS Account:         742932328420                           637131561301
 Cookie Domain:       .fortressam.ai                        .refugems.ai
 ```
 
@@ -383,10 +383,15 @@ FIRM uses a Teams bot (Bot Framework) for meeting join. Refuge needs its own bot
 
 ---
 
+## Resolved
+
+- **Refuge AWS account ID:** `637131561301`
+- **Bedrock model access:** Same as Fortress — full `anthropic.claude-*` availability
+- **VPC:** Single existing VPC `vpc-04e5e1d4df4e11806` — build inside it (ALB, ECS, Aurora subnets)
+- **Environment:** Prod-only (no dev)
+
 ## Open Questions
 
-1. **Refuge AWS account ID** — Fred to confirm
-2. **Bedrock model access** — is Bedrock enabled in the Refuge account? Need `anthropic.claude-*` model access
-3. **VPC peering or isolation** — does the Refuge account have existing VPC infra, or are we building from scratch?
-4. **Teams bot scope** — will the Refuge bot be org-wide or limited to specific teams?
-5. **Who administers the Refuge org wiki?** — need to set `Firm:AdminEntraOid` for the Refuge deployment
+1. **Teams bot scope** — will the Refuge bot be org-wide or limited to specific teams?
+2. **Who administers the Refuge org wiki?** — need to set `Firm:AdminEntraOid` for the Refuge deployment
+3. **Subnets** — need public + private subnets inside `vpc-04e5e1d4df4e11806` for ALB (public) and ECS/Aurora (private). Verify what exists.

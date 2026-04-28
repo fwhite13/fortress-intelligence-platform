@@ -40,84 +40,81 @@ CREATE TABLE IF NOT EXISTS firm_user_wiki (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     entra_oid VARCHAR(128) NOT NULL,
     entra_tenant_id VARCHAR(36) NOT NULL,
-    term VARCHAR(256) NOT NULL,
-    description TEXT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    wiki_content TEXT,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_user_wiki_user (entra_oid, entra_tenant_id)
+    updated_by VARCHAR(256),
+    UNIQUE INDEX idx_user_wiki_user (entra_oid, entra_tenant_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 **Key design decisions:**
-- **Per-entry rows** (not a single JSON blob like org wiki). Cleaner for CRUD, pagination, and future search.
-- **Keyed by `entra_oid` + `entra_tenant_id`**. Works across tenants (Fortress and Refuge) without collision.
+- **JSON blob per user** — same pattern as the org wiki (`FirmOrgContext`). Entries are always loaded and saved as a complete set. No need for per-entry relational queries.
+- **Keyed by `entra_oid` + `entra_tenant_id`** (unique composite). Works across tenants (Fortress and Refuge) without collision.
 - **No foreign key to `firm_users`**. Keeps it simple — the Entra OID from the auth cookie is the identity.
+- **`wiki_content`** stores a JSON array of `[{ "Term": "...", "Description": "..." }]` — identical format to `FirmOrgContext.WikiContent`.
 
 ### EF Model
 
 ```csharp
-public class FirmUserWikiEntry
+public class FirmUserWiki
 {
     public long Id { get; set; }
     [MaxLength(128)]
     public string EntraOid { get; set; } = "";
     [MaxLength(36)]
     public string EntraTenantId { get; set; } = "";
-    [MaxLength(256)]
-    public string Term { get; set; } = "";
-    public string Description { get; set; } = "";
-    public DateTime CreatedAt { get; set; }
+    public string? WikiContent { get; set; }
     public DateTime UpdatedAt { get; set; }
+    [MaxLength(256)]
+    public string? UpdatedBy { get; set; }
 }
 ```
 
-Add to `FirmDbContext`:
+Mirrors `FirmOrgContext` structure. Add to `FirmDbContext`:
 
 ```csharp
-public DbSet<FirmUserWikiEntry> UserWikiEntries => Set<FirmUserWikiEntry>();
+public DbSet<FirmUserWiki> UserWikis => Set<FirmUserWiki>();
 
 // In OnModelCreating:
-modelBuilder.Entity<FirmUserWikiEntry>(entity =>
+modelBuilder.Entity<FirmUserWiki>(entity =>
 {
     entity.ToTable("firm_user_wiki");
     entity.HasKey(e => e.Id);
     entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
     entity.Property(e => e.EntraOid).HasColumnName("entra_oid");
     entity.Property(e => e.EntraTenantId).HasColumnName("entra_tenant_id");
-    entity.Property(e => e.Term).HasColumnName("term");
-    entity.Property(e => e.Description).HasColumnName("description");
-    entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+    entity.Property(e => e.WikiContent).HasColumnName("wiki_content");
     entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+    entity.Property(e => e.UpdatedBy).HasColumnName("updated_by");
+    entity.HasIndex(e => new { e.EntraOid, e.EntraTenantId }).IsUnique();
 });
 ```
 
 ### Service
 
-New `IUserWikiService` / `UserWikiService`:
+New `IUserWikiService` / `UserWikiService` — mirrors `IOrgContextService` pattern:
 
 ```csharp
 public interface IUserWikiService
 {
-    Task<List<FirmUserWikiEntry>> GetEntriesAsync(string entraOid, string tenantId);
-    Task<FirmUserWikiEntry> AddEntryAsync(string entraOid, string tenantId, string term, string description);
-    Task<FirmUserWikiEntry?> UpdateEntryAsync(long id, string entraOid, string term, string description);
-    Task<bool> DeleteEntryAsync(long id, string entraOid);
-    Task<int> GetEntryCountAsync(string entraOid, string tenantId);
+    Task<List<OrgContextEntry>> GetEntriesAsync(string entraOid, string tenantId);
+    Task UpsertEntriesAsync(string entraOid, string tenantId, List<OrgContextEntry> entries, string updatedBy);
+    Task<DateTime?> GetUpdatedAtAsync(string entraOid, string tenantId);
 }
 ```
+
+Reuses `OrgContextEntry { Term, Description }` — same data shape, same JSON serialization. The service reads/writes the `wiki_content` JSON blob exactly like `OrgContextService` does for org context.
 
 ### API Controller
 
 New `UserWikiController` (REST endpoints for the Blazor UI):
 
 ```
-GET    /api/user-wiki                    → list current user's entries
-POST   /api/user-wiki                    → add entry { term, description }
-PUT    /api/user-wiki/{id}               → update entry { term, description }
-DELETE /api/user-wiki/{id}               → delete entry
+GET    /api/user-wiki                    → get current user's entries (deserialize JSON blob)
+PUT    /api/user-wiki                    → save current user's entries (serialize full list to JSON blob)
 ```
 
-All endpoints extract `entra_oid` from the auth cookie claims. Users can only see/edit their own entries.
+Simpler than per-entry CRUD — the client loads the full list, edits in memory, saves the full list. Same pattern as org wiki. All endpoints extract `entra_oid` from the auth cookie claims.
 
 ### UI
 
@@ -201,20 +198,21 @@ For meetings with multiple FIRM users, we could merge personal wikis from all pa
 
 ### Task 1: Database + Model
 - Add `firm_user_wiki` table creation to `DatabaseInitializationService`
-- Add `FirmUserWikiEntry` model
+- Add `FirmUserWiki` model (JSON blob, mirrors `FirmOrgContext`)
 - Add DbSet to `FirmDbContext` + `OnModelCreating` mapping
 - Store `creator_entra_oid` on `FirmMeeting` if not already present
 
 ### Task 2: Service Layer
-- Implement `UserWikiService` with CRUD operations
+- Implement `UserWikiService` (mirrors `OrgContextService` pattern — load/save JSON blob)
+- Reuse `OrgContextEntry` record type
 - Register in DI (`Program.cs`)
 
 ### Task 3: API Controller
-- `UserWikiController` with GET/POST/PUT/DELETE
+- `UserWikiController` with GET/PUT (load all / save all)
 - Auth: extract `entra_oid` from claims, scope all queries
 
 ### Task 4: UI — My Wiki Page
-- New `MyWiki.razor` page with add/edit/delete dialog
+- New `MyWiki.razor` page with add/edit/delete dialog (same UX as `OrgContext.razor` but user-scoped)
 - Sidebar nav entry
 - Responsive layout (mobile-friendly — some Refuge users may access from phones)
 
