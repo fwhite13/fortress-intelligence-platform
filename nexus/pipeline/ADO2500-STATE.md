@@ -1,9 +1,9 @@
 # Pipeline State: ADO#2500
 
-## Current Stage: BUILDING
+## Current Stage: BUILDING (cycle 2)
 ## Risk Level: medium
 ## Pipeline Path: full
-## Review Cycles: 0
+## Review Cycles: 1
 
 ### WI
 - **Title:** NexusArtifacts UI — Test Case grouping, WI template badges, predecessor badges, external dependency panel
@@ -17,7 +17,7 @@
 | Stage | Status | Agent | Started | Completed | Notes |
 |-------|--------|-------|---------|-----------|-------|
 | PLAN  | ✅ DONE | Jarvis/Maria | 11:47 | 11:48 | Spec verified, WI #2500 created |
-| BUILD | 🔄 ACTIVE | Tony | 11:48 | — | Dispatched |
-| REVIEW | ⏳ PENDING | Clint | — | — | |
+| BUILD | ✅ DONE | Tony | 11:48 | ~11:52 | Commit 5159377, NexusArtifacts.razor new file |
+| REVIEW | ❌ NEEDS-CHANGES | Clint | 13:01 | 13:09 | C1: cross-Epic chip missing Epic name; C2: WorkItemRecord.Description missing + copy brief broken; 7 important issues |
 | DEPLOY | ⏳ PENDING | Rhodey | — | — | |
 | VERIFY | ⏳ PENDING | Natasha | — | — | |

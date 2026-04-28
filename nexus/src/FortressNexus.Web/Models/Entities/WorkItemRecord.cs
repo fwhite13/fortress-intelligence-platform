@@ -20,6 +20,9 @@ public class WorkItemRecord
     public bool IsExternalDependency { get; set; } = false;
     public string? ExternalOwner { get; set; }
 
+    // Developer brief / description
+    public string? Description { get; set; }
+
     // Parent story title (for Test Cases linked to a User Story)
     public string? ParentTitle { get; set; }
 

@@ -2,12 +2,14 @@
 @attribute [Authorize]
 @rendermode InteractiveServer
 
-@inject NexusDbContext Db
+@inject IDbContextFactory<NexusDbContext> DbFactory
 @inject IJSRuntime JS
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
+@inject UserContextService UserContextService
 
 @using FortressNexus.Web.Data
+@using FortressNexus.Web.Services
 @using Microsoft.EntityFrameworkCore
 
 <PageTitle>Work Items — NEXUS</PageTitle>
@@ -45,11 +47,10 @@ else if (_artifactSet is not null)
                             <MudCardContent>
                                 <MudText Typo="Typo.subtitle2"><strong>@extWi.ExternalOwner</strong></MudText>
                                 <MudText Typo="Typo.body1">@extWi.Title</MudText>
-                                @foreach (var tag in (extWi.TestedByTitles ?? []))
-                                {
-                                    <MudChip T="string" Size="Size.Small">@tag</MudChip>
-                                }
-                                <MudButton OnClick="@(() => CopyToClipboard(extWi.Title))"
+                                <MudText Typo="Typo.body2">
+                                    @(extWi.Description?.Length > 120 ? extWi.Description[..120] + "\u2026" : extWi.Description)
+                                </MudText>
+                                <MudButton OnClick="@(() => CopyToClipboard(extWi.Description ?? extWi.Title))"
                                            StartIcon="@Icons.Material.Outlined.ContentCopy"
                                            Size="Size.Small"
                                            Class="mt-1">
@@ -166,14 +167,25 @@ else if (_artifactSet is not null)
     {
         try
         {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
             // Load the latest artifact set for this submission's active spec
-            var submission = await Db.Submissions
+            var submission = await db.Submissions
                 .Include(s => s.SpecDocuments)
                 .FirstOrDefaultAsync(s => s.Id == Id);
 
             if (submission is null)
             {
                 _error = "Submission not found.";
+                return;
+            }
+
+            // Ownership check: only the submitter or an admin may view
+            var currentUpn = await UserContextService.GetUpnAsync();
+            var isAdmin = await UserContextService.IsAdminAsync();
+            if (!string.Equals(submission.SubmittedBy, currentUpn, StringComparison.OrdinalIgnoreCase) && !isAdmin)
+            {
+                _error = "You do not have permission to view this submission's artifacts.";
                 return;
             }
 
@@ -186,7 +198,7 @@ else if (_artifactSet is not null)
                 return;
             }
 
-            _artifactSet = await Db.ArtifactSets
+            _artifactSet = await db.ArtifactSets
                 .Include(a => a.WorkItemRecords)
                 .Where(a => a.SpecDocumentId == specDocId.Value)
                 .OrderByDescending(a => a.CreatedAt)
@@ -223,17 +235,19 @@ else if (_artifactSet is not null)
             .ToList();
     }
 
-    private bool IsCrossEpicPredecessor(WorkItemRecord wi, string predTitle)
+    private string? GetCrossEpicName(WorkItemRecord wi, string predecessorTitle)
     {
         // Find the predecessor WI
-        var predWi = _workItems.FirstOrDefault(w => w.Title == predTitle);
-        if (predWi is null) return false;
+        var pred = _workItems.FirstOrDefault(w =>
+            string.Equals(w.Title, predecessorTitle, StringComparison.OrdinalIgnoreCase));
+        if (pred == null) return null;
 
-        // Walk up to find each WI's Epic
+        // Walk up the parent chain to find each WI's Epic
+        var predEpic = FindEpicFor(pred);
         var wiEpic = FindEpicFor(wi);
-        var predEpic = FindEpicFor(predWi);
 
-        return wiEpic is not null && predEpic is not null && wiEpic.Title != predEpic.Title;
+        return predEpic != null && wiEpic != null && predEpic.Title != wiEpic.Title
+            ? predEpic.Title : null;
     }
 
     private WorkItemRecord? FindEpicFor(WorkItemRecord wi)
@@ -273,7 +287,7 @@ else if (_artifactSet is not null)
             builder.AddAttribute(1, "Color", Color.Info);
             builder.AddAttribute(2, "Size", Size.Small);
             builder.AddAttribute(3, "Class", "mr-1");
-            builder.AddAttribute(4, "ChildContent", (RenderFragment)(b => b.AddContent(0, "Infra")));
+            builder.AddAttribute(4, "ChildContent", (RenderFragment)(b => b.AddContent(0, "\U0001F3D7\uFE0F Infra")));
             builder.CloseComponent();
         }
         else if (wi.WiTemplate == WiTemplateType.Migration)
@@ -282,7 +296,7 @@ else if (_artifactSet is not null)
             builder.AddAttribute(1, "Color", Color.Secondary);
             builder.AddAttribute(2, "Size", Size.Small);
             builder.AddAttribute(3, "Class", "mr-1");
-            builder.AddAttribute(4, "ChildContent", (RenderFragment)(b => b.AddContent(0, "Migration")));
+            builder.AddAttribute(4, "ChildContent", (RenderFragment)(b => b.AddContent(0, "\U0001F504 Migration")));
             builder.CloseComponent();
         }
         else if (wi.WiTemplate == WiTemplateType.TestCase)
@@ -291,7 +305,7 @@ else if (_artifactSet is not null)
             builder.AddAttribute(1, "Color", Color.Primary);
             builder.AddAttribute(2, "Size", Size.Small);
             builder.AddAttribute(3, "Class", "mr-1");
-            builder.AddAttribute(4, "ChildContent", (RenderFragment)(b => b.AddContent(0, "TC")));
+            builder.AddAttribute(4, "ChildContent", (RenderFragment)(b => b.AddContent(0, "\U0001F9EA TC")));
             builder.CloseComponent();
         }
     };
@@ -302,7 +316,7 @@ else if (_artifactSet is not null)
 
         foreach (var predTitle in wi.PredecessorTitles)
         {
-            var isCrossEpic = IsCrossEpicPredecessor(wi, predTitle);
+            var crossEpicName = GetCrossEpicName(wi, predTitle);
             var isUnresolved = IsUnresolvedPredecessor(predTitle);
 
             if (isUnresolved)
@@ -314,12 +328,12 @@ else if (_artifactSet is not null)
                     tb.OpenComponent<MudChip<string>>(0);
                     tb.AddAttribute(1, "Color", Color.Error);
                     tb.AddAttribute(2, "Size", Size.Small);
-                    tb.AddAttribute(3, "ChildContent", (RenderFragment)(cb => cb.AddContent(0, $"[!] {Truncate(predTitle, 30)}")));
+                    tb.AddAttribute(3, "ChildContent", (RenderFragment)(cb => cb.AddContent(0, $"\u26D3 [!] {Truncate(predTitle, 30)}")));
                     tb.CloseComponent();
                 }));
                 builder.CloseComponent();
             }
-            else if (isCrossEpic)
+            else if (crossEpicName != null)
             {
                 builder.OpenComponent<MudTooltip>(0);
                 builder.AddAttribute(1, "Text", predTitle);
@@ -328,7 +342,8 @@ else if (_artifactSet is not null)
                     tb.OpenComponent<MudChip<string>>(0);
                     tb.AddAttribute(1, "Color", Color.Warning);
                     tb.AddAttribute(2, "Size", Size.Small);
-                    tb.AddAttribute(3, "ChildContent", (RenderFragment)(cb => cb.AddContent(0, $"Cross-Epic: {Truncate(predTitle, 30)}")));
+                    tb.AddAttribute(3, "Style", "background-color: orange;");
+                    tb.AddAttribute(4, "ChildContent", (RenderFragment)(cb => cb.AddContent(0, $"\u26D3 Cross-Epic: {crossEpicName} > {Truncate(predTitle, 25)}")));
                     tb.CloseComponent();
                 }));
                 builder.CloseComponent();
@@ -342,7 +357,7 @@ else if (_artifactSet is not null)
                     tb.OpenComponent<MudChip<string>>(0);
                     tb.AddAttribute(1, "Color", Color.Warning);
                     tb.AddAttribute(2, "Size", Size.Small);
-                    tb.AddAttribute(3, "ChildContent", (RenderFragment)(cb => cb.AddContent(0, $"Blocked by: {Truncate(predTitle, 30)}")));
+                    tb.AddAttribute(3, "ChildContent", (RenderFragment)(cb => cb.AddContent(0, $"\u26D3 Blocked by: {Truncate(predTitle, 30)}")));
                     tb.CloseComponent();
                 }));
                 builder.CloseComponent();

@@ -69,6 +69,7 @@ public class AdoCreationService : IAdoService
                 AdoWorkItemUrl = createdAdoUrl,
                 WorkItemType = dto.WorkItemType,
                 Title = dto.Title,
+                Description = dto.Description,
                 Status = "Created",
                 WiTemplate = dto.WiTemplate,
                 IsExternalDependency = dto.IsExternalDependency,
