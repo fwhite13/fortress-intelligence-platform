@@ -24,7 +24,7 @@
 
 ## Commit
 
-**Hash:** (pending — see below)
+**Hash:** f527f50
 **Message:** `feat(nexus#2497): add decomposition upgrade fields to WorkItemRecord and ArtifactSet`
 
 ## Build Result

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using FortressNexus.Web.Data;
 using FortressNexus.Web.Models.DTOs;
 using Microsoft.EntityFrameworkCore;
@@ -11,17 +12,25 @@ public class ArtifactGenerationService : IArtifactGenerationService
     private readonly BedrockService _bedrock;
     private readonly IConfiguration _config;
     private readonly ILogger<ArtifactGenerationService> _logger;
+    private readonly IWiClassifier _wiClassifier;
+
+    private static readonly Regex AcCheckboxPattern = new(
+        @"^\s*-\s*\[.\]\s*(.+)", RegexOptions.Multiline | RegexOptions.Compiled);
+    private static readonly Regex AcNumberedPattern = new(
+        @"^\s*\d+\.\s+(.+)", RegexOptions.Multiline | RegexOptions.Compiled);
 
     public ArtifactGenerationService(
         NexusDbContext db,
         BedrockService bedrock,
         IConfiguration config,
-        ILogger<ArtifactGenerationService> logger)
+        ILogger<ArtifactGenerationService> logger,
+        IWiClassifier wiClassifier)
     {
         _db = db;
         _bedrock = bedrock;
         _config = config;
         _logger = logger;
+        _wiClassifier = wiClassifier;
     }
 
     public async Task<List<AdoWorkItemDto>> GenerateWorkItemsAsync(int specDocumentId)
@@ -50,8 +59,42 @@ public class ArtifactGenerationService : IArtifactGenerationService
 
             var items = ParseWorkItems(text, specDocumentId);
 
-            _logger.LogInformation("[WI_GEN] Completed work item generation for SpecDocument {SpecDocumentId}: {ItemCount} items produced",
-                specDocumentId, items.Count);
+            // Classify each WI candidate
+            foreach (var item in items)
+            {
+                item.WiTemplate = _wiClassifier.ClassifyStory(item);
+                item.IsExternalDependency = _wiClassifier.IsExternalDependency(item);
+                item.ExternalOwner = _wiClassifier.ExtractExternalOwner(item);
+            }
+
+            // Generate Test Case WIs for qualifying User Stories
+            var testCases = new List<AdoWorkItemDto>();
+            foreach (var story in items.Where(w => w.WorkItemType == "User Story"))
+            {
+                if (_wiClassifier.ShouldGenerateTestCases(story))
+                {
+                    var acItems = ParseAcItems(story.AcceptanceCriteria);
+                    var tcTitles = new List<string>();
+                    foreach (var acItem in acItems)
+                    {
+                        var tc = new AdoWorkItemDto
+                        {
+                            WorkItemType = "Test Case",
+                            WiTemplate = WiTemplateType.TestCase,
+                            Title = $"TC: {acItem.Trim()}",
+                            ParentTitle = story.Title,
+                            Description = $"Test case for acceptance criterion: {acItem.Trim()}",
+                        };
+                        testCases.Add(tc);
+                        tcTitles.Add(tc.Title);
+                    }
+                    story.TestedByTitles = tcTitles;
+                }
+            }
+            items.AddRange(testCases);
+
+            _logger.LogInformation("[WI_GEN] Completed work item generation for SpecDocument {SpecDocumentId}: {ItemCount} items produced ({TestCaseCount} test cases)",
+                specDocumentId, items.Count, testCases.Count);
 
             return items;
         }
@@ -88,5 +131,28 @@ public class ArtifactGenerationService : IArtifactGenerationService
             _logger.LogError(ex, "[WI_GEN] JSON parse failed for SpecDocument {SpecDocumentId} — returning empty list", specDocumentId);
             return new List<AdoWorkItemDto>();
         }
+    }
+
+    internal static List<string> ParseAcItems(string? acceptanceCriteria)
+    {
+        if (string.IsNullOrWhiteSpace(acceptanceCriteria))
+            return new List<string>();
+
+        // Try checkbox pattern first: - [ ] or - [x]
+        var checkboxMatches = AcCheckboxPattern.Matches(acceptanceCriteria);
+        if (checkboxMatches.Count > 0)
+            return checkboxMatches.Select(m => m.Groups[1].Value.Trim()).Where(s => s.Length > 0).ToList();
+
+        // Try numbered list pattern: 1. item
+        var numberedMatches = AcNumberedPattern.Matches(acceptanceCriteria);
+        if (numberedMatches.Count > 0)
+            return numberedMatches.Select(m => m.Groups[1].Value.Trim()).Where(s => s.Length > 0).ToList();
+
+        // Fallback: split on newlines, filter non-empty
+        return acceptanceCriteria
+            .Split('\n')
+            .Select(l => l.Trim())
+            .Where(l => l.Length > 0)
+            .ToList();
     }
 }

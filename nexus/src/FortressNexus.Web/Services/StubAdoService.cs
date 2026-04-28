@@ -52,7 +52,11 @@ public class StubAdoService : IAdoService
             AdoWorkItemUrl = $"https://dev.azure.com/stub/_workitems/edit/{Random.Shared.Next(1000, 9999)}",
             WorkItemType = dto.WorkItemType,
             Title = dto.Title,
-            Status = "Created"
+            Status = "Created",
+            WiTemplate = dto.WiTemplate,
+            IsExternalDependency = dto.IsExternalDependency,
+            ExternalOwner = dto.ExternalOwner,
+            TestedByTitles = dto.TestedByTitles
         };
         return Task.FromResult(record);
     }
@@ -69,8 +73,15 @@ public class StubAdoService : IAdoService
             AdoWorkItemUrl = $"https://dev.azure.com/stub/_workitems/edit/{Random.Shared.Next(1000, 9999)}",
             WorkItemType = dto.WorkItemType,
             Title = dto.Title,
-            Status = "Created"
+            Status = "Created",
+            WiTemplate = dto.WiTemplate,
+            IsExternalDependency = dto.IsExternalDependency,
+            ExternalOwner = dto.ExternalOwner,
+            TestedByTitles = dto.TestedByTitles
         }).ToList();
+
+        artifactSet.ExternalDependencyCount = records.Count(w => w.IsExternalDependency);
+
         return Task.FromResult(records);
     }
 }
