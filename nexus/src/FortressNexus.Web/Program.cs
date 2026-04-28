@@ -131,6 +131,7 @@ builder.Services.AddSingleton<IAmazonS3>(_ => new AmazonS3Client());
 builder.Services.AddScoped<IFileStorageService, FileStorageService>();
 builder.Services.AddScoped<IMockupProcessingService, MockupProcessingService>();
 builder.Services.AddScoped<IArtifactGenerationService, ArtifactGenerationService>();
+builder.Services.AddScoped<IWiClassifier, WiClassifierService>();
 builder.Services.AddScoped<UserContextService>();
 builder.Services.AddScoped<IAdoService, StubAdoService>();
 builder.Services.AddScoped<ISpecExporter, MarkdownExporter>();
