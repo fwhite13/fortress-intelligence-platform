@@ -8,8 +8,9 @@
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
 @using MudBlazor
+@inject BrandingConfig Branding
 
-<PageTitle>My Wiki — FIRM</PageTitle>
+<PageTitle>My Wiki — @Branding.ModuleName</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
     <MudText Typo="Typo.h5" Class="mb-2 org-context-title">

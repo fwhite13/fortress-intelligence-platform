@@ -3,6 +3,7 @@
 @using FipShared.Models
 @inject NavigationManager _nav
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment HostEnv
+@inject BrandingConfig Branding
 @using FortressIntelligenceRM.Web.Theme
 @using System.Security.Claims
 
@@ -28,17 +29,17 @@
                       <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor" opacity="0.9"/>
                       <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
-                    <span style="color: rgba(248,250,252,0.8); font-size: 14px; font-weight: 500;">Fortress</span>
+                    <span style="color: rgba(248,250,252,0.8); font-size: 14px; font-weight: 500;">@Branding.OrgName</span>
                 </div>
                 <div style="color: var(--color-gold); font-size: var(--text-lg); font-weight: var(--font-bold); margin-top: 2px;">
-                    FIRM
+                    @Branding.ModuleName
                 </div>
             </MudDrawerHeader>
             <div style="flex: 1; overflow-y: auto;">
                 <NavMenu />
             </div>
             <div class="fip-drawer-footer">
-                <MudText Typo="Typo.caption">Fortress Intelligence Platform</MudText>
+                <MudText Typo="Typo.caption">@Branding.SuiteFullName</MudText>
             </div>
         </div>
     </MudDrawer>

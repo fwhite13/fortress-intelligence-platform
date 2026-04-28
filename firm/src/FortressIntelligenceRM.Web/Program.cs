@@ -72,6 +72,11 @@ builder.Services.AddDbContextFactory<FipDbContext>(options =>
         new MySqlServerVersion(new Version(8, 0, 28)),
         mysqlOptions => mysqlOptions.EnableRetryOnFailure(3)));
 
+// Branding
+var branding = new BrandingConfig();
+builder.Configuration.GetSection("Branding").Bind(branding);
+builder.Services.AddSingleton(branding);
+
 // Application services
 builder.Services.AddScoped<MeetingService>();
 builder.Services.AddScoped<VpBotService>();
@@ -169,7 +174,7 @@ builder.Services.AddDataProtection()
 var app = builder.Build();
 
 // Health endpoint
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "firm", timestamp = DateTime.UtcNow })).AllowAnonymous();
+app.MapGet("/health", (BrandingConfig b) => Results.Ok(new { status = "healthy", service = b.ModuleName.ToLower(), timestamp = DateTime.UtcNow })).AllowAnonymous();
 
 if (!app.Environment.IsDevelopment())
 {

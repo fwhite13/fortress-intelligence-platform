@@ -11,8 +11,9 @@
 @using Microsoft.EntityFrameworkCore
 @using System.Security.Claims
 @using MudBlazor
+@inject BrandingConfig Branding
 
-<PageTitle>Settings — FIRM</PageTitle>
+<PageTitle>Settings — @Branding.ModuleName</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
     <MudText Typo="Typo.h5" Class="mb-2 org-context-title">

@@ -1,5 +1,6 @@
 @using MudBlazor
 @using FortressIntelligenceRM.Web.Services
+@inject BrandingConfig Branding
 
 <MudDialog>
     <TitleContent>
@@ -16,7 +17,7 @@
         @if (_showHostToggle)
         {
             <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3" Icon="@Icons.Material.Filled.Business">
-                Fortress-hosted Teams meeting detected.
+                @Branding.OrgName-hosted Teams meeting detected.
             </MudAlert>
             <div class="d-flex align-center gap-3 mb-3">
                 <MudText Typo="Typo.body2" Style="color: var(--color-text-primary);">Are you the host of this meeting?</MudText>
@@ -28,11 +29,11 @@
             <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);" Class="mb-3">
                 @if (_isHostValue == "yes")
                 {
-                    <span>Mode A — FIRM will capture the transcript directly without a bot joining.</span>
+                    <span>Mode A — @Branding.ModuleName will capture the transcript directly without a bot joining.</span>
                 }
                 else
                 {
-                    <span>Mode B — Fortress Notetaker will join to record.</span>
+                    <span>Mode B — @Branding.NotetakerName will join to record.</span>
                 }
             </MudText>
         }
@@ -85,7 +86,7 @@
     private void OnUrlChanged()
     {
         var tenantId = CalendarService.ExtractTenantIdFromUrl(MeetingUrl);
-        _showHostToggle = !string.IsNullOrEmpty(tenantId) && CalendarService.IsFortressTenant(tenantId)
+        _showHostToggle = !string.IsNullOrEmpty(tenantId) && Branding.IsHomeTenant(tenantId)
                           && MeetingUrl.Contains("teams.microsoft.com");
         if (!_showHostToggle) _isHostValue = "no";
     }
@@ -94,7 +95,7 @@
     {
         if (!MeetingUrl.Contains("teams.microsoft.com")) return "B";
         var tenantId = CalendarService.ExtractTenantIdFromUrl(MeetingUrl);
-        if (CalendarService.IsFortressTenant(tenantId) && _isHostValue == "yes") return "A";
+        if (Branding.IsHomeTenant(tenantId) && _isHostValue == "yes") return "A";
         return "B";
     }
 

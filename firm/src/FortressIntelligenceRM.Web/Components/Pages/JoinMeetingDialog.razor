@@ -1,5 +1,6 @@
 @using MudBlazor
 @using FortressIntelligenceRM.Web.Services
+@inject BrandingConfig Branding
 
 <MudDialog>
     <TitleContent>
@@ -23,7 +24,7 @@
                 @if (_showHostToggle)
                 {
                     <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2" Icon="@Icons.Material.Filled.Business">
-                        Fortress-hosted meeting detected.
+                        @Branding.OrgName-hosted meeting detected.
                     </MudAlert>
                     <div class="d-flex align-center gap-3 mb-3">
                         <MudText Typo="Typo.body2" Style="color: var(--color-text-primary);">Are you the host?</MudText>
@@ -35,31 +36,31 @@
                     <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);" Class="mb-2">
                         @if (_isHostValue == "yes")
                         {
-                            <span>Mode A — FIRM captures transcript directly (no bot).</span>
+                            <span>Mode A — @Branding.ModuleName captures transcript directly (no bot).</span>
                         }
                         else
                         {
-                            <span>Mode B — Fortress Notetaker will join.</span>
+                            <span>Mode B — @Branding.NotetakerName will join.</span>
                         }
                     </MudText>
                 }
                 else
                 {
                     <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);" Class="mb-3">
-                        Fortress Notetaker will join to record.
+                        @Branding.NotetakerName will join to record.
                     </MudText>
                 }
             }
             else if (DetectPlatform(MeetingUrl) == "zoom")
             {
                 <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.SmartToy">
-                    Zoom meeting detected — Fortress Notetaker will join as a participant to record.
+                    Zoom meeting detected — @Branding.NotetakerName will join as a participant to record.
                 </MudAlert>
             }
             else if (DetectPlatform(MeetingUrl) == "meet")
             {
                 <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.SmartToy">
-                    Google Meet detected — Fortress Notetaker will join as a participant to record.
+                    Google Meet detected — @Branding.NotetakerName will join as a participant to record.
                 </MudAlert>
             }
             else
@@ -81,8 +82,8 @@
                        Class="mb-3" Style="color: var(--color-text-primary);">
                 <MudSelectItem Value="@("auto")">Auto-detect</MudSelectItem>
                 <MudSelectItem Value="@("teams-native")">Teams — native transcript (Mode A)</MudSelectItem>
-                <MudSelectItem Value="@("teams-bot")">Teams — Fortress Notetaker (Mode B)</MudSelectItem>
-                <MudSelectItem Value="@("zoom")">Zoom — Fortress Notetaker</MudSelectItem>
+                <MudSelectItem Value="@("teams-bot")">Teams — @Branding.NotetakerName (Mode B)</MudSelectItem>
+                <MudSelectItem Value="@("zoom")">Zoom — @Branding.NotetakerName</MudSelectItem>
                 <MudSelectItem Value="@("meet")" Disabled="true">Google Meet (coming soon)</MudSelectItem>
             </MudSelect>
         }
@@ -125,7 +126,7 @@
     private void OnUrlChanged()
     {
         var tenantId = CalendarService.ExtractTenantIdFromUrl(MeetingUrl);
-        _showHostToggle = !string.IsNullOrEmpty(tenantId) && CalendarService.IsFortressTenant(tenantId)
+        _showHostToggle = !string.IsNullOrEmpty(tenantId) && Branding.IsHomeTenant(tenantId)
                           && MeetingUrl.Contains("teams.microsoft.com");
         if (!_showHostToggle) _isHostValue = "no";
     }
@@ -155,7 +156,7 @@
             if (effectivePlatform == "teams")
             {
                 var tenantId = CalendarService.ExtractTenantIdFromUrl(MeetingUrl);
-                effectiveMode = (CalendarService.IsFortressTenant(tenantId) && _isHostValue == "yes") ? "A" : "B";
+                effectiveMode = (Branding.IsHomeTenant(tenantId) && _isHostValue == "yes") ? "A" : "B";
             }
             else
             {

@@ -8,16 +8,18 @@ public class CalendarService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly FipTokenService _fipTokenService;
     private readonly ILogger<CalendarService> _logger;
-    private const string FortressTenantPrefix = "7152ea12";
+    private readonly BrandingConfig _branding;
 
     public CalendarService(
         IHttpClientFactory httpClientFactory,
         FipTokenService fipTokenService,
-        ILogger<CalendarService> logger)
+        ILogger<CalendarService> logger,
+        BrandingConfig branding)
     {
         _httpClientFactory = httpClientFactory;
         _fipTokenService = fipTokenService;
         _logger = logger;
+        _branding = branding;
     }
 
     public async Task<List<CalendarMeetingDto>> GetUpcomingCalendarMeetingsAsync(string entraOid, string userEmail, CancellationToken ct = default)
@@ -81,7 +83,7 @@ public class CalendarService
                 var organizerEmail = ev.Organizer?.EmailAddress?.Address?.Trim().ToLower() ?? "";
                 var currentUserEmail = userEmail.Trim().ToLower();
 
-                var isFortressTenant = !string.IsNullOrEmpty(tenantId) && tenantId.StartsWith(FortressTenantPrefix, StringComparison.OrdinalIgnoreCase);
+                var isFortressTenant = _branding.IsHomeTenant(tenantId);
                 var isOrganizer = !string.IsNullOrEmpty(organizerEmail) && !string.IsNullOrEmpty(currentUserEmail) && organizerEmail == currentUserEmail;
 
                 var mode = (isFortressTenant && isOrganizer) ? "A" : "B";
@@ -98,8 +100,8 @@ public class CalendarService
                     OrganizerEmail = organizerEmail,
                     TenantId = tenantId ?? "",
                     ModeText = mode == "A"
-                        ? "Mode A — FIRM captures transcript directly"
-                        : "Mode B — Fortress Notetaker will join to record"
+                        ? $"Mode A — {_branding.ModuleName} captures transcript directly"
+                        : $"Mode B — {_branding.NotetakerName} will join to record"
                 });
             }
 
@@ -125,8 +127,12 @@ public class CalendarService
 
     public static string? ExtractTenantIdFromUrl(string? url) => url == null ? null : ExtractTenantId(url);
 
+    /// <summary>Kept for backward compat — prefer BrandingConfig.IsHomeTenant() for new code.</summary>
+    public bool IsHomeTenant(string? tenantId) => _branding.IsHomeTenant(tenantId);
+
+    [Obsolete("Use instance method IsHomeTenant or BrandingConfig.IsHomeTenant")]
     public static bool IsFortressTenant(string? tenantId) =>
-        !string.IsNullOrEmpty(tenantId) && tenantId.StartsWith(FortressTenantPrefix, StringComparison.OrdinalIgnoreCase);
+        !string.IsNullOrEmpty(tenantId) && tenantId.StartsWith("7152ea12", StringComparison.OrdinalIgnoreCase);
 }
 
 public class CalendarMeetingDto
