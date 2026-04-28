@@ -17,6 +17,7 @@ public class AdoWorkItemDto
     public bool IsExternalDependency { get; set; }
     public string? ExternalOwner { get; set; }
     public List<string>? TestedByTitles { get; set; }
+    public List<string>? PredecessorTitles { get; set; }
 }
 
 public record AdoProcessTemplate(string TypeId, string Name, string Description);

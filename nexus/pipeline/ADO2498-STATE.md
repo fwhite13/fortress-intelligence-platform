@@ -1,9 +1,9 @@
 # Pipeline State: ADO#2498
 
-## Current Stage: BUILDING
+## Current Stage: BUILDING (cycle 2)
 ## Risk Level: medium
 ## Pipeline Path: full
-## Review Cycles: 0
+## Review Cycles: 1
 
 ### WI
 - **Title:** Integrate IWiClassifier into ArtifactGenerationService
@@ -17,7 +17,8 @@
 | Stage | Status | Agent | Started | Completed | Notes |
 |-------|--------|-------|---------|-----------|-------|
 | PLAN  | ✅ DONE | Jarvis/Maria | 07:57 | 07:58 | Spec verified, WI #2498 created |
-| BUILD | 🔄 ACTIVE | Tony | 07:58 | — | Dispatched |
-| REVIEW | ⏳ PENDING | Clint | — | — | |
+| BUILD | ✅ DONE | Tony | 07:58 | ~08:00 | Commit d4c0656, clean build |
+| REVIEW | ❌ NEEDS-CHANGES | Clint | 09:04 | 09:12 | C1: WorkItemRecord missing ParentTitle; C2: PredecessorTitles not mapped in StubAdoService |
+| BUILD C2 | 🔄 ACTIVE | Tony | 09:12 | — | Dispatched cycle 2 |
 | DEPLOY | ⏳ PENDING | Rhodey | — | — | |
 | VERIFY | ⏳ PENDING | Natasha | — | — | |

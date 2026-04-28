@@ -20,6 +20,9 @@ public class WorkItemRecord
     public bool IsExternalDependency { get; set; } = false;
     public string? ExternalOwner { get; set; }
 
+    // Parent story title (for Test Cases linked to a User Story)
+    public string? ParentTitle { get; set; }
+
     // WI template classification
     public WiTemplateType WiTemplate { get; set; } = WiTemplateType.Standard;
 

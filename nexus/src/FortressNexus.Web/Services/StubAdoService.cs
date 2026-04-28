@@ -56,7 +56,9 @@ public class StubAdoService : IAdoService
             WiTemplate = dto.WiTemplate,
             IsExternalDependency = dto.IsExternalDependency,
             ExternalOwner = dto.ExternalOwner,
-            TestedByTitles = dto.TestedByTitles
+            TestedByTitles = dto.TestedByTitles,
+            ParentTitle = dto.ParentTitle,
+            PredecessorTitles = dto.PredecessorTitles
         };
         return Task.FromResult(record);
     }
@@ -77,7 +79,9 @@ public class StubAdoService : IAdoService
             WiTemplate = dto.WiTemplate,
             IsExternalDependency = dto.IsExternalDependency,
             ExternalOwner = dto.ExternalOwner,
-            TestedByTitles = dto.TestedByTitles
+            TestedByTitles = dto.TestedByTitles,
+            ParentTitle = dto.ParentTitle,
+            PredecessorTitles = dto.PredecessorTitles
         }).ToList();
 
         artifactSet.ExternalDependencyCount = records.Count(w => w.IsExternalDependency);
