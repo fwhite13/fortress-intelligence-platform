@@ -214,6 +214,14 @@ else if (_submission is not null)
                            Class="nexus-detail-generate-wi-btn">
                     Generate Work Items
                 </MudButton>
+
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.ListAlt"
+                           OnClick="@(() => Nav.NavigateTo($"/nexus/{Id}/artifacts"))"
+                           Class="nexus-detail-view-wi-btn">
+                    View Work Items
+                </MudButton>
             }
 
             @* Download dropdown *@

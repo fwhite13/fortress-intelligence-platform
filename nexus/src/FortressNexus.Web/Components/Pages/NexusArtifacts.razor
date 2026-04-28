@@ -1,0 +1,352 @@
+@page "/nexus/{Id:int}/artifacts"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject NexusDbContext Db
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+@using FortressNexus.Web.Data
+@using Microsoft.EntityFrameworkCore
+
+<PageTitle>Work Items — NEXUS</PageTitle>
+
+@if (_loading)
+{
+    <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="40px" Class="mb-2" />
+        <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="400px" />
+    </MudContainer>
+}
+else if (_error is not null)
+{
+    <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+        <MudAlert Severity="Severity.Error">@_error</MudAlert>
+    </MudContainer>
+}
+else if (_artifactSet is not null)
+{
+    <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+        <MudText Typo="Typo.h5" Class="mb-4">Work Items — @_submissionTitle</MudText>
+
+        @* ── External Dependencies Panel ── *@
+        @if (_artifactSet.ExternalDependencyCount > 0)
+        {
+            <MudAlert Severity="Severity.Warning" Class="mb-4">
+                @_artifactSet.ExternalDependencyCount external dependencies require action before these WIs can be completed
+            </MudAlert>
+
+            <MudExpansionPanels Class="mb-4">
+                <MudExpansionPanel Text="External Dependencies" Expanded="true">
+                    @foreach (var extWi in _externalDependencies)
+                    {
+                        <MudCard Class="mb-2">
+                            <MudCardContent>
+                                <MudText Typo="Typo.subtitle2"><strong>@extWi.ExternalOwner</strong></MudText>
+                                <MudText Typo="Typo.body1">@extWi.Title</MudText>
+                                @foreach (var tag in (extWi.TestedByTitles ?? []))
+                                {
+                                    <MudChip T="string" Size="Size.Small">@tag</MudChip>
+                                }
+                                <MudButton OnClick="@(() => CopyToClipboard(extWi.Title))"
+                                           StartIcon="@Icons.Material.Outlined.ContentCopy"
+                                           Size="Size.Small"
+                                           Class="mt-1">
+                                    Copy brief
+                                </MudButton>
+                            </MudCardContent>
+                        </MudCard>
+                    }
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+        }
+
+        @* ── WI Tree: Epic → Feature → Story → Task ── *@
+        <MudExpansionPanels MultiExpansion="true">
+            @foreach (var epic in _epics)
+            {
+                <MudExpansionPanel Text="@epic.Title" Expanded="true">
+                    <TitleContent>
+                        <div class="d-flex align-center gap-2">
+                            @RenderTemplateBadge(epic)
+                            <MudText Typo="Typo.subtitle1"><strong>Epic:</strong> @epic.Title</MudText>
+                            @RenderPredecessorBadges(epic)
+                        </div>
+                    </TitleContent>
+                    <ChildContent>
+                        @{
+                            var features = GetChildren("Feature", epic.Title);
+                        }
+                        @foreach (var feature in features)
+                        {
+                            <MudPaper Elevation="0" Class="ml-4 mb-2 pa-2" Style="border-left: 3px solid var(--mud-palette-primary);">
+                                <div class="d-flex align-center gap-2 mb-1">
+                                    @RenderTemplateBadge(feature)
+                                    <MudText Typo="Typo.subtitle2"><strong>Feature:</strong> @feature.Title</MudText>
+                                    @RenderPredecessorBadges(feature)
+                                </div>
+
+                                @{
+                                    var stories = GetChildren("User Story", feature.Title);
+                                }
+                                @foreach (var story in stories)
+                                {
+                                    <MudPaper Elevation="0" Class="ml-4 mb-2 pa-2" Style="border-left: 3px solid var(--mud-palette-secondary);">
+                                        <div class="d-flex align-center flex-wrap gap-2 mb-1">
+                                            @RenderTemplateBadge(story)
+                                            <MudText Typo="Typo.body1"><strong>Story:</strong> @story.Title</MudText>
+                                            @RenderPredecessorBadges(story)
+                                        </div>
+
+                                        @* Tasks under this Story *@
+                                        @{
+                                            var tasks = GetChildren("Task", story.Title);
+                                        }
+                                        @foreach (var task in tasks)
+                                        {
+                                            <div class="d-flex align-center flex-wrap gap-2 ml-4 mb-1">
+                                                @RenderTemplateBadge(task)
+                                                <MudIcon Icon="@Icons.Material.Filled.CheckBox" Size="Size.Small" />
+                                                <MudText Typo="Typo.body2">@task.Title</MudText>
+                                                @RenderPredecessorBadges(task)
+                                            </div>
+                                        }
+
+                                        @* Test Cases collapsible subsection *@
+                                        @{
+                                            var testCases = _workItems
+                                                .Where(w => w.WorkItemType == "Test Case" && w.ParentTitle == story.Title)
+                                                .ToList();
+                                        }
+                                        @if (testCases.Any())
+                                        {
+                                            <MudExpansionPanels Class="mt-2 ml-4">
+                                                <MudExpansionPanel Expanded="false">
+                                                    <TitleContent>
+                                                        <MudText Typo="Typo.body2">Test Cases (@testCases.Count)</MudText>
+                                                    </TitleContent>
+                                                    <ChildContent>
+                                                        @foreach (var tc in testCases)
+                                                        {
+                                                            <div class="ml-4 mb-2">
+                                                                <div class="d-flex align-center gap-2">
+                                                                    <MudChip T="string" Color="Color.Primary" Size="Size.Small">TC</MudChip>
+                                                                    <MudText Typo="Typo.body2">@tc.Title</MudText>
+                                                                </div>
+                                                            </div>
+                                                        }
+                                                    </ChildContent>
+                                                </MudExpansionPanel>
+                                            </MudExpansionPanels>
+                                        }
+                                    </MudPaper>
+                                }
+                            </MudPaper>
+                        }
+                    </ChildContent>
+                </MudExpansionPanel>
+            }
+        </MudExpansionPanels>
+    </MudContainer>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private ArtifactSet? _artifactSet;
+    private List<WorkItemRecord> _workItems = new();
+    private List<WorkItemRecord> _externalDependencies = new();
+    private List<WorkItemRecord> _epics = new();
+    private string _submissionTitle = "";
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Load the latest artifact set for this submission's active spec
+            var submission = await Db.Submissions
+                .Include(s => s.SpecDocuments)
+                .FirstOrDefaultAsync(s => s.Id == Id);
+
+            if (submission is null)
+            {
+                _error = "Submission not found.";
+                return;
+            }
+
+            _submissionTitle = submission.Title;
+
+            var specDocId = submission.ActiveSpecDocumentId;
+            if (!specDocId.HasValue)
+            {
+                _error = "No active spec document.";
+                return;
+            }
+
+            _artifactSet = await Db.ArtifactSets
+                .Include(a => a.WorkItemRecords)
+                .Where(a => a.SpecDocumentId == specDocId.Value)
+                .OrderByDescending(a => a.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (_artifactSet is null)
+            {
+                _error = "No work items generated yet.";
+                return;
+            }
+
+            _workItems = _artifactSet.WorkItemRecords;
+            _externalDependencies = _workItems.Where(w => w.IsExternalDependency).ToList();
+
+            // Epics are top-level (no parent or parent is null)
+            _epics = _workItems.Where(w => w.WorkItemType == "Epic").ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Error loading artifacts: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private List<WorkItemRecord> GetChildren(string wiType, string parentTitle)
+    {
+        return _workItems
+            .Where(w => w.WorkItemType == wiType
+                        && w.ParentTitle == parentTitle
+                        && w.WorkItemType != "Test Case")
+            .ToList();
+    }
+
+    private bool IsCrossEpicPredecessor(WorkItemRecord wi, string predTitle)
+    {
+        // Find the predecessor WI
+        var predWi = _workItems.FirstOrDefault(w => w.Title == predTitle);
+        if (predWi is null) return false;
+
+        // Walk up to find each WI's Epic
+        var wiEpic = FindEpicFor(wi);
+        var predEpic = FindEpicFor(predWi);
+
+        return wiEpic is not null && predEpic is not null && wiEpic.Title != predEpic.Title;
+    }
+
+    private WorkItemRecord? FindEpicFor(WorkItemRecord wi)
+    {
+        var current = wi;
+        var visited = new HashSet<string>();
+        while (current is not null && current.WorkItemType != "Epic")
+        {
+            if (current.ParentTitle is null || !visited.Add(current.ParentTitle))
+                return null;
+            current = _workItems.FirstOrDefault(w => w.Title == current.ParentTitle);
+        }
+        return current;
+    }
+
+    private bool IsUnresolvedPredecessor(string predTitle)
+    {
+        return !_workItems.Any(w => w.Title == predTitle);
+    }
+
+    private static string Truncate(string text, int maxLen)
+    {
+        return text.Length <= maxLen ? text : text[..maxLen] + "...";
+    }
+
+    private async Task CopyToClipboard(string? text)
+    {
+        if (text is not null)
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+    }
+
+    private static RenderFragment RenderTemplateBadge(WorkItemRecord wi) => builder =>
+    {
+        if (wi.WiTemplate == WiTemplateType.Infrastructure)
+        {
+            builder.OpenComponent<MudChip<string>>(0);
+            builder.AddAttribute(1, "Color", Color.Info);
+            builder.AddAttribute(2, "Size", Size.Small);
+            builder.AddAttribute(3, "Class", "mr-1");
+            builder.AddAttribute(4, "ChildContent", (RenderFragment)(b => b.AddContent(0, "Infra")));
+            builder.CloseComponent();
+        }
+        else if (wi.WiTemplate == WiTemplateType.Migration)
+        {
+            builder.OpenComponent<MudChip<string>>(0);
+            builder.AddAttribute(1, "Color", Color.Secondary);
+            builder.AddAttribute(2, "Size", Size.Small);
+            builder.AddAttribute(3, "Class", "mr-1");
+            builder.AddAttribute(4, "ChildContent", (RenderFragment)(b => b.AddContent(0, "Migration")));
+            builder.CloseComponent();
+        }
+        else if (wi.WiTemplate == WiTemplateType.TestCase)
+        {
+            builder.OpenComponent<MudChip<string>>(0);
+            builder.AddAttribute(1, "Color", Color.Primary);
+            builder.AddAttribute(2, "Size", Size.Small);
+            builder.AddAttribute(3, "Class", "mr-1");
+            builder.AddAttribute(4, "ChildContent", (RenderFragment)(b => b.AddContent(0, "TC")));
+            builder.CloseComponent();
+        }
+    };
+
+    private RenderFragment RenderPredecessorBadges(WorkItemRecord wi) => builder =>
+    {
+        if (wi.PredecessorTitles?.Any() != true) return;
+
+        foreach (var predTitle in wi.PredecessorTitles)
+        {
+            var isCrossEpic = IsCrossEpicPredecessor(wi, predTitle);
+            var isUnresolved = IsUnresolvedPredecessor(predTitle);
+
+            if (isUnresolved)
+            {
+                builder.OpenComponent<MudTooltip>(0);
+                builder.AddAttribute(1, "Text", "Could not be auto-linked");
+                builder.AddAttribute(2, "ChildContent", (RenderFragment)(tb =>
+                {
+                    tb.OpenComponent<MudChip<string>>(0);
+                    tb.AddAttribute(1, "Color", Color.Error);
+                    tb.AddAttribute(2, "Size", Size.Small);
+                    tb.AddAttribute(3, "ChildContent", (RenderFragment)(cb => cb.AddContent(0, $"[!] {Truncate(predTitle, 30)}")));
+                    tb.CloseComponent();
+                }));
+                builder.CloseComponent();
+            }
+            else if (isCrossEpic)
+            {
+                builder.OpenComponent<MudTooltip>(0);
+                builder.AddAttribute(1, "Text", predTitle);
+                builder.AddAttribute(2, "ChildContent", (RenderFragment)(tb =>
+                {
+                    tb.OpenComponent<MudChip<string>>(0);
+                    tb.AddAttribute(1, "Color", Color.Warning);
+                    tb.AddAttribute(2, "Size", Size.Small);
+                    tb.AddAttribute(3, "ChildContent", (RenderFragment)(cb => cb.AddContent(0, $"Cross-Epic: {Truncate(predTitle, 30)}")));
+                    tb.CloseComponent();
+                }));
+                builder.CloseComponent();
+            }
+            else
+            {
+                builder.OpenComponent<MudTooltip>(0);
+                builder.AddAttribute(1, "Text", predTitle);
+                builder.AddAttribute(2, "ChildContent", (RenderFragment)(tb =>
+                {
+                    tb.OpenComponent<MudChip<string>>(0);
+                    tb.AddAttribute(1, "Color", Color.Warning);
+                    tb.AddAttribute(2, "Size", Size.Small);
+                    tb.AddAttribute(3, "ChildContent", (RenderFragment)(cb => cb.AddContent(0, $"Blocked by: {Truncate(predTitle, 30)}")));
+                    tb.CloseComponent();
+                }));
+                builder.CloseComponent();
+            }
+        }
+    };
+}
