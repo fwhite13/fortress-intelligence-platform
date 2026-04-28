@@ -196,6 +196,13 @@ For meetings with multiple FIRM users, we could merge personal wikis from all pa
 
 ## Implementation Tasks
 
+### Task 0: DB-Based Admin Role
+- Add `is_admin BOOLEAN NOT NULL DEFAULT FALSE` column to `firm_users` table
+- Add `IsAdmin` property to `FirmUser` model
+- Update `OrgContext.razor` admin check: query `firm_users.is_admin` by the current user's `entra_oid` instead of relying on `Firm:AdminEntraOid` env var or Entra role claims
+- Keep `Firm:AdminEntraOid` as a fallback/bootstrap (so Fred can always get in), but primary check is DB
+- This applies to both FIRM and RN — admin is managed per-deployment in the DB, not in Entra
+
 ### Task 1: Database + Model
 - Add `firm_user_wiki` table creation to `DatabaseInitializationService`
 - Add `FirmUserWiki` model (JSON blob, mirrors `FirmOrgContext`)

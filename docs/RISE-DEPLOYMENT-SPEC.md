@@ -390,8 +390,14 @@ FIRM uses a Teams bot (Bot Framework) for meeting join. Refuge needs its own bot
 - **VPC:** Single existing VPC `vpc-04e5e1d4df4e11806` — build inside it (ALB, ECS, Aurora subnets)
 - **Environment:** Prod-only (no dev)
 
-## Open Questions
+## Resolved (cont.)
 
-1. **Teams bot scope** — will the Refuge bot be org-wide or limited to specific teams?
-2. **Who administers the Refuge org wiki?** — need to set `Firm:AdminEntraOid` for the Refuge deployment
-3. **Subnets** — need public + private subnets inside `vpc-04e5e1d4df4e11806` for ALB (public) and ECS/Aurora (private). Verify what exists.
+- **Teams bot:** Not a factor for initial deployment. The Teams App manifest hasn't been deployed in Fortress either (Rob hasn't actioned it). The working bot is vpbot which doesn't require Entra. RN mirrors FIRM's current state; both get updated together when the Teams App integration is finalized.
+- **Org wiki admin:** DB-based admin role. New `is_admin` column on `firm_users` table. No dependency on Entra role claims or group membership. Module admins are managed in each deployment's own DB. Part of the Personal Wiki prereq work (Task 0).
+- **Subnets:** Will verify once Refuge IAM credentials are set up. Creating public + private subnets in `vpc-04e5e1d4df4e11806` if they don't exist.
+
+## Implementation Prereqs (Ordered)
+
+1. **FIRM Personal Wiki + DB Admin Role** — code changes, ships to Fortress first (see `FIRM-PERSONAL-WIKI-SPEC.md`)
+2. **Refuge IAM Setup** — create `rise-deployer` + `rise-bedrock` users in account `637131561301`, configure credentials for CI/CD and runtime
+3. Then proceed with Workstreams 1–6 above
