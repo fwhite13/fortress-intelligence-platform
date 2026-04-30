@@ -52,12 +52,13 @@ public class ArtifactGenerationService : IArtifactGenerationService
 
         try
         {
-            var (text, promptTokens, completionTokens) = await _bedrock.InvokeAsync(systemPrompt, specContent, 8192, resolvedModelId);
+            // Call 1 — Decomposition (TC-stripped prompt, 32768 max tokens)
+            var (call1Text, pt1, ct1) = await _bedrock.InvokeAsync(systemPrompt, specContent, 32768, resolvedModelId);
 
-            _logger.LogInformation("[WI_GEN] Bedrock response received for SpecDocument {SpecDocumentId}: {PromptTokens} prompt + {CompletionTokens} completion tokens",
-                specDocumentId, promptTokens, completionTokens);
+            _logger.LogInformation("[WI_GEN] Call 1 (decomposition) completed for SpecDocument {SpecDocumentId}: {Pt1} + {Ct1} tokens",
+                specDocumentId, pt1, ct1);
 
-            var items = ParseWorkItems(text, specDocumentId);
+            var items = ParseWorkItems(call1Text, specDocumentId);
 
             // Classify each WI candidate
             foreach (var item in items)
@@ -67,34 +68,38 @@ public class ArtifactGenerationService : IArtifactGenerationService
                 item.ExternalOwner = _wiClassifier.ExtractExternalOwner(item);
             }
 
-            // Generate Test Case WIs for qualifying User Stories
-            var testCases = new List<AdoWorkItemDto>();
-            foreach (var story in items.Where(w => w.WorkItemType == "User Story"))
+            // Call 2 — TC Compliance Scan
+            var tcCount = 0;
+            var tcScanPrompt = _config["Nexus:Prompts:TcScanSystem"];
+            if (!string.IsNullOrEmpty(tcScanPrompt))
             {
-                if (_wiClassifier.ShouldGenerateTestCases(story))
+                var call2UserMessage = $"WORK ITEM ARRAY:\n{JsonSerializer.Serialize(items)}\n\nORIGINAL SPEC:\n{specContent}";
+                try
                 {
-                    var acItems = ParseAcItems(story.AcceptanceCriteria);
-                    var tcTitles = new List<string>();
-                    foreach (var acItem in acItems)
+                    var (call2Text, pt2, ct2) = await _bedrock.InvokeAsync(tcScanPrompt, call2UserMessage, 32768, resolvedModelId);
+                    _logger.LogInformation("[WI_GEN] Call 2 (TC scan) completed for SpecDocument {SpecDocumentId}: {Pt2} + {Ct2} tokens",
+                        specDocumentId, pt2, ct2);
+
+                    var tcResult = ParseTcScanResult(call2Text);
+                    items.AddRange(tcResult.TestCases);
+                    tcCount = tcResult.TestCases.Count;
+
+                    var titleMap = items.ToDictionary(w => w.Title ?? "", w => w);
+                    foreach (var update in tcResult.ParentUpdates)
                     {
-                        var tc = new AdoWorkItemDto
-                        {
-                            WorkItemType = "Test Case",
-                            WiTemplate = WiTemplateType.TestCase,
-                            Title = $"TC: {acItem.Trim()}",
-                            ParentTitle = story.Title,
-                            Description = $"Test case for acceptance criterion: {acItem.Trim()}",
-                        };
-                        testCases.Add(tc);
-                        tcTitles.Add(tc.Title);
+                        if (titleMap.TryGetValue(update.StoryTitle ?? "", out var parent))
+                            parent.TestedByTitles = update.TestedByTitles;
                     }
-                    story.TestedByTitles = tcTitles;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[WI_GEN] TC scan failed for SpecDocument {SpecDocumentId} — returning decomposition result without TCs",
+                        specDocumentId);
                 }
             }
-            items.AddRange(testCases);
 
             _logger.LogInformation("[WI_GEN] Completed work item generation for SpecDocument {SpecDocumentId}: {ItemCount} items produced ({TestCaseCount} test cases)",
-                specDocumentId, items.Count, testCases.Count);
+                specDocumentId, items.Count, tcCount);
 
             return items;
         }
@@ -132,6 +137,63 @@ public class ArtifactGenerationService : IArtifactGenerationService
             return new List<AdoWorkItemDto>();
         }
     }
+
+    private TcScanResult ParseTcScanResult(string json)
+    {
+        var trimmed = json.Trim();
+        if (trimmed.StartsWith("```"))
+        {
+            var start = trimmed.IndexOf('\n');
+            var end = trimmed.LastIndexOf("```");
+            if (start >= 0 && end > start)
+                trimmed = trimmed[(start + 1)..end].Trim();
+        }
+
+        using var doc = JsonDocument.Parse(trimmed);
+        var root = doc.RootElement;
+
+        var testCases = new List<AdoWorkItemDto>();
+        if (root.TryGetProperty("testCases", out var tcArray))
+        {
+            foreach (var tc in tcArray.EnumerateArray())
+            {
+                var dto = new AdoWorkItemDto
+                {
+                    WorkItemType = "Test Case",
+                    WiTemplate = WiTemplateType.TestCase,
+                    Title = tc.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "",
+                    ParentTitle = tc.TryGetProperty("parentTitle", out var pt) ? pt.GetString() : null,
+                    IsExternalDependency = tc.TryGetProperty("isExternalDependency", out var ied) && ied.GetBoolean(),
+                };
+
+                if (tc.TryGetProperty("rationale", out var rat))
+                    dto.Description = rat.GetString();
+
+                if (tc.TryGetProperty("tags", out var tags))
+                    dto.Tags = tags.EnumerateArray().Select(x => x.GetString() ?? "").ToList();
+
+                testCases.Add(dto);
+            }
+        }
+
+        var parentUpdates = new List<TcParentUpdate>();
+        if (root.TryGetProperty("parentUpdates", out var puArray))
+        {
+            foreach (var pu in puArray.EnumerateArray())
+            {
+                var storyTitle = pu.TryGetProperty("storyTitle", out var st) ? st.GetString() : null;
+                List<string>? testedBy = null;
+                if (pu.TryGetProperty("testedByTitles", out var tbt))
+                    testedBy = tbt.EnumerateArray().Select(x => x.GetString() ?? "").ToList();
+                parentUpdates.Add(new TcParentUpdate(storyTitle, testedBy));
+            }
+        }
+
+        return new TcScanResult(testCases, parentUpdates);
+    }
+
+    private record TcScanResult(List<AdoWorkItemDto> TestCases, List<TcParentUpdate> ParentUpdates);
+    private record TcParentUpdate(string? StoryTitle, List<string>? TestedByTitles);
 
     internal static List<string> ParseAcItems(string? acceptanceCriteria)
     {

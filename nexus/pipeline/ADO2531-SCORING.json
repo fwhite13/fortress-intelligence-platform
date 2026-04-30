@@ -1,0 +1,69 @@
+{
+  "checklist": [
+    [
+      "Infrastructure WIs have wi_template='infrastructure'",
+      "PASS",
+      "5 infrastructure WIs found (need \u22654). Badge in title/tags: 0/5 \u2014 badge missing on some but wi_template correct"
+    ],
+    [
+      "Rob's CF task: is_external_dependency=true, owner='Rob Nethery'",
+      "FAIL",
+      "Found: 'Configure CloudFlare routing and external dependencies'. isExternalDependency=True, externalOwner='Rob Nethery', blocked-external=NO, owner-rob-nethery=NO \u2014 MISSING required tags"
+    ],
+    [
+      "IAM WI: is_external_dependency=true, owner='AWS IAM'",
+      "PASS",
+      "Found: 'As a DevOps engineer, I want to create IAM roles for fip-mcp service so that it can access Bedrock'. isExternalDependency=True, externalOwner='AWS IAM'"
+    ],
+    [
+      "search_kb: >=4 Test Cases for scoping enforcement",
+      "PASS",
+      "4 Test Cases found for search_kb (need \u22654)\n    - TC: Given Personal KB request, When search_kb called, Then auto-injects user_id filter\n    - TC: Given unauthorized KB access, When search_kb called, Then returns 403 forbidden\n    - TC: Given Team KB request without team_id, When search_kb called, Then returns 400 team_id_required\n    - TC: Given valid Corp KB request, When search_kb called, Then returns results without filters"
+    ],
+    [
+      "add_to_kb: >=2 Test Cases for write entitlement + metadata",
+      "PASS",
+      "3 Test Cases found for add_to_kb (need \u22652)"
+    ],
+    [
+      "get_job_status: >=1 Test Case for polling contract",
+      "PASS",
+      "2 Test Cases found for get_job_status (need \u22651)"
+    ],
+    [
+      "FAIT v2 DB stories have cross-Epic predecessorTitles",
+      "FAIL",
+      "0 FAIT v2 DB stories found. 0 have cross-Epic predecessorTitles."
+    ],
+    [
+      "ExternalDependencyCount = 3 in ArtifactSet context",
+      "FAIL",
+      "4 external dependencies found (need exactly 3)\n    - 'As a DevOps engineer, I want to create IAM roles for fip-mcp service so that it can access Bedrock' owner='AWS IAM'\n    - 'Configure CloudFlare routing and external dependencies' owner='Rob Nethery'\n    - 'As Rob Nethery, I want to configure CloudFlare routing for api.fortressam.ai/mcp so that FIP clients can access the MCP server' owner='Rob Nethery'\n    - 'As AWS IAM, I want bedrock-agent-runtime permissions granted to fip-mcp task role so that KB operations work' owner='AWS IAM'"
+    ],
+    [
+      "External Dependencies panel entries = 3",
+      "PASS",
+      "4 entries, 2 unique owners: Rob Nethery, AWS IAM"
+    ],
+    [
+      "FIRM migration WI: wi_template='migration', Before/After/Validation present",
+      "PASS",
+      "Found: 'As a project manager, I want to file migration WIs for FIRM so that it uses fip-mcp instead of direct Bedrock calls'. wiTemplate='migration'. Before=YES, After=YES, Validation=YES"
+    ]
+  ],
+  "pass_count": 7,
+  "total": 10,
+  "type_counts": {
+    "Epic": 1,
+    "Feature": 4,
+    "User Story": 17,
+    "Task": 20,
+    "Test Case": 15
+  },
+  "total_items": 57,
+  "spec_ref_missing": 0,
+  "rationale_missing": 0,
+  "json_parseable": true,
+  "stories_missing_spec_ref_titles": [],
+  "tcs_missing_rationale_titles": []
+}

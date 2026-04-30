@@ -1,0 +1,8 @@
+{
+  "input_tokens": 10415,
+  "output_tokens": 20523,
+  "stop_reason": "end_turn",
+  "parse_ok": true,
+  "item_count": 57,
+  "model": "claude-sonnet-4-20250514"
+}
