@@ -1,0 +1,511 @@
+/* ============================================================
+   NBAIS WC Proposal — Stylesheet
+   Print-targeted: US Letter, narrow margins
+   ============================================================ */
+
+@page {
+  size: 8.5in 11in;
+  margin: 0;
+}
+
+:root {
+  --navy: #1F3864;
+  --blue: #2E75B6;
+  --lt-blue: #EBF3FB;
+  --white: #FFFFFF;
+  --gray: #595959;
+  --mid-gray: #B0B0B0;
+  --light-gray: #F5F5F5;
+  --border: #CCCCCC;
+  --red: #C00000;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 10pt;
+  color: #222;
+  line-height: 1.45;
+  background: #888;
+}
+
+/* Page container — every section is one printed page */
+.page {
+  width: 8.5in;
+  height: 11in;
+  background: var(--white);
+  padding: 0.5in 0.55in 0.5in 0.55in;
+  position: relative;
+  page-break-after: always;
+  page-break-inside: avoid;
+  overflow: hidden;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+.page:last-child { page-break-after: auto; }
+
+@media screen {
+  body { padding: 24px 0; }
+  .page {
+    margin-bottom: 24px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  }
+}
+
+/* ── Page header ─────────────────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8pt;
+  border-bottom: 2pt solid var(--navy);
+  margin-bottom: 14pt;
+  flex: 0 0 auto;
+}
+.page-header img {
+  height: 28pt;
+  width: auto;
+}
+.page-header .doc-tag {
+  font-size: 9pt;
+  font-style: italic;
+  color: var(--gray);
+}
+
+/* ── Page footer ─────────────────────────────────────── */
+.page-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 7.5pt;
+  color: var(--gray);
+  padding-top: 6pt;
+  border-top: 1pt solid var(--mid-gray);
+  margin-top: auto;
+  flex: 0 0 auto;
+}
+
+/* ── Page body ───────────────────────────────────────── */
+.page-body {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* ── Merge field token ───────────────────────────────── */
+.mf {
+  color: var(--red);
+  font-style: italic;
+  font-weight: 500;
+}
+
+/* ── Headings ────────────────────────────────────────── */
+h1, h2, h3, h4 {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--navy);
+}
+
+/* Section banner — full-width navy bar */
+.banner {
+  background: var(--navy);
+  color: var(--white);
+  font-size: 14pt;
+  font-weight: 700;
+  letter-spacing: 0.3pt;
+  padding: 9pt 14pt;
+  margin-bottom: 14pt;
+}
+.banner.continued {
+  font-size: 13pt;
+}
+
+/* h2 — used inside sections, but most pages use .banner */
+h2 {
+  font-size: 14pt;
+  font-weight: 700;
+  margin-bottom: 8pt;
+}
+
+/* h3 — subhead with bottom rule */
+h3 {
+  font-size: 11pt;
+  font-weight: 700;
+  color: var(--navy);
+  border-bottom: 1pt solid var(--border);
+  padding-bottom: 3pt;
+  margin-top: 14pt;
+  margin-bottom: 8pt;
+}
+h3.subhead-blue {
+  color: var(--blue);
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-top: 10pt;
+  margin-bottom: 4pt;
+  font-size: 10.5pt;
+}
+
+p { margin-bottom: 6pt; font-size: 10pt; }
+p.lead { color: var(--gray); font-style: italic; font-size: 9.5pt; margin-bottom: 10pt; }
+p.fine { font-size: 8.5pt; color: var(--gray); }
+
+ul, ol { padding-left: 18pt; margin-bottom: 6pt; }
+li { font-size: 9.5pt; margin-bottom: 3pt; line-height: 1.4; }
+
+strong { font-weight: 700; }
+
+/* ── Tables ──────────────────────────────────────────── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 10pt;
+}
+th, td {
+  text-align: left;
+  vertical-align: middle;
+  padding: 6pt 9pt;
+  border: 0.75pt solid var(--border);
+  font-size: 9pt;
+}
+thead th {
+  background: var(--navy);
+  color: var(--white);
+  font-weight: 700;
+  font-size: 8.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.4pt;
+  border: 0.75pt solid var(--navy);
+}
+tbody tr:nth-child(even) { background: var(--light-gray); }
+
+/* Key-value table — left col labels, right col values */
+table.kv th {
+  background: var(--white);
+  color: #222;
+  font-weight: 700;
+  font-size: 9pt;
+  text-transform: none;
+  letter-spacing: 0;
+  border: 0.75pt solid var(--border);
+  width: 35%;
+}
+table.kv tbody tr:nth-child(even) th { background: var(--light-gray); }
+
+/* Glance table — has banner header row */
+table.glance tbody tr.banner-row th,
+table.glance tbody tr.banner-row:nth-child(odd) th,
+table.glance tbody tr.banner-row:nth-child(even) th {
+  background: var(--navy) !important;
+  color: var(--white) !important;
+  font-size: 11pt;
+  font-weight: 700;
+  letter-spacing: 0.3pt;
+  text-transform: none;
+  padding: 7pt 12pt;
+  border: 0.75pt solid var(--navy);
+}
+table.glance th {
+  background: var(--white);
+  color: #222;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 9pt;
+  width: 35%;
+}
+table.glance tbody tr:nth-child(odd) th,
+table.glance tbody tr:nth-child(odd) td { background: var(--light-gray); }
+table.glance tbody tr:nth-child(even) th,
+table.glance tbody tr:nth-child(even) td { background: var(--white); }
+table.glance tr.total th,
+table.glance tr.total td {
+  background: var(--lt-blue) !important;
+  color: var(--navy);
+  font-weight: 700;
+  font-size: 10pt;
+}
+
+/* Numeric column alignment */
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── Cover page ──────────────────────────────────────── */
+.page.cover {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cover-rule {
+  height: 0.32in;
+  background: var(--navy);
+  flex: 0 0 auto;
+}
+.cover-eyebrow {
+  padding: 14pt 0.55in 0;
+  font-size: 9pt;
+  color: var(--gray);
+  font-style: italic;
+  letter-spacing: 0.2pt;
+}
+.cover-logo {
+  text-align: center;
+  margin: 0.7in 0 0.55in;
+}
+.cover-logo img {
+  width: 2.6in;
+  height: auto;
+}
+.cover-title {
+  text-align: center;
+  font-size: 30pt;
+  font-weight: 700;
+  color: var(--navy);
+  line-height: 1.15;
+  letter-spacing: -0.3pt;
+  padding: 0 0.55in;
+  margin-bottom: 10pt;
+}
+.cover-sub {
+  text-align: center;
+  font-size: 11pt;
+  color: var(--gray);
+  font-style: italic;
+  padding: 0 0.55in;
+  margin-bottom: 0.6in;
+}
+.cover-meta {
+  flex: 1 1 auto;
+  padding: 0 0.55in;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.cover-meta-grid {
+  display: grid;
+  grid-template-columns: 1.6in 1fr;
+  row-gap: 7pt;
+  column-gap: 14pt;
+  max-width: 4.6in;
+  margin: 0 auto;
+}
+.cover-meta-grid .label {
+  text-align: right;
+  font-size: 10pt;
+  font-weight: 700;
+  color: var(--navy);
+  padding-top: 1pt;
+}
+.cover-meta-grid .value {
+  font-size: 10pt;
+  color: #222;
+}
+.cover-foot {
+  margin-top: auto;
+  padding: 14pt 0.55in 24pt;
+  border-top: 1.5pt solid var(--navy);
+  text-align: center;
+  font-size: 8.5pt;
+  color: var(--gray);
+  font-style: italic;
+}
+
+/* ── Cover letter ────────────────────────────────────── */
+.letter-meta { margin-bottom: 12pt; }
+.letter-meta .row { font-size: 10pt; }
+ul.highlights {
+  list-style: none;
+  padding: 8pt 14pt;
+  background: var(--lt-blue);
+  border-radius: 0;
+  margin-bottom: 8pt;
+}
+ul.highlights li {
+  padding-left: 18pt;
+  position: relative;
+  font-size: 9.5pt;
+  margin-bottom: 4pt;
+  line-height: 1.45;
+}
+ul.highlights li:last-child { margin-bottom: 0; }
+ul.highlights li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--blue);
+  font-weight: 700;
+  font-size: 11pt;
+}
+
+/* ── Two-column recommendations ──────────────────────── */
+.rec.two-col {
+  column-count: 2;
+  column-gap: 26pt;
+  margin-top: 8pt;
+}
+.rec.two-col section {
+  break-inside: avoid;
+  margin-bottom: 12pt;
+}
+.rec.two-col section h3 {
+  font-size: 10pt;
+  color: var(--blue);
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-top: 0;
+  margin-bottom: 4pt;
+}
+.rec.two-col ul {
+  list-style: disc;
+  padding-left: 14pt;
+  margin: 0;
+}
+.rec.two-col li {
+  font-size: 9pt;
+  margin-bottom: 2pt;
+  line-height: 1.35;
+}
+
+.section-divider {
+  font-size: 12pt;
+  font-weight: 700;
+  color: var(--navy);
+  border-bottom: 1pt solid var(--border);
+  padding-bottom: 3pt;
+  margin-top: 14pt;
+  margin-bottom: 6pt;
+}
+
+/* ── Contact grid (Next Steps) ───────────────────────── */
+.contact-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14pt;
+  margin: 14pt 0;
+}
+.contact-grid > div {
+  background: var(--light-gray);
+  border: 0.75pt solid var(--border);
+  padding: 14pt 16pt;
+}
+.contact-grid h4 {
+  color: var(--navy);
+  font-size: 10pt;
+  font-weight: 700;
+  margin-bottom: 7pt;
+}
+.contact-grid p { font-size: 9.5pt; margin-bottom: 3pt; }
+.contact-grid p.ph { color: var(--gray); font-style: italic; }
+.contact-grid p strong { color: #222; font-style: normal; }
+
+.signature-block { margin-top: 18pt; }
+.signature-block .signed { margin-top: 22pt; font-weight: 700; }
+
+/* ── Member signature table ──────────────────────────── */
+table.sig-block {
+  width: 100%;
+  margin-top: 14pt;
+  border-collapse: collapse;
+}
+table.sig-block th,
+table.sig-block td {
+  border: none;
+  padding: 14pt 0 0 0;
+  background: var(--white) !important;
+  font-size: 10pt;
+}
+table.sig-block th {
+  width: 1.1in;
+  text-align: left;
+  font-weight: 700;
+  color: var(--navy);
+  vertical-align: bottom;
+  padding-right: 12pt;
+}
+table.sig-block td {
+  vertical-align: bottom;
+}
+table.sig-block .sig-line {
+  display: inline-block;
+  width: 100%;
+  border-bottom: 1pt solid #222;
+  height: 14pt;
+}
+
+/* ── Callout boxes ───────────────────────────────────── */
+.callout {
+  background: var(--lt-blue);
+  border-left: 4pt solid var(--blue);
+  padding: 10pt 14pt;
+  margin: 10pt 0;
+  font-size: 9pt;
+}
+.callout strong { color: var(--navy); }
+
+.disclosure {
+  background: var(--light-gray);
+  border-left: 4pt solid var(--blue);
+  padding: 10pt 14pt;
+  margin: 8pt 0;
+  font-size: 8.5pt;
+  color: var(--gray);
+  line-height: 1.5;
+}
+
+/* ── About hero ──────────────────────────────────────── */
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 24pt;
+  padding: 18pt 0 22pt;
+  margin-bottom: 14pt;
+  border-bottom: 1pt solid var(--border);
+}
+.about-hero img {
+  width: 1.8in;
+  height: auto;
+  flex: 0 0 auto;
+}
+.about-hero .eyebrow {
+  font-size: 8.5pt;
+  color: var(--gray);
+  font-style: italic;
+  letter-spacing: 0.3pt;
+  margin-bottom: 4pt;
+}
+.about-hero h1 {
+  font-size: 22pt;
+  font-weight: 700;
+  color: var(--navy);
+  letter-spacing: -0.2pt;
+  line-height: 1.1;
+}
+.about-hero p {
+  margin-top: 4pt;
+  color: var(--gray);
+  font-size: 9.5pt;
+}
+.placeholder-box {
+  background: var(--light-gray);
+  border: 0.75pt dashed var(--mid-gray);
+  padding: 18pt 20pt;
+  font-size: 9.5pt;
+  color: var(--gray);
+}
+.placeholder-box .tag {
+  display: inline-block;
+  font-size: 8pt;
+  font-weight: 700;
+  color: var(--blue);
+  text-transform: uppercase;
+  letter-spacing: 0.5pt;
+  margin-bottom: 6pt;
+}
+
+/* ── Utility ─────────────────────────────────────────── */
+.mt-sm { margin-top: 6pt; }
+.mt-md { margin-top: 12pt; }
+.mt-lg { margin-top: 18pt; }
+.mb-sm { margin-bottom: 6pt; }
+.mb-md { margin-bottom: 12pt; }
+.mb-lg { margin-bottom: 18pt; }

@@ -111,6 +111,9 @@
       "enum": ["docx", "pdf", "both"],
       "default": "docx",
       "description": "Desired output format. 'both' returns docx + PDF."
+    },
+    "nbaisWc": {
+      "$ref": "#/definitions/NbaisWcExtension"
     }
   },
   "definitions": {
@@ -669,6 +672,45 @@
           "type": "boolean",
           "default": true,
           "description": "Whether to include the recommendations checklist section."
+        }
+      }
+    },
+    "NbaisWcExtension": {
+      "type": ["object", "null"],
+      "description": "NBAIS Workers' Compensation vertical extension fields. Required when templateId is nbais-wc-v1.",
+      "additionalProperties": false,
+      "properties": {
+        "quoteDate": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "Quote date from the carrier document (ISO 8601)."
+        },
+        "memberLegalName": {
+          "type": ["string", "null"],
+          "description": "Legal entity name for Named Insured section. Falls back to insured.name if null."
+        },
+        "surplusContribution": {
+          "type": ["number", "null"],
+          "description": "BAWNSIG surplus contribution amount (8% of estimated premium)."
+        },
+        "employersLiabilityFee": {
+          "type": ["number", "null"],
+          "description": "Employers' Liability fee amount."
+        },
+        "totalEstimatedPremium": {
+          "type": ["number", "null"],
+          "description": "Total estimated premium (premium + surplus + EL fee)."
+        },
+        "downPayment": {
+          "type": ["number", "null"],
+          "description": "Initial down payment amount (25% of total for new business)."
+        },
+        "excludedPersons": {
+          "type": ["array", "null"],
+          "description": "Persons who have elected to reject WC coverage via Form D-43.",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

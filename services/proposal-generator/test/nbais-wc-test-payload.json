@@ -1,0 +1,79 @@
+{
+  "templateId": "nbais-wc-v1",
+  "proposalNumber": "PROP-2026-00001",
+  "outputFormat": "both",
+  "metadata": {
+    "amName": "Dianne Slater",
+    "amEmail": "dslater@nbais.com",
+    "amTitle": "Producer"
+  },
+  "insured": {
+    "name": "Carson Valley Excavation and Concrete, LLC",
+    "entityType": "llc",
+    "address": {
+      "street1": "306 Bath St.",
+      "city": "Carson City",
+      "state": "NV",
+      "zip": "89703"
+    },
+    "primaryContact": {
+      "name": "James Moretti",
+      "title": "Owner",
+      "email": "jmoretti@cvexcavation.com",
+      "phone": "(775) 555-0192"
+    }
+  },
+  "policyPeriod": {
+    "effectiveDate": "2026-04-24",
+    "expirationDate": "2026-12-31"
+  },
+  "quotes": [
+    {
+      "lineOfBusiness": "WorkersCompensation",
+      "carrier": {
+        "name": "Builders Association of Western Nevada Self-Insured Group (BAWNSIG)"
+      },
+      "status": "quoted",
+      "isAdmitted": true,
+      "premium": 7192.80,
+      "totalCost": 7888.22,
+      "attributes": [
+        { "key": "el_each_accident", "value": 1000000, "label": "Employers' Liability — Each Accident", "format": "currency" },
+        { "key": "el_disease_each_employee", "value": 1000000, "label": "Employers' Liability — Disease (Each Employee)", "format": "currency" },
+        { "key": "el_disease_policy_limit", "value": 1000000, "label": "Employers' Liability — Disease (Policy Limit)", "format": "currency" }
+      ],
+      "scheduleItems": [
+        {
+          "itemType": "employee_class",
+          "itemNumber": 1,
+          "description": "Excavation & Drivers",
+          "attributes": [
+            { "key": "state", "value": "NV", "format": "text" },
+            { "key": "class_code", "value": "6217", "format": "text" },
+            { "key": "class_description", "value": "Excavation & Drivers", "format": "text" },
+            { "key": "payroll", "value": 144000, "format": "currency" },
+            { "key": "rate_per_hundred", "value": "4.995", "format": "text" },
+            { "key": "estimated_premium", "value": 7192.80, "format": "currency" }
+          ]
+        }
+      ]
+    }
+  ],
+  "nbaisWc": {
+    "quoteDate": "2026-04-27",
+    "memberLegalName": "Carson Valley Excavation and Concrete, LLC",
+    "surplusContribution": 575.42,
+    "employersLiabilityFee": 120.00,
+    "totalEstimatedPremium": 7888.22,
+    "downPayment": 1972.05,
+    "excludedPersons": [
+      "James Moretti",
+      "Sandra Cole"
+    ]
+  },
+  "templateConfig": {
+    "boilerplateSelections": [],
+    "includeToc": false,
+    "includeRecommendations": true
+  }
+}

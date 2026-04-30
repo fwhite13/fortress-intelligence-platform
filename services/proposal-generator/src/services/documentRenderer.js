@@ -7,7 +7,7 @@ import { loadTemplate } from './templateLoader.js'
 import { postProcess } from './postProcessor.js'
 import { renderLobPartial } from './lobRenderer.js'
 import { renderBoilerplate } from './boilerplateRenderer.js'
-import { assembleTemplateData } from './assembleTemplateData.js'
+import { assembleTemplateData, assembleNbaisWcTemplateData } from './assembleTemplateData.js'
 
 const require = createRequire(import.meta.url)
 const ImageModule = require('docxtemplater-image-module-free')
@@ -37,6 +37,27 @@ async function loadLogo(storageProvider, templateId, logger) {
   }
   logger?.debug({ templateId }, 'No vertical logo found — proceeding without logo')
   return null
+}
+
+/**
+ * Load named logos from S3 for verticals that need multiple logo files.
+ * Returns an object with named buffers: { stacked: Buffer, horizontal: Buffer }
+ */
+async function loadNamedLogos(storageProvider, templateId, logoConfig, logger) {
+  if (!logoConfig) return null
+  const result = {}
+  for (const [name, filename] of Object.entries(logoConfig)) {
+    const key = `${storageProvider.templatePrefix}/verticals/${templateId}/${filename}`
+    try {
+      result[name] = await storageProvider.getBuffer(storageProvider.templateBucket, key)
+    } catch (err) {
+      if (err.name !== 'NoSuchKey' && err.$metadata?.httpStatusCode !== 404) {
+        logger?.warn({ templateId, name, err: err.message }, 'Unexpected error loading named logo')
+      }
+      result[name] = null
+    }
+  }
+  return result
 }
 
 /**
@@ -103,12 +124,25 @@ export async function renderDocument(payload, storageProvider, logger) {
     logger
   )
 
-  // Step 5: Load vertical logo (graceful — null if not found)
-  const logoBuffer = await loadLogo(storageProvider, templateId, logger)
+  // Step 5: Load vertical logo(s) (graceful — null if not found)
+  const isNbaisWc = meta.vertical === 'nbais-wc'
+  let logoBuffer = null
+  let namedLogos = null
+
+  if (isNbaisWc && meta.logos) {
+    namedLogos = await loadNamedLogos(storageProvider, templateId, meta.logos, logger)
+  } else {
+    logoBuffer = await loadLogo(storageProvider, templateId, logger)
+  }
 
   // Step 6: Assemble full template data
   payload.proposalNumber = resolvedProposalNumber
-  const templateData = assembleTemplateData(payload, meta, logoBuffer, lobSectionsXml, boilerplateSectionsXml, logger)
+  let templateData
+  if (isNbaisWc) {
+    templateData = assembleNbaisWcTemplateData(payload, meta, namedLogos, logger)
+  } else {
+    templateData = assembleTemplateData(payload, meta, logoBuffer, lobSectionsXml, boilerplateSectionsXml, logger)
+  }
 
   // Step 7: Render master template
   let docxBuffer

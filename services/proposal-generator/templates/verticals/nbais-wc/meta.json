@@ -1,0 +1,16 @@
+{
+  "templateId": "nbais-wc-v1",
+  "vertical": "nbais-wc",
+  "displayName": "NBAIS — Workers' Compensation Proposal",
+  "version": "1.0.0",
+  "s3Key": "verticals/nbais-wc/master.docx",
+  "lobPartials": [
+    "WorkersCompensation"
+  ],
+  "defaultBoilerplate": [],
+  "logos": {
+    "stacked": "logo_stacked.png",
+    "horizontal": "logo_horizontal.png"
+  },
+  "active": true
+}

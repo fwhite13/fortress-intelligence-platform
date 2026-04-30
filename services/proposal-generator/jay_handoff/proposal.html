@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NBAIS Workers' Compensation Insurance Proposal</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============================================================
+     PAGE 1 — COVER
+     ============================================================ -->
+<section class="page cover">
+  <div class="cover-rule"></div>
+  <div class="cover-eyebrow">Nevada Builders Alliance Insurance Solutions</div>
+
+  <div class="cover-logo">
+    <img src="logo_stacked.png" alt="NBAIS — Nevada Builders Alliance Insurance Solutions, via Higginbotham">
+  </div>
+
+  <h1 class="cover-title">Workers' Compensation<br>Insurance Proposal</h1>
+  <div class="cover-sub">Prepared exclusively for Nevada Builders Alliance members</div>
+
+  <div class="cover-meta">
+    <div class="cover-meta-grid">
+      <div class="label">Prepared For</div>
+      <div class="value"><span class="mf">{{MEMBER_NAME}}</span></div>
+
+      <div class="label">Policy Period</div>
+      <div class="value"><span class="mf">{{POLICY_PERIOD}}</span></div>
+
+      <div class="label">Prepared By</div>
+      <div class="value">Dianne Slater</div>
+
+      <div class="label">Date</div>
+      <div class="value"><span class="mf">{{QUOTE_DATE}}</span></div>
+
+      <div class="label">Program</div>
+      <div class="value">Nevada Builders Alliance — NBAIS Member Program</div>
+    </div>
+  </div>
+
+  <div class="cover-foot">Confidential — Prepared for the named member's exclusive use</div>
+</section>
+
+<!-- ============================================================
+     PAGE 2 — COVER LETTER
+     ============================================================ -->
+<section class="page">
+  <header class="page-header">
+    <img src="logo_horizontal.png" alt="NBAIS">
+    <span class="doc-tag">Workers' Compensation Proposal</span>
+  </header>
+
+  <div class="page-body">
+    <div class="letter-meta">
+      <div class="row"><span class="mf">{{QUOTE_DATE}}</span></div>
+      <div class="row" style="margin-top: 8pt;"><span class="mf">{{MEMBER_NAME}}</span></div>
+      <div class="row"><span class="mf">{{MEMBER_ADDRESS}}</span></div>
+    </div>
+
+    <p style="margin-top: 6pt;"><strong>RE: Workers' Compensation Insurance Proposal — Nevada Builders Alliance Member Program</strong></p>
+
+    <p style="margin-top: 8pt;">Dear <span class="mf">{{MEMBER_NAME}}</span>,</p>
+
+    <h3>About this proposal</h3>
+    <p>On behalf of Nevada Builders Alliance Insurance Services (NBAIS), we are pleased to present this Workers' Compensation Insurance proposal exclusively for members of the Nevada Builders Alliance (NBA). This proposal has been prepared specifically for your organization and reflects the competitive program rates and enhanced coverage options available through your NBA membership.</p>
+    <p>NBAIS was established to serve the unique risk management needs of Nevada's construction industry — from residential and commercial builders to specialty trade contractors. As an NBA member, your organization has access to a Workers' Compensation program designed around the realities of your trade, not a one-size-fits-all solution.</p>
+
+    <h3>Program highlights</h3>
+    <ul class="highlights">
+      <li>Exclusive NBA member pricing — competitive group rates unavailable in the open market</li>
+      <li>Construction-class expertise — underwriting specialists who understand your trade</li>
+      <li>Dividend potential — SIG participation with return of premium for favorable loss performance</li>
+      <li>Loss control resources — proactive safety and claims management support</li>
+      <li>Dedicated service team — NBAIS producers with direct carrier access</li>
+    </ul>
+
+    <h3>What is included in this proposal</h3>
+    <p style="margin-bottom: 4pt;">This proposal package contains the following for your review:</p>
+    <ul style="margin-top: 0;">
+      <li><strong>Premium Summary &amp; Coverage at a Glance</strong> — a summary of your proposed coverage terms and estimated premium.</li>
+      <li><strong>Workers' Compensation Coverage Details</strong> — a detailed outline of the proposed coverage terms, limits, and exclusions applicable to your operation.</li>
+      <li><strong>Carrier Quote</strong> — the carrier quotation secured for your review, including the class code and payroll basis used to develop this quote. Please review for accuracy and notify us of any changes prior to binding.</li>
+      <li><strong>Coverage Recommendations</strong> — a comprehensive list of additional coverage lines for your consideration across commercial, personal, bond, employee benefits, and life planning categories.</li>
+    </ul>
+  </div>
+
+  <footer class="page-footer">
+    <span>NBAIS Workers' Compensation Proposal · <span class="mf">{{MEMBER_NAME}}</span> · Confidential</span>
+    <span>Cover Letter</span>
+  </footer>
+</section>
+
+<!-- ============================================================
+     PAGE 3 — PREMIUM SUMMARY
+     ============================================================ -->
+<section class="page">
+  <header class="page-header">
+    <img src="logo_horizontal.png" alt="NBAIS">
+    <span class="doc-tag">Workers' Compensation Proposal</span>
+  </header>
+
+  <div class="page-body">
+    <div class="banner">Premium Summary</div>
+
+    <p class="lead">Your estimated cost for the coverage period <span class="mf">{{POLICY_PERIOD}}</span>. All figures are subject to final payroll audit.</p>
+
+    <table class="glance">
+      <tbody>
+        <tr class="banner-row"><th colspan="2">Coverage at a Glance</th></tr>
+        <tr><th>Insured</th><td><span class="mf">{{MEMBER_NAME}}</span></td></tr>
+        <tr><th>Policy Period</th><td><span class="mf">{{POLICY_PERIOD}}</span></td></tr>
+        <tr><th>Coverage</th><td>Workers' Compensation — Statutory (Nevada) / Employers' Liability</td></tr>
+        <tr><th>Employers' Liability Limits</th><td>$1,000,000 Each Accident / $1,000,000 Disease – Each Employee / $1,000,000 Disease – Policy Limit</td></tr>
+        <tr><th>Program</th><td>Nevada Builders Alliance — NBAIS Member Program</td></tr>
+        <tr><th>Carrier</th><td>Builders Association of Western Nevada Self-Insured Group (BAWNSIG)</td></tr>
+        <tr><th>Est. Premium</th><td><span class="mf">{{EST_PREMIUM}}</span> (subject to final audit)</td></tr>
+        <tr><th>Surplus Contribution (8%)</th><td><span class="mf">{{SURPLUS_CONTRIBUTION}}</span></td></tr>
+        <tr><th>Employers' Liability Fee</th><td><span class="mf">{{EMPLOYERS_LIABILITY_FEE}}</span></td></tr>
+        <tr class="total"><th>Total Estimated Cost</th><td><span class="mf">{{TOTAL_ESTIMATED_PREMIUM}}</span></td></tr>
+        <tr><th>Initial Down Payment</th><td><span class="mf">{{DOWN_PAYMENT}}</span> (25% — new business). Balance payable online via secure payment link provided upon binding.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>What's next</h3>
+    <p>Review the Coverage Details on the following page, confirm payroll and class code accuracy, and contact your NBAIS producer to bind. Final premium will be reconciled at audit.</p>
+  </div>
+
+  <footer class="page-footer">
+    <span>NBAIS Workers' Compensation Proposal · <span class="mf">{{MEMBER_NAME}}</span> · Confidential</span>
+    <span>Premium Summary</span>
+  </footer>
+</section>
+
+<!-- ============================================================
+     PAGE 4 — COVERAGE DETAILS (Policy Info, Limits)
+     ============================================================ -->
+<section class="page">
+  <header class="page-header">
+    <img src="logo_horizontal.png" alt="NBAIS">
+    <span class="doc-tag">Workers' Compensation Proposal</span>
+  </header>
+
+  <div class="page-body">
+    <div class="banner">Coverage Details — Workers' Compensation</div>
+
+    <h3>Policy Information</h3>
+    <table class="kv">
+      <tbody>
+        <tr><th>Carrier</th><td>Builders Association of Western Nevada Self-Insured Group (BAWNSIG)</td></tr>
+        <tr><th>Program Manager</th><td>Lusense</td></tr>
+        <tr><th>Financial Strength</th><td>BAWNSIG is a Nevada state-regulated self-insured group. AM Best rating not applicable — see program disclosure.</td></tr>
+        <tr><th>Policy Period</th><td><span class="mf">{{POLICY_PERIOD}}</span></td></tr>
+        <tr><th>Coverage</th><td>Workers' Compensation</td></tr>
+        <tr><th>States Covered</th><td>Nevada</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Named Insured</h3>
+    <p style="font-size: 11pt; font-weight: 700; color: var(--navy); margin: 4pt 0 12pt;"><span class="mf">{{MEMBER_LEGAL_NAME}}</span></p>
+
+    <h3>Coverage and Limits</h3>
+    <table>
+      <thead>
+        <tr><th>Coverage</th><th class="num">Limit</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Part I — Workers' Compensation</td><td class="num">Statutory per State of Nevada</td></tr>
+        <tr><td>Part II — Employers' Liability: Each Accident</td><td class="num">$1,000,000</td></tr>
+        <tr><td>Part II — Employers' Liability: Disease — Each Employee</td><td class="num">$1,000,000</td></tr>
+        <tr><td>Part II — Employers' Liability: Disease — Policy Limit</td><td class="num">$1,000,000</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Surplus Contribution</h3>
+    <p>As a self-insured group (SIG), BAWNSIG requires a surplus contribution in addition to the estimated premium. This contribution — calculated at 8% of the estimated premium — is a regulatory requirement for SIG participation in Nevada and supports the financial reserves of the group. <strong>It is not a fee retained by NBAIS or your producer.</strong></p>
+  </div>
+
+  <footer class="page-footer">
+    <span>NBAIS Workers' Compensation Proposal · <span class="mf">{{MEMBER_NAME}}</span> · Confidential</span>
+    <span>Coverage Details (1 of 2)</span>
+  </footer>
+</section>
+
+<!-- ============================================================
+     PAGE 5 — COVERAGE DETAILS (Class Schedule + Excluded Persons)
+     Both expandable tables sit at top of page so they grow downward.
+     ============================================================ -->
+<section class="page">
+  <header class="page-header">
+    <img src="logo_horizontal.png" alt="NBAIS">
+    <span class="doc-tag">Workers' Compensation Proposal</span>
+  </header>
+
+  <div class="page-body">
+    <div class="banner continued">Coverage Details (continued)</div>
+
+    <h3 style="margin-top: 4pt;">Employee Classification Schedule</h3>
+    <table>
+      <colgroup>
+        <col style="width: 7%;">
+        <col style="width: 12%;">
+        <col style="width: 28%;">
+        <col style="width: 21%;">
+        <col style="width: 12%;">
+        <col style="width: 20%;">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>State</th>
+          <th>Class Code</th>
+          <th>Description</th>
+          <th class="num">Est. Annual Payroll</th>
+          <th class="num">Rate</th>
+          <th class="num">Est. Premium</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>NV</td>
+          <td><span class="mf">{{CLASS_CODE}}</span></td>
+          <td><span class="mf">{{CLASS_DESCRIPTION}}</span></td>
+          <td class="num"><span class="mf">{{EST_ANNUAL_PAYROLL}}</span></td>
+          <td class="num"><span class="mf">{{RATE}}</span></td>
+          <td class="num"><span class="mf">{{EST_PREMIUM}}</span></td>
+        </tr>
+        <tr style="background: var(--light-gray); font-weight: 700;">
+          <td colspan="5" style="text-align: right;">Total Estimated Premium</td>
+          <td class="num"><span class="mf">{{EST_PREMIUM}}</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Excluded Persons</h3>
+    <p>The following individuals have elected to reject workers' compensation coverage under Form D-43 (Employee's Election to Reject Coverage):</p>
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Form</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="mf">{{EXCLUDED_PERSON_1}}</span></td><td>Form D-43 — Election to Reject Coverage</td></tr>
+        <tr><td><span class="mf">{{EXCLUDED_PERSON_2}}</span></td><td>Form D-43 — Election to Reject Coverage</td></tr>
+      </tbody>
+    </table>
+    <p class="fine"><strong style="color: var(--red);">D-43 form required:</strong> A completed and signed Form D-43 is required for each individual listed above prior to binding. Coverage cannot be excluded without a signed D-43 on file.</p>
+    <p class="fine" style="margin-top: 4pt;"><strong>Important:</strong> Excluded individuals are not covered under this workers' compensation policy. Please confirm these elections are accurate prior to binding. <em>If no excluded persons exist on the carrier quote, omit this entire section.</em></p>
+
+    <h3>Self-Insured Group Disclosure</h3>
+    <div class="disclosure">
+      BAWNSIG is a Nevada-regulated self-insured group, not a traditional insurance carrier, and therefore does not carry an AM Best financial strength rating. BAWNSIG operates under the regulatory oversight of the Nevada Division of Industrial Relations and maintains reserves in accordance with state requirements. Members of NBAIS benefit from the group's long-standing solvency and claims-paying history as a construction industry SIG in Nevada.
+    </div>
+  </div>
+
+  <footer class="page-footer">
+    <span>NBAIS Workers' Compensation Proposal · <span class="mf">{{MEMBER_NAME}}</span> · Confidential</span>
+    <span>Coverage Details (2 of 2)</span>
+  </footer>
+</section>
+
+<!-- ============================================================
+     PAGE 6 — NEXT STEPS + MEMBER SIGNATURE (BINDABLE)
+     ============================================================ -->
+<section class="page">
+  <header class="page-header">
+    <img src="logo_horizontal.png" alt="NBAIS">
+    <span class="doc-tag">Workers' Compensation Proposal</span>
+  </header>
+
+  <div class="page-body">
+    <div class="banner">Next Steps &amp; Member Authorization</div>
+
+    <p>To bind coverage or to discuss this proposal in further detail, please contact your NBAIS producer using the information below. Please review all coverage details carefully and confirm payroll and class code accuracy prior to binding, as final premium is subject to audit.</p>
+
+    <div class="contact-grid">
+      <div>
+        <h4>Your NBAIS Producer</h4>
+        <p><strong>Dianne Slater</strong></p>
+        <p class="ph">[Title]</p>
+        <p class="ph">[Phone Number]</p>
+        <p class="ph">[Email Address]</p>
+      </div>
+      <div>
+        <h4>NBAIS Program Office</h4>
+        <p>Nevada Builders Alliance Insurance Services</p>
+        <p class="ph">[Office Address]</p>
+        <p class="ph">[www.nbaiswebsite.com]</p>
+      </div>
+    </div>
+
+    <h3 style="margin-top: 18pt;">Member Authorization</h3>
+    <p>By signing below, the undersigned acknowledges receipt of this Workers' Compensation Insurance proposal and authorizes Nevada Builders Alliance Insurance Services (NBAIS) to bind coverage as described herein, effective on the policy period stated above. The undersigned confirms that the payroll, classification codes, and excluded persons listed in this proposal are accurate to the best of their knowledge and understands that final premium is subject to audit. The required initial down payment will be remitted online via the secure payment link provided upon binding.</p>
+
+    <table class="sig-block" aria-label="Member signature">
+      <tbody>
+        <tr><th>By</th><td><span class="sig-line"></span></td></tr>
+        <tr><th>Print Name</th><td><span class="sig-line"></span></td></tr>
+        <tr><th>Title</th><td><span class="sig-line"></span></td></tr>
+        <tr><th>Date</th><td><span class="sig-line"></span></td></tr>
+      </tbody>
+    </table>
+
+    <p class="fine" style="margin-top: 18pt;">This proposal is not a binder or guarantee of coverage. All coverage is subject to underwriting approval, policy terms, conditions, and exclusions. Premium estimates are subject to final payroll audit. NBAIS is an insurance program administered on behalf of Nevada Builders Alliance members.</p>
+  </div>
+
+  <footer class="page-footer">
+    <span>NBAIS Workers' Compensation Proposal · <span class="mf">{{MEMBER_NAME}}</span> · Confidential</span>
+    <span>Next Steps &amp; Authorization</span>
+  </footer>
+</section>
+
+<!-- ============================================================
+     PAGE 7 — COVERAGE RECOMMENDATIONS (Commercial, part 1)
+     ============================================================ -->
+<section class="page">
+  <header class="page-header">
+    <img src="logo_horizontal.png" alt="NBAIS">
+    <span class="doc-tag">Workers' Compensation Proposal</span>
+  </header>
+
+  <div class="page-body">
+    <div class="banner">Coverage Recommendations</div>
+    <p class="lead">The following list identifies common coverage areas for your consideration. Please review with your NBAIS producer to determine which lines are recommended, currently insured, or not applicable to your operation.</p>
+
+    <div class="section-divider">Commercial Lines</div>
+
+    <div class="rec two-col">
+      <section>
+        <h3>Property Coverages</h3>
+        <ul>
+          <li>Building / Business Personal Property</li>
+          <li>Business Income &amp; Extra Expense</li>
+          <li>Equipment Breakdown</li>
+          <li>Inland Marine / Contractors Equipment</li>
+          <li>Installation Floater</li>
+          <li>Builders Risk</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Liability Coverages</h3>
+        <ul>
+          <li>Commercial General Liability</li>
+          <li>Products &amp; Completed Operations</li>
+          <li>Contractual Liability</li>
+          <li>Personal &amp; Advertising Injury</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Cyber / Identity Theft / Crime</h3>
+        <ul>
+          <li>Cyber Liability</li>
+          <li>Data Breach / Privacy Liability</li>
+          <li>Identity Theft Protection</li>
+          <li>Commercial Crime / Employee Dishonesty</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Automobile Coverage</h3>
+        <ul>
+          <li>Commercial Auto Liability</li>
+          <li>Physical Damage (Comp &amp; Collision)</li>
+          <li>Hired &amp; Non-Owned Auto</li>
+          <li>Motor Truck Cargo</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Workers' Compensation Coverages</h3>
+        <ul>
+          <li>Workers' Compensation — Statutory</li>
+          <li>Employers' Liability</li>
+          <li>Stop Gap / Employers Liability (Monopolistic States)</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Umbrella / Excess Liability</h3>
+        <ul>
+          <li>Commercial Umbrella</li>
+          <li>Excess Liability</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Directors &amp; Officers / EPL / Fiduciary</h3>
+        <ul>
+          <li>Directors &amp; Officers Liability</li>
+          <li>Employment Practices Liability (EPLI)</li>
+          <li>Fiduciary Liability</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Errors &amp; Omissions / Professional</h3>
+        <ul>
+          <li>Professional Liability / E&amp;O</li>
+          <li>Contractors Professional Liability</li>
+          <li>Design-Build Professional Liability</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <footer class="page-footer">
+    <span>NBAIS Workers' Compensation Proposal · <span class="mf">{{MEMBER_NAME}}</span> · Confidential</span>
+    <span>Coverage Recommendations (1 of 3)</span>
+  </footer>
+</section>
+
+<!-- ============================================================
+     PAGE 8 — COVERAGE RECOMMENDATIONS (Commercial cont. + Personal + Bond)
+     ============================================================ -->
+<section class="page">
+  <header class="page-header">
+    <img src="logo_horizontal.png" alt="NBAIS">
+    <span class="doc-tag">Workers' Compensation Proposal</span>
+  </header>
+
+  <div class="page-body">
+    <div class="banner continued">Coverage Recommendations (continued)</div>
+
+    <div class="section-divider">Commercial Lines (continued)</div>
+
+    <div class="rec two-col">
+      <section>
+        <h3>Wind / Hail, Earthquake, Flood</h3>
+        <ul>
+          <li>Wind &amp; Hail Coverage</li>
+          <li>Earthquake Coverage</li>
+          <li>Flood Coverage (NFIP or Private)</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Foreign Coverages</h3>
+        <ul>
+          <li>Foreign Voluntary Workers' Compensation</li>
+          <li>Foreign General Liability</li>
+          <li>Foreign Auto</li>
+          <li>Foreign Package Policy</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3>Pollution Liability</h3>
+        <ul>
+          <li>Contractors Pollution Liability</li>
+          <li>Environmental Impairment Liability</li>
+          <li>Site Pollution Legal Liability</li>
+        </ul>
+      </section>
+    </div>
+
+    <div class="section-divider">Personal Lines</div>
+
+    <div class="rec two-col">
+      <section>
+        <h3>Personal Insurance</h3>
+        <ul>
+          <li>Automobile</li>
+          <li>Home / Homeowners</li>
+          <li>Flood / Earthquake</li>
+          <li>Personal Umbrella</li>
+        </ul>
+      </section>
+      <section>
+        <h3>&nbsp;</h3>
+        <ul>
+          <li>Farm &amp; Ranch</li>
+          <li>Watercraft / Recreational Vehicles</li>
+          <li>Personal Articles Floater</li>
+        </ul>
+      </section>
+    </div>
+
+    <div class="section-divider">Bond Recommendations</div>
+
+    <div class="rec two-col">
+      <section>
+        <h3>Surety &amp; Bonds</h3>
+        <ul>
+          <li>Contract Bond</li>
+          <li>Court Bond</li>
+          <li>Fidelity Bond</li>
+          <li>Financial Institution Bond</li>
+        </ul>
+      </section>
+      <section>
+        <h3>&nbsp;</h3>
+        <ul>
+          <li>License &amp; Permit Bond</li>
+          <li>Probate Bond</li>
+          <li>Public Official Bond</li>
+          <li>Surety Bond</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <footer class="page-footer">
+    <span>NBAIS Workers' Compensation Proposal · <span class="mf">{{MEMBER_NAME}}</span> · Confidential</span>
+    <span>Coverage Recommendations (2 of 3)</span>
+  </footer>
+</section>
+
+<!-- ============================================================
+     PAGE 9 — EMPLOYEE BENEFITS RECOMMENDATIONS
+     ============================================================ -->
+<section class="page">
+  <header class="page-header">
+    <img src="logo_horizontal.png" alt="NBAIS">
+    <span class="doc-tag">Workers' Compensation Proposal</span>
+  </header>
+
+  <div class="page-body">
+    <div class="banner">Employee Benefits Recommendations</div>
+    <p class="lead">Group benefits, life planning, and retirement plan services available through NBAIS for member consideration.</p>
+
+    <div class="section-divider">Group Benefits</div>
+
+    <div class="rec two-col">
+      <section>
+        <h3>Health &amp; Welfare</h3>
+        <ul>
+          <li>HR Services</li>
+          <li>Group Medical</li>
+          <li>Group Dental</li>
+          <li>Vision</li>
+          <li>Group Life and Accidental Death &amp; Dismemberment (AD&amp;D)</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Disability &amp; Supplemental</h3>
+        <ul>
+          <li>Long Term Care</li>
+          <li>Short Term Disability</li>
+          <li>Section 125 Cafeteria Plans</li>
+          <li>Individual Medical / Dental</li>
+        </ul>
+      </section>
+    </div>
+
+    <div class="section-divider">Life Department</div>
+
+    <div class="rec two-col">
+      <section>
+        <h3>&nbsp;</h3>
+        <ul>
+          <li>Business Planning</li>
+          <li>Estate Planning</li>
+        </ul>
+      </section>
+      <section>
+        <h3>&nbsp;</h3>
+        <ul style="visibility: hidden;"><li>spacer</li></ul>
+      </section>
+    </div>
+
+    <div class="section-divider">Retirement Plan Services</div>
+
+    <div class="rec two-col">
+      <section>
+        <h3>&nbsp;</h3>
+        <ul>
+          <li>Qualified Plans</li>
+          <li>Non-Qualified Plans</li>
+        </ul>
+      </section>
+      <section>
+        <h3>&nbsp;</h3>
+        <ul style="visibility: hidden;"><li>spacer</li></ul>
+      </section>
+    </div>
+
+    <div class="callout" style="margin-top: 22pt;">
+      <strong>Discuss with your producer.</strong> Your NBAIS producer can help you assess which of these coverage lines apply to your operation and identify any potential gaps in your current insurance program.
+    </div>
+  </div>
+
+  <footer class="page-footer">
+    <span>NBAIS Workers' Compensation Proposal · <span class="mf">{{MEMBER_NAME}}</span> · Confidential</span>
+    <span>Coverage Recommendations (3 of 3)</span>
+  </footer>
+</section>
+
+</body>
+</html>
