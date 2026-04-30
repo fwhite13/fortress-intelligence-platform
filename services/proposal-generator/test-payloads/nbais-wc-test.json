@@ -1,0 +1,76 @@
+{
+  "templateId": "nbais-wc",
+  "proposalNumber": "PROP-2026-00001",
+  "insured": {
+    "name": "Carson Valley Excavation, LLC",
+    "dba": null,
+    "entityType": "LLC",
+    "fein": "88-1234567",
+    "address": {
+      "street1": "1485 Industrial Way",
+      "city": "Gardnerville",
+      "state": "NV",
+      "zip": "89410"
+    },
+    "primaryContact": {
+      "name": "Robert Carson",
+      "title": "Owner",
+      "email": "rcarson@cvexcavation.com",
+      "phone": "(775) 555-0192"
+    }
+  },
+  "policyPeriod": {
+    "effectiveDate": "2026-06-01",
+    "expirationDate": "2027-06-01"
+  },
+  "quotes": [
+    {
+      "lineOfBusiness": "WorkersCompensation",
+      "carrier": "BAWNSIG",
+      "premium": 14850.00,
+      "attributes": [
+        { "key": "estimated_premium", "value": "14850.00" },
+        { "key": "policy_number", "value": "WC-2026-CV-0041" }
+      ],
+      "scheduleItems": [
+        {
+          "itemType": "employee_class",
+          "description": "Excavation Work — Subsurface",
+          "attributes": [
+            { "key": "state", "value": "NV" },
+            { "key": "class_code", "value": "6217" },
+            { "key": "class_description", "value": "Excavation Work — Subsurface" },
+            { "key": "payroll", "value": "850000" },
+            { "key": "rate_per_hundred", "value": "1.42" },
+            { "key": "estimated_premium", "value": "12070.00" }
+          ]
+        },
+        {
+          "itemType": "employee_class",
+          "description": "Grading of Land",
+          "attributes": [
+            { "key": "state", "value": "NV" },
+            { "key": "class_code", "value": "6220" },
+            { "key": "class_description", "value": "Grading of Land" },
+            { "key": "payroll", "value": "195000" },
+            { "key": "rate_per_hundred", "value": "1.42" },
+            { "key": "estimated_premium", "value": "2780.00" }
+          ]
+        }
+      ]
+    }
+  ],
+  "nbaisWc": {
+    "memberLegalName": "Carson Valley Excavation, LLC",
+    "quoteDate": "2026-05-01",
+    "excludedPersons": [
+      { "name": "Robert Carson" },
+      { "name": "Jennifer Carson" }
+    ]
+  },
+  "metadata": {
+    "amName": "Dianne Slater",
+    "amEmail": "dslater@nbais.com"
+  },
+  "outputFormat": "docx"
+}

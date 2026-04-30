@@ -108,6 +108,20 @@ function formatCurrencyWc(value) {
 /**
  * Assemble template data for the NBAIS Workers' Compensation proposal.
  * This vertical uses a fixed-format template with WC-specific computed fields.
+ *
+ * Field mapping:
+ *   memberName         ← insured.name
+ *   memberAddress      ← insured.address (formatted)
+ *   memberLegalName    ← nbaisWc.memberLegalName || insured.name
+ *   policyPeriod       ← policyPeriod.effectiveDate – expirationDate (formatted)
+ *   quoteDate          ← nbaisWc.quoteDate || today
+ *   estPremium         ← quotes[0].premium (WorkersCompensation) — formatted currency
+ *   surplusContribution← COMPUTED: basePremium * 0.08 — formatted currency
+ *   employersLiabilityFee ← CONSTANT: $120 — formatted currency
+ *   totalEstimatedPremium ← COMPUTED: estPremium + surplusContribution + elFee — formatted
+ *   downPayment        ← COMPUTED: totalEstimatedPremium * 0.25 — formatted currency
+ *   classSchedule[]    ← quotes[0].scheduleItems[itemType=employee_class]
+ *   excludedPersons[]  ← payload.nbaisWc.excludedPersons[]
  */
 export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger) {
   const insured = payload.insured || {}
@@ -116,7 +130,7 @@ export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger
 
   const effectiveDate = formatDate(period.effectiveDate || '')
   const expirationDate = formatDate(period.expirationDate || '')
-  const policyPeriodDisplay = effectiveDate && expirationDate ? `${effectiveDate} \u2013 ${expirationDate}` : ''
+  const policyPeriodStr = effectiveDate && expirationDate ? `${effectiveDate} \u2013 ${expirationDate}` : ''
 
   // Extract the WC quote (first WorkersCompensation quote)
   const wcQuote = (payload.quotes || []).find(q => q.lineOfBusiness === 'WorkersCompensation') || {}
@@ -131,35 +145,28 @@ export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger
         state: ia.state || 'NV',
         classCode: ia.class_code || '',
         classDescription: ia.class_description || item.description || '',
-        estAnnualPayroll: formatCurrencyWc(ia.payroll || ia.estimated_annual_payroll),
+        estAnnualPayroll: formatCurrencyWc(ia.payroll ?? ia.estimated_annual_payroll),
         rate: ia.rate_per_hundred != null ? `$${ia.rate_per_hundred}` : (ia.rate || ''),
         classEstPremium: formatCurrencyWc(ia.estimated_premium),
       }
     })
 
   // Build excluded persons from payload extension field
-  const excludedPersons = (payload.nbaisWc?.excludedPersons || []).map(name => ({
-    name: typeof name === 'string' ? name : (name.name || ''),
+  const excludedPersons = (payload.nbaisWc?.excludedPersons || []).map(ep => ({
+    name: typeof ep === 'string' ? ep : (ep.name || ''),
   }))
 
   // Compute premium fields
-  const estPremium = wcQuote.premium != null
-    ? formatCurrencyWc(wcQuote.premium)
-    : (attrs.estimated_premium ? formatCurrencyWc(attrs.estimated_premium) : '')
-  const surplusContribution = payload.nbaisWc?.surplusContribution != null
-    ? formatCurrencyWc(payload.nbaisWc.surplusContribution)
-    : ''
-  const employersLiabilityFee = payload.nbaisWc?.employersLiabilityFee != null
-    ? formatCurrencyWc(payload.nbaisWc.employersLiabilityFee)
-    : ''
-  const totalEstimatedPremium = payload.nbaisWc?.totalEstimatedPremium != null
-    ? formatCurrencyWc(payload.nbaisWc.totalEstimatedPremium)
-    : ''
-  const downPayment = payload.nbaisWc?.downPayment != null
-    ? formatCurrencyWc(payload.nbaisWc.downPayment)
-    : ''
+  const basePremiumNum = wcQuote.premium != null
+    ? Number(wcQuote.premium)
+    : (attrs.estimated_premium ? Number(attrs.estimated_premium) : 0)
 
-  // Quote date — from payload extension or generated date
+  const surplusContributionNum = Math.round(basePremiumNum * 0.08 * 100) / 100
+  const elFeeNum = 120  // BAWNSIG program constant — $120 EL fee
+  const totalEstimatedPremiumNum = basePremiumNum + surplusContributionNum + elFeeNum
+  const downPaymentNum = Math.round(totalEstimatedPremiumNum * 0.25 * 100) / 100
+
+  // Quote date
   const quoteDate = payload.nbaisWc?.quoteDate
     ? formatDate(payload.nbaisWc.quoteDate)
     : new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
@@ -170,32 +177,30 @@ export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger
     memberAddress: formatAddress(address),
     memberLegalName: payload.nbaisWc?.memberLegalName || insured.name || '',
 
-    // Policy period
-    policyPeriodDisplay,
+    // Policy period — both key names for template compatibility
+    policyPeriod: policyPeriodStr,
+    policyPeriodDisplay: policyPeriodStr,
     quoteDate,
 
-    // Premium fields
-    estPremium,
-    surplusContribution,
-    employersLiabilityFee,
-    totalEstimatedPremium,
-    downPayment,
+    // Premium fields (all formatted currency strings)
+    estPremium: formatCurrencyWc(basePremiumNum),
+    surplusContribution: formatCurrencyWc(surplusContributionNum),
+    employersLiabilityFee: formatCurrencyWc(elFeeNum),
+    totalEstimatedPremium: formatCurrencyWc(totalEstimatedPremiumNum),
+    downPayment: formatCurrencyWc(downPaymentNum),
 
     // Class schedule (loop data)
     classSchedule,
 
-    // Excluded persons (conditional)
+    // Excluded persons (conditional + inner loop)
     hasExcludedPersons: excludedPersons.length > 0,
     excludedPersons,
-
-    // Footer / page labels
-    currentPageLabel: '',
 
     // Logos (base64 for image module)
     stackedLogoBase64: logos?.stacked ? logos.stacked.toString('base64') : null,
     horizontalLogoBase64: logos?.horizontal ? logos.horizontal.toString('base64') : null,
 
-    // Standard fields for compatibility
+    // Standard compatibility fields
     proposalNumber: payload.proposalNumber || generateProposalNumber(),
     generatedDate: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
     templateVersion: templateMeta?.version || '',
