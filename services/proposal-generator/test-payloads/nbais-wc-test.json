@@ -26,7 +26,7 @@
   "quotes": [
     {
       "lineOfBusiness": "WorkersCompensation",
-      "carrier": "BAWNSIG",
+      "carrier": { "name": "BAWNSIG" },
       "premium": 14850.00,
       "attributes": [
         { "key": "estimated_premium", "value": "14850.00" },
