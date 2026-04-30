@@ -57,7 +57,7 @@ L_MARGIN     = 792     # 0.55in
 R_MARGIN     = 792     # 0.55in
 T_MARGIN     = 720     # 0.5in
 B_MARGIN     = 720     # 0.5in
-CONTENT_W    = PAGE_W - L_MARGIN - R_MARGIN   # 10656 twips = 7.4in
+CONTENT_W    = 9360   # 6.5in at 1-inch margins (8.5in - 1in - 1in)
 HDR_DIST     = 432     # 0.3in
 
 FONT = 'Arial'
@@ -145,7 +145,7 @@ def set_cell_width(cell, width_twips):
     tcPr.append(tcW)
 
 
-def set_cell_margins(cell, top=60, bottom=60, left=80, right=80):
+def set_cell_margins(cell, top=80, bottom=80, left=115, right=115):
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
     tcMar = OxmlElement('w:tcMar')
@@ -259,8 +259,8 @@ def add_banner(doc, text, font_size=14):
     """Navy banner paragraph — 14pt bold white."""
     para = doc.add_paragraph()
     set_para_shading(para, NAVY_HEX)
-    para.paragraph_format.space_before = Pt(0)
-    para.paragraph_format.space_after = Pt(0)
+    para.paragraph_format.space_before = Pt(8)
+    para.paragraph_format.space_after = Pt(8)
     pf = para.paragraph_format
     pf.left_indent = Pt(14)
     run = para.add_run(text)
@@ -407,7 +407,7 @@ def build_standard_header(section):
     para = header.add_paragraph()
     para.paragraph_format.space_before = Pt(0)
     para.paragraph_format.space_after = Pt(3)
-    set_para_bottom_border(para, NAVY_HEX, 16)  # 2pt navy rule
+    set_para_bottom_border(para, 'AAAAAA', 4)  # 0.5pt light gray rule
 
     # Logo (if exists)
     if os.path.exists(LOGO_H_PATH):
@@ -461,11 +461,13 @@ def link_header(section):
 
 
 def apply_standard_margins(section):
-    """Apply standard page margins to section."""
-    section.top_margin    = Inches(0.5)
-    section.bottom_margin = Inches(0.5)
-    section.left_margin   = Inches(0.55)
-    section.right_margin  = Inches(0.55)
+    """Apply standard page size and margins to section (1-inch all sides for 6.5in text width)."""
+    section.page_width    = Inches(8.5)
+    section.page_height   = Inches(11)
+    section.top_margin    = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin   = Inches(1)
+    section.right_margin  = Inches(1)
     section.header_distance = Inches(0.3)
     section.footer_distance = Inches(0.3)
     section.different_first_page_header_footer = False
@@ -509,8 +511,8 @@ def add_kv_table(doc, rows_data, label_pct=35, banner_text=None):
         vc = tr.cells[1]
         set_cell_width(lc, label_w)
         set_cell_width(vc, value_w)
-        set_cell_margins(lc, top=60, bottom=60, left=80, right=60)
-        set_cell_margins(vc, top=60, bottom=60, left=80, right=60)
+        set_cell_margins(lc, top=80, bottom=80, left=115, right=115)
+        set_cell_margins(vc, top=80, bottom=80, left=115, right=115)
 
         # Alternating row background
         if i % 2 == 0:
@@ -560,7 +562,7 @@ def build_cover_page(doc):
     p_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_logo.paragraph_format.space_before = Pt(20)
     p_logo.paragraph_format.space_after = Pt(20)
-    r_logo = p_logo.add_run('{@stackedLogoBase64}')
+    r_logo = p_logo.add_run('{%stackedLogoBase64}')
     set_font(r_logo, size_pt=10, color=NAVY)
 
     # 4. Cover title
@@ -568,8 +570,8 @@ def build_cover_page(doc):
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_title.paragraph_format.space_before = Pt(12)
     p_title.paragraph_format.space_after = Pt(8)
-    r_title = p_title.add_run('Insurance Proposal')
-    set_font(r_title, size_pt=30, bold=True, color=NAVY)
+    r_title = p_title.add_run("Workers\u2019 Compensation Insurance Proposal")
+    set_font(r_title, size_pt=26, bold=True, color=NAVY)
 
     # 5. Subtitle
     p_sub = doc.add_paragraph()
@@ -635,6 +637,7 @@ def build_cover_page(doc):
 # PAGE 2 — TABLE OF CONTENTS
 # ─────────────────────────────────────────────────────────────────────────────
 
+# TODO: Re-enable TOC when heading styles are applied to section headings
 def build_toc_page(doc):
     """Build TOC page content (Section 2)."""
     add_banner(doc, 'Table of Contents', font_size=14)
@@ -757,7 +760,7 @@ def build_premium_summary_page(doc):
         ('Employers\u2019 Liability Fee',  '{employersLiabilityFee}'),
     ]
 
-    label_w = int(CONTENT_W * 0.38)
+    label_w = int(CONTENT_W * 0.35)
     value_w = CONTENT_W - label_w
 
     tbl = doc.add_table(rows=len(cag_rows) + 3, cols=2)  # +1 banner, +1 total, +1 downpayment
@@ -779,8 +782,8 @@ def build_premium_summary_page(doc):
         lc, vc = row.cells[0], row.cells[1]
         set_cell_width(lc, label_w)
         set_cell_width(vc, value_w)
-        set_cell_margins(lc, top=60, bottom=60, left=80, right=60)
-        set_cell_margins(vc, top=60, bottom=60, left=80, right=60)
+        set_cell_margins(lc, top=80, bottom=80, left=115, right=115)
+        set_cell_margins(vc, top=80, bottom=80, left=115, right=115)
         if i % 2 == 0:
             set_cell_bg(lc, LT_GRAY_HEX)
             set_cell_bg(vc, LT_GRAY_HEX)
@@ -940,7 +943,7 @@ def build_coverage_details_continued_page(doc):
     for j, w in enumerate(col_ws):
         cell = dr.cells[j]
         set_cell_width(cell, w)
-        set_cell_margins(cell, top=60, bottom=60, left=60, right=60)
+        set_cell_margins(cell, top=80, bottom=80, left=80, right=80)
 
     # Cell 0: loop start + state tag
     c0 = dr.cells[0]
@@ -1150,6 +1153,13 @@ def build_next_steps_page(doc):
                      bold=(style == 'bold'),
                      italic=(style == 'italic'),
                      color=GRAY)
+
+    # "What's Next" heading in dark red per brand spec
+    p_wn = doc.add_paragraph()
+    p_wn.paragraph_format.space_before = Pt(14)
+    p_wn.paragraph_format.space_after = Pt(8)
+    r_wn = p_wn.add_run("What\u2019s Next")
+    set_font(r_wn, size_pt=13, bold=True, color=RGBColor(0xC0, 0x00, 0x00))
 
     # Authorization section
     add_h3(doc, 'Member Authorization')
@@ -1446,8 +1456,8 @@ def main():
 
     # ── Section 1: Cover page (no header/footer) ──────────────────────────
     s1 = doc.sections[0]
-    s1.page_width  = Emu(PAGE_W * 914)
-    s1.page_height = Emu(PAGE_H * 914)
+    s1.page_width    = Inches(8.5)
+    s1.page_height   = Inches(11)
     s1.top_margin    = Inches(0)
     s1.bottom_margin = Inches(0)
     s1.left_margin   = Inches(0)
@@ -1459,17 +1469,10 @@ def main():
 
     build_cover_page(doc)
 
-    # ── Section 2: TOC page ───────────────────────────────────────────────
-    s2 = doc.add_section(WD_SECTION.NEW_PAGE)
-    apply_standard_margins(s2)
-    build_standard_header(s2)
-    build_standard_footer(s2, 'Table of Contents')
-    build_toc_page(doc)
-
     # ── Section 3: Cover Letter ───────────────────────────────────────────
     s3 = doc.add_section(WD_SECTION.NEW_PAGE)
     apply_standard_margins(s3)
-    link_header(s3)
+    build_standard_header(s3)  # First content section 2014 build header here (TOC removed)
     build_standard_footer(s3, 'Cover Letter')
     build_cover_letter_page(doc)
 
