@@ -117,7 +117,7 @@ function formatCurrencyWc(value) {
  *   quoteDate          ← nbaisWc.quoteDate || today
  *   estPremium         ← quotes[0].premium (WorkersCompensation) — formatted currency
  *   surplusContribution← COMPUTED: basePremium * 0.08 — formatted currency
- *   employersLiabilityFee ← CONSTANT: $120 — formatted currency
+ *   employersLiabilityFee ← CONSTANT: $20 — formatted currency
  *   totalEstimatedPremium ← COMPUTED: estPremium + surplusContribution + elFee — formatted
  *   downPayment        ← COMPUTED: totalEstimatedPremium * 0.25 — formatted currency
  *   classSchedule[]    ← quotes[0].scheduleItems[itemType=employee_class]
@@ -162,7 +162,7 @@ export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger
     : (attrs.estimated_premium ? Number(attrs.estimated_premium) : 0)
 
   const surplusContributionNum = Math.round(basePremiumNum * 0.08 * 100) / 100
-  const elFeeNum = 120  // BAWNSIG program constant — $120 EL fee
+  const elFeeNum = 20   // BAWNSIG program constant — $20 EL fee
   const totalEstimatedPremiumNum = basePremiumNum + surplusContributionNum + elFeeNum
   const downPaymentNum = Math.round(totalEstimatedPremiumNum * 0.25 * 100) / 100
 
