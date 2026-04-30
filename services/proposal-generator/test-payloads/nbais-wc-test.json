@@ -64,8 +64,8 @@
     "memberLegalName": "Carson Valley Excavation, LLC",
     "quoteDate": "2026-05-01",
     "excludedPersons": [
-      { "name": "Robert Carson" },
-      { "name": "Jennifer Carson" }
+      "Robert Carson",
+      "Jennifer Carson"
     ]
   },
   "metadata": {

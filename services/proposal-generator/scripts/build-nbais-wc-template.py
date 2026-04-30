@@ -8,7 +8,13 @@ This is the NBAIS Workers' Compensation proposal master template.
 Usage: python3 scripts/build-nbais-wc-template.py
 """
 
+# NOTE: This script generates master.docx locally.
+# Template assets are loaded from S3 at runtime by the proposal-generator service.
+# Run with --sync to push changes to S3 after generation.
+
+import argparse
 import os
+import subprocess
 import sys
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor, Emu
@@ -1514,5 +1520,27 @@ def main():
     print(f'Saved: {OUTPATH}')
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Build NBAIS WC master.docx template.')
+    parser.add_argument(
+        '--sync',
+        action='store_true',
+        help='After generating master.docx, sync templates/verticals/nbais-wc/ to S3.',
+    )
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
+    args = parse_args()
     main()
+    if args.sync:
+        sync_cmd = [
+            'aws', 's3', 'sync',
+            'templates/verticals/nbais-wc/',
+            's3://fortress-tools/fip-proposal-templates/verticals/nbais-wc/',
+            '--profile', 'fortress-tools-deployer',
+            '--region', 'us-east-1',
+            '--exact-timestamps',
+        ]
+        print(f'Syncing to S3: {" ".join(sync_cmd)}')
+        subprocess.run(sync_cmd, check=True)
