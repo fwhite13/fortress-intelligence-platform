@@ -382,6 +382,7 @@ def add_two_col_rec_table(doc, left_sections, right_sections):
             set_cell_width(cell, half)
             set_cell_margins(cell, top=40, bottom=40, left=60, right=60)
             set_no_cell_borders(cell)
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
             if i < len(sections):
                 title, bullets = sections[i]
@@ -490,7 +491,7 @@ def apply_standard_margins(section):
 # KV TABLE HELPER
 # ─────────────────────────────────────────────────────────────────────────────
 
-def add_kv_table(doc, rows_data, label_pct=35, banner_text=None):
+def add_kv_table(doc, rows_data, label_pct=30, banner_text=None):
     """2-column label|value table with optional navy banner first row.
     rows_data: list of (label, value) tuples. None separator → light-gray row spanning full width.
     """
@@ -511,6 +512,7 @@ def add_kv_table(doc, rows_data, label_pct=35, banner_text=None):
         cell0.merge(cell1)
         set_cell_bg(cell0, NAVY_HEX)
         set_cell_margins(cell0, top=80, bottom=80, left=100, right=80)
+        cell0.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         p = cell0.paragraphs[0]
         r = p.add_run(banner_text)
         set_font(r, size_pt=11, bold=True, color=WHITE)
@@ -546,23 +548,64 @@ def add_kv_table(doc, rows_data, label_pct=35, banner_text=None):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# COVER PAGE HEADER / FOOTER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_cover_first_page_header(section):
+    """Cover page: full-width navy bar in the first-page header."""
+    section.different_first_page_header_footer = True
+    first_header = section.first_page_header
+    first_header.is_linked_to_previous = False
+
+    # Clear existing paragraphs in header
+    for p in list(first_header.paragraphs):
+        p._p.getparent().remove(p._p)
+
+    # Add the banner table to the header
+    tbl = first_header.add_table(rows=1, cols=1, width=Inches(8.5))
+    remove_table_borders(tbl)
+    set_table_width(tbl, PAGE_W)
+    cell = tbl.rows[0].cells[0]
+    set_cell_bg(cell, NAVY_HEX)
+    set_row_height(tbl.rows[0], 460, exact=True)
+    set_cell_margins(cell, top=0, bottom=0, left=0, right=0)
+    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    p = cell.paragraphs[0]
+    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(0)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("NBAIS Workers\u2019 Compensation Program")
+    set_font(r, size_pt=14, bold=True, color=WHITE)
+
+
+def build_cover_first_page_footer(section):
+    """Cover page: confidentiality line in the first-page footer."""
+    first_footer = section.first_page_footer
+    first_footer.is_linked_to_previous = False
+
+    # Clear existing paragraphs
+    for p in list(first_footer.paragraphs):
+        p._p.getparent().remove(p._p)
+
+    # Blue rule paragraph (top border)
+    para = first_footer.add_paragraph()
+    para.paragraph_format.space_before = Pt(4)
+    para.paragraph_format.space_after = Pt(4)
+    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    set_para_top_border(para, NAVY_HEX, 12)  # 1.5pt navy top border
+    r = para.add_run(
+        'CONFIDENTIAL \u2014 This proposal is intended solely for the use of the named insured '
+        'and their authorized representatives.'
+    )
+    set_font(r, size_pt=8.5, italic=True, color=GRAY)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PAGE 1 — COVER PAGE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_cover_page(doc):
     """Build cover page content (Section 1, no header/footer)."""
-
-    # 1. Full-width navy rule (edge-to-edge since margins = 0)
-    tbl_rule = doc.add_table(rows=1, cols=1)
-    remove_table_borders(tbl_rule)
-    set_table_width(tbl_rule, PAGE_W)
-    cell_rule = tbl_rule.rows[0].cells[0]
-    set_cell_bg(cell_rule, NAVY_HEX)
-    set_row_height(tbl_rule.rows[0], 460, exact=True)  # ~0.32in
-    set_cell_margins(cell_rule, top=0, bottom=0, left=0, right=0)
-    p = cell_rule.paragraphs[0]
-    p.paragraph_format.space_before = Pt(0)
-    p.paragraph_format.space_after = Pt(0)
 
     # 2. Eyebrow text
     p_eyebrow = doc.add_paragraph()
@@ -572,13 +615,21 @@ def build_cover_page(doc):
     r = p_eyebrow.add_run('Nevada Builders Alliance Insurance Solutions')
     set_font(r, size_pt=9, italic=True, color=GRAY)
 
-    # 3. Stacked logo placeholder (docxtemplater image tag)
+    # 3. Stacked logo (actual image, correct aspect ratio)
+    # Logo: 1500x1429px. Display width: 2.5in, height = 2.5 * (1429/1500)
+    LOGO_S_WIDTH = Inches(2.5)
+    LOGO_S_HEIGHT = Inches(2.5 * 1429 / 1500)  # = Inches(2.382)
+
     p_logo = doc.add_paragraph()
     p_logo.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_logo.paragraph_format.space_before = Pt(20)
     p_logo.paragraph_format.space_after = Pt(20)
-    r_logo = p_logo.add_run('{%stackedLogoBase64}')
-    set_font(r_logo, size_pt=10, color=NAVY)
+    if os.path.exists(LOGO_S_PATH):
+        r_logo = p_logo.add_run()
+        r_logo.add_picture(LOGO_S_PATH, width=LOGO_S_WIDTH, height=LOGO_S_HEIGHT)
+    else:
+        r_logo = p_logo.add_run('{%stackedLogoBase64}')
+        set_font(r_logo, size_pt=10, color=NAVY)
 
     # 4. Cover title
     p_title = doc.add_paragraph()
@@ -607,14 +658,14 @@ def build_cover_page(doc):
         ('Date',          '{quoteDate}'),
         ('Program',       'Nevada Builders Alliance \u2014 NBAIS Member Program'),
     ]
-    label_w = int(CONTENT_W * 0.35)
-    value_w = CONTENT_W - label_w
+    META_TABLE_W = 5400  # ~3.75in, narrower so CENTER alignment is visible
+    label_w = int(META_TABLE_W * 0.35)   # 1890 twips
+    value_w = META_TABLE_W - label_w      # 3510 twips
 
     tbl_meta = doc.add_table(rows=len(meta_rows), cols=2)
     remove_table_borders(tbl_meta)
-    set_table_width(tbl_meta, CONTENT_W)
-    # Center the table by adding left indent equivalent to left margin
-    tbl_meta.alignment = WD_TABLE_ALIGNMENT.CENTER
+    set_table_width(tbl_meta, META_TABLE_W)
+    set_table_alignment(tbl_meta, WD_TABLE_ALIGNMENT.CENTER)
 
     for i, (label, value) in enumerate(meta_rows):
         row = tbl_meta.rows[i]
@@ -624,9 +675,11 @@ def build_cover_page(doc):
         set_cell_width(vc, value_w)
         set_cell_margins(lc, top=40, bottom=40, left=80, right=60)
         set_cell_margins(vc, top=40, bottom=40, left=60, right=80)
+        lc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        vc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
         lp = lc.paragraphs[0]
-        lp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        lp.alignment = WD_ALIGN_PARAGRAPH.LEFT
         lr = lp.add_run(label)
         set_font(lr, size_pt=10, bold=True, color=NAVY)
 
@@ -634,21 +687,6 @@ def build_cover_page(doc):
         vr = vp.add_run(value)
         set_font(vr, size_pt=10, color=GRAY)
 
-    # 7. Spacer + cover footer
-    for _ in range(4):
-        ps = doc.add_paragraph()
-        ps.paragraph_format.space_before = Pt(0)
-        ps.paragraph_format.space_after = Pt(0)
-
-    p_cfooter = doc.add_paragraph()
-    p_cfooter.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p_cfooter.paragraph_format.space_before = Pt(20)
-    p_cfooter.paragraph_format.space_after = Pt(0)
-    set_para_top_border(p_cfooter, NAVY_HEX, 12)  # 1.5pt navy
-    r_cf = p_cfooter.add_run(
-        'Confidential \u2014 Prepared for the named member\u2019s exclusive use'
-    )
-    set_font(r_cf, size_pt=8.5, italic=True, color=GRAY)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -791,6 +829,7 @@ def build_premium_summary_page(doc):
     b_cell.merge(tbl.rows[0].cells[1])
     set_cell_bg(b_cell, NAVY_HEX)
     set_cell_margins(b_cell, top=80, bottom=80, left=100, right=80)
+    b_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
     p = b_cell.paragraphs[0]
     r = p.add_run('Coverage at a Glance')
     set_font(r, size_pt=11, bold=True, color=WHITE)
@@ -823,6 +862,8 @@ def build_premium_summary_page(doc):
     set_cell_bg(tvc, LT_BLUE_HEX)
     set_cell_margins(tlc, top=80, bottom=80, left=80, right=60)
     set_cell_margins(tvc, top=80, bottom=80, left=80, right=60)
+    tlc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    tvc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
     tp = tlc.paragraphs[0]
     tr = tp.add_run('Total Estimated Cost')
     set_font(tr, size_pt=11, bold=True, color=NAVY)
@@ -835,6 +876,8 @@ def build_premium_summary_page(doc):
     dlc, dvc = dp_row.cells[0], dp_row.cells[1]
     set_cell_margins(dlc, top=60, bottom=60, left=80, right=60)
     set_cell_margins(dvc, top=60, bottom=60, left=80, right=60)
+    dlc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    dvc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
     dp = dlc.paragraphs[0]
     dr = dp.add_run('Initial Down Payment')
     set_font(dr, size_pt=10, bold=True, color=NAVY)
@@ -903,6 +946,8 @@ def build_premium_summary_page(doc):
     set_cell_bg(hvc, NAVY_HEX)
     set_cell_margins(hlc, top=70, bottom=70, left=80, right=60)
     set_cell_margins(hvc, top=70, bottom=70, left=80, right=60)
+    hlc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    hvc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
     hp1 = hlc.paragraphs[0]
     hp1.add_run('Coverage').font.bold = True
     hp1.runs[0].font.color.rgb = WHITE
@@ -979,6 +1024,7 @@ def build_coverage_details_continued_page(doc):
         set_cell_width(cell, w)
         set_cell_bg(cell, NAVY_HEX)
         set_cell_margins(cell, top=70, bottom=70, left=60, right=60)
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         p = cell.paragraphs[0]
         r = p.add_run(hdr)
         set_font(r, size_pt=9, bold=True, color=WHITE)
@@ -1037,6 +1083,7 @@ def build_coverage_details_continued_page(doc):
         set_cell_width(cell, w)
         set_cell_bg(cell, LT_GRAY_HEX)
         set_cell_margins(cell, top=70, bottom=70, left=60, right=60)
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
     # Merge cols 0-4 in total row for label
     tc_label = tr_row.cells[0]
@@ -1068,7 +1115,7 @@ def build_coverage_details_continued_page(doc):
         size_pt=10, color=GRAY, space_before=0, space_after=6)
 
     # Excluded persons table (with inner loop)
-    ep_label_w = int(CONTENT_W * 0.5)
+    ep_label_w = int(CONTENT_W * 0.30)
     ep_value_w = CONTENT_W - ep_label_w
 
     tbl_ep = doc.add_table(rows=2, cols=2)  # header + loop row
@@ -1083,6 +1130,8 @@ def build_coverage_details_continued_page(doc):
     set_cell_bg(ep_h1, NAVY_HEX)
     set_cell_margins(ep_h0, top=70, bottom=70, left=80, right=60)
     set_cell_margins(ep_h1, top=70, bottom=70, left=80, right=60)
+    ep_h0.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    ep_h1.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
     ep_h0.paragraphs[0].add_run('Name').font.bold = True
     ep_h0.paragraphs[0].runs[0].font.color.rgb = WHITE
     ep_h0.paragraphs[0].runs[0].font.size = Pt(10)
@@ -1144,6 +1193,7 @@ def build_coverage_details_continued_page(doc):
     disc_cell = tbl_disc.rows[0].cells[0]
     set_cell_bg(disc_cell, 'E8E8E8')  # light gray
     set_cell_margins(disc_cell, top=100, bottom=100, left=130, right=100)
+    disc_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
     # Blue left border accent
     set_cell_border(disc_cell, {
         'left': {'val': 'single', 'sz': 24, 'color': BLUE_HEX},
@@ -1176,23 +1226,15 @@ def build_next_steps_page(doc):
         'payroll and class code accuracy prior to binding, as final premium is subject to audit.',
         size_pt=10, color=GRAY, space_before=8, space_after=8)
 
-    # Contact grid — no outer border, shaded cells, inner vertical divider only
-    tbl_contact = doc.add_table(rows=1, cols=2)
+    # Contact grid — 3 columns: Producer box | spacer | Office box
+    CONTACT_BOX_W = (CONTENT_W - 200) // 2   # ~4580 twips each
+    SPACER_W = CONTENT_W - 2 * CONTACT_BOX_W  # ~200 twips
+
+    tbl_contact = doc.add_table(rows=1, cols=3)
     remove_table_borders(tbl_contact)
     set_table_width(tbl_contact, CONTENT_W)
-    # Set only the inner vertical divider
-    tblPr = tbl_contact._tbl.tblPr
-    tblBorders = OxmlElement('w:tblBorders')
-    insideV = OxmlElement('w:insideV')
-    insideV.set(qn('w:val'), 'single')
-    insideV.set(qn('w:sz'), '4')
-    insideV.set(qn('w:space'), '0')
-    insideV.set(qn('w:color'), 'CCCCCC')
-    tblBorders.append(insideV)
-    tblPr.append(tblBorders)
-    half_w = CONTENT_W // 2
 
-    for j, (title, lines) in enumerate([
+    contact_data = [
         ('Your NBAIS Producer', [
             ('bold', 'Dianne Slater'),
             ('italic', 'Account Manager'),
@@ -1204,23 +1246,46 @@ def build_next_steps_page(doc):
             ('italic', '1234 Builder\u2019s Way, Reno, NV 89501'),
             ('italic', 'www.nbais.com'),
         ]),
-    ]):
-        cell = tbl_contact.rows[0].cells[j]
-        set_cell_width(cell, half_w)
-        set_cell_bg(cell, 'E8E8E8')
-        set_cell_margins(cell, top=100, bottom=100, left=100, right=100)
+    ]
 
-        pt = cell.paragraphs[0]
-        rt = pt.add_run(title)
-        set_font(rt, size_pt=10, bold=True, color=NAVY)
+    # Col 0: Producer box
+    cell0 = tbl_contact.rows[0].cells[0]
+    set_cell_width(cell0, CONTACT_BOX_W)
+    set_cell_bg(cell0, 'E8E8E8')
+    set_cell_margins(cell0, top=100, bottom=100, left=100, right=100)
+    set_no_cell_borders(cell0)
+    cell0.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
-        for style, text in lines:
-            pl = cell.add_paragraph()
-            rl = pl.add_run(text)
-            set_font(rl, size_pt=10,
-                     bold=(style == 'bold'),
-                     italic=(style == 'italic'),
-                     color=GRAY)
+    title0, lines0 = contact_data[0]
+    pt0 = cell0.paragraphs[0]
+    pt0.add_run(title0)
+    set_font(pt0.runs[0], size_pt=10, bold=True, color=NAVY)
+    for style, text in lines0:
+        pl = cell0.add_paragraph()
+        rl = pl.add_run(text)
+        set_font(rl, size_pt=10, bold=(style == 'bold'), italic=(style == 'italic'), color=GRAY)
+
+    # Col 1: spacer (transparent, no borders, no fill)
+    cell_spacer = tbl_contact.rows[0].cells[1]
+    set_cell_width(cell_spacer, SPACER_W)
+    set_no_cell_borders(cell_spacer)
+
+    # Col 2: Office box
+    cell2 = tbl_contact.rows[0].cells[2]
+    set_cell_width(cell2, CONTACT_BOX_W)
+    set_cell_bg(cell2, 'E8E8E8')
+    set_cell_margins(cell2, top=100, bottom=100, left=100, right=100)
+    set_no_cell_borders(cell2)
+    cell2.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+    title2, lines2 = contact_data[1]
+    pt2 = cell2.paragraphs[0]
+    pt2.add_run(title2)
+    set_font(pt2.runs[0], size_pt=10, bold=True, color=NAVY)
+    for style, text in lines2:
+        pl = cell2.add_paragraph()
+        rl = pl.add_run(text)
+        set_font(rl, size_pt=10, bold=(style == 'bold'), italic=(style == 'italic'), color=GRAY)
 
     # Authorization section
     add_h3(doc, 'Member Authorization')
@@ -1242,8 +1307,8 @@ def build_next_steps_page(doc):
         ('Title', ''),
         ('Date', ''),
     ]
-    label_w = int(CONTENT_W * 0.25)
-    line_w = CONTENT_W - label_w
+    label_w = int(CONTENT_W * 0.20)   # ~1872 twips
+    line_w = CONTENT_W - label_w       # ~7488 twips
 
     tbl_sig = doc.add_table(rows=len(sig_rows), cols=2)
     remove_table_borders(tbl_sig)
@@ -1257,13 +1322,15 @@ def build_next_steps_page(doc):
         set_cell_width(vc, line_w)
         set_cell_margins(lc, top=80, bottom=80, left=0, right=60)
         set_cell_margins(vc, top=80, bottom=80, left=60, right=0)
+        lc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        vc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
         lp = lc.paragraphs[0]
         lr = lp.add_run(label)
         set_font(lr, size_pt=10, bold=True, color=NAVY)
 
         vp = vc.paragraphs[0]
-        set_cell_border(vc, {'bottom': {'val': 'single', 'sz': 6, 'color': BORDER_HEX}})
+        set_cell_border(vc, {'bottom': {'val': 'single', 'sz': 6, 'color': '000000'}})
         vp.add_run('')  # empty underline
 
     # Fine print
@@ -1481,20 +1548,39 @@ def build_employee_benefits_page(doc):
     ]
     add_two_col_rec_table(doc, ret_left, ret_right)
 
-    # Callout box
-    p_callout = doc.add_paragraph()
-    p_callout.paragraph_format.space_before = Pt(14)
-    p_callout.paragraph_format.space_after = Pt(4)
-    p_callout.paragraph_format.left_indent = Pt(14)
-    p_callout.paragraph_format.right_indent = Pt(14)
-    set_para_shading(p_callout, LT_BLUE_HEX)
-    r_bold = p_callout.add_run('Discuss with your producer. ')
-    set_font(r_bold, size_pt=9, bold=True, color=NAVY)
-    r_callout = p_callout.add_run(
+    # Spacer before callout
+    p_spacer_callout = doc.add_paragraph()
+    p_spacer_callout.paragraph_format.space_before = Pt(14)
+    p_spacer_callout.paragraph_format.space_after = Pt(0)
+
+    # Callout box — "Discuss with your producer" — matches SIG Disclosure box pattern
+    tbl_callout = doc.add_table(rows=1, cols=1)
+    remove_table_borders(tbl_callout)
+    set_table_width(tbl_callout, CONTENT_W)
+    callout_cell = tbl_callout.rows[0].cells[0]
+    set_cell_bg(callout_cell, 'EBF3FF')  # light blue-gray
+    set_cell_margins(callout_cell, top=120, bottom=120, left=160, right=120)
+    callout_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    # Dark navy left border accent
+    set_cell_border(callout_cell, {
+        'left': {'val': 'single', 'sz': 36, 'color': '1F3864'},
+        'top': {'val': 'none', 'sz': 0, 'color': 'auto'},
+        'bottom': {'val': 'none', 'sz': 0, 'color': 'auto'},
+        'right': {'val': 'none', 'sz': 0, 'color': 'auto'},
+    })
+    p_co = callout_cell.paragraphs[0]
+    r_co_bold = p_co.add_run('Discuss with your producer. ')
+    set_font(r_co_bold, size_pt=9, bold=True, color=NAVY)
+    r_co_text = p_co.add_run(
         'Your NBAIS producer can help you assess which of these coverage lines apply to your '
         'operation and identify any potential gaps in your current insurance program.'
     )
-    set_font(r_callout, size_pt=9, color=NAVY)
+    set_font(r_co_text, size_pt=9, color=NAVY)
+
+    # Spacer after callout
+    p_after_callout = doc.add_paragraph()
+    p_after_callout.paragraph_format.space_before = Pt(4)
+    p_after_callout.paragraph_format.space_after = Pt(0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1518,9 +1604,8 @@ def main():
     s1.left_margin   = Inches(0)
     s1.right_margin  = Inches(0)
     s1.different_first_page_header_footer = True
-    # First-page header and footer are empty (cover has none)
-    s1.first_page_header.is_linked_to_previous = False
-    s1.first_page_footer.is_linked_to_previous = False
+    build_cover_first_page_header(s1)
+    build_cover_first_page_footer(s1)
 
     build_cover_page(doc)
 
