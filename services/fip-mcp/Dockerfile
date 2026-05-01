@@ -13,6 +13,9 @@ RUN npm ci --omit=dev
 
 COPY src/ ./src/
 
+RUN addgroup -S appuser && adduser -S appuser -G appuser
+USER appuser
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget -qO- http://localhost:3000/health || exit 1
 
