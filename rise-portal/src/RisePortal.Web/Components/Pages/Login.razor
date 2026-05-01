@@ -1,0 +1,24 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject NavigationManager Navigation
+
+<PageTitle>Sign In — RISE</PageTitle>
+
+<div style="display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #FFFFFF;">
+    <MudCard Style="background: #F5F5F3; border: 1px solid #E0DFDB; border-radius: 12px; padding: 2rem; max-width: 380px; width: 100%;">
+        <MudCardContent>
+            <div style="text-align: center; margin-bottom: 2rem;">
+                <MudText Typo="Typo.h5" Style="color: #194C5C; font-weight: 700;">Refuge Intelligence Suite</MudText>
+                <MudText Typo="Typo.body2" Style="color: #7A776E; margin-top: 0.5rem;">Sign in to continue</MudText>
+            </div>
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       FullWidth="true"
+                       Href="/auth/login"
+                       Style="background: #A97C50; color: #FFFFFF; font-weight: 600;">
+                Sign in with Microsoft
+            </MudButton>
+        </MudCardContent>
+    </MudCard>
+</div>

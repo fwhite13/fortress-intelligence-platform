@@ -1,0 +1,16 @@
+@inject IHttpContextAccessor HttpContextAccessor
+
+<div style="display: flex; align-items: center; gap: 12px; padding-right: 12px;">
+    @if (HttpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated == true)
+    {
+        var displayName = HttpContextAccessor.HttpContext.User.FindFirst("name")?.Value
+                       ?? HttpContextAccessor.HttpContext.User.Identity?.Name
+                       ?? "User";
+        <MudText Style="color: #FFFFFF; font-size: 0.85rem;">Welcome, @displayName</MudText>
+    }
+    <MudButton Variant="Variant.Text"
+               Href="/auth/logout"
+               Style="color: #FFFFFF; text-transform: none; font-size: 0.85rem;">
+        Sign Out
+    </MudButton>
+</div>

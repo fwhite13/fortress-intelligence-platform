@@ -1,0 +1,39 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <!-- Top App Bar -->
+    <MudAppBar Elevation="1" Style="background: #194C5C; border-bottom: 1px solid #13404E; height: 56px;">
+        <div style="display: flex; align-items: center; gap: 10px; padding-left: 8px;">
+            <MudText Style="font-size: 14px; font-weight: 600; color: #A97C50; letter-spacing: 2.5px; text-transform: uppercase;">
+                REFUGE INTELLIGENCE SUITE FOR ENTERPRISE
+            </MudText>
+        </div>
+        <MudSpacer />
+        <NavMenu />
+    </MudAppBar>
+
+    <MudMainContent Style="padding-top: 56px; background: #FFFFFF; min-height: 100vh;">
+        @Body
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private MudTheme _theme = new MudTheme
+    {
+        PaletteLight = new PaletteLight
+        {
+            Background = "#FFFFFF",
+            Surface = "#F5F5F3",
+            AppbarBackground = "#194C5C",
+            Primary = "#A97C50",
+            PrimaryContrastText = "#FFFFFF",
+            TextPrimary = "#42403A",
+            TextSecondary = "#7A776E",
+        }
+    };
+}

@@ -1,0 +1,82 @@
+@page "/"
+@attribute [Authorize]
+@inject IConfiguration Configuration
+
+<PageTitle>RISE — Refuge Intelligence Suite for Enterprise</PageTitle>
+
+<div class="portal-wrapper">
+    <!-- Header -->
+    <div class="portal-header">
+        <MudText Typo="Typo.h4" Class="portal-title">Your Applications</MudText>
+    </div>
+
+    <!-- App Grid -->
+    <MudGrid Justify="Justify.Center" Class="portal-grid">
+
+        <!-- Notetaker (active) -->
+        <MudItem xs="12" sm="6" md="5" lg="4">
+            <MudCard Class="app-tile" Elevation="2">
+                <MudCardContent Class="app-tile-content">
+                    <div class="app-icon-wrap">
+                        <MudIcon Icon="@Icons.Material.Filled.RecordVoiceOver" Style="font-size: 2.5rem; color: #A97C50;" />
+                    </div>
+                    <MudText Typo="Typo.h6" Class="app-name">Notetaker</MudText>
+                    <MudText Typo="Typo.caption" Class="app-full-name">Meeting Intelligence</MudText>
+                    <MudText Typo="Typo.body2" Class="app-description">
+                        Record, transcribe, and summarize meetings automatically.
+                    </MudText>
+                </MudCardContent>
+                <MudCardActions Class="app-tile-actions">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Href="@(_notetakerUrl)"
+                               Target="_blank"
+                               Class="app-open-btn"
+                               FullWidth="true">
+                        Open →
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+
+        <!-- Coming Soon (teaser) -->
+        <MudItem xs="12" sm="6" md="5" lg="4">
+            <MudCard Class="app-tile app-tile--disabled" Elevation="0">
+                <MudCardContent Class="app-tile-content">
+                    <div class="app-icon-wrap app-icon-wrap--disabled">
+                        <MudIcon Icon="@Icons.Material.Filled.RocketLaunch" Style="font-size: 2.5rem; color: #B0ADA6;" />
+                    </div>
+                    <MudText Typo="Typo.h6" Class="app-name app-name--disabled">More Coming Soon</MudText>
+                    <MudText Typo="Typo.body2" Class="app-description app-description--disabled">
+                        New intelligence tools are on the way.
+                    </MudText>
+                </MudCardContent>
+                <MudCardActions Class="app-tile-actions">
+                    <MudButton Variant="Variant.Filled"
+                               Disabled="true"
+                               Class="app-open-btn app-open-btn--disabled"
+                               FullWidth="true">
+                        Coming Soon
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+
+    </MudGrid>
+
+    <!-- Footer -->
+    <div class="portal-footer">
+        <MudText Typo="Typo.caption" Style="color: #B0ADA6;">
+            &copy; 2026 Refuge Group. All rights reserved.
+        </MudText>
+    </div>
+</div>
+
+@code {
+    private string _notetakerUrl = "https://notetaker.refugems.ai";
+
+    protected override void OnInitialized()
+    {
+        _notetakerUrl = Configuration["Branding:NotetakerUrl"] ?? _notetakerUrl;
+    }
+}
