@@ -18,7 +18,7 @@ import subprocess
 import sys
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor, Emu
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
 from docx.enum.section import WD_SECTION
 from docx.oxml.ns import qn
@@ -167,6 +167,14 @@ def set_row_height(row, height_twips, exact=False):
     trPr.append(trH)
 
 
+def set_row_header(row):
+    """Enable header row repeat on page break."""
+    trPr = row._tr.get_or_add_trPr()
+    tblHeader = OxmlElement('w:tblHeader')
+    tblHeader.set(qn('w:val'), '1')
+    trPr.append(tblHeader)
+
+
 def set_table_borders(tbl, color=BORDER_HEX, size=6, sides=None):
     if sides is None:
         sides = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']
@@ -256,16 +264,20 @@ def body_para(doc, text='', size_pt=10, bold=False, italic=False, color=None,
 
 
 def add_banner(doc, text, font_size=14):
-    """Navy banner paragraph — 14pt bold white."""
-    para = doc.add_paragraph()
-    set_para_shading(para, NAVY_HEX)
-    para.paragraph_format.space_before = Pt(8)
-    para.paragraph_format.space_after = Pt(8)
-    pf = para.paragraph_format
-    pf.left_indent = Pt(14)
-    run = para.add_run(text)
-    set_font(run, size_pt=font_size, bold=True, color=WHITE)
-    return para
+    """Full-width navy title bar as a single-cell table row."""
+    tbl = doc.add_table(rows=1, cols=1)
+    remove_table_borders(tbl)
+    set_table_width(tbl, CONTENT_W)
+    cell = tbl.rows[0].cells[0]
+    set_cell_bg(cell, NAVY_HEX)
+    set_row_height(tbl.rows[0], 400, exact=True)  # consistent height ~0.28in
+    set_cell_margins(cell, top=60, bottom=60, left=115, right=115)
+    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    r = p.add_run(text)
+    set_font(r, size_pt=font_size, bold=True, color=WHITE)
+    return tbl
 
 
 def add_banner_continued(doc, text, font_size=13):
@@ -373,13 +385,14 @@ def add_two_col_rec_table(doc, left_sections, right_sections):
 
             if i < len(sections):
                 title, bullets = sections[i]
-                # H3 in BLUE (10pt bold)
-                p = cell.add_paragraph()
-                p.paragraph_format.space_before = Pt(10)
-                p.paragraph_format.space_after = Pt(4)
-                set_para_bottom_border(p, BORDER_HEX, 4)
-                r = p.add_run(title)
-                set_font(r, size_pt=10, bold=True, color=BLUE)
+                # H3 in BLUE (10pt bold) — only when title is non-empty
+                if title:
+                    p = cell.add_paragraph()
+                    p.paragraph_format.space_before = Pt(10)
+                    p.paragraph_format.space_after = Pt(4)
+                    set_para_bottom_border(p, BORDER_HEX, 4)
+                    r = p.add_run(title)
+                    set_font(r, size_pt=10, bold=True, color=BLUE)
                 # Bullets
                 for bullet in bullets:
                     pb = cell.add_paragraph()
@@ -513,6 +526,8 @@ def add_kv_table(doc, rows_data, label_pct=35, banner_text=None):
         set_cell_width(vc, value_w)
         set_cell_margins(lc, top=80, bottom=80, left=115, right=115)
         set_cell_margins(vc, top=80, bottom=80, left=115, right=115)
+        lc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        vc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
         # Alternating row background
         if i % 2 == 0:
@@ -570,8 +585,11 @@ def build_cover_page(doc):
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_title.paragraph_format.space_before = Pt(12)
     p_title.paragraph_format.space_after = Pt(8)
-    r_title = p_title.add_run("Workers\u2019 Compensation Insurance Proposal")
-    set_font(r_title, size_pt=26, bold=True, color=NAVY)
+    r_title1 = p_title.add_run("Workers\u2019 Compensation")
+    set_font(r_title1, size_pt=26, bold=True, color=NAVY)
+    p_title.add_run().add_break()  # line break within paragraph
+    r_title2 = p_title.add_run("Insurance Proposal")
+    set_font(r_title2, size_pt=26, bold=True, color=NAVY)
 
     # 5. Subtitle
     p_sub = doc.add_paragraph()
@@ -661,7 +679,6 @@ def build_toc_page(doc):
 
 def build_cover_letter_page(doc):
     """Build cover letter page content (Section 3)."""
-    add_banner(doc, 'Cover Letter', font_size=14)
 
     # Letter meta block
     for tag in ['{quoteDate}', '{memberName}', '{memberAddress}']:
@@ -687,30 +704,32 @@ def build_cover_letter_page(doc):
     add_h3(doc, 'About this proposal')
 
     body_para(doc,
-        'On behalf of Nevada Builders Alliance Insurance Solutions (NBAIS), we are pleased '
-        'to present this Workers\u2019 Compensation Insurance Proposal for your review. This '
-        'proposal has been prepared specifically for your business based on the information '
-        'provided and the Nevada Builders Alliance Member Program administered through NBAIS.',
+        'On behalf of Nevada Builders Alliance Insurance Services (NBAIS), we are pleased to present '
+        'this Workers\u2019 Compensation Insurance proposal exclusively for members of the Nevada '
+        'Builders Alliance (NBA). This proposal has been prepared specifically for your organization '
+        'and reflects the competitive program rates and enhanced coverage options available through '
+        'your NBA membership.',
         size_pt=10, color=GRAY, space_before=0, space_after=6)
 
     body_para(doc,
-        'The NBAIS Workers\u2019 Compensation program is administered through the Builders '
-        'Association of Western Nevada Self-Insured Group (BAWNSIG), a Nevada state-regulated '
-        'self-insured group offering competitive rates and comprehensive coverage for member businesses.',
+        'NBAIS was established to serve the unique risk management needs of Nevada\u2019s construction '
+        'industry \u2014 from residential and commercial builders to specialty trade contractors. As an '
+        'NBA member, your organization has access to a Workers\u2019 Compensation program designed '
+        'around the realities of your trade, not a one-size-fits-all solution.',
         size_pt=10, color=GRAY, space_before=0, space_after=6)
 
     # Program highlights
     add_h3(doc, 'Program highlights')
 
     highlights = [
-        'Competitive rates designed for Nevada Builders Alliance members',
-        'Nevada statutory Workers\u2019 Compensation coverage — Part I',
-        'Employers\u2019 Liability coverage — Part II, up to $1,000,000 per occurrence',
-        'Program managed by Lusense, an experienced WC program administrator',
-        'Secure online payment portal for convenient premium payment',
+        'Exclusive NBA member pricing \u2014 competitive group rates unavailable in the open market',
+        'Construction-class expertise \u2014 underwriting specialists who understand your trade',
+        'Dividend potential \u2014 SIG participation with return of premium for favorable loss performance',
+        'Loss control resources \u2014 proactive safety and claims management support',
+        'Dedicated service team \u2014 NBAIS producers with direct carrier access',
     ]
     for h in highlights:
-        add_check_bullet(doc, h)
+        add_bullet(doc, h)
 
     # What is included
     add_h3(doc, 'What is included in this proposal')
@@ -718,13 +737,13 @@ def build_cover_letter_page(doc):
     body_para(doc, 'This proposal package contains the following for your review:',
               size_pt=10, color=GRAY, space_before=0, space_after=6)
 
-    add_bullet(doc, ' — Your estimated Workers\u2019 Compensation premium for the policy period.',
-               lead_bold='Premium Summary')
-    add_bullet(doc, ' — Policy terms, carrier information, coverage limits, and class schedule.',
-               lead_bold='Coverage Details')
-    add_bullet(doc, ' — Instructions for binding coverage and member authorization.',
-               lead_bold='Next Steps & Authorization')
-    add_bullet(doc, ' — Additional insurance lines available through NBAIS.',
+    add_bullet(doc, ' \u2014 a summary of your proposed coverage terms and estimated premium.',
+               lead_bold='Premium Summary & Coverage at a Glance')
+    add_bullet(doc, ' \u2014 a detailed outline of the proposed coverage terms, limits, and exclusions applicable to your operation.',
+               lead_bold='Workers\u2019 Compensation Coverage Details')
+    add_bullet(doc, ' \u2014 the carrier quotation secured for your review, including the class code and payroll basis used to develop this quote. Please review for accuracy and notify us of any changes prior to binding.',
+               lead_bold='Carrier Quote')
+    add_bullet(doc, ' \u2014 a comprehensive list of additional coverage lines for your consideration across commercial, personal, bond, employee benefits, and life planning categories.',
                lead_bold='Coverage Recommendations')
 
 
@@ -775,6 +794,7 @@ def build_premium_summary_page(doc):
     p = b_cell.paragraphs[0]
     r = p.add_run('Coverage at a Glance')
     set_font(r, size_pt=11, bold=True, color=WHITE)
+    set_row_header(tbl.rows[0])
 
     # Data rows
     for i, (label, value) in enumerate(cag_rows):
@@ -784,6 +804,8 @@ def build_premium_summary_page(doc):
         set_cell_width(vc, value_w)
         set_cell_margins(lc, top=80, bottom=80, left=115, right=115)
         set_cell_margins(vc, top=80, bottom=80, left=115, right=115)
+        lc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        vc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         if i % 2 == 0:
             set_cell_bg(lc, LT_GRAY_HEX)
             set_cell_bg(vc, LT_GRAY_HEX)
@@ -821,6 +843,20 @@ def build_premium_summary_page(doc):
         '{downPayment} (25% \u2014 new business). Balance payable online via secure payment link provided upon binding.'
     )
     set_font(dvr, size_pt=10, color=GRAY)
+
+    # What's next section
+    add_h3(doc, "What\u2019s next")
+    body_para(doc,
+        'Review the Coverage Details on the following page, confirm payroll and class code accuracy, '
+        'and contact your NBAIS producer to bind. Final premium will be reconciled at audit.',
+        size_pt=10, color=GRAY, space_before=0, space_after=8)
+
+    # Explicit page break — force Coverage Details to start on new page
+    p_break = doc.add_paragraph()
+    p_break.paragraph_format.space_before = Pt(0)
+    p_break.paragraph_format.space_after = Pt(0)
+    run_break = p_break.add_run()
+    run_break.add_break(WD_BREAK.PAGE)
 
     # Coverage Details sub-section
     add_banner_continued(doc, 'Coverage Details \u2014 Workers\u2019 Compensation', font_size=13)
@@ -877,6 +913,7 @@ def build_premium_summary_page(doc):
     hp2.runs[0].font.color.rgb = WHITE
     hp2.runs[0].font.size = Pt(10)
     hp2.runs[0].font.name = FONT
+    set_row_header(tbl_cov.rows[0])
 
     for i, (label, value) in enumerate(cov_rows):
         row = tbl_cov.rows[i + 1]
@@ -885,6 +922,8 @@ def build_premium_summary_page(doc):
         set_cell_width(vc, cov_value_w)
         set_cell_margins(lc, top=60, bottom=60, left=80, right=60)
         set_cell_margins(vc, top=60, bottom=60, left=80, right=60)
+        lc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        vc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         if i % 2 == 0:
             set_cell_bg(lc, LT_GRAY_HEX)
             set_cell_bg(vc, LT_GRAY_HEX)
@@ -896,11 +935,17 @@ def build_premium_summary_page(doc):
         set_font(vr, size_pt=10, color=GRAY)
 
     add_h3(doc, 'Surplus Contribution')
-    body_para(doc,
-        'A surplus contribution of 8% of the estimated premium is required for participation '
-        'in the BAWNSIG self-insured group. This contribution is held in reserve and is not '
-        'considered an insurance premium. It may be refundable upon cancellation per program terms.',
-        size_pt=10, color=GRAY, space_before=4, space_after=4)
+    p_surplus = doc.add_paragraph()
+    p_surplus.paragraph_format.space_before = Pt(4)
+    p_surplus.paragraph_format.space_after = Pt(4)
+    r1 = p_surplus.add_run(
+        'As a self-insured group (SIG), BAWNSIG requires a surplus contribution in addition to the estimated premium. '
+        'This contribution \u2014 calculated at 8% of the estimated premium \u2014 is a regulatory requirement for SIG '
+        'participation in Nevada and supports the financial reserves of the group. '
+    )
+    set_font(r1, size_pt=10, color=GRAY)
+    r2 = p_surplus.add_run('It is not a fee retained by NBAIS or your producer.')
+    set_font(r2, size_pt=10, bold=True, color=GRAY)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -937,6 +982,7 @@ def build_coverage_details_continued_page(doc):
         p = cell.paragraphs[0]
         r = p.add_run(hdr)
         set_font(r, size_pt=9, bold=True, color=WHITE)
+    set_row_header(tbl_cs.rows[0])
 
     # Data row (docxtemplater loop)
     dr = tbl_cs.rows[1]
@@ -944,6 +990,7 @@ def build_coverage_details_continued_page(doc):
         cell = dr.cells[j]
         set_cell_width(cell, w)
         set_cell_margins(cell, top=80, bottom=80, left=80, right=80)
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
     # Cell 0: loop start + state tag
     c0 = dr.cells[0]
@@ -1044,6 +1091,7 @@ def build_coverage_details_continued_page(doc):
     ep_h1.paragraphs[0].runs[0].font.color.rgb = WHITE
     ep_h1.paragraphs[0].runs[0].font.size = Pt(10)
     ep_h1.paragraphs[0].runs[0].font.name = FONT
+    set_row_header(tbl_ep.rows[0])
 
     # Loop row
     ep_dr = tbl_ep.rows[1]
@@ -1087,20 +1135,29 @@ def build_coverage_details_continued_page(doc):
     # Self-Insured Group Disclosure
     add_h3(doc, 'Self-Insured Group Disclosure')
 
-    # Disclosure box (light-gray bg, blue left border)
-    p_disc = doc.add_paragraph()
-    p_disc.paragraph_format.space_before = Pt(4)
-    p_disc.paragraph_format.space_after = Pt(4)
-    p_disc.paragraph_format.left_indent = Pt(14)
-    set_para_shading(p_disc, LT_GRAY_HEX)
+    # SIG Disclosure box: light-gray bg + blue left border
+    tbl_disc = doc.add_table(rows=1, cols=1)
+    remove_table_borders(tbl_disc)
+    set_table_width(tbl_disc, CONTENT_W)
+    disc_cell = tbl_disc.rows[0].cells[0]
+    set_cell_bg(disc_cell, 'E8E8E8')  # light gray
+    set_cell_margins(disc_cell, top=100, bottom=100, left=130, right=100)
+    # Blue left border accent
+    set_cell_border(disc_cell, {
+        'left': {'val': 'single', 'sz': 24, 'color': BLUE_HEX},
+        'top': {'val': 'none', 'sz': 0, 'color': 'auto'},
+        'bottom': {'val': 'none', 'sz': 0, 'color': 'auto'},
+        'right': {'val': 'none', 'sz': 0, 'color': 'auto'},
+    })
+    p_disc = disc_cell.paragraphs[0]
     r_disc = p_disc.add_run(
-        'BAWNSIG is a Nevada state-regulated self-insured group, not an insurance company. '
-        'Coverage is provided through the group\u2019s self-insurance fund. This program is not '
-        'guaranteed by the Nevada Insurance Guaranty Association. Members should review the '
-        'program disclosure statement for full details regarding the self-insured group structure, '
-        'surplus requirements, and financial stability.'
+        'BAWNSIG is a Nevada-regulated self-insured group, not a traditional insurance carrier, '
+        'and therefore does not carry an AM Best financial strength rating. BAWNSIG operates under '
+        'the regulatory oversight of the Nevada Division of Industrial Relations and maintains reserves '
+        'in accordance with state requirements. Members of NBAIS benefit from the group\u2019s long-standing '
+        'solvency and claims-paying history as a construction industry SIG in Nevada.'
     )
-    set_font(r_disc, size_pt=9, color=GRAY)
+    set_font(r_disc, size_pt=9.5, color=GRAY)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1112,16 +1169,25 @@ def build_next_steps_page(doc):
     add_banner(doc, 'Next Steps & Member Authorization', font_size=14)
 
     body_para(doc,
-        'To bind coverage under the NBAIS Workers\u2019 Compensation program, please review '
-        'this proposal, complete the Member Authorization below, and return it to your NBAIS '
-        'producer. Coverage will be bound upon receipt of the signed authorization and initial '
-        'down payment.',
+        'To bind coverage or to discuss this proposal in further detail, please contact your NBAIS '
+        'producer using the information below. Please review all coverage details carefully and confirm '
+        'payroll and class code accuracy prior to binding, as final premium is subject to audit.',
         size_pt=10, color=GRAY, space_before=8, space_after=8)
 
-    # Contact grid
+    # Contact grid — no outer border, shaded cells, inner vertical divider only
     tbl_contact = doc.add_table(rows=1, cols=2)
-    set_table_borders(tbl_contact, color=BORDER_HEX, size=4)
+    remove_table_borders(tbl_contact)
     set_table_width(tbl_contact, CONTENT_W)
+    # Set only the inner vertical divider
+    tblPr = tbl_contact._tbl.tblPr
+    tblBorders = OxmlElement('w:tblBorders')
+    insideV = OxmlElement('w:insideV')
+    insideV.set(qn('w:val'), 'single')
+    insideV.set(qn('w:sz'), '4')
+    insideV.set(qn('w:space'), '0')
+    insideV.set(qn('w:color'), 'CCCCCC')
+    tblBorders.append(insideV)
+    tblPr.append(tblBorders)
     half_w = CONTENT_W // 2
 
     for j, (title, lines) in enumerate([
@@ -1139,7 +1205,7 @@ def build_next_steps_page(doc):
     ]):
         cell = tbl_contact.rows[0].cells[j]
         set_cell_width(cell, half_w)
-        set_cell_bg(cell, LT_GRAY_HEX)
+        set_cell_bg(cell, 'E8E8E8')
         set_cell_margins(cell, top=100, bottom=100, left=100, right=100)
 
         pt = cell.paragraphs[0]
@@ -1154,27 +1220,22 @@ def build_next_steps_page(doc):
                      italic=(style == 'italic'),
                      color=GRAY)
 
-    # "What's Next" heading in dark red per brand spec
-    p_wn = doc.add_paragraph()
-    p_wn.paragraph_format.space_before = Pt(14)
-    p_wn.paragraph_format.space_after = Pt(8)
-    r_wn = p_wn.add_run("What\u2019s Next")
-    set_font(r_wn, size_pt=13, bold=True, color=RGBColor(0xC0, 0x00, 0x00))
-
     # Authorization section
     add_h3(doc, 'Member Authorization')
 
     body_para(doc,
-        'By signing below, the undersigned authorized representative of the named member '
-        'acknowledges receipt of this Workers\u2019 Compensation Insurance Proposal and '
-        'authorizes NBAIS to bind coverage as outlined herein. The undersigned confirms '
-        'that all information provided in connection with this application is accurate and '
-        'complete to the best of their knowledge.',
+        'By signing below, the undersigned acknowledges receipt of this Workers\u2019 Compensation '
+        'Insurance proposal and authorizes Nevada Builders Alliance Insurance Services (NBAIS) to bind '
+        'coverage as described herein, effective on the policy period stated above. The undersigned '
+        'confirms that the payroll, classification codes, and excluded persons listed in this proposal '
+        'are accurate to the best of their knowledge and understands that final premium is subject to '
+        'audit. The required initial down payment will be remitted online via the secure payment link '
+        'provided upon binding.',
         size_pt=10, color=GRAY, space_before=4, space_after=12)
 
     # Signature table
     sig_rows = [
-        ('By (Signature)', ''),
+        ('By', ''),
         ('Print Name', ''),
         ('Title', ''),
         ('Date', ''),
@@ -1205,9 +1266,10 @@ def build_next_steps_page(doc):
 
     # Fine print
     body_para(doc,
-        'This proposal is not a guarantee of coverage. Final rates are subject to '
-        'underwriting approval and audit. Coverage is effective only upon receipt of '
-        'signed authorization and initial premium payment.',
+        'This proposal is not a binder or guarantee of coverage. All coverage is subject to '
+        'underwriting approval, policy terms, conditions, and exclusions. Premium estimates are '
+        'subject to final payroll audit. NBAIS is an insurance program administered on behalf of '
+        'Nevada Builders Alliance members.',
         size_pt=8.5, italic=True, color=GRAY, space_before=16, space_after=4)
 
 
@@ -1223,9 +1285,9 @@ def build_recommendations_1_page(doc):
     p_lead.paragraph_format.space_before = Pt(8)
     p_lead.paragraph_format.space_after = Pt(8)
     r_lead = p_lead.add_run(
-        'The following list identifies common coverage areas for businesses like yours. '
-        'Your NBAIS producer can help you assess your specific needs and obtain quotes for '
-        'any of the coverages listed below.'
+        'The following list identifies common coverage areas for your consideration. Please review '
+        'with your NBAIS producer to determine which lines are recommended, currently insured, or '
+        'not applicable to your operation.'
     )
     set_font(r_lead, size_pt=9.5, italic=True, color=GRAY)
 
@@ -1233,54 +1295,51 @@ def build_recommendations_1_page(doc):
 
     left_secs = [
         ('Property Coverages', [
-            'Commercial Building / Business Personal Property',
+            'Building / Business Personal Property',
             'Business Income & Extra Expense',
             'Equipment Breakdown',
-            'Inland Marine / Contractor\u2019s Equipment',
-            'Flood (NFIP or Private Market)',
+            'Inland Marine / Contractors Equipment',
+            'Installation Floater',
+            'Builders Risk',
         ]),
         ('Cyber / Identity Theft / Crime', [
-            'Cyber Liability & Data Breach Response',
-            'Employee Theft / Crime',
-            'Social Engineering / Funds Transfer Fraud',
+            'Cyber Liability',
+            'Data Breach / Privacy Liability',
             'Identity Theft Protection',
+            'Commercial Crime / Employee Dishonesty',
         ]),
         ('Workers\u2019 Compensation Coverages', [
-            'Statutory Workers\u2019 Compensation (NV) \u2014 current page',
-            'Stop-Gap Employers\u2019 Liability (monopolistic states)',
-            'Voluntary Compensation & Employers\u2019 Liability',
+            'Workers\u2019 Compensation \u2014 Statutory',
+            'Employers\u2019 Liability',
+            'Stop Gap / Employers Liability (Monopolistic States)',
         ]),
         ('Directors & Officers / EPL / Fiduciary', [
             'Directors & Officers Liability',
-            'Employment Practices Liability (EPL)',
+            'Employment Practices Liability (EPLI)',
             'Fiduciary Liability',
-            'Wage & Hour Defense',
         ]),
     ]
     right_secs = [
         ('Liability Coverages', [
-            'Commercial General Liability (CGL)',
+            'Commercial General Liability',
             'Products & Completed Operations',
-            'Liquor Liability',
             'Contractual Liability',
-            'Non-Owned & Hired Auto Liability',
+            'Personal & Advertising Injury',
         ]),
         ('Automobile Coverage', [
-            'Commercial Auto \u2014 Owned Vehicles',
+            'Commercial Auto Liability',
+            'Physical Damage (Comp & Collision)',
             'Hired & Non-Owned Auto',
-            'Motor Carrier / Truckers Liability',
-            'Auto Physical Damage',
+            'Motor Truck Cargo',
         ]),
         ('Umbrella / Excess Liability', [
             'Commercial Umbrella',
-            'Excess Liability (follow-form)',
-            'High-Limit Excess Towers',
+            'Excess Liability',
         ]),
         ('Errors & Omissions / Professional', [
-            'Contractors Pollution Liability',
             'Professional Liability / E&O',
-            'Design-Build Professional',
-            'Technology E&O',
+            'Contractors Professional Liability',
+            'Design-Build Professional Liability',
         ]),
     ]
 
@@ -1298,24 +1357,23 @@ def build_recommendations_2_page(doc):
     add_section_divider(doc, 'Commercial Lines (continued)')
 
     left_secs = [
-        ('Wind / Hail Coverage', [
-            'Standalone Windstorm / Hail',
-            'Parametric Wind Insurance',
-            'Builder\u2019s Risk \u2014 Wind Extension',
+        ('Wind / Hail, Earthquake, Flood', [
+            'Wind & Hail Coverage',
+            'Earthquake Coverage',
+            'Flood Coverage (NFIP or Private)',
         ]),
         ('Pollution Liability', [
+            'Contractors Pollution Liability',
             'Environmental Impairment Liability',
             'Site Pollution Legal Liability',
-            'Contractor\u2019s Pollution Liability',
-            'Storage Tank Liability',
         ]),
     ]
     right_secs = [
         ('Foreign Coverages', [
+            'Foreign Voluntary Workers\u2019 Compensation',
             'Foreign General Liability',
-            'Foreign Workers\u2019 Compensation',
             'Foreign Auto',
-            'Foreign Voluntary Compensation',
+            'Foreign Package Policy',
         ]),
         ('', []),  # empty right cell for this row
     ]
@@ -1323,39 +1381,42 @@ def build_recommendations_2_page(doc):
 
     add_section_divider(doc, 'Personal Lines')
 
-    p_secs = [
+    p_left = [
         ('Personal Insurance', [
-            'Homeowners / Renters Insurance',
-            'High-Value Home (agreed value)',
+            'Automobile',
+            'Home / Homeowners',
+            'Flood / Earthquake',
             'Personal Umbrella',
-            'Valuable Articles / Collections',
-            'Watercraft',
-        ]),
-        ('Farm & Ranch', [
-            'Farm Owners Coverage',
-            'Ranch Liability',
-            'Crop / Livestock Coverage',
         ]),
     ]
-    add_two_col_rec_table(doc, [p_secs[0]], [p_secs[1]])
+    p_right = [
+        ('', [
+            'Farm & Ranch',
+            'Watercraft / Recreational Vehicles',
+            'Personal Articles Floater',
+        ]),
+    ]
+    add_two_col_rec_table(doc, p_left, p_right)
 
     add_section_divider(doc, 'Bond Recommendations')
 
-    b_secs = [
+    b_left = [
         ('Surety & Bonds', [
-            'Performance & Payment Bonds',
-            'Bid Bonds',
-            'Subdivision / Site Improvement Bonds',
-            'Supply Bonds',
-        ]),
-        ('License & Permit Bonds', [
-            'Contractor License Bonds',
-            'Permit Bonds',
-            'Court / Fiduciary Bonds',
-            'Commercial Blanket Bonds',
+            'Contract Bond',
+            'Court Bond',
+            'Fidelity Bond',
+            'Financial Institution Bond',
         ]),
     ]
-    add_two_col_rec_table(doc, [b_secs[0]], [b_secs[1]])
+    b_right = [
+        ('', [
+            'License & Permit Bond',
+            'Probate Bond',
+            'Public Official Bond',
+            'Surety Bond',
+        ]),
+    ]
+    add_two_col_rec_table(doc, b_left, b_right)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1367,66 +1428,56 @@ def build_employee_benefits_page(doc):
     add_banner(doc, 'Employee Benefits Recommendations', font_size=14)
 
     body_para(doc,
-        'NBAIS can connect you with specialists for group benefits, life insurance, and '
-        'retirement planning. The following is an overview of available employee benefit programs.',
+        'Group benefits, life planning, and retirement plan services available through NBAIS '
+        'for member consideration.',
         size_pt=9.5, italic=True, color=GRAY, space_before=8, space_after=8)
 
     add_section_divider(doc, 'Group Benefits')
 
-    gb_secs = [
+    gb_left = [
         ('Health & Welfare', [
-            'Group Health Insurance (Medical)',
+            'HR Services',
+            'Group Medical',
             'Group Dental',
-            'Group Vision',
-            'Flexible Spending Accounts (FSA)',
-            'Health Reimbursement Arrangements (HRA)',
-            'Health Savings Accounts (HSA)',
-        ]),
-        ('Disability & Supplemental', [
-            'Short-Term Disability',
-            'Long-Term Disability',
-            'Group Accident Insurance',
-            'Critical Illness Coverage',
-            'Hospital Indemnity',
+            'Vision',
+            'Group Life and Accidental Death & Dismemberment (AD&D)',
         ]),
     ]
-    add_two_col_rec_table(doc, [gb_secs[0]], [gb_secs[1]])
+    gb_right = [
+        ('Disability & Supplemental', [
+            'Long Term Care',
+            'Short Term Disability',
+            'Section 125 Cafeteria Plans',
+            'Individual Medical / Dental',
+        ]),
+    ]
+    add_two_col_rec_table(doc, gb_left, gb_right)
 
     add_section_divider(doc, 'Life Department')
 
-    life_secs = [
-        ('Business Planning', [
-            'Key Person Life Insurance',
-            'Buy-Sell Agreement Funding',
-            'Business Continuation Planning',
-            'Executive Bonus Plans',
-        ]),
-        ('Estate Planning', [
-            'Individual Life Insurance',
-            'Survivorship / Second-to-Die Policies',
-            'Irrevocable Life Insurance Trust (ILIT)',
-            'Charitable Giving Strategies',
+    life_left = [
+        ('', [
+            'Business Planning',
+            'Estate Planning',
         ]),
     ]
-    add_two_col_rec_table(doc, [life_secs[0]], [life_secs[1]])
+    life_right = [
+        ('', []),
+    ]
+    add_two_col_rec_table(doc, life_left, life_right)
 
     add_section_divider(doc, 'Retirement Plan Services')
 
-    ret_secs = [
-        ('Qualified Plans', [
-            '401(k) Plan Design & Administration',
-            'SIMPLE IRA',
-            'SEP IRA',
-            'Defined Benefit / Pension Plans',
-            'Profit-Sharing Plans',
-        ]),
-        ('Non-Qualified Plans', [
-            'Deferred Compensation Plans',
-            'Executive Supplemental Retirement (SERP)',
-            'Split-Dollar Life Insurance',
+    ret_left = [
+        ('', [
+            'Qualified Plans',
+            'Non-Qualified Plans',
         ]),
     ]
-    add_two_col_rec_table(doc, [ret_secs[0]], [ret_secs[1]])
+    ret_right = [
+        ('', []),
+    ]
+    add_two_col_rec_table(doc, ret_left, ret_right)
 
     # Callout box
     p_callout = doc.add_paragraph()
@@ -1435,11 +1486,13 @@ def build_employee_benefits_page(doc):
     p_callout.paragraph_format.left_indent = Pt(14)
     p_callout.paragraph_format.right_indent = Pt(14)
     set_para_shading(p_callout, LT_BLUE_HEX)
+    r_bold = p_callout.add_run('Discuss with your producer. ')
+    set_font(r_bold, size_pt=9, bold=True, color=NAVY)
     r_callout = p_callout.add_run(
-        'Your NBAIS producer can help you assess your employee benefits needs and develop '
-        'a comprehensive program. Contact Dianne Slater to schedule a benefits review.'
+        'Your NBAIS producer can help you assess which of these coverage lines apply to your '
+        'operation and identify any potential gaps in your current insurance program.'
     )
-    set_font(r_callout, size_pt=9, italic=True, color=NAVY)
+    set_font(r_callout, size_pt=9, color=NAVY)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
