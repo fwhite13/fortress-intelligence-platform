@@ -1,0 +1,11 @@
+{
+  "_comment": "Phase 0 fallback entitlements — no FAIT v2 DB dependency. All authenticated users get defaults. Group membership adds additional entitlements.",
+  "groups": {},
+  "defaults": [
+    { "kb_id": "WYSKBKWHPL", "read": true, "write": false },
+    { "kb_id": "AOFDTSHGNT", "read": true, "write": false },
+    { "kb_id": "ZCEZCJGHQC", "read": true, "write": true },
+    { "kb_id": "PBKCTCPNUU", "read": true, "write": true },
+    { "kb_id": "WHB6WU9CVW", "read": true, "write": false }
+  ]
+}
