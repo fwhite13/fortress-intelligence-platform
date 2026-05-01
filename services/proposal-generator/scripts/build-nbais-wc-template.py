@@ -1101,6 +1101,8 @@ def build_coverage_details_continued_page(doc):
     set_cell_width(ep_d1, ep_value_w)
     set_cell_margins(ep_d0, top=60, bottom=60, left=80, right=60)
     set_cell_margins(ep_d1, top=60, bottom=60, left=80, right=60)
+    ep_d0.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    ep_d1.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
     # Cell 0: loop start + name
     ep_p0a = ep_d0.paragraphs[0]
