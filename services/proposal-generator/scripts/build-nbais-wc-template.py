@@ -151,6 +151,29 @@ def set_cell_width(cell, width_twips):
     tcPr.append(tcW)
 
 
+def set_table_grid(tbl, col_widths):
+    """Replace tblGrid gridCol elements with explicit column widths (twips).
+    Word uses tblGrid to normalize column widths and can override individual
+    tcW values if tblGrid doesn't match. Always call after set_table_width().
+    """
+    tbl_el = tbl._tbl
+    # Remove existing tblGrid
+    for existing in tbl_el.findall(qn('w:tblGrid')):
+        tbl_el.remove(existing)
+    # Build new tblGrid
+    grid = OxmlElement('w:tblGrid')
+    for w in col_widths:
+        col = OxmlElement('w:gridCol')
+        col.set(qn('w:w'), str(w))
+        grid.append(col)
+    # Insert after tblPr
+    tblPr = tbl_el.find(qn('w:tblPr'))
+    if tblPr is not None:
+        tblPr.addnext(grid)
+    else:
+        tbl_el.insert(0, grid)
+
+
 def set_cell_margins(cell, top=80, bottom=80, left=115, right=115):
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
@@ -508,6 +531,7 @@ def add_kv_table(doc, rows_data, label_pct=30, banner_text=None):
     tbl = doc.add_table(rows=n_rows, cols=2)
     set_table_borders(tbl, color=BORDER_HEX, size=4)
     set_table_width(tbl, CONTENT_W)
+    set_table_grid(tbl, [label_w, value_w])
 
     row_idx = 0
     if banner_text:
@@ -672,6 +696,7 @@ def build_cover_page(doc):
     remove_table_borders(tbl_meta)
     set_table_width(tbl_meta, META_TABLE_W)
     set_table_alignment(tbl_meta, WD_TABLE_ALIGNMENT.CENTER)
+    set_table_grid(tbl_meta, [label_w, value_w])
 
     for i, (label, value) in enumerate(meta_rows):
         row = tbl_meta.rows[i]
@@ -1239,6 +1264,7 @@ def build_next_steps_page(doc):
     tbl_contact = doc.add_table(rows=1, cols=3)
     remove_table_borders(tbl_contact)
     set_table_width(tbl_contact, CONTENT_W)
+    set_table_grid(tbl_contact, [CONTACT_BOX_W, SPACER_W, CONTACT_BOX_W])
 
     contact_data = [
         ('Your NBAIS Producer', [
@@ -1319,6 +1345,7 @@ def build_next_steps_page(doc):
     tbl_sig = doc.add_table(rows=len(sig_rows), cols=2)
     remove_table_borders(tbl_sig)
     set_table_width(tbl_sig, CONTENT_W)
+    set_table_grid(tbl_sig, [label_w, line_w])
 
     for i, (label, _) in enumerate(sig_rows):
         row = tbl_sig.rows[i]
