@@ -130,6 +130,9 @@ def add_right_tab_stop(para, pos_twips):
 
 def set_table_width(tbl, width_twips):
     tblPr = tbl._tbl.tblPr
+    # Remove existing tblW if present
+    for existing in tblPr.findall(qn('w:tblW')):
+        tblPr.remove(existing)
     tblW = OxmlElement('w:tblW')
     tblW.set(qn('w:w'), str(width_twips))
     tblW.set(qn('w:type'), 'dxa')
@@ -139,6 +142,9 @@ def set_table_width(tbl, width_twips):
 def set_cell_width(cell, width_twips):
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
+    # Remove existing tcW if present
+    for existing in tcPr.findall(qn('w:tcW')):
+        tcPr.remove(existing)
     tcW = OxmlElement('w:tcW')
     tcW.set(qn('w:w'), str(width_twips))
     tcW.set(qn('w:type'), 'dxa')
