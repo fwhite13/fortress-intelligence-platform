@@ -130,3 +130,10 @@ ep_d1.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 ```
 
 Regenerate `master.docx` and re-sync to S3. No other changes required.
+
+---
+
+## Cycle 2 Re-check
+- I1 fix: CONFIRMED — ep_d0/ep_d1 vertical_alignment = WD_ALIGN_VERTICAL.CENTER present in build_coverage_details_continued_page() (lines 1104–1105)
+- Spot checks: Policy info rows (L529-530) ✅ | Coverage details rows (L807-808) ✅ | Coverage options rows (L925-926) ✅ | Employee Classification Schedule (L993) ✅ — no other rows missing vertical alignment
+- Verdict: PASS

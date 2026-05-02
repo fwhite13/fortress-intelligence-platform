@@ -61,6 +61,10 @@ No — single CC session, single-file change, sequential execution.
 
 5. **Cover letter copy (Change 5)** — Jay's HTML references `{{MEMBER_NAME}}` but the template uses `{memberName}`. Verify the template tag names used in the cover letter body match the actual docxtemplater data model (`{memberName}`, `{memberAddress}`, `{quoteDate}`).
 
+## Cycle 2 Fix
+- Commit de138c5: Added `ep_d0.vertical_alignment = WD_ALIGN_VERTICAL.CENTER` and `ep_d1.vertical_alignment = WD_ALIGN_VERTICAL.CENTER` in `build_coverage_details_continued_page()` per Hawkeye I1.
+- S3 re-synced: PASS
+
 ## How to Test Locally
 ```bash
 # 1. Regenerate template

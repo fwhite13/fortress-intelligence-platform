@@ -403,6 +403,7 @@ def add_two_col_rec_table(doc, left_sections, right_sections):
     remove_table_borders(tbl)
     set_table_width(tbl, CONTENT_W)
     half = CONTENT_W // 2
+    set_table_grid(tbl, [half, half])
 
     for i in range(rows):
         row = tbl.rows[i]
@@ -854,6 +855,7 @@ def build_premium_summary_page(doc):
     tbl = doc.add_table(rows=len(cag_rows) + 3, cols=2)  # +1 banner, +1 total, +1 downpayment
     set_table_borders(tbl, color=BORDER_HEX, size=4)
     set_table_width(tbl, CONTENT_W)
+    set_table_grid(tbl, [label_w, value_w])
 
     # Banner row
     b_cell = tbl.rows[0].cells[0]
@@ -969,6 +971,7 @@ def build_premium_summary_page(doc):
     tbl_cov = doc.add_table(rows=len(cov_rows) + 1, cols=2)
     set_table_borders(tbl_cov, color=BORDER_HEX, size=4)
     set_table_width(tbl_cov, CONTENT_W)
+    set_table_grid(tbl_cov, [cov_label_w, cov_value_w])
 
     # Header row
     hr = tbl_cov.rows[0]
@@ -1047,6 +1050,7 @@ def build_coverage_details_continued_page(doc):
     tbl_cs = doc.add_table(rows=3, cols=6)  # header + 1 loop row + total row
     set_table_borders(tbl_cs, color=BORDER_HEX, size=4)
     set_table_width(tbl_cs, CONTENT_W)
+    set_table_grid(tbl_cs, col_ws)
 
     # Header row (navy)
     hr = tbl_cs.rows[0]
@@ -1152,6 +1156,7 @@ def build_coverage_details_continued_page(doc):
     tbl_ep = doc.add_table(rows=2, cols=2)  # header + loop row
     set_table_borders(tbl_ep, color=BORDER_HEX, size=4)
     set_table_width(tbl_ep, CONTENT_W)
+    set_table_grid(tbl_ep, [ep_label_w, ep_value_w])
 
     # Header row
     ep_hr = tbl_ep.rows[0]
