@@ -552,8 +552,9 @@ def add_kv_table(doc, rows_data, label_pct=30, banner_text=None):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_cover_first_page_header(section):
-    """Cover page: full-width navy bar in the first-page header."""
+    """Cover page: full-width navy bar in the first-page header — purely decorative, no text."""
     section.different_first_page_header_footer = True
+    section.header_distance = Inches(0.1)   # push bar flush to page top
     first_header = section.first_page_header
     first_header.is_linked_to_previous = False
 
@@ -569,13 +570,12 @@ def build_cover_first_page_header(section):
     set_cell_bg(cell, NAVY_HEX)
     set_row_height(tbl.rows[0], 460, exact=True)
     set_cell_margins(cell, top=0, bottom=0, left=0, right=0)
-    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
     p = cell.paragraphs[0]
     p.paragraph_format.space_before = Pt(0)
     p.paragraph_format.space_after = Pt(0)
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = p.add_run("NBAIS Workers\u2019 Compensation Program")
-    set_font(r, size_pt=14, bold=True, color=WHITE)
+    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    # No run — bar is purely decorative
 
 
 def build_cover_first_page_footer(section):
@@ -1307,8 +1307,8 @@ def build_next_steps_page(doc):
         ('Title', ''),
         ('Date', ''),
     ]
-    label_w = int(CONTENT_W * 0.20)   # ~1872 twips
-    line_w = CONTENT_W - label_w       # ~7488 twips
+    label_w = int(CONTENT_W * 0.25)   # ~2340 twips (25% per WI spec)
+    line_w = CONTENT_W - label_w       # ~7020 twips
 
     tbl_sig = doc.add_table(rows=len(sig_rows), cols=2)
     remove_table_borders(tbl_sig)
