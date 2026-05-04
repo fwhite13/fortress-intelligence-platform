@@ -89,6 +89,30 @@ The plan says update footer from "Coverage Details (1 of 2)" → "Policy Summary
 2. **Down Payment row layout**: The down payment row uses the label cell for the payment amount (`{downPayment}`) and the value cell for the balance note. This is a non-standard layout vs the other rows — verify it renders correctly in Word.
 3. **basePremium vs estPremium**: Both fields resolve to the same raw carrier premium value (`wcQuote.premium`). The template now shows Base Premium and Estimated Annual Premium as separate rows with the same `{basePremium}` / `{estPremium}` values. Confirm this is intentional per Jay's spec.
 
+---
+
+## BUILD CYCLE 2 — ADO#2709 [2026-05-04]
+
+### What was fixed
+Applied Clint's C1 (Critical) and I1 (Important) review comments:
+- **C1**: Policy Summary page (page 4b) was sharing section 4's footer, showing "Premium Summary" instead of "Policy Summary". Fixed by splitting s4 into two sections: s4 (Premium Summary page) and s4b (Policy Summary page), each with their own `build_standard_footer()`. Created new `build_policy_summary_page(doc)` function with the content formerly in `build_premium_summary_page()` after the WD_BREAK.PAGE. Removed the manual page break — section boundary handles pagination.
+- **I1**: Stale cover letter bullet `lead_bold='Premium Summary & Coverage at a Glance'` → `lead_bold='Premium Summary'`.
+
+### Commit
+`3e9c96d` — `fix(ADO#2709): split s4 section for Policy Summary footer, fix stale Coverage at a Glance bullet`
+
+### Build
+```
+python3 services/proposal-generator/scripts/build-nbais-wc-template.py
+Saved: .../master.docx (413 KiB)
+```
+Build: **SUCCEEDED** ✓
+
+### S3 sync
+- `master.docx` → `s3://fortress-tools/fip-proposal-templates/verticals/nbais-wc/master.docx` ✓
+
+---
+
 ## How to test locally
 ```bash
 # Rebuild template
