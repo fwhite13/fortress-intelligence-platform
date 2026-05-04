@@ -273,6 +273,47 @@ def set_table_alignment(tbl, alignment=WD_TABLE_ALIGNMENT.CENTER):
     tblPr.append(jc)
 
 
+def set_cell_vAlign(cell, val='center'):
+    """Set vAlign on cell's tcPr, removing any existing vAlign first."""
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    for existing in tcPr.findall(qn('w:vAlign')):
+        tcPr.remove(existing)
+    vAlign = OxmlElement('w:vAlign')
+    vAlign.set(qn('w:val'), val)
+    tcPr.append(vAlign)
+
+
+def set_para_spacing_zero(para):
+    """Set paragraph spacing before=0 after=0."""
+    pPr = para._p.get_or_add_pPr()
+    for existing in pPr.findall(qn('w:spacing')):
+        pPr.remove(existing)
+    spacing = OxmlElement('w:spacing')
+    spacing.set(qn('w:before'), '0')
+    spacing.set(qn('w:after'), '0')
+    pPr.append(spacing)
+
+
+def fix_cell_content(cell, valign='center'):
+    """Apply vAlign, zero paragraph spacing, remove trailing empty paras.
+
+    Fixes two root causes of apparent top-alignment in table cells:
+    A) vAlign must be set on each <w:tc> individually (not table-level)
+    B) Inherited Normal style paragraph spacing creates visual top-padding
+    """
+    set_cell_vAlign(cell, valign)
+    paras = cell.paragraphs
+    # Remove trailing empty paragraphs (keep at least one)
+    while len(paras) > 1 and not paras[-1].text.strip():
+        p = paras[-1]._p
+        p.getparent().remove(p)
+        paras = cell.paragraphs
+    # Zero spacing on all remaining paragraphs
+    for para in cell.paragraphs:
+        set_para_spacing_zero(para)
+
+
 def set_section_margins(section, top=T_MARGIN, bottom=B_MARGIN, left=L_MARGIN, right=R_MARGIN):
     section.top_margin = Emu(top * 914)   # twips to EMU: 1 twip = 914.4 EMU, approx
     section.bottom_margin = Emu(bottom * 914)
@@ -301,7 +342,7 @@ def add_banner(doc, text, font_size=14):
     set_cell_bg(cell, NAVY_HEX)
     set_row_height(tbl.rows[0], 400, exact=True)  # consistent height ~0.28in
     set_cell_margins(cell, top=60, bottom=60, left=115, right=115)
-    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(cell)
     p = cell.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
     r = p.add_run(text)
@@ -412,7 +453,7 @@ def add_two_col_rec_table(doc, left_sections, right_sections):
             set_cell_width(cell, half)
             set_cell_margins(cell, top=40, bottom=40, left=60, right=60)
             set_no_cell_borders(cell)
-            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            fix_cell_content(cell)
 
             if i < len(sections):
                 title, bullets = sections[i]
@@ -543,7 +584,7 @@ def add_kv_table(doc, rows_data, label_pct=30, banner_text=None):
         cell0.merge(cell1)
         set_cell_bg(cell0, NAVY_HEX)
         set_cell_margins(cell0, top=80, bottom=80, left=100, right=80)
-        cell0.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        fix_cell_content(cell0)
         p = cell0.paragraphs[0]
         r = p.add_run(banner_text)
         set_font(r, size_pt=11, bold=True, color=WHITE)
@@ -559,8 +600,8 @@ def add_kv_table(doc, rows_data, label_pct=30, banner_text=None):
         set_cell_width(vc, value_w)
         set_cell_margins(lc, top=80, bottom=80, left=115, right=115)
         set_cell_margins(vc, top=80, bottom=80, left=115, right=115)
-        lc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        vc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        fix_cell_content(lc)
+        fix_cell_content(vc)
 
         # Alternating row background
         if i % 2 == 0:
@@ -585,7 +626,7 @@ def add_kv_table(doc, rows_data, label_pct=30, banner_text=None):
 def build_cover_first_page_header(section):
     """Cover page: full-width navy bar in the first-page header — purely decorative, no text."""
     section.different_first_page_header_footer = True
-    section.header_distance = Inches(0.1)   # push bar flush to page top
+    section.header_distance = Inches(0)   # w:header=0 — flush to page top
     first_header = section.first_page_header
     first_header.is_linked_to_previous = False
 
@@ -707,8 +748,8 @@ def build_cover_page(doc):
         set_cell_width(vc, value_w)
         set_cell_margins(lc, top=40, bottom=40, left=80, right=60)
         set_cell_margins(vc, top=40, bottom=40, left=60, right=80)
-        lc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        vc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        fix_cell_content(lc)
+        fix_cell_content(vc)
 
         lp = lc.paragraphs[0]
         lp.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -862,7 +903,7 @@ def build_premium_summary_page(doc):
     b_cell.merge(tbl.rows[0].cells[1])
     set_cell_bg(b_cell, NAVY_HEX)
     set_cell_margins(b_cell, top=80, bottom=80, left=100, right=80)
-    b_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(b_cell)
     p = b_cell.paragraphs[0]
     r = p.add_run('Coverage at a Glance')
     set_font(r, size_pt=11, bold=True, color=WHITE)
@@ -876,8 +917,8 @@ def build_premium_summary_page(doc):
         set_cell_width(vc, value_w)
         set_cell_margins(lc, top=80, bottom=80, left=115, right=115)
         set_cell_margins(vc, top=80, bottom=80, left=115, right=115)
-        lc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        vc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        fix_cell_content(lc)
+        fix_cell_content(vc)
         if i % 2 == 0:
             set_cell_bg(lc, LT_GRAY_HEX)
             set_cell_bg(vc, LT_GRAY_HEX)
@@ -895,8 +936,8 @@ def build_premium_summary_page(doc):
     set_cell_bg(tvc, LT_BLUE_HEX)
     set_cell_margins(tlc, top=80, bottom=80, left=80, right=60)
     set_cell_margins(tvc, top=80, bottom=80, left=80, right=60)
-    tlc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-    tvc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(tlc)
+    fix_cell_content(tvc)
     tp = tlc.paragraphs[0]
     tr = tp.add_run('Total Estimated Cost')
     set_font(tr, size_pt=11, bold=True, color=NAVY)
@@ -909,8 +950,8 @@ def build_premium_summary_page(doc):
     dlc, dvc = dp_row.cells[0], dp_row.cells[1]
     set_cell_margins(dlc, top=60, bottom=60, left=80, right=60)
     set_cell_margins(dvc, top=60, bottom=60, left=80, right=60)
-    dlc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-    dvc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(dlc)
+    fix_cell_content(dvc)
     dp = dlc.paragraphs[0]
     dr = dp.add_run('Initial Down Payment')
     set_font(dr, size_pt=10, bold=True, color=NAVY)
@@ -980,8 +1021,8 @@ def build_premium_summary_page(doc):
     set_cell_bg(hvc, NAVY_HEX)
     set_cell_margins(hlc, top=70, bottom=70, left=80, right=60)
     set_cell_margins(hvc, top=70, bottom=70, left=80, right=60)
-    hlc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-    hvc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(hlc)
+    fix_cell_content(hvc)
     hp1 = hlc.paragraphs[0]
     hp1.add_run('Coverage').font.bold = True
     hp1.runs[0].font.color.rgb = WHITE
@@ -1001,8 +1042,8 @@ def build_premium_summary_page(doc):
         set_cell_width(vc, cov_value_w)
         set_cell_margins(lc, top=60, bottom=60, left=80, right=60)
         set_cell_margins(vc, top=60, bottom=60, left=80, right=60)
-        lc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        vc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        fix_cell_content(lc)
+        fix_cell_content(vc)
         if i % 2 == 0:
             set_cell_bg(lc, LT_GRAY_HEX)
             set_cell_bg(vc, LT_GRAY_HEX)
@@ -1059,7 +1100,7 @@ def build_coverage_details_continued_page(doc):
         set_cell_width(cell, w)
         set_cell_bg(cell, NAVY_HEX)
         set_cell_margins(cell, top=70, bottom=70, left=60, right=60)
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        fix_cell_content(cell)
         p = cell.paragraphs[0]
         r = p.add_run(hdr)
         set_font(r, size_pt=9, bold=True, color=WHITE)
@@ -1071,7 +1112,7 @@ def build_coverage_details_continued_page(doc):
         cell = dr.cells[j]
         set_cell_width(cell, w)
         set_cell_margins(cell, top=80, bottom=80, left=80, right=80)
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        fix_cell_content(cell)
 
     # Cell 0: loop start + state tag
     c0 = dr.cells[0]
@@ -1118,7 +1159,7 @@ def build_coverage_details_continued_page(doc):
         set_cell_width(cell, w)
         set_cell_bg(cell, LT_GRAY_HEX)
         set_cell_margins(cell, top=70, bottom=70, left=60, right=60)
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        fix_cell_content(cell)
 
     # Merge cols 0-4 in total row for label
     tc_label = tr_row.cells[0]
@@ -1166,8 +1207,8 @@ def build_coverage_details_continued_page(doc):
     set_cell_bg(ep_h1, NAVY_HEX)
     set_cell_margins(ep_h0, top=70, bottom=70, left=80, right=60)
     set_cell_margins(ep_h1, top=70, bottom=70, left=80, right=60)
-    ep_h0.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-    ep_h1.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(ep_h0)
+    fix_cell_content(ep_h1)
     ep_h0.paragraphs[0].add_run('Name').font.bold = True
     ep_h0.paragraphs[0].runs[0].font.color.rgb = WHITE
     ep_h0.paragraphs[0].runs[0].font.size = Pt(10)
@@ -1186,8 +1227,8 @@ def build_coverage_details_continued_page(doc):
     set_cell_width(ep_d1, ep_value_w)
     set_cell_margins(ep_d0, top=60, bottom=60, left=80, right=60)
     set_cell_margins(ep_d1, top=60, bottom=60, left=80, right=60)
-    ep_d0.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-    ep_d1.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(ep_d0)
+    fix_cell_content(ep_d1)
 
     # Cell 0: loop start + name
     ep_p0a = ep_d0.paragraphs[0]
@@ -1229,7 +1270,7 @@ def build_coverage_details_continued_page(doc):
     disc_cell = tbl_disc.rows[0].cells[0]
     set_cell_bg(disc_cell, 'E8E8E8')  # light gray
     set_cell_margins(disc_cell, top=100, bottom=100, left=130, right=100)
-    disc_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(disc_cell)
     # Blue left border accent
     set_cell_border(disc_cell, {
         'left': {'val': 'single', 'sz': 24, 'color': BLUE_HEX},
@@ -1291,7 +1332,7 @@ def build_next_steps_page(doc):
     set_cell_bg(cell0, 'E8E8E8')
     set_cell_margins(cell0, top=100, bottom=100, left=100, right=100)
     set_no_cell_borders(cell0)
-    cell0.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(cell0)
 
     title0, lines0 = contact_data[0]
     pt0 = cell0.paragraphs[0]
@@ -1313,7 +1354,7 @@ def build_next_steps_page(doc):
     set_cell_bg(cell2, 'E8E8E8')
     set_cell_margins(cell2, top=100, bottom=100, left=100, right=100)
     set_no_cell_borders(cell2)
-    cell2.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(cell2)
 
     title2, lines2 = contact_data[1]
     pt2 = cell2.paragraphs[0]
@@ -1360,8 +1401,8 @@ def build_next_steps_page(doc):
         set_cell_width(vc, line_w)
         set_cell_margins(lc, top=80, bottom=80, left=0, right=60)
         set_cell_margins(vc, top=80, bottom=80, left=60, right=0)
-        lc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        vc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        fix_cell_content(lc)
+        fix_cell_content(vc)
 
         lp = lc.paragraphs[0]
         lr = lp.add_run(label)
@@ -1598,7 +1639,7 @@ def build_employee_benefits_page(doc):
     callout_cell = tbl_callout.rows[0].cells[0]
     set_cell_bg(callout_cell, 'EBF3FF')  # light blue-gray
     set_cell_margins(callout_cell, top=120, bottom=120, left=160, right=120)
-    callout_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    fix_cell_content(callout_cell)
     # Dark navy left border accent
     set_cell_border(callout_cell, {
         'left': {'val': 'single', 'sz': 36, 'color': '1F3864'},
