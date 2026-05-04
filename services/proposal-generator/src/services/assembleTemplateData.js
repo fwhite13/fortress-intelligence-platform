@@ -124,6 +124,8 @@ function formatCurrencyWc(value) {
  *   excludedPersons[]  ← payload.nbaisWc.excludedPersons[]
  */
 export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger) {
+  const trimVal = v => (typeof v === 'string' ? v.trim() : v)
+
   const insured = payload.insured || {}
   const address = insured.address || {}
   const period = payload.policyPeriod || {}
@@ -142,18 +144,18 @@ export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger
     .map(item => {
       const ia = Object.fromEntries((item.attributes || []).map(a => [a.key, a.value]))
       return {
-        state: ia.state || 'NV',
-        classCode: ia.class_code || '',
-        classDescription: ia.class_description || item.description || '',
+        state: trimVal(ia.state || 'NV'),
+        classCode: trimVal(ia.class_code || ''),
+        classDescription: trimVal(ia.class_description || item.description || ''),
         estAnnualPayroll: formatCurrencyWc(ia.payroll ?? ia.estimated_annual_payroll),
-        rate: ia.rate_per_hundred != null ? `$${ia.rate_per_hundred}` : (ia.rate || ''),
+        rate: trimVal(ia.rate_per_hundred != null ? `$${ia.rate_per_hundred}` : (ia.rate || '')),
         classEstPremium: formatCurrencyWc(ia.estimated_premium),
       }
     })
 
   // Build excluded persons from payload extension field
   const excludedPersons = (payload.nbaisWc?.excludedPersons || []).map(ep => ({
-    name: typeof ep === 'string' ? ep : (ep.name || ''),
+    name: trimVal(typeof ep === 'string' ? ep : (ep.name || '')),
   }))
 
   // Compute premium fields
@@ -173,22 +175,22 @@ export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger
 
   return {
     // Member identity
-    memberName: insured.name || '',
-    memberAddress: formatAddress(address),
-    memberLegalName: payload.nbaisWc?.memberLegalName || insured.name || '',
+    memberName: trimVal(insured.name || ''),
+    memberAddress: trimVal(formatAddress(address)),
+    memberLegalName: trimVal(payload.nbaisWc?.memberLegalName || insured.name || ''),
 
     // Policy period — both key names for template compatibility
-    policyPeriod: policyPeriodStr,
-    policyPeriodDisplay: policyPeriodStr,
-    quoteDate,
+    policyPeriod: trimVal(policyPeriodStr),
+    policyPeriodDisplay: trimVal(policyPeriodStr),
+    quoteDate: trimVal(quoteDate),
 
     // Premium fields (all formatted currency strings)
-    basePremium: formatCurrencyWc(basePremiumNum),
-    estPremium: formatCurrencyWc(basePremiumNum),
-    surplusContribution: formatCurrencyWc(surplusContributionNum),
-    employersLiabilityFee: formatCurrencyWc(elFeeNum),
-    totalEstimatedPremium: formatCurrencyWc(totalEstimatedPremiumNum),
-    downPayment: formatCurrencyWc(downPaymentNum),
+    basePremium: trimVal(formatCurrencyWc(basePremiumNum)),
+    estPremium: trimVal(formatCurrencyWc(basePremiumNum)),
+    surplusContribution: trimVal(formatCurrencyWc(surplusContributionNum)),
+    employersLiabilityFee: trimVal(formatCurrencyWc(elFeeNum)),
+    totalEstimatedPremium: trimVal(formatCurrencyWc(totalEstimatedPremiumNum)),
+    downPayment: trimVal(formatCurrencyWc(downPaymentNum)),
 
     // Class schedule (loop data)
     classSchedule,
@@ -202,8 +204,8 @@ export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger
     horizontalLogoBase64: logos?.horizontal ? logos.horizontal.toString('base64') : null,
 
     // Standard compatibility fields
-    proposalNumber: payload.proposalNumber || generateProposalNumber(),
-    generatedDate: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
-    templateVersion: templateMeta?.version || '',
+    proposalNumber: trimVal(payload.proposalNumber || generateProposalNumber()),
+    generatedDate: trimVal(new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })),
+    templateVersion: trimVal(templateMeta?.version || ''),
   }
 }

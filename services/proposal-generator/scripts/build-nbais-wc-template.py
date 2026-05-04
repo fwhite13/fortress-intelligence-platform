@@ -465,7 +465,7 @@ def add_two_col_rec_table(doc, left_sections, right_sections):
             set_cell_width(cell, half)
             set_cell_margins(cell, top=40, bottom=40, left=60, right=60)
             set_no_cell_borders(cell)
-            fix_cell_content(cell)
+            fix_cell_content(cell, valign='top')
 
             if i < len(sections):
                 title, bullets = sections[i]
