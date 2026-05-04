@@ -791,26 +791,6 @@ def build_toc_page(doc):
 def build_cover_letter_page(doc):
     """Build cover letter page content (Section 3)."""
 
-    # Letter meta block
-    for tag in ['{quoteDate}', '{memberName}', '{memberAddress}']:
-        p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(3)
-        p.paragraph_format.space_after = Pt(3)
-        r = p.add_run(tag)
-        set_font(r, size_pt=10, color=GRAY)
-
-    # RE: line
-    p_re = doc.add_paragraph()
-    p_re.paragraph_format.space_before = Pt(10)
-    p_re.paragraph_format.space_after = Pt(10)
-    r_re = p_re.add_run(
-        'RE: Workers\u2019 Compensation Insurance Proposal \u2014 Nevada Builders Alliance Member Program'
-    )
-    set_font(r_re, size_pt=10, bold=True, color=GRAY)
-
-    # Salutation
-    p_sal = body_para(doc, 'Dear {memberName},', size_pt=10, color=GRAY, space_before=0, space_after=10)
-
     # About section
     add_h3(doc, 'About this proposal')
 
@@ -876,24 +856,18 @@ def build_premium_summary_page(doc):
     )
     set_font(r_lead, size_pt=10, italic=True, color=GRAY)
 
-    # Coverage at a Glance table
-    cag_rows = [
-        ('Insured',                   '{memberName}'),
-        ('Policy Period',             '{policyPeriod}'),
-        ('Coverage',                  'Workers\u2019 Compensation \u2014 Statutory (Nevada) / Employers\u2019 Liability'),
-        ('Employers\u2019 Liability Limits',
-         '$1,000,000 Each Accident / $1,000,000 Disease \u2013 Each Employee / $1,000,000 Disease \u2013 Policy Limit'),
-        ('Program',                   'Nevada Builders Alliance \u2014 NBAIS Member Program'),
-        ('Carrier',                   'Builders Association of Western Nevada Self-Insured Group (BAWNSIG)'),
-        ('Est. Premium',              '{estPremium} (subject to final audit)'),
-        ('Surplus Contribution (8%)', '{surplusContribution}'),
+    # Premium Summary table
+    ps_rows = [
+        ('Base Premium',                  '{basePremium}'),
+        ('Estimated Annual Premium',       '{estPremium}'),
+        ('Surplus Contribution (8%)',      '{surplusContribution}'),
         ('Employers\u2019 Liability Fee',  '{employersLiabilityFee}'),
     ]
 
     label_w = int(CONTENT_W * 0.35)
     value_w = CONTENT_W - label_w
 
-    tbl = doc.add_table(rows=len(cag_rows) + 3, cols=2)  # +1 banner, +1 total, +1 downpayment
+    tbl = doc.add_table(rows=7, cols=2)  # 1 banner + 4 data + 1 total + 1 downpayment
     set_table_borders(tbl, color=BORDER_HEX, size=4)
     set_table_width(tbl, CONTENT_W)
     set_table_grid(tbl, [label_w, value_w])
@@ -905,12 +879,12 @@ def build_premium_summary_page(doc):
     set_cell_margins(b_cell, top=80, bottom=80, left=100, right=80)
     fix_cell_content(b_cell)
     p = b_cell.paragraphs[0]
-    r = p.add_run('Coverage at a Glance')
+    r = p.add_run('Premium Summary')
     set_font(r, size_pt=11, bold=True, color=WHITE)
     set_row_header(tbl.rows[0])
 
     # Data rows
-    for i, (label, value) in enumerate(cag_rows):
+    for i, (label, value) in enumerate(ps_rows):
         row = tbl.rows[i + 1]
         lc, vc = row.cells[0], row.cells[1]
         set_cell_width(lc, label_w)
@@ -930,12 +904,12 @@ def build_premium_summary_page(doc):
         set_font(vr, size_pt=10, color=GRAY)
 
     # Total row
-    total_row = tbl.rows[len(cag_rows) + 1]
+    total_row = tbl.rows[5]
     tlc, tvc = total_row.cells[0], total_row.cells[1]
     set_cell_bg(tlc, LT_BLUE_HEX)
     set_cell_bg(tvc, LT_BLUE_HEX)
-    set_cell_margins(tlc, top=80, bottom=80, left=80, right=60)
-    set_cell_margins(tvc, top=80, bottom=80, left=80, right=60)
+    set_cell_margins(tlc, top=80, bottom=80, left=115, right=115)
+    set_cell_margins(tvc, top=80, bottom=80, left=115, right=115)
     fix_cell_content(tlc)
     fix_cell_content(tvc)
     tp = tlc.paragraphs[0]
@@ -946,20 +920,22 @@ def build_premium_summary_page(doc):
     set_font(tvr, size_pt=11, bold=True, color=NAVY)
 
     # Down payment row
-    dp_row = tbl.rows[len(cag_rows) + 2]
+    dp_row = tbl.rows[6]
     dlc, dvc = dp_row.cells[0], dp_row.cells[1]
-    set_cell_margins(dlc, top=60, bottom=60, left=80, right=60)
-    set_cell_margins(dvc, top=60, bottom=60, left=80, right=60)
+    set_cell_margins(dlc, top=80, bottom=80, left=115, right=115)
+    set_cell_margins(dvc, top=80, bottom=80, left=115, right=115)
     fix_cell_content(dlc)
     fix_cell_content(dvc)
     dp = dlc.paragraphs[0]
-    dr = dp.add_run('Initial Down Payment')
-    set_font(dr, size_pt=10, bold=True, color=NAVY)
+    dr1 = dp.add_run('Down Payment Due at Binding (25%): ')
+    set_font(dr1, size_pt=10, bold=True, color=NAVY)
+    dr2 = dp.add_run('{downPayment}')
+    set_font(dr2, size_pt=10, bold=True, color=NAVY)
+    dr3 = dp.add_run('.')
+    set_font(dr3, size_pt=10, color=NAVY)
     dvp = dvc.paragraphs[0]
-    dvr = dvp.add_run(
-        '{downPayment} (25% \u2014 new business). Balance payable online via secure payment link provided upon binding.'
-    )
-    set_font(dvr, size_pt=10, color=GRAY)
+    dvr = dvp.add_run('Balance payable online via secure payment link provided upon binding.')
+    set_font(dvr, size_pt=10, italic=True, color=GRAY)
 
     # What's next section
     add_h3(doc, "What\u2019s next")
@@ -976,14 +952,14 @@ def build_premium_summary_page(doc):
     run_break.add_break(WD_BREAK.PAGE)
 
     # Coverage Details sub-section
-    add_banner_continued(doc, 'Coverage Details \u2014 Workers\u2019 Compensation', font_size=13)
+    add_banner_continued(doc, 'Policy Summary', font_size=13)
 
     add_h3(doc, 'Policy Information')
 
     pi_rows = [
         ('Carrier',             'Builders Association of Western Nevada Self-Insured Group (BAWNSIG)'),
         ('Program Manager',     'Lusense'),
-        ('Financial Strength',  'BAWNSIG is a Nevada state-regulated self-insured group. AM Best rating not applicable \u2014 see program disclosure.'),
+        ('Delivered By',        'Nevada Builders Alliance Insurance Services (NBAIS) via Higginbotham'),
         ('Policy Period',       '{policyPeriod}'),
         ('Coverage',            'Workers\u2019 Compensation'),
         ('States Covered',      'Nevada'),
@@ -997,7 +973,7 @@ def build_premium_summary_page(doc):
     r_ni = p_ni.add_run('{memberLegalName}')
     set_font(r_ni, size_pt=11, bold=True, color=NAVY)
 
-    add_h3(doc, 'Coverage and Limits')
+    add_h3(doc, 'Coverage & Limits')
 
     cov_label_w = int(CONTENT_W * 0.65)
     cov_value_w = CONTENT_W - cov_label_w
@@ -1074,7 +1050,7 @@ def build_premium_summary_page(doc):
 
 def build_coverage_details_continued_page(doc):
     """Build coverage details continued page (Section 5)."""
-    add_banner_continued(doc, 'Coverage Details (continued)', font_size=13)
+    add_banner_continued(doc, 'Policy Details', font_size=13)
 
     # Employee Classification Schedule
     add_h3(doc, 'Employee Classification Schedule')
@@ -1707,7 +1683,7 @@ def main():
     s5 = doc.add_section(WD_SECTION.NEW_PAGE)
     apply_standard_margins(s5)
     link_header(s5)
-    build_standard_footer(s5, 'Coverage Details (2 of 2)')
+    build_standard_footer(s5, 'Policy Details')
     build_coverage_details_continued_page(doc)
 
     # ── Section 6: Next Steps & Authorization ────────────────────────────

@@ -92,4 +92,23 @@ python3 /home/fredw/projects/fip/services/proposal-generator/scripts/build-nbais
 
 ---
 
+## BUILD CYCLE 2 — 2026-05-04
+
+### Fix applied
+
+- **I1 (Required):** Added `fix_cell_content(cell_spacer)` after `set_no_cell_borders(cell_spacer)` in `build_next_steps_page()` at line ~1350. The contact spacer cell was missing this call, inconsistent with all other cells.
+- **N1 (Optional):** Replaced `cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP` with `fix_cell_content(cell, valign='top')` in cover header bar (~line 645). `fix_cell_content` already supported the `valign` param (defined as `def fix_cell_content(cell, valign='center')`), so the update was trivial.
+
+### Build & Deploy
+
+- Build: **SUCCEEDED** — `master.docx` regenerated cleanly
+- S3 sync: **SUCCEEDED** — uploaded to `s3://fortress-tools/fip-proposal-templates/verticals/nbais-wc/master.docx`
+- Commit: `97653a1` — `fix(ADO#2704): add fix_cell_content to contact spacer cell; update cover bar to use fix_cell_content (Clint I1+N1)`
+
+### ADO Comment
+
+Posted to WI#2704 (comment ID 772277).
+
+---
+
 _Build Report by Tony Stark (software-engineer) | 2026-05-04_

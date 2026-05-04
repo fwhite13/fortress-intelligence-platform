@@ -183,6 +183,7 @@ export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger
     quoteDate,
 
     // Premium fields (all formatted currency strings)
+    basePremium: formatCurrencyWc(basePremiumNum),
     estPremium: formatCurrencyWc(basePremiumNum),
     surplusContribution: formatCurrencyWc(surplusContributionNum),
     employersLiabilityFee: formatCurrencyWc(elFeeNum),
