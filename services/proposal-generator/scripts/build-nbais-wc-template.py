@@ -829,7 +829,7 @@ def build_cover_letter_page(doc):
               size_pt=10, color=GRAY, space_before=0, space_after=6)
 
     add_bullet(doc, ' \u2014 a summary of your proposed coverage terms and estimated premium.',
-               lead_bold='Premium Summary & Coverage at a Glance')
+               lead_bold='Premium Summary')
     add_bullet(doc, ' \u2014 a detailed outline of the proposed coverage terms, limits, and exclusions applicable to your operation.',
                lead_bold='Workers\u2019 Compensation Coverage Details')
     add_bullet(doc, ' \u2014 the carrier quotation secured for your review, including the class code and payroll basis used to develop this quote. Please review for accuracy and notify us of any changes prior to binding.',
@@ -944,14 +944,14 @@ def build_premium_summary_page(doc):
         'and contact your NBAIS producer to bind. Final premium will be reconciled at audit.',
         size_pt=10, color=GRAY, space_before=0, space_after=8)
 
-    # Explicit page break — force Coverage Details to start on new page
-    p_break = doc.add_paragraph()
-    p_break.paragraph_format.space_before = Pt(0)
-    p_break.paragraph_format.space_after = Pt(0)
-    run_break = p_break.add_run()
-    run_break.add_break(WD_BREAK.PAGE)
 
-    # Coverage Details sub-section
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 4b — POLICY SUMMARY
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_policy_summary_page(doc):
+    """Build policy summary page (Section 4b)."""
     add_banner_continued(doc, 'Policy Summary', font_size=13)
 
     add_h3(doc, 'Policy Information')
@@ -1672,12 +1672,19 @@ def main():
     build_standard_footer(s3, 'Cover Letter')
     build_cover_letter_page(doc)
 
-    # ── Section 4: Premium Summary + Coverage Details ─────────────────────
+    # ── Section 4: Premium Summary ────────────────────────────────────────
     s4 = doc.add_section(WD_SECTION.NEW_PAGE)
     apply_standard_margins(s4)
     link_header(s4)
     build_standard_footer(s4, 'Premium Summary')
     build_premium_summary_page(doc)
+
+    # ── Section 4b: Policy Summary ────────────────────────────────────────
+    s4b = doc.add_section(WD_SECTION.NEW_PAGE)
+    apply_standard_margins(s4b)
+    link_header(s4b)
+    build_standard_footer(s4b, 'Policy Summary')
+    build_policy_summary_page(doc)
 
     # ── Section 5: Coverage Details continued ─────────────────────────────
     s5 = doc.add_section(WD_SECTION.NEW_PAGE)
