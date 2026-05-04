@@ -295,6 +295,16 @@ def set_para_spacing_zero(para):
     pPr.append(spacing)
 
 
+def set_outline_level(para, level=9):
+    """Set paragraph outline level in pPr. Level 9 = body text (suppresses [+] in Word)."""
+    pPr = para._p.get_or_add_pPr()
+    for existing in pPr.findall(qn('w:outlineLvl')):
+        pPr.remove(existing)
+    outline_lvl = OxmlElement('w:outlineLvl')
+    outline_lvl.set(qn('w:val'), str(level))
+    pPr.append(outline_lvl)
+
+
 def fix_cell_content(cell, valign='center'):
     """Apply vAlign, zero paragraph spacing, remove trailing empty paras.
 
@@ -361,6 +371,7 @@ def add_h3(doc, text):
     para.paragraph_format.space_before = Pt(12)
     para.paragraph_format.space_after = Pt(6)
     set_para_bottom_border(para, BORDER_HEX, 8)
+    set_outline_level(para, 9)
     run = para.add_run(text)
     set_font(run, size_pt=11, bold=True, color=NAVY)
     return para
@@ -372,6 +383,7 @@ def add_section_divider(doc, text):
     para.paragraph_format.space_before = Pt(14)
     para.paragraph_format.space_after = Pt(8)
     set_para_bottom_border(para, BORDER_HEX, 8)
+    set_outline_level(para, 9)
     run = para.add_run(text)
     set_font(run, size_pt=12, bold=True, color=NAVY)
     return para
@@ -1098,6 +1110,7 @@ def build_coverage_details_continued_page(doc):
     p0b = c0.add_paragraph()
     r0b = p0b.add_run('{state}')
     set_font(r0b, size_pt=10, color=GRAY)
+    set_para_spacing_zero(p0b)
 
     # Cell 1: class code
     c1 = dr.cells[1]
@@ -1127,6 +1140,7 @@ def build_coverage_details_continued_page(doc):
     p5b = c5.add_paragraph()
     r5b = p5b.add_run('{/classSchedule}')
     set_font(r5b, size_pt=10, color=GRAY)
+    set_para_spacing_zero(p5b)
 
     # Total row
     tr_row = tbl_cs.rows[2]
