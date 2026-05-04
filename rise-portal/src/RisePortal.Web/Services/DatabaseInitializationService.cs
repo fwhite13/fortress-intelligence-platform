@@ -32,6 +32,11 @@ public class DatabaseInitializationService : IHostedService
 
             var tables = new[]
             {
+                ("DataProtectionKeys", @"CREATE TABLE IF NOT EXISTS DataProtectionKeys (
+                    Id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    FriendlyName TEXT NULL,
+                    Xml LONGTEXT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"),
                 ("user_microsoft_tokens", @"CREATE TABLE IF NOT EXISTS user_microsoft_tokens (
                     entra_oid VARCHAR(128) NOT NULL PRIMARY KEY,
                     access_token TEXT NOT NULL,

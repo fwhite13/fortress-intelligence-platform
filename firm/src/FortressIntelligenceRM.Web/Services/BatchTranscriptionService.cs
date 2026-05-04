@@ -17,8 +17,8 @@ public class BatchTranscriptionService : IBatchTranscriptionService
     private readonly IOrgContextService _orgContextService;
     private readonly IUserWikiService _userWikiService;
     private readonly ILogger<BatchTranscriptionService> _logger;
-    private const string JobQueue = "firm-transcription-queue";
-    private const string JobDefinition = "firm-transcription-job";
+    private string JobQueue => _config["Firm:BatchJobQueue"] ?? "firm-transcription-queue";
+    private string JobDefinition => _config["Firm:BatchJobDefinition"] ?? "firm-transcription-job";
 
     public BatchTranscriptionService(IAmazonBatch batch, IConfiguration config, IOrgContextService orgContextService, IUserWikiService userWikiService, ILogger<BatchTranscriptionService> logger)
     {

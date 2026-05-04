@@ -7,13 +7,16 @@ namespace FortressIntelligenceRM.Web.Data;
 public class DatabaseInitializationService : IHostedService
 {
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
+    private readonly IConfiguration _config;
     private readonly ILogger<DatabaseInitializationService> _logger;
 
     public DatabaseInitializationService(
         IDbContextFactory<FirmDbContext> dbFactory,
+        IConfiguration config,
         ILogger<DatabaseInitializationService> logger)
     {
         _dbFactory = dbFactory;
+        _config = config;
         _logger = logger;
     }
 
@@ -221,6 +224,41 @@ public class DatabaseInitializationService : IHostedService
                 {
                     _logger.LogWarning("FIRM: Schema migration failed (non-fatal): {Message}", ex.Message);
                 }
+            }
+
+            // Ensure DataProtectionKeys table exists in the shared keyring DB
+            try
+            {
+                var keyRingDbHost = _config["FORTRESS_DB_HOST"] ?? "localhost";
+                var keyRingDbPort = _config["FORTRESS_DB_PORT"] ?? "3306";
+                var keyRingDbUser = _config["FORTRESS_DB_USER"] ?? "fortress_mysql";
+                var keyRingDbPass = _config["FORTRESS_DB_PASS"] ?? "";
+                var keyRingDbName = _config["FIP_KEYRING_DB_NAME"] ?? "fred_dev";
+
+                var keyRingCsb = new MySqlConnectionStringBuilder
+                {
+                    Server = keyRingDbHost,
+                    Port = uint.Parse(keyRingDbPort),
+                    Database = keyRingDbName,
+                    UserID = keyRingDbUser,
+                    Password = keyRingDbPass,
+                    ConnectionTimeout = 10
+                };
+
+                await using var keyRingConn = new MySqlConnection(keyRingCsb.ConnectionString);
+                await keyRingConn.OpenAsync(cancellationToken);
+
+                await using var dpCmd = new MySqlCommand(@"CREATE TABLE IF NOT EXISTS DataProtectionKeys (
+                    Id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    FriendlyName TEXT NULL,
+                    Xml LONGTEXT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci", keyRingConn);
+                await dpCmd.ExecuteNonQueryAsync(cancellationToken);
+                _logger.LogInformation("FIRM: DataProtectionKeys table ensured in keyring DB.");
+            }
+            catch (Exception dpEx)
+            {
+                _logger.LogWarning("FIRM: DataProtectionKeys table creation note: {Message}", dpEx.Message);
             }
 
             _logger.LogInformation("FIRM: Database initialization complete.");

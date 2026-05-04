@@ -168,7 +168,7 @@ builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
 // FIRM is a consumer — DisableAutomaticKeyGeneration so only FIP portal creates keys
 builder.Services.AddDataProtection()
     .PersistKeysToDbContext<SharedKeyRingDbContext>()
-    .SetApplicationName("FortressAI")
+    .SetApplicationName(builder.Configuration["DataProtection:ApplicationName"] ?? "FortressAI")
     .DisableAutomaticKeyGeneration();
 
 var app = builder.Build();

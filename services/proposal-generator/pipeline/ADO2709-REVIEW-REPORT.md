@@ -149,3 +149,24 @@ Approach: extract the Policy Summary content (from the existing page-break point
 ```
 
 Both fixes are isolated, low-risk, and require no schema or data layer changes. Once applied, rebuild and re-sync master.docx to S3.
+
+---
+
+## Review Cycle 2 — Re-check
+
+**Reviewer:** Hawkeye (Clint Barton)  
+**Date:** 2026-05-04  
+**Commit reviewed:** `3e9c96d`  
+**Verdict:** ✅ PASS
+
+### CC Findings
+
+CC confirmed both required fixes in `build-nbais-wc-template.py`:
+
+**C1 — Section split (resolved):** `build_policy_summary_page()` function exists (line 953) with its own `add_banner_continued(doc, 'Policy Summary', ...)` call (line 955). Section 4b (lines 1682–1687) calls `build_standard_footer(s4b, 'Policy Summary')` correctly. Section 4 (lines 1675–1680) calls `build_standard_footer(s4, 'Premium Summary')`. Both sections apply `apply_standard_margins` and `link_header`, consistent with all other sections. The manual `WD_BREAK.PAGE` between the two pages is gone — the section break now handles pagination.
+
+**I1 — Cover letter bullet (resolved):** `'Premium Summary & Coverage at a Glance'` is gone. The bullet at line 831–832 reads `'Premium Summary'` only. No matches for `Coverage at a Glance` exist anywhere in the file.
+
+**No new issues introduced** by the section split.
+
+### Verdict: PASS — clears for deployment.
