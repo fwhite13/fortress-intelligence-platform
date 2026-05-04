@@ -165,3 +165,39 @@ set_table_grid(tbl_ep, [ep_label_w, ep_value_w])
 ---
 
 _Hawkeye — you see what others miss._
+
+---
+
+# Review Report — ADO#2696 (Cycle 3)
+
+**Commit:** `8db3a0a` — fix(ADO#2696): add set_table_grid to remaining 5 tables  
+**Reviewer:** Hawkeye (Clint Barton)  
+**Date:** 2026-05-01  
+**File reviewed:** `services/proposal-generator/scripts/build-nbais-wc-template.py`
+
+---
+
+### Verdict: PASS ✅
+
+---
+
+### CC Review Summary
+
+CC confirmed all 5 `set_table_grid()` calls from the Cycle 2 NEEDS-CHANGES verdict are now present, correctly placed immediately after `set_table_width()`, and using the correct width variables.
+
+| # | Table | Lines | Call | ✓ |
+|---|-------|-------|------|---|
+| 1 | `add_two_col_rec_table` | 404–406 | `set_table_grid(tbl, [half, half])` | ✅ |
+| 2 | Coverage at a Glance | 857–858 | `set_table_grid(tbl, [label_w, value_w])` | ✅ |
+| 3 | Coverage and Limits `tbl_cov` | 973–974 | `set_table_grid(tbl_cov, [cov_label_w, cov_value_w])` | ✅ |
+| 4 | Class Schedule `tbl_cs` | 1052–1053 | `set_table_grid(tbl_cs, col_ws)` | ✅ |
+| 5 | Excluded Persons `tbl_ep` | 1158–1159 | `set_table_grid(tbl_ep, [ep_label_w, ep_value_w])` | ✅ |
+
+### Notes
+- All calls placed after `set_table_width()` — correct ordering per OOXML spec.
+- No regressions detected. No out-of-scope changes.
+- ADO#2696 closed.
+
+---
+
+_Hawkeye — you see what others miss._

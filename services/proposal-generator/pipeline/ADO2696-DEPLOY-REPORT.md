@@ -1,59 +1,64 @@
 # ADO#2696 Deploy Report
 
-**WI:** ADO#2696 — fix set_cell_width/set_table_width remove-before-append  
-**Deployed by:** War Machine (Rhodey)  
+**Title:** fix(ADO#2696): add set_table_grid to remaining 5 tables  
+**Commit:** `8db3a0a`  
 **Date:** 2026-05-01  
-**Commit:** `01a5860`
+**Deployed by:** War Machine (Rhodey)
 
 ---
 
-## Summary
-
-Fix for `set_cell_width` / `set_table_width` to remove existing XML before append, preventing duplicate XML nodes accumulating on repeated calls.
-
----
-
-## Image
-
-| Tag | Digest |
-|-----|--------|
-| `fip-proposal-generator:01a5860` | `sha256:1b99891662eb27a9887dbc8cae43f45c7ade5be79e5047024494d5b69551d6bd` |
-| `fip-proposal-generator:latest` | same |
-
-ECR repo: `742932328420.dkr.ecr.us-east-1.amazonaws.com/fip-proposal-generator`
-
----
-
-## ECS
+## Deploy Summary
 
 | Field | Value |
-|-------|-------|
-| Cluster | `fortress-tools-cluster` |
+|---|---|
 | Service | `proposal-generator-dev` |
-| Previous task def | `proposal-generator-dev:28` |
-| New task def | `proposal-generator-dev:29` |
-| Status | RUNNING 1/1 |
-| `/health` | 200 |
+| Cluster | `fortress-tools-cluster` |
+| ECR Repo | `fip-proposal-generator` |
+| Image Tag | `8db3a0a` |
+| Image Digest | `sha256:0175a32d42527a875d15eaf5de50cb84656a5c7471fd0c13f4f4ea37f7fa100b` |
+| Previous Task Def | `proposal-generator-dev:29` |
+| New Task Def | `proposal-generator-dev:30` |
+| ECS Status | RUNNING 1/1 |
+| Health Check | `/health` → 200 `{"status":"ok","version":"1.0.0"}` |
 
 ---
 
-## Rollback
+## Pre-Deploy State
+
+- Task definition: `proposal-generator-dev:29`
+- Service: ACTIVE, 1/1 running
+
+## Build
+
+- Docker build: `--no-cache` from monorepo root
+- Dockerfile: `services/proposal-generator/Dockerfile`
+- Base image: `node:22-alpine` with LibreOffice
+- Both tags pushed: `:8db3a0a` and `:latest`
+
+## Deployment
+
+- New task definition registered: `proposal-generator-dev:30`
+- Image pinned to commit SHA `8db3a0a`
+- `force-new-deployment` triggered
+- ECS stabilized: RUNNING 1/1
+
+## Health Verification
+
+```
+GET /health (via ALB)
+Host: proposal-generator.dev.fortressam.ai
+Response: 200 {"status":"ok","version":"1.0.0"}
+```
+
+## Rollback Target
+
+`proposal-generator-dev:29`
 
 ```bash
 aws ecs update-service \
   --cluster fortress-tools-cluster \
   --service proposal-generator-dev \
-  --task-definition proposal-generator-dev:28 \
-  --force-new-deployment \
+  --task-definition proposal-generator-dev:29 \
   --profile fortress-tools-deployer \
   --region us-east-1
 ```
-
----
-
-## Build Notes
-
-- Docker build: `--no-cache` ✅
-- LibreOffice 25.8.1 installed in image ✅
-- npm ci --only=production ✅ (183 packages)
-- Build time: ~2 min 30 sec

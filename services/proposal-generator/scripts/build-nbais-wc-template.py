@@ -642,7 +642,7 @@ def build_cover_first_page_header(section):
     set_cell_bg(cell, NAVY_HEX)
     set_row_height(tbl.rows[0], 460, exact=True)
     set_cell_margins(cell, top=0, bottom=0, left=0, right=0)
-    cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+    fix_cell_content(cell, valign='top')
     p = cell.paragraphs[0]
     p.paragraph_format.space_before = Pt(0)
     p.paragraph_format.space_after = Pt(0)
@@ -1347,6 +1347,7 @@ def build_next_steps_page(doc):
     cell_spacer = tbl_contact.rows[0].cells[1]
     set_cell_width(cell_spacer, SPACER_W)
     set_no_cell_borders(cell_spacer)
+    fix_cell_content(cell_spacer)
 
     # Col 2: Office box
     cell2 = tbl_contact.rows[0].cells[2]

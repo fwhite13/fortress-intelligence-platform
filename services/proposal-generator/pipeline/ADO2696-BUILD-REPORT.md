@@ -49,3 +49,32 @@ SUCCEEDED — template rebuilt and synced to S3
 
 ### Commit
 `e15148b` — pushed to main
+
+---
+
+## Build Cycle 3 (commit 8db3a0a) — 2026-05-02
+
+### What was built
+Added `set_table_grid()` calls to the 5 remaining multi-column tables that had explicit per-cell widths but no tblGrid declaration (per Clint C2 NEEDS-CHANGES review).
+
+### Tables patched
+| Table / Function | Col widths | Split |
+|-----------------|------------|-------|
+| `add_two_col_rec_table` | [half, half] = [4680, 4680] | 50/50 |
+| Coverage at a Glance `tbl` | [label_w, value_w] | 35/65 |
+| Coverage and Limits `tbl_cov` | [cov_label_w, cov_value_w] | 65/35 |
+| Class Schedule `tbl_cs` | col_ws (6 cols) | proportional |
+| Excluded Persons `tbl_ep` | [ep_label_w, ep_value_w] | 30/70 |
+
+### Files changed
+- `services/proposal-generator/scripts/build-nbais-wc-template.py` — +5 `set_table_grid()` call sites (L407, L857, L972, L1050, L1155)
+- `services/proposal-generator/templates/verticals/nbais-wc/master.docx` — rebuilt
+
+### CC sessions
+1 CC Sonnet session (sequential, single task)
+
+### Build
+SUCCEEDED — template rebuilt and synced to S3
+
+### Commit
+`8db3a0a` — pushed to main

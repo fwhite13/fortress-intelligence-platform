@@ -1,5 +1,28 @@
 # QA Report: ADO#2696
 
+---
+
+## ✅ FINAL QA — 2026-05-01 20:52 EDT
+
+### Verdict: ✅ PASS
+
+**Service:** `proposal-generator-dev:30`, image `8db3a0a`  
+**All 4 test cases passed.** The S3 template upload fix resolved the signature table column width bug.
+
+| Test | Result | Details |
+|------|--------|---------|
+| TC1 — Health endpoint | ✅ PASS | HTTP 200 |
+| TC2 — Generate + download | ✅ PASS | 420 KB DOCX via S3 pre-signed URL |
+| TC3 — Signature table tblGrid | ✅ PASS | `['2340', '7020']` ← matches expected |
+| TC4 — Document integrity | ✅ PASS | Sections: 8, Tables: 24, Paras: 58 |
+
+**TC3 detail:** Table idx 12, tblGrid `['2340', '7020']`, tcW `['2340', '7020']` — the narrow label column and wide content column are correct.  
+**No warnings.** ADO#2696 acceptance criterion met.
+
+---
+
+## ❌ INITIAL QA — 2026-05-01 20:29 EDT (FAIL — stale S3 template)
+
 ### Verdict: ❌ FAIL
 
 **Reason:** Signature table column widths still read `['4680', '4680']` (50/50). The template fix landed correctly in the local `master.docx` but was **not synced to S3** before deploy. The service is loading the stale template from S3.
