@@ -8,8 +8,11 @@
 @inject NavigationManager Nav
 @inject UserContextService UserContextService
 @inject IDialogService DialogService
+@inject IConfiguration Configuration
+@inject IAdoService AdoService
 
 @using FortressNexus.Web.Data
+@using FortressNexus.Web.Models.DTOs
 @using FortressNexus.Web.Services
 @using Microsoft.EntityFrameworkCore
 
@@ -60,15 +63,27 @@ else if (_artifactSet is not null)
                         Done Editing
                     </MudButton>
                 }
-                <MudTooltip Text="@(_editMode ? "Exit edit mode to post" : "Post work items to ADO")">
-                    <MudButton Variant="Variant.Filled"
-                               Color="Color.Primary"
-                               StartIcon="@Icons.Material.Filled.CloudUpload"
-                               Size="Size.Small"
-                               Disabled="@_editMode">
-                        Post to ADO
-                    </MudButton>
-                </MudTooltip>
+                @if (_isAdmin)
+                {
+                    <MudTooltip Text="@(_editMode ? "Exit edit mode to post" : (_isPosting ? "Posting..." : "Post work items to ADO"))">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@(_isPosting ? null : Icons.Material.Filled.CloudUpload)"
+                                   Size="Size.Small"
+                                   Disabled="@(_editMode || _isPosting)"
+                                   OnClick="@OpenAdoConfirmDialogAsync">
+                            @if (_isPosting)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                                <span>Posting...</span>
+                            }
+                            else
+                            {
+                                <span>Post to ADO</span>
+                            }
+                        </MudButton>
+                    </MudTooltip>
+                }
             </div>
         </div>
 
@@ -415,7 +430,108 @@ else if (_artifactSet is not null)
                 </MudExpansionPanel>
             }
         </MudExpansionPanels>
+
+        @* ── ADO Post Progress ── *@
+        @if (_isPosting)
+        {
+            <MudPaper Class="pa-4 mt-4">
+                <MudText Typo="Typo.body1" Class="mb-2">@_postingStatus</MudText>
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            </MudPaper>
+        }
+
+        @* ── ADO Post Results Panel ── *@
+        @if (_postResults is not null && !_isPosting)
+        {
+            var createdCount = _postResults.Count(r => r.Status == "Created");
+            var errorCount = _postResults.Count(r => r.Status == "Error");
+
+            <MudPaper Class="pa-4 mt-4">
+                <div class="d-flex align-center gap-2 mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" />
+                    <MudText Typo="Typo.h6">ADO Post Complete — @createdCount created, @errorCount errors</MudText>
+                </div>
+
+                @foreach (var result in _postResults)
+                {
+                    <div class="d-flex align-center gap-2 mb-1 flex-wrap">
+                        <MudChip T="string" Color="Color.Secondary" Size="Size.Small">@result.WorkItemType</MudChip>
+                        <MudText Typo="Typo.body2" Style="flex:1">@result.Title</MudText>
+                        @if (result.Status == "Created")
+                        {
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small">✅ Created</MudChip>
+                            @if (!string.IsNullOrEmpty(result.AdoWorkItemUrl))
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.OpenInNew"
+                                               Size="Size.Small"
+                                               Color="Color.Primary"
+                                               Href="@result.AdoWorkItemUrl"
+                                               Target="_blank" />
+                            }
+                        }
+                        else
+                        {
+                            <MudTooltip Text="@(result.ErrorDetail ?? "Unknown error")">
+                                <MudChip T="string" Color="Color.Error" Size="Size.Small">❌ Error</MudChip>
+                            </MudTooltip>
+                        }
+                    </div>
+                }
+            </MudPaper>
+        }
     </MudContainer>
+
+    @* ── ADO Confirmation Dialog ── *@
+    @if (_showAdoConfirmDialog)
+    {
+        <MudOverlay Visible="true" DarkBackground="true" ZIndex="9" AutoClose="false">
+            <MudPaper Class="pa-6" Style="min-width:400px; max-width:500px;">
+                <MudText Typo="Typo.h6" Class="mb-4">Post to Azure DevOps</MudText>
+
+                <MudTextField @bind-Value="_adoOrg"
+                              Label="Organization"
+                              Variant="Variant.Outlined"
+                              Class="mb-3"
+                              ReadOnly="true" />
+
+                @if (_adoProjects.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="mb-3">Loading projects...</MudText>
+                }
+                else
+                {
+                    <MudSelect @bind-Value="_selectedAdoProject"
+                               Label="ADO Project"
+                               Variant="Variant.Outlined"
+                               Class="mb-3">
+                        @foreach (var proj in _adoProjects)
+                        {
+                            <MudSelectItem T="string" Value="@proj">@proj</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+
+                <MudText Typo="Typo.body1" Class="mb-4">
+                    Post <strong>@_workItems.Count</strong> work items to <strong>@(_selectedAdoProject ?? "...")</strong>?
+                </MudText>
+
+                <div class="d-flex justify-end gap-2">
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Default"
+                               OnClick="@(() => { _showAdoConfirmDialog = false; StateHasChanged(); })">
+                        Cancel
+                    </MudButton>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Disabled="@(_selectedAdoProject == null)"
+                               OnClick="@PostToAdoAsync"
+                               StartIcon="@Icons.Material.Filled.CloudUpload">
+                        Post to ADO →
+                    </MudButton>
+                </div>
+            </MudPaper>
+        </MudOverlay>
+    }
 }
 
 @code {
@@ -432,6 +548,18 @@ else if (_artifactSet is not null)
     // Edit Mode state
     private bool _editMode = false;
     private bool _isEditor = false;
+
+    // ADO Post state
+    private bool _isAdmin = false;
+    private bool _isPosting = false;
+    private string _postingStatus = "";
+    private List<WorkItemRecord>? _postResults = null;
+
+    // ADO confirmation dialog state
+    private bool _showAdoConfirmDialog = false;
+    private string _adoOrg = "FortressAffinityGroup";
+    private List<string> _adoProjects = new();
+    private string? _selectedAdoProject = null;
     // Track original titles for revert on save failure
     private Dictionary<int, string> _originalTitles = new();
     private Dictionary<int, string> _originalDescriptions = new();
@@ -493,6 +621,8 @@ else if (_artifactSet is not null)
             _epics = _workItems.Where(w => w.WorkItemType == "Epic").ToList();
 
             _isEditor = await UserContextService.IsNexusEditorAsync();
+            _isAdmin = await UserContextService.IsAdminAsync();
+            _adoOrg = Configuration["NexusAdo:Organization"] ?? "FortressAffinityGroup";
             // Snapshot originals for revert on save failure
             foreach (var w in _workItems)
             {
@@ -803,6 +933,97 @@ else if (_artifactSet is not null)
             builder.AddAttribute(4, "ChildContent", (RenderFragment)(b => b.AddContent(0, "\U0001F9EA TC")));
             builder.CloseComponent();
         }
+    };
+
+    // ── ADO Post ──
+
+    private async Task OpenAdoConfirmDialogAsync()
+    {
+        _adoProjects = new List<string>();
+        _selectedAdoProject = null;
+        _showAdoConfirmDialog = true;
+        StateHasChanged();
+
+        try
+        {
+            _adoProjects = await AdoService.GetProjectsAsync(_adoOrg);
+            if (_adoProjects.Count > 0)
+                _selectedAdoProject = _adoProjects[0];
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to load ADO projects: {ex.Message}", Severity.Error);
+            _showAdoConfirmDialog = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task PostToAdoAsync()
+    {
+        _showAdoConfirmDialog = false;
+        _isPosting = true;
+        _postResults = null;
+        _postingStatus = $"Posting {_workItems.Count} work items to {_selectedAdoProject}...";
+        StateHasChanged();
+
+        try
+        {
+            var dtos = _workItems.Select(MapToDto).ToList();
+            var results = await AdoService.CreateWorkItemBatchAsync(_artifactSet!, dtos);
+            await WriteBackResultsAsync(results);
+            _postResults = results;
+            Snackbar.Add($"Posted {results.Count(r => r.Status == "Created")} work items to ADO.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Post to ADO failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isPosting = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task WriteBackResultsAsync(List<WorkItemRecord> results)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        foreach (var result in results)
+        {
+            var record = await db.WorkItemRecords
+                .FirstOrDefaultAsync(w => w.ArtifactSetId == _artifactSet!.Id && w.Title == result.Title);
+            if (record is null) continue;
+
+            record.AdoWorkItemId = result.AdoWorkItemId;
+            record.AdoWorkItemUrl = result.AdoWorkItemUrl;
+            record.Status = result.Status;
+            record.ErrorDetail = result.ErrorDetail;
+
+            var local = _workItems.FirstOrDefault(w => w.Id == record.Id);
+            if (local is not null)
+            {
+                local.AdoWorkItemId = result.AdoWorkItemId;
+                local.AdoWorkItemUrl = result.AdoWorkItemUrl;
+                local.Status = result.Status;
+                local.ErrorDetail = result.ErrorDetail;
+            }
+        }
+        await db.SaveChangesAsync();
+    }
+
+    private static AdoWorkItemDto MapToDto(WorkItemRecord record) => new()
+    {
+        WorkItemType = record.WorkItemType,
+        Title = record.Title,
+        Description = record.Description,
+        AcceptanceCriteria = record.AcceptanceCriteria,
+        ParentTitle = record.ParentTitle,
+        PredecessorTitles = record.PredecessorTitles,
+        IsExternalDependency = record.IsExternalDependency,
+        ExternalOwner = record.ExternalOwner,
+        WiTemplate = record.WiTemplate,
+        TestedByTitles = record.TestedByTitles
     };
 
     private RenderFragment RenderPredecessorBadges(WorkItemRecord wi) => builder =>

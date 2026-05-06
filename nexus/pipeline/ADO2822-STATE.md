@@ -1,6 +1,6 @@
 # Pipeline State: ADO#2822
 
-## Current Stage: WAITING (on ADO#2821 review/deploy)
+## Current Stage: BUILD
 ## Risk Level: medium
 ## Pipeline Path: full
 ## Review Cycles: 0
@@ -15,4 +15,4 @@
 | Stage | Status | Agent | Started | Completed | Notes |
 |-------|--------|-------|---------|-----------|-------|
 | PLAN  | ✅ DONE | Jarvis/Maria | 00:37 | 00:42 | Brief written, waiting on #2821 |
-| BUILD | ⏳ WAITING | Tony | — | — | Will dispatch when #2821 clears review |
+| BUILD | 🔄 ACTIVE | Tony | 00:42 | — | Dispatched alongside #2821 entering review |
