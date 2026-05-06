@@ -1,0 +1,17 @@
+@page "/"
+@attribute [Authorize]
+
+<PageTitle>Dashboard — FAIT v2</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="fait-v2-page">
+    <MudText Typo="Typo.h5" Class="fait-v2-page__title">Dashboard</MudText>
+    <MudText Typo="Typo.body2" Class="fait-v2-page__subtitle">Your AI assistant is ready.</MudText>
+
+    <MudPaper Class="fait-v2-chat-placeholder" Elevation="0">
+        <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Class="fait-v2-chat-placeholder__inner">
+            <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Class="fait-v2-chat-placeholder__icon" />
+            <MudText Typo="Typo.h6" Class="fait-v2-chat-placeholder__title">Main Assistant Chat</MudText>
+            <MudText Typo="Typo.body2" Class="fait-v2-chat-placeholder__text">Persistent AI assistant — coming in Phase B</MudText>
+        </MudStack>
+    </MudPaper>
+</MudContainer>

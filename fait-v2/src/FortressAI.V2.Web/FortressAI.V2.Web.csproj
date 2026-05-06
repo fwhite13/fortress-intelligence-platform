@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Entra SSO -->
+    <PackageReference Include="Microsoft.Identity.Web" Version="3.*" />
+    <PackageReference Include="Microsoft.Identity.Web.UI" Version="3.*" />
+
+    <!-- MudBlazor v7 -->
+    <PackageReference Include="MudBlazor" Version="7.*" />
+
+    <!-- Auth components -->
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="8.0.*" />
+
+    <!-- DB (shell only — for future use) -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.*" />
+    <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="8.0.*" />
+    <PackageReference Include="MySqlConnector" Version="2.*" />
+
+    <!-- Logging -->
+    <PackageReference Include="Serilog.AspNetCore" Version="8.*" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.*" />
+
+    <!-- Data Protection -->
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- FIP shared nav/waffle component -->
+    <ProjectReference Include="..\..\..\shared\FipShared\FipShared.csproj" />
+  </ItemGroup>
+</Project>

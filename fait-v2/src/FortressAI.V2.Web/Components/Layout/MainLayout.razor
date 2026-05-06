@@ -1,0 +1,132 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@using FortressAI.V2.Web.Theme
+@using FipShared.Components
+@using FipShared.Models
+@inherits LayoutComponentBase
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IDisposable
+
+<MudThemeProvider Theme="_theme" @bind-IsDarkMode="_isDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <FipNavBar ActiveModule="FipModule.FAIT"
+               ModuleDisplayName="FAIT v2"
+               UserInitial="@_userInitial"
+               UserName="@_userName"
+               UserEmail="@_userEmail"
+               OnMenuClick="ToggleDrawer"
+               OnSignOut="Logout"
+               IsDev="@_isDev" />
+
+    <MudDrawer @bind-Open="_drawerOpen"
+               Variant="DrawerVariant.Responsive"
+               Breakpoint="Breakpoint.Md"
+               ClipMode="DrawerClipMode.Always"
+               Elevation="2"
+               Class="fait-v2-drawer">
+
+        <div class="fait-v2-drawer__content">
+            <MudDrawerHeader Class="fait-v2-drawer__header">
+                <div class="fait-v2-drawer__brand">
+                    <MudText Typo="Typo.h6" Class="fait-v2-drawer__title">FAIT v2</MudText>
+                    <MudText Typo="Typo.caption" Class="fait-v2-drawer__subtitle">Fortress AI</MudText>
+                </div>
+            </MudDrawerHeader>
+
+            <div class="fait-v2-drawer__nav">
+                <MudNavMenu>
+                    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+                    <MudNavLink Href="/memory" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Memory">Memory</MudNavLink>
+                    <MudNavLink Href="/tasks" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Schedule">Scheduled Tasks</MudNavLink>
+                    <MudNavLink Href="/workspace" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.FolderOpen">Workspace</MudNavLink>
+                    <MudNavLink Href="/connectors" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Cable">Connectors</MudNavLink>
+                </MudNavMenu>
+            </div>
+
+            <div class="fait-v2-drawer__footer">
+                <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                               Color="Color.Inherit"
+                               OnClick="ToggleDarkMode"
+                               Size="Size.Small"
+                               aria-label="Toggle dark mode"
+                               Class="fait-v2-drawer__theme-toggle" />
+                <MudText Typo="Typo.caption" Class="fait-v2-drawer__footer-text">Fortress Intelligence Platform</MudText>
+            </div>
+        </div>
+    </MudDrawer>
+
+    <MudMainContent Class="fait-v2-main">
+        @Body
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+    private bool _isDarkMode = false;
+    private bool _isDev = false;
+    private string _userInitial = "F";
+    private string _userName = "User";
+    private string _userEmail = "";
+
+    private MudTheme _theme = FipTheme.Create();
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isDev = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") == "Development";
+
+        if (AuthenticationState != null)
+        {
+            var authState = await AuthenticationState;
+            var user = authState.User;
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                _userEmail = user.FindFirst("preferred_username")?.Value
+                          ?? user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                          ?? "";
+                _userName = user.FindFirst("name")?.Value
+                         ?? user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+                         ?? _userEmail.Split('@')[0];
+                _userInitial = _userName.Length > 0 ? _userName[0].ToString().ToUpperInvariant() : "F";
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var saved = await JS.InvokeAsync<string?>("localStorage.getItem", "fait-v2-dark-mode");
+                _isDarkMode = saved == "true";
+                StateHasChanged();
+            }
+            catch { /* localStorage not available in prerender */ }
+        }
+    }
+
+    private async Task ToggleDarkMode()
+    {
+        _isDarkMode = !_isDarkMode;
+        await JS.InvokeVoidAsync("localStorage.setItem", "fait-v2-dark-mode", _isDarkMode.ToString().ToLower());
+    }
+
+    private void ToggleDrawer()
+    {
+        _drawerOpen = !_drawerOpen;
+    }
+
+    private void Logout()
+    {
+        Nav.NavigateTo("MicrosoftIdentity/Account/SignOut", forceLoad: true);
+    }
+
+    public void Dispose() { }
+}
