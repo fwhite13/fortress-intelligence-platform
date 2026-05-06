@@ -61,46 +61,53 @@ public class DatabaseInitializationService : IHostedService
                 var assembly = Assembly.GetExecutingAssembly();
                 using var stream = assembly.GetManifestResourceStream(
                     "FortressNexus.Web.Resources.forge-kb-spec-seed.md");
-                using var reader = new StreamReader(stream!);
-                var specContent = await reader.ReadToEndAsync();
-
-                var now = DateTime.UtcNow;
-
-                // 1. Create submission
-                var submission = new Submission
+                if (stream is null)
                 {
-                    Title = forgeKbTitle,
-                    FeatureArea = "FORGE KB",
-                    NarrativeText = "FORGE KB MCP Server implementation spec — seeded for E2E decomp validation.",
-                    SubmittedBy = fredUpn,
-                    SubmittedAt = now,
-                    Status = SubmissionStatus.AwaitingReview,
-                    MockupFileId = null
-                };
-                db.Submissions.Add(submission);
-                await db.SaveChangesAsync(cancellationToken); // get submission.Id
-
-                // 2. Create SpecDocument with spec content
-                var specDoc = new SpecDocument
+                    _logger.LogError("[NEXUS] forge-kb-spec-seed.md embedded resource not found — FORGE KB seed skipped.");
+                }
+                else
                 {
-                    SubmissionId = submission.Id,
-                    Version = 1,
-                    Content = specContent,
-                    GeneratedAt = now,
-                    GeneratedBy = "system-seed",
-                    IsApproved = false,
-                    PromptTokensUsed = 0,
-                    CompletionTokensUsed = 0
-                };
-                db.SpecDocuments.Add(specDoc);
-                await db.SaveChangesAsync(cancellationToken); // get specDoc.Id
+                    using var reader = new StreamReader(stream);
+                    var specContent = await reader.ReadToEndAsync();
 
-                // 3. Wire ActiveSpecDocumentId back
-                submission.ActiveSpecDocumentId = specDoc.Id;
-                await db.SaveChangesAsync(cancellationToken);
+                    var now = DateTime.UtcNow;
 
-                _logger.LogInformation("[NEXUS] Seeded FORGE KB spec submission id={Id} specDocId={SpecId}",
-                    submission.Id, specDoc.Id);
+                    // 1. Create submission
+                    var submission = new Submission
+                    {
+                        Title = forgeKbTitle,
+                        FeatureArea = "FORGE KB",
+                        NarrativeText = "FORGE KB MCP Server implementation spec — seeded for E2E decomp validation.",
+                        SubmittedBy = fredUpn,
+                        SubmittedAt = now,
+                        Status = SubmissionStatus.AwaitingReview,
+                        MockupFileId = null
+                    };
+                    db.Submissions.Add(submission);
+                    await db.SaveChangesAsync(cancellationToken); // get submission.Id
+
+                    // 2. Create SpecDocument with spec content
+                    var specDoc = new SpecDocument
+                    {
+                        SubmissionId = submission.Id,
+                        Version = 1,
+                        Content = specContent,
+                        GeneratedAt = now,
+                        GeneratedBy = "system-seed",
+                        IsApproved = false,
+                        PromptTokensUsed = 0,
+                        CompletionTokensUsed = 0
+                    };
+                    db.SpecDocuments.Add(specDoc);
+                    await db.SaveChangesAsync(cancellationToken); // get specDoc.Id
+
+                    // 3. Wire ActiveSpecDocumentId back
+                    submission.ActiveSpecDocumentId = specDoc.Id;
+                    await db.SaveChangesAsync(cancellationToken);
+
+                    _logger.LogInformation("[NEXUS] Seeded FORGE KB spec submission id={Id} specDocId={SpecId}",
+                        submission.Id, specDoc.Id);
+                }
             }
         }
         catch (Exception ex)
