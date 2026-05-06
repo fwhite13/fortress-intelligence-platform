@@ -180,6 +180,11 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', version: VERSION });
 });
 
+// Health check at /mcp/health — public, no auth (ALB rule priority 14 bypasses Entra)
+app.get('/mcp/health', (_req, res) => {
+  res.json({ status: 'ok', version: VERSION });
+});
+
 // POST /mcp — JSON-RPC 2.0 MCP tool calls (Streamable HTTP transport)
 app.post('/mcp', authMiddleware, async (req, res) => {
   const user = req.user;
