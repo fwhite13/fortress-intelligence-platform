@@ -91,3 +91,37 @@ Build succeeded.
     0 Warning(s)
     0 Error(s)
 ```
+
+---
+
+## Build Cycle 2 — Review Retry
+
+**Agent:** Tony Stark (BUILD cycle 2)
+**Trigger:** Clint's review — NEEDS-CHANGES (2 important issues)
+**Commit:** `8362cdf`
+**Build:** SUCCEEDED — 0 errors, 0 warnings
+
+### Issues Fixed
+
+**I1 — `Components/Pages/Onboarding.razor` missing `@attribute [Authorize]`**
+- Added `@attribute [Authorize]` as line 2, consistent with all 5 sibling pages
+- Defense-in-depth: page-level auth guard explicit alongside circuit-level FallbackPolicy
+
+**I2 — Security headers middleware registered after `UseStaticFiles()`**
+- Moved `app.Use(...)` security headers block to above `app.UseStaticFiles()`
+- All static file responses (MudBlazor CSS/JS, wwwroot assets) now include `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`
+
+### Files Modified
+- `src/FortressAI.V2.Web/Components/Pages/Onboarding.razor` — added `@attribute [Authorize]`
+- `src/FortressAI.V2.Web/Program.cs` — reordered middleware: security headers before static files
+
+### Build Output (Cycle 2)
+
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+```
+
+### ADO Comment
+Posted comment ID 781626 to ADO#2842 at 2026-05-06T22:37:27Z
