@@ -970,9 +970,10 @@ else if (_artifactSet is not null)
         try
         {
             var dtos = _workItems.Select(MapToDto).ToList();
+            _artifactSet!.AdoProjectName = _selectedAdoProject!;
             var results = await AdoService.CreateWorkItemBatchAsync(_artifactSet!, dtos);
-            await WriteBackResultsAsync(results);
             _postResults = results;
+            await WriteBackResultsAsync(results);
             Snackbar.Add($"Posted {results.Count(r => r.Status == "Created")} work items to ADO.", Severity.Success);
         }
         catch (Exception ex)
@@ -991,8 +992,7 @@ else if (_artifactSet is not null)
         await using var db = await DbFactory.CreateDbContextAsync();
         foreach (var result in results)
         {
-            var record = await db.WorkItemRecords
-                .FirstOrDefaultAsync(w => w.ArtifactSetId == _artifactSet!.Id && w.Title == result.Title);
+            var record = await db.WorkItemRecords.FindAsync(result.Id);
             if (record is null) continue;
 
             record.AdoWorkItemId = result.AdoWorkItemId;
