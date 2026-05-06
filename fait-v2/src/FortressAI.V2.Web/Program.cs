@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Identity.Web;
 using MudBlazor.Services;
 using Serilog;
+using Microsoft.EntityFrameworkCore;
 using FortressAI.V2.Web.Components;
+using FortressAI.V2.Web.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -50,6 +52,14 @@ builder.Services.AddControllersWithViews();
 
 // MudBlazor
 builder.Services.AddMudServices();
+
+// EF Core — FaitV2DbContext (Pomelo MySQL provider, GuidFormat=None in connection string)
+builder.Services.AddDbContext<FaitV2DbContext>(options =>
+    options.UseMySql(
+        builder.Configuration.GetConnectionString("DefaultConnection")!,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mySqlOptions => mySqlOptions.EnableRetryOnFailure(3)
+    ));
 
 var app = builder.Build();
 

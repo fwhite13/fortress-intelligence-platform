@@ -154,3 +154,61 @@ Clean build. Everything that passes is solid:
 2. **`Program.cs`** — Move the security headers `app.Use(...)` block from after `app.UseStaticFiles()` to before it. Swap lines ~69 and ~72-79. The FallbackPolicy and security headers need to appear before static file serving.
 
 That's it. Clean build, solid pattern, two fixable gaps. Return for cycle 2 after both are addressed.
+
+---
+
+## Cycle 2 Review — ADO#2842
+
+**Reviewer:** Hawkeye (Clint Barton)  
+**Cycle:** 2 of 2  
+**Commit:** `8362cdf`  
+**CC invocation:** `cat pipeline/review-c2-brief.md | claude --model sonnet --print --dangerously-skip-permissions`
+
+---
+
+### Verdict: PASS
+
+Both I1 and I2 fixes verified correct. No new issues introduced. No source scope creep.
+
+---
+
+### Fix Verification
+
+#### I1 — `Onboarding.razor` — ✅ FIXED
+- `@attribute [Authorize]` present at line 2, directly after `@page "/onboarding"`
+- No other changes to this file
+- All 6 pages now carry `[Authorize]` (Dashboard ✅ Memory ✅ Tasks ✅ Workspace ✅ Connectors ✅ Onboarding ✅)
+
+#### I2 — `Program.cs` Middleware Order — ✅ FIXED
+
+Confirmed ordering (line numbers):
+
+| Line | Middleware |
+|------|------------|
+| 70 | `app.Use(...)` — security headers START |
+| 77 | `});` — security headers END |
+| 79 | `app.UseStaticFiles()` |
+| 81 | `app.UseRouting()` |
+| 82 | `app.UseAuthentication()` |
+| 83 | `app.UseAuthorization()` |
+| 84 | `app.UseAntiforgery()` |
+| 87 | `/health` — `.AllowAnonymous()` |
+| 93 | `app.MapRazorComponents<App>()` |
+
+Security headers block is before `UseStaticFiles`. Static file responses (MudBlazor CSS/JS, wwwroot) now receive `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`. `await next()` is correctly called — no request blocking.
+
+---
+
+### Scope Creep — ✅ CLEAN (source files only)
+
+Commit touched 5 files total. The 3 beyond the expected 2 are pipeline artifacts under `pipeline/` (build report, review report, C2 brief) — not source code. No functional scope creep.
+
+---
+
+### New Issues — None
+
+No issues introduced by the cycle 2 changes. Belt-and-suspenders auth pattern intact (`FallbackPolicy = DefaultPolicy` + `.RequireAuthorization()` on `MapRazorComponents` + per-page `[Authorize]`). `/health` correctly anonymous.
+
+---
+
+### Final Verdict: PASS — Ready to ship.
