@@ -65,6 +65,13 @@ namespace FortressNexus.Web.Migrations
                 .Annotation("MySql:CharSet", "utf8mb4")
                 .OldAnnotation("MySql:CharSet", "utf8mb4");
 
+            migrationBuilder.UpdateData(
+                table: "work_item_records",
+                keyColumn: "ado_work_item_id",
+                keyValue: null,
+                column: "ado_work_item_id",
+                value: 0);
+
             migrationBuilder.AlterColumn<int>(
                 name: "ado_work_item_id",
                 table: "work_item_records",
