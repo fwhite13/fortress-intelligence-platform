@@ -43,7 +43,7 @@ public class NexusClaimsTransformation : IClaimsTransformation
 
         var clone = principal.Clone();
         var identity = clone.Identity as ClaimsIdentity
-                       ?? new ClaimsIdentity();
+            ?? throw new InvalidOperationException("ClaimsIdentity not found on cloned principal — cannot inject NEXUS roles.");
         foreach (var role in roles)
             identity.AddClaim(new Claim(ClaimTypes.Role, role));
 
