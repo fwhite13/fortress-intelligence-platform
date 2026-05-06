@@ -320,7 +320,7 @@ public class KnowledgeBaseService
 
         foreach (var chunk in chunks)
         {
-            var sourceName = System.IO.Path.GetFileNameWithoutExtension(chunk.Source.Split('/').Last());
+            var sourceName = chunk.Source.Split('/').Last();
             sb.AppendLine($"### [{chunk.KbType} KB: {sourceName}]");
             sb.AppendLine(chunk.Content);
             sb.AppendLine();

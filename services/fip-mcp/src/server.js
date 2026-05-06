@@ -16,6 +16,7 @@ import { listKbs, getEntitlements } from './tools/list_kbs.js';
 import { addToKb } from './tools/add_to_kb.js';
 import { getKbMetadata } from './tools/get_kb_metadata.js';
 import { getJobStatus } from './tools/get_job_status.js';
+import { listKbFiles } from './tools/list_kb_files.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,6 +157,25 @@ function createMcpServer(user) {
     async ({ job_id }) => {
       try {
         const result = await getJobStatus({ job_id }, user);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        const e = handleToolError(err);
+        return { content: [{ type: 'text', text: JSON.stringify(e, null, 2) }], isError: true };
+      }
+    }
+  );
+
+  // Tool: list_kb_files
+  server.tool(
+    'list_kb_files',
+    'List files in a user\'s knowledge base. Returns filenames with extensions, sizes, and last modified dates. Use this when the user asks what documents are in their KB.',
+    {
+      kb_id: z.string().describe('KB ID from list_kbs'),
+      team_id: z.string().optional().describe('Team ID (required for Team KB)'),
+    },
+    async ({ kb_id, team_id }) => {
+      try {
+        const result = await listKbFiles({ kb_id, team_id }, user);
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (err) {
         const e = handleToolError(err);
