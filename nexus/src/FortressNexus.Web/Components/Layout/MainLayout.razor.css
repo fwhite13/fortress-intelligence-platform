@@ -1,1 +1,14 @@
 /* NEXUS MainLayout styles */
+
+.nexus-header-role-chip {
+    margin-right: 4px;
+}
+
+.nexus-header-upn {
+    opacity: 0.85;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: inherit;
+}

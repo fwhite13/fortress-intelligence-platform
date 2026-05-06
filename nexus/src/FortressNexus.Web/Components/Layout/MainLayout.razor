@@ -43,6 +43,19 @@
 
 @code {
     private bool _drawerOpen = true;
+    private string? _upn;
+    private string? _displayName;
+    private bool _isAdmin;
+    private bool _isReviewer;
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _upn = await UserContextService.GetUpnAsync();
+        _isAdmin = await UserContextService.IsAdminAsync();
+        _isReviewer = !_isAdmin && await UserContextService.IsReviewerAsync();
+        // Display only the part before '@' for readability; fall back to full UPN
+        _displayName = _upn?.Contains('@') == true ? _upn.Split('@')[0] : _upn;
+    }
 }
