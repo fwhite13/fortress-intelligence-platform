@@ -66,9 +66,7 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
                      | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
 });
 
-app.UseStaticFiles();
-
-// Security headers
+// Security headers — must be before UseStaticFiles
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -77,6 +75,8 @@ app.Use(async (context, next) =>
     context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
     await next();
 });
+
+app.UseStaticFiles();
 
 app.UseRouting();
 app.UseAuthentication();
