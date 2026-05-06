@@ -7,6 +7,22 @@
 @using FortressIntelligenceRM.Web.Theme
 @using System.Security.Claims
 
+<style>
+:root {
+    --fortress-navy: @Branding.PrimaryColor;
+    --color-primary: @Branding.PrimaryColor;
+    --color-primary-hover: @Branding.PrimaryColor;
+    --fortress-gold: @Branding.AccentColor;
+    --color-accent: @Branding.AccentColor;
+    --color-accent-hover: @Branding.AccentColor;
+    --color-gold: @Branding.AccentColor;
+    --color-header-bg: @Branding.HeaderBg;
+    --color-sidebar-bg: @Branding.SidebarBg;
+    --color-sidebar-hover: @Branding.SidebarBg;
+    --color-sidebar-active: @Branding.SidebarBg;
+}
+</style>
+
 <MudThemeProvider Theme="_theme" />
 <MudPopoverProvider />
 <MudDialogProvider />
@@ -14,6 +30,7 @@
 
 <MudLayout>
         <FipNavBar ActiveModule="FipModule.FIRM"
+                   ModuleDisplayName="@Branding.ModuleName"
                    UserInitial="@_userInitial"
                    UserName="@_userName"
                    UserEmail="@_userEmail"

@@ -14,7 +14,7 @@
                 <path d="M14 1L2 6V16C2 22.627 7.373 29.254 14 31C20.627 29.254 26 22.627 26 16V6L14 1Z" fill="currentColor" stroke="var(--color-gold)" stroke-width="1.5"/>
                 <path d="M14 7L8 10V16C8 19.314 10.686 22.627 14 23.5C17.314 22.627 20 19.314 20 16V10L14 7Z" fill="var(--color-gold)" opacity="0.85"/>
             </svg>
-            <span class="fip-navbar__module-name">@ActiveModule.ShortName()</span>
+            <span class="fip-navbar__module-name">@(ModuleDisplayName ?? ActiveModule.ShortName())</span>
         </div>
     </div>
 
@@ -63,6 +63,7 @@
 
 @code {
     [Parameter, EditorRequired] public FipModule ActiveModule { get; set; }
+    [Parameter] public string? ModuleDisplayName { get; set; }
     [Parameter] public string UserInitial { get; set; } = string.Empty;
     [Parameter] public string UserName { get; set; } = string.Empty;
     [Parameter] public string UserEmail { get; set; } = string.Empty;
