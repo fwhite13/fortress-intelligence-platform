@@ -457,7 +457,7 @@
         {
             try
             {
-                await SubmissionService.UpdateNarrativeAsync(_submissionId.Value, _narrativeText);
+                await SubmissionService.UpdateNarrativeAsync(_submissionId.Value, _narrativeText, upn);
             }
             catch (Exception ex)
             {
@@ -615,10 +615,12 @@
 
     private async Task ApplyResumeChangesAsync()
     {
+        var upn = await UserContextService.GetUpnAsync();
+
         // 1. Persist updated narrative
         try
         {
-            await SubmissionService.UpdateNarrativeAsync(_submissionId!.Value, _narrativeText);
+            await SubmissionService.UpdateNarrativeAsync(_submissionId!.Value, _narrativeText, upn);
         }
         catch (Exception ex)
         {
@@ -646,6 +648,8 @@
 
         try
         {
+            var upn = await UserContextService.GetUpnAsync();
+
             if (_isResume && _hasChanges)
             {
                 if (!_regenPending)
@@ -670,7 +674,7 @@
 
                     try
                     {
-                        await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating);
+                        await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating, upn);
                         await SpecGenerationService.GenerateAsync(_submissionId.Value);
                         // GenerateAsync sets status to AwaitingReview internally — no need to set here
                     }
@@ -679,7 +683,7 @@
                         Snackbar.Add($"Spec regeneration failed: {ex.Message}", Severity.Error);
                         try
                         {
-                            await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed);
+                            await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed, upn);
                         }
                         catch (Exception statusEx)
                         {
@@ -703,8 +707,8 @@
             if (_isResume && !_hasChanges && _existingSpecDocument != null)
             {
                 // Skip-regen path: existing spec, no changes — persist narrative then promote Draft → AwaitingReview
-                await SubmissionService.UpdateNarrativeAsync(_submissionId.Value, _narrativeText);
-                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.AwaitingReview);
+                await SubmissionService.UpdateNarrativeAsync(_submissionId.Value, _narrativeText, upn);
+                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.AwaitingReview, upn);
                 Nav.NavigateTo($"/nexus/{ResumeSubmissionId}");
                 return;
             }
@@ -712,7 +716,7 @@
             // New submission (or resume with no prior spec) — generate spec
             try
             {
-                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating);
+                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating, upn);
                 await SpecGenerationService.GenerateAsync(_submissionId.Value);
                 // GenerateAsync sets status to AwaitingReview internally
             }
@@ -721,7 +725,7 @@
                 Snackbar.Add($"Spec generation failed: {ex.Message}", Severity.Error);
                 try
                 {
-                    await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed);
+                    await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed, upn);
                 }
                 catch (Exception statusEx)
                 {

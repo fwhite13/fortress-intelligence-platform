@@ -1,6 +1,6 @@
 # Pipeline State: ADO#2821
 
-## Current Stage: REVIEW (cycle 2)
+## Current Stage: DEPLOY
 ## Risk Level: medium
 ## Pipeline Path: full
 ## Review Cycles: 1
@@ -19,3 +19,6 @@
 | REVIEW | ❌ FAIL | Clint | 09:43 | 09:50 | C1: Reviewer missing from VerifySubmissionAccessAsync bypass; C2: view guard uses IsAdminAsync not IsNexusEditorAsync |
 | BUILD C2 | ✅ DONE | Tony | 09:50 | 09:53 | Commit ca777b2, 2 files 4 lines, C1+C2 fixed |
 | REVIEW C2 | 🔄 ACTIVE | Clint | 09:53 | — | Verify C1+C2 fixes only |
+REVIEW C2 | ✅ PASS | Clint | 09:53 | 09:55 | C1+C2 confirmed fixed, scope clean |
+| QA | ✅ PASS | Natasha | 10:05 | 10:12 | 10/10 TCs pass. EF migration confirmed. All 6 API endpoints gated. |
+| DONE | ✅ | Maria | 10:12 | 10:12 | Closed |

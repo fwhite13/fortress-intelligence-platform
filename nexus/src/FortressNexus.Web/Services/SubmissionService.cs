@@ -82,7 +82,7 @@ public class SubmissionService : ISubmissionService
             .ToListAsync();
     }
 
-    public async Task UpdateStatusAsync(int id, SubmissionStatus status)
+    public async Task UpdateStatusAsync(int id, SubmissionStatus status, string callerUpn, bool isAdmin = false)
     {
         var submission = await _db.Submissions.FindAsync(id);
         if (submission is null)
@@ -90,12 +90,14 @@ public class SubmissionService : ISubmissionService
             _logger.LogWarning("[SUBMISSION] UpdateStatusAsync — submission {SubmissionId} not found", id);
             return;
         }
+        if (!isAdmin && submission.SubmittedBy != callerUpn)
+            throw new UnauthorizedAccessException($"Caller {callerUpn} does not own submission {id}.");
         submission.Status = status;
         await _db.SaveChangesAsync();
         _logger.LogInformation("[SUBMISSION] Status changed for submission {SubmissionId} to {Status}", id, status);
     }
 
-    public async Task SetActiveSpecDocumentAsync(int submissionId, int specDocumentId)
+    public async Task SetActiveSpecDocumentAsync(int submissionId, int specDocumentId, string callerUpn, bool isAdmin = false)
     {
         var submission = await _db.Submissions.FindAsync(submissionId);
         if (submission is null)
@@ -103,6 +105,8 @@ public class SubmissionService : ISubmissionService
             _logger.LogWarning("[SUBMISSION] SetActiveSpecDocumentAsync — submission {SubmissionId} not found", submissionId);
             return;
         }
+        if (!isAdmin && submission.SubmittedBy != callerUpn)
+            throw new UnauthorizedAccessException($"Caller {callerUpn} does not own submission {submissionId}.");
         submission.ActiveSpecDocumentId = specDocumentId;
         await _db.SaveChangesAsync();
     }
@@ -120,7 +124,7 @@ public class SubmissionService : ISubmissionService
         await _db.SaveChangesAsync();
     }
 
-    public async Task UpdateNarrativeAsync(int submissionId, string narrativeText)
+    public async Task UpdateNarrativeAsync(int submissionId, string narrativeText, string callerUpn, bool isAdmin = false)
     {
         var submission = await _db.Submissions.FindAsync(submissionId);
         if (submission is null)
@@ -128,6 +132,8 @@ public class SubmissionService : ISubmissionService
             _logger.LogWarning("[SUBMISSION] UpdateNarrativeAsync — submission {SubmissionId} not found", submissionId);
             return;
         }
+        if (!isAdmin && submission.SubmittedBy != callerUpn)
+            throw new UnauthorizedAccessException($"Caller {callerUpn} does not own submission {submissionId}.");
         submission.NarrativeText = narrativeText;
         await _db.SaveChangesAsync();
         _logger.LogInformation("[SUBMISSION] Narrative updated for submission {SubmissionId}", submissionId);
