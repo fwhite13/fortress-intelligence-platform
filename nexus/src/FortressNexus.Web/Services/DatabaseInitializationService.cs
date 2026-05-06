@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using FortressNexus.Web.Data;
+using FortressNexus.Web.Models.Entities;
 
 namespace FortressNexus.Web.Services;
 
@@ -29,6 +30,23 @@ public class DatabaseInitializationService : IHostedService
             var db = scope.ServiceProvider.GetRequiredService<NexusDbContext>();
             await db.Database.MigrateAsync(cancellationToken);
             _logger.LogInformation("[NEXUS] EF Core migrations complete.");
+
+            // Seed NexusAdmin role for Fred White
+            const string fredUpn = "fwhite@fortressaffinitygroup.com";
+            var hasAdminRole = await db.NexusUserRoles
+                .AnyAsync(r => r.UserUpn == fredUpn && r.Role == NexusRoles.Admin, cancellationToken);
+            if (!hasAdminRole)
+            {
+                db.NexusUserRoles.Add(new NexusUserRole
+                {
+                    UserUpn = fredUpn,
+                    Role = NexusRoles.Admin,
+                    AssignedAt = DateTime.UtcNow,
+                    AssignedBy = "system-seed"
+                });
+                await db.SaveChangesAsync(cancellationToken);
+                _logger.LogInformation("[NEXUS] Seeded NexusAdmin role for {Upn}", fredUpn);
+            }
         }
         catch (Exception ex)
         {

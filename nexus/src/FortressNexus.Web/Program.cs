@@ -13,6 +13,7 @@ using FortressNexus.Web.Services;
 using FortressNexus.Web.Services.Exporters;
 using Azure.Identity;
 using Azure.Extensions.AspNetCore.Configuration.Secrets;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -52,6 +53,7 @@ builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = options.DefaultPolicy;
 });
+builder.Services.AddScoped<IClaimsTransformation, NexusClaimsTransformation>();
 builder.Services.AddControllersWithViews();
 
 builder.Services.AddHttpContextAccessor();

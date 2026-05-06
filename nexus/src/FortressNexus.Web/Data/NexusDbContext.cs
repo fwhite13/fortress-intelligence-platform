@@ -20,6 +20,7 @@ public class NexusDbContext : DbContext
     public DbSet<DiscoverySession> DiscoverySessions => Set<DiscoverySession>();
     public DbSet<DiscoveryQuestion> DiscoveryQuestions => Set<DiscoveryQuestion>();
     public DbSet<DiscoveryAnswer> DiscoveryAnswers => Set<DiscoveryAnswer>();
+    public DbSet<NexusUserRole> NexusUserRoles => Set<NexusUserRole>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -238,6 +239,19 @@ public class NexusDbContext : DbContext
             entity.Property(e => e.AnswerText).HasColumnName("answer_text").HasMaxLength(2000);
             entity.Property(e => e.AnsweredBy).HasColumnName("answered_by").HasMaxLength(255);
             entity.Property(e => e.AnsweredAt).HasColumnName("answered_at");
+        });
+
+        // NexusUserRole
+        modelBuilder.Entity<NexusUserRole>(entity =>
+        {
+            entity.ToTable("nexus_user_roles");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            entity.Property(e => e.UserUpn).HasColumnName("user_upn").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Role).HasColumnName("role").HasMaxLength(50).IsRequired();
+            entity.Property(e => e.AssignedAt).HasColumnName("assigned_at").IsRequired();
+            entity.Property(e => e.AssignedBy).HasColumnName("assigned_by").HasMaxLength(200).IsRequired();
+            entity.HasIndex(e => new { e.UserUpn, e.Role }).IsUnique();
         });
     }
 }

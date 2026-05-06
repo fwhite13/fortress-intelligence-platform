@@ -17,3 +17,7 @@
 | REVIEW C2 | 🔄 ACTIVE | Clint | 10:31 | — | Verify I1+I2 |
 | REVIEW C2 | ❌ NEEDS-CHANGES | Clint | 10:31 | 10:36 | Migration Down() missing UpdateData null back-fill for ado_work_item_id before AlterColumn |
 | BUILD C3 | 🔄 ACTIVE | Tony | 10:36 | — | Fix migration Down() |
+| BUILD C3 | ✅ DONE | Tony | 10:36 | 10:38 | Commit a6a2abb, UpdateData null back-fill in Down(), 0 errors |
+| REVIEW C3 | 🔄 ACTIVE | Clint | 10:38 | — | Verify Down() UpdateData |
+| REVIEW C3 | ✅ PASS | Clint | 10:38 | 10:40 | Migration Down() UpdateData confirmed, order correct, scope clean |
+| DEPLOY | ⏳ QUEUED | Rhodey | — | — | Batching with #2819/#2824/#2826 |
