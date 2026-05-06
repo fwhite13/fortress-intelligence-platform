@@ -76,35 +76,21 @@ public class FirmIntegrationController : ControllerBase
             return BadRequest(new { error = "entraOid is required" });
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        // Entra users in FAIT have is_entra_user=1 — match by email prefix pattern or entra OID
-        // FAIT stores Entra users; the OID is stored... look it up via email or by checking EntraOid field if present.
-        // For now: look up by email. FIRM should pass the entraOid which is the Azure AD Object ID.
-        // AppUser doesn't have EntraOid directly — we look up users whose email matches.
-        // Actually we need to find user by Entra OID. Since AppUser doesn't store it directly,
-        // we look for is_entra_user=true users and try to match.
-        // The simplest approach: FAIT uses Entra SSO, users are created with their Entra email.
-        // FIRM stores the entraOid. We need FAIT user ID.
-        // Since AppUser doesn't have EntraOid, we'll search by looking for a user tagged as Entra user.
-        // This is a known limitation — TODO: add EntraOid column to AppUser for reliable lookup.
-        // For now: accept the Entra OID as a hint and look for Entra users. If only one Entra user exists
-        // whose record was created via SSO, return it. Otherwise return 404.
-        //
-        // IMPORTANT: This endpoint's resolution accuracy depends on FAIT adding EntraOid to the users table.
-        // For single-tenant deployments, this works. For multi-user, the entraOid → userId mapping
-        // requires AppUser.EntraOid column (TODO).
-        //
-        // Current workaround: treat the entraOid as a lookup key against the email field
-        // (FIRM also passes display name / email for cross-reference if needed in the future).
-        // The caller (FIRM) passes entraOid; we match against users.
-        // Short-term: return the first active Entra user as the match (single-user deployment).
 
         var user = await db.Users
-            .Where(u => u.IsEntraUser && u.IsActive)
-            .OrderByDescending(u => u.CreatedAt)
+            .Where(u => u.EntraOid == entraOid && u.IsActive)
             .FirstOrDefaultAsync();
 
         if (user == null)
-            return NotFound(new { error = "No matching FAIT user found for this Entra OID" });
+        {
+            var entraUsers = await db.Users
+                .Where(u => u.IsEntraUser && u.IsActive)
+                .ToListAsync();
+            user = entraUsers.Count == 1 ? entraUsers[0] : null;
+        }
+
+        if (user == null)
+            return NotFound(new { error = "No matching FAIT user found for Entra OID" });
 
         _logger.LogInformation("FirmIntegration: Resolved entraOid {OID} → FAIT user {UserId}", entraOid, user.Id);
         return Ok(new { userId = user.Id.ToString() });

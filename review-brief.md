@@ -1,101 +1,107 @@
-# ADO#1352 — Cycle 2 Re-Review Brief
+# ADO#2834 Review Brief — Adversarial Code Review
 
-You are performing a **verification review** for ADO#1352, cycle 2 of 2.
-Working directory: `/home/fredw/projects/fip/`
+You are performing an adversarial code review for ADO#2834. Your job is to find what is WRONG with this code.
 
 ## Context
 
-Cycle 1 found 1 Important issue and 3 Nitpicks. Tony claims to have fixed all 4 in commit `a1c6c2c`.
+ADO#2834 has two changes:
+1. 1-liner fix in FAIT `KnowledgeBaseService.cs` — removes `GetFileNameWithoutExtension` wrapper
+2. New tool `list_kb_files.js` in fip-mcp — lists S3 objects in a user's KB
 
-Your job: verify each fix is actually present and correct, check for regressions, and flag any new issues introduced in cycle 2.
+The project root is `/home/fredw/projects/fip/`.
 
----
+## Files to Read
 
-## Verification Checklist
+Read these files in full:
 
-### I1 — FipDbContext Server fallback
-**File:** `firm/Program.cs`
-**Claim:** FipDbContext registration now uses `Server = dbHost ?? "localhost"` instead of bare `dbHost`.
+1. `/home/fredw/projects/fip/fait/src/FortressAI.Web/Services/KnowledgeBaseService.cs` — check line 323 specifically
+2. `/home/fredw/projects/fip/services/fip-mcp/src/tools/list_kb_files.js` — new file, full review
+3. `/home/fredw/projects/fip/services/fip-mcp/src/server.js` — verify only import + registration added, no other changes
+4. `/home/fredw/projects/fip/services/fip-mcp/package.json` — verify @aws-sdk/client-s3 added correctly
+5. `/home/fredw/projects/fip/services/fip-mcp/src/auth.js` — read the user object structure (what fields are set on req.user)
+6. `/home/fredw/projects/fip/fait/src/FortressAI.Shared/Models/AppUser.cs` — read AppUser model
+7. `/home/fredw/projects/fip/fait/src/FortressAI.Web/Services/KbDocumentService.cs` — check what userId is used for S3 prefix `kb-docs/personal/{userId}/` (lines ~54-90, ~386-400)
+8. `/home/fredw/projects/fip/services/fip-mcp/src/tools/search_kb.js` — check how user.user_id is used for personal KB scoping
+9. `/home/fredw/projects/fip/services/fip-mcp/src/config/kb-inventory.js` — check KB_TYPE enum values and KB_INVENTORY structure
 
-Action: Read `firm/Program.cs`. Find the FipDbContext registration block (look for `UseMySql` or connection string builder near FipDbContext). Verify `dbHost ?? "localhost"` is present. Also check the FipDbContext connection string construction doesn't have any other null-unsafe references to env vars.
+## Critical Investigation: user_id Identity Mismatch
 
-### N1 — Dead field + unreachable render block removed from Meetings.razor
-**File:** `firm/Pages/Meetings.razor` (or similar path — search if needed)
-**Claim:** `_calendarPendingMsg` field declaration removed AND the render block that referenced it removed.
+This is the most important thing to verify:
 
-Action: Read the Meetings.razor file. Search for `_calendarPendingMsg` — it must not appear anywhere. Also confirm no orphaned/unreachable render blocks remain.
+**In auth.js:** `user.user_id = payload.oid` (Entra Object ID — a GUID string like "a1b2c3d4-...")
 
-### N2 — Unused `using` directives removed from CalendarService.cs
-**File:** `firm/Services/CalendarService.cs` (or similar path — search if needed)
-**Claim:** 2 unused `using` directives were removed.
+**In FAIT KbDocumentService:** `UploadDocumentAsync(... Guid userId ...)` stores to `kb-docs/personal/{userId}/` where `userId` comes from `Session.UserId` which is `AppUser.Id` — the FAIT internal database GUID.
 
-Action: Read CalendarService.cs. Check the using block at the top. Count and note what's there. Verify there are no obviously unused imports (namespaces not referenced in the file body).
+**AppUser model has TWO identity fields:**
+- `AppUser.Id` — FAIT-generated internal GUID (used for S3 paths)
+- `AppUser.EntraOid` — Entra OID (stored as string, added in ADO#1240)
 
-### N3 — UserMicrosoftToken cleanup
-**Files:**
-- `firm/Data/FirmDbContext.cs` (or similar)
-- `firm/Models/UserMicrosoftToken.cs` (should be DELETED)
+**THE QUESTION:** Does `auth.js` `user.user_id = payload.oid` (Entra OID) match the `AppUser.Id` GUID that FAIT uses for S3 paths? Or are these different GUIDs?
 
-**Claim:**
-- `DbSet<UserMicrosoftToken>` property removed from FirmDbContext
-- `OnModelCreating` config block for UserMicrosoftToken removed
-- `UserMicrosoftToken.cs` model file deleted entirely
+Specifically:
+- For Entra-provisioned users, is `AppUser.Id` set to the Entra OID, or is it a separate randomly generated GUID?
+- Check how FAIT provisions Entra users — does it set `AppUser.Id = Guid.Parse(oidClaim)` or does it generate a new Guid?
 
-Action:
-1. Try to read `firm/Models/UserMicrosoftToken.cs` — it should NOT exist (expect file not found).
-2. Read FirmDbContext.cs — search for `UserMicrosoftToken`, `DbSet<UserMicrosoftToken>`, and any OnModelCreating config referencing it. None should appear.
-3. Search the entire `firm/` directory for any remaining references to `UserMicrosoftToken` — use grep/find. The ONLY acceptable reference is in `FipTokenService` where it accesses the DbSet via the context property (e.g., `_context.UserMicrosoftTokens`). Wait — actually if the DbSet property was deleted, FipTokenService would break. CHECK THIS CAREFULLY.
+Look at: `/home/fredw/projects/fip/fait/src/FortressAI.Web/Controllers/ExcelAddinController.cs` (lines around 60-90 for Entra user provisioning) and any other controller that creates AppUser records for Entra sign-ins.
 
-### Regression Check — FipTokenService
-**File:** `firm/Services/FipTokenService.cs` (or similar)
-**Concern:** If FipTokenService accesses `_context.UserMicrosoftTokens` (the DbSet property on FirmDbContext), and that property was deleted, FipTokenService would fail to compile.
+Also check: `/home/fredw/projects/fip/fait/src/FortressAI.Web/Controllers/AccountController.cs` or equivalent for how Entra users get their AppUser.Id assigned.
 
-Action: Read FipTokenService.cs. Find any references to `UserMicrosoftTokens`. Then verify that FirmDbContext still has that property (or that FipTokenService was updated to not need it).
+## Review Checklist
 
-### Regression Check — FipDbContext still registers correctly
-**File:** `firm/Program.cs`
-**Concern:** The I1 fix might have introduced a malformed connection string.
+### 1. KnowledgeBaseService.cs line 323
+- Is the fix exactly `chunk.Source.Split('/').Last()`?
+- No `GetFileNameWithoutExtension` wrapper?
+- Any other changes on nearby lines (should be 1-line-only change)?
+- Are there other places in the same file where the same pattern might still be wrong?
 
-Action: Read the full FipDbContext registration block. Verify:
-- Connection string is well-formed (Server, Database, User Id, Password all present)
-- `dbHost ?? "localhost"` is syntactically correct
-- No other env vars in the block are used without null safety
+### 2. list_kb_files.js — Full Review
+- **Entitlement check**: Is `getEntitlements` called BEFORE the S3 call? (Must be yes — auth failure before data exposure)
+- **Sidecar exclusions**: Are BOTH `.metadata.json` AND `-bda-text.txt` correctly excluded?
+- **Empty filename guard**: Is `if (!filename) continue;` present?
+- **Pagination**: Is the `do...while (continuationToken)` loop correct?
+- **Error handling**: What happens if S3 call throws? Is it caught or does it bubble up?
+- **Team KB**: Is `team_id` validation present before S3 call?
+- **Corp KB prefix**: Is `kb-docs/fortress/` the correct prefix? (Verify against KbDocumentService)
+- **Project KB**: Is it handled or explicitly rejected?
+- **user.user_id identity**: Does `user.user_id` (Entra OID from auth.js) match what FAIT uses for S3 paths?
 
----
+### 3. server.js
+- Is the import line for `listKbFiles` added correctly?
+- Is the tool registration following the same pattern as other tools?
+- Are there ANY other changes beyond import + tool registration?
+- Is the tool schema correct (kb_id required, team_id optional)?
 
-## New Issues Check
+### 4. package.json
+- Is `@aws-sdk/client-s3: "^3.0.0"` present in dependencies?
+- Was it already there (check other aws-sdk deps for version consistency)?
 
-While reading all the above files, also look for:
-- Any new hardcoded values that should be env vars
-- Any new dead code or unreachable blocks
-- Any new unused imports
-- Any obvious bugs introduced by the cycle 2 changes
+### 5. Pipeline docs (Tony note)
+- Tony said CC also staged ADO2834-PLAN.md and some ADO2833 pipeline files
+- Verify these are documentation only, not application code
+- Check what was actually staged: look at `services/fip-mcp/pipeline/` directory
 
----
+## Pass/Fail Criteria
 
-## Pass Criteria
+**FAIL if:**
+- `user.user_id` (Entra OID) doesn't match the userId used by FAIT for S3 paths — this means `list_kb_files` will return 0 results for all personal KBs
+- Entitlement check missing or happens AFTER S3 call
+- Critical security issues
 
-**PASS** if:
-1. `Server = dbHost ?? "localhost"` confirmed in Program.cs FipDbContext block ✓
-2. `_calendarPendingMsg` completely absent from Meetings.razor ✓
-3. CalendarService.cs using block is clean (no obviously unused imports) ✓
-4. FirmDbContext.cs has no UserMicrosoftToken references ✓
-5. Models/UserMicrosoftToken.cs does not exist ✓
-6. No live references to UserMicrosoftToken outside of what's expected ✓
-7. FipTokenService still compiles (either the DbSet property is still there under a different context, or FipTokenService was updated) ✓
-8. No new issues introduced ✓
+**NEEDS-CHANGES if:**
+- Minor issues, missing edge case handling, style problems
 
-**NEEDS-CHANGES** if any of the above fail.
-
----
+**PASS if:**
+- user_id matches (or there's a clear mechanism making them equivalent)
+- All checklist items pass
+- Only docs in the extra staged files
 
 ## Output Format
 
-Report findings for each verification item:
-- ✅ VERIFIED — what you found
-- ❌ NOT FIXED — what's actually there vs. what was claimed
-- ⚠️ NEW ISSUE — something not in cycle 1 findings
-
-End with overall verdict: **PASS** or **NEEDS-CHANGES** with summary.
-
-Be specific — cite file paths and line numbers where possible.
+Report findings in this format:
+1. **user_id identity verdict** — MATCH or MISMATCH, with evidence
+2. **KnowledgeBaseService.cs** — PASS or issue
+3. **list_kb_files.js** — findings list
+4. **server.js** — PASS or issue  
+5. **package.json** — PASS or issue
+6. **Pipeline docs** — docs-only confirmed or not
+7. **Overall recommendation** — PASS / NEEDS-CHANGES / FAIL with reasoning

@@ -1,6 +1,7 @@
 import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getEntitlements } from './list_kbs.js';
 import { KB_INVENTORY, KB_TYPE } from '../config/kb-inventory.js';
+import { getFaitUserId } from '../utils/fait-user-resolver.js';
 
 const s3Client = new S3Client({
   region: process.env.BEDROCK_REGION ?? 'us-east-1',
@@ -17,7 +18,11 @@ const KB_BUCKET = process.env.KB_BUCKET ?? 'fortress-tools';
 function getS3Prefix(kbType, user, args) {
   switch (kbType) {
     case KB_TYPE.PERSONAL:
-      return `kb-docs/personal/${user.user_id}/`;
+      if (!args.faitUserId) {
+        throw { code: 'USER_RESOLUTION_FAILED', status: 500,
+                message: 'Could not resolve FAIT user ID — personal KB listing unavailable' };
+      }
+      return `kb-docs/personal/${args.faitUserId}/`;
     case KB_TYPE.TEAM:
       if (!args.team_id) throw { code: 'TEAM_ID_REQUIRED', status: 400, message: 'team_id is required for Team KB' };
       return `kb-docs/teams/${args.team_id}/`;
@@ -40,7 +45,11 @@ export async function listKbFiles(args, user) {
   const entitled = entitlements.find(e => e.kb_id === kb_id && e.read);
   if (!entitled) throw { code: 'NOT_ENTITLED', status: 403, message: `Not entitled to read KB: ${kb_id}` };
 
-  const prefix = getS3Prefix(kb.kb_type, user, { team_id });
+  let faitUserId = null;
+  if (kb.kb_type === KB_TYPE.PERSONAL) {
+    faitUserId = await getFaitUserId(user.user_id);
+  }
+  const prefix = getS3Prefix(kb.kb_type, user, { team_id, faitUserId });
 
   const files = [];
   let continuationToken;
