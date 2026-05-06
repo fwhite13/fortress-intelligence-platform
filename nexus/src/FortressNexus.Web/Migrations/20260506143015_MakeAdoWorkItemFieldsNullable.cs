@@ -30,21 +30,11 @@ namespace FortressNexus.Web.Migrations
                 oldClrType: typeof(int),
                 oldType: "int");
 
-            migrationBuilder.AddColumn<string>(
-                name: "acceptance_criteria",
-                table: "work_item_records",
-                type: "text",
-                nullable: true)
-                .Annotation("MySql:CharSet", "utf8mb4");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "acceptance_criteria",
-                table: "work_item_records");
-
             migrationBuilder.UpdateData(
                 table: "work_item_records",
                 keyColumn: "ado_work_item_url",
