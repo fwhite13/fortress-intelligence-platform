@@ -1,73 +1,54 @@
-# CC Brief — ADO#2842 Build Cycle 2
+# CC Brief — ADO#2843 Build Cycle 2 (I1 only)
 
 ## Task
-Two targeted fixes only. No scope creep. Do not touch any other files.
+Add `created_at` and `updated_at` columns to the `user_sessions` table to match the timestamp convention on all other tables.
 
-## Project Root
-`/home/fredw/projects/fip/fait-v2/src/FortressAI.V2.Web/`
-
----
-
-## Fix I1 — Add `@attribute [Authorize]` to Onboarding.razor
-
-**File:** `/home/fredw/projects/fip/fait-v2/src/FortressAI.V2.Web/Components/Pages/Onboarding.razor`
-
-Current line 1:
-```
-@page "/onboarding"
-```
-
-Change to:
-```
-@page "/onboarding"
-@attribute [Authorize]
-```
-
-Insert `@attribute [Authorize]` as line 2, immediately after the `@page` directive — same pattern as all other pages in the same directory.
+**Scope:** I1 only. Do NOT touch CHAR vs varchar (I2 pending design call). Do NOT touch any other files.
 
 ---
 
-## Fix I2 — Move security headers middleware above UseStaticFiles() in Program.cs
+## File 1: `Data/Models/UserSession.cs`
 
-**File:** `/home/fredw/projects/fip/fait-v2/src/FortressAI.V2.Web/Program.cs`
+Full path: `/home/fredw/projects/fip/fait-v2/src/FortressAI.V2.Web/Data/Models/UserSession.cs`
 
-Current order (wrong):
+Add two properties after the `UserAgent` property and before the Navigation comment:
+
 ```csharp
-app.UseStaticFiles();
+[Column("created_at")]
+public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-// Security headers
-app.Use(async (context, next) =>
-{
-    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
-    context.Response.Headers["X-Frame-Options"] = "DENY";
-    context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
-    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-    await next();
-});
+[Column("updated_at")]
+public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 ```
 
-Replace with (correct order — security headers BEFORE static files):
-```csharp
-// Security headers — must be before UseStaticFiles
-app.Use(async (context, next) =>
-{
-    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
-    context.Response.Headers["X-Frame-Options"] = "DENY";
-    context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
-    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-    await next();
-});
+---
 
-app.UseStaticFiles();
+## File 2: `Data/FaitV2DbContext.cs`
+
+Full path: `/home/fredw/projects/fip/fait-v2/src/FortressAI.V2.Web/Data/FaitV2DbContext.cs`
+
+In the `user_sessions` entity config (inside the `modelBuilder.Entity<UserSession>` block), add after the `UserAgent` property config and before the `HasIndex` lines:
+
+```csharp
+entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
 ```
+
+---
+
+## After editing files, run this migration command:
+
+```bash
+cd /home/fredw/projects/fip/fait-v2/src/FortressAI.V2.Web && dotnet ef migrations add AddUserSessionTimestamps --output-dir Data/Migrations
+```
+
+After running the migration, verify the generated migration file's `Up()` method contains `AddColumn` calls for `created_at` and `updated_at` on the `user_sessions` table.
 
 ---
 
 ## Constraints
-- Touch ONLY these two files: `Components/Pages/Onboarding.razor` and `Program.cs`
-- Do NOT add, remove, or change anything else
-- Do NOT reformat or reorder anything outside the specified change
-- Do NOT add any comments except the updated comment on the security headers block
-
-## Done
-After both edits are made, output "FIXES APPLIED" and list the two files modified.
+- Do NOT modify any other files
+- Do NOT change any existing `.HasColumnType()` calls on PKs/FKs
+- Do NOT rename any existing columns
+- Do NOT touch any other entity configurations
+- The migration must be additive only (no dropping/modifying existing columns)
