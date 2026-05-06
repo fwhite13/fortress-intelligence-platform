@@ -13,6 +13,8 @@ RUN npm ci --omit=dev
 
 COPY src/ ./src/
 
+RUN apk add --no-cache curl
+
 RUN addgroup -S appuser && adduser -S appuser -G appuser
 USER appuser
 
