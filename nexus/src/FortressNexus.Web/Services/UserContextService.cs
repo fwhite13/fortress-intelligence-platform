@@ -32,4 +32,10 @@ public class UserContextService
         var authState = await _authStateProvider.GetAuthenticationStateAsync();
         return authState.User.IsInRole(NexusRoles.Admin);
     }
+
+    public async Task<bool> IsNexusEditorAsync()
+    {
+        var authState = await _authStateProvider.GetAuthenticationStateAsync();
+        return authState.User.IsInRole(NexusRoles.Admin) || authState.User.IsInRole(NexusRoles.Reviewer);
+    }
 }

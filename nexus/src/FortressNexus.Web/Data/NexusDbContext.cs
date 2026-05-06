@@ -164,6 +164,7 @@ public class NexusDbContext : DbContext
                     v => v == null ? 0 : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null).GetHashCode(),
                     v => v == null ? null : JsonSerializer.Deserialize<List<string>>(JsonSerializer.Serialize(v, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null)));
             entity.Property(e => e.Description).HasColumnName("description").HasColumnType("text");
+            entity.Property(e => e.AcceptanceCriteria).HasColumnName("acceptance_criteria").HasColumnType("text");
             entity.Property(e => e.ParentTitle).HasColumnName("parent_title").HasMaxLength(500);
             entity.Property(e => e.IsExternalDependency).HasColumnName("is_external_dependency").IsRequired();
             entity.Property(e => e.ExternalOwner).HasColumnName("external_owner").HasMaxLength(100);

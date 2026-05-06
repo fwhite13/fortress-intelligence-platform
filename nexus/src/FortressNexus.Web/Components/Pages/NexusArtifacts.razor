@@ -7,6 +7,7 @@
 @inject ISnackbar Snackbar
 @inject NavigationManager Nav
 @inject UserContextService UserContextService
+@inject IDialogService DialogService
 
 @using FortressNexus.Web.Data
 @using FortressNexus.Web.Services
@@ -30,7 +31,46 @@ else if (_error is not null)
 else if (_artifactSet is not null)
 {
     <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
-        <MudText Typo="Typo.h5" Class="mb-4">Work Items — @_submissionTitle</MudText>
+        <div class="d-flex align-center justify-space-between mb-4 flex-wrap gap-2">
+            <div class="d-flex align-center gap-2">
+                <MudText Typo="Typo.h5">Work Items — @_submissionTitle</MudText>
+                @if (_editMode)
+                {
+                    <MudChip T="string" Color="Color.Warning" Size="Size.Small" Class="ml-2">✏️ EDIT MODE</MudChip>
+                }
+            </div>
+            <div class="d-flex align-center gap-2">
+                @if (_isEditor && !_editMode)
+                {
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Edit"
+                               Size="Size.Small"
+                               OnClick="@(() => { _editMode = true; StateHasChanged(); })">
+                        Edit
+                    </MudButton>
+                }
+                @if (_editMode)
+                {
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Success"
+                               StartIcon="@Icons.Material.Filled.CheckCircle"
+                               Size="Size.Small"
+                               OnClick="@(() => { _editMode = false; StateHasChanged(); })">
+                        Done Editing
+                    </MudButton>
+                }
+                <MudTooltip Text="@(_editMode ? "Exit edit mode to post" : "Post work items to ADO")">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.CloudUpload"
+                               Size="Size.Small"
+                               Disabled="@_editMode">
+                        Post to ADO
+                    </MudButton>
+                </MudTooltip>
+            </div>
+        </div>
 
         @* ── External Dependencies Panel ── *@
         @if (_artifactSet.ExternalDependencyCount > 0)
@@ -69,10 +109,33 @@ else if (_artifactSet is not null)
             {
                 <MudExpansionPanel Text="@epic.Title" Expanded="true">
                     <TitleContent>
-                        <div class="d-flex align-center gap-2">
+                        <div class="d-flex align-center gap-2 flex-wrap">
                             @RenderTemplateBadge(epic)
-                            <MudText Typo="Typo.subtitle1"><strong>Epic:</strong> @epic.Title</MudText>
+                            @if (_editMode)
+                            {
+                                <MudText Typo="Typo.subtitle2" Class="mr-1"><strong>Epic:</strong></MudText>
+                                <MudTextField @bind-Value="epic.Title"
+                                              Variant="Variant.Outlined"
+                                              Margin="Margin.Dense"
+                                              Style="min-width:300px"
+                                              @onblur="@(() => SaveTitle(epic))"
+                                              @onkeydown="@((KeyboardEventArgs e) => { if (e.Key == "Enter") InvokeAsync(() => SaveTitle(epic)); })"
+                                              @onclick:stopPropagation="true" />
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.subtitle1"><strong>Epic:</strong> @epic.Title</MudText>
+                            }
                             @RenderPredecessorBadges(epic)
+                            @if (_editMode)
+                            {
+                                <span @onclick:stopPropagation="true">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                   Color="Color.Error"
+                                                   Size="Size.Small"
+                                                   OnClick="@(() => ConfirmDelete(epic))" />
+                                </span>
+                            }
                         </div>
                     </TitleContent>
                     <ChildContent>
@@ -82,11 +145,46 @@ else if (_artifactSet is not null)
                         @foreach (var feature in features)
                         {
                             <MudPaper Elevation="0" Class="ml-4 mb-2 pa-2" Style="border-left: 3px solid var(--mud-palette-primary);">
-                                <div class="d-flex align-center gap-2 mb-1">
+                                <div class="d-flex align-center gap-2 mb-1 flex-wrap">
                                     @RenderTemplateBadge(feature)
-                                    <MudText Typo="Typo.subtitle2"><strong>Feature:</strong> @feature.Title</MudText>
+                                    @if (_editMode)
+                                    {
+                                        <MudText Typo="Typo.subtitle2" Class="mr-1"><strong>Feature:</strong></MudText>
+                                        <MudTextField @bind-Value="feature.Title"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense"
+                                                      Style="min-width:260px"
+                                                      @onblur="@(() => SaveTitle(feature))"
+                                                      @onkeydown="@((KeyboardEventArgs e) => { if (e.Key == "Enter") InvokeAsync(() => SaveTitle(feature)); })" />
+                                        <MudMenu Label="Move ▾" Size="Size.Small" Dense="true">
+                                            @foreach (var target in GetValidParents(feature))
+                                            {
+                                                <MudMenuItem OnClick="@(() => MoveWi(feature, target.Title))">@target.Title</MudMenuItem>
+                                            }
+                                        </MudMenu>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => ConfirmDelete(feature))" />
+                                    }
+                                    else
+                                    {
+                                        <MudText Typo="Typo.subtitle2"><strong>Feature:</strong> @feature.Title</MudText>
+                                    }
                                     @RenderPredecessorBadges(feature)
                                 </div>
+                                @if (_editMode)
+                                {
+                                    <MudExpansionPanels Class="ml-2 mb-1">
+                                        <MudExpansionPanel Text="Description ▾">
+                                            <MudTextField @bind-Value="feature.Description"
+                                                          Variant="Variant.Outlined"
+                                                          Lines="3"
+                                                          Label="Feature Description"
+                                                          @onblur="@(() => SaveDescription(feature))" />
+                                        </MudExpansionPanel>
+                                    </MudExpansionPanels>
+                                }
 
                                 @{
                                     var stories = GetChildren("User Story", feature.Title);
@@ -96,9 +194,74 @@ else if (_artifactSet is not null)
                                     <MudPaper Elevation="0" Class="ml-4 mb-2 pa-2" Style="border-left: 3px solid var(--mud-palette-secondary);">
                                         <div class="d-flex align-center flex-wrap gap-2 mb-1">
                                             @RenderTemplateBadge(story)
-                                            <MudText Typo="Typo.body1"><strong>Story:</strong> @story.Title</MudText>
+                                            @if (_editMode)
+                                            {
+                                                <MudText Typo="Typo.body2" Class="mr-1"><strong>Story:</strong></MudText>
+                                                <MudTextField @bind-Value="story.Title"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              Style="min-width:260px"
+                                                              @onblur="@(() => SaveTitle(story))"
+                                                              @onkeydown="@((KeyboardEventArgs e) => { if (e.Key == "Enter") InvokeAsync(() => SaveTitle(story)); })" />
+                                                <MudMenu Label="Move ▾" Size="Size.Small" Dense="true">
+                                                    @foreach (var target in GetValidParents(story))
+                                                    {
+                                                        <MudMenuItem OnClick="@(() => MoveWi(story, target.Title))">@target.Title</MudMenuItem>
+                                                    }
+                                                </MudMenu>
+                                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                               Color="Color.Error"
+                                                               Size="Size.Small"
+                                                               OnClick="@(() => ConfirmDelete(story))" />
+                                            }
+                                            else
+                                            {
+                                                <MudText Typo="Typo.body1"><strong>Story:</strong> @story.Title</MudText>
+                                            }
                                             @RenderPredecessorBadges(story)
                                         </div>
+                                        @if (_editMode)
+                                        {
+                                            <MudExpansionPanels Class="ml-2 mb-1">
+                                                <MudExpansionPanel Text="Description ▾">
+                                                    <MudTextField @bind-Value="story.Description"
+                                                                  Variant="Variant.Outlined"
+                                                                  Lines="3"
+                                                                  Label="Story Description"
+                                                                  @onblur="@(() => SaveDescription(story))" />
+                                                </MudExpansionPanel>
+                                                <MudExpansionPanel Text="Acceptance Criteria ▾">
+                                                    @{
+                                                        if (!_acLists.ContainsKey(story.Id))
+                                                            _acLists[story.Id] = new List<string>();
+                                                        var acItems = _acLists[story.Id];
+                                                    }
+                                                    @for (int acIdx = 0; acIdx < acItems.Count; acIdx++)
+                                                    {
+                                                        var capturedIdx = acIdx;
+                                                        <div class="d-flex align-center gap-1 mb-1">
+                                                            <MudTextField Value="@acItems[capturedIdx]"
+                                                                          ValueChanged="@((string val) => { acItems[capturedIdx] = val; })"
+                                                                          Variant="Variant.Outlined"
+                                                                          Margin="Margin.Dense"
+                                                                          Style="flex:1"
+                                                                          @onblur="@(() => SaveAc(story))" />
+                                                            <MudIconButton Icon="@Icons.Material.Filled.Close"
+                                                                           Size="Size.Small"
+                                                                           Color="Color.Default"
+                                                                           OnClick="@(async () => { acItems.RemoveAt(capturedIdx); story.AcceptanceCriteria = string.Join('\n', acItems); await SaveAc(story); })" />
+                                                        </div>
+                                                    }
+                                                    <MudButton Variant="Variant.Text"
+                                                               Color="Color.Primary"
+                                                               StartIcon="@Icons.Material.Filled.Add"
+                                                               Size="Size.Small"
+                                                               OnClick="@(() => { acItems.Add(""); StateHasChanged(); })">
+                                                        + Add AC
+                                                    </MudButton>
+                                                </MudExpansionPanel>
+                                            </MudExpansionPanels>
+                                        }
 
                                         @* Tasks under this Story *@
                                         @{
@@ -109,8 +272,42 @@ else if (_artifactSet is not null)
                                             <div class="d-flex align-center flex-wrap gap-2 ml-4 mb-1">
                                                 @RenderTemplateBadge(task)
                                                 <MudIcon Icon="@Icons.Material.Filled.CheckBox" Size="Size.Small" />
-                                                <MudText Typo="Typo.body2">@task.Title</MudText>
+                                                @if (_editMode)
+                                                {
+                                                    <MudTextField @bind-Value="task.Title"
+                                                                  Variant="Variant.Outlined"
+                                                                  Margin="Margin.Dense"
+                                                                  Style="min-width:240px"
+                                                                  @onblur="@(() => SaveTitle(task))"
+                                                                  @onkeydown="@((KeyboardEventArgs e) => { if (e.Key == "Enter") InvokeAsync(() => SaveTitle(task)); })" />
+                                                    <MudMenu Label="Move ▾" Size="Size.Small" Dense="true">
+                                                        @foreach (var target in GetValidParents(task))
+                                                        {
+                                                            <MudMenuItem OnClick="@(() => MoveWi(task, target.Title))">@target.Title</MudMenuItem>
+                                                        }
+                                                    </MudMenu>
+                                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                                   Color="Color.Error"
+                                                                   Size="Size.Small"
+                                                                   OnClick="@(() => ConfirmDelete(task))" />
+                                                }
+                                                else
+                                                {
+                                                    <MudText Typo="Typo.body2">@task.Title</MudText>
+                                                }
                                                 @RenderPredecessorBadges(task)
+                                            </div>
+                                        }
+                                        @if (_editMode)
+                                        {
+                                            <div class="ml-4 mt-1">
+                                                <MudButton Variant="Variant.Text"
+                                                           Color="Color.Default"
+                                                           StartIcon="@Icons.Material.Filled.Add"
+                                                           Size="Size.Small"
+                                                           OnClick="@(() => AddWi("Task", story.Title))">
+                                                    + Add Task
+                                                </MudButton>
                                             </div>
                                         }
 
@@ -120,7 +317,7 @@ else if (_artifactSet is not null)
                                                 .Where(w => w.WorkItemType == "Test Case" && w.ParentTitle == story.Title)
                                                 .ToList();
                                         }
-                                        @if (testCases.Any())
+                                        @if (testCases.Any() || _editMode)
                                         {
                                             <MudExpansionPanels Class="mt-2 ml-4">
                                                 <MudExpansionPanel Expanded="false">
@@ -133,8 +330,42 @@ else if (_artifactSet is not null)
                                                             <div class="ml-4 mb-2">
                                                                 <div class="d-flex align-center gap-2">
                                                                     <MudChip T="string" Color="Color.Primary" Size="Size.Small">TC</MudChip>
-                                                                    <MudText Typo="Typo.body2">@tc.Title</MudText>
+                                                                    @if (_editMode)
+                                                                    {
+                                                                        <MudTextField @bind-Value="tc.Title"
+                                                                                      Variant="Variant.Outlined"
+                                                                                      Margin="Margin.Dense"
+                                                                                      Style="min-width:220px"
+                                                                                      @onblur="@(() => SaveTitle(tc))"
+                                                                                      @onkeydown="@((KeyboardEventArgs e) => { if (e.Key == "Enter") InvokeAsync(() => SaveTitle(tc)); })" />
+                                                                        <MudMenu Label="Move ▾" Size="Size.Small" Dense="true">
+                                                                            @foreach (var target in GetValidParents(tc))
+                                                                            {
+                                                                                <MudMenuItem OnClick="@(() => MoveWi(tc, target.Title))">@target.Title</MudMenuItem>
+                                                                            }
+                                                                        </MudMenu>
+                                                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                                                       Color="Color.Error"
+                                                                                       Size="Size.Small"
+                                                                                       OnClick="@(() => ConfirmDelete(tc))" />
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        <MudText Typo="Typo.body2">@tc.Title</MudText>
+                                                                    }
                                                                 </div>
+                                                            </div>
+                                                        }
+                                                        @if (_editMode)
+                                                        {
+                                                            <div class="ml-4 mt-1">
+                                                                <MudButton Variant="Variant.Text"
+                                                                           Color="Color.Primary"
+                                                                           StartIcon="@Icons.Material.Filled.Add"
+                                                                           Size="Size.Small"
+                                                                           OnClick="@(() => AddWi("Test Case", story.Title))">
+                                                                    + Add Test Case
+                                                                </MudButton>
                                                             </div>
                                                         }
                                                     </ChildContent>
@@ -143,7 +374,42 @@ else if (_artifactSet is not null)
                                         }
                                     </MudPaper>
                                 }
+                                @if (_editMode)
+                                {
+                                    <div class="ml-4 mt-1">
+                                        <MudButton Variant="Variant.Text"
+                                                   Color="Color.Secondary"
+                                                   StartIcon="@Icons.Material.Filled.Add"
+                                                   Size="Size.Small"
+                                                   OnClick="@(() => AddWi("User Story", feature.Title))">
+                                            + Add Story
+                                        </MudButton>
+                                    </div>
+                                }
                             </MudPaper>
+                        }
+                        @if (_editMode)
+                        {
+                            <div class="ml-4 mt-2">
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.Add"
+                                           Size="Size.Small"
+                                           OnClick="@(() => AddWi("Feature", epic.Title))">
+                                    + Add Feature
+                                </MudButton>
+                            </div>
+
+                            @* Description section for Epic *@
+                            <MudExpansionPanels Class="ml-4 mt-1">
+                                <MudExpansionPanel Text="Description ▾">
+                                    <MudTextField @bind-Value="epic.Description"
+                                                  Variant="Variant.Outlined"
+                                                  Lines="3"
+                                                  Label="Epic Description"
+                                                  @onblur="@(() => SaveDescription(epic))" />
+                                </MudExpansionPanel>
+                            </MudExpansionPanels>
                         }
                     </ChildContent>
                 </MudExpansionPanel>
@@ -162,6 +428,16 @@ else if (_artifactSet is not null)
     private string _submissionTitle = "";
     private bool _loading = true;
     private string? _error;
+
+    // Edit Mode state
+    private bool _editMode = false;
+    private bool _isEditor = false;
+    // Track original titles for revert on save failure
+    private Dictionary<int, string> _originalTitles = new();
+    private Dictionary<int, string> _originalDescriptions = new();
+    private Dictionary<int, string> _originalAc = new();
+    // AC list state (per WI id → list of ac strings)
+    private Dictionary<int, List<string>> _acLists = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -215,6 +491,19 @@ else if (_artifactSet is not null)
 
             // Epics are top-level (no parent or parent is null)
             _epics = _workItems.Where(w => w.WorkItemType == "Epic").ToList();
+
+            _isEditor = await UserContextService.IsNexusEditorAsync();
+            // Snapshot originals for revert on save failure
+            foreach (var w in _workItems)
+            {
+                _originalTitles[w.Id] = w.Title;
+                _originalDescriptions[w.Id] = w.Description ?? "";
+                _originalAc[w.Id] = w.AcceptanceCriteria ?? "";
+                _acLists[w.Id] = (w.AcceptanceCriteria ?? "")
+                    .Split('\n', StringSplitOptions.None)
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .ToList();
+            }
         }
         catch (Exception ex)
         {
@@ -277,6 +566,212 @@ else if (_artifactSet is not null)
     {
         if (text is not null)
             await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+    }
+
+    // ── Edit Mode Helpers ──
+
+    private List<WorkItemRecord> GetValidParents(WorkItemRecord wi)
+    {
+        return wi.WorkItemType switch
+        {
+            "Feature" => _workItems.Where(w => w.WorkItemType == "Epic").ToList(),
+            "User Story" => _workItems.Where(w => w.WorkItemType == "Feature").ToList(),
+            "Task" => _workItems.Where(w => w.WorkItemType == "User Story").ToList(),
+            "Test Case" => _workItems.Where(w => w.WorkItemType == "User Story").ToList(),
+            _ => new List<WorkItemRecord>()
+        };
+    }
+
+    private List<WorkItemRecord> GetAllDescendants(WorkItemRecord wi)
+    {
+        var result = new List<WorkItemRecord>();
+        CollectDescendantsLocal(wi, result);
+        return result;
+    }
+
+    private void CollectDescendantsLocal(WorkItemRecord parent, List<WorkItemRecord> result)
+    {
+        var children = _workItems.Where(w => w.ParentTitle == parent.Title && w.Id != parent.Id).ToList();
+        foreach (var child in children)
+        {
+            result.Add(child);
+            CollectDescendantsLocal(child, result);
+        }
+    }
+
+    // ── Save Methods ──
+
+    private async Task SaveTitle(WorkItemRecord wi)
+    {
+        if (string.IsNullOrWhiteSpace(wi.Title))
+        {
+            wi.Title = _originalTitles.GetValueOrDefault(wi.Id, wi.Title);
+            Snackbar.Add("Title cannot be empty — reverted.", Severity.Warning);
+            return;
+        }
+        var oldTitle = _originalTitles.GetValueOrDefault(wi.Id, wi.Title);
+        if (oldTitle == wi.Title) return;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await using var tx = await db.Database.BeginTransactionAsync();
+            var record = await db.WorkItemRecords.FindAsync(wi.Id);
+            if (record is null) { Snackbar.Add("WI not found.", Severity.Error); return; }
+            record.Title = wi.Title;
+            // Cascade: update ParentTitle refs in same ArtifactSet
+            var dependents = await db.WorkItemRecords
+                .Where(w => w.ArtifactSetId == wi.ArtifactSetId && w.ParentTitle == oldTitle)
+                .ToListAsync();
+            foreach (var dep in dependents)
+            {
+                dep.ParentTitle = wi.Title;
+                // Also update local list
+                var local = _workItems.FirstOrDefault(w => w.Id == dep.Id);
+                if (local is not null) local.ParentTitle = wi.Title;
+            }
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+            _originalTitles[wi.Id] = wi.Title;
+            StateHasChanged();
+        }
+        catch
+        {
+            wi.Title = oldTitle;
+            Snackbar.Add("Save failed — check connection.", Severity.Error);
+        }
+    }
+
+    private async Task SaveDescription(WorkItemRecord wi)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var record = await db.WorkItemRecords.FindAsync(wi.Id);
+            if (record is null) return;
+            record.Description = wi.Description;
+            await db.SaveChangesAsync();
+            _originalDescriptions[wi.Id] = wi.Description ?? "";
+        }
+        catch
+        {
+            wi.Description = _originalDescriptions.GetValueOrDefault(wi.Id, "");
+            Snackbar.Add("Save failed — check connection.", Severity.Error);
+        }
+    }
+
+    private async Task SaveAc(WorkItemRecord wi)
+    {
+        if (!_acLists.TryGetValue(wi.Id, out var items)) return;
+        var joined = string.Join('\n', items.Where(s => !string.IsNullOrWhiteSpace(s)));
+        wi.AcceptanceCriteria = joined;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var record = await db.WorkItemRecords.FindAsync(wi.Id);
+            if (record is null) return;
+            record.AcceptanceCriteria = joined;
+            await db.SaveChangesAsync();
+            _originalAc[wi.Id] = joined;
+        }
+        catch
+        {
+            var orig = _originalAc.GetValueOrDefault(wi.Id, "");
+            wi.AcceptanceCriteria = orig;
+            _acLists[wi.Id] = orig.Split('\n', StringSplitOptions.None)
+                .Where(s => !string.IsNullOrEmpty(s)).ToList();
+            Snackbar.Add("Save failed — check connection.", Severity.Error);
+        }
+    }
+
+    private async Task MoveWi(WorkItemRecord wi, string newParentTitle)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var record = await db.WorkItemRecords.FindAsync(wi.Id);
+            if (record is null) return;
+            record.ParentTitle = newParentTitle;
+            await db.SaveChangesAsync();
+            wi.ParentTitle = newParentTitle;
+            _epics = _workItems.Where(w => w.WorkItemType == "Epic").ToList();
+            StateHasChanged();
+        }
+        catch
+        {
+            Snackbar.Add("Move failed — check connection.", Severity.Error);
+        }
+    }
+
+    private async Task ConfirmDelete(WorkItemRecord wi)
+    {
+        var descendants = GetAllDescendants(wi);
+        string message = descendants.Count > 0
+            ? $"Delete '{wi.Title}' and its {descendants.Count} child item(s)? This cannot be undone."
+            : $"Delete '{wi.Title}'? This cannot be undone.";
+        string yesText = descendants.Count > 0 ? "Delete with children" : "Delete";
+
+        bool? confirmed = await DialogService.ShowMessageBox(
+            "Confirm Delete",
+            message,
+            yesText: yesText,
+            cancelText: "Cancel");
+
+        if (confirmed != true) return;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var allToDelete = new List<int> { wi.Id };
+            allToDelete.AddRange(descendants.Select(d => d.Id));
+            var dbRecords = await db.WorkItemRecords
+                .Where(w => allToDelete.Contains(w.Id))
+                .ToListAsync();
+            db.WorkItemRecords.RemoveRange(dbRecords);
+            await db.SaveChangesAsync();
+
+            _workItems.Remove(wi);
+            foreach (var d in descendants) _workItems.Remove(d);
+            _epics = _workItems.Where(w => w.WorkItemType == "Epic").ToList();
+            StateHasChanged();
+        }
+        catch
+        {
+            Snackbar.Add("Delete failed — check connection.", Severity.Error);
+        }
+    }
+
+    private async Task AddWi(string wiType, string parentTitle)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var newWi = new WorkItemRecord
+            {
+                ArtifactSetId = _artifactSet!.Id,
+                WorkItemType = wiType,
+                Title = $"New {wiType}",
+                ParentTitle = parentTitle,
+                Status = "Created",
+                AdoWorkItemId = 0,
+                AdoWorkItemUrl = "",
+                WiTemplate = WiTemplateType.Standard
+            };
+            db.WorkItemRecords.Add(newWi);
+            await db.SaveChangesAsync();
+
+            _workItems.Add(newWi);
+            _originalTitles[newWi.Id] = newWi.Title;
+            _originalDescriptions[newWi.Id] = "";
+            _originalAc[newWi.Id] = "";
+            _acLists[newWi.Id] = new List<string>();
+            if (wiType == "Epic")
+                _epics = _workItems.Where(w => w.WorkItemType == "Epic").ToList();
+            StateHasChanged();
+        }
+        catch
+        {
+            Snackbar.Add("Add failed — check connection.", Severity.Error);
+        }
     }
 
     private static RenderFragment RenderTemplateBadge(WorkItemRecord wi) => builder =>

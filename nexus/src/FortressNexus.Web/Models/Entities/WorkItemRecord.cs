@@ -23,6 +23,9 @@ public class WorkItemRecord
     // Developer brief / description
     public string? Description { get; set; }
 
+    // Acceptance criteria — newline-delimited string (e.g. "Item 1\nItem 2\nItem 3")
+    public string? AcceptanceCriteria { get; set; }
+
     // Parent story title (for Test Cases linked to a User Story)
     public string? ParentTitle { get; set; }
 

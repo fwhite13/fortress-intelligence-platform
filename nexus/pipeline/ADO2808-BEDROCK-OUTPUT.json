@@ -1,0 +1,2844 @@
+[
+  {
+    "type": "Epic",
+    "parentTitle": null,
+    "title": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "description": "Build a unified MCP server for all Bedrock Knowledge Base operations across FIP applications. Centralizes KB access through authenticated HTTP/SSE endpoints with auto-scoping security and proper entitlement management.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "phase-0-prerequisite"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Epic",
+    "parentTitle": null,
+    "title": "FAIT v2 DB: KB Entitlements Schema",
+    "description": "Create database schema for KB entitlements management including kb_entitlements, team_memberships, and teams tables to support Team KB and Project KB access control.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "fait-v2-prerequisite"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Feature",
+    "parentTitle": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "title": "Implement MCP server infrastructure",
+    "description": "Create the foundational ECS service, ECR repository, IAM roles, and ALB configuration for the fip-mcp server.",
+    "acceptanceCriteria": "Given the infrastructure is deployed, when health checks are performed, then the service returns 200 OK and is reachable via the ALB target group",
+    "developerBrief": "## Infrastructure Setup\n**Purpose:** Deploy the core AWS infrastructure for the fip-mcp service\n### Components Required\n- ECS Fargate service in fortress-tools-cluster\n- ECR repository for container images\n- ALB target group and routing rules\n- IAM task execution role with Bedrock permissions\n### Configuration\n- 0.25 vCPU, 512MB memory\n- Single container initially\n- Port 3000 or 8080 (document choice)\n- Host-based routing for /mcp/* paths",
+    "specReference": null,
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-6",
+      "infrastructure"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "Feature",
+    "parentTitle": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "title": "Build Node.js MCP server with auth validation",
+    "description": "Implement the core MCP server using the @modelcontextprotocol/sdk with Entra OAuth bearer token validation and proper CORS configuration.",
+    "acceptanceCriteria": "Given a valid Entra JWT token, when making requests to /mcp endpoints, then the server validates the token and returns appropriate responses; and given invalid/missing tokens, then returns 401 errors",
+    "developerBrief": "## MCP Server Core\n**Tech Stack:** Node.js 22, @modelcontextprotocol/sdk, Express/Fastify\n### Key Components\n- SSE transport for MCP over HTTP\n- JWT validation against Entra JWKS\n- CORS headers for cross-origin FIP apps\n- Health check endpoint\n### Auth Requirements\n- Validate aud, tid claims\n- Extract oid, groups for entitlements\n- Support forge-kb-admin role checking",
+    "specReference": null,
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given valid Entra JWT token, when making request to /mcp endpoint, then server validates token and returns appropriate response",
+      "TC: Given invalid/missing JWT token, when making request to /mcp endpoint, then server returns 401 error"
+    ]
+  },
+  {
+    "type": "Feature",
+    "parentTitle": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "title": "Implement KB search and metadata tools",
+    "description": "Build the search_kb, list_kbs, and get_kb_metadata MCP tools with proper auto-scoping and entitlement validation.",
+    "acceptanceCriteria": "Given entitled users, when calling search_kb with valid KB IDs, then results are returned with proper security filtering applied; and when calling list_kbs, then only entitled KBs are returned; and when calling get_kb_metadata, then accurate stats are provided",
+    "developerBrief": "## KB Read Operations\n**Tools:** search_kb, list_kbs, get_kb_metadata\n### Auto-Scoping Rules\n- Personal KB: inject user_id filter\n- Team KB: validate team membership\n- Project KB: validate project access\n- Corp/NEXUS: no additional filtering\n### Bedrock Integration\n- bedrock-agent-runtime:Retrieve for search\n- GetKnowledgeBase + ListIngestionJobs for metadata",
+    "specReference": null,
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given entitled users, when calling search_kb with valid KB ID, then results are returned with proper security filtering",
+      "TC: Given entitled users, when calling list_kbs, then only entitled KBs are returned",
+      "TC: Given entitled users, when calling get_kb_metadata, then accurate stats are provided"
+    ]
+  },
+  {
+    "type": "Feature",
+    "parentTitle": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "title": "Implement KB ingestion and job tracking",
+    "description": "Build the add_to_kb and get_job_status MCP tools for async content ingestion with proper job lifecycle management.",
+    "acceptanceCriteria": "Given users with write entitlements, when calling add_to_kb, then content is queued for ingestion and a job_id is returned; and when polling with get_job_status, then accurate status updates are provided until completion",
+    "developerBrief": "## KB Write Operations\n**Tools:** add_to_kb, get_job_status\n### Async Pattern\n- Immediate job_id return\n- In-memory job tracking (MVP)\n- StartIngestionJob integration\n### Validation\n- Write entitlement checking\n- Required metadata fields\n- Project/team scoping for restricted KBs",
+    "specReference": null,
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 2,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given users with write entitlements, when calling add_to_kb, then content is queued and job_id is returned",
+      "TC: Given valid job_id, when polling with get_job_status, then accurate status updates are provided until completion"
+    ]
+  },
+  {
+    "type": "Feature",
+    "parentTitle": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "title": "Implement entitlements management system",
+    "description": "Build the entitlement resolution system supporting both database-backed entitlements and fallback static configuration with admin endpoints.",
+    "acceptanceCriteria": "Given the FAIT v2 DB exists, when querying entitlements, then the kb_entitlements table is used; and given no database, when using fallback config, then group-based entitlements work correctly; and given admin role, when accessing admin endpoints, then entitlement data is returned",
+    "developerBrief": "## Entitlements System\n**Priority Order:** DB table \u2192 fallback static config\n### Database Schema\n- kb_entitlements table with user_id/kb_id/permissions\n- team_memberships validation for Team KBs\n### Fallback Config\n- JSON file with group mappings\n- Default entitlements for all users\n- Environment variable configuration",
+    "specReference": null,
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3",
+      "spec-section-4"
+    ],
+    "predecessorTitles": [
+      "Create kb_entitlements table in FAIT v2 DB"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given FAIT v2 DB exists, when querying entitlements, then kb_entitlements table is used",
+      "TC: Given no database, when using fallback config, then group-based entitlements work correctly",
+      "TC: Given admin role, when accessing admin endpoints, then entitlement data is returned"
+    ]
+  },
+  {
+    "type": "Feature",
+    "parentTitle": "FAIT v2 DB: KB Entitlements Schema",
+    "title": "Create KB entitlements database schema",
+    "description": "Design and implement the database tables required for KB entitlements management including kb_entitlements, teams, and team_memberships tables.",
+    "acceptanceCriteria": "Given the FAIT v2 database exists, when the schema is deployed, then kb_entitlements table supports user/KB permission mappings; and teams table supports team management; and team_memberships table supports team membership validation with proper foreign key constraints",
+    "developerBrief": "## KB Entitlements Schema\n**Database:** FAIT v2 PostgreSQL/MySQL\n### Tables Required\n1. kb_entitlements: user permissions per KB\n2. teams: team definitions and metadata\n3. team_memberships: user-to-team associations\n### Constraints\n- Primary keys and foreign keys\n- Proper indexing for lookup performance\n- Data validation rules",
+    "specReference": null,
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8",
+      "fait-v2-prerequisite"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given FAIT v2 database exists, when schema is deployed, then kb_entitlements table supports user/KB permission mappings",
+      "TC: Given teams table exists, when supporting team management, then team_memberships table supports membership validation with proper foreign key constraints"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement MCP server infrastructure",
+    "title": "As a DevOps engineer, I want ECR repository created for fip-mcp so that container images can be stored and deployed",
+    "description": "## Developer Brief \u2014 ECR Repository Setup\n**Spec Reference:** Section 6 \u2014 Deployment\n### Context\nThe fip-mcp service needs a dedicated ECR repository for storing Docker images in the FIP deployment pipeline.\n### Scope\n- Create ECR repository named 'fip-mcp'\n- Apply standard FIP lifecycle policies\n- Configure in us-east-1 region\n### Technical Notes\n- Repository: 742932328420.dkr.ecr.us-east-1.amazonaws.com/fip-mcp\n- Follow existing FIP ECR naming conventions\n- Apply standard image lifecycle management\n### Dependencies\nNone - foundational infrastructure\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given the ECR repository creation, when checking AWS ECR console, then fip-mcp repository exists in us-east-1; and when pushing images, then standard lifecycle policies are applied; and when other services reference the repository, then the full URI is available",
+    "developerBrief": null,
+    "specReference": "\u00a76 \u2014 Deployment",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-6"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement MCP server infrastructure",
+    "title": "As a DevOps engineer, I want IAM task execution role configured so that fip-mcp can access Bedrock services",
+    "description": "## Developer Brief \u2014 IAM Role Configuration\n**Spec Reference:** Section 6 \u2014 Deployment\n### Context\nThe fip-mcp ECS task requires specific Bedrock permissions to call bedrock-agent-runtime APIs for KB operations.\n### Scope\n- Create or modify ECS task execution role\n- Add all required Bedrock permissions\n- Resource scope initially set to * (narrow in follow-up)\n### Technical Notes\n- Role attached to ECS task definition\n- Permissions: Retrieve, StartIngestionJob, GetKnowledgeBase, ListIngestionJobs, GetIngestionJob\n- Follow least-privilege principles for production\n### Dependencies\nECR repository must exist before task definition creation\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given the IAM role configuration, when the ECS task starts, then it can successfully call all required bedrock-agent-runtime APIs; and when testing KB operations, then no permission denied errors occur; and when reviewing the role, then only necessary Bedrock permissions are granted",
+    "developerBrief": null,
+    "specReference": "\u00a76 \u2014 Deployment",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-6"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement MCP server infrastructure",
+    "title": "As a DevOps engineer, I want ECS service configured in fortress-tools-cluster so that fip-mcp runs as a Fargate service",
+    "description": "## Developer Brief \u2014 ECS Service Setup\n**Spec Reference:** Section 6 \u2014 Deployment\n### Context\nDeploy the fip-mcp service as a Fargate container in the existing fortress-tools-cluster for consistent infrastructure management.\n### Scope\n- ECS service named 'fip-mcp'\n- Fargate launch type with specified resource allocation\n- Single container deployment initially\n- Environment variable configuration from Secrets Manager\n### Technical Notes\n- 0.25 vCPU (256), 512MB memory\n- Desired count: 1 (always-on)\n- Container port: 3000 or 8080 (document choice)\n- Auto-scaling policies if needed\n### Dependencies\nECR repository and IAM role must exist\n### Open Questions\nConfirm container port choice (3000 vs 8080)",
+    "acceptanceCriteria": "Given the ECS service deployment, when checking the fortress-tools-cluster, then fip-mcp service is running with 1 healthy task; and when accessing the health endpoint, then the service responds correctly; and when reviewing resource utilization, then CPU and memory usage is within expected ranges",
+    "developerBrief": null,
+    "specReference": "\u00a76 \u2014 Deployment",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-6"
+    ],
+    "predecessorTitles": [
+      "As a DevOps engineer, I want ECR repository created for fip-mcp so that container images can be stored and deployed",
+      "As a DevOps engineer, I want IAM task execution role configured so that fip-mcp can access Bedrock services"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement MCP server infrastructure",
+    "title": "As a DevOps engineer, I want ALB target group configured so that traffic routes to fip-mcp service",
+    "description": "## Developer Brief \u2014 ALB Target Group Configuration\n**Spec Reference:** Section 6 \u2014 Deployment\n### Context\nIntegrate fip-mcp into the existing ALB infrastructure with host-based routing for the /mcp/* path pattern.\n### Scope\n- Create new target group for fip-mcp\n- Configure health check parameters\n- Add routing rule for api.fortressam.ai/mcp/*\n- Register ECS service with target group\n### Technical Notes\n- Health check path: /health\n- Host-based routing rule priority\n- Integration with existing ALB configuration\n- No authentication required on health checks\n### Dependencies\nECS service must be running before target group registration\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given the ALB configuration, when requests are made to api.fortressam.ai/mcp/*, then traffic routes correctly to the fip-mcp service; and when health checks run, then the target group reports healthy targets; and when testing end-to-end connectivity, then requests reach the application successfully",
+    "developerBrief": null,
+    "specReference": "\u00a76 \u2014 Deployment",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-6"
+    ],
+    "predecessorTitles": [
+      "As a DevOps engineer, I want ECS service configured in fortress-tools-cluster so that fip-mcp runs as a Fargate service"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Build Node.js MCP server with auth validation",
+    "title": "As a developer, I want Node.js project scaffolding with MCP SDK so that the server foundation is established",
+    "description": "## Developer Brief \u2014 Project Scaffolding\n**Spec Reference:** Section 2 \u2014 Architecture; Section 6 \u2014 Deployment\n### Context\nSet up the foundational Node.js project structure with the MCP SDK and required dependencies for the fip-mcp server.\n### Scope\n- Node.js 22 project initialization\n- @modelcontextprotocol/sdk integration\n- HTTP server framework (Express/Fastify)\n- Docker containerization\n- Basic project structure and build pipeline\n### Technical Notes\n- Use McpServer class with SSE transport\n- Alpine base image for container\n- Standard FIP build patterns\n- Package.json with proper dependency versions\n### Dependencies\nNone - foundational development work\n### Open Questions\nExpress vs Fastify choice - document decision",
+    "acceptanceCriteria": "Given the project scaffolding, when building the Docker image, then it builds successfully; and when running the container, then the MCP server starts without errors; and when making basic HTTP requests, then the server responds appropriately",
+    "developerBrief": null,
+    "specReference": "\u00a72 \u2014 Architecture; \u00a76 \u2014 Deployment",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2",
+      "spec-section-6"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Build Node.js MCP server with auth validation",
+    "title": "As a developer, I want Entra OAuth JWT validation implemented so that all requests are properly authenticated",
+    "description": "## Developer Brief \u2014 JWT Authentication\n**Spec Reference:** Section 4 \u2014 Auth & Identity\n### Context\nImplement bearer token validation against Entra OAuth to secure all MCP endpoints with proper claim extraction.\n### Scope\n- JWT signature validation against Entra JWKS\n- Claim validation (aud, tid, expiration)\n- Token parsing for oid, groups, roles claims\n- Middleware integration for protected routes\n### Technical Notes\n- Use jsonwebtoken + jwks-rsa or @azure/msal-node\n- Cache JWKS for performance\n- Extract security-relevant claims for entitlement checking\n- Return appropriate 401 errors for invalid tokens\n### Dependencies\nProject scaffolding must be complete\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given valid Entra JWT tokens, when making requests to /mcp endpoints, then requests are authenticated successfully; and given invalid tokens, when making requests, then 401 errors are returned; and given missing tokens, when making requests, then 401 errors are returned; and given valid tokens, when parsing claims, then oid and groups are extracted correctly",
+    "developerBrief": null,
+    "specReference": "\u00a74 \u2014 Auth & Identity",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": [
+      "As a developer, I want Node.js project scaffolding with MCP SDK so that the server foundation is established"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given valid Entra JWT tokens, when making requests to /mcp endpoints, then requests are authenticated successfully",
+      "TC: Given invalid tokens, when making requests, then 401 errors are returned",
+      "TC: Given missing tokens, when making requests, then 401 errors are returned",
+      "TC: Given valid tokens, when parsing claims, then oid and groups are extracted correctly"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Build Node.js MCP server with auth validation",
+    "title": "As a developer, I want CORS configuration implemented so that FIP applications can make cross-origin requests",
+    "description": "## Developer Brief \u2014 CORS Configuration\n**Spec Reference:** Section 2 \u2014 Architecture\n### Context\nConfigure CORS headers to allow cross-origin requests from known FIP applications while maintaining security.\n### Scope\n- CORS middleware configuration\n- Whitelist specific FIP origins\n- Proper handling of preflight requests\n- Credential-aware CORS (no wildcard with auth)\n### Technical Notes\n- Origins: *.fortressam.ai domains\n- Support for Authorization headers\n- Preflight OPTIONS handling\n- Pass-through compatible with CloudFlare\n### Dependencies\nHTTP server framework must be established\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given requests from FAIT on Azure, when making cross-origin calls, then CORS headers allow the requests; and given requests from FIRM/NEXUS on AWS, when making cross-origin calls, then CORS headers allow the requests; and given requests from unknown origins, when making calls, then CORS blocks the requests; and given preflight requests, when sent by browsers, then proper OPTIONS responses are returned",
+    "developerBrief": null,
+    "specReference": "\u00a72 \u2014 Architecture",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2"
+    ],
+    "predecessorTitles": [
+      "As a developer, I want Node.js project scaffolding with MCP SDK so that the server foundation is established"
+    ],
+    "isExternalDependency": true,
+    "externalOwner": "Rob Nethery",
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given requests from FAIT on Azure, when making cross-origin calls, then CORS headers allow the requests",
+      "TC: Given requests from FIRM/NEXUS on AWS, when making cross-origin calls, then CORS headers allow the requests",
+      "TC: Given requests from unknown origins, when making calls, then CORS blocks the requests",
+      "TC: Given preflight requests, when sent by browsers, then proper OPTIONS responses are returned"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Build Node.js MCP server with auth validation",
+    "title": "As a developer, I want SSE transport and health endpoints implemented so that MCP communication works over HTTP",
+    "description": "## Developer Brief \u2014 HTTP/SSE Endpoints\n**Spec Reference:** Section 2 \u2014 Architecture\n### Context\nImplement the core HTTP endpoints for MCP communication including JSON-RPC over POST and SSE streaming for server-initiated notifications.\n### Scope\n- POST /mcp for JSON-RPC 2.0 tool calls\n- GET /mcp/sse for Server-Sent Events\n- GET /health for health checks (no auth)\n- SSE connection management and cleanup\n### Technical Notes\n- SSE transport via SSEServerTransport from MCP SDK\n- JSON-RPC 2.0 standard compliance\n- Connection timeout handling for SSE\n- Health check returns service status\n### Dependencies\nMCP SDK integration must be complete\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given MCP client connections, when using POST /mcp, then JSON-RPC calls work correctly; and when using GET /mcp/sse, then SSE connections establish and stream properly; and when checking GET /health, then health status is returned without authentication; and given long-lived SSE connections, when maintained over time, then connections remain stable",
+    "developerBrief": null,
+    "specReference": "\u00a72 \u2014 Architecture",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2"
+    ],
+    "predecessorTitles": [
+      "As a developer, I want Entra OAuth JWT validation implemented so that all requests are properly authenticated"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given MCP client connections, when using POST /mcp, then JSON-RPC calls work correctly",
+      "TC: Given SSE connections, when using GET /mcp/sse, then connections establish and stream properly",
+      "TC: Given health checks, when checking GET /health, then health status is returned without authentication",
+      "TC: Given long-lived SSE connections, when maintained over time, then connections remain stable"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement KB search and metadata tools",
+    "title": "As a developer, I want search_kb tool implemented so that clients can query Knowledge Bases with proper scoping",
+    "description": "## Developer Brief \u2014 KB Search Tool\n**Spec Reference:** Section 3 \u2014 Tool Definitions\n### Context\nImplement the core search_kb MCP tool that provides semantic search across FORGE KBs with automatic security scoping.\n### Scope\n- bedrock-agent-runtime:Retrieve API integration\n- Auto-scoping filter injection by KB type\n- Query parameter validation\n- Result formatting and scoring\n### Technical Notes\n- Support all KB IDs from inventory\n- Merge auto-scoped filters with caller filters using AND logic\n- Return relevance scores (0.0-1.0)\n- Handle top_k parameter (default 5)\n### Dependencies\nBedrock client integration and entitlement system\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given entitled users, when calling search_kb with Corp KB, then results are returned without additional filtering; and when calling with Personal KB, then user_id filter is auto-injected; and when calling with Team KB, then team membership is validated; and when calling with invalid KB ID, then 400 UNKNOWN_KB error is returned; and when unauthorized for KB, then 403 NOT_ENTITLED error is returned",
+    "developerBrief": null,
+    "specReference": "\u00a73 \u2014 Tool Definitions",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given entitled users, when calling search_kb with Corp KB, then results are returned without additional filtering",
+      "TC: Given entitled users, when calling with Personal KB, then user_id filter is auto-injected",
+      "TC: Given entitled users, when calling with Team KB, then team membership is validated",
+      "TC: Given invalid KB ID, when calling search_kb, then 400 UNKNOWN_KB error is returned",
+      "TC: Given unauthorized access, when calling search_kb, then 403 NOT_ENTITLED error is returned"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement KB search and metadata tools",
+    "title": "As a developer, I want list_kbs tool implemented so that clients can discover available Knowledge Bases",
+    "description": "## Developer Brief \u2014 KB Listing Tool\n**Spec Reference:** Section 3 \u2014 Tool Definitions\n### Context\nImplement the list_kbs MCP tool that returns KBs the authenticated user is entitled to access based on entitlements configuration.\n### Scope\n- Entitlement resolution (DB table or fallback config)\n- KB metadata aggregation\n- Read/write permission indication\n- KB type classification\n### Technical Notes\n- NEXUS KB always included for authenticated users\n- Group-based entitlement resolution from token claims\n- Database fallback when FAIT v2 DB unavailable\n- Return kb_type, description, writable flags\n### Dependencies\nEntitlement system must be implemented\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given authenticated users, when calling list_kbs, then only entitled KBs are returned; and when user has read access, then writable=false is set appropriately; and when user has write access, then writable=true is set; and when using fallback config, then group-based entitlements work; and when database is available, then kb_entitlements table is used",
+    "developerBrief": null,
+    "specReference": "\u00a73 \u2014 Tool Definitions",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given authenticated users, when calling list_kbs, then only entitled KBs are returned",
+      "TC: Given user with read access, when checking permissions, then writable=false is set appropriately",
+      "TC: Given user with write access, when checking permissions, then writable=true is set",
+      "TC: Given fallback config, when database unavailable, then group-based entitlements work",
+      "TC: Given database availability, when querying entitlements, then kb_entitlements table is used"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement KB search and metadata tools",
+    "title": "As a developer, I want get_kb_metadata tool implemented so that clients can retrieve KB statistics and configuration",
+    "description": "## Developer Brief \u2014 KB Metadata Tool\n**Spec Reference:** Section 3 \u2014 Tool Definitions\n### Context\nImplement get_kb_metadata tool to provide KB statistics including document count, last update time, and configuration details.\n### Scope\n- GetKnowledgeBase API integration\n- ListIngestionJobs for last_updated derivation\n- Document count and metadata aggregation\n- Entitlement validation before returning data\n### Technical Notes\n- Combine multiple Bedrock API calls\n- Parse ingestion job timestamps for last_updated\n- Return kb_type, document_count, data_source_id\n- Validate read entitlement before processing\n### Dependencies\nBedrock client and entitlement validation\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given entitled users, when calling get_kb_metadata with valid KB ID, then accurate statistics are returned; and when calling with unauthorized KB, then 403 NOT_ENTITLED error is returned; and when calling with invalid KB ID, then 400 UNKNOWN_KB error is returned; and when KB has recent ingestion jobs, then last_updated reflects the most recent completion time",
+    "developerBrief": null,
+    "specReference": "\u00a73 \u2014 Tool Definitions",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 2,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given entitled users, when calling get_kb_metadata with valid KB ID, then accurate statistics are returned",
+      "TC: Given unauthorized access, when calling with unauthorized KB, then 403 NOT_ENTITLED error is returned",
+      "TC: Given invalid KB ID, when calling get_kb_metadata, then 400 UNKNOWN_KB error is returned",
+      "TC: Given KB with recent ingestion jobs, when querying metadata, then last_updated reflects most recent completion time"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement KB ingestion and job tracking",
+    "title": "As a developer, I want add_to_kb tool implemented so that clients can ingest content into Knowledge Bases asynchronously",
+    "description": "## Developer Brief \u2014 KB Ingestion Tool\n**Spec Reference:** Section 3 \u2014 Tool Definitions\n### Context\nImplement add_to_kb tool for async content ingestion with immediate job_id return and proper metadata validation.\n### Scope\n- StartIngestionJob API integration\n- Write entitlement validation\n- Metadata field validation (source, created_by)\n- Job ID generation and tracking\n### Technical Notes\n- Return immediately with job_id - do not wait\n- Validate required metadata fields\n- Project KB requires project_id in metadata\n- NEXUS and Corp KB require forge-kb-admin role for writes\n### Dependencies\nBedrock client and job tracking system\n### Open Questions\nS3 trigger vs direct API approach - confirm with KB data source setup",
+    "acceptanceCriteria": "Given users with write entitlements, when calling add_to_kb with valid content, then job_id is returned immediately; and when missing required metadata, then 400 METADATA_REQUIRED error is returned; and when unauthorized for write, then 403 WRITE_NOT_ENTITLED error is returned; and when content is processed, then it becomes searchable via search_kb",
+    "developerBrief": null,
+    "specReference": "\u00a73 \u2014 Tool Definitions",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 2,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given users with write entitlements, when calling add_to_kb with valid content, then job_id is returned immediately",
+      "TC: Given missing required metadata, when calling add_to_kb, then 400 METADATA_REQUIRED error is returned",
+      "TC: Given unauthorized write access, when calling add_to_kb, then 403 WRITE_NOT_ENTITLED error is returned",
+      "TC: Given processed content, when ingestion completes, then content becomes searchable via search_kb"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement KB ingestion and job tracking",
+    "title": "As a developer, I want get_job_status tool implemented so that clients can poll async operation status",
+    "description": "## Developer Brief \u2014 Job Status Tracking\n**Spec Reference:** Section 3 \u2014 Tool Definitions\n### Context\nImplement universal async job status polling tool for all FIP MCP operations, starting with KB ingestion jobs.\n### Scope\n- GetIngestionJob API integration for KB jobs\n- In-memory job tracking (MVP)\n- Standard job status states (queued, running, complete, failed)\n- Future-proof design for other async operations\n### Technical Notes\n- Universal FIP MCP async contract\n- Job routing by job_id prefix or type\n- Percent complete when available\n- Result/error payload on completion\n### Dependencies\nJob ID generation system from add_to_kb\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given valid job IDs from add_to_kb, when calling get_job_status, then accurate status is returned; and when jobs complete, then result payload is available; and when jobs fail, then error details are provided; and when invalid job_id, then appropriate error is returned; and when jobs are in progress, then percent_complete is updated when available",
+    "developerBrief": null,
+    "specReference": "\u00a73 \u2014 Tool Definitions",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 2,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": [
+      "As a developer, I want add_to_kb tool implemented so that clients can ingest content into Knowledge Bases asynchronously"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given valid job IDs from add_to_kb, when calling get_job_status, then accurate status is returned",
+      "TC: Given completed jobs, when querying status, then result payload is available",
+      "TC: Given failed jobs, when querying status, then error details are provided",
+      "TC: Given invalid job_id, when calling get_job_status, then appropriate error is returned",
+      "TC: Given jobs in progress, when checking status, then percent_complete is updated when available"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement entitlements management system",
+    "title": "As a developer, I want database entitlement resolution implemented so that KB access is controlled via FAIT v2 DB",
+    "description": "## Developer Brief \u2014 Database Entitlement System\n**Spec Reference:** Section 3 \u2014 Tool Definitions; Section 4 \u2014 Auth & Identity\n### Context\nImplement the primary entitlement resolution system using the kb_entitlements table in FAIT v2 DB with team membership validation.\n### Scope\n- kb_entitlements table queries\n- team_memberships table validation for Team KBs\n- Read/write permission checking\n- Database connection management\n### Technical Notes\n- Priority over fallback config when available\n- SQL queries for user entitlements\n- Team membership joins for Team KB access\n- Connection pooling and error handling\n### Dependencies\nFAIT v2 DB and schema must exist\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given the FAIT v2 database exists, when querying user entitlements, then kb_entitlements table is used; and when Team KB access is requested, then team membership is validated via team_memberships table; and when database is unavailable, then fallback config is used; and when permissions are updated in DB, then changes take effect immediately",
+    "developerBrief": null,
+    "specReference": "\u00a73 \u2014 Tool Definitions; \u00a74 \u2014 Auth & Identity",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3",
+      "spec-section-4"
+    ],
+    "predecessorTitles": [
+      "Create kb_entitlements table in FAIT v2 DB"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given FAIT v2 database exists, when querying user entitlements, then kb_entitlements table is used",
+      "TC: Given Team KB access request, when validating access, then team membership is validated via team_memberships table",
+      "TC: Given database unavailability, when querying entitlements, then fallback config is used",
+      "TC: Given permissions updated in DB, when accessing resources, then changes take effect immediately"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement entitlements management system",
+    "title": "As a developer, I want fallback entitlement configuration implemented so that the service works before FAIT v2 DB exists",
+    "description": "## Developer Brief \u2014 Fallback Entitlement Config\n**Spec Reference:** Section 3 \u2014 Tool Definitions; Section 8 \u2014 Open Questions / Prerequisites\n### Context\nImplement static JSON configuration for entitlements to bridge the gap before FAIT v2 DB is available.\n### Scope\n- JSON config file parsing\n- Group-based entitlement mapping\n- Default entitlement assignment\n- Environment variable configuration\n### Technical Notes\n- Entra group GUID to KB mapping\n- Default entitlements for all authenticated users\n- File-based or environment variable config\n- Graceful fallback when DB unavailable\n### Dependencies\nNone - this IS the fallback system\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given no FAIT v2 database, when users authenticate, then fallback config provides entitlements; and when users are in mapped Entra groups, then additional entitlements are granted; and when config file is updated, then changes take effect on restart; and when database becomes available, then database takes priority over fallback",
+    "developerBrief": null,
+    "specReference": "\u00a73 \u2014 Tool Definitions; \u00a78 \u2014 Open Questions / Prerequisites",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given no FAIT v2 database, when users authenticate, then fallback config provides entitlements",
+      "TC: Given users in mapped Entra groups, when accessing resources, then additional entitlements are granted",
+      "TC: Given config file updated, when service restarts, then changes take effect on restart",
+      "TC: Given database becomes available, when querying entitlements, then database takes priority over fallback"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Implement entitlements management system",
+    "title": "As an admin, I want admin entitlement endpoint implemented so that entitlements can be audited and managed",
+    "description": "## Developer Brief \u2014 Admin Entitlement Endpoint\n**Spec Reference:** Section 4 \u2014 Auth & Identity\n### Context\nImplement admin-only endpoint for viewing and auditing entitlement configuration with forge-kb-admin role requirement.\n### Scope\n- GET /admin/entitlements endpoint\n- forge-kb-admin role validation\n- Full entitlement table/config return\n- Optional user_id filtering\n### Technical Notes\n- Require forge-kb-admin in token roles claim\n- Return current entitlement source (DB or config)\n- Support query parameter filtering\n- JSON response with full audit details\n### Dependencies\nRole-based auth validation system\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given users with forge-kb-admin role, when calling /admin/entitlements, then full entitlement data is returned; and when non-admin users call the endpoint, then 403 error is returned; and when filtering by user_id, then only that user's entitlements are shown; and when using fallback config, then config source is indicated in response",
+    "developerBrief": null,
+    "specReference": "\u00a74 \u2014 Auth & Identity",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 3,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given users with forge-kb-admin role, when calling /admin/entitlements, then full entitlement data is returned",
+      "TC: Given non-admin users, when calling admin endpoint, then 403 error is returned",
+      "TC: Given filtering by user_id, when querying admin endpoint, then only that user's entitlements are shown",
+      "TC: Given fallback config usage, when checking response, then config source is indicated in response"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Create KB entitlements database schema",
+    "title": "As a database admin, I want kb_entitlements table created so that user KB permissions can be stored",
+    "description": "## Developer Brief \u2014 KB Entitlements Table\n**Spec Reference:** Section 8 \u2014 Open Questions / Prerequisites\n### Context\nCreate the primary table for storing user-to-KB permission mappings in the FAIT v2 database.\n### Scope\n- Table creation with proper schema\n- Primary key and foreign key constraints\n- Indexing for performance\n- Initial data seeding if needed\n### Technical Notes\n- Composite primary key (user_id, kb_id)\n- user_id references Entra oid values\n- kb_id matches FORGE KB inventory\n- can_read, can_write boolean flags\n- granted_by, granted_at audit fields\n### Dependencies\nFAIT v2 database must exist\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given FAIT v2 database exists, when the table is created, then kb_entitlements table has proper schema; and when inserting entitlement records, then constraints are enforced; and when querying by user_id, then performance is acceptable; and when the MCP server queries the table, then proper indexes support fast lookups",
+    "developerBrief": null,
+    "specReference": "\u00a78 \u2014 Open Questions / Prerequisites",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given FAIT v2 database exists, when table is created, then kb_entitlements table has proper schema",
+      "TC: Given entitlement record insertion, when adding records, then constraints are enforced",
+      "TC: Given user_id queries, when searching records, then performance is acceptable",
+      "TC: Given MCP server queries, when accessing table, then proper indexes support fast lookups"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "Create KB entitlements database schema",
+    "title": "As a database admin, I want teams and team_memberships tables created so that team-based KB access can be validated",
+    "description": "## Developer Brief \u2014 Team Management Tables\n**Spec Reference:** Section 8 \u2014 Open Questions / Prerequisites\n### Context\nCreate tables to support FAIT team management and Team KB access validation through team membership.\n### Scope\n- teams table for team definitions\n- team_memberships table for user-team associations\n- Proper relationships and constraints\n- Support for role-based team membership\n### Technical Notes\n- teams: team_id, name, created_by, created_at\n- team_memberships: team_id, user_id, role, joined_at\n- Foreign key relationships\n- Support for future team role expansion\n### Dependencies\nFAIT v2 database must exist\n### Open Questions\nNone",
+    "acceptanceCriteria": "Given FAIT v2 database exists, when team tables are created, then proper schema supports team management; and when users join teams, then team_memberships records are created; and when validating Team KB access, then membership queries perform efficiently; and when teams are created through FAIT settings, then proper foreign key relationships are maintained",
+    "developerBrief": null,
+    "specReference": "\u00a78 \u2014 Open Questions / Prerequisites",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard",
+    "testedByTitles": [
+      "TC: Given FAIT v2 database exists, when team tables are created, then proper schema supports team management",
+      "TC: Given users joining teams, when adding memberships, then team_memberships records are created",
+      "TC: Given Team KB access validation, when checking membership, then queries perform efficiently",
+      "TC: Given teams created through FAIT settings, when establishing relationships, then proper foreign key relationships are maintained"
+    ]
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "title": "As a project manager, I want CloudFlare routing configured so that api.fortressam.ai/mcp/* routes to the fip-mcp service",
+    "description": "## Developer Brief \u2014 CloudFlare Route Configuration\n**Spec Reference:** Section 5 \u2014 CloudFlare Brief for Rob\n### Context\nConfigure CloudFlare to route /mcp/* requests to the ALB with proper SSE support and CORS handling.\n### Scope\n- Route api.fortressam.ai/mcp/* to existing ALB\n- SSE timeout configuration (300-600s)\n- Disable response buffering for /mcp/sse\n- CORS header pass-through\n- Cache bypass for /mcp/*\n### Technical Notes\n- No special caching needed - cache-bypass\n- SSE connections must not be terminated early\n- Server sets own CORS headers - CF passes through\n- Integration with existing ALB infrastructure\n### Dependencies\nALB target group must exist\n### Open Questions\nConfirm domain/path preference with Rob",
+    "acceptanceCriteria": "Given CloudFlare configuration, when requests are made to api.fortressam.ai/mcp/*, then traffic routes to fip-mcp service; and when SSE connections are established to /mcp/sse, then connections remain active for at least 300 seconds; and when CORS headers are set by the server, then CloudFlare passes them through unmodified; and when testing end-to-end, then no buffering delays occur on SSE streams",
+    "developerBrief": null,
+    "specReference": "\u00a75 \u2014 CloudFlare Brief for Rob",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-5",
+      "blocked-external",
+      "owner-rob-nethery"
+    ],
+    "predecessorTitles": [
+      "As a DevOps engineer, I want ALB target group configured so that traffic routes to fip-mcp service"
+    ],
+    "isExternalDependency": true,
+    "externalOwner": "Rob Nethery",
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "title": "As a project manager, I want Project KB data source ID confirmed so that A5U1GKN0TS KB configuration is complete",
+    "description": "## Developer Brief \u2014 Project KB Configuration\n**Spec Reference:** Section 8 \u2014 Open Questions / Prerequisites\n### Context\nThe Project KB (A5U1GKN0TS) is missing its data source ID in current records, which is required for ingestion operations.\n### Scope\n- Verify existing data source ID for A5U1GKN0TS\n- Create data source if missing\n- Update KB inventory documentation\n- Test ingestion functionality\n### Technical Notes\n- Data source ID needed for add_to_kb operations\n- Must be compatible with Project KB scoping rules\n- Document final configuration for development team\n### Dependencies\nNone - prerequisite validation\n### Open Questions\nWhether to create new data source or find existing one",
+    "acceptanceCriteria": "Given Project KB investigation, when checking A5U1GKN0TS configuration, then data source ID is identified or created; and when testing ingestion to Project KB, then add_to_kb operations work correctly; and when updating documentation, then KB inventory reflects accurate data source ID",
+    "developerBrief": null,
+    "specReference": "\u00a78 \u2014 Open Questions / Prerequisites",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 2,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8",
+      "blocked-external",
+      "owner-product-owner"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "title": "As a developer, I want FIRM migration from direct Bedrock calls to fip-mcp add_to_kb so that meeting summaries use centralized KB ingestion",
+    "description": "## Before\nFIRM's summarization pipeline (firm-transcriber Batch container) calls bedrock-agent-runtime directly to push meeting summaries to the Personal KB using StartIngestionJob API.\n\n## After\nFIRM calls the fip-mcp service using the add_to_kb MCP tool for all KB ingestion operations, eliminating direct Bedrock client usage.\n\n## Migration Steps\n1. Update firm-transcriber to use HTTP client instead of bedrock-agent-runtime SDK\n2. Replace StartIngestionJob calls with add_to_kb tool calls\n3. Add Entra OAuth token acquisition for fip-mcp authentication\n4. Update error handling to match MCP tool error responses\n5. Test end-to-end meeting summary ingestion workflow\n\n## Validation\nMeeting summaries appear in Personal KB via fip-mcp with same metadata and content quality as direct Bedrock approach.\n\n## Rollback\nRevert to direct bedrock-agent-runtime calls if fip-mcp service is unavailable.",
+    "acceptanceCriteria": "Given FIRM meeting processing, when summaries are generated, then they are ingested via fip-mcp add_to_kb tool; and when ingestion completes, then summaries appear in Personal KB with proper user scoping; and when fip-mcp is unavailable, then appropriate error handling occurs; and when comparing before/after, then summary quality and metadata are equivalent",
+    "developerBrief": null,
+    "specReference": "\u00a77 \u2014 FORGE KB Migration \u2014 What Needs to Happen",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 3,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-7"
+    ],
+    "predecessorTitles": [
+      "As a developer, I want add_to_kb tool implemented so that clients can ingest content into Knowledge Bases asynchronously"
+    ],
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "migration"
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "title": "As a developer, I want NEXUS migration from direct Bedrock calls to fip-mcp search_kb so that discovery questions use centralized KB access",
+    "description": "## Before\nNEXUS calls the NEXUS-Discovery KB (WHB6WU9CVW) directly using bedrock-agent-runtime Retrieve API to generate discovery questions.\n\n## After\nNEXUS calls the fip-mcp service using the search_kb MCP tool for all KB retrieval operations, eliminating direct Bedrock client usage.\n\n## Migration Steps\n1. Replace bedrock-agent-runtime SDK with HTTP client in NEXUS backend\n2. Update Retrieve API calls to use search_kb tool calls\n3. Add Entra OAuth token acquisition for fip-mcp authentication\n4. Map search results from MCP format to existing NEXUS data structures\n5. Update error handling for MCP tool error responses\n6. Test discovery question generation workflow\n\n## Validation\nDiscovery questions generated via fip-mcp match quality and relevance of direct Bedrock approach for same query inputs.\n\n## Rollback\nRevert to direct bedrock-agent-runtime calls if fip-mcp service performance is inadequate.",
+    "acceptanceCriteria": "Given NEXUS discovery workflows, when generating questions, then KB queries use fip-mcp search_kb tool; and when search results are processed, then question quality matches direct Bedrock approach; and when fip-mcp errors occur, then graceful degradation is implemented; and when comparing performance, then latency is acceptable for user experience",
+    "developerBrief": null,
+    "specReference": "\u00a77 \u2014 FORGE KB Migration \u2014 What Needs to Happen",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 3,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-7"
+    ],
+    "predecessorTitles": [
+      "As a developer, I want search_kb tool implemented so that clients can query Knowledge Bases with proper scoping"
+    ],
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "migration"
+  },
+  {
+    "type": "User Story",
+    "parentTitle": "FORGE KB MCP Server: Core Infrastructure & Unified KB Gateway",
+    "title": "As a developer, I want FAIT v1 migration from direct Bedrock calls to fip-mcp search_kb so that agent context uses centralized KB access",
+    "description": "## Before\nFAIT v1 backend has direct KB retrieval calls using bedrock-agent-runtime Retrieve API for agent context injection.\n\n## After\nFAIT v1 calls the fip-mcp service using the search_kb MCP tool for KB retrieval, or migration is skipped if FAIT v1 retirement timeline conflicts.\n\n## Migration Steps\n1. Evaluate FAIT v1 retirement timeline vs fip-mcp deployment\n2. If proceeding: Replace bedrock-agent-runtime with HTTP client\n3. Update Retrieve calls to use search_kb tool\n4. Add Entra OAuth token acquisition\n5. Map search results to existing agent context format\n6. Test agent performance with centralized KB access\n\n## Validation\nAgent context quality and retrieval performance match direct Bedrock approach, or migration is deferred/skipped based on FAIT v1 lifecycle.\n\n## Rollback\nRevert to direct calls or proceed with FAIT v1 retirement as planned.",
+    "acceptanceCriteria": "Given FAIT v1 lifecycle evaluation, when migration timeline is feasible, then KB calls use fip-mcp search_kb; or when FAIT v1 retirement is imminent, then migration is skipped; and when migration proceeds, then agent context quality is maintained; and when testing performance, then retrieval latency is acceptable",
+    "developerBrief": null,
+    "specReference": "\u00a77 \u2014 FORGE KB Migration \u2014 What Needs to Happen",
+    "rationale": null,
+    "activity": null,
+    "estimateHours": null,
+    "priority": 4,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-7"
+    ],
+    "predecessorTitles": [
+      "As a developer, I want search_kb tool implemented so that clients can query Knowledge Bases with proper scoping"
+    ],
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "migration"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a DevOps engineer, I want ECR repository created for fip-mcp so that container images can be stored and deployed",
+    "title": "Create ECR repository fip-mcp in us-east-1",
+    "description": "## ECR Repository Creation\n**Resource:** ECR repository named 'fip-mcp'\n**Purpose:** Store Docker images for the fip-mcp MCP server deployment pipeline\n**Configuration:**\n- Repository name: fip-mcp\n- Region: us-east-1\n- Account: 742932328420\n- Lifecycle policy: Standard FIP image retention rules\n- Image scanning: Enabled\n- Encryption: Default AWS managed\n**Verification:** Repository exists at 742932328420.dkr.ecr.us-east-1.amazonaws.com/fip-mcp and accepts image pushes",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Infrastructure",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a DevOps engineer, I want ECR repository created for fip-mcp so that container images can be stored and deployed",
+    "title": "Apply FIP lifecycle policy to fip-mcp ECR repository",
+    "description": "## Lifecycle Policy Configuration\n**Resource:** ECR lifecycle policy for fip-mcp repository\n**Purpose:** Automatically manage image retention to prevent storage cost accumulation\n**Configuration:**\n- Apply standard FIP ECR lifecycle rules\n- Retain last N tagged images (follow FIP standard)\n- Clean up untagged images after X days\n- Priority rules for production vs development images\n**Verification:** Policy is active and untagged test images are cleaned up according to schedule",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Infrastructure",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Create ECR repository fip-mcp in us-east-1"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a DevOps engineer, I want IAM task execution role configured so that fip-mcp can access Bedrock services",
+    "title": "Create IAM policy with Bedrock permissions for fip-mcp",
+    "description": "## IAM Policy Creation\n**Resource:** IAM policy for Bedrock agent runtime permissions\n**Purpose:** Grant fip-mcp service access to required Bedrock APIs for KB operations\n**Configuration:**\n- Policy name: fip-mcp-bedrock-policy\n- Permissions: bedrock-agent-runtime:Retrieve, StartIngestionJob, GetKnowledgeBase, ListIngestionJobs, GetIngestionJob\n- Resource scope: * (narrow to specific KB ARNs in follow-up)\n- Effect: Allow\n- Principal: ECS task role for fip-mcp\n**Verification:** Policy allows all required Bedrock operations when attached to task role",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Infrastructure",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a DevOps engineer, I want IAM task execution role configured so that fip-mcp can access Bedrock services",
+    "title": "Attach Bedrock policy to fip-mcp ECS task execution role",
+    "description": "## Policy Attachment\n**Resource:** Policy attachment to ECS task execution role\n**Purpose:** Enable the fip-mcp container to authenticate and call Bedrock services\n**Configuration:**\n- Role name: [existing or new ECS task execution role for fip-mcp]\n- Attached policies: fip-mcp-bedrock-policy + standard ECS execution policies\n- Trust relationship: ECS tasks service principal\n- Session duration: Default\n**Verification:** ECS task can assume role and successfully call bedrock-agent-runtime APIs",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Infrastructure",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Create IAM policy with Bedrock permissions for fip-mcp"
+    ],
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a DevOps engineer, I want ECS service configured in fortress-tools-cluster so that fip-mcp runs as a Fargate service",
+    "title": "Create ECS task definition for fip-mcp service",
+    "description": "## ECS Task Definition\n**Resource:** ECS task definition for fip-mcp Fargate service\n**Purpose:** Define container specification and resource requirements for the MCP server\n**Configuration:**\n- Family: fip-mcp\n- CPU: 256 (0.25 vCPU)\n- Memory: 512 MB\n- Network mode: awsvpc\n- Container image: [ECR repository URI]:latest\n- Container port: 3000 or 8080 (document choice)\n- Environment variables: PORT, NODE_ENV, BEDROCK_REGION\n- Secrets: ENTRA_TENANT_ID, ENTRA_CLIENT_ID from Secrets Manager\n- Logging: CloudWatch log group\n**Verification:** Task definition creates and containers start successfully with proper resource allocation",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Infrastructure",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a DevOps engineer, I want ECS service configured in fortress-tools-cluster so that fip-mcp runs as a Fargate service",
+    "title": "Deploy ECS service in fortress-tools-cluster with desired count 1",
+    "description": "## ECS Service Deployment\n**Resource:** ECS service running fip-mcp task definition\n**Purpose:** Ensure fip-mcp is always running with proper health monitoring and restart capabilities\n**Configuration:**\n- Service name: fip-mcp\n- Cluster: fortress-tools-cluster\n- Task definition: fip-mcp:latest\n- Launch type: Fargate\n- Desired count: 1\n- Deployment type: Rolling update\n- Health check grace period: 30s\n- Auto-scaling: Disabled initially\n**Verification:** Service shows 1/1 running tasks with HEALTHY status in ECS console",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Infrastructure",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Create ECS task definition for fip-mcp service"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a DevOps engineer, I want ALB target group configured so that traffic routes to fip-mcp service",
+    "title": "Create ALB target group for fip-mcp with health check configuration",
+    "description": "## ALB Target Group Setup\n**Resource:** Application Load Balancer target group for fip-mcp service\n**Purpose:** Route HTTP traffic from ALB to fip-mcp ECS tasks with health monitoring\n**Configuration:**\n- Target group name: fip-mcp-tg\n- Target type: IP (for Fargate)\n- Protocol: HTTP\n- Port: [match container port - 3000 or 8080]\n- VPC: [fortress-tools VPC]\n- Health check path: /health\n- Health check interval: 30s\n- Health check timeout: 5s\n- Healthy threshold: 2\n- Unhealthy threshold: 5\n**Verification:** Target group exists and health checks pass when targets are registered",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Infrastructure",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a DevOps engineer, I want ALB target group configured so that traffic routes to fip-mcp service",
+    "title": "Configure ALB listener rule for /mcp/* path routing to fip-mcp target group",
+    "description": "## ALB Listener Rule\n**Resource:** ALB listener rule for routing /mcp requests\n**Purpose:** Route requests matching api.fortressam.ai/mcp/* to the fip-mcp target group\n**Configuration:**\n- Listener: HTTPS listener on existing fortress-tools ALB\n- Condition: Host header = api.fortressam.ai AND Path pattern = /mcp/*\n- Action: Forward to fip-mcp-tg target group\n- Priority: [appropriate priority to not conflict with existing rules]\n- Health checks: Inherit from target group\n**Verification:** Test requests to api.fortressam.ai/mcp/health route correctly and return 200 OK",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Infrastructure",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Create ALB target group for fip-mcp with health check configuration"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "infrastructure"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want Node.js project scaffolding with MCP SDK so that the server foundation is established",
+    "title": "Initialize Node.js 22 project with package.json and dependencies",
+    "description": "Set up the foundational Node.js project structure with proper dependency management and build configuration for the fip-mcp server.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want Node.js project scaffolding with MCP SDK so that the server foundation is established",
+    "title": "Integrate @modelcontextprotocol/sdk with SSEServerTransport",
+    "description": "Add the MCP SDK and configure the McpServer class with Server-Sent Events transport for HTTP-based MCP communication.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Initialize Node.js 22 project with package.json and dependencies"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want Entra OAuth JWT validation implemented so that all requests are properly authenticated",
+    "title": "Implement JWT signature validation against Entra JWKS endpoint",
+    "description": "Build JWT validation middleware that verifies token signatures using Entra's JWKS endpoint with proper caching and error handling.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want Entra OAuth JWT validation implemented so that all requests are properly authenticated",
+    "title": "Extract and validate token claims (aud, tid, oid, groups, roles)",
+    "description": "Parse validated JWT tokens to extract security-relevant claims and validate audience, tenant, and expiration requirements.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Implement JWT signature validation against Entra JWKS endpoint"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want CORS configuration implemented so that FIP applications can make cross-origin requests",
+    "title": "Configure CORS middleware with FIP domain whitelist",
+    "description": "Set up CORS headers to allow cross-origin requests from known FIP applications while maintaining security restrictions.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want CORS configuration implemented so that FIP applications can make cross-origin requests",
+    "title": "Implement OPTIONS preflight handling for credentialed requests",
+    "description": "Handle preflight OPTIONS requests properly for CORS-enabled endpoints that require authentication headers.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Configure CORS middleware with FIP domain whitelist"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want SSE transport and health endpoints implemented so that MCP communication works over HTTP",
+    "title": "Implement POST /mcp endpoint for JSON-RPC 2.0 tool calls",
+    "description": "Create the main MCP endpoint that accepts JSON-RPC 2.0 requests and routes them to appropriate tool handlers with proper error responses.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want SSE transport and health endpoints implemented so that MCP communication works over HTTP",
+    "title": "Implement GET /mcp/sse endpoint for Server-Sent Events streaming",
+    "description": "Set up SSE endpoint for real-time server-to-client communication with proper connection management and cleanup.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Implement POST /mcp endpoint for JSON-RPC 2.0 tool calls"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want search_kb tool implemented so that clients can query Knowledge Bases with proper scoping",
+    "title": "Implement bedrock-agent-runtime Retrieve API integration",
+    "description": "Build AWS SDK integration for bedrock-agent-runtime Retrieve calls with proper error handling and result formatting.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want search_kb tool implemented so that clients can query Knowledge Bases with proper scoping",
+    "title": "Implement auto-scoping filter injection by KB type",
+    "description": "Build the security layer that automatically injects appropriate filters based on KB type and user identity from token claims.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Implement bedrock-agent-runtime Retrieve API integration"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want list_kbs tool implemented so that clients can discover available Knowledge Bases",
+    "title": "Implement entitlement resolution from database and fallback config",
+    "description": "Build the entitlement lookup system that queries the database first, then falls back to static configuration for KB access determination.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want list_kbs tool implemented so that clients can discover available Knowledge Bases",
+    "title": "Format KB list response with type, description, and write flags",
+    "description": "Transform entitlement data into the proper list_kbs response format with all required metadata fields.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Implement entitlement resolution from database and fallback config"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want get_kb_metadata tool implemented so that clients can retrieve KB statistics and configuration",
+    "title": "Implement GetKnowledgeBase and ListIngestionJobs API calls",
+    "description": "Integrate bedrock-agent-runtime APIs to retrieve KB configuration and job history for metadata aggregation.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want get_kb_metadata tool implemented so that clients can retrieve KB statistics and configuration",
+    "title": "Calculate document count and last_updated from job history",
+    "description": "Process ingestion job data to derive accurate document counts and determine the most recent update timestamp.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Implement GetKnowledgeBase and ListIngestionJobs API calls"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want add_to_kb tool implemented so that clients can ingest content into Knowledge Bases asynchronously",
+    "title": "Implement StartIngestionJob API integration with job ID generation",
+    "description": "Build the core ingestion functionality that calls bedrock-agent-runtime and returns job IDs for async operation tracking.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want add_to_kb tool implemented so that clients can ingest content into Knowledge Bases asynchronously",
+    "title": "Validate metadata requirements and write entitlements",
+    "description": "Implement validation logic for required metadata fields and user write permissions before processing ingestion requests.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Implement StartIngestionJob API integration with job ID generation"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want get_job_status tool implemented so that clients can poll async operation status",
+    "title": "Implement in-memory job tracking system",
+    "description": "Build job state management system for tracking async operations with proper lifecycle management and cleanup.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want get_job_status tool implemented so that clients can poll async operation status",
+    "title": "Implement GetIngestionJob API calls for status polling",
+    "description": "Integrate bedrock-agent-runtime GetIngestionJob API to provide real-time status updates for KB ingestion operations.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Implement in-memory job tracking system"
+    ],
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want database entitlement resolution implemented so that KB access is controlled via FAIT v2 DB",
+    "title": "Implement kb_entitlements table queries with connection pooling",
+    "description": "Build database access layer for querying user entitlements with proper connection management and error handling.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want database entitlement resolution implemented so that KB access is controlled via FAIT v2 DB",
+    "title": "Implement team membership validation via team_memberships table",
+    "description": "Build Team KB access validation by checking user membership in teams table with proper join queries.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Implement kb_entitlements table queries with connection pooling"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want fallback entitlement configuration implemented so that the service works before FAIT v2 DB exists",
+    "title": "Implement JSON config file parsing for entitlements",
+    "description": "Build configuration system that reads entitlement mappings from JSON files with proper error handling and validation.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want fallback entitlement configuration implemented so that the service works before FAIT v2 DB exists",
+    "title": "Implement group-based entitlement mapping from Entra groups",
+    "description": "Map Entra group claims from JWT tokens to KB entitlements using the fallback configuration system.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Implement JSON config file parsing for entitlements"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As an admin, I want admin entitlement endpoint implemented so that entitlements can be audited and managed",
+    "title": "Implement GET /admin/entitlements endpoint with role validation",
+    "description": "Build admin endpoint that validates forge-kb-admin role and returns entitlement data with optional user filtering.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As an admin, I want admin entitlement endpoint implemented so that entitlements can be audited and managed",
+    "title": "Format admin response with entitlement source indication",
+    "description": "Return comprehensive entitlement data indicating whether source is database table or fallback configuration.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Implement GET /admin/entitlements endpoint with role validation"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a database admin, I want kb_entitlements table created so that user KB permissions can be stored",
+    "title": "Design kb_entitlements table schema with proper constraints",
+    "description": "Create the table definition with composite primary key, foreign key relationships, and appropriate data types for entitlement storage.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a database admin, I want kb_entitlements table created so that user KB permissions can be stored",
+    "title": "Create indexes for user_id and kb_id lookup performance",
+    "description": "Optimize table performance with appropriate indexes for the expected query patterns in entitlement lookups.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Design kb_entitlements table schema with proper constraints"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a database admin, I want teams and team_memberships tables created so that team-based KB access can be validated",
+    "title": "Design teams and team_memberships table schemas",
+    "description": "Create table definitions for team management with proper relationships to support FAIT team functionality and KB access control.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a database admin, I want teams and team_memberships tables created so that team-based KB access can be validated",
+    "title": "Establish foreign key relationships and constraints for team data integrity",
+    "description": "Implement proper database constraints to ensure data integrity across team management tables with cascading rules.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Design teams and team_memberships table schemas"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a project manager, I want CloudFlare routing configured so that api.fortressam.ai/mcp/* routes to the fip-mcp service",
+    "title": "Coordinate CloudFlare route setup with Rob Nethery",
+    "description": "Work with CloudFlare admin to establish routing configuration for the /mcp path with proper SSE and CORS settings.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Deployment",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "blocked-external",
+      "owner-rob-nethery"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": "Rob Nethery",
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a project manager, I want CloudFlare routing configured so that api.fortressam.ai/mcp/* routes to the fip-mcp service",
+    "title": "Test end-to-end routing from CloudFlare to fip-mcp service",
+    "description": "Validate that requests flow correctly through CloudFlare to ALB to fip-mcp with proper SSE functionality and CORS headers.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Testing",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Coordinate CloudFlare route setup with Rob Nethery"
+    ],
+    "isExternalDependency": true,
+    "externalOwner": "Rob Nethery",
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a project manager, I want Project KB data source ID confirmed so that A5U1GKN0TS KB configuration is complete",
+    "title": "Investigate A5U1GKN0TS KB configuration in AWS console",
+    "description": "Research the current state of Project KB to determine if data source ID exists or needs to be created.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Documentation",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "blocked-external",
+      "owner-product-owner"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a project manager, I want Project KB data source ID confirmed so that A5U1GKN0TS KB configuration is complete",
+    "title": "Update KB inventory documentation with confirmed data source ID",
+    "description": "Document the final Project KB configuration for use in fip-mcp implementation and future reference.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Documentation",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Investigate A5U1GKN0TS KB configuration in AWS console"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want FIRM migration from direct Bedrock calls to fip-mcp add_to_kb so that meeting summaries use centralized KB ingestion",
+    "title": "Replace bedrock-agent-runtime SDK with HTTP client in firm-transcriber",
+    "description": "Update FIRM's Batch container to use HTTP requests to fip-mcp instead of direct AWS SDK calls for KB ingestion.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "migration"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want FIRM migration from direct Bedrock calls to fip-mcp add_to_kb so that meeting summaries use centralized KB ingestion",
+    "title": "Implement Entra OAuth token acquisition for fip-mcp authentication",
+    "description": "Add OAuth client credentials flow to FIRM for obtaining bearer tokens to authenticate with the fip-mcp service.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Replace bedrock-agent-runtime SDK with HTTP client in firm-transcriber"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want NEXUS migration from direct Bedrock calls to fip-mcp search_kb so that discovery questions use centralized KB access",
+    "title": "Replace bedrock-agent-runtime SDK with HTTP client in NEXUS backend",
+    "description": "Update NEXUS to use HTTP requests to fip-mcp instead of direct AWS SDK calls for KB search operations.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "migration"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want NEXUS migration from direct Bedrock calls to fip-mcp search_kb so that discovery questions use centralized KB access",
+    "title": "Map MCP search results to existing NEXUS data structures",
+    "description": "Transform search_kb tool responses into the format expected by NEXUS's discovery question generation logic.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Replace bedrock-agent-runtime SDK with HTTP client in NEXUS backend"
+    ],
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want FAIT v1 migration from direct Bedrock calls to fip-mcp search_kb so that agent context uses centralized KB access",
+    "title": "Evaluate FAIT v1 retirement timeline vs fip-mcp deployment schedule",
+    "description": "Determine whether FAIT v1 migration should proceed or be skipped based on service retirement plans and development priorities.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Documentation",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "externalOwner": null,
+    "wiTemplate": "standard"
+  },
+  {
+    "type": "Task",
+    "parentTitle": "As a developer, I want FAIT v1 migration from direct Bedrock calls to fip-mcp search_kb so that agent context uses centralized KB access",
+    "title": "Update FAIT v1 KB retrieval calls to use search_kb tool (conditional)",
+    "description": "If migration proceeds, replace direct bedrock-agent-runtime calls with fip-mcp search_kb requests in FAIT v1 agent context system.",
+    "acceptanceCriteria": null,
+    "developerBrief": null,
+    "specReference": null,
+    "rationale": null,
+    "activity": "Development",
+    "estimateHours": null,
+    "priority": 1,
+    "tags": [
+      "auto-generated",
+      "needs-review"
+    ],
+    "predecessorTitles": [
+      "Evaluate FAIT v1 retirement timeline vs fip-mcp deployment schedule"
+    ],
+    "isExternalDependency": true,
+    "externalOwner": "AWS IAM",
+    "wiTemplate": "migration"
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Build Node.js MCP server with auth validation",
+    "title": "TC: Given valid Entra JWT token, when making request to /mcp endpoint, then server validates token and returns appropriate response",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Build Node.js MCP server with auth validation",
+    "title": "TC: Given invalid/missing JWT token, when making request to /mcp endpoint, then server returns 401 error",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Implement KB search and metadata tools",
+    "title": "TC: Given entitled users, when calling search_kb with valid KB ID, then results are returned with proper security filtering",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Implement KB search and metadata tools",
+    "title": "TC: Given entitled users, when calling list_kbs, then only entitled KBs are returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Implement KB search and metadata tools",
+    "title": "TC: Given entitled users, when calling get_kb_metadata, then accurate stats are provided",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Implement KB ingestion and job tracking",
+    "title": "TC: Given users with write entitlements, when calling add_to_kb, then content is queued and job_id is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Implement KB ingestion and job tracking",
+    "title": "TC: Given valid job_id, when polling with get_job_status, then accurate status updates are provided until completion",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Implement entitlements management system",
+    "title": "TC: Given FAIT v2 DB exists, when querying entitlements, then kb_entitlements table is used",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Implement entitlements management system",
+    "title": "TC: Given no database, when using fallback config, then group-based entitlements work correctly",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Implement entitlements management system",
+    "title": "TC: Given admin role, when accessing admin endpoints, then entitlement data is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Create KB entitlements database schema",
+    "title": "TC: Given FAIT v2 database exists, when schema is deployed, then kb_entitlements table supports user/KB permission mappings",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a78 Open Questions / Prerequisites.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "Create KB entitlements database schema",
+    "title": "TC: Given teams table exists, when supporting team management, then team_memberships table supports membership validation with proper foreign key constraints",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a78 Open Questions / Prerequisites.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want Entra OAuth JWT validation implemented so that all requests are properly authenticated",
+    "title": "TC: Given valid Entra JWT tokens, when making requests to /mcp endpoints, then requests are authenticated successfully",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want Entra OAuth JWT validation implemented so that all requests are properly authenticated",
+    "title": "TC: Given invalid tokens, when making requests, then 401 errors are returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want Entra OAuth JWT validation implemented so that all requests are properly authenticated",
+    "title": "TC: Given missing tokens, when making requests, then 401 errors are returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want Entra OAuth JWT validation implemented so that all requests are properly authenticated",
+    "title": "TC: Given valid tokens, when parsing claims, then oid and groups are extracted correctly",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want CORS configuration implemented so that FIP applications can make cross-origin requests",
+    "title": "TC: Given requests from FAIT on Azure, when making cross-origin calls, then CORS headers allow the requests",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a72 Architecture.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want CORS configuration implemented so that FIP applications can make cross-origin requests",
+    "title": "TC: Given requests from FIRM/NEXUS on AWS, when making cross-origin calls, then CORS headers allow the requests",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a72 Architecture.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want CORS configuration implemented so that FIP applications can make cross-origin requests",
+    "title": "TC: Given requests from unknown origins, when making calls, then CORS blocks the requests",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a72 Architecture.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want CORS configuration implemented so that FIP applications can make cross-origin requests",
+    "title": "TC: Given preflight requests, when sent by browsers, then proper OPTIONS responses are returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a72 Architecture.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want SSE transport and health endpoints implemented so that MCP communication works over HTTP",
+    "title": "TC: Given MCP client connections, when using POST /mcp, then JSON-RPC calls work correctly",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a72 Architecture.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want SSE transport and health endpoints implemented so that MCP communication works over HTTP",
+    "title": "TC: Given SSE connections, when using GET /mcp/sse, then connections establish and stream properly",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a72 Architecture.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want SSE transport and health endpoints implemented so that MCP communication works over HTTP",
+    "title": "TC: Given health checks, when checking GET /health, then health status is returned without authentication",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a72 Architecture.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want SSE transport and health endpoints implemented so that MCP communication works over HTTP",
+    "title": "TC: Given long-lived SSE connections, when maintained over time, then connections remain stable",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a72 Architecture.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-2"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want search_kb tool implemented so that clients can query Knowledge Bases with proper scoping",
+    "title": "TC: Given entitled users, when calling search_kb with Corp KB, then results are returned without additional filtering",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want search_kb tool implemented so that clients can query Knowledge Bases with proper scoping",
+    "title": "TC: Given entitled users, when calling with Personal KB, then user_id filter is auto-injected",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want search_kb tool implemented so that clients can query Knowledge Bases with proper scoping",
+    "title": "TC: Given entitled users, when calling with Team KB, then team membership is validated",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want search_kb tool implemented so that clients can query Knowledge Bases with proper scoping",
+    "title": "TC: Given invalid KB ID, when calling search_kb, then 400 UNKNOWN_KB error is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want search_kb tool implemented so that clients can query Knowledge Bases with proper scoping",
+    "title": "TC: Given unauthorized access, when calling search_kb, then 403 NOT_ENTITLED error is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want list_kbs tool implemented so that clients can discover available Knowledge Bases",
+    "title": "TC: Given authenticated users, when calling list_kbs, then only entitled KBs are returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want list_kbs tool implemented so that clients can discover available Knowledge Bases",
+    "title": "TC: Given user with read access, when checking permissions, then writable=false is set appropriately",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want list_kbs tool implemented so that clients can discover available Knowledge Bases",
+    "title": "TC: Given user with write access, when checking permissions, then writable=true is set",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want list_kbs tool implemented so that clients can discover available Knowledge Bases",
+    "title": "TC: Given fallback config, when database unavailable, then group-based entitlements work",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want list_kbs tool implemented so that clients can discover available Knowledge Bases",
+    "title": "TC: Given database availability, when querying entitlements, then kb_entitlements table is used",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want get_kb_metadata tool implemented so that clients can retrieve KB statistics and configuration",
+    "title": "TC: Given entitled users, when calling get_kb_metadata with valid KB ID, then accurate statistics are returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want get_kb_metadata tool implemented so that clients can retrieve KB statistics and configuration",
+    "title": "TC: Given unauthorized access, when calling with unauthorized KB, then 403 NOT_ENTITLED error is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want get_kb_metadata tool implemented so that clients can retrieve KB statistics and configuration",
+    "title": "TC: Given invalid KB ID, when calling get_kb_metadata, then 400 UNKNOWN_KB error is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want get_kb_metadata tool implemented so that clients can retrieve KB statistics and configuration",
+    "title": "TC: Given KB with recent ingestion jobs, when querying metadata, then last_updated reflects most recent completion time",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want add_to_kb tool implemented so that clients can ingest content into Knowledge Bases asynchronously",
+    "title": "TC: Given users with write entitlements, when calling add_to_kb with valid content, then job_id is returned immediately",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want add_to_kb tool implemented so that clients can ingest content into Knowledge Bases asynchronously",
+    "title": "TC: Given missing required metadata, when calling add_to_kb, then 400 METADATA_REQUIRED error is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want add_to_kb tool implemented so that clients can ingest content into Knowledge Bases asynchronously",
+    "title": "TC: Given unauthorized write access, when calling add_to_kb, then 403 WRITE_NOT_ENTITLED error is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want add_to_kb tool implemented so that clients can ingest content into Knowledge Bases asynchronously",
+    "title": "TC: Given processed content, when ingestion completes, then content becomes searchable via search_kb",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want get_job_status tool implemented so that clients can poll async operation status",
+    "title": "TC: Given valid job IDs from add_to_kb, when calling get_job_status, then accurate status is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want get_job_status tool implemented so that clients can poll async operation status",
+    "title": "TC: Given completed jobs, when querying status, then result payload is available",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want get_job_status tool implemented so that clients can poll async operation status",
+    "title": "TC: Given failed jobs, when querying status, then error details are provided",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want get_job_status tool implemented so that clients can poll async operation status",
+    "title": "TC: Given invalid job_id, when calling get_job_status, then appropriate error is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want get_job_status tool implemented so that clients can poll async operation status",
+    "title": "TC: Given jobs in progress, when checking status, then percent_complete is updated when available",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want database entitlement resolution implemented so that KB access is controlled via FAIT v2 DB",
+    "title": "TC: Given FAIT v2 database exists, when querying user entitlements, then kb_entitlements table is used",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want database entitlement resolution implemented so that KB access is controlled via FAIT v2 DB",
+    "title": "TC: Given Team KB access request, when validating access, then team membership is validated via team_memberships table",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want database entitlement resolution implemented so that KB access is controlled via FAIT v2 DB",
+    "title": "TC: Given database unavailability, when querying entitlements, then fallback config is used",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want database entitlement resolution implemented so that KB access is controlled via FAIT v2 DB",
+    "title": "TC: Given permissions updated in DB, when accessing resources, then changes take effect immediately",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want fallback entitlement configuration implemented so that the service works before FAIT v2 DB exists",
+    "title": "TC: Given no FAIT v2 database, when users authenticate, then fallback config provides entitlements",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want fallback entitlement configuration implemented so that the service works before FAIT v2 DB exists",
+    "title": "TC: Given users in mapped Entra groups, when accessing resources, then additional entitlements are granted",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want fallback entitlement configuration implemented so that the service works before FAIT v2 DB exists",
+    "title": "TC: Given config file updated, when service restarts, then changes take effect on restart",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a developer, I want fallback entitlement configuration implemented so that the service works before FAIT v2 DB exists",
+    "title": "TC: Given database becomes available, when querying entitlements, then database takes priority over fallback",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a73 Tool Definitions.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-3"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As an admin, I want admin entitlement endpoint implemented so that entitlements can be audited and managed",
+    "title": "TC: Given users with forge-kb-admin role, when calling /admin/entitlements, then full entitlement data is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As an admin, I want admin entitlement endpoint implemented so that entitlements can be audited and managed",
+    "title": "TC: Given non-admin users, when calling admin endpoint, then 403 error is returned",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As an admin, I want admin entitlement endpoint implemented so that entitlements can be audited and managed",
+    "title": "TC: Given filtering by user_id, when querying admin endpoint, then only that user's entitlements are shown",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As an admin, I want admin entitlement endpoint implemented so that entitlements can be audited and managed",
+    "title": "TC: Given fallback config usage, when checking response, then config source is indicated in response",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a74 Auth & Identity.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-4"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a database admin, I want kb_entitlements table created so that user KB permissions can be stored",
+    "title": "TC: Given FAIT v2 database exists, when table is created, then kb_entitlements table has proper schema",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a78 Open Questions / Prerequisites.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a database admin, I want kb_entitlements table created so that user KB permissions can be stored",
+    "title": "TC: Given entitlement record insertion, when adding records, then constraints are enforced",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a78 Open Questions / Prerequisites.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a database admin, I want kb_entitlements table created so that user KB permissions can be stored",
+    "title": "TC: Given user_id queries, when searching records, then performance is acceptable",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a78 Open Questions / Prerequisites.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a database admin, I want kb_entitlements table created so that user KB permissions can be stored",
+    "title": "TC: Given MCP server queries, when accessing table, then proper indexes support fast lookups",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a78 Open Questions / Prerequisites.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a database admin, I want teams and team_memberships tables created so that team-based KB access can be validated",
+    "title": "TC: Given FAIT v2 database exists, when team tables are created, then proper schema supports team management",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a78 Open Questions / Prerequisites.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a database admin, I want teams and team_memberships tables created so that team-based KB access can be validated",
+    "title": "TC: Given users joining teams, when adding memberships, then team_memberships records are created",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a78 Open Questions / Prerequisites.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a database admin, I want teams and team_memberships tables created so that team-based KB access can be validated",
+    "title": "TC: Given Team KB access validation, when checking membership, then queries perform efficiently",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a78 Open Questions / Prerequisites.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  },
+  {
+    "type": "Test Case",
+    "parentTitle": "As a database admin, I want teams and team_memberships tables created so that team-based KB access can be validated",
+    "title": "TC: Given teams created through FAIT settings, when establishing relationships, then proper foreign key relationships are maintained",
+    "wiTemplate": "test-case",
+    "rationale": "Enforces \u00a78 Open Questions / Prerequisites.",
+    "tags": [
+      "auto-generated",
+      "needs-review",
+      "spec-section-8"
+    ],
+    "predecessorTitles": null,
+    "isExternalDependency": false,
+    "priority": 2
+  }
+]
