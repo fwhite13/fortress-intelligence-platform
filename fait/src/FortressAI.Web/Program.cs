@@ -120,6 +120,7 @@ builder.Services.AddSingleton<Amazon.BedrockAgent.IAmazonBedrockAgent>(sp =>
             builder.Configuration["AWS:Region"] ?? "us-east-1")));
 
 builder.Services.AddScoped<KnowledgeBaseService>();
+builder.Services.AddScoped<BdaProcessingService>();
 builder.Services.AddScoped<KbDocumentService>();
 builder.Services.AddSingleton<KbSyncRetryService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<KbSyncRetryService>());

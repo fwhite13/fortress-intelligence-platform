@@ -17,8 +17,13 @@ public class KbDocumentService
     private readonly ILogger<KbDocumentService> _logger;
     private readonly KbSyncRetryService _syncRetryService;
     private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
+    private readonly BdaProcessingService _bdaService;
 
     private const string BucketName = "fortress-tools";
+
+    /// <summary>Image extensions supported by Bedrock Data Automation for OCR + visual indexing.</summary>
+    private static readonly HashSet<string> BdaSupportedImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+        { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
 
     // Config keys read per KB type — KB IDs needed for polling ingestion job status
     private string CorpKbId => _config["KnowledgeBase:CorpKbId"] ?? "";
@@ -34,7 +39,7 @@ public class KbDocumentService
     private string CorpDataSourceId => _config["KnowledgeBase:CorpDataSourceId"] ?? "";
     private string DevDataSourceId => _config["KnowledgeBase:DevDataSourceId"] ?? "";
 
-    public KbDocumentService(IAmazonS3 s3, IAmazonBedrockAgent bedrockAgent, IConfiguration config, ILogger<KbDocumentService> logger, KbSyncRetryService syncRetryService, IDbContextFactory<AppDbContext> dbContextFactory)
+    public KbDocumentService(IAmazonS3 s3, IAmazonBedrockAgent bedrockAgent, IConfiguration config, ILogger<KbDocumentService> logger, KbSyncRetryService syncRetryService, IDbContextFactory<AppDbContext> dbContextFactory, BdaProcessingService bdaService)
     {
         _s3 = s3;
         _bedrockAgent = bedrockAgent;
@@ -42,6 +47,7 @@ public class KbDocumentService
         _logger = logger;
         _syncRetryService = syncRetryService;
         _dbContextFactory = dbContextFactory;
+        _bdaService = bdaService;
     }
 
     /// <summary>Upload document to S3 + write companion .metadata.json. Returns the S3 key.</summary>
@@ -91,6 +97,15 @@ public class KbDocumentService
         };
         await _s3.PutObjectAsync(putReq);
         _logger.LogInformation("Uploaded KB document to s3://{Bucket}/{Key}", BucketName, key);
+
+        // BDA image processing — runs AFTER S3 upload (BDA needs the file in S3 as input)
+        // Non-fatal: BdaProcessingService.ProcessImageAsync catches all exceptions internally
+        var fileExt = Path.GetExtension(safeFilename);
+        if (BdaSupportedImageExtensions.Contains(fileExt))
+        {
+            _logger.LogInformation("[KbDocumentService] Image detected, invoking BDA processing: {Key}", key);
+            _ = Task.Run(() => _bdaService.ProcessImageAsync(key), CancellationToken.None);
+        }
 
         // Write metadata companion file (not needed for Corp KB — structural isolation)
         if (tier != KbTier.Corporate)
@@ -156,17 +171,46 @@ public class KbDocumentService
         if (string.IsNullOrEmpty(safeFilename))
             throw new ArgumentException("Invalid filename.", nameof(filename));
 
+        // Auto-convert PPTX — same as UploadDocumentAsync (Bedrock KB does not support .pptx natively)
+        Stream uploadStream = fileStream;
+        if (safeFilename.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation("PPTX detected (project) — converting to PDF via LibreOffice: {Filename}", safeFilename);
+            var pdfBytes = await ConvertPptxToPdfAsync(fileStream, safeFilename, _logger);
+
+            if (pdfBytes != null)
+            {
+                var convertedFilename = Path.ChangeExtension(safeFilename, ".pdf");
+                uploadStream = new MemoryStream(pdfBytes);
+                safeFilename = convertedFilename;
+                contentType = "application/pdf";
+                _logger.LogInformation("PPTX converted to PDF (project): {Filename} ({Bytes} bytes)", convertedFilename, pdfBytes.Length);
+            }
+            else
+            {
+                _logger.LogWarning("PPTX→PDF conversion failed (project) — uploading original PPTX");
+            }
+        }
+
         var key = $"kb-docs/project/{projectId}/{safeFilename}";
 
         await _s3.PutObjectAsync(new PutObjectRequest
         {
             BucketName = BucketName,
-            Key = key,
-            InputStream = fileStream,
+            Key        = key,
+            InputStream = uploadStream,
             ContentType = contentType
         });
 
         _logger.LogInformation("Uploaded project KB document to s3://{Bucket}/{Key}", BucketName, key);
+
+        // BDA image processing — runs AFTER S3 upload (BDA needs the file in S3 as input)
+        var projFileExt = Path.GetExtension(safeFilename);
+        if (BdaSupportedImageExtensions.Contains(projFileExt))
+        {
+            _logger.LogInformation("[KbDocumentService] Image detected (project), invoking BDA processing: {Key}", key);
+            _ = Task.Run(() => _bdaService.ProcessImageAsync(key), CancellationToken.None);
+        }
 
         // Write metadata — structural isolation: Project KB contains ONLY project docs.
         // Only projectId needed for within-KB filtering. No kbType or ownerId needed.
