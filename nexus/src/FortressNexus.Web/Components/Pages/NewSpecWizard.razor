@@ -277,6 +277,7 @@
     // Resume mode
     [Parameter] public int? ResumeSubmissionId { get; set; }
     private bool _isResume = false;
+    private bool _isAdmin;
     private bool _regenPending = false; // true after re-discovery initiated; triggers regen on next Submit
     private bool _showRediscoveryConfirm = false;
     private bool _regenInProgress = false;
@@ -326,8 +327,8 @@
 
         // Auth guard: only the owner or a NexusAdmin can resume
         var currentUpn = await UserContextService.GetUpnAsync();
-        var isAdmin = await UserContextService.IsAdminAsync();
-        if (!isAdmin && submission.SubmittedBy != currentUpn)
+        _isAdmin = await UserContextService.IsAdminAsync();
+        if (!_isAdmin && submission.SubmittedBy != currentUpn)
         {
             Snackbar.Add("You do not have permission to resume this submission.", Severity.Warning);
             Nav.NavigateTo("/nexus");
@@ -457,7 +458,7 @@
         {
             try
             {
-                await SubmissionService.UpdateNarrativeAsync(_submissionId.Value, _narrativeText, upn);
+                await SubmissionService.UpdateNarrativeAsync(_submissionId.Value, _narrativeText, upn, _isAdmin);
             }
             catch (Exception ex)
             {
@@ -620,7 +621,7 @@
         // 1. Persist updated narrative
         try
         {
-            await SubmissionService.UpdateNarrativeAsync(_submissionId!.Value, _narrativeText, upn);
+            await SubmissionService.UpdateNarrativeAsync(_submissionId!.Value, _narrativeText, upn, _isAdmin);
         }
         catch (Exception ex)
         {
@@ -674,7 +675,7 @@
 
                     try
                     {
-                        await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating, upn);
+                        await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating, upn, _isAdmin);
                         await SpecGenerationService.GenerateAsync(_submissionId.Value);
                         // GenerateAsync sets status to AwaitingReview internally — no need to set here
                     }
@@ -683,7 +684,7 @@
                         Snackbar.Add($"Spec regeneration failed: {ex.Message}", Severity.Error);
                         try
                         {
-                            await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed, upn);
+                            await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed, upn, _isAdmin);
                         }
                         catch (Exception statusEx)
                         {
@@ -707,8 +708,8 @@
             if (_isResume && !_hasChanges && _existingSpecDocument != null)
             {
                 // Skip-regen path: existing spec, no changes — persist narrative then promote Draft → AwaitingReview
-                await SubmissionService.UpdateNarrativeAsync(_submissionId.Value, _narrativeText, upn);
-                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.AwaitingReview, upn);
+                await SubmissionService.UpdateNarrativeAsync(_submissionId.Value, _narrativeText, upn, _isAdmin);
+                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.AwaitingReview, upn, _isAdmin);
                 Nav.NavigateTo($"/nexus/{ResumeSubmissionId}");
                 return;
             }
@@ -716,7 +717,7 @@
             // New submission (or resume with no prior spec) — generate spec
             try
             {
-                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating, upn);
+                await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Generating, upn, _isAdmin);
                 await SpecGenerationService.GenerateAsync(_submissionId.Value);
                 // GenerateAsync sets status to AwaitingReview internally
             }
@@ -725,7 +726,7 @@
                 Snackbar.Add($"Spec generation failed: {ex.Message}", Severity.Error);
                 try
                 {
-                    await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed, upn);
+                    await SubmissionService.UpdateStatusAsync(_submissionId.Value, SubmissionStatus.Failed, upn, _isAdmin);
                 }
                 catch (Exception statusEx)
                 {
