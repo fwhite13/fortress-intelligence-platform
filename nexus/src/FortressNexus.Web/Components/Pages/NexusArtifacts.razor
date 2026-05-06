@@ -584,9 +584,9 @@ else if (_artifactSet is not null)
                 return;
             }
 
-            // Ownership check: only the submitter or an admin may view
+            // Ownership check: only the submitter or an editor/admin may view
             var currentUpn = await UserContextService.GetUpnAsync();
-            var isAdmin = await UserContextService.IsAdminAsync();
+            var isAdmin = await UserContextService.IsNexusEditorAsync();
             if (!string.Equals(submission.SubmittedBy, currentUpn, StringComparison.OrdinalIgnoreCase) && !isAdmin)
             {
                 _error = "You do not have permission to view this submission's artifacts.";

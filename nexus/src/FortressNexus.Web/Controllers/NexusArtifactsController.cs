@@ -242,7 +242,8 @@ public class NexusArtifactsController : ControllerBase
             ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
 
         if (!string.Equals(submission.SubmittedBy, currentUpn, StringComparison.OrdinalIgnoreCase)
-            && !User.IsInRole(NexusRoles.Admin))
+            && !User.IsInRole(NexusRoles.Admin)
+            && !User.IsInRole(NexusRoles.Reviewer))
             return false;
 
         var artifactSet = await _db.ArtifactSets.FirstOrDefaultAsync(a => a.Id == artifactSetId);
