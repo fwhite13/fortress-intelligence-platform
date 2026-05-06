@@ -6,18 +6,27 @@
 <MudSnackbarProvider />
 
 <MudLayout>
+    <!-- Copper accent strip -->
+    <div class="accent-strip"></div>
+
     <!-- Top App Bar -->
     <MudAppBar Elevation="1" Style="background: #194C5C; border-bottom: 1px solid #13404E; height: 56px;">
-        <div style="display: flex; align-items: center; gap: 10px; padding-left: 8px;">
-            <MudText Style="font-size: 14px; font-weight: 600; color: #A97C50; letter-spacing: 2.5px; text-transform: uppercase;">
-                REFUGE INTELLIGENCE SUITE FOR ENTERPRISE
-            </MudText>
+        <div style="display: flex; align-items: center; gap: 12px; padding-left: 8px;">
+            <!-- R Monogram -->
+            <svg class="rise-logo" width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="28" height="28" rx="4" fill="rgba(169,124,80,0.15)"/>
+                <path d="M8 21V7h5.5c1.4 0 2.5.35 3.2 1.05.75.7 1.1 1.6 1.1 2.75 0 .85-.2 1.55-.65 2.1-.45.55-1.05.9-1.85 1.1L19 21h-2.8l-3.4-6.5H10.5V21H8zm2.5-8.8h3c.7 0 1.25-.2 1.6-.55.4-.35.6-.85.6-1.45 0-.6-.2-1.1-.6-1.45-.35-.35-.9-.55-1.6-.55h-3v4z" fill="#A97C50"/>
+            </svg>
+            <div style="display: flex; flex-direction: column; line-height: 1.1;">
+                <span style="font-size: 15px; font-weight: 700; color: #FFFFFF; letter-spacing: 1.5px;">RISE</span>
+                <span style="font-size: 9px; color: rgba(255,255,255,0.6); letter-spacing: 0.5px;">Refuge Intelligence Suite</span>
+            </div>
         </div>
         <MudSpacer />
         <NavMenu />
     </MudAppBar>
 
-    <MudMainContent Style="padding-top: 56px; background: #FFFFFF; min-height: 100vh;">
+    <MudMainContent Style="padding-top: 59px; background: #FFFFFF; min-height: 100vh;">
         @Body
     </MudMainContent>
 </MudLayout>

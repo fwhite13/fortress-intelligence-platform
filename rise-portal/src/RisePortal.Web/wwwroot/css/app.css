@@ -3,6 +3,17 @@
    Primary: #194C5C | Accent: #A97C50 | Text: #42403A
    ═══════════════════════════════════════════════════════ */
 
+/* ── Accent Strip ── */
+.accent-strip {
+    height: 3px;
+    background: linear-gradient(90deg, #A97C50, #C9A87C, #A97C50);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10000;
+}
+
 /* ── Base ── */
 *, *::before, *::after {
     box-sizing: border-box;
@@ -136,18 +147,22 @@ html, body {
     padding: 0 1.5rem 1.5rem !important;
 }
 
-/* ── Open Button ── */
+/* ── Open Button (outline → filled on hover) ── */
 .app-open-btn {
-    background: #A97C50 !important;
-    color: #FFFFFF !important;
+    background: transparent !important;
+    color: #A97C50 !important;
+    border: 1.5px solid #A97C50 !important;
     font-weight: 600 !important;
     border-radius: 8px !important;
     text-transform: none !important;
-    letter-spacing: 0 !important;
+    letter-spacing: 0.3px !important;
+    transition: all 0.25s ease !important;
 }
 
 .app-open-btn:hover {
-    background: #BF9266 !important;
+    background: #A97C50 !important;
+    color: #FFFFFF !important;
+    box-shadow: 0 4px 12px rgba(169, 124, 80, 0.3) !important;
 }
 
 .app-open-btn--disabled {
@@ -160,6 +175,11 @@ html, body {
     margin-top: auto;
     padding-top: 3rem;
     text-align: center;
+}
+
+/* ── Logo ── */
+.rise-logo {
+    flex-shrink: 0;
 }
 
 /* ── MudBlazor Overrides ── */
