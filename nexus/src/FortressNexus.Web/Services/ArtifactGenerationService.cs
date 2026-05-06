@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using FortressNexus.Web.Data;
 using FortressNexus.Web.Models.DTOs;
+using FortressNexus.Web.Models.Entities;
+using FortressNexus.Web.Models.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace FortressNexus.Web.Services;
@@ -108,6 +110,56 @@ public class ArtifactGenerationService : IArtifactGenerationService
             _logger.LogError(ex, "[WI_GEN] Failed to generate work items for SpecDocument {SpecDocumentId}", specDocumentId);
             return new List<AdoWorkItemDto>();
         }
+    }
+
+    public async Task<ArtifactSet> DecomposeAndPersistAsync(int submissionId, int specDocumentId, string callerUpn)
+    {
+        // 1. Generate work item DTOs via Bedrock
+        var dtos = await GenerateWorkItemsAsync(specDocumentId);
+
+        // 2. Create and persist ArtifactSet
+        var artifactSet = new ArtifactSet
+        {
+            SpecDocumentId = specDocumentId,
+            AdoOrganization = "FortressAffinityGroup",
+            AdoProjectName = "Fortress",
+            ProcessTemplateTypeId = "6b724908-ef14-45cf-84f8-768b5384da45",
+            ExternalDependencyCount = dtos.Count(d => d.IsExternalDependency),
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = callerUpn
+        };
+        _db.ArtifactSets.Add(artifactSet);
+        await _db.SaveChangesAsync();
+
+        // 3. Map DTOs to WorkItemRecords and save
+        var records = dtos.Select(dto => new WorkItemRecord
+        {
+            ArtifactSetId = artifactSet.Id,
+            WorkItemType = dto.WorkItemType,
+            Title = dto.Title,
+            Description = dto.Description,
+            AcceptanceCriteria = dto.AcceptanceCriteria,
+            Status = "Pending",
+            WiTemplate = dto.WiTemplate,
+            IsExternalDependency = dto.IsExternalDependency,
+            ExternalOwner = dto.ExternalOwner,
+            TestedByTitles = dto.TestedByTitles,
+            ParentTitle = dto.ParentTitle,
+            PredecessorTitles = dto.PredecessorTitles
+        }).ToList();
+        _db.WorkItemRecords.AddRange(records);
+        await _db.SaveChangesAsync();
+
+        // 4. Update submission status to ArtifactsCreated
+        var submission = await _db.Submissions.FindAsync(submissionId)
+            ?? throw new InvalidOperationException($"Submission {submissionId} not found");
+        submission.Status = SubmissionStatus.ArtifactsCreated;
+        await _db.SaveChangesAsync();
+
+        _logger.LogInformation("[DECOMP_PERSIST] Submission {SubmissionId}: ArtifactSet {ArtifactSetId} created with {Count} WorkItemRecords. Status → ArtifactsCreated.",
+            submissionId, artifactSet.Id, records.Count);
+
+        return artifactSet;
     }
 
     private List<AdoWorkItemDto> ParseWorkItems(string json, int specDocumentId)

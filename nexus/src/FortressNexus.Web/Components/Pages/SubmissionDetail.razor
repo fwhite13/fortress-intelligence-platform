@@ -10,7 +10,6 @@
 @inject UserContextService UserContextService
 @inject ISnackbar Snackbar
 @inject IArtifactGenerationService ArtifactGenerationService
-@inject IAdoService AdoService
 @inject IDiscoveryService DiscoveryService
 @inject IDialogService DialogService
 @inject ILogger<SubmissionDetail> Logger
@@ -204,23 +203,33 @@ else if (_submission is not null)
                 </MudButton>
             }
 
-            @if (_submission.Status == SubmissionStatus.Approved || _submission.Status == SubmissionStatus.ArtifactsCreated)
+            @if (_submission.Status == SubmissionStatus.Approved && _isEditor)
             {
                 <MudButton Variant="Variant.Filled"
                            Color="Color.Secondary"
-                           StartIcon="@Icons.Material.Filled.WorkOutline"
+                           StartIcon="@Icons.Material.Filled.AutoAwesome"
                            OnClick="HandleGenerateWorkItems"
                            Disabled="@_isGeneratingWorkItems"
                            Class="nexus-detail-generate-wi-btn">
-                    Generate Work Items
+                    @(_isGeneratingWorkItems ? "Decomposing..." : "Decompose")
                 </MudButton>
 
-                <MudButton Variant="Variant.Outlined"
-                           Color="Color.Primary"
+                @if (_isGeneratingWorkItems && _generatingStatusText is not null)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="nexus-detail-decomp-status">
+                        @_generatingStatusText
+                    </MudText>
+                }
+            }
+
+            @if (_submission.Status == SubmissionStatus.ArtifactsCreated)
+            {
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Success"
                            StartIcon="@Icons.Material.Filled.ListAlt"
                            OnClick="@(() => Nav.NavigateTo($"/nexus/{Id}/artifacts"))"
                            Class="nexus-detail-view-wi-btn">
-                    View Work Items
+                    Review Work Items
                 </MudButton>
             }
 
@@ -316,6 +325,10 @@ else if (_submission is not null)
     // WI #1652
     private List<SpecDocument> _historicalSpecs = new();
 
+    // ADO#2820
+    private bool _isEditor;
+    private string? _generatingStatusText;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadSubmissionAsync();
@@ -330,6 +343,7 @@ else if (_submission is not null)
             // Resolve user context first (needed for access guard below)
             _currentUserUpn = await UserContextService.GetUpnAsync();
             _isAdmin = await UserContextService.IsAdminAsync();
+            _isEditor = await UserContextService.IsNexusEditorAsync();
 
             _submission = await SubmissionService.GetByIdAsync(Id);
             if (_submission is null)
@@ -447,30 +461,27 @@ else if (_submission is not null)
     private async Task HandleGenerateWorkItems()
     {
         if (_activeSpec is null || _submission is null) return;
+        if (!_isEditor) return;
 
         _isGeneratingWorkItems = true;
+        _generatingStatusText = "Running decomposition (this may take 30-60 seconds)...";
         StateHasChanged();
 
         try
         {
-            var workItems = await ArtifactGenerationService.GenerateWorkItemsAsync(_activeSpec.Id);
+            var callerUpn = await UserContextService.GetUpnAsync();
+            var artifactSet = await ArtifactGenerationService.DecomposeAndPersistAsync(
+                _submission.Id, _activeSpec.Id, callerUpn);
 
-            var stubArtifactSet = new ArtifactSet
-            {
-                SpecDocumentId = _activeSpec.Id,
-                AdoOrganization = "stub",
-                AdoProjectName = "NEXUS",
-                ProcessTemplateTypeId = "6b724908-ef14-45cf-84f8-768b5384da45",
-                CreatedAt = DateTime.UtcNow,
-                CreatedBy = "nexus-ui"
-            };
-
-            var records = await AdoService.CreateWorkItemBatchAsync(stubArtifactSet, workItems);
-            Snackbar.Add($"{records.Count} work items created in ADO.", Severity.Success);
+            // Reload submission to reflect ArtifactsCreated status
+            _submission = await SubmissionService.GetByIdAsync(_submission.Id);
+            _generatingStatusText = null;
+            Snackbar.Add($"Decomposition complete — {artifactSet.ExternalDependencyCount} external dependencies flagged. Navigate to Work Items to review.", Severity.Success);
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Work item generation failed: {ex.Message}", Severity.Error);
+            _generatingStatusText = null;
+            Snackbar.Add($"Decomposition failed: {ex.Message}", Severity.Error);
         }
         finally
         {
