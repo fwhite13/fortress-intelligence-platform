@@ -87,7 +87,7 @@
                                         {
                                             <MudText Typo="Typo.h6" Class="nexus-review-section-title">@(sec.Heading)</MudText>
                                         }
-                                        @if (!_specDoc.IsApproved)
+                                        @if (!_specDoc.IsApproved && _canEdit)
                                         {
                                             <MudIconButton Icon="@Icons.Material.Filled.Edit"
                                                            Size="Size.Small"
@@ -121,7 +121,7 @@
                                           Lines="30"
                                           Variant="Variant.Outlined"
                                           Class="nexus-review-editor"
-                                          Disabled="@_specDoc.IsApproved" />
+                                          Disabled="@(_specDoc.IsApproved || !_canEdit)" />
                         }
                     </MudItem>
                 </MudGrid>
@@ -188,6 +188,7 @@
     private bool _showEdit;
     private DateTime? _lastSavedAt;
     private bool _isAdmin;
+    private bool _canEdit;
     private string _upn = "";
     private List<SpecSection> _sections = new();
     private HashSet<int> _editingSections = new();
@@ -235,6 +236,7 @@
             }
 
             _isAdmin = isAdmin;
+            _canEdit = isEditor;
             _upn = upn;
 
             _editedContent = _specDoc.EditedContent ?? _specDoc.Content;
