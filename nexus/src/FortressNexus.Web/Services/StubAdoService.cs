@@ -104,7 +104,7 @@ public class StubAdoService : IAdoService
         var titleToAdoId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var record in records)
         {
-            titleToAdoId[record.Title] = record.AdoWorkItemId;
+            titleToAdoId[record.Title] = record.AdoWorkItemId.GetValueOrDefault();
         }
 
         // Step 4: Predecessor resolution pass

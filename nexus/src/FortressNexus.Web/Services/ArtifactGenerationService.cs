@@ -116,6 +116,8 @@ public class ArtifactGenerationService : IArtifactGenerationService
     {
         // 1. Generate work item DTOs via Bedrock
         var dtos = await GenerateWorkItemsAsync(specDocumentId);
+        if (dtos.Count == 0)
+            throw new InvalidOperationException("Bedrock returned 0 work items — decomposition may have failed silently. Check CloudWatch logs.");
 
         // 2. Create and persist ArtifactSet
         var artifactSet = new ArtifactSet

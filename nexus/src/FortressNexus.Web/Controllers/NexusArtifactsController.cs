@@ -189,8 +189,6 @@ public class NexusArtifactsController : ControllerBase
             Title = req.Title,
             ParentTitle = req.ParentTitle,
             Status = "Created",
-            AdoWorkItemId = 0,
-            AdoWorkItemUrl = "",
             WiTemplate = WiTemplateType.Standard
         };
 

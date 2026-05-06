@@ -6,8 +6,8 @@ public class WorkItemRecord
 {
     public int Id { get; set; }
     public int ArtifactSetId { get; set; }
-    public int AdoWorkItemId { get; set; }
-    public string AdoWorkItemUrl { get; set; } = "";
+    public int? AdoWorkItemId { get; set; }
+    public string? AdoWorkItemUrl { get; set; }
     public string WorkItemType { get; set; } = "";
     public string Title { get; set; } = "";
     public string Status { get; set; } = "Created";

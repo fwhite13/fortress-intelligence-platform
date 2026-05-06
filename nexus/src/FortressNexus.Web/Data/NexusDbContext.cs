@@ -148,8 +148,8 @@ public class NexusDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
             entity.Property(e => e.ArtifactSetId).HasColumnName("artifact_set_id").IsRequired();
-            entity.Property(e => e.AdoWorkItemId).HasColumnName("ado_work_item_id").IsRequired();
-            entity.Property(e => e.AdoWorkItemUrl).HasColumnName("ado_work_item_url").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.AdoWorkItemId).HasColumnName("ado_work_item_id");
+            entity.Property(e => e.AdoWorkItemUrl).HasColumnName("ado_work_item_url").HasMaxLength(500);
             entity.Property(e => e.WorkItemType).HasColumnName("work_item_type").HasMaxLength(50).IsRequired();
             entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(500).IsRequired();
             entity.Property(e => e.Status).HasColumnName("status").HasMaxLength(50).IsRequired();
