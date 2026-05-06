@@ -124,7 +124,7 @@ builder.Services.AddAuthentication(options =>
     options.ExpireTimeSpan = TimeSpan.FromHours(12);
     options.SlidingExpiration = true;
     // Must match FAIT's cookie name and domain exactly for cross-subdomain cookie sharing
-    options.Cookie.Name = ".FortressAI.Session";
+    options.Cookie.Name = builder.Configuration["Auth:CookieName"] ?? ".FortressAI.Session";
     options.Cookie.Domain = builder.Configuration["Auth__CookieDomain"] ?? "";
     options.Cookie.SameSite = SameSiteMode.Lax;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;

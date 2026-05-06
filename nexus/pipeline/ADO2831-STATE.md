@@ -17,3 +17,7 @@
 | REVIEW C2 | 🔄 ACTIVE | Clint | 13:36 | — | Verify one-liner |
 | REVIEW C2 | ✅ PASS | Clint | 13:36 | 13:37 | I1 resolved, scope clean |
 | DEPLOY | 🔄 ACTIVE | Rhodey | 13:37 | — | |
+| DEPLOY | ✅ DONE | Rhodey | 13:37 | 13:45 | CodeBuild 5db15e23, nexus-web:47, migration+seed confirmed |
+| VERIFY | 🔄 ACTIVE | Natasha | 13:45 | — | |
+| VERIFY | ✅ PASS | Natasha | 13:45 | 13:48 | 6/6 TCs PASS — seed confirmed CloudWatch 17:41:06, DDL clean, transform correct, idempotent, docs present |
+| CONFIRM | ✅ DONE | Maria | 13:48 | 13:48 | |

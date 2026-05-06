@@ -78,7 +78,7 @@ builder.Services.Configure<CookieAuthenticationOptions>(CookieAuthenticationDefa
     var cookieDomain = builder.Configuration["Auth:CookieDomain"];
     if (!string.IsNullOrEmpty(cookieDomain))
         options.Cookie.Domain = cookieDomain;
-    options.Cookie.Name = ".RISE.Auth";
+    options.Cookie.Name = builder.Configuration["Auth:CookieName"] ?? ".RISE.Session";
     options.ExpireTimeSpan = TimeSpan.FromHours(8);
     options.SlidingExpiration = true;
 });
@@ -146,6 +146,24 @@ app.MapGet("/auth/logout", async (HttpContext ctx) =>
 {
     await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     await ctx.SignOutAsync(OpenIdConnectDefaults.AuthenticationScheme);
+}).AllowAnonymous();
+
+// FIRM/RN callback — module redirects here to acquire shared auth cookie
+app.MapGet("/auth/firm-callback", async (HttpContext ctx, string? returnUrl) =>
+{
+    if (ctx.User?.Identity?.IsAuthenticated != true)
+    {
+        // Not authenticated — challenge, then come back here
+        var callbackUrl = "/auth/firm-callback" + (returnUrl != null ? "?returnUrl=" + Uri.EscapeDataString(returnUrl) : "");
+        await ctx.ChallengeAsync(OpenIdConnectDefaults.AuthenticationScheme, new AuthenticationProperties
+        {
+            RedirectUri = callbackUrl
+        });
+        return;
+    }
+    // Authenticated — cookie is set, redirect to module
+    var target = returnUrl ?? "/";
+    ctx.Response.Redirect(target);
 }).AllowAnonymous();
 
 app.MapRazorComponents<App>()
