@@ -29,8 +29,7 @@ public class WiClassifierService : IWiClassifier
     {
         "rob", "rob nethery", "cloudflare", "cf config", "cf route",
         "azure access", "iam request", "iam permissions",
-        "secrets manager access", "ado pat", "pat token",
-        "bedrock-agent-runtime"
+        "secrets manager access", "ado pat", "pat token"
     };
 
     private static readonly Regex AcItemPattern = new(
