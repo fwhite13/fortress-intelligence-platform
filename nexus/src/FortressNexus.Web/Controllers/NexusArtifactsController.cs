@@ -39,6 +39,17 @@ public class NexusArtifactsController : ControllerBase
         if (submission is null)
             return NotFound($"Submission {id} not found.");
 
+        // Ownership check: caller must own the submission OR be NexusAdmin
+        var currentUpn = User.FindFirst("preferred_username")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+
+        if (!string.Equals(submission.SubmittedBy, currentUpn, StringComparison.OrdinalIgnoreCase)
+            && !User.IsInRole(NexusRoles.Admin))
+        {
+            return Forbid();
+        }
+
         if (!submission.ActiveSpecDocumentId.HasValue)
             return NotFound("No active spec document.");
 

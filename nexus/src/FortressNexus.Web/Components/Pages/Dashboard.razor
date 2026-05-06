@@ -15,7 +15,7 @@
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="nexus-dashboard-container">
     <div class="nexus-dashboard-header">
-        <MudText Typo="Typo.h4" Class="nexus-dashboard-title">My Submissions</MudText>
+        <MudText Typo="Typo.h4" Class="nexus-dashboard-title">@(_isAdmin ? "All Submissions" : "My Submissions")</MudText>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
                    OnClick="@(() => NavManager.NavigateTo("/nexus/new"))"
                    Class="nexus-dashboard-new-btn">New Submission</MudButton>
@@ -39,6 +39,10 @@
                     <MudTh>Title</MudTh>
                     <MudTh>Feature Area</MudTh>
                     <MudTh>Status</MudTh>
+                    @if (_isAdmin)
+                    {
+                        <MudTh>Submitter</MudTh>
+                    }
                     <MudTh>Submitted</MudTh>
                     <MudTh>Action</MudTh>
                 </HeaderContent>
@@ -53,6 +57,12 @@
                             @context.Status.ToString()
                         </MudChip>
                     </MudTd>
+                    @if (_isAdmin)
+                    {
+                        <MudTd DataLabel="Submitter">
+                            <MudText Typo="Typo.caption" Class="nexus-dashboard-submitter-upn">@context.SubmittedBy</MudText>
+                        </MudTd>
+                    }
                     <MudTd DataLabel="Submitted">@context.SubmittedAt.ToString("MMM d, yyyy")</MudTd>
                     <MudTd DataLabel="Action">
                         <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
@@ -124,7 +134,7 @@
                        ?? "";
             _isAdmin = authState.User.IsInRole(NexusRoles.Admin);
 
-            _submissions = await SubmissionService.GetByUserAsync(userUpn) ?? new();
+            _submissions = await SubmissionService.GetByUserAsync(userUpn, _isAdmin) ?? new();
 
             if (_isAdmin)
             {

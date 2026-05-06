@@ -8,7 +8,7 @@ public interface ISubmissionService
 {
     Task<Submission> CreateAsync(SubmissionCreateDto dto, string userUpn);
     Task<Submission?> GetByIdAsync(int id);
-    Task<List<Submission>> GetByUserAsync(string userUpn);
+    Task<List<Submission>> GetByUserAsync(string userUpn, bool isAdmin = false);
     Task<List<Submission>> GetAllPendingReviewAsync();
     Task UpdateStatusAsync(int id, SubmissionStatus status);
     Task SetActiveSpecDocumentAsync(int submissionId, int specDocumentId);

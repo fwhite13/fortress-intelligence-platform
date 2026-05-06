@@ -15,4 +15,5 @@
 | Stage | Status | Agent | Started | Completed | Notes |
 |-------|--------|-------|---------|-----------|-------|
 | PLAN  | ✅ DONE | Jarvis/Maria | 00:37 | 00:42 | Brief written, waiting on #2821 |
-| BUILD | 🔄 ACTIVE | Tony | 00:42 | — | Dispatched alongside #2821 entering review |
+| BUILD | ✅ DONE | Tony | 09:43 | 09:50 | Commit eaf36b7, 10/10 AC pass, 0 warnings |
+| REVIEW | ⏳ QUEUED | Clint | — | — | Waiting for Clint to finish #2821 review |

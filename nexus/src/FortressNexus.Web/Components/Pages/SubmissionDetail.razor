@@ -327,10 +327,23 @@ else if (_submission is not null)
         _error = null;
         try
         {
+            // Resolve user context first (needed for access guard below)
+            _currentUserUpn = await UserContextService.GetUpnAsync();
+            _isAdmin = await UserContextService.IsAdminAsync();
+
             _submission = await SubmissionService.GetByIdAsync(Id);
             if (_submission is null)
             {
                 _error = "Submission not found.";
+                return;
+            }
+
+            // Access guard: non-admins cannot view other users' submissions
+            if (!string.Equals(_submission.SubmittedBy, _currentUserUpn, StringComparison.OrdinalIgnoreCase)
+                && !_isAdmin)
+            {
+                _error = "You don't have permission to view this submission.";
+                _submission = null;
                 return;
             }
 
@@ -370,9 +383,6 @@ else if (_submission is not null)
                 catch { /* non-fatal */ }
             }
 
-            // WI #1650/#1651: current user context
-            _currentUserUpn = await UserContextService.GetUpnAsync();
-            _isAdmin = await UserContextService.IsAdminAsync();
         }
         catch (Exception ex)
         {

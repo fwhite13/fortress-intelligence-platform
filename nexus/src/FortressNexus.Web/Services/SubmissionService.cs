@@ -66,12 +66,12 @@ public class SubmissionService : ISubmissionService
             .FirstOrDefaultAsync(s => s.Id == id);
     }
 
-    public async Task<List<Submission>> GetByUserAsync(string userUpn)
+    public async Task<List<Submission>> GetByUserAsync(string userUpn, bool isAdmin = false)
     {
-        return await _db.Submissions
-            .Where(s => s.SubmittedBy == userUpn)
-            .OrderByDescending(s => s.SubmittedAt)
-            .ToListAsync();
+        var query = _db.Submissions.AsQueryable();
+        if (!isAdmin)
+            query = query.Where(s => s.SubmittedBy == userUpn);
+        return await query.OrderByDescending(s => s.SubmittedAt).ToListAsync();
     }
 
     public async Task<List<Submission>> GetAllPendingReviewAsync()
