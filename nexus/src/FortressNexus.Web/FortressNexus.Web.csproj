@@ -33,4 +33,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\shared\FipShared\FipShared.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources/forge-kb-spec-seed.md" />
+  </ItemGroup>
 </Project>
