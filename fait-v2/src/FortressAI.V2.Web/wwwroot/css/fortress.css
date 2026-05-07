@@ -2120,3 +2120,166 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
 .drag-over {
     border: 2px dashed var(--color-btn-primary-bg) !important;
 }
+
+/* ============================================
+   CONNECTORS PAGE
+   ============================================ */
+
+.connectors-page {
+    padding: var(--spacing-xl, 2rem);
+    max-width: 1200px;
+}
+
+.connectors-header {
+    margin-bottom: var(--spacing-xl, 2rem);
+}
+
+.connectors-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    margin: 0 0 0.5rem 0;
+}
+
+.connectors-subtitle {
+    color: var(--color-text-secondary);
+    margin: 0;
+}
+
+.connectors-loading {
+    display: flex;
+    justify-content: center;
+    padding: 4rem 0;
+}
+
+.connectors-error {
+    margin-top: var(--spacing-lg, 1.5rem);
+}
+
+.connectors-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: var(--spacing-lg, 1.5rem);
+}
+
+@media (max-width: 600px) {
+    .connectors-grid {
+        grid-template-columns: 1fr;
+    }
+    .connectors-page {
+        padding: var(--spacing-md, 1rem);
+    }
+}
+
+/* ============================================
+   CONNECTOR CARD
+   ============================================ */
+
+.connector-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg, 1.5rem);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md, 1rem);
+    transition: box-shadow 0.2s ease;
+}
+
+.connector-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.connector-card__header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md, 1rem);
+}
+
+.connector-card__icon {
+    color: var(--color-primary);
+    font-size: 1.75rem;
+}
+
+.connector-card__meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+}
+
+.connector-card__name {
+    font-weight: 600;
+    color: var(--color-text-primary);
+    font-size: 1rem;
+}
+
+.connector-card__status {
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.125rem 0.5rem;
+    border-radius: var(--radius-sm);
+    display: inline-block;
+    width: fit-content;
+}
+
+.connector-card__status--connected {
+    background: color-mix(in srgb, var(--color-success) 15%, transparent);
+    color: var(--color-success);
+}
+
+.connector-card__status--disconnected {
+    background: color-mix(in srgb, var(--color-text-muted) 15%, transparent);
+    color: var(--color-text-muted);
+}
+
+.connector-card__description {
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+    margin: 0;
+    line-height: 1.5;
+}
+
+.connector-card__scopes {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.connector-card__scope-pill {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.125rem 0.625rem;
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.connector-card__scope-pill--read {
+    background: color-mix(in srgb, var(--color-info) 15%, transparent);
+    color: var(--color-info);
+}
+
+.connector-card__scope-pill--write {
+    background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+    color: var(--color-warning);
+}
+
+.connector-card__actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: auto;
+}
+
+.connector-card__managed-badge {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-text-muted);
+    padding: 0.25rem 0.625rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+}
+
+.connector-card__btn {
+    /* inherits MudButton styling — no overrides needed */
+}

@@ -1,13 +1,106 @@
 @page "/connectors"
 @attribute [Authorize]
+@inject IConnectorService ConnectorService
+@inject AuthenticationStateProvider AuthState
+@inject ISnackbar Snackbar
 
-<PageTitle>Connectors — FAIT v2</PageTitle>
+<PageTitle>Connectors — FAIT</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Large" Class="fait-v2-page">
-    <MudText Typo="Typo.h5" Class="fait-v2-page__title">Connector Management</MudText>
-    <MudText Typo="Typo.body2" Class="fait-v2-page__subtitle">Manage your MCP connectors and integrations.</MudText>
+<div class="connectors-page">
+    <div class="connectors-header">
+        <h1 class="connectors-title">Connectors</h1>
+        <p class="connectors-subtitle">Connect your tools to give your AI assistant access to the right data.</p>
+    </div>
 
-    <MudPaper Class="fait-v2-placeholder-card" Elevation="0">
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Connector Management UI — coming in Phase C2</MudText>
-    </MudPaper>
-</MudContainer>
+    @if (_loading)
+    {
+        <div class="connectors-loading">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        </div>
+    }
+    else if (_error != null)
+    {
+        <MudAlert Severity="Severity.Error" Class="connectors-error">@_error</MudAlert>
+    }
+    else
+    {
+        <div class="connectors-grid">
+            @foreach (var connector in _connectors)
+            {
+                <ConnectorCard Connector="connector"
+                               OnRevoke="HandleRevoke"
+                               OnConnect="HandleConnect" />
+            }
+        </div>
+    }
+</div>
+
+@if (_showModal && _connectingConnector != null)
+{
+    <ConnectorOAuthModal ConnectorName="@_connectingConnector.DisplayName"
+                         OnClose="CloseModal" />
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private IReadOnlyList<ConnectorViewModel> _connectors = Array.Empty<ConnectorViewModel>();
+    private bool _showModal;
+    private ConnectorViewModel? _connectingConnector;
+    private string? _entraOid;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _entraOid = auth.User.FindFirst("oid")?.Value
+                 ?? auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        await LoadConnectors();
+    }
+
+    private async Task LoadConnectors()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            if (_entraOid != null)
+                _connectors = await ConnectorService.ListConnectorsAsync(_entraOid);
+        }
+        catch (Exception ex)
+        {
+            _error = "Failed to load connectors. Please try again.";
+            _ = ex; // suppress unused warning
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task HandleRevoke(ConnectorViewModel connector)
+    {
+        if (_entraOid == null) return;
+        try
+        {
+            await ConnectorService.RevokeConnectionAsync(_entraOid, connector.Name);
+            Snackbar.Add($"{connector.DisplayName} disconnected.", Severity.Success);
+            await LoadConnectors();
+        }
+        catch
+        {
+            Snackbar.Add($"Failed to revoke {connector.DisplayName}.", Severity.Error);
+        }
+    }
+
+    private void HandleConnect(ConnectorViewModel connector)
+    {
+        _connectingConnector = connector;
+        _showModal = true;
+    }
+
+    private void CloseModal()
+    {
+        _showModal = false;
+        _connectingConnector = null;
+    }
+}

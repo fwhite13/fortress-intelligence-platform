@@ -138,6 +138,9 @@ builder.Services.AddScoped<IForgeKbService, ForgeKbService>();
 // Design Agent
 builder.Services.AddScoped<IDesignAgentService, DesignAgentService>();
 
+// Connector management
+builder.Services.AddScoped<IConnectorService, ConnectorService>();
+
 var app = builder.Build();
 
 // Seed mcp_servers with forge-kb entry (idempotent)
