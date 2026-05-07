@@ -59,6 +59,7 @@ async function invokeStitchTool(toolName, args, timeoutMs = 30000) {
         const proc = spawn('stitch-mcp', [], { env: process.env });
         let buffer = '';
         let initDone = false;
+        let toolDone = false;
         let toolCallId = 2;
 
         const timer = setTimeout(() => {
@@ -92,6 +93,7 @@ async function invokeStitchTool(toolName, args, timeoutMs = 30000) {
                 } else if (initDone && msg.id === toolCallId) {
                     clearTimeout(timer);
                     proc.kill();
+                    toolDone = true;
                     if (msg.error) reject(new Error(msg.error.message || JSON.stringify(msg.error)));
                     else resolve(msg.result);
                 }
@@ -102,6 +104,7 @@ async function invokeStitchTool(toolName, args, timeoutMs = 30000) {
         proc.on('exit', (code) => {
             clearTimeout(timer);
             if (!initDone) reject(new Error(`stitch-mcp exited ${code} before initialize response`));
+            else if (!toolDone) reject(new Error(`stitch-mcp exited ${code} before tool response`));
         });
 
         // Send initialize request

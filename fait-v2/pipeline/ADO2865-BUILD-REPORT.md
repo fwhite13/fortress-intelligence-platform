@@ -194,3 +194,26 @@ dotnet build → Build succeeded. 0 Warning(s). 0 Error(s).
 ```
 
 All four Clint review items addressed. Ready for Clint re-review.
+
+---
+
+## Cycle 3 — Single Fix
+
+**Date:** 2026-05-07
+**Commit:** `bda1964`
+**Build:** SUCCEEDED ✅ (0 errors, 0 warnings)
+
+### What was fixed
+Added `_currentSessionId = result.SessionId ?? _currentSessionId;` after `GenerateScreenAsync` returns (line 486 in `DesignAgentView.razor`), before the `IsFallback` check and `SaveArtifactAsync` call.
+
+### Files changed
+- `src/FortressAI.V2.Web/Components/Agent/DesignAgentView.razor` — 1 line added
+
+### Why
+`_currentSessionId` was initialized once at component creation and never updated after the server persisted the session. Refine operations were saving artifacts with a phantom GUID that was never in `design_agent_sessions`. This fix propagates the server-assigned session ID back to the component immediately after generation.
+
+### CC sessions
+1 run (CC Sonnet) — single targeted edit
+
+### ADO comment posted
+Comment ID: 781965

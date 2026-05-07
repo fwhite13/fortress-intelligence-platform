@@ -95,3 +95,54 @@ cd /home/fredw/projects/fip/fait-v2 && dotnet build src/FortressAI.V2.Web/
 ## Sending To
 
 Clint Barton (code-reviewer) for review.
+
+---
+
+# Build Report — ADO#2866 — Cycle 2 (Review Fixes)
+
+**Agent:** Tony Stark | **Cycle:** 2
+**Date:** 2026-05-07
+**Commit:** `857b351`
+**Build status:** ✅ SUCCEEDED (0 errors, 0 warnings)
+
+---
+
+## What Was Fixed
+
+Three fixes to `agent-harness/harness-server.js` addressing Clint's Cycle 1 review:
+1. **MCP handshake sequence** — Rewrote `invokeStitchTool` to be event-driven: streams stdout line-by-line, waits for `initialize` response (id=1), sends `notifications/initialized` notification, then sends `tools/call`. Fixes the silent failure where every Stitch tool call returned `"stitch-mcp exited N with no result"`.
+2. **30s subprocess timeout** — Part of the `invokeStitchTool` rewrite. `setTimeout` watchdog kills the proc and rejects after `timeoutMs` (default 30000ms).
+3. **`SecretString` guard in `bootstrapGcpCredentials`** — Validates `SecretString` is non-null and valid JSON before writing. Returns early with a `console.warn` for binary or malformed secrets.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `agent-harness/harness-server.js` | Rewrote `invokeStitchTool` (event-driven, proper MCP handshake, 30s timeout); guarded `SecretString` in `bootstrapGcpCredentials` |
+
+---
+
+## CC Sessions
+
+1 CC Sonnet session (synchronous). Syntax check passed: `node --check` returned clean.
+
+---
+
+## Acceptance Criteria Verification
+
+- [x] `invokeStitchTool` waits for initialize response (id=1) before sending notification + tool call
+- [x] `notifications/initialized` sent before `tools/call`
+- [x] 30s timeout watchdog kills proc and rejects promise
+- [x] `bootstrapGcpCredentials` returns early if `SecretString` is null/undefined
+- [x] `bootstrapGcpCredentials` returns early if `SecretString` is not valid JSON
+- [x] `node --check` syntax validation passed
+- [x] `dotnet build` — 0 errors, 0 warnings
+- [x] CC CLI used (mandatory) ✅
+
+---
+
+## Sending To
+
+Clint Barton (code-reviewer) for Cycle 2 review.
