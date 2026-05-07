@@ -1,7 +1,6 @@
 using Amazon.S3;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
-using Microsoft.Identity.Web;
+using Microsoft.AspNetCore.DataProtection;
 using MudBlazor.Services;
 using Serilog;
 using Microsoft.EntityFrameworkCore;
@@ -22,26 +21,54 @@ builder.Host.UseSerilog((ctx, cfg) =>
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Entra SSO via Microsoft.Identity.Web
-builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
-    .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"))
-    .EnableTokenAcquisitionToCallDownstreamApi()
-    .AddInMemoryTokenCaches();
+// FIP shared cookie consumer — no independent OIDC
+// fip.fortressam.ai owns Entra auth; fait-v2 reads the shared .FortressAI.Session cookie
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+})
+.AddCookie(options =>
+{
+    options.LoginPath = "/auth/redirect-to-login";
+    options.AccessDeniedPath = "/access-denied";
+    options.ExpireTimeSpan = TimeSpan.FromHours(12);
+    options.SlidingExpiration = true;
+    options.Cookie.Name = builder.Configuration["Auth:CookieName"] ?? ".FortressAI.Session";
+    options.Cookie.Domain = builder.Configuration["Auth__CookieDomain"] ?? "";
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.IsEssential = true;
+});
 
-// Override the cookie to use the shared FIP session cookie
-builder.Services.Configure<CookieAuthenticationOptions>(
-    CookieAuthenticationDefaults.AuthenticationScheme, options =>
-    {
-        options.Cookie.Name = ".FortressAI.Session";
-        options.Cookie.Domain = builder.Configuration["Auth:CookieDomain"] ?? "";
-        options.Cookie.SameSite = SameSiteMode.Lax;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-        options.Cookie.IsEssential = true;
-        options.ExpireTimeSpan = TimeSpan.FromHours(12);
-        options.SlidingExpiration = true;
-        options.LoginPath = "/auth/signin";
-        options.AccessDeniedPath = "/access-denied";
-    });
+// DataProtection: shared key ring points to fred_dev (FIP portal's DB)
+// fait-v2 is a consumer — DisableAutomaticKeyGeneration so only FIP portal creates keys
+var keyRingDbHost = builder.Configuration["FORTRESS_DB_HOST"];
+var keyRingDbPort = builder.Configuration["FORTRESS_DB_PORT"] ?? "3306";
+var keyRingDbUser = builder.Configuration["FORTRESS_DB_USER"] ?? "fortress_mysql";
+var keyRingDbPass = builder.Configuration["FORTRESS_DB_PASS"] ?? "";
+var keyRingDbName = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? "fred_dev";
+
+var keyRingCsb = new MySqlConnector.MySqlConnectionStringBuilder
+{
+    Server = keyRingDbHost ?? "localhost",
+    Port = uint.Parse(keyRingDbPort),
+    Database = keyRingDbName,
+    UserID = keyRingDbUser,
+    Password = keyRingDbPass,
+    ConnectionTimeout = 10,
+    GuidFormat = MySqlConnector.MySqlGuidFormat.None   // MANDATORY — matches existing FIRM pattern
+};
+
+builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
+    options.UseMySql(keyRingCsb.ConnectionString,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mysql => mysql.EnableRetryOnFailure(3)));
+
+builder.Services.AddDataProtection()
+    .PersistKeysToDbContext<SharedKeyRingDbContext>()
+    .SetApplicationName(builder.Configuration["DataProtection:ApplicationName"] ?? "FortressAI")
+    .DisableAutomaticKeyGeneration(); // fait-v2 is a consumer — FIP portal creates keys
 
 builder.Services.AddAuthorization(options =>
 {
@@ -50,7 +77,6 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCascadingAuthenticationState();
-builder.Services.AddControllersWithViews();
 
 // MudBlazor
 builder.Services.AddMudServices();
@@ -106,8 +132,13 @@ app.UseAntiforgery();
 // Health endpoint — public
 app.MapGet("/health", () => "OK").AllowAnonymous();
 
-// MicrosoftIdentity challenge/callback endpoints
-app.MapControllers();
+// Redirect unauthenticated users to FIP portal for login
+app.MapGet("/auth/redirect-to-login", (IConfiguration cfg, HttpContext ctx) =>
+{
+    var fipUrl = cfg["FIP__LoginUrl"]?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
+    var returnUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}/";
+    return Results.Redirect($"{fipUrl}?returnUrl={Uri.EscapeDataString(returnUrl)}");
+}).AllowAnonymous();
 
 // Blazor components — all routes require auth
 app.MapRazorComponents<App>()

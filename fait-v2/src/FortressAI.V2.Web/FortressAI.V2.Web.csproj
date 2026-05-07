@@ -6,10 +6,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Entra SSO -->
-    <PackageReference Include="Microsoft.Identity.Web" Version="3.*" />
-    <PackageReference Include="Microsoft.Identity.Web.UI" Version="3.*" />
-
     <!-- MudBlazor v7 -->
     <PackageReference Include="MudBlazor" Version="7.*" />
 
@@ -28,6 +24,7 @@
 
     <!-- Data Protection -->
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.*" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="8.0.*" />
 
     <!-- AWS -->
     <PackageReference Include="AWSSDK.S3" Version="3.*" />
