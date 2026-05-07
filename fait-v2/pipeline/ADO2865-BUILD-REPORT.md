@@ -1,0 +1,119 @@
+# BUILD REPORT — ADO#2865 — Google Stitch Design Agent
+**Sprint 3 | FAIT v2 Epic #2835 | §6.3 Design Agent**
+**Agent:** Tony Stark | **Cycle:** 1 | **Date:** 2026-05-07
+
+---
+
+## Build Status: SUCCEEDED ✅
+
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:02.05
+```
+
+**Commit:** `aa91a57`
+**Branch:** `main`
+**Pushed to:** `origin/main`
+
+---
+
+## What Was Built
+
+### 1. `IUserAgentRuntime` + `FargateUserAgentRuntime` — DispatchToolCallAsync
+
+- Added `Task<string> DispatchToolCallAsync(...)` to `IUserAgentRuntime.cs`
+- Stubbed in `FargateUserAgentRuntime.cs`: POSTs JSON body to `http://{privateIp}:{port}/tools/{toolName}`, returns raw result string
+- Enables WI#2866 (Stitch MCP wiring) to plug in tool calls via the harness endpoint
+
+### 2. `IDesignAgentService` + `DesignAgentService`
+
+- `Services/IDesignAgentService.cs`: interface with `GenerateScreenAsync`, `ExtractDesignContextAsync`, `RefineScreenAsync`, `SaveArtifactAsync`, `IsStitchAvailableAsync`
+- `DesignAgentResult` record: `(Html, ScreenId, ProjectId, IsFallback)`
+- `Services/DesignAgentService.cs`: full implementation
+  - Dispatches `stitch_generate_screen`, `stitch_extract_design_dna`, `stitch_refine_screen` tool calls via `DispatchToolCallAsync`
+  - Falls back to CC-native HTML generation via `SendTurnAsync` when Stitch unavailable
+  - `IsStitchAvailableAsync` checks `Stitch:GcpCredentialsConfigured` config
+  - Artifacts saved to S3 at `workspaces/{userId}/artifacts/design/{sessionId}/{name}.html`
+- Registered as `AddScoped<IDesignAgentService, DesignAgentService>()` in `Program.cs`
+
+### 3. DB Models (already migrated via `AddMcpTables`)
+
+- `Data/Models/DesignAgentSession.cs`: `design_agent_sessions` — id, user_id, conversation_id, stitch_project_id, design_dna, timestamps
+- `Data/Models/DesignAgentArtifact.cs`: `design_agent_artifacts` — id, session_id, user_id, artifact_name, s3_key, stitch_screen_id, is_fallback, created_at
+- Both registered in `FaitV2DbContext` (`OnModelCreating` config matches existing snapshot — no new migration needed, tables already created in `AddMcpTables`)
+
+### 4. Blazor Components
+
+**`Components/Agent/AgentPluginBadge.razor`**
+- Props: `AgentName` (string), `IsActive` (bool)
+- Renders colored badge using `--color-accent-bg` / `--color-accent` CSS variables when active
+
+**`Components/Agent/DesignArtifactCard.razor`**
+- Displays iframe thumbnail (scaled 50%), artifact name, fallback tag ("CC-native")
+- "Preview" button → fires `OnOpenPreview` callback (expands preview panel in parent)
+- "Download" button → triggers browser file download via `IJSRuntime` `downloadBase64`
+
+**`Components/Agent/DesignAgentView.razor`**
+- Full chat UI: prompt input, image upload (via `InputFile`), turn history
+- Calls `GenerateScreenAsync` on first prompt, `RefineScreenAsync` for follow-ups (uses last Stitch screenId)
+- Image upload triggers `ExtractDesignContextAsync` → `designDnaContext` passed to generation
+- Shows inline preview panel (`<iframe srcdoc>`) when "Open in Preview" clicked
+- Shows "Stitch unavailable — using CC-native generation" notice when `IsFallback = true`
+- All artifacts auto-saved to S3 after generation
+- CSS animations: `@keyframes design-spin` for generating spinner
+
+### 5. `ChatView.razor` — Agent Selector
+
+- Added `ActiveAgent` enum (`MainAssistant | DesignAgent`) in `Models/ActiveAgent.cs`
+- Agent selector toolbar at top: two pill buttons (Assistant, Design Agent)
+- When `DesignAgent` active: renders `<DesignAgentView />` instead of message list, shows `<AgentPluginBadge>`
+- When `MainAssistant` active: existing chat flow unchanged
+
+---
+
+## Acceptance Criteria Status
+
+| # | Criterion | Status |
+|---|-----------|--------|
+| 1 | `IDesignAgentService` and `DesignAgentService` implemented and registered | ✅ |
+| 2 | `DispatchToolCallAsync` added to `IUserAgentRuntime` and stubbed in `FargateUserAgentRuntime` | ✅ |
+| 3 | `design_agent_sessions` and `design_agent_artifacts` DB tables via EF migration | ✅ (in `AddMcpTables`) |
+| 4 | `DesignAgentView.razor` renders: prompt → `GenerateScreenAsync` → iframe preview | ✅ |
+| 5 | Image upload triggers `ExtractDesignContextAsync` before generation | ✅ |
+| 6 | `DesignArtifactCard.razor` with Download + Preview buttons | ✅ |
+| 7 | `AgentPluginBadge.razor` in chat header when Design Agent active | ✅ |
+| 8 | Fallback to CC-native HTML with visible notice | ✅ |
+| 9 | Artifacts saved to S3 `workspaces/{userId}/artifacts/design/{sessionId}/` | ✅ |
+| 10 | Design Agent invokable from chat toolbar in `ChatView.razor` | ✅ |
+| 11 | ALL styling via CSS variables — zero hardcoded colors/fonts/sizes | ✅ |
+
+---
+
+## Files Changed
+
+| File | Action |
+|------|--------|
+| `Services/IUserAgentRuntime.cs` | Modified — added `DispatchToolCallAsync` |
+| `Services/FargateUserAgentRuntime.cs` | Modified — implemented `DispatchToolCallAsync` |
+| `Services/IDesignAgentService.cs` | Created |
+| `Services/DesignAgentService.cs` | Created |
+| `Data/Models/DesignAgentSession.cs` | Created |
+| `Data/Models/DesignAgentArtifact.cs` | Created |
+| `Data/FaitV2DbContext.cs` | Modified — registered design agent entities |
+| `Components/Agent/AgentPluginBadge.razor` | Created |
+| `Components/Agent/DesignArtifactCard.razor` | Created |
+| `Components/Agent/DesignAgentView.razor` | Created |
+| `Components/Chat/ChatView.razor` | Modified — agent selector toolbar |
+| `Models/ActiveAgent.cs` | Created |
+| `Program.cs` | Modified — `AddScoped<IDesignAgentService, DesignAgentService>()` |
+
+---
+
+## Notes
+
+- `design_agent_sessions` and `design_agent_artifacts` tables were pre-created in the `AddMcpTables` migration (20260507125357) by the Sprint 3 WI#2887 agent. EF model snapshot already reflects both tables. No additional migration was needed.
+- `AgentPluginBadge.razor` and `DesignArtifactCard.razor` were also partially pre-staged by WI#2887 agent (residual CC artifacts, commit `b95d55d`). This WI completed the full implementations.
+- WI#2866 (Stitch MCP harness wiring) remains a dependency for live Stitch integration. Until `Stitch:GcpCredentialsConfigured=true` is set, the service will use CC-native HTML fallback.
