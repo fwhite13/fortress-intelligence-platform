@@ -39,6 +39,10 @@ import { addAdoComment } from './tools/ado/add_comment.js';
 import { listAdoIterations } from './tools/ado/list_iterations.js';
 import { isPATConfigured } from './tools/ado/ado-client.js';
 
+// Search tool imports
+import { webSearch } from './tools/search/web_search.js';
+import { isAPIKeyConfigured } from './tools/search/search-client.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -509,6 +513,32 @@ function createMcpServer(user, rawToken) {
       } catch (err) {
         console.error('[fip-mcp] ADO error:', err);
         return { content: [{ type: 'text', text: `ADO error: ${err.message}` }], isError: true };
+      }
+    }
+  );
+
+
+  // ---- Search Tools ----
+
+  // Tool: web_search
+  server.tool(
+    'web_search',
+    'Search the web using Brave Search. Returns titles, URLs, and snippets for the top results.',
+    {
+      query: z.string().describe('Search query'),
+      count: z.number().min(1).max(20).optional().describe('Number of results (1-20, default 10)'),
+      country: z.string().optional().describe('2-letter country code for results (e.g. US, GB). Default: US'),
+    },
+    async ({ query, count, country }) => {
+      try {
+        if (!isAPIKeyConfigured()) {
+          return { content: [{ type: 'text', text: 'Web search not configured: BRAVE_API_KEY env var missing' }], isError: true };
+        }
+        const results = await webSearch(user, { query, count, country });
+        return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+      } catch (err) {
+        console.error('[fip-mcp] web_search error:', err);
+        return { content: [{ type: 'text', text: `Search error: ${err.message}` }], isError: true };
       }
     }
   );
