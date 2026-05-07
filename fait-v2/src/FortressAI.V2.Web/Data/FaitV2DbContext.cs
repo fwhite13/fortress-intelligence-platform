@@ -186,12 +186,11 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
 
-            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_design_agent_sessions_user_id");
+            entity.HasIndex(e => e.UserId);
 
             entity.HasOne(e => e.User)
                   .WithMany()
                   .HasForeignKey(e => e.UserId)
-                  .HasConstraintName("fk_design_sessions_user")
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -209,13 +208,11 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.IsFallback).HasColumnName("is_fallback").HasColumnType("tinyint(1)");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
 
-            entity.HasIndex(e => e.SessionId).HasDatabaseName("ix_design_artifacts_session_id");
-            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_design_artifacts_user_id");
+            entity.HasIndex(e => e.SessionId);
 
             entity.HasOne(e => e.Session)
                   .WithMany(s => s.Artifacts)
                   .HasForeignKey(e => e.SessionId)
-                  .HasConstraintName("fk_design_artifacts_session")
                   .OnDelete(DeleteBehavior.Cascade);
         });
     }
