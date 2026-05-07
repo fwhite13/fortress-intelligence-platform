@@ -20,10 +20,24 @@ async function bootstrapGcpCredentials() {
     try {
         const client = new SecretsManagerClient({ region: process.env.AWS_REGION || 'us-east-1' });
         const response = await client.send(new GetSecretValueCommand({ SecretId: secretName }));
+
+        const secretValue = response.SecretString;
+        if (!secretValue) {
+            console.warn('[harness] GCP secret is binary or empty — Stitch will be unavailable');
+            return;
+        }
+        // Validate it's parseable JSON (GCP SA keys are JSON objects)
+        try {
+            JSON.parse(secretValue);
+        } catch {
+            console.warn('[harness] GCP secret is not valid JSON — Stitch will be unavailable');
+            return;
+        }
+
         const credPath = '/tmp/gcp-service-account.json';
-        writeFileSync(credPath, response.SecretString, { mode: 0o600 });
+        writeFileSync(credPath, secretValue, { mode: 0o600 });
         process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
-        console.log('[harness] GCP credentials bootstrapped from Secrets Manager');
+        console.log('[harness] GCP credentials bootstrapped');
     } catch (err) {
         console.warn('[harness] GCP credentials not available — Stitch will be unavailable:', err.message);
     }
@@ -40,59 +54,67 @@ const STITCH_TOOLS = new Set([
     'refine_screen'
 ]);
 
-function invokeStitchTool(toolName, args) {
+async function invokeStitchTool(toolName, args, timeoutMs = 30000) {
     return new Promise((resolve, reject) => {
-        const proc = spawn('stitch-mcp', [], {
-            env: { ...process.env },
-            stdio: ['pipe', 'pipe', 'pipe']
+        const proc = spawn('stitch-mcp', [], { env: process.env });
+        let buffer = '';
+        let initDone = false;
+        let toolCallId = 2;
+
+        const timer = setTimeout(() => {
+            proc.kill();
+            reject(new Error(`stitch-mcp timeout after ${timeoutMs}ms`));
+        }, timeoutMs);
+
+        proc.stdout.on('data', (chunk) => {
+            buffer += chunk.toString();
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // keep incomplete line
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                let msg;
+                try { msg = JSON.parse(line); } catch { continue; }
+
+                if (!initDone && msg.id === 1) {
+                    // Got initialize response — send initialized notification + tool call
+                    initDone = true;
+                    proc.stdin.write(JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: 'notifications/initialized'
+                    }) + '\n');
+                    proc.stdin.write(JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: toolCallId,
+                        method: 'tools/call',
+                        params: { name: toolName, arguments: args }
+                    }) + '\n');
+                } else if (initDone && msg.id === toolCallId) {
+                    clearTimeout(timer);
+                    proc.kill();
+                    if (msg.error) reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+                    else resolve(msg.result);
+                }
+            }
         });
 
-        // Send MCP initialize then tools/call via JSON-RPC over stdio
-        const initMsg = JSON.stringify({
-            jsonrpc: '2.0', id: 1,
+        proc.stderr.on('data', (d) => console.error('[stitch-mcp stderr]', d.toString()));
+        proc.on('exit', (code) => {
+            clearTimeout(timer);
+            if (!initDone) reject(new Error(`stitch-mcp exited ${code} before initialize response`));
+        });
+
+        // Send initialize request
+        proc.stdin.write(JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
             method: 'initialize',
             params: {
                 protocolVersion: '2024-11-05',
                 capabilities: {},
-                clientInfo: { name: 'fait-v2-harness', version: '1.0' }
+                clientInfo: { name: 'fait-v2-harness', version: '1.0.0' }
             }
-        }) + '\n';
-
-        const callMsg = JSON.stringify({
-            jsonrpc: '2.0', id: 2,
-            method: 'tools/call',
-            params: { name: toolName, arguments: args || {} }
-        }) + '\n';
-
-        let stdout = '';
-        let stderr = '';
-
-        proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-        proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-
-        proc.on('close', (code) => {
-            // Parse all JSON-RPC messages from stdout, find id=2 response
-            const lines = stdout.split('\n').filter(l => l.trim());
-            for (const line of lines) {
-                try {
-                    const msg = JSON.parse(line);
-                    if (msg.id === 2) {
-                        if (msg.error) {
-                            return reject(new Error(msg.error.message || JSON.stringify(msg.error)));
-                        }
-                        return resolve(msg.result);
-                    }
-                } catch (_) { /* skip non-JSON lines */ }
-            }
-            reject(new Error(`stitch-mcp exited ${code} with no result. stderr: ${stderr.slice(0, 200)}`));
-        });
-
-        proc.on('error', (err) => reject(err));
-
-        // Write both messages then close stdin
-        proc.stdin.write(initMsg);
-        proc.stdin.write(callMsg);
-        proc.stdin.end();
+        }) + '\n');
     });
 }
 
