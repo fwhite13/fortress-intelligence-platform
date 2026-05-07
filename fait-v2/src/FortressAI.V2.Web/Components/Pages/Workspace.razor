@@ -55,14 +55,14 @@
                             @if (file.Extension == ".html")
                             {
                                 <MudIconButton Icon="@Icons.Material.Outlined.Visibility"
-                                               Size="Size.Small" Title="Preview"
+                                               Size="Size.Small"
                                                OnClick="() => PreviewFile(file)" />
                             }
                             <MudIconButton Icon="@Icons.Material.Outlined.Download"
-                                           Size="Size.Small" Title="Download"
+                                           Size="Size.Small"
                                            OnClick="() => DownloadFile(file)" />
                             <MudIconButton Icon="@Icons.Material.Outlined.Delete"
-                                           Size="Size.Small" Title="Delete" Color="Color.Error"
+                                           Size="Size.Small" Color="Color.Error"
                                            OnClick="() => ConfirmDelete(file)" />
                         </div>
                     </div>

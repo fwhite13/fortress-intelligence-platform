@@ -63,7 +63,7 @@ public class WorkspaceService : IWorkspaceService
             .ToList();
     }
 
-    public async Task<string> GetDownloadUrlAsync(string userId, string s3Key, CancellationToken ct = default)
+    public Task<string> GetDownloadUrlAsync(string userId, string s3Key, CancellationToken ct = default)
     {
         if (!s3Key.StartsWith($"workspaces/{userId}/"))
             throw new UnauthorizedAccessException("Access denied");
@@ -75,7 +75,7 @@ public class WorkspaceService : IWorkspaceService
             Expires = DateTime.UtcNow.AddMinutes(15),
             Verb = HttpVerb.GET,
         };
-        return _s3.GetPreSignedURL(request);
+        return Task.FromResult(_s3.GetPreSignedURL(request));
     }
 
     public async Task DeleteFileAsync(string userId, string s3Key, CancellationToken ct = default)
