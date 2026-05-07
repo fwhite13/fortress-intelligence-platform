@@ -1,12 +1,12 @@
 /**
- * Send a message to a Teams chat via Microsoft Graph /me/chats/{chatId}/messages.
+ * Send a message to a Teams chat via Microsoft Graph /chats/{chatId}/messages.
  *
  * @param {import('@microsoft/microsoft-graph-client').Client} graphClient
  * @param {{ chatId: string, content: string }} options
  */
 export async function sendTeamsMessage(graphClient, { chatId, content }) {
     const msg = await graphClient
-        .api(`/me/chats/${chatId}/messages`)
+        .api(`/chats/${chatId}/messages`)
         .post({
             body: {
                 content,
