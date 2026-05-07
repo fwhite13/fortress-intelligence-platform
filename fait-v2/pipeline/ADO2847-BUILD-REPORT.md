@@ -81,3 +81,34 @@ Integration test requires a live `fortress-user-workspaces` S3 bucket with ECS t
 ---
 
 ## Build Complete — ready for Clint review
+
+---
+
+## Build Cycle 2 — ADO#2847 Review Fixes
+
+**Commit:** `aa14724`
+**Date:** 2026-05-07
+**Build:** SUCCEEDED (0 errors, 0 warnings)
+
+### Fixes applied
+
+| Issue | Fix | Lines affected |
+|-------|-----|----------------|
+| I1 — Inner `GetObjectAsync` unhandled in `GetTopicsAsync` | Wrapped in `try/catch AmazonS3Exception (NoSuchKey/404)` + `catch Exception` — log + skip per file | ~162–175 |
+| I1 — Inner `GetObjectAsync` unhandled in `ExportZipAsync` | Same wrapping pattern applied | ~242–257 |
+| I2 — Dead 404 catch in `DeleteFileAsync` | Removed try/catch; replaced with direct unconditional `DeleteObjectAsync` + idempotency comment | ~95–101 |
+| I2 — Dead 404 catch in `DeleteTopicAsync` | Same removal | ~218–225 |
+| I3 — `userId` not validated | Added `ValidateId(string, string)` private helper; called at top of all 9 public methods | ~47–53 + all public methods |
+| I4 — `topicSlug` not validated | Same `ValidateId` helper called at top of all topic methods | All topic methods |
+| I6 — `RemoveFromVectorIndexAsync` stub missing | Added `await RemoveFromVectorIndexAsync(userId, topicSlug, ct)` in `DeleteTopicAsync` + no-op stub method | ~228, ~283–289 |
+
+### Not fixed (Sprint 2 pre-acknowledged)
+- I5: N+1 serial `GetObjectAsync` in `GetTopicsAsync` — Sprint 2 parallelization
+- N1: `UpsertTopicAsync` returns approximate timestamp — Sprint 2
+- N2: `SyncToVectorIndexAsync` missing `CancellationToken` — Sprint 2
+
+### CC sessions
+1 CC session (Sonnet). Clean pass, 0 retries.
+
+### ADO comment posted
+Comment ID `781707` — posted 2026-05-07T02:59:52Z
