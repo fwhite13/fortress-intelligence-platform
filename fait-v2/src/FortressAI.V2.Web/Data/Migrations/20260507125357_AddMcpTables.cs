@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -11,35 +11,6 @@ namespace FortressAI.V2.Web.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.CreateTable(
-                name: "design_agent_sessions",
-                columns: table => new
-                {
-                    id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    conversation_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: true)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    stitch_project_id = table.Column<string>(type: "varchar(200)", maxLength: 200, nullable: true)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    design_dna = table.Column<string>(type: "TEXT", nullable: true)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    created_at = table.Column<DateTime>(type: "datetime(6)", nullable: false),
-                    updated_at = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_design_agent_sessions", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_design_agent_sessions_users_user_id",
-                        column: x => x.user_id,
-                        principalTable: "users",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                })
-                .Annotation("MySql:CharSet", "utf8mb4");
-
             migrationBuilder.CreateTable(
                 name: "mcp_servers",
                 columns: table => new
@@ -93,47 +64,6 @@ namespace FortressAI.V2.Web.Data.Migrations
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
-            migrationBuilder.CreateTable(
-                name: "design_agent_artifacts",
-                columns: table => new
-                {
-                    id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    session_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    artifact_name = table.Column<string>(type: "varchar(200)", maxLength: 200, nullable: false)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    s3_key = table.Column<string>(type: "varchar(500)", maxLength: 500, nullable: false)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    stitch_screen_id = table.Column<string>(type: "varchar(200)", maxLength: 200, nullable: true)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    is_fallback = table.Column<bool>(type: "tinyint(1)", nullable: false),
-                    created_at = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_design_agent_artifacts", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_design_agent_artifacts_design_agent_sessions_session_id",
-                        column: x => x.session_id,
-                        principalTable: "design_agent_sessions",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
-                })
-                .Annotation("MySql:CharSet", "utf8mb4");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_design_agent_artifacts_session_id",
-                table: "design_agent_artifacts",
-                column: "session_id");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_design_agent_sessions_user_id",
-                table: "design_agent_sessions",
-                column: "user_id");
-
             migrationBuilder.CreateIndex(
                 name: "ix_mcp_servers_name",
                 table: "mcp_servers",
@@ -156,16 +86,10 @@ namespace FortressAI.V2.Web.Data.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
-                name: "design_agent_artifacts");
-
-            migrationBuilder.DropTable(
                 name: "mcp_servers");
 
             migrationBuilder.DropTable(
                 name: "mcp_user_tokens");
-
-            migrationBuilder.DropTable(
-                name: "design_agent_sessions");
         }
     }
 }

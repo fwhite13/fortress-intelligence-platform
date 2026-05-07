@@ -22,99 +22,6 @@ namespace FortressAI.V2.Web.Data.Migrations
 
             MySqlModelBuilderExtensions.AutoIncrementColumns(modelBuilder);
 
-            modelBuilder.Entity("FortressAI.V2.Web.Data.Models.DesignAgentArtifact", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
-
-                    b.Property<string>("ArtifactName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("varchar(200)")
-                        .HasColumnName("artifact_name");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<bool>("IsFallback")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("is_fallback");
-
-                    b.Property<string>("S3Key")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("varchar(500)")
-                        .HasColumnName("s3_key");
-
-                    b.Property<string>("SessionId")
-                        .IsRequired()
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("session_id");
-
-                    b.Property<string>("StitchScreenId")
-                        .HasMaxLength(200)
-                        .HasColumnType("varchar(200)")
-                        .HasColumnName("stitch_screen_id");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SessionId");
-
-                    b.ToTable("design_agent_artifacts");
-                });
-
-            modelBuilder.Entity("FortressAI.V2.Web.Data.Models.DesignAgentSession", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
-
-                    b.Property<string>("ConversationId")
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("conversation_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("DesignDna")
-                        .HasColumnType("TEXT")
-                        .HasColumnName("design_dna");
-
-                    b.Property<string>("StitchProjectId")
-                        .HasMaxLength(200)
-                        .HasColumnType("varchar(200)")
-                        .HasColumnName("stitch_project_id");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("design_agent_sessions");
-                });
-
             modelBuilder.Entity("FortressAI.V2.Web.Data.Models.MainAssistant", b =>
                 {
                     b.Property<string>("Id")
@@ -501,28 +408,6 @@ namespace FortressAI.V2.Web.Data.Migrations
                     b.ToTable("user_sessions", (string)null);
                 });
 
-            modelBuilder.Entity("FortressAI.V2.Web.Data.Models.DesignAgentArtifact", b =>
-                {
-                    b.HasOne("FortressAI.V2.Web.Data.Models.DesignAgentSession", "Session")
-                        .WithMany("Artifacts")
-                        .HasForeignKey("SessionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Session");
-                });
-
-            modelBuilder.Entity("FortressAI.V2.Web.Data.Models.DesignAgentSession", b =>
-                {
-                    b.HasOne("FortressAI.V2.Web.Data.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("FortressAI.V2.Web.Data.Models.MainAssistant", b =>
                 {
                     b.HasOne("FortressAI.V2.Web.Data.Models.User", "User")
@@ -577,11 +462,6 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("FortressAI.V2.Web.Data.Models.DesignAgentSession", b =>
-                {
-                    b.Navigation("Artifacts");
                 });
 
             modelBuilder.Entity("FortressAI.V2.Web.Data.Models.User", b =>

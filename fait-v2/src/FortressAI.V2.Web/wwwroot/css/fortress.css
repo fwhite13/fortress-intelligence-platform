@@ -118,6 +118,8 @@
   /* Shape (FIP) */
   --radius-xl: 16px;
   --radius-full: 9999px;
+  /* Component sizes */
+  --pill-height-sm: 28px;
   /* Elevation (FIP) */
   --shadow-lg: 0 10px 15px rgba(0,0,0,0.10), 0 4px 6px rgba(0,0,0,0.05);
 

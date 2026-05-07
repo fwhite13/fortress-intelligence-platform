@@ -101,6 +101,23 @@ builder.Services.AddScoped<IUserProvisioningService, UserProvisioningService>();
 // Memory file service
 builder.Services.AddScoped<IMemoryFileService, MemoryFileService>();
 
+// FIP portal DB — read delegated Entra tokens written at login (fip_dev.user_microsoft_tokens)
+var fipPortalDbName = builder.Configuration["FIP_DB_NAME"] ?? "fip_dev";
+var fipPortalCsb = new MySqlConnector.MySqlConnectionStringBuilder
+{
+    Server = keyRingDbHost ?? "localhost",
+    Port = uint.Parse(keyRingDbPort),
+    Database = fipPortalDbName,
+    UserID = keyRingDbUser,
+    Password = keyRingDbPass,
+    ConnectionTimeout = 10,
+    GuidFormat = MySqlConnector.MySqlGuidFormat.None
+};
+builder.Services.AddDbContextFactory<FipPortalDbContext>(options =>
+    options.UseMySql(fipPortalCsb.ConnectionString,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mysql => mysql.EnableRetryOnFailure(3)));
+
 // FORGE KB / fip-mcp integration
 builder.Services.AddHttpClient("FipMcpClient");
 builder.Services.AddScoped<IFipTokenProvider, FipTokenProvider>();
