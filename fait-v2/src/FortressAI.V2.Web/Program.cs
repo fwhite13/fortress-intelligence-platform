@@ -145,6 +145,10 @@ builder.Services.AddScoped<IConnectorService, ConnectorService>();
 // CC execution service (child process orchestration)
 builder.Services.AddScoped<ICCExecutionService, FargateCCExecutionService>();
 
+// Project service (FAIT v1 carry-over)
+builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<ProjectStateService>();
+
 var app = builder.Build();
 
 // Seed mcp_servers with forge-kb entry (idempotent)

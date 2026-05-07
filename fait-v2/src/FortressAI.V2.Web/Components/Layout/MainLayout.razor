@@ -1,10 +1,13 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using FortressAI.V2.Web.Theme
+@using FortressAI.V2.Web.Services
 @using FipShared.Components
 @using FipShared.Models
 @inherits LayoutComponentBase
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject IProjectService ProjectService
+@inject ProjectStateService ProjectState
 @implements IDisposable
 
 <MudThemeProvider Theme="_theme" @bind-IsDarkMode="_isDarkMode" />
@@ -47,6 +50,35 @@
                 </MudNavMenu>
             </div>
 
+            <div class="fait-v2-drawer__projects">
+                <div class="fait-v2-drawer__section-header">
+                    <span class="fait-v2-drawer__section-title">Projects</span>
+                    <MudIconButton Icon="@Icons.Material.Outlined.Add"
+                                   Size="Size.Small"
+                                   Class="fait-v2-drawer__section-add"
+                                   title="New project"
+                                   OnClick="OpenNewProjectDialog" />
+                </div>
+                @if (_projects.Count == 0)
+                {
+                    <div class="fait-v2-drawer__section-empty">No projects yet</div>
+                }
+                else
+                {
+                    @foreach (var project in _projects)
+                    {
+                        var isActive = _selectedProjectId == project.Id;
+                        <div class="fait-v2-drawer__project-item @(isActive ? "fait-v2-drawer__project-item--active" : "")"
+                             @onclick="() => SelectProjectAsync(project)">
+                            <MudIcon Icon="@Icons.Material.Outlined.FolderOpen"
+                                     Size="Size.Small"
+                                     Class="fait-v2-drawer__project-icon" />
+                            <span class="fait-v2-drawer__project-name">@project.Name</span>
+                        </div>
+                    }
+                }
+            </div>
+
             <div class="fait-v2-drawer__footer">
                 <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
                                Color="Color.Inherit"
@@ -71,6 +103,9 @@
     private string _userInitial = "F";
     private string _userName = "User";
     private string _userEmail = "";
+    private string _entraOid = "";
+    private List<ProjectSummary> _projects = new();
+    private string? _selectedProjectId;
 
     private MudTheme _theme = FipTheme.Create();
 
@@ -94,8 +129,30 @@
                          ?? user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
                          ?? _userEmail.Split('@')[0];
                 _userInitial = _userName.Length > 0 ? _userName[0].ToString().ToUpperInvariant() : "F";
+
+                _entraOid = user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                         ?? user.FindFirst("oid")?.Value ?? "";
             }
         }
+
+        if (!string.IsNullOrEmpty(_entraOid))
+        {
+            try { _projects = await ProjectService.GetUserProjectsAsync(_entraOid); }
+            catch { /* non-critical — leave empty */ }
+        }
+    }
+
+    private async Task SelectProjectAsync(ProjectSummary project)
+    {
+        _selectedProjectId = project.Id;
+        var context = await ProjectService.GetProjectContextAsync(project.Id);
+        ProjectState.SetActiveProject(project.Id, context);
+        StateHasChanged();
+    }
+
+    private void OpenNewProjectDialog()
+    {
+        // Future WI: open new project dialog
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
