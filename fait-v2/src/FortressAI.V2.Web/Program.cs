@@ -260,8 +260,37 @@ app.MapHub<CCProgressHub>("/hubs/cc-progress");
 // Health endpoint — public
 app.MapGet("/health", () => "OK").AllowAnonymous();
 
-// Stub: returns Starting until a future WI wires IUserAgentRuntime.GetSessionAsync()
-app.MapGet("/api/agent/status", () => Results.Ok(new { status = "Starting" })).AllowAnonymous();
+// Provision user workspace on first call, report status to AssistantLoadingState poller
+app.MapGet("/api/agent/status", async (
+    HttpContext ctx,
+    IUserProvisioningService provisioning,
+    ILogger<Program> log,
+    CancellationToken ct) =>
+{
+    var entraOid = ctx.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                ?? ctx.User.FindFirst("oid")?.Value;
+    if (string.IsNullOrEmpty(entraOid))
+        return Results.Ok(new { status = "Error", message = "Not authenticated" });
+
+    var email = ctx.User.FindFirst("email")?.Value
+             ?? ctx.User.FindFirst("preferred_username")?.Value
+             ?? ctx.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value
+             ?? "";
+    var displayName = ctx.User.FindFirst("name")?.Value
+                   ?? ctx.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name")?.Value
+                   ?? email;
+
+    try
+    {
+        await provisioning.ProvisionAsync(entraOid, entraOid, email, displayName, null, ct);
+        return Results.Ok(new { status = "Running" });
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Provisioning failed for user {EntraOid}", entraOid);
+        return Results.Ok(new { status = "Error", message = "Initialization failed. Please refresh." });
+    }
+}).RequireAuthorization();
 
 // Push a message from an external FIP app (e.g. FIRM) into the user's FAIT v2 inbox
 app.MapPost("/api/agent/push-message", async (

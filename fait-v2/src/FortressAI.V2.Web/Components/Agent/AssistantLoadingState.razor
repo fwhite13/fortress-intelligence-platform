@@ -74,6 +74,14 @@
                             await OnReady.InvokeAsync();
                             return;
                         }
+                        if (content.Contains("\"status\":\"Error\"") || content.Contains("\"status\":\"error\""))
+                        {
+                            _pollTimer?.Dispose();
+                            _timedOut = true;
+                            _statusMessage = "Initialization failed. Please refresh the page.";
+                            StateHasChanged();
+                            return;
+                        }
                     }
                 }
                 catch { /* keep polling */ }
@@ -118,6 +126,14 @@
                         {
                             _pollTimer?.Dispose();
                             await OnReady.InvokeAsync();
+                            return;
+                        }
+                        if (content.Contains("\"status\":\"Error\"") || content.Contains("\"status\":\"error\""))
+                        {
+                            _pollTimer?.Dispose();
+                            _timedOut = true;
+                            _statusMessage = "Initialization failed. Please refresh the page.";
+                            StateHasChanged();
                             return;
                         }
                     }
