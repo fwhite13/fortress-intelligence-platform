@@ -148,6 +148,9 @@ builder.Services.AddScoped<IDesignAgentService, DesignAgentService>();
 // Connector management
 builder.Services.AddScoped<IConnectorService, ConnectorService>();
 
+// Context envelope service (system CLAUDE.md + per-user envelope assembly)
+builder.Services.AddScoped<IContextEnvelopeService, ContextEnvelopeService>();
+
 // CC execution service (child process orchestration)
 builder.Services.AddScoped<ICCExecutionService, FargateCCExecutionService>();
 

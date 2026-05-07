@@ -9,15 +9,18 @@ public class FargateCCExecutionService : ICCExecutionService
     private readonly IAmazonS3 _s3Client;
     private readonly IConfiguration _config;
     private readonly ILogger<FargateCCExecutionService> _logger;
+    private readonly IContextEnvelopeService _contextEnvelopeService;
 
     public FargateCCExecutionService(
         IAmazonS3 s3Client,
         IConfiguration config,
-        ILogger<FargateCCExecutionService> logger)
+        ILogger<FargateCCExecutionService> logger,
+        IContextEnvelopeService contextEnvelopeService)
     {
         _s3Client = s3Client;
         _config = config;
         _logger = logger;
+        _contextEnvelopeService = contextEnvelopeService;
     }
 
     public async Task<CCExecutionResult> DispatchTaskAsync(
@@ -31,7 +34,8 @@ public class FargateCCExecutionService : ICCExecutionService
         var startTime = DateTime.UtcNow;
         var model = _config["CC:Model"] ?? "sonnet";
 
-        var prompt = BuildPrompt(contextEnvelope, task);
+        var systemClaudeMd = _contextEnvelopeService.GetSystemClaudeMd();
+        var prompt = BuildPrompt(contextEnvelope, task, systemClaudeMd);
 
         var psi = new ProcessStartInfo
         {
@@ -133,26 +137,41 @@ public class FargateCCExecutionService : ICCExecutionService
         };
     }
 
-    private string BuildPrompt(CCContextEnvelope envelope, string task)
+    private string BuildPrompt(CCContextEnvelope envelope, string task, string systemClaudeMd)
     {
+        var kb = envelope.KbIds.Any()
+            ? string.Join("\n", envelope.KbIds.Select(id => $"- {id}"))
+            : "None assigned";
+        var mcp = envelope.EnabledMcpServers.Any()
+            ? string.Join("\n", envelope.EnabledMcpServers.Select(s => $"- {s}"))
+            : "None enabled";
+        var memory = envelope.MemorySummary != null
+            ? $"## Memory Context\n{envelope.MemorySummary}\n\n"
+            : "";
+
         return $"""
-            # User Context
-            User ID: {envelope.UserId}
-            User Name: {envelope.UserDisplayName}
+{systemClaudeMd}
 
-            # Available Knowledge Bases
-            {string.Join(", ", envelope.KbIds)}
+---
 
-            # Enabled MCP Servers
-            {string.Join(", ", envelope.EnabledMcpServers)}
+# Per-User Context
 
-            {(envelope.MemorySummary != null ? $"# Memory Context\n{envelope.MemorySummary}\n" : "")}
-            # Task Instructions
-            {envelope.TaskInstructions}
+## Identity
+User ID: {envelope.UserId}
+User Name: {envelope.UserDisplayName}
 
-            # Task
-            {task}
-            """;
+## Available Knowledge Bases
+{kb}
+
+## Enabled MCP Servers
+{mcp}
+
+{memory}## Task Instructions
+{envelope.TaskInstructions}
+
+## Task
+{task}
+""";
     }
 
     private string GetUserWorkDir(string userId)
