@@ -89,3 +89,29 @@ curl -X POST http://localhost:3000/turn \
 ```
 
 > Note: CC credentials (`ANTHROPIC_API_KEY` or AWS Bedrock IAM role) must be available in the container for `/turn` to succeed.
+
+---
+
+## Build Cycle 2 — ADO#2846
+
+**Commit:** `4723cba`
+**Date:** 2026-05-06
+**Cycle:** 2 (addressing Hawkeye review cycle 1 findings)
+
+### Fixes Applied
+
+| Fix | Severity | File | Change |
+|-----|----------|------|--------|
+| C1 | Critical | `Dockerfile` | Merged `unzip` into first `apt-get` RUN layer; removed broken `apt-get install -y unzip` from AWS CLI RUN (package lists already purged) |
+| C2 | Critical | `harness-server.js` | Added `userId` path traversal validation — rejects `..`, `/`, `\`, non-alphanumeric; regex `/^[a-zA-Z0-9_-]{1,64}$/` |
+| I3 | High | `harness-server.js` | Added `ended` flag + `endResponse()` helper to prevent double `res.end()` across `close`, `error`, and outer `catch` |
+| I4 | High | `harness-server.js` | Added 5-minute SIGTERM timeout on CC process (`CC_TIMEOUT_MS` env override); `clearTimeout` on normal close/error |
+| I5 | Medium | `harness-server.js` | Added `mkdirSync(userWorkspaceDir, { recursive: true })` guard before CC spawn |
+
+### dotnet build
+
+`Build succeeded. 0 Warning(s) 0 Error(s)` — no C# changes, sanity check only.
+
+### CC sessions run
+
+1 — `cat brief-c2-2846.md | claude --model sonnet --print --dangerously-skip-permissions`
