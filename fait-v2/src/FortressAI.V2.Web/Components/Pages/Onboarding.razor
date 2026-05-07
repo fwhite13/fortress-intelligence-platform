@@ -232,6 +232,14 @@
                     ?? _email.Split('@')[0];
 
         _preferredName = _displayName.Split(' ').FirstOrDefault() ?? _displayName;
+
+        if (string.IsNullOrEmpty(_entraOid))
+        {
+            _errorMessage = "Unable to determine your identity. Please sign out and sign in again.";
+            _provisionError = true;
+            StateHasChanged();
+            return;
+        }
     }
 
     private void ToggleUseCase(string useCase, bool selected)
@@ -258,14 +266,15 @@
 
         try
         {
-            var enrichedDisplayName = BuildEnrichedDisplayName();
+            var wizardData = BuildWizardData();
             var userId = await GetOrCreateUserId();
 
             await ProvisioningService.ProvisionAsync(
                 userId: userId,
                 entraOid: _entraOid,
                 email: _email,
-                displayName: enrichedDisplayName
+                displayName: _displayName,
+                wizardData: wizardData
             );
 
             _isProvisioning = false;
@@ -291,11 +300,17 @@
         return Guid.NewGuid().ToString();
     }
 
-    private string BuildEnrichedDisplayName()
-    {
-        var name = string.IsNullOrWhiteSpace(_preferredName) ? _displayName : _preferredName;
-        return name;
-    }
+    private WizardData BuildWizardData() => new WizardData(
+        Role: _role,
+        Responsibilities: _responsibilities,
+        CommunicationStyle: _communicationStyle,
+        ResponseFormat: _responseFormat,
+        ShowCitations: _showCitations,
+        UseCases: _selectedUseCases.ToList(),
+        PreferredName: string.IsNullOrWhiteSpace(_preferredName) ? _displayName.Split(' ').FirstOrDefault() ?? _displayName : _preferredName,
+        AssistantName: _assistantName,
+        AccentColor: _accentColor
+    );
 
     private async Task RetryProvisioning()
     {

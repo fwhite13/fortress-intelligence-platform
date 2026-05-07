@@ -85,10 +85,13 @@ public class UserProvisioningService : IUserProvisioningService
         string entraOid,
         string email,
         string displayName,
+        WizardData? wizardData = null,
         CancellationToken ct = default)
     {
         if (!Guid.TryParse(userId, out _))
             throw new ArgumentException($"userId must be a valid GUID, got: {userId}", nameof(userId));
+        if (string.IsNullOrWhiteSpace(entraOid))
+            throw new ArgumentException("entraOid cannot be empty", nameof(entraOid));
 
         // Step 1 — Idempotency check
         var existing = await _db.Users
@@ -152,7 +155,7 @@ public class UserProvisioningService : IUserProvisioningService
 
             var files = new Dictionary<string, string>
             {
-                [$"{s3Prefix}assistants/SOUL.md"]   = SoulMdTemplate.Replace("{DisplayName}", displayName),
+                [$"{s3Prefix}assistants/SOUL.md"]   = BuildSoulMdContent(displayName, wizardData),
                 [$"{s3Prefix}assistants/USER.md"]   = UserMdTemplate
                     .Replace("{DisplayName}", displayName)
                     .Replace("{Email}", email),
@@ -340,5 +343,59 @@ public class UserProvisioningService : IUserProvisioningService
         await conn.OpenAsync(ct);
         await using var cmd = new NpgsqlCommand($"""DROP SCHEMA IF EXISTS "{schemaName}" CASCADE;""", conn);
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // ── SOUL.md builder ───────────────────────────────────────────────────
+
+    private static string BuildSoulMdContent(string displayName, WizardData? wizardData)
+    {
+        var sb = new System.Text.StringBuilder();
+        var name = !string.IsNullOrWhiteSpace(wizardData?.PreferredName)
+            ? wizardData.PreferredName
+            : displayName;
+
+        sb.AppendLine($"# SOUL.md — {name}'s Assistant");
+        sb.AppendLine();
+        sb.AppendLine("## Identity");
+        sb.AppendLine("I am your personal AI assistant on the Fortress Intelligence Platform.");
+
+        if (wizardData != null)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## User Context");
+            if (!string.IsNullOrEmpty(wizardData.Role))
+                sb.AppendLine($"- **Role:** {wizardData.Role}");
+            if (!string.IsNullOrEmpty(wizardData.Responsibilities))
+                sb.AppendLine($"- **Responsibilities:** {wizardData.Responsibilities}");
+            if (wizardData.UseCases.Count > 0)
+                sb.AppendLine($"- **Primary use cases:** {string.Join(", ", wizardData.UseCases)}");
+            if (!string.IsNullOrEmpty(wizardData.AssistantName))
+                sb.AppendLine($"- **Assistant name:** {wizardData.AssistantName}");
+
+            sb.AppendLine();
+            sb.AppendLine("## Communication Style");
+            sb.AppendLine($"- Style: {wizardData.CommunicationStyle}");
+            sb.AppendLine($"- Format: {wizardData.ResponseFormat}");
+            sb.AppendLine($"- Citations: {(wizardData.ShowCitations ? "Show sources" : "Omit sources")}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("## Purpose");
+        sb.AppendLine("I help you work smarter — drafting, researching, analyzing, and executing complex tasks.");
+
+        if (wizardData != null)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Personality");
+            sb.AppendLine("Precise, proactive, and honest. I surface what matters and flag what's uncertain.");
+        }
+        else
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Personality");
+            sb.AppendLine("Precise, proactive, and honest. I surface what matters and flag what's uncertain.");
+        }
+
+        return sb.ToString();
     }
 }
