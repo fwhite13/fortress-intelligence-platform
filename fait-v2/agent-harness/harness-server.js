@@ -1,6 +1,8 @@
 const express = require('express');
 const { spawn } = require('child_process');
 const { mkdirSync } = require('fs');
+const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
+const { existsSync, writeFileSync } = require('fs');
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
@@ -10,6 +12,113 @@ const WORKSPACE_DIR = process.env.WORKSPACE_DIR || '/workspace';
 // Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
+// ─── GCP credential bootstrap ─────────────────────────────────────────────
+async function bootstrapGcpCredentials() {
+    const secretName = process.env.GCP_STITCH_SECRET_NAME || 'fait-v2/gcp-stitch-service-account';
+    try {
+        const client = new SecretsManagerClient({ region: process.env.AWS_REGION || 'us-east-1' });
+        const response = await client.send(new GetSecretValueCommand({ SecretId: secretName }));
+        const credPath = '/tmp/gcp-service-account.json';
+        writeFileSync(credPath, response.SecretString, { mode: 0o600 });
+        process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
+        console.log('[harness] GCP credentials bootstrapped from Secrets Manager');
+    } catch (err) {
+        console.warn('[harness] GCP credentials not available — Stitch will be unavailable:', err.message);
+    }
+}
+
+// ─── Stitch MCP tool routing ───────────────────────────────────────────────
+const STITCH_TOOLS = new Set([
+    'generate_screen_from_text',
+    'extract_design_context',
+    'fetch_screen_code',
+    'fetch_screen_image',
+    'list_projects',
+    'list_screens',
+    'refine_screen'
+]);
+
+function invokeStitchTool(toolName, args) {
+    return new Promise((resolve, reject) => {
+        const proc = spawn('stitch-mcp', [], {
+            env: { ...process.env },
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
+
+        // Send MCP initialize then tools/call via JSON-RPC over stdio
+        const initMsg = JSON.stringify({
+            jsonrpc: '2.0', id: 1,
+            method: 'initialize',
+            params: {
+                protocolVersion: '2024-11-05',
+                capabilities: {},
+                clientInfo: { name: 'fait-v2-harness', version: '1.0' }
+            }
+        }) + '\n';
+
+        const callMsg = JSON.stringify({
+            jsonrpc: '2.0', id: 2,
+            method: 'tools/call',
+            params: { name: toolName, arguments: args || {} }
+        }) + '\n';
+
+        let stdout = '';
+        let stderr = '';
+
+        proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+        proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+        proc.on('close', (code) => {
+            // Parse all JSON-RPC messages from stdout, find id=2 response
+            const lines = stdout.split('\n').filter(l => l.trim());
+            for (const line of lines) {
+                try {
+                    const msg = JSON.parse(line);
+                    if (msg.id === 2) {
+                        if (msg.error) {
+                            return reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+                        }
+                        return resolve(msg.result);
+                    }
+                } catch (_) { /* skip non-JSON lines */ }
+            }
+            reject(new Error(`stitch-mcp exited ${code} with no result. stderr: ${stderr.slice(0, 200)}`));
+        });
+
+        proc.on('error', (err) => reject(err));
+
+        // Write both messages then close stdin
+        proc.stdin.write(initMsg);
+        proc.stdin.write(callMsg);
+        proc.stdin.end();
+    });
+}
+
+// Stitch MCP health check
+app.get('/tools/stitch/health', (req, res) => {
+    const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    const available = !!(credPath && existsSync(credPath));
+    res.json({ available, reason: available ? 'ok' : 'GCP credentials not configured' });
+});
+
+// Tool dispatch — Stitch MCP tools
+app.post('/tools/:toolName', async (req, res) => {
+    const { toolName } = req.params;
+    const args = req.body || {};
+
+    if (!STITCH_TOOLS.has(toolName)) {
+        return res.status(404).json({ error: `Unknown tool: ${toolName}` });
+    }
+
+    try {
+        const result = await invokeStitchTool(toolName, args);
+        res.json({ result });
+    } catch (err) {
+        console.error(`[harness] Tool ${toolName} error:`, err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Dispatch a turn to CC CLI
@@ -115,6 +224,10 @@ app.get('/session', (req, res) => {
     });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`FAIT v2 agent harness listening on port ${PORT}`);
-});
+// Bootstrap GCP credentials then start server
+(async () => {
+    await bootstrapGcpCredentials();
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`FAIT v2 agent harness listening on port ${PORT}`);
+    });
+})();

@@ -19,6 +19,7 @@ public class DesignAgentService : IDesignAgentService
     private readonly IConfiguration _config;
     private readonly ILogger<DesignAgentService> _logger;
     private readonly IDbContextFactory<FaitV2DbContext> _dbFactory;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     private string Bucket => _config["AWS:WorkspaceBucket"]
         ?? throw new InvalidOperationException("AWS:WorkspaceBucket is not configured.");
@@ -28,13 +29,15 @@ public class DesignAgentService : IDesignAgentService
         IAmazonS3 s3,
         IConfiguration config,
         ILogger<DesignAgentService> logger,
-        IDbContextFactory<FaitV2DbContext> dbFactory)
+        IDbContextFactory<FaitV2DbContext> dbFactory,
+        IHttpClientFactory httpClientFactory)
     {
         _runtime = runtime;
         _s3 = s3;
         _config = config;
         _logger = logger;
         _dbFactory = dbFactory;
+        _httpClientFactory = httpClientFactory;
     }
 
     // ─── GenerateScreenAsync ──────────────────────────────────────────────────
@@ -62,7 +65,7 @@ public class DesignAgentService : IDesignAgentService
             await db.SaveChangesAsync(ct);
         }
 
-        if (!await IsStitchAvailableAsync(ct))
+        if (!await IsStitchAvailableAsync(userId, ct))
         {
             _logger.LogInformation("Stitch unavailable for user {UserId} — using CC-native HTML fallback", userId);
             var fallbackHtml = await GenerateFallbackHtmlAsync(userId, prompt, ct);
@@ -103,7 +106,7 @@ public class DesignAgentService : IDesignAgentService
         string screenHtmlOrImageBase64,
         CancellationToken ct = default)
     {
-        if (!await IsStitchAvailableAsync(ct))
+        if (!await IsStitchAvailableAsync(userId, ct))
         {
             _logger.LogDebug("Stitch unavailable — returning empty design DNA for user {UserId}", userId);
             return string.Empty;
@@ -134,7 +137,7 @@ public class DesignAgentService : IDesignAgentService
         string refinementPrompt,
         CancellationToken ct = default)
     {
-        if (!await IsStitchAvailableAsync(ct))
+        if (!await IsStitchAvailableAsync(userId, ct))
         {
             _logger.LogInformation("Stitch unavailable — using CC-native HTML fallback for refinement, user {UserId}", userId);
             var fallbackHtml = await GenerateFallbackHtmlAsync(userId, refinementPrompt, ct);
@@ -208,10 +211,28 @@ public class DesignAgentService : IDesignAgentService
 
     // ─── IsStitchAvailableAsync ───────────────────────────────────────────────
 
-    public Task<bool> IsStitchAvailableAsync(CancellationToken ct = default)
+    public async Task<bool> IsStitchAvailableAsync(string userId, CancellationToken ct = default)
     {
-        var configured = _config["Stitch:GcpCredentialsConfigured"];
-        return Task.FromResult(string.Equals(configured, "true", StringComparison.OrdinalIgnoreCase));
+        try
+        {
+            var session = await _runtime.GetSessionAsync(userId, ct);
+            if (session == null || session.Status != RuntimeSessionStatus.Running || string.IsNullOrEmpty(session.PrivateIp))
+                return false;
+
+            var client = _httpClientFactory.CreateClient("HarnessClient");
+            client.Timeout = TimeSpan.FromSeconds(5);
+            var resp = await client.GetAsync($"http://{session.PrivateIp}:{session.Port}/tools/stitch/health", ct);
+            if (!resp.IsSuccessStatusCode) return false;
+
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty("available", out var avail) && avail.GetBoolean();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Stitch health check failed for user {UserId} — treating as unavailable", userId);
+            return false;
+        }
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────

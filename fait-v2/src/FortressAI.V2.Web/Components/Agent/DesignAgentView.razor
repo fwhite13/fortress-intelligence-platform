@@ -449,7 +449,7 @@
         _userId = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
                ?? auth.User.FindFirst("oid")?.Value ?? "";
 
-        _stitchUnavailableNotice = !await DesignAgent.IsStitchAvailableAsync();
+        _stitchUnavailableNotice = !await DesignAgent.IsStitchAvailableAsync(_userId);
     }
 
     private async Task SendPrompt()

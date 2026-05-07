@@ -15,7 +15,7 @@ public interface IDesignAgentService
     Task<string> SaveArtifactAsync(string userId, string sessionId, string html, string artifactName, string? stitchScreenId = null, bool isFallback = false, CancellationToken ct = default);
 
     /// <summary>Is Stitch available? Returns false if GCP credentials not configured.</summary>
-    Task<bool> IsStitchAvailableAsync(CancellationToken ct = default);
+    Task<bool> IsStitchAvailableAsync(string userId, CancellationToken ct = default);
 }
 
 public record DesignAgentResult(
