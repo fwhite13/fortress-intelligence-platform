@@ -70,7 +70,9 @@ export async function validateToken(authHeader) {
  */
 export async function authMiddleware(req, res, next) {
   try {
-    req.user = await validateToken(req.headers['authorization']);
+    const authHeader = req.headers['authorization'];
+    req.user = await validateToken(authHeader);
+    req.user.rawToken = authHeader ? authHeader.slice(7) : null;
     next();
   } catch (err) {
     res.status(401).json({ error: 'Unauthorized', message: err.message });

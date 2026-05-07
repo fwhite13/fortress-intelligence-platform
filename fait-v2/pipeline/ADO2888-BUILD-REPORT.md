@@ -67,6 +67,28 @@ No — single CC session (all changes interdependent: service before page, page 
 
 ---
 
+## Cycle 2 — Review Fixes
+
+**Commit:** `1984873`
+**Branch:** `main`
+**Build:** SUCCEEDED (0 errors, 0 warnings)
+**Date:** 2026-05-07
+
+### Fixes applied
+
+| Fix | File | Change |
+|-----|------|--------|
+| C1 | `Program.cs` | forge-kb seed: `AuthType = "oauth_entra"` → `"none"`. Update branch now also corrects `AuthType` (+ combined `changed` flag for atomic save) |
+| C2 | `Connectors.razor` | `LoadConnectors()` early-exits with `_error` set when `_entraOid` is null — no more silent empty page |
+| C3 | `Connectors.razor` | `HandleRevoke()` shows snackbar error when `_entraOid` is null instead of silent no-op |
+| I1 | `Connectors.razor` + `ConnectorOAuthModal.razor` | Inline modal replaced with `IDialogService.ShowAsync<ConnectorOAuthModal>`. Modal converted to proper MudDialog with `[CascadingParameter] MudDialogInstance` (v7 concrete type) and `Close()` → `MudDialog.Close()` |
+| I2 | `ConnectorService.cs` | Added `MapAuthType(string?)` helper. `ListConnectorsAsync` now reads `server.AuthType` from DB instead of hardcoded fallback for unknown connectors |
+
+### Build note
+First build attempt failed due to stale MSBuild cache returning old error on `IMudDialogInstance` (v8+ interface). `--no-incremental` cleared the cache and build succeeded clean. CC correctly wrote `MudDialogInstance` (v7 concrete class) from the start.
+
+---
+
 ## How to test locally
 
 1. Seed `mcp_servers` table with `ms365`, `ado`, `search` entries (currently only `forge-kb` is auto-seeded in Program.cs)
