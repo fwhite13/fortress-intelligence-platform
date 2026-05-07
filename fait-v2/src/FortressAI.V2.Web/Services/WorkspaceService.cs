@@ -32,7 +32,7 @@ public class WorkspaceService : IWorkspaceService
             {
                 Name = folder,
                 Prefix = prefix,
-                FileCount = response.S3Objects.Count,
+                FileCount = response.S3Objects.Count(o => o.Key != prefix),
             });
         }
         return result;

@@ -17,6 +17,7 @@ public class FaitV2DbContext : DbContext
     public DbSet<DesignAgentSession> DesignAgentSessions => Set<DesignAgentSession>();
     public DbSet<DesignAgentArtifact> DesignAgentArtifacts => Set<DesignAgentArtifact>();
     public DbSet<PushedMessage> PushedMessages => Set<PushedMessage>();
+    public DbSet<FeedbackSubmission> FeedbackSubmissions => Set<FeedbackSubmission>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -239,6 +240,27 @@ public class FaitV2DbContext : DbContext
                   .WithMany()
                   .HasForeignKey(e => e.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // feedback_submissions
+        modelBuilder.Entity<FeedbackSubmission>(entity =>
+        {
+            entity.ToTable("feedback_submissions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Type).HasColumnName("type").HasMaxLength(20).IsRequired();
+            entity.Property(e => e.Description).HasColumnName("description").HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.PageUrl).HasColumnName("page_url").HasMaxLength(500);
+            entity.Property(e => e.ScreenshotS3Key).HasColumnName("screenshot_s3_key").HasMaxLength(500);
+            entity.Property(e => e.Status).HasColumnName("status").HasMaxLength(20).IsRequired().HasDefaultValue("pending");
+            entity.Property(e => e.AdoWiId).HasColumnName("ado_wi_id").HasMaxLength(20);
+            entity.Property(e => e.TriageResult).HasColumnName("triage_result").HasColumnType("TEXT");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.TriagedAt).HasColumnName("triaged_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_feedback_submissions_user_id");
+            entity.HasIndex(e => e.Status).HasDatabaseName("ix_feedback_submissions_status");
         });
     }
 }
