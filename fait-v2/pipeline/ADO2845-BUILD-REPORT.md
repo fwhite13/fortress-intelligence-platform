@@ -83,3 +83,65 @@ Comment ID 781687, posted 2026-05-07T01:36:46Z
 ---
 
 _Cycle 2 complete. Sending to Clint for re-review._
+
+---
+
+## Cycle 3 — BUILD REPORT
+
+**Agent:** Tony Stark (software-engineer)
+**Commit:** `ca856e5`
+**Build result:** SUCCEEDED — 0 errors, 0 warnings
+
+### What was built
+
+Five targeted fixes from Clint's cycle 2 review. I1 blocked PASS; I2/I3/N1/N2 were tracked issues.
+
+**I1 — AdditionalContext wired end-to-end (blocks PASS)**
+- Added `string? AdditionalContext` to `WizardData` record in `IUserProvisioningService.cs` (before `AccentColor`)
+- Added `AdditionalContext: _additionalContext,` to `BuildWizardData()` in `Onboarding.razor`
+- Added emission of `AdditionalContext` in `BuildSoulMdContent()` under User Context section
+
+**I2 — Dead if/else in Personality section simplified**
+- Both branches of `if (wizardData != null)` / `else` in `BuildSoulMdContent()` emitted identical content — collapsed to single unconditional block.
+
+**I3 — Null guard on UseCases**
+- `wizardData.UseCases.Count > 0` → `wizardData.UseCases?.Count > 0` in `BuildSoulMdContent()`
+
+**N1 — IsNullOrWhiteSpace consistency on entraOid**
+- `string.IsNullOrEmpty(_entraOid)` → `string.IsNullOrWhiteSpace(_entraOid)` in `Onboarding.razor` `OnInitializedAsync`
+
+**N2 — AccentColor comment**
+- Added `// UI-only — not persisted at provisioning time` inline comment on `AccentColor` in `WizardData` record (handled as part of I1 edit)
+
+### Files changed
+
+- `src/FortressAI.V2.Web/Services/IUserProvisioningService.cs` — Added `AdditionalContext` to `WizardData`; added comment on `AccentColor`
+- `src/FortressAI.V2.Web/Services/UserProvisioningService.cs` — Emit `AdditionalContext` in `BuildSoulMdContent`; collapsed dead Personality if/else; added null guard on `UseCases`
+- `src/FortressAI.V2.Web/Components/Pages/Onboarding.razor` — Added `AdditionalContext: _additionalContext` to `BuildWizardData()`; `IsNullOrEmpty` → `IsNullOrWhiteSpace` on entraOid guard
+
+### Parallelization used
+
+No — sequential edits with inter-file dependencies (interface → service → razor).
+
+### CC sessions run
+
+1 CC run (Sonnet). Brief piped via `cat pipeline/brief-c3.md | claude --model sonnet --print --dangerously-skip-permissions`.
+
+### Acceptance criteria verification
+
+- [x] `WizardData.AdditionalContext` field exists in interface file — confirmed
+- [x] `BuildWizardData()` sets `AdditionalContext: _additionalContext` — confirmed
+- [x] `BuildSoulMdContent()` emits AdditionalContext when non-whitespace — confirmed
+- [x] Dead Personality if/else collapsed — confirmed
+- [x] `UseCases?.Count` null guard — confirmed
+- [x] `IsNullOrWhiteSpace` used consistently for entraOid — confirmed
+- [x] AccentColor comment present — confirmed
+- [x] `dotnet build` — 0 errors, 0 warnings — confirmed
+
+### ADO comment posted
+
+Comment ID 781691, posted 2026-05-07T01:45:07Z
+
+---
+
+_Cycle 3 complete. Sending to Clint for re-review._
