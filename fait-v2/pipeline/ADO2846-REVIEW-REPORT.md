@@ -166,3 +166,71 @@ fs.mkdirSync(userWorkspaceDir, { recursive: true });
 ---
 
 _Hawkeye — review cycle 1 complete. 2 critical, 2 high, 1 medium. NEEDS-CHANGES. Fix and resubmit for cycle 2._
+
+---
+
+# Review Report — ADO#2846 — Cycle 2 (Final)
+
+**Commit:** `4723cba`
+**Review Cycle:** 2 of 2
+**Reviewer:** Hawkeye (Clint Barton)
+**CC Model:** sonnet
+
+---
+
+### Verdict: PASS
+
+---
+
+## CC Review Summary
+
+CC ran adversarial verification of all 5 cycle-1 fixes plus regression sweep. 5/5 fixes confirmed correct and complete. 8/8 regression items PASS. No new issues found.
+
+**CC command:** `cat review-c2-2846-brief.md | claude --model sonnet --print --dangerously-skip-permissions`
+
+---
+
+## Fix Verification — All 5 Resolved
+
+| Fix | Status | Notes |
+|-----|--------|-------|
+| **C1** — `unzip` in first RUN layer | ✅ RESOLVED | `unzip` added to first apt-get block; AWS CLI RUN has zero apt-get calls |
+| **C2** — `userId` regex validation | ✅ RESOLVED | `^[a-zA-Z0-9_-]{1,64}$` enforced; returns 400; applied before path construction |
+| **I3** — `ended` flag + `endResponse()` helper | ✅ RESOLVED | All 3 exit paths (close, error, catch) use `endResponse()`; no bare `res.end()`; double-end impossible |
+| **I4** — 5-min SIGTERM timeout | ✅ RESOLVED | `setTimeout(300000)` with `parseInt`; `clearTimeout` in both `close` and `error` handlers; no timer leak |
+| **I5** — `mkdirSync` before spawn | ✅ RESOLVED | `mkdirSync(userWorkspaceDir, { recursive: true })` with try/catch; ordered after validation |
+
+---
+
+## Regression Check
+
+| Item | Status |
+|------|--------|
+| HEALTHCHECK in Dockerfile | ✅ |
+| Layer ordering (harness-server.js last) | ✅ |
+| `CLAUDE_CODE_ENTRYPOINT = 'fargate-harness'` in spawn env | ✅ |
+| `CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1'` in spawn env | ✅ |
+| stdin write + end ordering | ✅ |
+| SSE headers set before streaming; 400s fire before headers committed | ✅ |
+| `/health` and `/session` endpoints | ✅ |
+
+---
+
+## Security Path Trace — C2 Verification
+
+`{"userId":"../../etc","message":"x"}`:
+1. Not falsy → passes existence check
+2. `typeof "../../etc" !== 'string'` → false
+3. `"../../etc".includes('..')` → **TRUE** → 400 returned
+
+Path traversal fully blocked. ✅
+
+---
+
+## New Issues Found
+
+None.
+
+---
+
+_Hawkeye — review cycle 2 complete. All cycle-1 findings resolved. No regressions. PASS — ships._

@@ -112,6 +112,10 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.EndedAt).HasColumnName("ended_at").HasColumnType("datetime(6)");
             entity.Property(e => e.IpAddress).HasColumnName("ip_address").HasMaxLength(50);
             entity.Property(e => e.UserAgent).HasColumnName("user_agent").HasMaxLength(500);
+            entity.Property(e => e.TaskArn).HasColumnName("task_arn").HasMaxLength(500);
+            entity.Property(e => e.PrivateIp).HasColumnName("private_ip").HasMaxLength(45);
+            entity.Property(e => e.FargateStatus).HasColumnName("fargate_status").HasMaxLength(20);
+            entity.Property(e => e.FargateSessionId).HasColumnName("fargate_session_id").HasMaxLength(200);
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
 

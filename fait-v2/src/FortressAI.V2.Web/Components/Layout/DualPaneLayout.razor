@@ -1,6 +1,5 @@
 @* Dual-pane layout: chat (left) + artifact preview (right) *@
 @* Right pane collapses at < 1024px or when explicitly closed *@
-@using MudBlazor
 
 <div class="dual-pane-container @(IsPanelOpen ? "panel-open" : "panel-closed")"
      style="--chat-pane-width: @(_chatPaneWidthPct)%">
@@ -25,7 +24,7 @@
         <div class="dual-pane-preview-header">
             <span class="dual-pane-preview-title">@PreviewTitle</span>
             <button class="dual-pane-close-btn" @onclick="ClosePanel" title="Close preview">
-                <MudIcon Icon="@Icons.Material.Filled.Close" Style="width: 16px; height: 16px;" />
+                <MudIcon Icon="@Icons.Material.Filled.Close" />
             </button>
         </div>
         <div class="dual-pane-preview-content">

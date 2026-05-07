@@ -434,6 +434,11 @@
     color: var(--color-text-primary);
 }
 
+.dual-pane-close-btn svg {
+    width: var(--icon-sm, 16px);
+    height: var(--icon-sm, 16px);
+}
+
 .dual-pane-preview-content {
     flex: 1;
     overflow: auto;

@@ -33,6 +33,23 @@ public class UserSession
     [MaxLength(500)]
     public string? UserAgent { get; set; }
 
+    // Fargate runtime fields
+    [Column("task_arn")]
+    [MaxLength(500)]
+    public string? TaskArn { get; set; }
+
+    [Column("private_ip")]
+    [MaxLength(45)]
+    public string? PrivateIp { get; set; }
+
+    [Column("fargate_status")]
+    [MaxLength(20)]
+    public string? FargateStatus { get; set; }
+
+    [Column("fargate_session_id")]
+    [MaxLength(200)]
+    public string? FargateSessionId { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
