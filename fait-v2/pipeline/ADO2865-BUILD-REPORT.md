@@ -159,3 +159,38 @@ Time Elapsed 00:00:02.05
 - `design_agent_sessions` and `design_agent_artifacts` tables were pre-created in the `AddMcpTables` migration (20260507125357) by the Sprint 3 WI#2887 agent. EF model snapshot already reflects both tables. No additional migration was needed.
 - `AgentPluginBadge.razor` and `DesignArtifactCard.razor` were also partially pre-staged by WI#2887 agent (residual CC artifacts, commit `b95d55d`). This WI completed the full implementations.
 - WI#2866 (Stitch MCP harness wiring) remains a dependency for live Stitch integration. Until `Stitch:GcpCredentialsConfigured=true` is set, the service will use CC-native HTML fallback.
+
+---
+
+## Cycle 2 — Review Fixes (2026-05-07)
+
+**Clint's verdict:** NEEDS-CHANGES (3 critical, 1 important)
+**Cycle 2 commit:** `3ca547d`
+**Build:** SUCCEEDED — 0 errors, 0 warnings
+
+### Fixes Applied
+
+| Fix | Issue | Resolution | Status |
+|-----|-------|------------|--------|
+| 1 (CRITICAL) | `downloadBase64` JS missing — runtime crash on download | Created `wwwroot/js/app.js` with `window.downloadBase64`; referenced via `<script src="/js/app.js">` in `App.razor` | ✅ |
+| 2 (CRITICAL) | `DesignAgentService` never wrote to DB | Injected `IDbContextFactory<FaitV2DbContext>`; session persisted in `GenerateScreenAsync` before generation; artifact persisted in `SaveArtifactAsync` after S3 upload; `sessionId` threaded through `DesignAgentResult` | ✅ |
+| 3 (CRITICAL) | `IsStitchAvailableAsync` always returned `true` without HTTP call | Replaced with Option A: config-based check — `_config["Stitch:GcpCredentialsConfigured"] == "true"` | ✅ |
+| 4 (IMPORTANT) | Silent catch in `SendPrompt` swallowed exceptions | Added `Logger.LogError(ex, "SendPrompt failed for userId={UserId}", _userId)` in catch block | ✅ |
+
+### Files Changed in Cycle 2
+
+| File | Change |
+|------|--------|
+| `wwwroot/js/app.js` | Created — `window.downloadBase64` browser download helper |
+| `Components/App.razor` | Added `<script src="/js/app.js"></script>` before `</body>` |
+| `Services/DesignAgentService.cs` | Added `IDbContextFactory` injection; DB persistence in `GenerateScreenAsync` and `SaveArtifactAsync`; `IsStitchAvailableAsync` fixed to config check |
+| `Services/IDesignAgentService.cs` | Updated `SaveArtifactAsync` signature to include `sessionId` parameter |
+| `Components/Agent/DesignAgentView.razor` | Added `Logger.LogError` in `SendPrompt` catch; wires `result.SessionId` to artifact save |
+
+### Cycle 2 Verification
+
+```
+dotnet build → Build succeeded. 0 Warning(s). 0 Error(s).
+```
+
+All four Clint review items addressed. Ready for Clint re-review.
