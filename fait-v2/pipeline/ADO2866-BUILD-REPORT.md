@@ -146,3 +146,50 @@ Three fixes to `agent-harness/harness-server.js` addressing Clint's Cycle 1 revi
 ## Sending To
 
 Clint Barton (code-reviewer) for Cycle 2 review.
+
+---
+
+# Build Report — ADO#2866 — Cycle 3 (Regression Fix)
+
+**Agent:** Tony Stark | **Cycle:** 3
+**Date:** 2026-05-07
+**Commit:** `f8a8c00`
+**Build status:** ✅ SUCCEEDED
+
+---
+
+## What Was Fixed
+
+Single regression fix in `agent-harness/harness-server.js`: added a `toolDone` flag to prevent the Promise from hanging if `stitch-mcp` crashes after the initialize response but before the tool call response.
+
+Previously, the `proc.on('exit', ...)` handler called `clearTimeout(timer)` (killing the timeout watchdog) but only rejected when `!initDone`. A crash in the window between initialize and tool response killed the watchdog AND skipped the reject — leaving the Promise hung indefinitely and leaking the HTTP connection.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `agent-harness/harness-server.js` | Added `toolDone` flag; set before resolve/reject in id===toolCallId branch; exit handler guards both `!initDone` and `else if (!toolDone)` |
+
+---
+
+## CC Sessions
+
+1 CC Sonnet session (synchronous). 0 errors.
+
+---
+
+## Acceptance Criteria Verification
+
+- [x] `let toolDone = false;` declared alongside `let initDone = false;`
+- [x] `toolDone = true;` set before `if (msg.error)` in the `id === toolCallId` branch
+- [x] `proc.on('exit', ...)` handler has `else if (!toolDone)` guard
+- [x] No other changes — only `harness-server.js` modified
+- [x] CC CLI used (mandatory) ✅
+
+---
+
+## Sending To
+
+Clint Barton (code-reviewer) for Cycle 3 review.

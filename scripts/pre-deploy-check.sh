@@ -1,6 +1,9 @@
 #!/bin/bash
 # Pre-deploy checklist — run before triggering ANY CodeBuild
 # Usage: ./scripts/pre-deploy-check.sh
+#
+# For ECS task def registration, use: ./scripts/ecs-register-task-def.sh
+# This ensures taskRoleArn is always inherited from the current running revision.
 
 set -e
 
