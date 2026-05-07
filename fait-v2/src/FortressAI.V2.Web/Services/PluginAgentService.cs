@@ -89,7 +89,7 @@ public class PluginAgentService : IPluginAgentService
         return Task.FromResult($"# {plugin.Name} Agent\n\n{plugin.Description}");
     }
 
-    public List<McpServerPermission> DeserializeMcpServers(string json)
+    private List<McpServerPermission> DeserializeMcpServers(string json)
     {
         try
         {

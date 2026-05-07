@@ -26,6 +26,21 @@ else
         </div>
     }
 
+    @if (_activeRecurringCount > 0 || _nextScheduledRun.HasValue)
+    {
+        <div class="dashboard-tasks-widget">
+            <MudIcon Icon="@Icons.Material.Outlined.Schedule" Class="dashboard-tasks-widget__icon" />
+            <span class="dashboard-tasks-widget__text">
+                <strong>@_activeRecurringCount</strong> active recurring @(_activeRecurringCount == 1 ? "task" : "tasks")
+                @if (_nextScheduledRun.HasValue)
+                {
+                    <span> · Next run: @FormatRelative(_nextScheduledRun)</span>
+                }
+            </span>
+            <MudLink Href="/tasks" Class="dashboard-tasks-widget__link">View tasks</MudLink>
+        </div>
+    }
+
     <DualPaneLayout @bind-IsPanelOpen="_previewOpen"
                     PreviewTitle="@_previewTitle">
         <ChatContent>
@@ -39,6 +54,7 @@ else
 
 @code {
     [Inject] private IForgeKbService ForgeKbService { get; set; } = default!;
+    [Inject] private IScheduledTaskService TaskService { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private bool _previewOpen = true;
@@ -46,6 +62,8 @@ else
     private bool _agentReady = false;
     private IReadOnlyList<KbInfo> _kbs = Array.Empty<KbInfo>();
     private string _entraOid = "";
+    private int _activeRecurringCount = 0;
+    private DateTime? _nextScheduledRun;
 
     protected override async Task OnInitializedAsync()
     {
@@ -54,6 +72,20 @@ else
             var auth = await AuthState;
             _entraOid = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
                      ?? auth.User.FindFirst("oid")?.Value ?? "";
+        }
+
+        if (!string.IsNullOrEmpty(_entraOid))
+        {
+            try
+            {
+                var tasks = await TaskService.GetUserTasksAsync(_entraOid);
+                _activeRecurringCount = tasks.Count(t => t.ScheduleType == "recurring" && t.IsActive);
+                _nextScheduledRun = tasks
+                    .Where(t => t.IsActive && t.NextRunAt.HasValue && t.NextRunAt > DateTime.UtcNow)
+                    .OrderBy(t => t.NextRunAt)
+                    .FirstOrDefault()?.NextRunAt;
+            }
+            catch { /* non-critical */ }
         }
     }
 
@@ -74,5 +106,15 @@ else
         {
             // KB list is non-critical — swallow errors, leave _kbs empty
         }
+    }
+
+    private static string FormatRelative(DateTime? dt)
+    {
+        if (dt is null) return "—";
+        var diff = dt.Value - DateTime.UtcNow;
+        if (diff.TotalMinutes is > 0 and < 60) return $"in {(int)diff.TotalMinutes}m";
+        if (diff.TotalHours is > 0 and < 24) return $"in {(int)diff.TotalHours}h";
+        if (diff.TotalDays > 0) return $"in {(int)diff.TotalDays}d";
+        return dt.Value.ToLocalTime().ToString("MMM d");
     }
 }

@@ -23,7 +23,9 @@ public class ScheduledTaskService : IScheduledTaskService
     }
 
     public async Task<ScheduledTask> CreateTaskAsync(string userId, string name, string prompt,
-        string scheduleType, string? cronExpression, CancellationToken ct = default)
+        string scheduleType, string? cronExpression,
+        bool alertOnCompletion = false, bool alertOnFailure = true,
+        CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var task = new ScheduledTask
@@ -33,6 +35,8 @@ public class ScheduledTaskService : IScheduledTaskService
             Prompt = prompt,
             ScheduleType = scheduleType,
             CronExpression = cronExpression,
+            AlertOnCompletion = alertOnCompletion,
+            AlertOnFailure = alertOnFailure,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -42,7 +46,9 @@ public class ScheduledTaskService : IScheduledTaskService
     }
 
     public async Task<ScheduledTask> UpdateTaskAsync(string taskId, string userId, string name, string prompt,
-        string? cronExpression, bool isActive, CancellationToken ct = default)
+        string? cronExpression, bool isActive,
+        bool alertOnCompletion = false, bool alertOnFailure = true,
+        CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var task = await db.ScheduledTasks
@@ -53,6 +59,8 @@ public class ScheduledTaskService : IScheduledTaskService
         task.Prompt = prompt;
         task.CronExpression = cronExpression;
         task.IsActive = isActive;
+        task.AlertOnCompletion = alertOnCompletion;
+        task.AlertOnFailure = alertOnFailure;
         task.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
@@ -94,6 +102,18 @@ public class ScheduledTaskService : IScheduledTaskService
 
         return await db.ScheduledTaskRuns
             .Where(r => r.TaskId == taskId)
+            .OrderByDescending(r => r.StartedAt)
+            .Take(limit)
+            .ToListAsync(ct);
+    }
+
+    public async Task<List<ScheduledTaskRun>> GetAllRunHistoryAsync(string userId,
+        int limit = 50, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.ScheduledTaskRuns
+            .Where(r => r.Task != null && r.Task.UserId == userId)
+            .Include(r => r.Task)
             .OrderByDescending(r => r.StartedAt)
             .Take(limit)
             .ToListAsync(ct);

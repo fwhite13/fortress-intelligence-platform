@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 
 namespace FortressAI.V2.Web.Services;
@@ -85,8 +86,9 @@ public class ContextEnvelopeService : IContextEnvelopeService
                 if (plugin != null)
                 {
                     // Merge plugin's read-enabled MCP servers into the envelope (union)
-                    var pluginService = (PluginAgentService)_pluginAgentService;
-                    var pluginMcpServers = pluginService.DeserializeMcpServers(plugin.AllowedMcpServers);
+                    var pluginMcpServers = JsonSerializer.Deserialize<List<McpServerPermission>>(
+                        plugin.AllowedMcpServers,
+                        new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? new();
                     var additionalServers = pluginMcpServers
                         .Where(s => s.Read && !enabledMcpServers.Contains(s.ServerId))
                         .Select(s => s.ServerId);
