@@ -1,5 +1,7 @@
 @page "/"
 @attribute [Authorize]
+@using Microsoft.EntityFrameworkCore
+@inject FaitV2DbContext Db
 
 <PageTitle>Dashboard — FAIT v2</PageTitle>
 
@@ -7,11 +9,61 @@
     <MudText Typo="Typo.h5" Class="fait-v2-page__title">Dashboard</MudText>
     <MudText Typo="Typo.body2" Class="fait-v2-page__subtitle">Your AI assistant is ready.</MudText>
 
+    @if (!string.IsNullOrEmpty(_welcomeName))
+    {
+        <MudPaper Class="fait-v2-dashboard__welcome" Elevation="1">
+            <div class="fait-v2-dashboard__welcome-inner">
+                <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Class="fait-v2-dashboard__welcome-icon" />
+                <div class="fait-v2-dashboard__welcome-text">
+                    <MudText Typo="Typo.h6" Class="fait-v2-dashboard__welcome-title">
+                        Welcome, @_welcomeName! Your assistant is ready.
+                    </MudText>
+                    <MudText Typo="Typo.body2" Class="fait-v2-dashboard__welcome-sub">
+                        Your workspace is set up and your AI assistant is waiting for you.
+                    </MudText>
+                </div>
+            </div>
+        </MudPaper>
+    }
+
     <MudPaper Class="fait-v2-chat-placeholder" Elevation="0">
         <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Class="fait-v2-chat-placeholder__inner">
-            <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Class="fait-v2-chat-placeholder__icon" />
-            <MudText Typo="Typo.h6" Class="fait-v2-chat-placeholder__title">Main Assistant Chat</MudText>
-            <MudText Typo="Typo.body2" Class="fait-v2-chat-placeholder__text">Persistent AI assistant — coming in Phase B</MudText>
+            <MudIcon Icon="@Icons.Material.Filled.Chat" Class="fait-v2-chat-placeholder__icon" />
+            <MudText Typo="Typo.h6" Class="fait-v2-chat-placeholder__title">Start chatting</MudText>
+            <MudText Typo="Typo.body2" Class="fait-v2-chat-placeholder__text">
+                Main assistant chat — coming in Phase B
+            </MudText>
         </MudStack>
     </MudPaper>
 </MudContainer>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string _welcomeName = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState == null) return;
+        var auth = await AuthState;
+        var user = auth.User;
+        if (user.Identity?.IsAuthenticated != true) return;
+
+        var oid = user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+               ?? user.FindFirst("oid")?.Value ?? "";
+        if (string.IsNullOrEmpty(oid)) return;
+
+        var dbUser = await Db.Users.FirstOrDefaultAsync(u => u.EntraOid == oid);
+        if (dbUser != null)
+        {
+            _welcomeName = dbUser.DisplayName.Split(' ').FirstOrDefault() ?? dbUser.DisplayName;
+        }
+        else
+        {
+            _welcomeName = user.FindFirst("name")?.Value?.Split(' ').FirstOrDefault()
+                        ?? user.FindFirst("preferred_username")?.Value?.Split('@').FirstOrDefault()
+                        ?? "";
+        }
+    }
+}

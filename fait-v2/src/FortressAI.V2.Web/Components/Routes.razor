@@ -1,3 +1,7 @@
+@using Microsoft.EntityFrameworkCore
+@inject FaitV2DbContext Db
+@inject NavigationManager Nav
+
 <Router AppAssembly="typeof(App).Assembly"
         AdditionalAssemblies="new[] { typeof(FipShared.Components.FipNavBar).Assembly }">
     <Found Context="routeData">
@@ -22,3 +26,34 @@
         </LayoutView>
     </NotFound>
 </Router>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthState { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || AuthState == null) return;
+        var auth = await AuthState;
+        if (!auth.User.Identity?.IsAuthenticated ?? true) return;
+
+        var oid = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+               ?? auth.User.FindFirst("oid")?.Value ?? "";
+        if (string.IsNullOrEmpty(oid)) return;
+
+        var user = await Db.Users.FirstOrDefaultAsync(u => u.EntraOid == oid);
+        var currentUri = Nav.ToBaseRelativePath(Nav.Uri);
+
+        bool isProvisioned = user?.OnboardingCompletedAt != null;
+        bool isOnboardingPath = currentUri.TrimStart('/').Equals("onboarding", StringComparison.OrdinalIgnoreCase);
+
+        if (!isProvisioned && !isOnboardingPath)
+        {
+            Nav.NavigateTo("/onboarding", replace: true);
+        }
+        else if (isProvisioned && isOnboardingPath)
+        {
+            Nav.NavigateTo("/", replace: true);
+        }
+    }
+}
