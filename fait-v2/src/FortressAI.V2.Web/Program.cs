@@ -136,6 +136,9 @@ app.UseAntiforgery();
 // Health endpoint — public
 app.MapGet("/health", () => "OK").AllowAnonymous();
 
+// Stub: returns Starting until a future WI wires IUserAgentRuntime.GetSessionAsync()
+app.MapGet("/api/agent/status", () => Results.Ok(new { status = "Starting" })).AllowAnonymous();
+
 // Redirect unauthenticated users to FIP portal for login
 app.MapGet("/auth/redirect-to-login", (IConfiguration cfg, HttpContext ctx) =>
 {

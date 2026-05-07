@@ -1,0 +1,133 @@
+@implements IDisposable
+
+<div class="loading-state-container">
+    <div class="loading-state-card">
+        @* Fortress brand spinner *@
+        <div class="loading-spinner">
+            <div class="loading-spinner-ring"></div>
+        </div>
+
+        @* Status message *@
+        <p class="loading-status-message">@_statusMessage</p>
+
+        @* Contextual subtitle *@
+        <p class="loading-subtitle">Your assistant remembers where you left off.</p>
+
+        @* Error state *@
+        @if (_timedOut)
+        {
+            <div class="loading-error-state">
+                <p class="loading-error-message">Taking longer than expected.</p>
+                <button class="loading-retry-btn" @onclick="Retry">Try again</button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnReady { get; set; }
+
+    private string _statusMessage = "Starting your assistant...";
+    private bool _timedOut = false;
+    private int _pollCount = 0;
+    private const int MaxPolls = 30; // 30 × 2s = 60s timeout
+    private System.Threading.Timer? _pollTimer;
+
+    protected override void OnInitialized()
+    {
+        _pollTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                _pollCount++;
+
+                if (_pollCount >= MaxPolls)
+                {
+                    _pollTimer?.Dispose();
+                    _timedOut = true;
+                    StateHasChanged();
+                    return;
+                }
+
+                // Update status message based on poll count
+                _statusMessage = _pollCount switch
+                {
+                    <= 3 => "Starting your assistant...",
+                    <= 7 => "Loading your memory...",
+                    _ => "Almost ready..."
+                };
+
+                // Poll status endpoint
+                try
+                {
+                    var client = HttpClientFactory.CreateClient();
+                    client.BaseAddress = new Uri($"{NavigationManager.BaseUri}");
+                    var response = await client.GetAsync("/api/agent/status");
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var content = await response.Content.ReadAsStringAsync();
+                        if (content.Contains("\"status\":\"Running\"") || content.Contains("\"status\":\"running\""))
+                        {
+                            _pollTimer?.Dispose();
+                            await OnReady.InvokeAsync();
+                            return;
+                        }
+                    }
+                }
+                catch { /* keep polling */ }
+
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    private void Retry()
+    {
+        _timedOut = false;
+        _pollCount = 0;
+        _statusMessage = "Starting your assistant...";
+        _pollTimer?.Dispose();
+        _pollTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                _pollCount++;
+                if (_pollCount >= MaxPolls)
+                {
+                    _timedOut = true;
+                    StateHasChanged();
+                    return;
+                }
+                _statusMessage = _pollCount switch
+                {
+                    <= 3 => "Starting your assistant...",
+                    <= 7 => "Loading your memory...",
+                    _ => "Almost ready..."
+                };
+                try
+                {
+                    var client = HttpClientFactory.CreateClient();
+                    client.BaseAddress = new Uri($"{NavigationManager.BaseUri}");
+                    var response = await client.GetAsync("/api/agent/status");
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var content = await response.Content.ReadAsStringAsync();
+                        if (content.Contains("\"status\":\"Running\"") || content.Contains("\"status\":\"running\""))
+                        {
+                            _pollTimer?.Dispose();
+                            await OnReady.InvokeAsync();
+                            return;
+                        }
+                    }
+                }
+                catch { }
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    public void Dispose() => _pollTimer?.Dispose();
+
+    [Inject] private IHttpClientFactory HttpClientFactory { get; set; } = default!;
+    [Inject] private NavigationManager NavigationManager { get; set; } = default!;
+}

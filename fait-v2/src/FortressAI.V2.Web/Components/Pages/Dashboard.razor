@@ -2,20 +2,35 @@
 @attribute [Authorize]
 @using FortressAI.V2.Web.Components.Layout
 @using FortressAI.V2.Web.Components.Chat
+@using FortressAI.V2.Web.Components.Agent
 
 <PageTitle>Dashboard — FAIT v2</PageTitle>
 
-<DualPaneLayout @bind-IsPanelOpen="_previewOpen"
-                PreviewTitle="@_previewTitle">
-    <ChatContent>
-        <ChatView />
-    </ChatContent>
-    <PreviewContent>
-        <MemoryManagerView />
-    </PreviewContent>
-</DualPaneLayout>
+@if (!_agentReady)
+{
+    <AssistantLoadingState OnReady="HandleAgentReady" />
+}
+else
+{
+    <DualPaneLayout @bind-IsPanelOpen="_previewOpen"
+                    PreviewTitle="@_previewTitle">
+        <ChatContent>
+            <ChatView />
+        </ChatContent>
+        <PreviewContent>
+            <MemoryManagerView />
+        </PreviewContent>
+    </DualPaneLayout>
+}
 
 @code {
     private bool _previewOpen = true;
     private string _previewTitle = "Memory";
+    private bool _agentReady = false;  // start in loading state
+
+    private void HandleAgentReady()
+    {
+        _agentReady = true;
+        StateHasChanged();
+    }
 }
