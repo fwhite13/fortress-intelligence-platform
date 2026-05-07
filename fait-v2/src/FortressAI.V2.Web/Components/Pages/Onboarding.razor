@@ -233,7 +233,7 @@
 
         _preferredName = _displayName.Split(' ').FirstOrDefault() ?? _displayName;
 
-        if (string.IsNullOrEmpty(_entraOid))
+        if (string.IsNullOrWhiteSpace(_entraOid))
         {
             _errorMessage = "Unable to determine your identity. Please sign out and sign in again.";
             _provisionError = true;
@@ -309,6 +309,7 @@
         UseCases: _selectedUseCases.ToList(),
         PreferredName: string.IsNullOrWhiteSpace(_preferredName) ? _displayName.Split(' ').FirstOrDefault() ?? _displayName : _preferredName,
         AssistantName: _assistantName,
+        AdditionalContext: _additionalContext,
         AccentColor: _accentColor
     );
 

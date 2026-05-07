@@ -19,7 +19,8 @@ public record WizardData(
     List<string> UseCases,
     string PreferredName,
     string AssistantName,
-    string? AccentColor
+    string? AdditionalContext,
+    string? AccentColor  // UI-only — not persisted at provisioning time
 );
 
 public interface IUserProvisioningService

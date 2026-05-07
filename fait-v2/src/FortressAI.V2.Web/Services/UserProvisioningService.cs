@@ -367,10 +367,12 @@ public class UserProvisioningService : IUserProvisioningService
                 sb.AppendLine($"- **Role:** {wizardData.Role}");
             if (!string.IsNullOrEmpty(wizardData.Responsibilities))
                 sb.AppendLine($"- **Responsibilities:** {wizardData.Responsibilities}");
-            if (wizardData.UseCases.Count > 0)
+            if (wizardData.UseCases?.Count > 0)
                 sb.AppendLine($"- **Primary use cases:** {string.Join(", ", wizardData.UseCases)}");
             if (!string.IsNullOrEmpty(wizardData.AssistantName))
                 sb.AppendLine($"- **Assistant name:** {wizardData.AssistantName}");
+            if (!string.IsNullOrWhiteSpace(wizardData.AdditionalContext))
+                sb.AppendLine($"- **Additional context:** {wizardData.AdditionalContext}");
 
             sb.AppendLine();
             sb.AppendLine("## Communication Style");
@@ -383,18 +385,9 @@ public class UserProvisioningService : IUserProvisioningService
         sb.AppendLine("## Purpose");
         sb.AppendLine("I help you work smarter — drafting, researching, analyzing, and executing complex tasks.");
 
-        if (wizardData != null)
-        {
-            sb.AppendLine();
-            sb.AppendLine("## Personality");
-            sb.AppendLine("Precise, proactive, and honest. I surface what matters and flag what's uncertain.");
-        }
-        else
-        {
-            sb.AppendLine();
-            sb.AppendLine("## Personality");
-            sb.AppendLine("Precise, proactive, and honest. I surface what matters and flag what's uncertain.");
-        }
+        sb.AppendLine();
+        sb.AppendLine("## Personality");
+        sb.AppendLine("Precise, proactive, and honest. I surface what matters and flag what's uncertain.");
 
         return sb.ToString();
     }
