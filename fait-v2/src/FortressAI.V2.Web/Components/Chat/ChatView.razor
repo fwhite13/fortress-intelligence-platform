@@ -4,6 +4,8 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.SignalR.Client
 @implements IAsyncDisposable
+@inject IPluginAgentService PluginAgentService
+@inject IContextEnvelopeService ContextEnvelopeSvc
 
 @* Main chat component — lives in DualPaneLayout's ChatContent slot *@
 
@@ -88,6 +90,32 @@
         }
     </div>
 
+    @* Plugin selector *@
+    @if (_availablePlugins.Count > 0)
+    {
+        <div class="chat-plugin-bar">
+            <span class="chat-plugin-label">Plugin:</span>
+            <div class="chat-plugin-pills">
+                <button class="chat-plugin-pill @(_selectedPluginId == null ? "chat-plugin-pill-active" : "")"
+                        @onclick="@(() => _selectedPluginId = null)">
+                    None (Main Assistant)
+                </button>
+                @foreach (var plugin in _availablePlugins)
+                {
+                    <button class="chat-plugin-pill @(_selectedPluginId == plugin.Id ? "chat-plugin-pill-active" : "")"
+                            @onclick="@(() => _selectedPluginId = plugin.Id)"
+                            title="@plugin.Description">
+                        @plugin.Name
+                    </button>
+                }
+            </div>
+            @if (_selectedPluginId != null)
+            {
+                <span class="chat-plugin-active-badge">[@(_availablePlugins.FirstOrDefault(p => p.Id == _selectedPluginId)?.Name ?? "")]</span>
+            }
+        </div>
+    }
+
     @* Input bar — sticky bottom *@
     <div class="chat-input-bar">
         @* Top row: KB toggles *@
@@ -165,6 +193,58 @@
         background: var(--color-accent-bg);
         color: var(--color-accent);
     }
+
+    .chat-plugin-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-1) var(--space-4);
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface);
+        flex-wrap: wrap;
+    }
+
+    .chat-plugin-label {
+        font-size: var(--font-size-xs);
+        color: var(--color-text-secondary);
+        white-space: nowrap;
+    }
+
+    .chat-plugin-pills {
+        display: flex;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+    }
+
+    .chat-plugin-pill {
+        padding: var(--space-1) var(--space-2);
+        height: var(--pill-height-sm);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-xs);
+        cursor: pointer;
+        transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base);
+    }
+
+    .chat-plugin-pill:hover {
+        background: var(--color-surface-hover);
+        color: var(--color-text-primary);
+    }
+
+    .chat-plugin-pill-active {
+        border-color: var(--color-accent);
+        background: var(--color-accent-bg);
+        color: var(--color-accent);
+    }
+
+    .chat-plugin-active-badge {
+        font-size: var(--font-size-xs);
+        color: var(--color-accent);
+        font-weight: 600;
+        margin-left: auto;
+    }
 </style>
 
 @code {
@@ -187,6 +267,10 @@
     private bool _personalKbEnabled = true;
     private ActiveAgent _activeAgent = ActiveAgent.MainAssistant;
 
+    // Plugin state
+    private List<AgentPlugin> _availablePlugins = new();
+    private string? _selectedPluginId = null;
+
     // CC task state
     private bool _ccRunning = false;
     private string _ccCurrentStep = "Generating artifact...";
@@ -205,6 +289,11 @@
                ?? auth.User.FindFirst("oid")?.Value ?? "";
         _userDisplayName = auth.User.FindFirst("name")?.Value
                         ?? auth.User.FindFirst("preferred_username")?.Value ?? "User";
+
+        var userRoles = auth.User.Claims
+            .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "roles")
+            .Select(c => c.Value);
+        _availablePlugins = await PluginAgentService.GetAvailablePluginsAsync(_userId, userRoles);
 
         await ConnectSignalRAsync();
     }
@@ -317,6 +406,14 @@
         try
         {
             var envelope = BuildEnvelope(_userId, _userDisplayName);
+            if (_selectedPluginId != null)
+            {
+                var pluginEnvelope = await ContextEnvelopeSvc.BuildEnvelopeAsync(
+                    _userId, _userDisplayName, envelope.TaskInstructions,
+                    _selectedPluginId, _ccCts!.Token);
+                envelope.EnabledMcpServers = pluginEnvelope.EnabledMcpServers;
+                envelope.MemorySummary = pluginEnvelope.MemorySummary;
+            }
             var result = await CCExecutionService.DispatchTaskAsync(
                 _userId,
                 userMessage,

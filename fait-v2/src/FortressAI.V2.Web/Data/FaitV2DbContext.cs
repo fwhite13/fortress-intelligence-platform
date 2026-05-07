@@ -19,6 +19,9 @@ public class FaitV2DbContext : DbContext
     public DbSet<PushedMessage> PushedMessages => Set<PushedMessage>();
     public DbSet<FeedbackSubmission> FeedbackSubmissions => Set<FeedbackSubmission>();
     public DbSet<ArtifactRecord> ArtifactRecords => Set<ArtifactRecord>();
+    public DbSet<AgentPlugin> AgentPlugins => Set<AgentPlugin>();
+    public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
+    public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -280,6 +283,92 @@ public class FaitV2DbContext : DbContext
 
             entity.HasIndex(e => e.UserId).HasDatabaseName("ix_feedback_submissions_user_id");
             entity.HasIndex(e => e.Status).HasDatabaseName("ix_feedback_submissions_status");
+        });
+
+        // agent_plugins
+        modelBuilder.Entity<AgentPlugin>(entity =>
+        {
+            entity.ToTable("agent_plugins");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasColumnName("description").HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.SkillsDirectory).HasColumnName("skills_directory").HasMaxLength(500);
+            entity.Property(e => e.AllowedMcpServers).HasColumnName("allowed_mcp_servers").HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.AllowedRoles).HasColumnName("allowed_roles").HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.IsActive).HasColumnName("is_active");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasMaxLength(36);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.Name).IsUnique().HasDatabaseName("ix_agent_plugins_name");
+        });
+
+        // scheduled_tasks
+        modelBuilder.Entity<ScheduledTask>(entity =>
+        {
+            entity.ToTable("scheduled_tasks");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.ProjectId).HasColumnName("project_id").HasMaxLength(36);
+            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Prompt).HasColumnName("prompt").HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.ScheduleType).HasColumnName("schedule_type").HasMaxLength(20).IsRequired();
+            entity.Property(e => e.CronExpression).HasColumnName("cron_expression").HasMaxLength(100);
+            entity.Property(e => e.NextRunAt).HasColumnName("next_run_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.LastRunAt).HasColumnName("last_run_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.LastRunStatus).HasColumnName("last_run_status").HasMaxLength(20);
+            entity.Property(e => e.FailureCount).HasColumnName("failure_count");
+            entity.Property(e => e.AlertOnCompletion).HasColumnName("alert_on_completion");
+            entity.Property(e => e.AlertOnFailure).HasColumnName("alert_on_failure");
+            entity.Property(e => e.IsActive).HasColumnName("is_active");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_scheduled_tasks_user_id");
+            entity.HasIndex(e => e.NextRunAt).HasDatabaseName("ix_scheduled_tasks_next_run_at");
+        });
+
+        // scheduled_task_runs
+        modelBuilder.Entity<ScheduledTaskRun>(entity =>
+        {
+            entity.ToTable("scheduled_task_runs");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.TaskId).HasColumnName("task_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.StartedAt).HasColumnName("started_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.CompletedAt).HasColumnName("completed_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ErrorMessage).HasColumnName("error_message").HasColumnType("TEXT");
+            entity.Property(e => e.ArtifactS3Key).HasColumnName("artifact_s3_key").HasMaxLength(500);
+            entity.Property(e => e.SandboxId).HasColumnName("sandbox_id").HasMaxLength(200);
+
+            entity.HasIndex(e => e.TaskId).HasDatabaseName("ix_scheduled_task_runs_task_id");
+
+            entity.HasOne(e => e.Task)
+                  .WithMany()
+                  .HasForeignKey(e => e.TaskId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // agent_plugins
+        modelBuilder.Entity<AgentPlugin>(entity =>
+        {
+            entity.ToTable("agent_plugins");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Description).HasColumnName("description").HasColumnType("TEXT");
+            entity.Property(e => e.SkillsDirectory).HasColumnName("skills_directory").HasMaxLength(500);
+            entity.Property(e => e.AllowedMcpServers).HasColumnName("allowed_mcp_servers").HasColumnType("longtext");
+            entity.Property(e => e.AllowedRoles).HasColumnName("allowed_roles").HasColumnType("longtext");
+            entity.Property(e => e.IsActive).HasColumnName("is_active");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasMaxLength(36);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.IsActive).HasDatabaseName("ix_agent_plugins_is_active");
         });
     }
 }

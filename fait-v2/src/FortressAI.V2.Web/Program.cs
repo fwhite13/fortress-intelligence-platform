@@ -164,6 +164,13 @@ builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();
 // Artifact service (CC-generated artifact metadata)
 builder.Services.AddScoped<IArtifactService, ArtifactService>();
 
+// Plugin agent service (admin-provisioned skill agents)
+builder.Services.AddScoped<IPluginAgentService, PluginAgentService>();
+
+// Scheduled task service + background poller
+builder.Services.AddScoped<IScheduledTaskService, ScheduledTaskService>();
+builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
+
 var app = builder.Build();
 
 // Seed mcp_servers with forge-kb entry (idempotent)
