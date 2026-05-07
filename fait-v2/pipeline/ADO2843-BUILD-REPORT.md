@@ -98,6 +98,51 @@ Time Elapsed 00:00:03.56
 
 ---
 
+---
+
+## Build Cycle 2 — I1 Fix
+
+**Date:** 2026-05-06  
+**Commit:** `14d91c9` — `fix(fait-v2#2843): add created_at/updated_at to user_sessions table`  
+**Status:** ✅ COMPLETE
+
+### What changed
+
+Added `created_at` + `updated_at` to `user_sessions` table to match timestamp convention on all other tables (Clint I1 finding from cycle 1 review).
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `Data/Models/UserSession.cs` | Added `CreatedAt` and `UpdatedAt` properties with `[Column(...)]` attributes |
+| `Data/FaitV2DbContext.cs` | Added `HasColumnName/HasColumnType("datetime(6)")` configs for both new properties in `user_sessions` entity block |
+| `Data/Migrations/20260506225415_AddUserSessionTimestamps.cs` | New additive migration — `AddColumn` for `created_at` and `updated_at` on `user_sessions` |
+| `Data/Migrations/20260506225415_AddUserSessionTimestamps.Designer.cs` | EF scaffolding |
+| `Data/Migrations/FaitV2DbContextModelSnapshot.cs` | Updated snapshot |
+
+### Migration Up() verification
+
+```csharp
+migrationBuilder.AddColumn<DateTime>(name: "created_at", table: "user_sessions", type: "datetime(6)", nullable: false, ...);
+migrationBuilder.AddColumn<DateTime>(name: "updated_at", table: "user_sessions", type: "datetime(6)", nullable: false, ...);
+```
+
+✅ Additive only — no existing columns modified or dropped.
+
+### Build result
+
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+```
+
+### I2 Status
+
+I2 (CHAR(36) vs varchar(36)) is **pending a design decision** — not addressed in this cycle. Left as-is per scope instructions.
+
+---
+
 ## How to Test Locally
 
 ```bash

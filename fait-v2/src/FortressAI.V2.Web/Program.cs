@@ -1,3 +1,4 @@
+using Amazon.S3;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Identity.Web;
@@ -6,6 +7,7 @@ using Serilog;
 using Microsoft.EntityFrameworkCore;
 using FortressAI.V2.Web.Components;
 using FortressAI.V2.Web.Data;
+using FortressAI.V2.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -60,6 +62,12 @@ builder.Services.AddDbContext<FaitV2DbContext>(options =>
         new MySqlServerVersion(new Version(8, 0, 28)),
         mySqlOptions => mySqlOptions.EnableRetryOnFailure(3)
     ));
+
+// AWS S3 (workspace bucket)
+builder.Services.AddAWSService<IAmazonS3>();
+
+// User provisioning
+builder.Services.AddScoped<IUserProvisioningService, UserProvisioningService>();
 
 var app = builder.Build();
 

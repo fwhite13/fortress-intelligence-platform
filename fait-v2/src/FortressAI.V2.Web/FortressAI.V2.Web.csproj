@@ -28,6 +28,13 @@
 
     <!-- Data Protection -->
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.*" />
+
+    <!-- AWS -->
+    <PackageReference Include="AWSSDK.S3" Version="3.*" />
+    <PackageReference Include="AWSSDK.Extensions.NETCore.Setup" Version="3.*" />
+
+    <!-- PostgreSQL -->
+    <PackageReference Include="Npgsql" Version="8.*" />
   </ItemGroup>
 
   <ItemGroup>

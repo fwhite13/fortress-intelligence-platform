@@ -144,3 +144,89 @@ Not blocking, but worth standardizing. Recommend normalizing to `updated_at` eve
 2. **I2 — CHAR(36) vs varchar(36):** Pick a path — either add `.HasColumnType("char(36)")` to all PK/FK configs and regenerate the migration, OR accept varchar(36) and correct the WI checklist language. Need Fred's direction on which.
 
 Both fixes are mechanical and non-risky. A new migration for I1 is required regardless of the I2 decision.
+
+---
+
+## Review Report — ADO#2843 — Cycle 2
+
+**Commit:** `14d91c9` (I1 fix — user_sessions timestamps)
+**Reviewer:** Hawkeye (Clint Barton)
+**Cycle:** 2 of 2
+**Date:** 2026-05-06
+
+---
+
+### Verdict: ✅ PASS
+
+---
+
+### CC Review Summary
+
+CC invoked via:
+```bash
+cat /tmp/clint-c2-brief-2843.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+
+CC performed a full four-layer consistency audit (model ↔ DbContext ↔ migration ↔ snapshot) focused on the `user_sessions` timestamp fix. No false positives. All layers clean. One non-blocking observation on `DateTime.MinValue` EF default — dismissed as standard scaffold behavior for a greenfield schema.
+
+---
+
+### Scope Check
+
+Only expected files changed:
+- `Data/Models/UserSession.cs` ✅
+- `Data/FaitV2DbContext.cs` ✅
+- `Data/Migrations/20260506225415_AddUserSessionTimestamps.cs` ✅
+- `Data/Migrations/20260506225415_AddUserSessionTimestamps.Designer.cs` ✅ (auto-generated)
+- `Data/Migrations/FaitV2DbContextModelSnapshot.cs` ✅ (auto-generated)
+- `pipeline/` artifacts ✅ (expected)
+
+No scope creep.
+
+---
+
+### I1 Fix Verification — Four-Layer Consistency
+
+| Layer | Check | Result |
+|-------|-------|--------|
+| Model (`UserSession.cs`) | `CreatedAt` `[Column("created_at")]` DateTime non-nullable | ✅ PASS |
+| Model (`UserSession.cs`) | `UpdatedAt` `[Column("updated_at")]` DateTime non-nullable | ✅ PASS |
+| DbContext (`FaitV2DbContext.cs`) | `HasColumnName("created_at").HasColumnType("datetime(6)")` in user_sessions block | ✅ PASS |
+| DbContext (`FaitV2DbContext.cs`) | `HasColumnName("updated_at").HasColumnType("datetime(6)")` in user_sessions block | ✅ PASS |
+| Migration Up() | `AddColumn` `created_at` on `user_sessions`, `datetime(6)`, `nullable: false` | ✅ PASS |
+| Migration Up() | `AddColumn` `updated_at` on `user_sessions`, `datetime(6)`, `nullable: false` | ✅ PASS |
+| Migration Down() | Drops both columns cleanly | ✅ PASS |
+| Migration | Additive only — no data loss risk | ✅ PASS |
+| Snapshot | `CreatedAt` + `UpdatedAt` with `datetime(6)` in UserSession block | ✅ PASS |
+
+---
+
+### I2 Status — CLOSED by Design Decision
+
+varchar(36) accepted. Pomelo emits varchar(36) for GUIDs by default; CHAR vs VARCHAR is storage-equivalent on InnoDB/Aurora. No `.HasColumnType("char(36)")` enforcement required. Not an issue.
+
+---
+
+### Issues Found
+
+None. No Critical, Important, or blocking issues.
+
+**Non-blocking observation (not requiring action):** Migration columns use EF Core's standard `defaultValue: DateTime.MinValue` (`0001-01-01`). If this migration runs against an existing table with rows, those rows receive `0001-01-01` for both timestamps. Greenfield schema with no session data in prod — this is a non-issue.
+
+---
+
+### Build
+
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+```
+
+---
+
+### Final Decision
+
+**PASS. Ready for deploy.**
+
+I1 is correctly and completely fixed. All four layers consistent. Fix is minimal, additive, scoped. No open issues.
