@@ -173,7 +173,7 @@ builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 
 var app = builder.Build();
 
-// Seed mcp_servers with forge-kb entry (idempotent)
+// Seed mcp_servers with all MCP tool groups (idempotent)
 using (var seedScope = app.Services.CreateScope())
 {
     var dbFactory = seedScope.ServiceProvider.GetRequiredService<IDbContextFactory<FaitV2DbContext>>();
@@ -181,45 +181,47 @@ using (var seedScope = app.Services.CreateScope())
     var seedLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     await using var seedDb = await dbFactory.CreateDbContextAsync();
-    var endpointUrl = cfg["FipMcp:EndpointUrl"] ?? "https://api.fortressam.ai/mcp";
-    var exists = await seedDb.McpServers.AnyAsync(s => s.Name == "forge-kb");
-    if (!exists)
+    var baseUrl = cfg["FipMcp:BaseUrl"]?.TrimEnd('/') ?? "https://mcp.fortressam.ai/mcp";
+
+    var toolGroups = new[]
     {
-        seedDb.McpServers.Add(new FortressAI.V2.Web.Data.Models.McpServer
-        {
-            Id = Guid.NewGuid().ToString(),
-            Name = "forge-kb",
-            EndpointUrl = endpointUrl,
-            AuthType = "none",
-            DefaultRead = true,
-            DefaultWrite = false,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow
-        });
-        await seedDb.SaveChangesAsync();
-        seedLogger.LogInformation("Seeded forge-kb mcp_servers entry");
-    }
-    else
+        new { Name = "forge-kb",   AuthType = "none",        DefaultRead = true,  DefaultWrite = false },
+        new { Name = "ms365",      AuthType = "oauth_entra", DefaultRead = true,  DefaultWrite = false },
+        new { Name = "ado",        AuthType = "oauth_entra", DefaultRead = true,  DefaultWrite = false },
+        new { Name = "web-search", AuthType = "none",        DefaultRead = true,  DefaultWrite = false },
+    };
+
+    foreach (var tg in toolGroups)
     {
-        // Update endpoint URL and auth_type if config changed
-        var server = await seedDb.McpServers.FirstAsync(s => s.Name == "forge-kb");
-        bool changed = false;
-        if (server.EndpointUrl != endpointUrl)
+        var expectedUrl = $"{baseUrl}/{tg.Name}";
+        var existing = await seedDb.McpServers.FirstOrDefaultAsync(s => s.Name == tg.Name);
+        if (existing == null)
         {
-            server.EndpointUrl = endpointUrl;
-            changed = true;
+            seedDb.McpServers.Add(new FortressAI.V2.Web.Data.Models.McpServer
+            {
+                Id = Guid.NewGuid().ToString(),
+                Name = tg.Name,
+                EndpointUrl = expectedUrl,
+                AuthType = tg.AuthType,
+                DefaultRead = tg.DefaultRead,
+                DefaultWrite = tg.DefaultWrite,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            });
+            seedLogger.LogInformation("Seeded mcp_servers entry: {Name}", tg.Name);
         }
-        if (server.AuthType != "none")
+        else
         {
-            server.AuthType = "none";
-            changed = true;
-        }
-        if (changed)
-        {
-            await seedDb.SaveChangesAsync();
-            seedLogger.LogInformation("Updated forge-kb mcp_servers entry");
+            bool changed = false;
+            if (existing.EndpointUrl != expectedUrl) { existing.EndpointUrl = expectedUrl; changed = true; }
+            if (existing.AuthType != tg.AuthType) { existing.AuthType = tg.AuthType; changed = true; }
+            if (changed)
+            {
+                seedLogger.LogInformation("Updated mcp_servers entry: {Name}", tg.Name);
+            }
         }
     }
+    await seedDb.SaveChangesAsync();
 }
 
 if (!app.Environment.IsDevelopment())

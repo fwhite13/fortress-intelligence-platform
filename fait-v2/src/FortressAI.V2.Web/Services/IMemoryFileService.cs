@@ -50,6 +50,8 @@ public interface IMemoryFileService
 
     // ── Export ─────────────────────────────────────────────────────────
 
+    // OQ-15-5: export returns .md files only, not pgvector chunks
+
     /// <summary>Exports all files under workspaces/{userId}/memory/ as a ZIP archive.</summary>
     Task<byte[]> ExportZipAsync(string userId, CancellationToken ct = default);
 }

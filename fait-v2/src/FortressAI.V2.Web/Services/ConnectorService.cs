@@ -14,13 +14,13 @@ public class ConnectorService : IConnectorService
         {
             ["forge-kb"] = ("FORGE Knowledge Base", "Search and add to your organization's knowledge bases", ConnectorAuthType.None),
             ["ms365"]    = ("Microsoft 365", "Email, calendar, Teams, OneDrive, SharePoint", ConnectorAuthType.OAuthEntra),
-            ["search"]   = ("Web Search", "Search the web via Brave Search API", ConnectorAuthType.None),
+            ["web-search"] = ("Web Search", "Search the web via Brave Search API", ConnectorAuthType.None),
             ["ado"]      = ("Azure DevOps", "Work items, repos, pipelines", ConnectorAuthType.OAuthEntra),
         };
 
     // Connectors that are always connected (service-level, no per-user OAuth)
     private static readonly HashSet<string> ManagedConnectors =
-        new(StringComparer.OrdinalIgnoreCase) { "forge-kb", "search" };
+        new(StringComparer.OrdinalIgnoreCase) { "forge-kb", "web-search" };
 
     private static ConnectorAuthType MapAuthType(string? dbAuthType) => dbAuthType switch
     {

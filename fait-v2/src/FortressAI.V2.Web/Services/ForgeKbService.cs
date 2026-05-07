@@ -92,8 +92,8 @@ public class ForgeKbService : IForgeKbService
 
     private async Task<string?> CallToolAsync(string toolName, object arguments, CancellationToken ct)
     {
-        var endpointUrl = _config["FipMcp:EndpointUrl"]?.TrimEnd('/')
-            ?? throw new InvalidOperationException("FipMcp:EndpointUrl not configured");
+        var baseUrl = _config["FipMcp:BaseUrl"]?.TrimEnd('/')
+            ?? throw new InvalidOperationException("FipMcp:BaseUrl not configured");
 
         var token = await _tokenProvider.GetAccessTokenAsync();
 
@@ -112,7 +112,7 @@ public class ForgeKbService : IForgeKbService
 
         var json = JsonSerializer.Serialize(body);
         var client = _httpClientFactory.CreateClient("FipMcpClient");
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{endpointUrl}/mcp")
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/forge-kb")
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };

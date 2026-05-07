@@ -25,6 +25,13 @@ public interface IPluginAgentService
     Task<string> GetSkillsContentAsync(AgentPlugin plugin, CancellationToken ct = default);
 }
 
+/// <summary>
+/// A fact discovered by a plugin agent during conversation.
+/// No confidence scoring — all facts returned by plugin agents are persisted.
+/// Quality gate is in plugin prompt engineering, not post-hoc filtering.
+/// </summary>
+public record DiscoveredFact(string Fact, string Source);
+
 public class McpServerPermission
 {
     public string ServerId { get; set; } = string.Empty;
