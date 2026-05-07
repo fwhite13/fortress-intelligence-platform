@@ -1,0 +1,15 @@
+{
+  "name": "fait-v2-agent-harness",
+  "version": "1.0.0",
+  "description": "FAIT v2 per-user Fargate agent harness — OpenClaw runtime HTTP shim",
+  "main": "harness-server.js",
+  "scripts": {
+    "start": "node harness-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
