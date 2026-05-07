@@ -75,3 +75,24 @@ Navigate to `https://localhost:5001/`. At 1024px+ viewport: left pane fills view
 
 - ADO comment posted: ✅ (comment ID 781734)
 - WI state: Sending to Clint for review
+
+---
+
+## BUILD Cycle 2 — Inline Style Fix
+
+**Date:** 2026-05-07  
+**Commit:** `2042049`  
+**Triggered by:** Clint code review (I1)
+
+### Fix applied
+
+| File | Change |
+|------|--------|
+| `Components/Layout/DualPaneLayout.razor` | Removed `Style="width: 16px; height: 16px;"` from MudIcon; removed redundant `@using MudBlazor` (already in `_Imports.razor`) |
+| `wwwroot/css/app.css` | Added `.dual-pane-close-btn svg { width: var(--icon-sm, 16px); height: var(--icon-sm, 16px); }` after `.dual-pane-close-btn` rule |
+
+### Build result
+- `dotnet build`: **SUCCEEDED — 0 errors, 0 warnings**
+
+### ADO comment posted
+- Comment ID 781738
