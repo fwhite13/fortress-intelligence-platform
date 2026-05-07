@@ -525,8 +525,8 @@ function createMcpServer(user, rawToken) {
     'web_search',
     'Search the web using Brave Search. Returns titles, URLs, and snippets for the top results.',
     {
-      query: z.string().describe('Search query'),
-      count: z.number().min(1).max(20).optional().describe('Number of results (1-20, default 10)'),
+      query: z.string().min(1).describe('Search query'),
+      count: z.number().int().min(1).max(20).optional().describe('Number of results (1-20, default 10)'),
       country: z.string().optional().describe('2-letter country code for results (e.g. US, GB). Default: US'),
     },
     async ({ query, count, country }) => {
