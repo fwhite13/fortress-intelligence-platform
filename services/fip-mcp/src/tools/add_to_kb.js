@@ -2,6 +2,7 @@ import {
   BedrockAgentClient,
   StartIngestionJobCommand,
 } from '@aws-sdk/client-bedrock-agent';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { v4 as uuidv4 } from 'uuid';
 import { getKb } from '../config/kb-inventory.js';
 import { getEntitlements } from './list_kbs.js';
@@ -10,6 +11,38 @@ import { jobMap } from './get_job_status.js';
 const mgmtClient = new BedrockAgentClient({
   region: process.env.BEDROCK_REGION ?? 'us-east-1',
 });
+
+const s3Client = new S3Client({
+  region: process.env.BEDROCK_REGION ?? 'us-east-1',
+});
+
+/**
+ * Determine the scoping ID for S3 path construction.
+ * - Personal: user.user_id (Entra OID)
+ * - Team: caller-supplied metadata.team_id
+ * - Project: caller-supplied metadata.project_id
+ * - Corp/NEXUS: empty string (no sub-path scoping)
+ */
+function getScopingId(kb, user, metadata) {
+  switch (kb.kb_type) {
+    case 'personal': return user.user_id;
+    case 'team': return metadata.team_id ?? '';
+    case 'project': return metadata.project_id ?? '';
+    default: return '';
+  }
+}
+
+/**
+ * Derive file extension from content_type metadata field, defaulting to .txt.
+ */
+function getExtension(contentType) {
+  if (!contentType) return 'txt';
+  if (contentType.includes('markdown') || contentType.includes('md')) return 'md';
+  if (contentType.includes('html')) return 'html';
+  if (contentType.includes('json')) return 'json';
+  if (contentType.includes('pdf')) return 'pdf';
+  return 'txt';
+}
 
 export async function addToKb(args, user) {
   const { kb_id, content, metadata } = args;
@@ -29,6 +62,11 @@ export async function addToKb(args, user) {
     throw { code: 'PROJECT_ID_REQUIRED', status: 400, message: 'metadata.project_id is required for Project KB' };
   }
 
+  // Team KB requires team_id in metadata
+  if (kb.kb_type === 'team' && !metadata.team_id) {
+    throw { code: 'TEAM_ID_REQUIRED', status: 400, message: 'metadata.team_id is required for Team KB' };
+  }
+
   // Corp KB and NEXUS KB require forge-kb-admin role for write
   if ((kb.kb_type === 'corp' || kb.kb_type === 'nexus') && !user.roles.includes('forge-kb-admin')) {
     throw { code: 'WRITE_NOT_ENTITLED', status: 403, message: `Writing to ${kb.kb_type} KB requires forge-kb-admin role` };
@@ -45,11 +83,40 @@ export async function addToKb(args, user) {
     throw { code: 'DATA_SOURCE_UNAVAILABLE', status: 503, message: `KB ${kb_id} data source ID not configured` };
   }
 
-  // NOTE (Phase 0): StartIngestionJob triggers a sync of the KB data source.
-  // The actual content write mechanism (S3 put vs direct API) depends on KB data source config.
-  // For now, we call StartIngestionJob to trigger a sync — the assumption is content was already
-  // placed in the data source S3 bucket by the caller. This is an open question per spec §8 item 7.
-  // TODO: Implement S3 content write before StartIngestionJob call when S3 bucket is confirmed.
+  // Write content to S3 before triggering ingestion
+  const scopingId = getScopingId(kb, user, metadata);
+  const ext = getExtension(metadata.content_type);
+  const timestamp = Date.now();
+  const safeSource = (metadata.source ?? 'document').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `${safeSource}-${timestamp}.${ext}`;
+  const s3Key = scopingId
+    ? `${kb.s3_prefix}/${scopingId}/${filename}`
+    : `${kb.s3_prefix}/${filename}`;
+
+  // Write main content file
+  await s3Client.send(new PutObjectCommand({
+    Bucket: kb.s3_bucket,
+    Key: s3Key,
+    Body: content,
+    ContentType: metadata.content_type ?? 'text/plain',
+  }));
+
+  // Write metadata sidecar for all KB types except Corp and NEXUS
+  if (kb.metadata_key) {
+    const scopingValue = scopingId;
+    const sidecar = JSON.stringify({
+      metadataAttributes: {
+        [kb.metadata_key]: scopingValue,
+      },
+    });
+    await s3Client.send(new PutObjectCommand({
+      Bucket: kb.s3_bucket,
+      Key: `${s3Key}.metadata.json`,
+      Body: sidecar,
+      ContentType: 'application/json',
+    }));
+  }
+
   const clientToken = uuidv4();
 
   const command = new StartIngestionJobCommand({

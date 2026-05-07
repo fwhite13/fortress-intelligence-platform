@@ -19,30 +19,33 @@ function buildRetrievalFilter(kb, user, callerFilters) {
   // Auto-inject security filter based on KB scoping rule
   switch (kb.scoping_rule) {
     case SCOPING_RULE.USER_ID:
+      // SCOPING_RULE.USER_ID === 'ownerId'
       filters.push({
-        equals: { key: 'user_id', value: user.user_id },
+        equals: { key: SCOPING_RULE.USER_ID, value: user.user_id },
       });
       break;
 
     case SCOPING_RULE.TEAM_ID: {
+      // SCOPING_RULE.TEAM_ID === 'teamId'
       const team_id = callerFilters?.team_id;
       if (!team_id) {
         throw { code: 'TEAM_ID_REQUIRED', status: 400, message: 'team_id is required for Team KB' };
       }
       // Phase 0: require team_id param but skip DB membership validation
       filters.push({
-        equals: { key: 'team_id', value: team_id },
+        equals: { key: SCOPING_RULE.TEAM_ID, value: team_id },
       });
       break;
     }
 
     case SCOPING_RULE.PROJECT_ID: {
+      // SCOPING_RULE.PROJECT_ID === 'projectId'
       const project_id = callerFilters?.project_id;
       if (!project_id) {
         throw { code: 'PROJECT_ID_REQUIRED', status: 400, message: 'project_id is required for Project KB' };
       }
       filters.push({
-        equals: { key: 'project_id', value: project_id },
+        equals: { key: SCOPING_RULE.PROJECT_ID, value: project_id },
       });
       break;
     }
@@ -55,7 +58,7 @@ function buildRetrievalFilter(kb, user, callerFilters) {
 
   // Merge caller-supplied metadata filters (excluding security-controlled keys)
   if (callerFilters) {
-    const RESERVED_KEYS = ['user_id', 'team_id', 'project_id'];
+    const RESERVED_KEYS = ['ownerId', 'teamId', 'projectId'];
     for (const [key, value] of Object.entries(callerFilters)) {
       if (!RESERVED_KEYS.includes(key)) {
         filters.push({ equals: { key, value } });

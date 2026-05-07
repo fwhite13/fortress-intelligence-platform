@@ -10,9 +10,9 @@ export const KB_TYPE = {
 // Scoping rules per KB type
 export const SCOPING_RULE = {
   NONE: 'none',             // org-wide, no filter
-  USER_ID: 'user_id',       // auto-inject token.oid as user_id filter
-  TEAM_ID: 'team_id',       // require team_id param, validate membership
-  PROJECT_ID: 'project_id', // require project_id param, validate access
+  USER_ID: 'ownerId',       // auto-inject token.oid as ownerId filter
+  TEAM_ID: 'teamId',        // require team_id param, validate membership
+  PROJECT_ID: 'projectId',  // require project_id param, validate access
 };
 
 // KB inventory — keyed by KB ID
@@ -28,6 +28,8 @@ export const KB_INVENTORY = {
     scoping_rule: SCOPING_RULE.NONE,
     description: 'Organization-wide corporate knowledge base',
     writable: false, // requires forge-kb-admin role to write
+    s3_bucket: 'fortress-tools',
+    s3_prefix: 'kb-docs/fortress',
   },
   ZCEZCJGHQC: {
     kb_id: 'ZCEZCJGHQC',
@@ -38,6 +40,9 @@ export const KB_INVENTORY = {
     scoping_rule: SCOPING_RULE.USER_ID,
     description: 'Personal knowledge base — user-scoped content',
     writable: true,
+    s3_bucket: 'fortress-tools',
+    s3_prefix: 'kb-docs/personal',
+    metadata_key: 'ownerId',
   },
   NRGEACKSBJ: {
     kb_id: 'NRGEACKSBJ',
@@ -48,16 +53,22 @@ export const KB_INVENTORY = {
     scoping_rule: SCOPING_RULE.TEAM_ID,
     description: 'Team knowledge base — requires team membership',
     writable: true,
+    s3_bucket: 'fortress-tools',
+    s3_prefix: 'kb-docs/teams',
+    metadata_key: 'teamId',
   },
   A5U1GKN0TS: {
     kb_id: 'A5U1GKN0TS',
     kb_type: KB_TYPE.PROJECT,
     kb_name: 'Project KB',
-    data_source_id: null, // data_source_id TBD — see spec §8 open question #6
+    data_source_id: 'QAP3QMUD5N',
     env: 'prod',
     scoping_rule: SCOPING_RULE.PROJECT_ID,
     description: 'Project knowledge base — requires project access',
     writable: true,
+    s3_bucket: 'fortress-tools',
+    s3_prefix: 'kb-docs/project',
+    metadata_key: 'projectId',
   },
   WHB6WU9CVW: {
     kb_id: 'WHB6WU9CVW',
@@ -68,6 +79,8 @@ export const KB_INVENTORY = {
     scoping_rule: SCOPING_RULE.NONE,
     description: 'NEXUS discovery context — org-wide read-only',
     writable: false, // requires forge-kb-admin role to write
+    s3_bucket: 'fortress-tools',
+    s3_prefix: 'kb-docs/nexus',
   },
 
   // Dev KBs
@@ -80,6 +93,8 @@ export const KB_INVENTORY = {
     scoping_rule: SCOPING_RULE.NONE,
     description: 'Dev corp knowledge base',
     writable: false,
+    s3_bucket: 'fortress-tools',
+    s3_prefix: 'kb-docs/dev/fortress',
   },
   PBKCTCPNUU: {
     kb_id: 'PBKCTCPNUU',
@@ -90,6 +105,9 @@ export const KB_INVENTORY = {
     scoping_rule: SCOPING_RULE.USER_ID,
     description: 'Dev personal knowledge base',
     writable: true,
+    s3_bucket: 'fortress-tools',
+    s3_prefix: 'kb-docs/dev/personal',
+    metadata_key: 'ownerId',
   },
   XLVSGM2BXH: {
     kb_id: 'XLVSGM2BXH',
@@ -100,6 +118,9 @@ export const KB_INVENTORY = {
     scoping_rule: SCOPING_RULE.TEAM_ID,
     description: 'Dev team knowledge base',
     writable: true,
+    s3_bucket: 'fortress-tools',
+    s3_prefix: 'kb-docs/dev/teams',
+    metadata_key: 'teamId',
   },
   '70MDNR521D': {
     kb_id: '70MDNR521D',
@@ -110,6 +131,9 @@ export const KB_INVENTORY = {
     scoping_rule: SCOPING_RULE.PROJECT_ID,
     description: 'Dev project knowledge base',
     writable: true,
+    s3_bucket: 'fortress-tools',
+    s3_prefix: 'kb-docs/dev/project',
+    metadata_key: 'projectId',
   },
 };
 
