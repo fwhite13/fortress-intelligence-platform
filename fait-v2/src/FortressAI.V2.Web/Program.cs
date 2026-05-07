@@ -149,6 +149,9 @@ builder.Services.AddScoped<ICCExecutionService, FargateCCExecutionService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ProjectStateService>();
 
+// Workspace explorer
+builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();
+
 var app = builder.Build();
 
 // Seed mcp_servers with forge-kb entry (idempotent)
@@ -239,6 +242,62 @@ app.MapGet("/health", () => "OK").AllowAnonymous();
 // Stub: returns Starting until a future WI wires IUserAgentRuntime.GetSessionAsync()
 app.MapGet("/api/agent/status", () => Results.Ok(new { status = "Starting" })).AllowAnonymous();
 
+// Push a message from an external FIP app (e.g. FIRM) into the user's FAIT v2 inbox
+app.MapPost("/api/agent/push-message", async (
+    PushMessageRequest request,
+    IDbContextFactory<FaitV2DbContext> dbFactory,
+    HttpContext httpContext,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    if (!(httpContext.User.Identity?.IsAuthenticated ?? false))
+        return Results.Unauthorized();
+
+    var callerOid = httpContext.User.FindFirst("oid")?.Value
+                  ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+    if (string.IsNullOrEmpty(callerOid))
+        return Results.Unauthorized();
+
+    await using var db = await dbFactory.CreateDbContextAsync(ct);
+
+    var user = await db.Users
+        .FirstOrDefaultAsync(u => u.EntraOid == callerOid, ct);
+
+    if (user == null)
+        return Results.BadRequest(new { error = "User does not have a FAIT v2 account provisioned" });
+
+    var formattedContent =
+        $"📋 **Meeting Summary: {request.Title}**\n" +
+        $"*{request.MeetingDate:MMM dd, yyyy}*\n\n" +
+        $"{request.Summary}\n\n" +
+        $"---\n" +
+        $"*Pushed from FIRM. Use this context to discuss the meeting with your assistant.*";
+
+    if (!string.IsNullOrEmpty(request.Transcript))
+    {
+        formattedContent +=
+            $"\n\n---\n**Transcript excerpt:**\n\n{request.Transcript}";
+    }
+
+    db.PushedMessages.Add(new FortressAI.V2.Web.Data.Models.PushedMessage
+    {
+        Id = Guid.NewGuid().ToString(),
+        UserId = user.Id,
+        Source = request.Source,
+        Title = request.Title,
+        Content = formattedContent,
+        ExternalId = request.MeetingId,
+        MeetingDate = request.MeetingDate,
+        CreatedAt = DateTime.UtcNow
+    });
+    await db.SaveChangesAsync(ct);
+
+    logger.LogInformation("Pushed FIRM meeting {MeetingId} to FAIT v2 user {UserId}", request.MeetingId, user.Id);
+
+    return Results.Ok(new { success = true, message = "Message pushed to FAIT v2 assistant" });
+}).RequireAuthorization();
+
 // Redirect unauthenticated users to FIP portal for login
 app.MapGet("/auth/redirect-to-login", (IConfiguration cfg, HttpContext ctx) =>
 {
@@ -254,3 +313,12 @@ app.MapRazorComponents<App>()
    .RequireAuthorization();
 
 app.Run();
+
+public record PushMessageRequest(
+    string Source,
+    string Title,
+    string Summary,
+    string? Transcript,
+    string MeetingId,
+    DateTime MeetingDate
+);

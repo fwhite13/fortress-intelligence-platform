@@ -16,6 +16,7 @@ public class FaitV2DbContext : DbContext
     public DbSet<McpUserToken> McpUserTokens => Set<McpUserToken>();
     public DbSet<DesignAgentSession> DesignAgentSessions => Set<DesignAgentSession>();
     public DbSet<DesignAgentArtifact> DesignAgentArtifacts => Set<DesignAgentArtifact>();
+    public DbSet<PushedMessage> PushedMessages => Set<PushedMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -213,6 +214,30 @@ public class FaitV2DbContext : DbContext
             entity.HasOne(e => e.Session)
                   .WithMany(s => s.Artifacts)
                   .HasForeignKey(e => e.SessionId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // pushed_messages
+        modelBuilder.Entity<PushedMessage>(entity =>
+        {
+            entity.ToTable("pushed_messages");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Source).HasColumnName("source").HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Content).HasColumnName("content").HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.ExternalId).HasColumnName("external_id").HasMaxLength(100);
+            entity.Property(e => e.IsRead).HasColumnName("is_read").HasDefaultValue(false);
+            entity.Property(e => e.MeetingDate).HasColumnName("meeting_date").HasColumnType("datetime(6)");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_pushed_messages_user_id");
+            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("ix_pushed_messages_created_at");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
         });
     }

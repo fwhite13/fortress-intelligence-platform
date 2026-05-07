@@ -143,6 +143,7 @@
 @code {
     [Inject] private IUserAgentRuntime AgentRuntime { get; set; } = default!;
     [Inject] private IForgeKbService ForgeKbService { get; set; } = default!;
+    [Inject] private ProjectStateService ProjectState { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private List<ChatMessage> _messages = new();
@@ -188,7 +189,7 @@
         try
         {
             var request = new TurnRequest(
-                Message: userMessage,
+                Message: BuildContextualMessage(userMessage),
                 SystemPrompt: BuildSystemPrompt()
             );
             await foreach (var evt in AgentRuntime.SendTurnAsync(_userId, request))
@@ -213,6 +214,13 @@
             _streamingContent = "";
             StateHasChanged();
         }
+    }
+
+    private string BuildContextualMessage(string userInput)
+    {
+        return string.IsNullOrEmpty(ProjectState.ActiveProjectContext)
+            ? userInput
+            : $"[ACTIVE PROJECT CONTEXT]\n{ProjectState.ActiveProjectContext}\n\n[USER MESSAGE]\n{userInput}";
     }
 
     private string? BuildSystemPrompt()

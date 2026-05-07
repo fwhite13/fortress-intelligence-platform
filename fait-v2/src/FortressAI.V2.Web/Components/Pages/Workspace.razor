@@ -1,13 +1,193 @@
 @page "/workspace"
 @attribute [Authorize]
+@inject IWorkspaceService WorkspaceService
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
 
 <PageTitle>Workspace — FAIT v2</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Large" Class="fait-v2-page">
-    <MudText Typo="Typo.h5" Class="fait-v2-page__title">Workspace Explorer</MudText>
-    <MudText Typo="Typo.body2" Class="fait-v2-page__subtitle">Browse your files, artifacts, and projects.</MudText>
+<div class="workspace-container">
+    <div class="workspace-sidebar">
+        <div class="workspace-sidebar__title">Workspace</div>
+        @if (_folders != null)
+        {
+            @foreach (var folder in _folders)
+            {
+                <div class="workspace-folder-item @(_activeFolder == folder.Name ? "active" : "")"
+                     @onclick="() => SelectFolder(folder.Name)">
+                    <MudIcon Icon="@GetFolderIcon(folder.Name)" Size="Size.Small" />
+                    <span>@folder.Name</span>
+                    <span class="workspace-folder-count">@folder.FileCount</span>
+                </div>
+            }
+        }
+    </div>
 
-    <MudPaper Class="fait-v2-placeholder-card" Elevation="0">
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Workspace Explorer — coming in Phase D2</MudText>
-    </MudPaper>
-</MudContainer>
+    <div class="workspace-content">
+        @if (_files == null)
+        {
+            <MudProgressCircular Indeterminate="true" />
+        }
+        else if (_files.Count == 0)
+        {
+            <div class="workspace-empty">
+                <MudIcon Icon="@Icons.Material.Outlined.FolderOpen" Size="Size.Large" />
+                <p>No files in @_activeFolder yet</p>
+            </div>
+        }
+        else
+        {
+            <MudTextField @bind-Value="_searchQuery" Placeholder="Search files..."
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Outlined.Search"
+                          Class="workspace-search" Immediate="true" />
+
+            <div class="workspace-file-list">
+                @foreach (var file in FilteredFiles)
+                {
+                    <div class="workspace-file-item">
+                        <MudIcon Icon="@GetFileIcon(file.Extension)" Size="Size.Small" />
+                        <div class="workspace-file-info">
+                            <span class="workspace-file-name">@file.FileName</span>
+                            <span class="workspace-file-meta">@FormatSize(file.SizeBytes) · @file.LastModified.ToString("MMM d, yyyy")</span>
+                        </div>
+                        <div class="workspace-file-actions">
+                            @if (file.Extension == ".html")
+                            {
+                                <MudIconButton Icon="@Icons.Material.Outlined.Visibility"
+                                               Size="Size.Small" Title="Preview"
+                                               OnClick="() => PreviewFile(file)" />
+                            }
+                            <MudIconButton Icon="@Icons.Material.Outlined.Download"
+                                           Size="Size.Small" Title="Download"
+                                           OnClick="() => DownloadFile(file)" />
+                            <MudIconButton Icon="@Icons.Material.Outlined.Delete"
+                                           Size="Size.Small" Title="Delete" Color="Color.Error"
+                                           OnClick="() => ConfirmDelete(file)" />
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (_previewFile != null)
+        {
+            <div class="workspace-preview-panel">
+                <div class="workspace-preview-header">
+                    <span>@_previewFile.FileName</span>
+                    <MudIconButton Icon="@Icons.Material.Outlined.Close"
+                                   Size="Size.Small" OnClick="ClosePreview" />
+                </div>
+                <iframe src="@_previewUrl" class="workspace-preview-iframe" sandbox="allow-scripts"></iframe>
+            </div>
+        }
+    </div>
+</div>
+
+<MudDialog @bind-IsVisible="_showDeleteDialog">
+    <TitleContent>Delete file?</TitleContent>
+    <DialogContent>
+        <MudText>Delete <strong>@_fileToDelete?.FileName</strong>? This cannot be undone.</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showDeleteDialog = false">Cancel</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="DeleteConfirmed">Delete</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private List<WorkspaceFolder>? _folders;
+    private List<WorkspaceFile>? _files;
+    private string _activeFolder = "artifacts";
+    private string _searchQuery = string.Empty;
+    private WorkspaceFile? _previewFile;
+    private string? _previewUrl;
+    private bool _showDeleteDialog;
+    private WorkspaceFile? _fileToDelete;
+    private string _userId = string.Empty;
+
+    private IEnumerable<WorkspaceFile> FilteredFiles =>
+        string.IsNullOrWhiteSpace(_searchQuery)
+            ? _files ?? new List<WorkspaceFile>()
+            : (_files ?? new List<WorkspaceFile>()).Where(f => f.FileName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst("oid")?.Value
+               ?? auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+               ?? string.Empty;
+
+        _folders = await WorkspaceService.GetFolderStructureAsync(_userId);
+        await LoadFiles();
+    }
+
+    private async Task SelectFolder(string folder)
+    {
+        _activeFolder = folder;
+        _files = null;
+        await LoadFiles();
+    }
+
+    private async Task LoadFiles()
+    {
+        _files = await WorkspaceService.ListFilesAsync(_userId, _activeFolder);
+    }
+
+    private async Task DownloadFile(WorkspaceFile file)
+    {
+        var url = await WorkspaceService.GetDownloadUrlAsync(_userId, file.Key);
+        await JS.InvokeVoidAsync("open", url, "_blank");
+    }
+
+    private async Task PreviewFile(WorkspaceFile file)
+    {
+        _previewUrl = await WorkspaceService.GetDownloadUrlAsync(_userId, file.Key);
+        _previewFile = file;
+    }
+
+    private void ClosePreview() { _previewFile = null; _previewUrl = null; }
+
+    private void ConfirmDelete(WorkspaceFile file)
+    {
+        _fileToDelete = file;
+        _showDeleteDialog = true;
+    }
+
+    private async Task DeleteConfirmed()
+    {
+        if (_fileToDelete == null) return;
+        await WorkspaceService.DeleteFileAsync(_userId, _fileToDelete.Key);
+        _showDeleteDialog = false;
+        _fileToDelete = null;
+        await LoadFiles();
+        _folders = await WorkspaceService.GetFolderStructureAsync(_userId);
+    }
+
+    private static string GetFolderIcon(string folder) => folder switch
+    {
+        "artifacts"  => Icons.Material.Outlined.AutoAwesome,
+        "uploads"    => Icons.Material.Outlined.Upload,
+        "memory"     => Icons.Material.Outlined.Psychology,
+        "assistants" => Icons.Material.Outlined.SmartToy,
+        _            => Icons.Material.Outlined.Folder,
+    };
+
+    private static string GetFileIcon(string ext) => ext switch
+    {
+        ".docx" => Icons.Material.Outlined.Description,
+        ".xlsx" => Icons.Material.Outlined.TableChart,
+        ".pptx" => Icons.Material.Outlined.Slideshow,
+        ".html" => Icons.Material.Outlined.Web,
+        ".json" => Icons.Material.Outlined.DataObject,
+        ".pdf"  => Icons.Material.Outlined.PictureAsPdf,
+        _       => Icons.Material.Outlined.InsertDriveFile,
+    };
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024):F1} MB";
+    }
+}

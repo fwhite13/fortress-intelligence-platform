@@ -96,6 +96,20 @@
     </MudMainContent>
 </MudLayout>
 
+<MudDialog @bind-IsVisible="_showNewProjectDialog">
+    <TitleContent>New Project</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_newProjectName" Label="Project name" Required="true" />
+        <MudTextField @bind-Value="_newProjectDescription" Label="Description (optional)" Lines="2" Class="mt-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => _showNewProjectDialog = false">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@string.IsNullOrWhiteSpace(_newProjectName)"
+                   OnClick="CreateProject">Create</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     private bool _drawerOpen = true;
     private bool _isDarkMode = false;
@@ -106,6 +120,9 @@
     private string _entraOid = "";
     private List<ProjectSummary> _projects = new();
     private string? _selectedProjectId;
+    private bool _showNewProjectDialog;
+    private string _newProjectName = string.Empty;
+    private string? _newProjectDescription;
 
     private MudTheme _theme = FipTheme.Create();
 
@@ -152,7 +169,25 @@
 
     private void OpenNewProjectDialog()
     {
-        // Future WI: open new project dialog
+        _newProjectName = string.Empty;
+        _newProjectDescription = null;
+        _showNewProjectDialog = true;
+    }
+
+    private async Task CreateProject()
+    {
+        if (string.IsNullOrWhiteSpace(_newProjectName)) return;
+        var project = await ProjectService.CreateProjectAsync(_entraOid, _newProjectName, _newProjectDescription);
+        _projects.Add(new ProjectSummary
+        {
+            Id = project.Id,
+            Name = project.Name,
+            Description = project.Description,
+            UpdatedAt = project.UpdatedAt,
+        });
+        _showNewProjectDialog = false;
+        await SelectProjectAsync(_projects.Last());
+        StateHasChanged();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
