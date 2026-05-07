@@ -21,7 +21,9 @@ export async function adoGet(path) {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`[ADO] GET ${path} failed: ${res.status} ${res.statusText} — ${body}`);
+    const err = new Error(`[ADO] GET ${path} failed: ${res.status} ${res.statusText} — ${body}`);
+    err.statusCode = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -39,7 +41,9 @@ export async function adoPost(path, body) {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`[ADO] POST ${path} failed: ${res.status} ${res.statusText} — ${text}`);
+    const err = new Error(`[ADO] POST ${path} failed: ${res.status} ${res.statusText} — ${text}`);
+    err.statusCode = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -61,7 +65,9 @@ export async function adoPostPatch(path, body) {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`[ADO] POST(patch) ${path} failed: ${res.status} ${res.statusText} — ${text}`);
+    const err = new Error(`[ADO] POST(patch) ${path} failed: ${res.status} ${res.statusText} — ${text}`);
+    err.statusCode = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -79,7 +85,9 @@ export async function adoPatch(path, body) {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`[ADO] PATCH ${path} failed: ${res.status} ${res.statusText} — ${text}`);
+    const err = new Error(`[ADO] PATCH ${path} failed: ${res.status} ${res.statusText} — ${text}`);
+    err.statusCode = res.status;
+    throw err;
   }
   return res.json();
 }
