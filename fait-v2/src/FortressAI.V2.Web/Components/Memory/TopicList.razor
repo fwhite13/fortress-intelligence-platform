@@ -63,11 +63,15 @@
     private bool _loading = true;
     private bool _creating = false;
     private string _newSlug = "";
+    private string _lastLoadedUserId = "";
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!string.IsNullOrEmpty(UserId))
+        if (!string.IsNullOrEmpty(UserId) && UserId != _lastLoadedUserId)
+        {
+            _lastLoadedUserId = UserId;
             await LoadTopics();
+        }
     }
 
     private async Task LoadTopics()
@@ -83,7 +87,10 @@
     private async Task ConfirmCreate()
     {
         if (string.IsNullOrWhiteSpace(_newSlug)) return;
-        var slug = _newSlug.Trim().ToLower().Replace(" ", "-");
+        var slug = System.Text.RegularExpressions.Regex.Replace(
+            _newSlug.Trim().ToLower().Replace(" ", "-"),
+            @"[^a-z0-9\-_]", "");
+        if (string.IsNullOrEmpty(slug)) return;
         // Create topic with empty content skeleton
         await MemoryService.UpsertTopicAsync(UserId, slug, $"# {slug}\n\n");
         _creating = false;
