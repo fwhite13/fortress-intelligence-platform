@@ -1,0 +1,158 @@
+@using FortressAI.V2.Web.Models
+@using FortressAI.V2.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+
+@* Main chat component — lives in DualPaneLayout's ChatContent slot *@
+
+<div class="chat-container">
+
+    @* Message history — scrollable *@
+    <div class="chat-messages" @ref="_messagesRef">
+        @if (!_messages.Any())
+        {
+            <div class="chat-empty-state">
+                <MudIcon Icon="@Icons.Material.Filled.Chat" Class="chat-empty-icon" />
+                <p class="chat-empty-title">What can I help you with?</p>
+                <p class="chat-empty-subtitle">Ask anything, or start with one of your recent topics.</p>
+            </div>
+        }
+        else
+        {
+            @foreach (var msg in _messages)
+            {
+                <MessageBubble Message="@msg" />
+            }
+            @if (_isStreaming)
+            {
+                <div class="chat-streaming-indicator">
+                    <span class="chat-streaming-text">@_streamingContent</span>
+                    <span class="chat-streaming-cursor">▋</span>
+                </div>
+            }
+        }
+    </div>
+
+    @* Input bar — sticky bottom *@
+    <div class="chat-input-bar">
+        @* Top row: KB toggles *@
+        <div class="chat-input-top-row">
+            <div class="chat-kb-pills">
+                <button @onclick="ToggleFortressKb" title="Search Fortress knowledge base" style="@GetFortressKbStyle()">
+                    <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Class="chat-pill-icon" />
+                    <span class="chat-pill-label">Fortress KB</span>
+                </button>
+                <button @onclick="TogglePersonalKb" title="My personal knowledge base" style="@GetPersonalKbStyle()">
+                    <MudIcon Icon="@Icons.Material.Filled.Person" Class="chat-pill-icon" />
+                    <span class="chat-pill-label">My KB</span>
+                </button>
+            </div>
+        </div>
+        @* Bottom row: text input + send *@
+        <div class="chat-input-bottom-row">
+            <textarea class="chat-input-field"
+                      @bind="_inputText"
+                      @bind:event="oninput"
+                      @onkeydown="HandleKeyDown"
+                      placeholder="Message your assistant..."
+                      rows="1"
+                      disabled="@_isStreaming"></textarea>
+            <button class="chat-send-btn"
+                    @onclick="SendMessage"
+                    disabled="@(string.IsNullOrWhiteSpace(_inputText) || _isStreaming)"
+                    title="Send message">
+                <MudIcon Icon="@Icons.Material.Filled.Send" Class="chat-send-icon" />
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Inject] private IUserAgentRuntime AgentRuntime { get; set; } = default!;
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private List<ChatMessage> _messages = new();
+    private string _inputText = "";
+    private bool _isStreaming = false;
+    private string _streamingContent = "";
+    private ElementReference _messagesRef;
+    private string _userId = "";
+    private bool _fortressKbEnabled = false;
+    private bool _personalKbEnabled = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState == null) return;
+        var auth = await AuthState;
+        _userId = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+               ?? auth.User.FindFirst("oid")?.Value ?? "";
+    }
+
+    private string GetFortressKbStyle() =>
+        _fortressKbEnabled
+            ? "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-gold); background: var(--color-gold-muted); color: var(--color-gold); cursor: pointer;"
+            : "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); cursor: pointer;";
+
+    private string GetPersonalKbStyle() =>
+        _personalKbEnabled
+            ? "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-gold); background: var(--color-gold-muted); color: var(--color-gold); cursor: pointer;"
+            : "display: flex; align-items: center; padding: 0 var(--space-3); height: 28px; border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); cursor: pointer;";
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(_inputText) || _isStreaming) return;
+
+        var userMessage = _inputText.Trim();
+        _inputText = "";
+        _messages.Add(new ChatMessage(Role: "user", Content: userMessage));
+        _isStreaming = true;
+        _streamingContent = "";
+        StateHasChanged();
+
+        var assistantContent = new System.Text.StringBuilder();
+        try
+        {
+            var request = new TurnRequest(
+                Message: userMessage,
+                SystemPrompt: BuildSystemPrompt()
+            );
+            await foreach (var evt in AgentRuntime.SendTurnAsync(_userId, request))
+            {
+                if (evt.Type == "text" && evt.Content != null)
+                {
+                    assistantContent.Append(evt.Content);
+                    _streamingContent = assistantContent.ToString();
+                    StateHasChanged();
+                }
+                else if (evt.Type == "done" || evt.Type == "error")
+                {
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            _isStreaming = false;
+            if (assistantContent.Length > 0)
+                _messages.Add(new ChatMessage(Role: "assistant", Content: assistantContent.ToString()));
+            _streamingContent = "";
+            StateHasChanged();
+        }
+    }
+
+    private string BuildSystemPrompt()
+    {
+        var parts = new List<string>();
+        if (_fortressKbEnabled) parts.Add("Search the Fortress knowledge base for relevant context.");
+        if (_personalKbEnabled) parts.Add("Search the user's personal knowledge base for relevant context.");
+        return string.Join(" ", parts);
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+            await SendMessage();
+    }
+
+    private void ToggleFortressKb() => _fortressKbEnabled = !_fortressKbEnabled;
+    private void TogglePersonalKb() => _personalKbEnabled = !_personalKbEnabled;
+}

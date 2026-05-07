@@ -1,0 +1,18 @@
+@using FortressAI.V2.Web.Models
+
+@* Single chat message bubble *@
+
+<div class="message-bubble @(Message.Role == "user" ? "message-user" : "message-assistant")">
+    <div class="message-content">@((MarkupString)RenderMarkdown(Message.Content))</div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ChatMessage Message { get; set; } = default!;
+
+    private string RenderMarkdown(string content)
+    {
+        // TODO: wire Markdig in Sprint 3 — for now, render as plain text with line breaks
+        return System.Net.WebUtility.HtmlEncode(content)
+            .Replace("\n", "<br/>");
+    }
+}
