@@ -6,6 +6,7 @@ using MudBlazor.Services;
 using Serilog;
 using Microsoft.EntityFrameworkCore;
 using FortressAI.V2.Web.Components;
+using FortressAI.V2.Web.Components.Hubs;
 using FortressAI.V2.Web.Data;
 using FortressAI.V2.Web.Services;
 
@@ -141,6 +142,9 @@ builder.Services.AddScoped<IDesignAgentService, DesignAgentService>();
 // Connector management
 builder.Services.AddScoped<IConnectorService, ConnectorService>();
 
+// CC execution service (child process orchestration)
+builder.Services.AddScoped<ICCExecutionService, FargateCCExecutionService>();
+
 var app = builder.Build();
 
 // Seed mcp_servers with forge-kb entry (idempotent)
@@ -221,6 +225,9 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
+
+// CC progress hub
+app.MapHub<CCProgressHub>("/hubs/cc-progress");
 
 // Health endpoint — public
 app.MapGet("/health", () => "OK").AllowAnonymous();
