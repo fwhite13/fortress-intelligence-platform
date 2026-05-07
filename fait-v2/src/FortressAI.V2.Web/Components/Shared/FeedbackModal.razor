@@ -97,7 +97,16 @@
             });
         });
 
-        await _hubConnection.StartAsync();
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            // Hub connection is non-critical — feedback modal degrades gracefully if /hubs/cc-progress is unavailable
+            // Do NOT let this crash the page
+            _ = ex; // suppress unused-variable warning
+        }
     }
 
     private async Task Submit()
