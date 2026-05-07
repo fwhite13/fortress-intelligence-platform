@@ -483,6 +483,8 @@
             else
                 result = await DesignAgent.GenerateScreenAsync(_userId, prompt, _designDnaContext);
 
+            _currentSessionId = result.SessionId ?? _currentSessionId;
+
             if (result.IsFallback)
                 _stitchUnavailableNotice = true;
 
