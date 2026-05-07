@@ -106,6 +106,9 @@ builder.Services.AddHttpClient("FipMcpClient");
 builder.Services.AddScoped<IFipTokenProvider, FipTokenProvider>();
 builder.Services.AddScoped<IForgeKbService, ForgeKbService>();
 
+// Design Agent
+builder.Services.AddScoped<IDesignAgentService, DesignAgentService>();
+
 var app = builder.Build();
 
 // Seed mcp_servers with forge-kb entry (idempotent)

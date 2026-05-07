@@ -6,6 +6,35 @@
 
 <div class="chat-container">
 
+    @* Agent selector toolbar *@
+    <div class="chat-agent-toolbar">
+        <div class="chat-agent-pills">
+            <button class="chat-agent-pill @(_activeAgent == ActiveAgent.MainAssistant ? "chat-agent-pill-active" : "")"
+                    @onclick="@(() => SetAgent(ActiveAgent.MainAssistant))"
+                    title="Main assistant">
+                <MudIcon Icon="@Icons.Material.Filled.Chat" Class="chat-pill-icon" />
+                <span class="chat-pill-label">Assistant</span>
+            </button>
+            <button class="chat-agent-pill @(_activeAgent == ActiveAgent.DesignAgent ? "chat-agent-pill-active" : "")"
+                    @onclick="@(() => SetAgent(ActiveAgent.DesignAgent))"
+                    title="Design Agent — create UI with Stitch">
+                <MudIcon Icon="@Icons.Material.Filled.Palette" Class="chat-pill-icon" />
+                <span class="chat-pill-label">Design Agent</span>
+            </button>
+        </div>
+        @if (_activeAgent == ActiveAgent.DesignAgent)
+        {
+            <AgentPluginBadge AgentName="Design Agent" IsActive="true" />
+        }
+    </div>
+
+    @if (_activeAgent == ActiveAgent.DesignAgent)
+    {
+        <DesignAgentView />
+    }
+    else
+    {
+
     @* Message history — scrollable *@
     <div class="chat-messages" @ref="_messagesRef">
         @if (!_messages.Any())
@@ -64,7 +93,52 @@
             </button>
         </div>
     </div>
+
+    } @* end else (MainAssistant) *@
+
 </div>
+
+<style>
+    .chat-agent-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-2) var(--space-4);
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface);
+    }
+
+    .chat-agent-pills {
+        display: flex;
+        gap: var(--space-2);
+    }
+
+    .chat-agent-pill {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-3);
+        height: 28px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+        transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base);
+    }
+
+    .chat-agent-pill:hover {
+        background: var(--color-surface-hover);
+        color: var(--color-text-primary);
+    }
+
+    .chat-agent-pill-active {
+        border-color: var(--color-accent);
+        background: var(--color-accent-bg);
+        color: var(--color-accent);
+    }
+</style>
 
 @code {
     [Inject] private IUserAgentRuntime AgentRuntime { get; set; } = default!;
@@ -79,6 +153,7 @@
     private string _userId = "";
     private bool _fortressKbEnabled = false;
     private bool _personalKbEnabled = true;
+    private ActiveAgent _activeAgent = ActiveAgent.MainAssistant;
 
     protected override async Task OnInitializedAsync()
     {
@@ -156,4 +231,6 @@
 
     private void ToggleFortressKb() => _fortressKbEnabled = !_fortressKbEnabled;
     private void TogglePersonalKb() => _personalKbEnabled = !_personalKbEnabled;
+
+    private void SetAgent(ActiveAgent agent) => _activeAgent = agent;
 }

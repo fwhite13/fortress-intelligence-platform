@@ -1,0 +1,544 @@
+@using FortressAI.V2.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+
+@* DesignAgentView — chat interface for the Design Agent *@
+
+<div class="design-agent-container">
+
+    @* Header *@
+    <div class="design-agent-header">
+        <AgentPluginBadge AgentName="Design Agent" IsActive="true" />
+        @if (_stitchUnavailableNotice)
+        {
+            <div class="design-agent-fallback-notice">
+                <MudIcon Icon="@Icons.Material.Filled.Info" Class="design-agent-notice-icon" />
+                <span>Stitch unavailable — using CC-native generation</span>
+            </div>
+        }
+    </div>
+
+    @* Turn history *@
+    <div class="design-agent-messages" @ref="_messagesRef">
+        @if (!_turns.Any())
+        {
+            <div class="design-agent-empty">
+                <MudIcon Icon="@Icons.Material.Filled.Palette" Class="design-agent-empty-icon" />
+                <p class="design-agent-empty-title">Design with AI</p>
+                <p class="design-agent-empty-subtitle">Describe the UI you need, or drag in an image for reference.</p>
+            </div>
+        }
+        else
+        {
+            @foreach (var turn in _turns)
+            {
+                <div class="design-agent-turn design-agent-turn-@turn.Role">
+                    <div class="design-agent-bubble">@turn.Text</div>
+                    @if (turn.Result != null)
+                    {
+                        <DesignArtifactCard
+                            ArtifactName="@turn.ArtifactName"
+                            Html="@turn.Result.Html"
+                            IsFallback="@turn.Result.IsFallback"
+                            OnOpenPreview="@(() => OpenPreview(turn.Result.Html))" />
+                    }
+                </div>
+            }
+        }
+
+        @if (_isGenerating)
+        {
+            <div class="design-agent-generating">
+                <div class="design-agent-spinner"></div>
+                <span class="design-agent-generating-text">Generating design...</span>
+            </div>
+        }
+    </div>
+
+    @* Preview panel (shows when a design is selected) *@
+    @if (_previewHtml != null)
+    {
+        <div class="design-agent-preview-panel">
+            <div class="design-agent-preview-header">
+                <span class="design-agent-preview-label">Preview</span>
+                <button class="design-agent-preview-close" @onclick="ClosePreview">
+                    <MudIcon Icon="@Icons.Material.Filled.Close" Class="design-agent-preview-close-icon" />
+                </button>
+            </div>
+            <iframe class="design-agent-preview-iframe"
+                    srcdoc="@_previewHtml"
+                    sandbox="allow-same-origin allow-scripts"
+                    title="Design preview"></iframe>
+        </div>
+    }
+
+    @* Input bar *@
+    <div class="design-agent-input-bar">
+        @* Image drop zone *@
+        <InputFile id="design-image-upload"
+                   OnChange="HandleImageUpload"
+                   accept="image/*"
+                   style="display:none;" />
+
+        <div class="design-agent-input-row">
+            <label for="design-image-upload" class="design-agent-image-btn" title="Upload reference image">
+                <MudIcon Icon="@Icons.Material.Filled.Image" Class="design-agent-image-icon" />
+            </label>
+
+            <textarea class="design-agent-input-field"
+                      @bind="_inputText"
+                      @bind:event="oninput"
+                      @onkeydown="HandleKeyDown"
+                      placeholder="Describe the UI you want to create..."
+                      rows="1"
+                      disabled="@_isGenerating"></textarea>
+
+            <button class="design-agent-send-btn"
+                    @onclick="SendPrompt"
+                    disabled="@(string.IsNullOrWhiteSpace(_inputText) || _isGenerating)"
+                    title="Generate design">
+                <MudIcon Icon="@Icons.Material.Filled.Send" Class="design-agent-send-icon" />
+            </button>
+        </div>
+
+        @if (_uploadedImageName != null)
+        {
+            <div class="design-agent-image-tag">
+                <MudIcon Icon="@Icons.Material.Filled.Image" Class="design-agent-image-tag-icon" />
+                <span>@_uploadedImageName</span>
+                <button class="design-agent-image-tag-remove" @onclick="ClearImage">
+                    <MudIcon Icon="@Icons.Material.Filled.Close" Class="design-agent-image-tag-remove-icon" />
+                </button>
+            </div>
+        }
+    </div>
+</div>
+
+<style>
+    .design-agent-container {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        background: var(--color-bg);
+    }
+
+    .design-agent-header {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface);
+    }
+
+    .design-agent-fallback-notice {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--font-size-sm);
+        color: var(--color-gold);
+        background: var(--color-gold-muted);
+        border: 1px solid var(--color-gold);
+        border-radius: var(--radius-md);
+        padding: var(--space-1) var(--space-3);
+    }
+
+    .design-agent-notice-icon {
+        font-size: 14px !important;
+        width: 14px !important;
+        height: 14px !important;
+    }
+
+    .design-agent-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
+    }
+
+    .design-agent-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        gap: var(--space-3);
+        color: var(--color-text-secondary);
+        text-align: center;
+        padding: var(--space-8) var(--space-4);
+    }
+
+    .design-agent-empty-icon {
+        font-size: 48px !important;
+        width: 48px !important;
+        height: 48px !important;
+        opacity: 0.4;
+    }
+
+    .design-agent-empty-title {
+        font-size: var(--font-size-lg);
+        font-weight: 600;
+        color: var(--color-text-primary);
+        margin: 0;
+    }
+
+    .design-agent-empty-subtitle {
+        font-size: var(--font-size-sm);
+        color: var(--color-text-secondary);
+        margin: 0;
+    }
+
+    .design-agent-turn {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+    }
+
+    .design-agent-turn-user {
+        align-items: flex-end;
+    }
+
+    .design-agent-turn-assistant {
+        align-items: flex-start;
+    }
+
+    .design-agent-bubble {
+        max-width: 600px;
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius-lg);
+        font-size: var(--font-size-base);
+        line-height: 1.5;
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+        border: 1px solid var(--color-border);
+    }
+
+    .design-agent-turn-user .design-agent-bubble {
+        background: var(--color-accent-bg);
+        border-color: var(--color-accent);
+        color: var(--color-text-primary);
+    }
+
+    .design-agent-generating {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-sm);
+        padding: var(--space-2) 0;
+    }
+
+    .design-agent-spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--color-border);
+        border-top-color: var(--color-accent);
+        border-radius: 50%;
+        animation: design-spin 0.8s linear infinite;
+    }
+
+    @@keyframes design-spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .design-agent-preview-panel {
+        border-top: 1px solid var(--color-border);
+        background: var(--color-bg-secondary);
+        display: flex;
+        flex-direction: column;
+        height: 380px;
+    }
+
+    .design-agent-preview-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-2) var(--space-4);
+        border-bottom: 1px solid var(--color-border);
+        background: var(--color-surface);
+    }
+
+    .design-agent-preview-label {
+        font-size: var(--font-size-sm);
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .design-agent-preview-close {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        color: var(--color-text-secondary);
+        padding: var(--space-1);
+        border-radius: var(--radius-sm);
+    }
+
+    .design-agent-preview-close:hover {
+        background: var(--color-surface-hover);
+        color: var(--color-text-primary);
+    }
+
+    .design-agent-preview-close-icon {
+        font-size: 16px !important;
+        width: 16px !important;
+        height: 16px !important;
+    }
+
+    .design-agent-preview-iframe {
+        flex: 1;
+        width: 100%;
+        border: none;
+    }
+
+    .design-agent-input-bar {
+        border-top: 1px solid var(--color-border);
+        padding: var(--space-3) var(--space-4);
+        background: var(--color-surface);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+
+    .design-agent-input-row {
+        display: flex;
+        align-items: flex-end;
+        gap: var(--space-2);
+    }
+
+    .design-agent-image-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        background: transparent;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        transition: background var(--transition-base), color var(--transition-base);
+        flex-shrink: 0;
+    }
+
+    .design-agent-image-btn:hover {
+        background: var(--color-surface-hover);
+        color: var(--color-text-primary);
+    }
+
+    .design-agent-image-icon {
+        font-size: 18px !important;
+        width: 18px !important;
+        height: 18px !important;
+    }
+
+    .design-agent-input-field {
+        flex: 1;
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-3);
+        color: var(--color-text-primary);
+        font-size: var(--font-size-base);
+        resize: none;
+        outline: none;
+        min-height: 36px;
+        max-height: 120px;
+        font-family: inherit;
+        line-height: 1.5;
+    }
+
+    .design-agent-input-field:focus {
+        border-color: var(--color-accent);
+    }
+
+    .design-agent-input-field:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .design-agent-send-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: var(--radius-md);
+        border: none;
+        background: var(--color-accent);
+        color: var(--color-on-accent);
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: opacity var(--transition-base);
+    }
+
+    .design-agent-send-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .design-agent-send-icon {
+        font-size: 18px !important;
+        width: 18px !important;
+        height: 18px !important;
+    }
+
+    .design-agent-image-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-3);
+        border-radius: var(--radius-md);
+        background: var(--color-accent-bg);
+        border: 1px solid var(--color-accent);
+        color: var(--color-accent);
+        font-size: var(--font-size-sm);
+        align-self: flex-start;
+    }
+
+    .design-agent-image-tag-icon {
+        font-size: 14px !important;
+        width: 14px !important;
+        height: 14px !important;
+    }
+
+    .design-agent-image-tag-remove {
+        background: transparent;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        color: var(--color-accent);
+        padding: 0;
+    }
+
+    .design-agent-image-tag-remove-icon {
+        font-size: 12px !important;
+        width: 12px !important;
+        height: 12px !important;
+    }
+</style>
+
+@code {
+    [Inject] private IDesignAgentService DesignAgent { get; set; } = default!;
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string _userId = "";
+    private string _inputText = "";
+    private bool _isGenerating = false;
+    private bool _stitchUnavailableNotice = false;
+    private string? _previewHtml;
+    private string? _uploadedImageBase64;
+    private string? _uploadedImageName;
+    private string? _designDnaContext;
+    private string _currentSessionId = Guid.NewGuid().ToString();
+    private ElementReference _messagesRef;
+
+    private List<DesignTurn> _turns = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState == null) return;
+        var auth = await AuthState;
+        _userId = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+               ?? auth.User.FindFirst("oid")?.Value ?? "";
+
+        _stitchUnavailableNotice = !await DesignAgent.IsStitchAvailableAsync();
+    }
+
+    private async Task SendPrompt()
+    {
+        if (string.IsNullOrWhiteSpace(_inputText) || _isGenerating) return;
+
+        var prompt = _inputText.Trim();
+        _inputText = "";
+        _isGenerating = true;
+
+        _turns.Add(new DesignTurn("user", prompt, null, string.Empty));
+        StateHasChanged();
+
+        try
+        {
+            // If an image was uploaded, extract design DNA first
+            if (_uploadedImageBase64 != null && _designDnaContext == null)
+            {
+                _designDnaContext = await DesignAgent.ExtractDesignContextAsync(_userId, _uploadedImageBase64);
+                _uploadedImageBase64 = null;
+                _uploadedImageName = null;
+            }
+
+            DesignAgentResult result;
+            var lastScreenId = _turns
+                .LastOrDefault(t => t.Result?.ScreenId != null)
+                ?.Result?.ScreenId;
+
+            if (lastScreenId != null)
+                result = await DesignAgent.RefineScreenAsync(_userId, lastScreenId, prompt);
+            else
+                result = await DesignAgent.GenerateScreenAsync(_userId, prompt, _designDnaContext);
+
+            if (result.IsFallback)
+                _stitchUnavailableNotice = true;
+
+            // Save to S3
+            var artifactName = $"design-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+            await DesignAgent.SaveArtifactAsync(_userId, _currentSessionId, result.Html, artifactName);
+
+            _turns.Add(new DesignTurn("assistant", "Here's your design:", result, artifactName));
+        }
+        catch (Exception)
+        {
+            _turns.Add(new DesignTurn("assistant", "Something went wrong. Please try again.", null, string.Empty));
+        }
+        finally
+        {
+            _isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+            await SendPrompt();
+    }
+
+    private async Task HandleImageUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null) return;
+
+        const long MaxBytes = 5 * 1024 * 1024; // 5 MB
+        using var ms = new System.IO.MemoryStream();
+        await using var stream = file.OpenReadStream(MaxBytes);
+        await stream.CopyToAsync(ms);
+        _uploadedImageBase64 = Convert.ToBase64String(ms.ToArray());
+        _uploadedImageName = file.Name;
+        _designDnaContext = null;
+        StateHasChanged();
+    }
+
+    private void ClearImage()
+    {
+        _uploadedImageBase64 = null;
+        _uploadedImageName = null;
+        _designDnaContext = null;
+    }
+
+    private void OpenPreview(string html)
+    {
+        _previewHtml = html;
+    }
+
+    private void ClosePreview()
+    {
+        _previewHtml = null;
+    }
+
+    private sealed record DesignTurn(string Role, string Text, DesignAgentResult? Result, string ArtifactName);
+}
