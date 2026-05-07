@@ -44,6 +44,28 @@ export async function adoPost(path, body) {
   return res.json();
 }
 
+/**
+ * POST with JSON Patch content type — used for work item creation.
+ * ADO create work item requires HTTP POST but with application/json-patch+json body.
+ */
+export async function adoPostPatch(path, body) {
+  const url = `${BASE_URL}${path}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': getAuthHeader(),
+      'Content-Type': 'application/json-patch+json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`[ADO] POST(patch) ${path} failed: ${res.status} ${res.statusText} — ${text}`);
+  }
+  return res.json();
+}
+
 export async function adoPatch(path, body) {
   const url = `${BASE_URL}${path}`;
   const res = await fetch(url, {

@@ -1,5 +1,5 @@
 // src/tools/ado/create_work_item.js
-import { adoPatch, getAdoOrg } from './ado-client.js';
+import { adoPostPatch, getAdoOrg } from './ado-client.js';
 
 /**
  * Create a work item in an ADO project.
@@ -33,7 +33,7 @@ export async function createAdoWorkItem(user, { project, type, title, descriptio
 
   // Work item type in URL: $ + encoded type name
   const typeSegment = `$${encodeURIComponent(type)}`;
-  const wi = await adoPatch(`/${encodeURIComponent(project)}/_apis/wit/workitems/${typeSegment}?api-version=7.1`, ops);
+  const wi = await adoPostPatch(`/${encodeURIComponent(project)}/_apis/wit/workitems/${typeSegment}?api-version=7.1`, ops);
   const f = wi.fields ?? {};
 
   return {
