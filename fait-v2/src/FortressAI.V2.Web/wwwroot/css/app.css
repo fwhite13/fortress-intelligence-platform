@@ -1208,3 +1208,223 @@
 .workspace-preview-panel { position: fixed; right: 0; top: 64px; width: 50%; height: calc(100vh - 64px); background: var(--color-surface); border-left: 1px solid var(--color-border); display: flex; flex-direction: column; z-index: 100; }
 .workspace-preview-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border); font-weight: 500; }
 .workspace-preview-iframe { flex: 1; border: none; }
+
+/* ============================================================
+   ADO#2878 — Scheduled Tasks page
+   ============================================================ */
+
+.tasks-page__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: var(--space-4);
+    gap: var(--space-3);
+}
+
+.tasks-page__header-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.tasks-page__new-btn {
+    flex-shrink: 0;
+}
+
+.tasks-page__loading {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-8);
+}
+
+.tasks-page__tabs {
+    margin-top: var(--space-2);
+}
+
+.tasks-page__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-10) var(--space-4);
+    color: var(--color-text-secondary);
+    text-align: center;
+}
+
+.tasks-page__empty-icon {
+    font-size: 48px !important;
+    opacity: 0.3;
+    color: var(--color-text-secondary);
+}
+
+.tasks-page__empty-text {
+    color: var(--color-text-primary);
+    font-weight: 500;
+}
+
+.tasks-page__empty-sub {
+    color: var(--color-text-secondary);
+    font-size: var(--text-sm);
+}
+
+.tasks-page__table-wrap {
+    overflow-x: auto;
+}
+
+.tasks-page__table {
+    background: transparent !important;
+}
+
+.tasks-page__task-name {
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.tasks-page__cron {
+    font-family: monospace;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+.tasks-page__next-run {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+.tasks-page__on-demand-label {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    font-style: italic;
+}
+
+.tasks-page__status-chip {
+    text-transform: capitalize;
+}
+
+.tasks-page__actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.tasks-page__run-started {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+.tasks-page__run-duration {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+/* Mobile card layout — shown only at < 768px */
+.tasks-page__card-list {
+    display: none;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3) 0;
+}
+
+.tasks-page__card {
+    border: 1px solid var(--color-border) !important;
+}
+
+.tasks-page__card-content {
+    padding: var(--space-3) !important;
+}
+
+.tasks-page__card-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+}
+
+.tasks-page__card-row--title {
+    justify-content: space-between;
+    margin-bottom: var(--space-2);
+}
+
+.tasks-page__card-meta-icon {
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+
+.tasks-page__card-meta {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+.tasks-page__card-actions {
+    padding: 0 var(--space-2) var(--space-1) !important;
+}
+
+@media (max-width: 768px) {
+    .tasks-page__table-wrap {
+        display: none;
+    }
+    .tasks-page__card-list {
+        display: flex;
+    }
+    .tasks-page__header {
+        flex-wrap: wrap;
+    }
+}
+
+/* Task edit dialog */
+.task-edit-dialog__form {
+    display: flex;
+    flex-direction: column;
+}
+
+.task-edit-dialog__field {
+    width: 100%;
+}
+
+.task-edit-dialog__schedule-toggle {
+    display: flex;
+    gap: var(--space-3);
+}
+
+.task-edit-dialog__alerts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.task-edit-dialog__switch {
+    margin: 0;
+}
+
+/* Dashboard scheduled tasks summary widget */
+.dashboard-tasks-widget {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-primary);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+}
+
+.dashboard-tasks-widget__icon {
+    color: var(--color-primary);
+    font-size: 18px !important;
+    flex-shrink: 0;
+}
+
+.dashboard-tasks-widget__text {
+    flex: 1;
+    color: var(--color-text-secondary);
+}
+
+.dashboard-tasks-widget__link {
+    font-size: var(--text-sm);
+    color: var(--color-primary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}

@@ -72,20 +72,20 @@
                                     <div class="tasks-page__actions">
                                         <MudIconButton Icon="@Icons.Material.Outlined.Edit"
                                                        Size="Size.Small"
-                                                       Title="Edit"
+                                                       title="Edit"
                                                        OnClick="() => OpenEditDialog(context)" />
                                         <MudIconButton Icon="@(context.IsActive ? Icons.Material.Outlined.PauseCircle : Icons.Material.Outlined.PlayCircle)"
                                                        Size="Size.Small"
-                                                       Title="@(context.IsActive ? "Pause" : "Resume")"
+                                                       title="@(context.IsActive ? "Pause" : "Resume")"
                                                        OnClick="() => ToggleActiveAsync(context)" />
                                         <MudIconButton Icon="@Icons.Material.Outlined.PlayArrow"
                                                        Size="Size.Small"
-                                                       Title="Run Now"
+                                                       title="Run Now"
                                                        OnClick="() => RunNowAsync(context)" />
                                         <MudIconButton Icon="@Icons.Material.Outlined.Delete"
                                                        Size="Size.Small"
                                                        Color="Color.Error"
-                                                       Title="Delete"
+                                                       title="Delete"
                                                        OnClick="() => ConfirmDeleteAsync(context)" />
                                     </div>
                                 </MudTd>
@@ -116,12 +116,12 @@
                                     </div>
                                 </MudCardContent>
                                 <MudCardActions Class="tasks-page__card-actions">
-                                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" Title="Edit" OnClick="() => OpenEditDialog(t)" />
+                                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" title="Edit" OnClick="() => OpenEditDialog(t)" />
                                     <MudIconButton Icon="@(t.IsActive ? Icons.Material.Outlined.PauseCircle : Icons.Material.Outlined.PlayCircle)"
-                                                   Size="Size.Small" Title="@(t.IsActive ? "Pause" : "Resume")"
+                                                   Size="Size.Small" title="@(t.IsActive ? "Pause" : "Resume")"
                                                    OnClick="() => ToggleActiveAsync(t)" />
-                                    <MudIconButton Icon="@Icons.Material.Outlined.PlayArrow" Size="Size.Small" Title="Run Now" OnClick="() => RunNowAsync(t)" />
-                                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" Color="Color.Error" Title="Delete" OnClick="() => ConfirmDeleteAsync(t)" />
+                                    <MudIconButton Icon="@Icons.Material.Outlined.PlayArrow" Size="Size.Small" title="Run Now" OnClick="() => RunNowAsync(t)" />
+                                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" Color="Color.Error" title="Delete" OnClick="() => ConfirmDeleteAsync(t)" />
                                 </MudCardActions>
                             </MudCard>
                         }
@@ -168,9 +168,9 @@
                                 </MudTd>
                                 <MudTd DataLabel="Actions">
                                     <div class="tasks-page__actions">
-                                        <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" Title="Edit" OnClick="() => OpenEditDialog(context)" />
-                                        <MudIconButton Icon="@Icons.Material.Outlined.PlayArrow" Size="Size.Small" Title="Run Now" OnClick="() => RunNowAsync(context)" />
-                                        <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" Color="Color.Error" Title="Delete" OnClick="() => ConfirmDeleteAsync(context)" />
+                                        <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" title="Edit" OnClick="() => OpenEditDialog(context)" />
+                                        <MudIconButton Icon="@Icons.Material.Outlined.PlayArrow" Size="Size.Small" title="Run Now" OnClick="() => RunNowAsync(context)" />
+                                        <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" Color="Color.Error" title="Delete" OnClick="() => ConfirmDeleteAsync(context)" />
                                     </div>
                                 </MudTd>
                             </RowTemplate>
@@ -201,9 +201,9 @@
                                     }
                                 </MudCardContent>
                                 <MudCardActions Class="tasks-page__card-actions">
-                                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" Title="Edit" OnClick="() => OpenEditDialog(t)" />
-                                    <MudIconButton Icon="@Icons.Material.Outlined.PlayArrow" Size="Size.Small" Title="Run Now" OnClick="() => RunNowAsync(t)" />
-                                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" Color="Color.Error" Title="Delete" OnClick="() => ConfirmDeleteAsync(t)" />
+                                    <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" title="Edit" OnClick="() => OpenEditDialog(t)" />
+                                    <MudIconButton Icon="@Icons.Material.Outlined.PlayArrow" Size="Size.Small" title="Run Now" OnClick="() => RunNowAsync(t)" />
+                                    <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" Color="Color.Error" title="Delete" OnClick="() => ConfirmDeleteAsync(t)" />
                                 </MudCardActions>
                             </MudCard>
                         }
