@@ -1,5 +1,129 @@
 # Review Report — ADO#2844
 
+---
+
+## Review Cycle 2 — ADO#2844
+
+**WI:** FAIT v2: User provisioning service
+**Commit:** `09b6ce1`
+**Review Cycle:** 2 of 2 (reopened)
+**Reviewer:** Hawkeye (Clint Barton)
+**CC Invocation:** `cat pipeline/review-c2-brief.md | claude --model sonnet --print --dangerously-skip-permissions`
+
+---
+
+## Verdict: NEEDS-CHANGES
+
+C1, N1, N2 all verified clean. N3 migration `Up()` is empty — the unique constraint on `memory_topics(user_id, topic_slug)` will **never be applied to the database**.
+
+---
+
+## Cycle 2 Fix Verification
+
+### C1 — Per-step diagnostic flags ✅ PASS
+
+Four flags declared at lines 119–122 of `UserProvisioningService.cs`:
+```csharp
+var s3Complete = false;
+var pgComplete = false;
+var auroraAddComplete = false;
+var seedComplete = false;
+```
+
+All set correctly — each flag set only after its step fully completes:
+- `s3Complete = true` — line 174, after all 4 S3 writes complete
+- `pgComplete = true` — line 180, after `CreatePgSchemaAsync` returns
+- `auroraAddComplete = true` — line 196, after `_db.MainAssistants.Add()`
+- `seedComplete = true` — line 218, after memory_topics seeding loop
+
+`FailedStep` ternary (lines 277–281):
+```csharp
+!s3Complete ? "s3-write"
+    : !pgComplete ? "pg-schema"
+    : !auroraAddComplete ? "aurora-record"
+    : !seedComplete ? "memory-topics-seed"
+    : "aurora-save"
+```
+Exact order correct. No `auroraRecordCreated` flag remaining. ✅
+
+---
+
+### N1 — CancellationToken in DropPgSchemaAsync ✅ PASS
+
+- Signature (line 337): `CancellationToken ct = default` ✅
+- `OpenAsync(ct)` — line 340 ✅
+- `ExecuteNonQueryAsync(ct)` — line 342 ✅
+- Call site (line 240): `await DropPgSchemaAsync(pgConnString, schemaName, ct)` — passes `ct` ✅
+
+---
+
+### N2 — Guid.TryParse guard ✅ PASS
+
+Lines 90–91, first executable lines of `ProvisionAsync`:
+```csharp
+if (!Guid.TryParse(userId, out _))
+    throw new ArgumentException($"userId must be a valid GUID, got: {userId}", nameof(userId));
+```
+Guard precedes `_db.Users.FirstOrDefaultAsync` (line 96). ✅
+
+---
+
+### N3 — Migration AddMemoryTopicsUniqueConstraint ❌ CRITICAL FAIL
+
+**`Up()` body is empty:**
+```csharp
+protected override void Up(MigrationBuilder migrationBuilder)
+{
+
+}
+```
+**`Down()` body is also empty.**
+
+The Designer.cs snapshot correctly shows `HasIndex("UserId", "TopicSlug").IsUnique()` for `MemoryTopic` — but that only reflects the EF model state. The actual DDL (`CREATE UNIQUE INDEX`) was never generated into `Up()`. Running `dotnet ef database update` against this migration does nothing to the database. The constraint will not be applied.
+
+Additional indicator: `FaitV2DbContextModelSnapshot.cs` is absent from the diff between `5754984` → `09b6ce1`. A proper `dotnet ef migrations add` run would update the global snapshot alongside the Designer.cs. Its absence confirms the migration was not generated correctly by the EF tooling.
+
+---
+
+### Scope Check ✅ PASS
+
+No unexpected files changed. Files changed between `5754984` → `09b6ce1` (excluding pipeline docs):
+- `Services/UserProvisioningService.cs` ✅
+- `Data/Migrations/20260507010358_AddMemoryTopicsUniqueConstraint.cs` ✅
+- `Data/Migrations/20260507010358_AddMemoryTopicsUniqueConstraint.Designer.cs` ✅
+- `Data/Migrations/FaitV2DbContextModelSnapshot.cs` — **absent** (consistent with N3 defect)
+
+---
+
+## Issues Found
+
+| Severity | File | Issue | Fix |
+|----------|------|-------|-----|
+| Critical | `Data/Migrations/20260507010358_AddMemoryTopicsUniqueConstraint.cs` | `Up()` is empty — unique constraint on `memory_topics(user_id, topic_slug)` will never be applied to DB | Delete migration, verify `HasIndex(...).IsUnique()` in `OnModelCreating`, re-run `dotnet ef migrations add AddMemoryTopicsUniqueConstraint` |
+
+---
+
+## What Tony needs to fix
+
+**One fix required before this ships:**
+
+Delete `20260507010358_AddMemoryTopicsUniqueConstraint.cs` and `20260507010358_AddMemoryTopicsUniqueConstraint.Designer.cs`. Verify that `FaitV2DbContext.OnModelCreating` has `HasIndex(e => new { e.UserId, e.TopicSlug }).IsUnique()` on `MemoryTopic`. Then run:
+```bash
+dotnet ef migrations add AddMemoryTopicsUniqueConstraint
+```
+This will generate `Up()` with the correct `migrationBuilder.CreateIndex(...)` call and update `FaitV2DbContextModelSnapshot.cs`. Both files must be committed.
+
+---
+
+_Reviewed by Hawkeye — cycle 2/2. N3 migration empty — fix and resubmit._
+
+---
+
+# Cycle 1 Report (original below)
+
+---
+
+
 **WI:** FAIT v2: User provisioning service — S3 prefix, memory files, RDS PostgreSQL schema + pgvector, Aurora records  
 **Commit:** `5754984`  
 **Review Cycle:** 1 of 2  

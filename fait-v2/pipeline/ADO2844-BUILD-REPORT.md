@@ -102,6 +102,40 @@ Pending — awaiting pipeline dispatch.
 
 ---
 
+---
+
+## Build Cycle 2 — ADO#2844
+
+**Commit:** `09b6ce1` — `fix(fait-v2#2844): per-step diagnostic flags, CT propagation, GUID guard, migration`
+**Triggered by:** Review cycle 1 — Clint's NEEDS-CHANGES verdict
+
+### What was fixed
+
+| Fix | Category | What changed |
+|---|---|---|
+| C1 | Required | Replaced `auroraRecordCreated` single flag with four per-step diagnostic flags: `s3Complete`, `pgComplete`, `auroraAddComplete`, `seedComplete`. FailedStep ternary now correctly identifies all 5 failure stages: `s3-write` → `pg-schema` → `aurora-record` → `memory-topics-seed` → `aurora-save` |
+| N1 | Nitpick | `DropPgSchemaAsync` now accepts `CancellationToken ct = default`; passes `ct` to `OpenAsync(ct)` and `ExecuteNonQueryAsync(ct)`. Rollback call site updated accordingly. |
+| N2 | Nitpick | Added `Guid.TryParse` guard at top of `ProvisionAsync` — throws `ArgumentException` before any DB/S3 access if `userId` is not a valid GUID. |
+| N3 | Nitpick | `FaitV2DbContext.OnModelCreating` already had `HasIndex(e => new { e.UserId, e.TopicSlug }).IsUnique()` from cycle 1. Added EF migration `20260507010358_AddMemoryTopicsUniqueConstraint` to apply it to the schema. |
+
+### Files changed
+- `Services/UserProvisioningService.cs` — C1, N1, N2
+- `Data/Migrations/20260507010358_AddMemoryTopicsUniqueConstraint.cs` — new migration
+- `Data/Migrations/20260507010358_AddMemoryTopicsUniqueConstraint.Designer.cs` — scaffolded
+- `Data/Migrations/FaitV2DbContextModelSnapshot.cs` — updated
+
+### Build result
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+```
+
+### Migration name
+`20260507010358_AddMemoryTopicsUniqueConstraint`
+
+---
+
 ## Notes for Clint
 
 - `GetPgSchemaName()` is `private static` — deterministic, no DB lookup needed for schema routing
