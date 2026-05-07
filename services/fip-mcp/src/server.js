@@ -43,6 +43,9 @@ import { isPATConfigured } from './tools/ado/ado-client.js';
 import { webSearch } from './tools/search/web_search.js';
 import { isAPIKeyConfigured } from './tools/search/search-client.js';
 
+// Path-routed server factories
+import { createForgeKbServer } from './servers/forge-kb-server.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -608,6 +611,63 @@ app.get('/mcp/sse', authMiddleware, async (req, res) => {
     await server.connect(transport);
   } catch (err) {
     console.error('[fip-mcp] GET /mcp/sse error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+});
+
+// --- forge-kb path-routed server ---
+const forgeKbSseSessions = new Map();
+
+// Health check at /mcp/forge-kb/health — public, no auth
+app.get('/mcp/forge-kb/health', (_req, res) => {
+  res.json({ status: 'ok', server: 'forge-kb', version: VERSION });
+});
+
+// POST /mcp/forge-kb — KB-only MCP server (Streamable HTTP transport)
+app.post('/mcp/forge-kb', authMiddleware, async (req, res) => {
+  const user = req.user;
+  const rawToken = req.user.rawToken;
+
+  try {
+    const server = createForgeKbServer(user, rawToken);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+    await server.close();
+  } catch (err) {
+    console.error('[fip-mcp] POST /mcp/forge-kb error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+});
+
+// GET /mcp/forge-kb/sse — SSE stream for KB-only server
+app.get('/mcp/forge-kb/sse', authMiddleware, async (req, res) => {
+  const user = req.user;
+  const rawToken = req.user.rawToken;
+
+  try {
+    const server = createForgeKbServer(user, rawToken);
+    const transport = new SSEServerTransport('/mcp/forge-kb/sse', res);
+
+    const sessionId = transport.sessionId;
+    if (sessionId) {
+      forgeKbSseSessions.set(sessionId, transport);
+    }
+
+    transport.onclose = () => {
+      if (sessionId) forgeKbSseSessions.delete(sessionId);
+    };
+
+    await server.connect(transport);
+  } catch (err) {
+    console.error('[fip-mcp] GET /mcp/forge-kb/sse error:', err);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Internal server error' });
     }
