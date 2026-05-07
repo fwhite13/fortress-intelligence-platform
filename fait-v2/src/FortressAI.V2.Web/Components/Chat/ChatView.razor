@@ -68,6 +68,7 @@
 
 @code {
     [Inject] private IUserAgentRuntime AgentRuntime { get; set; } = default!;
+    [Inject] private IForgeKbService ForgeKbService { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private List<ChatMessage> _messages = new();

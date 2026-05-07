@@ -349,6 +349,17 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
         }
     }
 
+    // ─── DispatchToolCallAsync ────────────────────────────────────────────────
+
+    public async Task<string> DispatchToolCallAsync(string userId, string toolName, Dictionary<string, object> args, CancellationToken ct = default)
+    {
+        var harness = await EnsureRunningAsync(userId, ct);
+        var client = _httpClientFactory.CreateClient("HarnessClient");
+        var response = await client.PostAsJsonAsync($"http://{harness.PrivateIp}:{harness.Port}/tools/{toolName}", args, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync(ct);
+    }
+
     // ─── Private helpers ──────────────────────────────────────────────────────
 
     private RuntimeSession MapToRuntimeSession(UserSession s)

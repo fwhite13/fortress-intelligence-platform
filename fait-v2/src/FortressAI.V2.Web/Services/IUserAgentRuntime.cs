@@ -18,6 +18,9 @@ public interface IUserAgentRuntime
 
     /// <summary>Send a turn to the user's Fargate task and stream the response.</summary>
     IAsyncEnumerable<HarnessEvent> SendTurnAsync(string userId, TurnRequest request, CancellationToken ct = default);
+
+    /// <summary>Dispatch a named tool call to the user's Fargate harness (e.g. Stitch MCP tools).</summary>
+    Task<string> DispatchToolCallAsync(string userId, string toolName, Dictionary<string, object> args, CancellationToken ct = default);
 }
 
 public record RuntimeSession(

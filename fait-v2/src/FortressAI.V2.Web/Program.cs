@@ -101,7 +101,51 @@ builder.Services.AddScoped<IUserProvisioningService, UserProvisioningService>();
 // Memory file service
 builder.Services.AddScoped<IMemoryFileService, MemoryFileService>();
 
+// FORGE KB / fip-mcp integration
+builder.Services.AddHttpClient("FipMcpClient");
+builder.Services.AddScoped<IFipTokenProvider, FipTokenProvider>();
+builder.Services.AddScoped<IForgeKbService, ForgeKbService>();
+
 var app = builder.Build();
+
+// Seed mcp_servers with forge-kb entry (idempotent)
+using (var seedScope = app.Services.CreateScope())
+{
+    var dbFactory = seedScope.ServiceProvider.GetRequiredService<IDbContextFactory<FaitV2DbContext>>();
+    var cfg = seedScope.ServiceProvider.GetRequiredService<IConfiguration>();
+    var seedLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+    await using var seedDb = await dbFactory.CreateDbContextAsync();
+    var endpointUrl = cfg["FipMcp:EndpointUrl"] ?? "https://api.fortressam.ai/mcp";
+    var exists = await seedDb.McpServers.AnyAsync(s => s.Name == "forge-kb");
+    if (!exists)
+    {
+        seedDb.McpServers.Add(new FortressAI.V2.Web.Data.Models.McpServer
+        {
+            Id = Guid.NewGuid().ToString(),
+            Name = "forge-kb",
+            EndpointUrl = endpointUrl,
+            AuthType = "oauth_entra",
+            DefaultRead = true,
+            DefaultWrite = false,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await seedDb.SaveChangesAsync();
+        seedLogger.LogInformation("Seeded forge-kb mcp_servers entry");
+    }
+    else
+    {
+        // Update endpoint URL if config changed
+        var server = await seedDb.McpServers.FirstAsync(s => s.Name == "forge-kb");
+        if (server.EndpointUrl != endpointUrl)
+        {
+            server.EndpointUrl = endpointUrl;
+            await seedDb.SaveChangesAsync();
+            seedLogger.LogInformation("Updated forge-kb endpoint_url to {Url}", endpointUrl);
+        }
+    }
+}
 
 if (!app.Environment.IsDevelopment())
 {

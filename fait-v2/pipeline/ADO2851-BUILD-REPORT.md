@@ -94,3 +94,37 @@ dotnet run --project src/FortressAI.V2.Web/FortressAI.V2.Web.csproj
 ---
 
 **Build Report sent to Clint: YES — awaiting review.**
+
+---
+
+## BUILD Cycle 2 — Security & Stability Fixes
+
+**Date:** 2026-05-07  
+**Commit:** `8923ed7`  
+**Engineer:** Tony Stark  
+**Triggered by:** Clint's review findings (ADO2851-REVIEW-REPORT.md)
+
+### Fixes Applied
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| C1 | CRITICAL | **Slug path-traversal sanitization** — `ConfirmCreate` now strips all chars outside `[a-z0-9\-_]` via Regex; empty-slug guard added (`if (string.IsNullOrEmpty(slug)) return;`) |
+| I1 | IMPORTANT | **OnParametersSetAsync re-render storm** — Added `_lastLoadedUserId` field; `LoadTopics()` only fires when `UserId` actually changes |
+
+### Files Changed
+
+- `src/FortressAI.V2.Web/Components/Memory/TopicList.razor` — Two targeted fixes, no other changes
+
+### Build Result
+
+`dotnet build` → **SUCCEEDED — 0 errors, 0 warnings**
+
+### ADO Comment Posted
+
+Comment ID `781768` — 2026-05-07T04:12:10Z
+
+### Notes
+
+Both fixes are isolated to `TopicList.razor`. CC verified correctness and build before commit.
+
+**Sent to Clint for re-review.**

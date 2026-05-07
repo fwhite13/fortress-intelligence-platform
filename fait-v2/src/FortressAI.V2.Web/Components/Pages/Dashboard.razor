@@ -3,6 +3,8 @@
 @using FortressAI.V2.Web.Components.Layout
 @using FortressAI.V2.Web.Components.Chat
 @using FortressAI.V2.Web.Components.Agent
+@using FortressAI.V2.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
 
 <PageTitle>Dashboard — FAIT v2</PageTitle>
 
@@ -12,6 +14,18 @@
 }
 else
 {
+    @if (_kbs.Count > 0)
+    {
+        <div class="kb-status-bar">
+            <MudIcon Icon="@Icons.Material.Filled.Storage" Class="kb-status-icon" />
+            <span class="kb-status-label">Knowledge Bases:</span>
+            @foreach (var kb in _kbs)
+            {
+                <span class="kb-status-pill">@kb.Description</span>
+            }
+        </div>
+    }
+
     <DualPaneLayout @bind-IsPanelOpen="_previewOpen"
                     PreviewTitle="@_previewTitle">
         <ChatContent>
@@ -24,13 +38,41 @@ else
 }
 
 @code {
+    [Inject] private IForgeKbService ForgeKbService { get; set; } = default!;
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
     private bool _previewOpen = true;
     private string _previewTitle = "Memory";
-    private bool _agentReady = false;  // start in loading state
+    private bool _agentReady = false;
+    private IReadOnlyList<KbInfo> _kbs = Array.Empty<KbInfo>();
+    private string _entraOid = "";
 
-    private void HandleAgentReady()
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState != null)
+        {
+            var auth = await AuthState;
+            _entraOid = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                     ?? auth.User.FindFirst("oid")?.Value ?? "";
+        }
+    }
+
+    private async Task HandleAgentReady()
     {
         _agentReady = true;
+        await LoadKbsAsync();
         StateHasChanged();
+    }
+
+    private async Task LoadKbsAsync()
+    {
+        try
+        {
+            _kbs = await ForgeKbService.ListKbsAsync(_entraOid);
+        }
+        catch (Exception)
+        {
+            // KB list is non-critical — swallow errors, leave _kbs empty
+        }
     }
 }

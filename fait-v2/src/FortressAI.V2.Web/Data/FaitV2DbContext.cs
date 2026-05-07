@@ -12,6 +12,10 @@ public class FaitV2DbContext : DbContext
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<MemoryTopic> MemoryTopics => Set<MemoryTopic>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
+    public DbSet<McpServer> McpServers => Set<McpServer>();
+    public DbSet<McpUserToken> McpUserTokens => Set<McpUserToken>();
+    public DbSet<DesignAgentSession> DesignAgentSessions => Set<DesignAgentSession>();
+    public DbSet<DesignAgentArtifact> DesignAgentArtifacts => Set<DesignAgentArtifact>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -125,6 +129,93 @@ public class FaitV2DbContext : DbContext
             entity.HasOne(e => e.User)
                   .WithMany(u => u.UserSessions)
                   .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // mcp_servers
+        modelBuilder.Entity<McpServer>(entity =>
+        {
+            entity.ToTable("mcp_servers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(100).IsRequired();
+            entity.Property(e => e.EndpointUrl).HasColumnName("endpoint_url").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.AuthType).HasColumnName("auth_type").HasMaxLength(20).IsRequired().HasDefaultValue("oauth_entra");
+            entity.Property(e => e.DefaultRead).HasColumnName("default_read").HasDefaultValue(true);
+            entity.Property(e => e.DefaultWrite).HasColumnName("default_write").HasDefaultValue(false);
+            entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.Name).IsUnique().HasDatabaseName("ix_mcp_servers_name");
+        });
+
+        // mcp_user_tokens
+        modelBuilder.Entity<McpUserToken>(entity =>
+        {
+            entity.ToTable("mcp_user_tokens");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.ServerName).HasColumnName("server_name").HasMaxLength(100).IsRequired();
+            entity.Property(e => e.AccessToken).HasColumnName("access_token").HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.RefreshToken).HasColumnName("refresh_token").HasColumnType("TEXT");
+            entity.Property(e => e.TokenExpiresAt).HasColumnName("token_expires_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_mcp_user_tokens_user_id");
+            entity.HasIndex(new[] { "UserId", "ServerName" }).IsUnique().HasDatabaseName("ix_mcp_user_tokens_user_server");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .HasConstraintName("fk_mcp_user_tokens_user")
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // design_agent_sessions
+        modelBuilder.Entity<DesignAgentSession>(entity =>
+        {
+            entity.ToTable("design_agent_sessions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.ConversationId).HasColumnName("conversation_id").HasMaxLength(36);
+            entity.Property(e => e.StitchProjectId).HasColumnName("stitch_project_id").HasMaxLength(200);
+            entity.Property(e => e.DesignDna).HasColumnName("design_dna").HasColumnType("TEXT");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_design_agent_sessions_user_id");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .HasConstraintName("fk_design_sessions_user")
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // design_agent_artifacts
+        modelBuilder.Entity<DesignAgentArtifact>(entity =>
+        {
+            entity.ToTable("design_agent_artifacts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.SessionId).HasColumnName("session_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.ArtifactName).HasColumnName("artifact_name").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.S3Key).HasColumnName("s3_key").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.StitchScreenId).HasColumnName("stitch_screen_id").HasMaxLength(200);
+            entity.Property(e => e.IsFallback).HasColumnName("is_fallback").HasColumnType("tinyint(1)");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.SessionId).HasDatabaseName("ix_design_artifacts_session_id");
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_design_artifacts_user_id");
+
+            entity.HasOne(e => e.Session)
+                  .WithMany(s => s.Artifacts)
+                  .HasForeignKey(e => e.SessionId)
+                  .HasConstraintName("fk_design_artifacts_session")
                   .OnDelete(DeleteBehavior.Cascade);
         });
     }
