@@ -2283,3 +2283,64 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
 .connector-card__btn {
     /* inherits MudButton styling — no overrides needed */
 }
+
+/* ============================================
+   FEEDBACK — Drawer trigger + modal
+   ============================================ */
+
+.fait-v2-drawer__feedback {
+    padding: 0.5rem 0.75rem;
+    border-top: 1px solid var(--color-border);
+}
+
+.fait-v2-drawer__feedback-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--color-text-muted);
+    font-size: 0.8125rem;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.fait-v2-drawer__feedback-btn:hover {
+    background-color: var(--color-sidebar-hover);
+    color: var(--color-text-secondary);
+}
+
+.fait-v2-drawer__feedback-icon {
+    flex-shrink: 0;
+    font-size: 1rem;
+}
+
+.fait-v2-drawer__feedback-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.feedback-modal__toggle {
+    width: 100%;
+}
+
+.feedback-modal__toggle-item {
+    flex: 1;
+}
+
+.feedback-modal__description {
+    width: 100%;
+}
+
+.feedback-modal__page-url {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.feedback-modal__result {
+    /* inherits MudSnackbar positioning */
+}

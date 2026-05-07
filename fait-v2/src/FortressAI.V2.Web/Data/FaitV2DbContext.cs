@@ -18,6 +18,7 @@ public class FaitV2DbContext : DbContext
     public DbSet<DesignAgentArtifact> DesignAgentArtifacts => Set<DesignAgentArtifact>();
     public DbSet<PushedMessage> PushedMessages => Set<PushedMessage>();
     public DbSet<FeedbackSubmission> FeedbackSubmissions => Set<FeedbackSubmission>();
+    public DbSet<ArtifactRecord> ArtifactRecords => Set<ArtifactRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -240,6 +241,24 @@ public class FaitV2DbContext : DbContext
                   .WithMany()
                   .HasForeignKey(e => e.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // artifact_records
+        modelBuilder.Entity<ArtifactRecord>(entity =>
+        {
+            entity.ToTable("artifact_records");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Type).HasColumnName("type").HasMaxLength(20).IsRequired();
+            entity.Property(e => e.FileName).HasColumnName("file_name").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.S3Key).HasColumnName("s3_key").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.SizeBytes).HasColumnName("size_bytes");
+            entity.Property(e => e.TaskDescription).HasColumnName("task_description").HasColumnType("TEXT");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_artifact_records_user_id");
+            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("ix_artifact_records_created_at");
         });
 
         // feedback_submissions

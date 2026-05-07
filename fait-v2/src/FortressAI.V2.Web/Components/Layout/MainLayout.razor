@@ -79,6 +79,13 @@
                 }
             </div>
 
+            <div class="fait-v2-drawer__feedback">
+                <div class="fait-v2-drawer__feedback-btn" @onclick="OpenFeedbackModal">
+                    <MudIcon Icon="@Icons.Material.Outlined.BugReport" Size="Size.Small" Class="fait-v2-drawer__feedback-icon" />
+                    <span class="fait-v2-drawer__feedback-label">Report a bug</span>
+                </div>
+            </div>
+
             <div class="fait-v2-drawer__footer">
                 <MudIconButton Icon="@(_isDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
                                Color="Color.Inherit"
@@ -95,6 +102,8 @@
         @Body
     </MudMainContent>
 </MudLayout>
+
+<FeedbackModal @ref="_feedbackModal" />
 
 <MudDialog @bind-Visible="_showNewProjectDialog">
     <TitleContent>New Project</TitleContent>
@@ -123,6 +132,7 @@
     private bool _showNewProjectDialog;
     private string _newProjectName = string.Empty;
     private string? _newProjectDescription;
+    private FeedbackModal? _feedbackModal;
 
     private MudTheme _theme = FipTheme.Create();
 
@@ -165,6 +175,11 @@
         var context = await ProjectService.GetProjectContextAsync(project.Id);
         ProjectState.SetActiveProject(project.Id, context);
         StateHasChanged();
+    }
+
+    private void OpenFeedbackModal()
+    {
+        _feedbackModal?.Open();
     }
 
     private void OpenNewProjectDialog()
