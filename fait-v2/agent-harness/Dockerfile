@@ -5,11 +5,11 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     ca-certificates \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install AWS CLI v2 (for S3 workspace access)
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip \
-    && apt-get install -y unzip \
     && unzip /tmp/awscli.zip -d /tmp \
     && /tmp/aws/install \
     && rm -rf /tmp/awscli.zip /tmp/aws

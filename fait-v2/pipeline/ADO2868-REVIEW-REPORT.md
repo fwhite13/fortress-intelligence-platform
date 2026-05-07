@@ -145,3 +145,29 @@ CC (Claude Code, Sonnet, run via `cat /tmp/review-2868-brief.md | claude --model
 ---
 
 _Hawkeye — code-reviewer pipeline stage_
+
+---
+
+## Review Cycle 2 — ADO#2868
+
+**Commit:** `d42f070`  
+**Date:** 2026-05-06  
+**Reviewer:** Clint Barton (Hawkeye)
+
+### Verdict: PASS
+
+**I1 verification:**
+- `appsettings.Development.json` diff at `d42f070` confirms the `AzureAd` block (TenantId, ClientId, ClientSecret — 5 lines) is fully removed.
+- File now contains exactly `{ "Auth": { "CookieDomain": "" } }` — nothing more.
+- `git grep` scan of `src/` for `AzureAd`, `OpenIdConnect`, `AddMicrosoftIdentityWebApp`, `SignedOutCallbackPath`, `CallbackPath` → **zero hits** in tracked source files.
+- Build gate: clean (no new compilation units touched; this was a config-only change).
+
+**CC confirmation:** `cat review-c2-2868-brief.md | claude --model sonnet --print --dangerously-skip-permissions` returned PASS.
+
+**ADO comment:** Posted (comment ID 781714).
+
+All issues from Cycle 1 resolved. This WI is clear to proceed.
+
+---
+
+_Hawkeye — code-reviewer pipeline stage (cycle 2 final)_

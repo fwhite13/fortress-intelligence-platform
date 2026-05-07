@@ -184,3 +184,77 @@ Items I5 (N+1), I6 (ExportZip double-load), N1 (timestamp), and N2 (ct on stub) 
 ---
 
 _Hawkeye — Review cycle 1 of 2. NEEDS-CHANGES._
+
+---
+
+## Review Report — ADO#2847 Cycle 2
+
+**Commit:** `aa14724`
+**Reviewer:** Hawkeye (Clint Barton)
+**Review cycle:** 2 of 2 (final)
+**Date:** 2026-05-07
+
+---
+
+### Verdict: PASS
+
+---
+
+### CC Review Summary
+
+CC ran adversarial cycle 2 verification against `MemoryFileService.cs` and `IMemoryFileService.cs`. All 5 mandatory fix checks executed.
+
+**All 5 fixes verified correct.** No regressions found. Build clean (0 errors, 0 warnings per Tony's cycle 2 build report).
+
+CC command:
+```bash
+cd /home/fredw/projects/fip/fait-v2/src/FortressAI.V2.Web && \
+  CLAUDE_CODE_ENTRYPOINT=ado-pipeline CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
+  cat /tmp/review-c2-brief.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+
+---
+
+### Fix Verification
+
+| Fix | Issue | Result |
+|-----|-------|--------|
+| I1 | Inner `GetObjectAsync` in `GetTopicsAsync` wrapped in per-file try/catch (NoSuchKey → warn+skip, Exception → error+skip, no rethrow) | ✅ VERIFIED |
+| I1 | Same wrapping applied to inner `GetObjectAsync` in `ExportZipAsync` | ✅ VERIFIED |
+| I2 | Dead 404 catch removed from `DeleteFileAsync`; unconditional `DeleteObjectAsync` with idempotency comment | ✅ VERIFIED |
+| I2 | Dead 404 catch removed from `DeleteTopicAsync`; same unconditional pattern | ✅ VERIFIED |
+| I3 | `ValidateId(userId, ...)` called at top of all 9 public methods | ✅ VERIFIED |
+| I4 | `ValidateId(topicSlug, ...)` called at top of all 3 topic methods (`GetTopicAsync`, `UpsertTopicAsync`, `DeleteTopicAsync`) | ✅ VERIFIED |
+| I6 | `RemoveFromVectorIndexAsync(userId, topicSlug, ct)` called in `DeleteTopicAsync`; no-op stub with TODO alongside `SyncToVectorIndexAsync` | ✅ VERIFIED |
+
+**`ValidateId` logic verified manually:** rejects empty, whitespace, `/`-containing, and `..`-containing values; accepts valid identifiers like `valid-user-123`. Guard is correct.
+
+---
+
+### Regression Check
+
+- Interface contract: all 9 signatures match implementation exactly — ✅ no breakage
+- Existing methods (`ReadFileAsync`, `WriteFileAsync`, `ListFilesAsync`): structurally unchanged — ✅ no damage
+- New try/catch blocks scope correctly — swallow per-object errors only, outer `ListObjectsV2Async` failures still propagate — ✅ correct
+- No new holes introduced
+
+---
+
+### Observations (non-blocking, backlog only)
+
+- **Redundant TODO comment** (`DeleteTopicAsync` ~line 247): comment says "remove from pgvector index when wired" immediately above the call that already does it (as stub). Harmless contradiction — clean up opportunistically.
+- **`fileName` parameter not validated** in `ReadFileAsync`, `WriteFileAsync`, `DeleteFileAsync`: `userId` and `topicSlug` are now guarded; `fileName` is not. S3 keys are opaque (no path normalization), so practical risk is low, but worth noting for a future pass.
+
+Neither item blocks PASS. Both are pre-existing or cleanup-level.
+
+---
+
+### Sprint 2 Backlog (confirmed pre-acknowledged)
+- I5: N+1 serial `GetObjectAsync` in `GetTopicsAsync` — parallelize with `Task.WhenAll`
+- N1: `UpsertTopicAsync` returns approximate timestamp
+- N2: `SyncToVectorIndexAsync` missing `CancellationToken` parameter
+- `fileName` validation (above)
+
+---
+
+_Hawkeye — Review cycle 2 of 2. PASS. Ready for CodeSec scan and deployment._

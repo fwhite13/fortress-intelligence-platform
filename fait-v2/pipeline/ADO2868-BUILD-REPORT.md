@@ -94,3 +94,22 @@ No parallelization — single sequential CC run (all changes in one file set).
 ---
 
 _Sent to Clint Barton for review._
+
+---
+
+## BUILD Cycle 2 — ADO#2868
+
+**Issue fixed:** I1 — Remove stale `AzureAd` block from `appsettings.Development.json`  
+**Commit:** `d42f070`  
+**Date:** 2026-05-07  
+**Build:** ✅ SUCCEEDED — 0 errors, 0 warnings
+
+### What was done
+- Removed the `AzureAd` JSON object (TenantId, ClientId, ClientSecret) from `appsettings.Development.json`
+- `appsettings.Production.json` does not exist — no action needed there
+- JSON remains valid; all other config untouched
+
+### Clint's original finding
+Clint flagged `appsettings.Development.json` still contained a dead `AzureAd` config block from before the OIDC middleware was removed. This is now cleaned up.
+
+_Cycle 2 complete. ADO comment posted (id: 781710)._

@@ -1,5 +1,6 @@
 const express = require('express');
 const { spawn } = require('child_process');
+const { mkdirSync } = require('fs');
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
@@ -21,6 +22,13 @@ app.post('/turn', async (req, res) => {
         return res.status(400).json({ error: 'userId and message required' });
     }
 
+    // Validate userId — no path traversal
+    if (typeof userId !== 'string' ||
+        userId.includes('..') || userId.includes('/') || userId.includes('\\') ||
+        !/^[a-zA-Z0-9_-]{1,64}$/.test(userId)) {
+        return res.status(400).json({ error: 'Invalid userId' });
+    }
+
     const userWorkspaceDir = `${WORKSPACE_DIR}/${userId}`;
 
     // Set up SSE for streaming
@@ -29,6 +37,21 @@ app.post('/turn', async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
 
     try {
+        let ended = false;
+        const endResponse = (data) => {
+            if (ended) return;
+            ended = true;
+            res.write(`data: ${JSON.stringify(data)}\n\n`);
+            res.end();
+        };
+
+        // I5: Ensure workspace dir exists before spawning CC
+        try {
+            mkdirSync(userWorkspaceDir, { recursive: true });
+        } catch (mkErr) {
+            return endResponse({ type: 'error', message: `Cannot create workspace: ${mkErr.message}` });
+        }
+
         // Build CC CLI invocation
         // System prompt passed via stdin as a brief file
         const briefContent = systemPrompt
@@ -53,6 +76,12 @@ app.post('/turn', async (req, res) => {
         ccProcess.stdin.write(briefContent);
         ccProcess.stdin.end();
 
+        const TURN_TIMEOUT_MS = parseInt(process.env.CC_TIMEOUT_MS || '300000', 10);
+        const timeout = setTimeout(() => {
+            ccProcess.kill('SIGTERM');
+            endResponse({ type: 'error', message: 'Turn timed out after 5 minutes' });
+        }, TURN_TIMEOUT_MS);
+
         ccProcess.stdout.on('data', (chunk) => {
             res.write(`data: ${JSON.stringify({ type: 'text', content: chunk.toString() })}\n\n`);
         });
@@ -62,18 +91,17 @@ app.post('/turn', async (req, res) => {
         });
 
         ccProcess.on('close', (code) => {
-            res.write(`data: ${JSON.stringify({ type: 'done', exitCode: code })}\n\n`);
-            res.end();
+            clearTimeout(timeout);
+            endResponse({ type: 'done', exitCode: code });
         });
 
         ccProcess.on('error', (err) => {
-            res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
-            res.end();
+            clearTimeout(timeout);
+            endResponse({ type: 'error', message: err.message });
         });
 
     } catch (err) {
-        res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
-        res.end();
+        endResponse({ type: 'error', message: err.message });
     }
 });
 
