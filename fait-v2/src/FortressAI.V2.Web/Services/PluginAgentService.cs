@@ -89,6 +89,12 @@ public class PluginAgentService : IPluginAgentService
 
         if (plugin.SkillsDirectory.StartsWith("wwwroot/"))
         {
+            if (string.IsNullOrEmpty(_env.WebRootPath))
+            {
+                _logger.LogWarning("WebRootPath is null; cannot resolve skills file for plugin {Name}", plugin.Name);
+                return string.Empty;
+            }
+
             // Local file — resolve against content root
             var filePath = Path.Combine(_env.WebRootPath,
                 plugin.SkillsDirectory["wwwroot/".Length..]);
