@@ -285,25 +285,6 @@ public class FaitV2DbContext : DbContext
             entity.HasIndex(e => e.Status).HasDatabaseName("ix_feedback_submissions_status");
         });
 
-        // agent_plugins
-        modelBuilder.Entity<AgentPlugin>(entity =>
-        {
-            entity.ToTable("agent_plugins");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
-            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
-            entity.Property(e => e.Description).HasColumnName("description").HasColumnType("TEXT").IsRequired();
-            entity.Property(e => e.SkillsDirectory).HasColumnName("skills_directory").HasMaxLength(500);
-            entity.Property(e => e.AllowedMcpServers).HasColumnName("allowed_mcp_servers").HasColumnType("TEXT").IsRequired();
-            entity.Property(e => e.AllowedRoles).HasColumnName("allowed_roles").HasColumnType("TEXT").IsRequired();
-            entity.Property(e => e.IsActive).HasColumnName("is_active");
-            entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasMaxLength(36);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
-            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
-
-            entity.HasIndex(e => e.Name).IsUnique().HasDatabaseName("ix_agent_plugins_name");
-        });
-
         // scheduled_tasks
         modelBuilder.Entity<ScheduledTask>(entity =>
         {
@@ -369,6 +350,7 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
 
             entity.HasIndex(e => e.IsActive).HasDatabaseName("ix_agent_plugins_is_active");
+            entity.HasIndex(e => e.Name).IsUnique().HasDatabaseName("ix_agent_plugins_name");
         });
     }
 }
