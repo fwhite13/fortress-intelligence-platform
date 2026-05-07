@@ -48,3 +48,29 @@ dotnet run --project src/FortressAI.V2.Web/FortressAI.V2.Web.csproj
 
 ## Commit
 `28feac949ddeab63ec84e77d5589df319b3069a4`
+
+---
+
+## Build Cycle 2 — Fix Pass
+
+**Date:** 2026-05-07
+**Commit:** `b63835e`
+**Build:** SUCCEEDED — 0 errors, 0 warnings
+
+### Fixes applied
+
+#### C7 — Hardcoded `max-height: 200px` in CSS
+- **File:** `src/FortressAI.V2.Web/wwwroot/css/app.css` (line 618)
+- **Change:** `.chat-input-field` rule — `max-height: 200px` → `max-height: var(--chat-input-max-height, 200px)`
+- Default preserved at 200px via CSS custom property fallback; now overridable without source changes.
+
+#### I2 — `BuildSystemPrompt()` returns empty string instead of null
+- **File:** `src/FortressAI.V2.Web/Components/Chat/ChatView.razor` (line 142)
+- **Change:** Return type `string` → `string?`; return expression changed to `parts.Any() ? string.Join(" ", parts) : null`
+- When no KBs are enabled, method now returns `null` instead of `""`, preventing downstream callers from treating an empty string as a valid system prompt.
+
+### CC Sessions
+1 CC run (Sonnet) — both fixes in single session.
+
+### ADO Comment
+Posted as comment ID 781753 on WI #2850.
