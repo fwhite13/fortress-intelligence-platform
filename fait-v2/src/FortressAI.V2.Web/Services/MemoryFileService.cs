@@ -41,10 +41,21 @@ public class MemoryFileService : IMemoryFileService
     private static string TopicsPrefix(string userId) =>
         $"workspaces/{userId}/memory/topics/";
 
+    /// <summary>
+    /// Validates that an id-style string (userId or topicSlug) contains only safe characters.
+    /// Prevents path traversal attacks in S3 key construction.
+    /// </summary>
+    private static void ValidateId(string value, string paramName)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Contains('/') || value.Contains(".."))
+            throw new ArgumentException($"Invalid {paramName}: value is empty or contains disallowed characters.", paramName);
+    }
+
     // ── S3 file operations ────────────────────────────────────────────────
 
     public async Task<string?> ReadFileAsync(string userId, string fileName, CancellationToken ct = default)
     {
+        ValidateId(userId, nameof(userId));
         var key = FileKey(userId, fileName);
         try
         {
@@ -65,6 +76,7 @@ public class MemoryFileService : IMemoryFileService
 
     public async Task WriteFileAsync(string userId, string fileName, string content, CancellationToken ct = default)
     {
+        ValidateId(userId, nameof(userId));
         var key = FileKey(userId, fileName);
         await _s3.PutObjectAsync(new PutObjectRequest
         {
@@ -78,24 +90,20 @@ public class MemoryFileService : IMemoryFileService
 
     public async Task DeleteFileAsync(string userId, string fileName, CancellationToken ct = default)
     {
+        ValidateId(userId, nameof(userId));
         var key = FileKey(userId, fileName);
-        try
+        // S3 DeleteObject is idempotent — returns 204 whether or not the key exists; no 404 to catch
+        await _s3.DeleteObjectAsync(new DeleteObjectRequest
         {
-            await _s3.DeleteObjectAsync(new DeleteObjectRequest
-            {
-                BucketName = _bucket,
-                Key = key
-            }, ct);
-            _logger.LogInformation("Deleted memory file {Key}", key);
-        }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            _logger.LogDebug("Memory file already absent: {Key}", key);
-        }
+            BucketName = _bucket,
+            Key = key
+        }, ct);
+        _logger.LogInformation("Deleted memory file {Key}", key);
     }
 
     public async Task<IReadOnlyList<MemoryFileInfo>> ListFilesAsync(string userId, CancellationToken ct = default)
     {
+        ValidateId(userId, nameof(userId));
         var prefix = MemoryPrefix(userId);
         var results = new List<MemoryFileInfo>();
         string? continuationToken = null;
@@ -128,6 +136,7 @@ public class MemoryFileService : IMemoryFileService
 
     public async Task<IReadOnlyList<MemoryTopicEntry>> GetTopicsAsync(string userId, CancellationToken ct = default)
     {
+        ValidateId(userId, nameof(userId));
         var prefix = TopicsPrefix(userId);
         var topics = new List<MemoryTopicEntry>();
         string? continuationToken = null;
@@ -149,15 +158,25 @@ public class MemoryFileService : IMemoryFileService
                 var slug = keyName[..^3]; // strip .md
 
                 // Fetch content
-                var getResponse = await _s3.GetObjectAsync(new GetObjectRequest
+                try
                 {
-                    BucketName = _bucket,
-                    Key = obj.Key
-                }, ct);
-                using var reader = new StreamReader(getResponse.ResponseStream);
-                var content = await reader.ReadToEndAsync(ct);
-
-                topics.Add(new MemoryTopicEntry(slug, content, obj.LastModified));
+                    var getResponse = await _s3.GetObjectAsync(new GetObjectRequest
+                    {
+                        BucketName = _bucket,
+                        Key = obj.Key
+                    }, ct);
+                    using var reader = new StreamReader(getResponse.ResponseStream);
+                    var content = await reader.ReadToEndAsync(ct);
+                    topics.Add(new MemoryTopicEntry(slug, content, obj.LastModified));
+                }
+                catch (AmazonS3Exception ex) when (ex.ErrorCode == "NoSuchKey" || ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    _logger.LogWarning("Topic key {Key} listed but not found — skipping", obj.Key);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unexpected error fetching topic key {Key} — skipping", obj.Key);
+                }
             }
 
             continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : null;
@@ -169,6 +188,8 @@ public class MemoryFileService : IMemoryFileService
 
     public async Task<MemoryTopicEntry?> GetTopicAsync(string userId, string topicSlug, CancellationToken ct = default)
     {
+        ValidateId(userId, nameof(userId));
+        ValidateId(topicSlug, nameof(topicSlug));
         var key = TopicKey(userId, topicSlug);
         try
         {
@@ -191,6 +212,8 @@ public class MemoryFileService : IMemoryFileService
 
     public async Task<MemoryTopicEntry> UpsertTopicAsync(string userId, string topicSlug, string content, CancellationToken ct = default)
     {
+        ValidateId(userId, nameof(userId));
+        ValidateId(topicSlug, nameof(topicSlug));
         var key = TopicKey(userId, topicSlug);
         await _s3.PutObjectAsync(new PutObjectRequest
         {
@@ -211,26 +234,25 @@ public class MemoryFileService : IMemoryFileService
 
     public async Task DeleteTopicAsync(string userId, string topicSlug, CancellationToken ct = default)
     {
+        ValidateId(userId, nameof(userId));
+        ValidateId(topicSlug, nameof(topicSlug));
         var key = TopicKey(userId, topicSlug);
-        try
+        // S3 DeleteObject is idempotent — returns 204 whether or not the key exists; no 404 to catch
+        await _s3.DeleteObjectAsync(new DeleteObjectRequest
         {
-            await _s3.DeleteObjectAsync(new DeleteObjectRequest
-            {
-                BucketName = _bucket,
-                Key = key
-            }, ct);
-            _logger.LogInformation("Deleted topic {Slug} for user {UserId}", topicSlug, userId);
-        }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            _logger.LogDebug("Topic already absent: {Key}", key);
-        }
+            BucketName = _bucket,
+            Key = key
+        }, ct);
+        _logger.LogInformation("Deleted topic {Slug} for user {UserId}", topicSlug, userId);
+        // TODO: remove from pgvector index when PostgresMemoryService is wired (Sprint 2 follow-up)
+        await RemoveFromVectorIndexAsync(userId, topicSlug, ct);
     }
 
     // ── Export ────────────────────────────────────────────────────────────
 
     public async Task<byte[]> ExportZipAsync(string userId, CancellationToken ct = default)
     {
+        ValidateId(userId, nameof(userId));
         var prefix = MemoryPrefix(userId);
         var files = new List<(string RelativePath, byte[] Data)>();
         string? continuationToken = null;
@@ -250,15 +272,25 @@ public class MemoryFileService : IMemoryFileService
                 var relPath = obj.Key[prefix.Length..];
                 if (string.IsNullOrEmpty(relPath)) continue;
 
-                var getResponse = await _s3.GetObjectAsync(new GetObjectRequest
+                try
                 {
-                    BucketName = _bucket,
-                    Key = obj.Key
-                }, ct);
-
-                using var ms = new MemoryStream();
-                await getResponse.ResponseStream.CopyToAsync(ms, ct);
-                files.Add((relPath, ms.ToArray()));
+                    var getResponse = await _s3.GetObjectAsync(new GetObjectRequest
+                    {
+                        BucketName = _bucket,
+                        Key = obj.Key
+                    }, ct);
+                    using var ms = new MemoryStream();
+                    await getResponse.ResponseStream.CopyToAsync(ms, ct);
+                    files.Add((relPath, ms.ToArray()));
+                }
+                catch (AmazonS3Exception ex) when (ex.ErrorCode == "NoSuchKey" || ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    _logger.LogWarning("Export: key {Key} listed but not found — skipping", obj.Key);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Export: unexpected error fetching key {Key} — skipping", obj.Key);
+                }
             }
 
             continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : null;
@@ -292,6 +324,16 @@ public class MemoryFileService : IMemoryFileService
     private static Task SyncToVectorIndexAsync(string userId, string topicSlug, string content)
     {
         // No-op stub — pgvector integration is Sprint 2
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Removes a topic from the pgvector index.
+    /// TODO: wire pgvector delete via PostgresMemoryService (Sprint 2 #2847 follow-up)
+    /// </summary>
+    private static Task RemoveFromVectorIndexAsync(string userId, string topicSlug, CancellationToken ct)
+    {
+        // No-op stub — pgvector removal is Sprint 2
         return Task.CompletedTask;
     }
 }
