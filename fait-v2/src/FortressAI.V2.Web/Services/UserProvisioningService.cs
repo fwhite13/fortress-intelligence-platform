@@ -87,6 +87,9 @@ public class UserProvisioningService : IUserProvisioningService
         string displayName,
         CancellationToken ct = default)
     {
+        if (!Guid.TryParse(userId, out _))
+            throw new ArgumentException($"userId must be a valid GUID, got: {userId}", nameof(userId));
+
         // Step 1 — Idempotency check
         var existing = await _db.Users
             .Include(u => u.MainAssistant)
@@ -111,7 +114,12 @@ public class UserProvisioningService : IUserProvisioningService
         // Track what we've successfully created for rollback
         var s3ObjectsWritten = new List<string>();
         var pgSchemaCreated = false;
-        var auroraRecordCreated = false;
+
+        // Per-step diagnostic flags (set ONLY after each step fully completes)
+        var s3Complete = false;        // set after ALL 4 S3 files written
+        var pgComplete = false;        // set after CreatePgSchemaAsync returns
+        var auroraAddComplete = false;  // set after _db.MainAssistants.Add() (step 5)
+        var seedComplete = false;       // set after memory_topics loop completes (step 6)
 
         try
         {
@@ -163,11 +171,13 @@ public class UserProvisioningService : IUserProvisioningService
                 }, ct);
                 s3ObjectsWritten.Add(key);
             }
+            s3Complete = true;
 
             // Step 4 — RDS PostgreSQL per-user schema
             _logger.LogInformation("Creating PostgreSQL schema {Schema} for user {UserId}", schemaName, userId);
             await CreatePgSchemaAsync(pgConnString, schemaName, ct);
             pgSchemaCreated = true;
+            pgComplete = true;
 
             // Step 5 — Aurora main_assistants record
             var assistant = new MainAssistant
@@ -183,7 +193,7 @@ public class UserProvisioningService : IUserProvisioningService
                 UpdatedAt = now
             };
             _db.MainAssistants.Add(assistant);
-            auroraRecordCreated = true;
+            auroraAddComplete = true;
 
             // Step 6 — Seed memory_topics rows
             foreach (var (slug, name, fileName) in DefaultTopics)
@@ -205,6 +215,7 @@ public class UserProvisioningService : IUserProvisioningService
                     });
                 }
             }
+            seedComplete = true;
 
             // Step 7 — Mark onboarding complete
             user.OnboardingCompletedAt = now;
@@ -226,7 +237,7 @@ public class UserProvisioningService : IUserProvisioningService
                 try
                 {
                     _logger.LogWarning("Rolling back PostgreSQL schema {Schema}", schemaName);
-                    await DropPgSchemaAsync(pgConnString, schemaName);
+                    await DropPgSchemaAsync(pgConnString, schemaName, ct);
                 }
                 catch (Exception rollbackEx)
                 {
@@ -263,7 +274,11 @@ public class UserProvisioningService : IUserProvisioningService
 
             throw new ProvisioningException(
                 userId,
-                auroraRecordCreated ? "aurora-save" : pgSchemaCreated ? "aurora-record" : s3ObjectsWritten.Count > 0 ? "pg-schema" : "s3-write",
+                !s3Complete ? "s3-write"
+                    : !pgComplete ? "pg-schema"
+                    : !auroraAddComplete ? "aurora-record"
+                    : !seedComplete ? "memory-topics-seed"
+                    : "aurora-save",
                 $"Provisioning failed for user {userId}: {ex.Message}",
                 ex);
         }
@@ -319,11 +334,11 @@ public class UserProvisioningService : IUserProvisioningService
             await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task DropPgSchemaAsync(string connString, string schemaName)
+    private static async Task DropPgSchemaAsync(string connString, string schemaName, CancellationToken ct = default)
     {
         await using var conn = new NpgsqlConnection(connString);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
         await using var cmd = new NpgsqlCommand($"""DROP SCHEMA IF EXISTS "{schemaName}" CASCADE;""", conn);
-        await cmd.ExecuteNonQueryAsync();
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 }
