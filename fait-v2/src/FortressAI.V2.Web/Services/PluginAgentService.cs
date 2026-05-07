@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FortressAI.V2.Web.Data;
 using FortressAI.V2.Web.Data.Models;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 
 namespace FortressAI.V2.Web.Services;
@@ -8,13 +9,15 @@ namespace FortressAI.V2.Web.Services;
 public class PluginAgentService : IPluginAgentService
 {
     private readonly FaitV2DbContext _db;
+    private readonly IWebHostEnvironment _env;
     private readonly ILogger<PluginAgentService> _logger;
 
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
-    public PluginAgentService(FaitV2DbContext db, ILogger<PluginAgentService> logger)
+    public PluginAgentService(FaitV2DbContext db, IWebHostEnvironment env, ILogger<PluginAgentService> logger)
     {
         _db = db;
+        _env = env;
         _logger = logger;
     }
 
@@ -79,14 +82,24 @@ public class PluginAgentService : IPluginAgentService
         return plugin;
     }
 
-    public Task<string> GetSkillsContentAsync(AgentPlugin plugin, CancellationToken ct = default)
+    public async Task<string> GetSkillsContentAsync(AgentPlugin plugin, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(plugin.SkillsDirectory))
-            return Task.FromResult(string.Empty);
+            return string.Empty;
 
-        // MVP fallback — blob integration not yet wired for Sprint 5
-        _logger.LogWarning("SkillsDirectory blob read not implemented; returning fallback content for plugin {PluginId}", plugin.Id);
-        return Task.FromResult($"# {plugin.Name} Agent\n\n{plugin.Description}");
+        if (plugin.SkillsDirectory.StartsWith("wwwroot/"))
+        {
+            // Local file — resolve against content root
+            var filePath = Path.Combine(_env.WebRootPath,
+                plugin.SkillsDirectory["wwwroot/".Length..]);
+            if (File.Exists(filePath))
+                return await File.ReadAllTextAsync(filePath, ct);
+            _logger.LogWarning("Skills file not found: {Path}", filePath);
+            return string.Empty;
+        }
+
+        // Future: blob path — return placeholder for now
+        return $"# {plugin.Name} Agent\n\n{plugin.Description}";
     }
 
     private List<McpServerPermission> DeserializeMcpServers(string json)
