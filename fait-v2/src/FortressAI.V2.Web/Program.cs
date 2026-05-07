@@ -290,7 +290,7 @@ app.MapGet("/api/agent/status", async (
         log.LogError(ex, "Provisioning failed for user {EntraOid}", entraOid);
         return Results.Ok(new { status = "Error", message = "Initialization failed. Please refresh." });
     }
-}).RequireAuthorization();
+}).AllowAnonymous(); // HttpClient in AssistantLoadingState has no auth cookies — handler guards on null entraOid
 
 // Push a message from an external FIP app (e.g. FIRM) into the user's FAIT v2 inbox
 app.MapPost("/api/agent/push-message", async (
