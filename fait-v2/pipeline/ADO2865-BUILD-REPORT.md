@@ -1,6 +1,6 @@
 # BUILD REPORT — ADO#2865 — Google Stitch Design Agent
 **Sprint 3 | FAIT v2 Epic #2835 | §6.3 Design Agent**
-**Agent:** Tony Stark | **Cycle:** 1 | **Date:** 2026-05-07
+**Agent:** Tony Stark | **Cycle:** 2 (review fixes) | **Date:** 2026-05-07
 
 ---
 
@@ -14,13 +14,43 @@ Build succeeded.
 Time Elapsed 00:00:02.05
 ```
 
-**Commit:** `aa91a57`
+**Commit (cycle 1):** `aa91a57`
+**Commit (cycle 2):** `3ca547d`
 **Branch:** `main`
 **Pushed to:** `origin/main`
 
 ---
 
-## What Was Built
+## Cycle 2 — Review Fixes (Clint NEEDS-CHANGES)
+
+### Fix 1 (CRITICAL): `downloadBase64` JS function
+
+- Created `wwwroot/js/app.js` with `window.downloadBase64(fileName, mimeType, base64String)` — triggers browser download via `<a>` element
+- Added `<script src="/js/app.js"></script>` to `Components/App.razor` before `</body>`
+- Parameter order in JS matches the C# `JS.InvokeVoidAsync("downloadBase64", fileName, "text/html", base64)` call
+
+### Fix 2 (CRITICAL): `DesignAgentService` DB persistence
+
+- Injected `IDbContextFactory<FaitV2DbContext>` into `DesignAgentService`
+- `GenerateScreenAsync`: creates and persists a `DesignAgentSession` record before generation; returns `SessionId` in `DesignAgentResult`
+- `SaveArtifactAsync`: added optional `stitchScreenId`/`isFallback` params; persists a `DesignAgentArtifact` record after S3 upload
+- `IDesignAgentService`: updated `SaveArtifactAsync` signature and added `SessionId` field to `DesignAgentResult` record
+- `DesignAgentView.razor`: uses `result.SessionId` (falls back to `_currentSessionId`) and passes `result.ScreenId`/`result.IsFallback` to `SaveArtifactAsync`
+
+### Fix 3 (CRITICAL): `IsStitchAvailableAsync` — no fake health check
+
+- Removed the dead health endpoint branch that always returned `Task.FromResult(true)`
+- Now: `return Task.FromResult(configured == "true")` — simple config check, no fake HTTP
+- Failures on actual Stitch calls already caught and fallen back via existing try/catch in `GenerateScreenAsync`
+
+### Fix 4 (IMPORTANT): Error logging in `SendPrompt`
+
+- Added `[Inject] ILogger<DesignAgentView>` to `DesignAgentView.razor`
+- `catch (Exception ex)` now logs: `Logger.LogError(ex, "SendPrompt failed for userId={UserId}", _userId)`
+
+---
+
+## What Was Built (Cycle 1)
 
 ### 1. `IUserAgentRuntime` + `FargateUserAgentRuntime` — DispatchToolCallAsync
 
@@ -92,7 +122,19 @@ Time Elapsed 00:00:02.05
 
 ---
 
-## Files Changed
+## Cycle 2 — Files Changed
+
+| File | Action |
+|------|--------|
+| `wwwroot/js/app.js` | Created — `downloadBase64` JS helper |
+| `Components/App.razor` | Modified — added `<script src="/js/app.js">` |
+| `Services/IDesignAgentService.cs` | Modified — `SaveArtifactAsync` signature, `SessionId` on `DesignAgentResult` |
+| `Services/DesignAgentService.cs` | Modified — DB factory injection, session/artifact persistence, `IsStitchAvailableAsync` fix |
+| `Components/Agent/DesignAgentView.razor` | Modified — `ILogger` inject, `result.SessionId` usage, error logging |
+
+---
+
+## Cycle 1 — Files Changed
 
 | File | Action |
 |------|--------|
