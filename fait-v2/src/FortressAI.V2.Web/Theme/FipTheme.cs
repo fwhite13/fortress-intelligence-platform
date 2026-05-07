@@ -3,8 +3,9 @@ using MudBlazor;
 namespace FortressAI.V2.Web.Theme;
 
 /// <summary>
-/// FAIT v2 — Fortress brand theme with dark/light toggle support.
-/// Brand colors: Blue #0066CC, Dark #1A1A2E, Gold #d4af37
+/// Fortress Intelligence Platform unified theme — MudBlazor v7 compatible.
+/// Matches FORMS FipTheme exactly, namespace updated for FAIT v2.
+/// No PaletteDark — app is always light mode.
 /// </summary>
 public static class FipTheme
 {
@@ -12,51 +13,27 @@ public static class FipTheme
     {
         PaletteLight = new PaletteLight
         {
-            Primary = "#0066CC",
+            Primary = "#1a2332",
             PrimaryContrastText = "#ffffff",
             Secondary = "#d4af37",
-            SecondaryContrastText = "#1A1A2E",
+            SecondaryContrastText = "#1a2332",
             Background = "#f8f9fa",
             Surface = "#ffffff",
-            AppbarBackground = "#1A1A2E",
+            AppbarBackground = "#1a2332",
             AppbarText = "#ffffff",
-            DrawerBackground = "#1A1A2E",
+            DrawerBackground = "#1a2332",
             DrawerText = "#f0f0f0",
             DrawerIcon = "#d4af37",
-            TextPrimary = "#1A1A2E",
+            TextPrimary = "#1a2332",
             TextSecondary = "#6b7280",
             TextDisabled = "rgba(0,0,0,0.38)",
             ActionDefault = "#6b7280",
             Success = "#059669",
             Warning = "#d97706",
             Error = "#dc2626",
-            Info = "#0066CC",
+            Info = "#2563eb",
             TableLines = "#e5e7eb",
             TableHover = "#f3f4f6",
-        },
-        PaletteDark = new PaletteDark
-        {
-            Primary = "#0066CC",
-            PrimaryContrastText = "#ffffff",
-            Secondary = "#d4af37",
-            SecondaryContrastText = "#1A1A2E",
-            Background = "#0d0d1a",
-            Surface = "#1A1A2E",
-            AppbarBackground = "#0d0d1a",
-            AppbarText = "#f0f0f0",
-            DrawerBackground = "#0d0d1a",
-            DrawerText = "#f0f0f0",
-            DrawerIcon = "#d4af37",
-            TextPrimary = "#f0f0f0",
-            TextSecondary = "#9ca3af",
-            TextDisabled = "rgba(255,255,255,0.38)",
-            ActionDefault = "#9ca3af",
-            Success = "#34d399",
-            Warning = "#fbbf24",
-            Error = "#f87171",
-            Info = "#60a5fa",
-            TableLines = "#374151",
-            TableHover = "#1f2937",
         },
         Typography = new Typography
         {
@@ -80,8 +57,8 @@ public static class FipTheme
         },
         LayoutProperties = new LayoutProperties
         {
-            AppbarHeight = "56px",
-            DrawerWidthLeft = "260px",
+            AppbarHeight = "48px",
+            DrawerWidthLeft = "264px",
         }
     };
 }
