@@ -45,6 +45,9 @@ import { isAPIKeyConfigured } from './tools/search/search-client.js';
 
 // Path-routed server factories
 import { createForgeKbServer } from './servers/forge-kb-server.js';
+import { createMs365Server } from './servers/ms365-server.js';
+import { createAdoServer } from './servers/ado-server.js';
+import { createWebServer } from './servers/web-server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -674,6 +677,120 @@ app.get('/mcp/forge-kb/sse', authMiddleware, async (req, res) => {
   }
 });
 
+// --- ms365 path-routed server ---
+const ms365SseSessions = new Map();
+
+app.get('/mcp/ms365/health', (_req, res) => {
+  res.json({ status: 'ok', server: 'ms365', version: VERSION });
+});
+
+app.post('/mcp/ms365', authMiddleware, async (req, res) => {
+  const user = req.user;
+  const rawToken = req.user.rawToken;
+  try {
+    const server = createMs365Server(user, rawToken);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+    await server.close();
+  } catch (err) {
+    console.error('[fip-mcp] POST /mcp/ms365 error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/mcp/ms365/sse', authMiddleware, async (req, res) => {
+  const user = req.user;
+  const rawToken = req.user.rawToken;
+  try {
+    const server = createMs365Server(user, rawToken);
+    const transport = new SSEServerTransport('/mcp/ms365/sse', res);
+    const sessionId = transport.sessionId;
+    if (sessionId) ms365SseSessions.set(sessionId, transport);
+    transport.onclose = () => { if (sessionId) ms365SseSessions.delete(sessionId); };
+    await server.connect(transport);
+  } catch (err) {
+    console.error('[fip-mcp] GET /mcp/ms365/sse error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// --- ado path-routed server ---
+const adoSseSessions = new Map();
+
+app.get('/mcp/ado/health', (_req, res) => {
+  res.json({ status: 'ok', server: 'ado', version: VERSION });
+});
+
+app.post('/mcp/ado', authMiddleware, async (req, res) => {
+  const user = req.user;
+  const rawToken = req.user.rawToken;
+  try {
+    const server = createAdoServer(user, rawToken);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+    await server.close();
+  } catch (err) {
+    console.error('[fip-mcp] POST /mcp/ado error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/mcp/ado/sse', authMiddleware, async (req, res) => {
+  const user = req.user;
+  const rawToken = req.user.rawToken;
+  try {
+    const server = createAdoServer(user, rawToken);
+    const transport = new SSEServerTransport('/mcp/ado/sse', res);
+    const sessionId = transport.sessionId;
+    if (sessionId) adoSseSessions.set(sessionId, transport);
+    transport.onclose = () => { if (sessionId) adoSseSessions.delete(sessionId); };
+    await server.connect(transport);
+  } catch (err) {
+    console.error('[fip-mcp] GET /mcp/ado/sse error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// --- web path-routed server ---
+const webSseSessions = new Map();
+
+app.get('/mcp/web/health', (_req, res) => {
+  res.json({ status: 'ok', server: 'web', version: VERSION });
+});
+
+app.post('/mcp/web', authMiddleware, async (req, res) => {
+  const user = req.user;
+  const rawToken = req.user.rawToken;
+  try {
+    const server = createWebServer(user, rawToken);
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+    await server.close();
+  } catch (err) {
+    console.error('[fip-mcp] POST /mcp/web error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/mcp/web/sse', authMiddleware, async (req, res) => {
+  const user = req.user;
+  const rawToken = req.user.rawToken;
+  try {
+    const server = createWebServer(user, rawToken);
+    const transport = new SSEServerTransport('/mcp/web/sse', res);
+    const sessionId = transport.sessionId;
+    if (sessionId) webSseSessions.set(sessionId, transport);
+    transport.onclose = () => { if (sessionId) webSseSessions.delete(sessionId); };
+    await server.connect(transport);
+  } catch (err) {
+    console.error('[fip-mcp] GET /mcp/web/sse error:', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Admin: GET /admin/entitlements — requires forge-kb-admin role
 app.get('/admin/entitlements', authMiddleware, async (req, res) => {
   if (!req.user.roles.includes('forge-kb-admin')) {
@@ -684,7 +801,8 @@ app.get('/admin/entitlements', authMiddleware, async (req, res) => {
 
 // --- Start ---
 app.listen(PORT, () => {
-  console.log(`[fip-mcp] FORGE KB MCP Server v${VERSION} listening on port ${PORT}`);
+  console.log(`[fip-mcp] FIP MCP Server v${VERSION} listening on port ${PORT}`);
+  console.log(`[fip-mcp] Path routes: /mcp (monolith), /mcp/forge-kb, /mcp/ms365, /mcp/ado, /mcp/web`);
   console.log(`[fip-mcp] Entra tenant: ${process.env.ENTRA_TENANT_ID}`);
   console.log(`[fip-mcp] Entra client: ${process.env.ENTRA_CLIENT_ID}`);
   console.log(`[fip-mcp] Bedrock region: ${process.env.BEDROCK_REGION ?? 'us-east-1'}`);
