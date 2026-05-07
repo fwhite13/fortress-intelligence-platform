@@ -143,3 +143,61 @@ Build succeeded.
 - `ChangeTracker.Detach` pattern on rollback prevents EF from trying to save Aurora records that were in the add queue when PG failed
 - pgvector `CREATE EXTENSION` is run at each schema creation — harmless, idempotent
 - No `Pgvector` NuGet package used — raw SQL only (as spec allows)
+
+---
+
+---
+
+## Build Cycle 3 — ADO#2844
+
+**Commit:** `b0566e4` — `fix(fait-v2#2844): remove empty AddMemoryTopicsUniqueConstraint migration — constraint already exists in InitialSchema`
+**Triggered by:** Review cycle 2 — Clint's N3 CRITICAL FAIL verdict
+
+### Root Cause
+
+The broken migration `20260507010358_AddMemoryTopicsUniqueConstraint` had empty `Up()` and `Down()`. The cause was not a missing model annotation — it was that `InitialSchema` (20260506224542) **already created** `ix_memory_topics_user_slug` as a unique index on `memory_topics(user_id, topic_slug)` (lines 169-172). EF compared the current model against the snapshot and found no diff, so it scaffolded an empty migration.
+
+The constraint was never missing from the DB schema — it has been in InitialSchema from day 1.
+
+### What was fixed
+
+| Fix | Category | What changed |
+|---|---|---|
+| N3 | Critical | Deleted `20260507010358_AddMemoryTopicsUniqueConstraint.cs` and `.Designer.cs`. No regeneration needed — the unique constraint already exists in `InitialSchema`. Migration chain is now clean. |
+
+### Files changed
+- `Data/Migrations/20260507010358_AddMemoryTopicsUniqueConstraint.cs` — **deleted**
+- `Data/Migrations/20260507010358_AddMemoryTopicsUniqueConstraint.Designer.cs` — **deleted**
+
+### Files NOT changed
+- `FaitV2DbContextModelSnapshot.cs` — already correct, no reference to broken migration
+- `FaitV2DbContext.cs` — already correct, `HasIndex(...).IsUnique()` present
+
+### Clean migration chain after fix
+```
+20260506224542_InitialSchema.cs           ← creates ix_memory_topics_user_slug (unique: true)
+20260506225415_AddUserSessionTimestamps.cs
+FaitV2DbContextModelSnapshot.cs
+```
+
+### Build result
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+```
+
+### Unique index in InitialSchema (for Clint's verification)
+```csharp
+migrationBuilder.CreateIndex(
+    name: "ix_memory_topics_user_slug",
+    table: "memory_topics",
+    columns: new[] { "user_id", "topic_slug" },
+    unique: true);
+```
+InitialSchema.cs lines 169-172 — **always there, always correct**.
+
+### Notes for Clint
+- `Up()` for the unique constraint is in `InitialSchema` — Clint can verify at `Data/Migrations/20260506224542_InitialSchema.cs` lines 169-172
+- No model changes needed — constraint is in sync across DbContext, snapshot, and migration
+- Ready for final review and merge
