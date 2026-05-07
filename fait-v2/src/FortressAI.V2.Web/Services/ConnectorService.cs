@@ -22,6 +22,14 @@ public class ConnectorService : IConnectorService
     private static readonly HashSet<string> ManagedConnectors =
         new(StringComparer.OrdinalIgnoreCase) { "forge-kb", "search" };
 
+    private static ConnectorAuthType MapAuthType(string? dbAuthType) => dbAuthType switch
+    {
+        "oauth_entra" => ConnectorAuthType.OAuthEntra,
+        "api_key"     => ConnectorAuthType.ApiKey,
+        "none"        => ConnectorAuthType.None,
+        _             => ConnectorAuthType.OAuthEntra  // safe default for unknown
+    };
+
     public ConnectorService(IDbContextFactory<FaitV2DbContext> dbFactory, ILogger<ConnectorService> logger)
     {
         _dbFactory = dbFactory;
@@ -60,9 +68,10 @@ public class ConnectorService : IConnectorService
         var result = new List<ConnectorViewModel>(servers.Count);
         foreach (var server in servers)
         {
-            var (displayName, description, authType) = ConnectorMeta.TryGetValue(server.Name, out var meta)
+            var (displayName, description, _) = ConnectorMeta.TryGetValue(server.Name, out var meta)
                 ? meta
                 : (server.Name, string.Empty, ConnectorAuthType.OAuthEntra);
+            var authType = MapAuthType(server.AuthType);
 
             bool isConnected;
             DateTime? connectedAt = null;

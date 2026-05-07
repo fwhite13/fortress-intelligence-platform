@@ -160,7 +160,7 @@ using (var seedScope = app.Services.CreateScope())
             Id = Guid.NewGuid().ToString(),
             Name = "forge-kb",
             EndpointUrl = endpointUrl,
-            AuthType = "oauth_entra",
+            AuthType = "none",
             DefaultRead = true,
             DefaultWrite = false,
             IsActive = true,
@@ -171,13 +171,23 @@ using (var seedScope = app.Services.CreateScope())
     }
     else
     {
-        // Update endpoint URL if config changed
+        // Update endpoint URL and auth_type if config changed
         var server = await seedDb.McpServers.FirstAsync(s => s.Name == "forge-kb");
+        bool changed = false;
         if (server.EndpointUrl != endpointUrl)
         {
             server.EndpointUrl = endpointUrl;
+            changed = true;
+        }
+        if (server.AuthType != "none")
+        {
+            server.AuthType = "none";
+            changed = true;
+        }
+        if (changed)
+        {
             await seedDb.SaveChangesAsync();
-            seedLogger.LogInformation("Updated forge-kb endpoint_url to {Url}", endpointUrl);
+            seedLogger.LogInformation("Updated forge-kb mcp_servers entry");
         }
     }
 }

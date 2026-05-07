@@ -3,6 +3,7 @@
 @inject IConnectorService ConnectorService
 @inject AuthenticationStateProvider AuthState
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <PageTitle>Connectors — FAIT</PageTitle>
 
@@ -35,18 +36,10 @@
     }
 </div>
 
-@if (_showModal && _connectingConnector != null)
-{
-    <ConnectorOAuthModal ConnectorName="@_connectingConnector.DisplayName"
-                         OnClose="CloseModal" />
-}
-
 @code {
     private bool _loading = true;
     private string? _error;
     private IReadOnlyList<ConnectorViewModel> _connectors = Array.Empty<ConnectorViewModel>();
-    private bool _showModal;
-    private ConnectorViewModel? _connectingConnector;
     private string? _entraOid;
 
     protected override async Task OnInitializedAsync()
@@ -61,10 +54,17 @@
     {
         _loading = true;
         _error = null;
+
+        if (string.IsNullOrEmpty(_entraOid))
+        {
+            _error = "Unable to identify your account. Please sign out and sign in again.";
+            _loading = false;
+            return;
+        }
+
         try
         {
-            if (_entraOid != null)
-                _connectors = await ConnectorService.ListConnectorsAsync(_entraOid);
+            _connectors = await ConnectorService.ListConnectorsAsync(_entraOid);
         }
         catch (Exception ex)
         {
@@ -79,7 +79,11 @@
 
     private async Task HandleRevoke(ConnectorViewModel connector)
     {
-        if (_entraOid == null) return;
+        if (string.IsNullOrEmpty(_entraOid))
+        {
+            Snackbar.Add("Unable to identify your account. Please sign out and sign in again.", Severity.Error);
+            return;
+        }
         try
         {
             await ConnectorService.RevokeConnectionAsync(_entraOid, connector.Name);
@@ -92,15 +96,16 @@
         }
     }
 
-    private void HandleConnect(ConnectorViewModel connector)
+    private async Task HandleConnect(ConnectorViewModel connector)
     {
-        _connectingConnector = connector;
-        _showModal = true;
-    }
-
-    private void CloseModal()
-    {
-        _showModal = false;
-        _connectingConnector = null;
+        var parameters = new DialogParameters
+        {
+            ["ConnectorName"] = connector.DisplayName
+        };
+        await DialogService.ShowAsync<ConnectorOAuthModal>(
+            $"Connect {connector.DisplayName}",
+            parameters,
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true }
+        );
     }
 }

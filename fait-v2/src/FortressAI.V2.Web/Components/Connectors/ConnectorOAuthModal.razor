@@ -1,6 +1,6 @@
 @namespace FortressAI.V2.Web.Components.Connectors
 
-<MudDialog Options="_dialogOptions">
+<MudDialog>
     <TitleContent>
         <MudText Typo="Typo.h6">Connect @ConnectorName</MudText>
     </TitleContent>
@@ -16,13 +16,8 @@
 </MudDialog>
 
 @code {
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = null!;
     [Parameter, EditorRequired] public string ConnectorName { get; set; } = string.Empty;
-    [Parameter] public EventCallback OnClose { get; set; }
 
-    private DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = false };
-
-    private async Task Close()
-    {
-        await OnClose.InvokeAsync();
-    }
+    private void Close() => MudDialog.Close();
 }
