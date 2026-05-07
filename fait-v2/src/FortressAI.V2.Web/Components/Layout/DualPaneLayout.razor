@@ -1,0 +1,57 @@
+@* Dual-pane layout: chat (left) + artifact preview (right) *@
+@* Right pane collapses at < 1024px or when explicitly closed *@
+@using MudBlazor
+
+<div class="dual-pane-container @(IsPanelOpen ? "panel-open" : "panel-closed")"
+     style="--chat-pane-width: @(_chatPaneWidthPct)%">
+
+    @* Left: chat pane *@
+    <div class="dual-pane-chat">
+        @ChatContent
+    </div>
+
+    @* Resize handle — only visible when panel is open *@
+    @if (IsPanelOpen)
+    {
+        <div class="dual-pane-handle"
+             @onmousedown="StartResize"
+             title="Drag to resize">
+            <div class="dual-pane-handle-grip"></div>
+        </div>
+    }
+
+    @* Right: artifact preview pane *@
+    <div class="dual-pane-preview @(IsPanelOpen ? "" : "hidden")">
+        <div class="dual-pane-preview-header">
+            <span class="dual-pane-preview-title">@PreviewTitle</span>
+            <button class="dual-pane-close-btn" @onclick="ClosePanel" title="Close preview">
+                <MudIcon Icon="@Icons.Material.Filled.Close" Style="width: 16px; height: 16px;" />
+            </button>
+        </div>
+        <div class="dual-pane-preview-content">
+            @PreviewContent
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public RenderFragment? ChatContent { get; set; }
+    [Parameter] public RenderFragment? PreviewContent { get; set; }
+    [Parameter] public string PreviewTitle { get; set; } = "Preview";
+    [Parameter] public bool IsPanelOpen { get; set; }
+    [Parameter] public EventCallback<bool> IsPanelOpenChanged { get; set; }
+
+    private double _chatPaneWidthPct = 55;
+
+    private async Task ClosePanel()
+    {
+        IsPanelOpen = false;
+        await IsPanelOpenChanged.InvokeAsync(false);
+    }
+
+    private void StartResize(MouseEventArgs e)
+    {
+        // Full drag implementation via JS interop — stub for now
+        // TODO: wire JS drag events in Sprint 2 follow-up
+    }
+}

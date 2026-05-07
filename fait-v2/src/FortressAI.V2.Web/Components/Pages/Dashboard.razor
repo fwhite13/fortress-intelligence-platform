@@ -1,47 +1,63 @@
 @page "/"
 @attribute [Authorize]
 @using Microsoft.EntityFrameworkCore
+@using FortressAI.V2.Web.Components.Layout
 @inject FaitV2DbContext Db
 
 <PageTitle>Dashboard — FAIT v2</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Large" Class="fait-v2-page">
-    <MudText Typo="Typo.h5" Class="fait-v2-page__title">Dashboard</MudText>
-    <MudText Typo="Typo.body2" Class="fait-v2-page__subtitle">Your AI assistant is ready.</MudText>
+<DualPaneLayout @bind-IsPanelOpen="_previewOpen"
+                PreviewTitle="@_previewTitle">
+    <ChatContent>
+        @* Chat UI goes here — built in #2850 *@
+        @* For now, show the welcome banner from Sprint 1 *@
+        <MudContainer MaxWidth="MaxWidth.Large" Class="fait-v2-page">
+            <MudText Typo="Typo.h5" Class="fait-v2-page__title">Dashboard</MudText>
+            <MudText Typo="Typo.body2" Class="fait-v2-page__subtitle">Your AI assistant is ready.</MudText>
 
-    @if (!string.IsNullOrEmpty(_welcomeName))
-    {
-        <MudPaper Class="fait-v2-dashboard__welcome" Elevation="1">
-            <div class="fait-v2-dashboard__welcome-inner">
-                <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Class="fait-v2-dashboard__welcome-icon" />
-                <div class="fait-v2-dashboard__welcome-text">
-                    <MudText Typo="Typo.h6" Class="fait-v2-dashboard__welcome-title">
-                        Welcome, @_welcomeName! Your assistant is ready.
-                    </MudText>
-                    <MudText Typo="Typo.body2" Class="fait-v2-dashboard__welcome-sub">
-                        Your workspace is set up and your AI assistant is waiting for you.
-                    </MudText>
-                </div>
-            </div>
-        </MudPaper>
-    }
+            @if (!string.IsNullOrEmpty(_welcomeName))
+            {
+                <MudPaper Class="fait-v2-dashboard__welcome" Elevation="1">
+                    <div class="fait-v2-dashboard__welcome-inner">
+                        <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Class="fait-v2-dashboard__welcome-icon" />
+                        <div class="fait-v2-dashboard__welcome-text">
+                            <MudText Typo="Typo.h6" Class="fait-v2-dashboard__welcome-title">
+                                Welcome, @_welcomeName! Your assistant is ready.
+                            </MudText>
+                            <MudText Typo="Typo.body2" Class="fait-v2-dashboard__welcome-sub">
+                                Your workspace is set up and your AI assistant is waiting for you.
+                            </MudText>
+                        </div>
+                    </div>
+                </MudPaper>
+            }
 
-    <MudPaper Class="fait-v2-chat-placeholder" Elevation="0">
-        <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Class="fait-v2-chat-placeholder__inner">
-            <MudIcon Icon="@Icons.Material.Filled.Chat" Class="fait-v2-chat-placeholder__icon" />
-            <MudText Typo="Typo.h6" Class="fait-v2-chat-placeholder__title">Start chatting</MudText>
-            <MudText Typo="Typo.body2" Class="fait-v2-chat-placeholder__text">
-                Main assistant chat — coming in Phase B
-            </MudText>
-        </MudStack>
-    </MudPaper>
-</MudContainer>
+            <MudPaper Class="fait-v2-chat-placeholder" Elevation="0">
+                <MudStack AlignItems="AlignItems.Center" Justify="Justify.Center" Class="fait-v2-chat-placeholder__inner">
+                    <MudIcon Icon="@Icons.Material.Filled.Chat" Class="fait-v2-chat-placeholder__icon" />
+                    <MudText Typo="Typo.h6" Class="fait-v2-chat-placeholder__title">Start chatting</MudText>
+                    <MudText Typo="Typo.body2" Class="fait-v2-chat-placeholder__text">
+                        Main assistant chat — coming in Phase B
+                    </MudText>
+                </MudStack>
+            </MudPaper>
+        </MudContainer>
+    </ChatContent>
+    <PreviewContent>
+        @* Artifact preview goes here — built in Sprint 3 *@
+        <div class="dual-pane-preview-empty">
+            No artifact selected.
+        </div>
+    </PreviewContent>
+</DualPaneLayout>
 
 @code {
     [CascadingParameter]
     private Task<AuthenticationState>? AuthState { get; set; }
 
     private string _welcomeName = "";
+    private bool _previewOpen = false;
+    private string _previewTitle = "Preview";
 
     protected override async Task OnInitializedAsync()
     {
