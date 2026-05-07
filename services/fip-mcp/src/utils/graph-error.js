@@ -1,21 +1,26 @@
 /**
  * Handles Microsoft Graph API errors and normalizes them.
- * Graph errors have a statusCode property and a body.error shape.
+ * Graph SDK v3: err.body is a JSON string, err.code is set directly by SDK.
  */
 export function handleGraphError(err) {
-    // Try to extract Graph error details from response body
-    const graphError = err.body?.error ?? err.response?.error;
-    if (graphError) {
-        return {
-            error: {
-                code: `GRAPH_${graphError.code ?? err.statusCode ?? 'ERROR'}`,
-                message: graphError.message ?? err.message
+    // Graph SDK v3: err.code is set directly by SDK for well-known Graph errors
+    if (err.code) {
+        return { error: { code: err.code, message: err.message } };
+    }
+    // Try parsing err.body (JSON string) for structured error
+    if (err.body) {
+        try {
+            const parsed = JSON.parse(err.body);
+            // SDK serializes inner error directly: { code, message } — no .error wrapper
+            if (parsed?.code) {
+                return { error: { code: parsed.code, message: parsed.message ?? err.message } };
             }
-        };
+        } catch {
+            // body wasn't valid JSON — fall through
+        }
     }
     if (err.statusCode) {
         return { error: { code: `GRAPH_${err.statusCode}`, message: err.message } };
     }
-    console.error('[fip-mcp] Graph error:', err);
     return { error: { code: 'GRAPH_ERROR', message: err.message ?? 'Microsoft Graph error' } };
 }
