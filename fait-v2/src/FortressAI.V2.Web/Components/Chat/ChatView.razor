@@ -1,6 +1,8 @@
 @using FortressAI.V2.Web.Models
 @using FortressAI.V2.Web.Services
+@using FortressAI.V2.Web.Data.Models
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.SignalR.Client
 
 @* Main chat component — lives in DualPaneLayout's ChatContent slot *@
 
@@ -59,6 +61,30 @@
                 </div>
             }
         }
+
+        @* CC progress indicator *@
+        @if (_ccRunning)
+        {
+            <div class="chat-artifact-progress">
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                <span class="chat-artifact-progress-step">@_ccCurrentStep</span>
+                <MudButton Size="Size.Small" OnClick="CancelCCTask" Class="chat-artifact-cancel-btn">Cancel</MudButton>
+            </div>
+        }
+
+        @* Artifact result card *@
+        @if (_lastArtifact != null)
+        {
+            <div class="chat-artifact-result">
+                <MudIcon Icon="@GetArtifactIcon(_lastArtifact.Type)" Class="chat-artifact-icon" />
+                <span class="chat-artifact-filename">@_lastArtifact.FileName</span>
+                @if (_lastArtifact.Type == "html")
+                {
+                    <MudButton Size="Size.Small" OnClick="PreviewArtifact" Class="chat-artifact-action-btn">Preview</MudButton>
+                }
+                <MudButton Size="Size.Small" OnClick="DownloadArtifact" Class="chat-artifact-action-btn">Download</MudButton>
+            </div>
+        }
     </div>
 
     @* Input bar — sticky bottom *@
@@ -84,10 +110,10 @@
                       @onkeydown="HandleKeyDown"
                       placeholder="Message your assistant..."
                       rows="1"
-                      disabled="@_isStreaming"></textarea>
+                      disabled="@(_isStreaming || _ccRunning)"></textarea>
             <button class="chat-send-btn"
                     @onclick="SendMessage"
-                    disabled="@(string.IsNullOrWhiteSpace(_inputText) || _isStreaming)"
+                    disabled="@(string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _ccRunning)"
                     title="Send message">
                 <MudIcon Icon="@Icons.Material.Filled.Send" Class="chat-send-icon" />
             </button>
@@ -144,6 +170,9 @@
     [Inject] private IUserAgentRuntime AgentRuntime { get; set; } = default!;
     [Inject] private IForgeKbService ForgeKbService { get; set; } = default!;
     [Inject] private ProjectStateService ProjectState { get; set; } = default!;
+    [Inject] private ICCExecutionService CCExecutionService { get; set; } = default!;
+    [Inject] private IArtifactService ArtifactService { get; set; } = default!;
+    [Inject] private NavigationManager NavManager { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private List<ChatMessage> _messages = new();
@@ -152,9 +181,20 @@
     private string _streamingContent = "";
     private ElementReference _messagesRef;
     private string _userId = "";
+    private string _userDisplayName = "";
     private bool _fortressKbEnabled = false;
     private bool _personalKbEnabled = true;
     private ActiveAgent _activeAgent = ActiveAgent.MainAssistant;
+
+    // CC task state
+    private bool _ccRunning = false;
+    private string _ccCurrentStep = "Generating artifact...";
+    private CancellationTokenSource? _ccCts;
+    private ArtifactRecord? _lastArtifact;
+    private HubConnection? _hubConnection;
+
+    private static readonly string[] ArtifactKeywords = { "create", "generate", "write", "make", "build" };
+    private static readonly string[] ArtifactTypeHints = { "word doc", "docx", "excel", "spreadsheet", "xlsx", "presentation", "pptx", "powerpoint", "report", "html", "webpage" };
 
     protected override async Task OnInitializedAsync()
     {
@@ -162,6 +202,33 @@
         var auth = await AuthState;
         _userId = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
                ?? auth.User.FindFirst("oid")?.Value ?? "";
+        _userDisplayName = auth.User.FindFirst("name")?.Value
+                        ?? auth.User.FindFirst("preferred_username")?.Value ?? "User";
+
+        await ConnectSignalRAsync();
+    }
+
+    private async Task ConnectSignalRAsync()
+    {
+        try
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(NavManager.ToAbsoluteUri("/hubs/cc-progress"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<CCProgressUpdate>("ReceiveProgress", update =>
+            {
+                _ccCurrentStep = update.CurrentStep;
+                InvokeAsync(StateHasChanged);
+            });
+
+            await _hubConnection.StartAsync();
+        }
+        catch (Exception)
+        {
+            // SignalR is non-critical — progress updates are best-effort
+        }
     }
 
     private string GetFortressKbStyle() =>
@@ -176,11 +243,34 @@
 
     private async Task SendMessage()
     {
-        if (string.IsNullOrWhiteSpace(_inputText) || _isStreaming) return;
+        if (string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _ccRunning) return;
 
         var userMessage = _inputText.Trim();
         _inputText = "";
         _messages.Add(new ChatMessage(Role: "user", Content: userMessage));
+        _lastArtifact = null;
+        StateHasChanged();
+
+        if (IsArtifactRequest(userMessage))
+        {
+            await RunCCTaskAsync(userMessage);
+        }
+        else
+        {
+            await RunStreamingTurnAsync(userMessage);
+        }
+    }
+
+    private bool IsArtifactRequest(string message)
+    {
+        var lower = message.ToLowerInvariant();
+        bool hasKeyword = ArtifactKeywords.Any(k => lower.Contains(k));
+        bool hasTypeHint = ArtifactTypeHints.Any(t => lower.Contains(t));
+        return hasKeyword && hasTypeHint;
+    }
+
+    private async Task RunStreamingTurnAsync(string userMessage)
+    {
         _isStreaming = true;
         _streamingContent = "";
         StateHasChanged();
@@ -216,6 +306,114 @@
         }
     }
 
+    private async Task RunCCTaskAsync(string userMessage)
+    {
+        _ccRunning = true;
+        _ccCurrentStep = "Starting artifact generation...";
+        _ccCts = new CancellationTokenSource();
+        StateHasChanged();
+
+        try
+        {
+            var envelope = BuildEnvelope(_userId, _userDisplayName);
+            var result = await CCExecutionService.DispatchTaskAsync(
+                _userId,
+                userMessage,
+                envelope,
+                cancellationToken: _ccCts.Token);
+
+            if (result.Success && result.ArtifactS3Key != null)
+            {
+                _lastArtifact = await ArtifactService.RecordArtifactAsync(
+                    _userId, result, userMessage, _ccCts.Token);
+
+                var responseMsg = $"I've generated **{_lastArtifact.FileName}** for you. Use the buttons below to preview or download it.";
+                _messages.Add(new ChatMessage(Role: "assistant", Content: responseMsg));
+            }
+            else
+            {
+                var errorMsg = result.Error ?? "The artifact generation did not produce a file. Please try again with a more specific request.";
+                _messages.Add(new ChatMessage(Role: "assistant", Content: $"Artifact generation failed: {errorMsg}"));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _messages.Add(new ChatMessage(Role: "assistant", Content: "Artifact generation was cancelled."));
+        }
+        catch (Exception ex)
+        {
+            _messages.Add(new ChatMessage(Role: "assistant", Content: $"An error occurred during artifact generation: {ex.Message}"));
+        }
+        finally
+        {
+            _ccRunning = false;
+            _ccCts?.Dispose();
+            _ccCts = null;
+            StateHasChanged();
+        }
+    }
+
+    private void CancelCCTask()
+    {
+        _ccCts?.Cancel();
+    }
+
+    private async Task DownloadArtifact()
+    {
+        if (_lastArtifact == null) return;
+        try
+        {
+            var url = await ArtifactService.GetDownloadUrlAsync(_userId, _lastArtifact.Id);
+            NavManager.NavigateTo(url, forceLoad: true);
+        }
+        catch (Exception)
+        {
+            // download URL generation failure — silently ignore
+        }
+    }
+
+    private async Task PreviewArtifact()
+    {
+        if (_lastArtifact == null || _lastArtifact.Type != "html") return;
+        try
+        {
+            var url = await ArtifactService.GetDownloadUrlAsync(_userId, _lastArtifact.Id);
+            NavManager.NavigateTo(url, forceLoad: true);
+        }
+        catch (Exception)
+        {
+            // preview URL generation failure — silently ignore
+        }
+    }
+
+    private static string GetArtifactIcon(string type) => type switch
+    {
+        "docx" => Icons.Material.Filled.Description,
+        "xlsx" => Icons.Material.Filled.TableChart,
+        "pptx" => Icons.Material.Filled.Slideshow,
+        "html" => Icons.Material.Filled.Code,
+        "json" => Icons.Material.Filled.DataObject,
+        "code" => Icons.Material.Filled.Code,
+        _      => Icons.Material.Filled.InsertDriveFile,
+    };
+
+    private CCContextEnvelope BuildEnvelope(string userId, string displayName)
+    {
+        return new CCContextEnvelope
+        {
+            UserId = userId,
+            UserDisplayName = displayName,
+            KbIds = new List<string>(),
+            EnabledMcpServers = new List<string>(),
+            MemorySummary = null,
+            TaskInstructions = @"You are an AI assistant generating a document artifact.
+Generate the requested document and write it to the working directory.
+Use python-docx for .docx, openpyxl for .xlsx, python-pptx for .pptx.
+For HTML, write a clean self-contained HTML file.
+The filename should be descriptive of the content.",
+        };
+    }
+
     private string BuildContextualMessage(string userInput)
     {
         return string.IsNullOrEmpty(ProjectState.ActiveProjectContext)
@@ -241,4 +439,12 @@
     private void TogglePersonalKb() => _personalKbEnabled = !_personalKbEnabled;
 
     private void SetAgent(ActiveAgent agent) => _activeAgent = agent;
+
+    public async ValueTask DisposeAsync()
+    {
+        _ccCts?.Cancel();
+        _ccCts?.Dispose();
+        if (_hubConnection != null)
+            await _hubConnection.DisposeAsync();
+    }
 }

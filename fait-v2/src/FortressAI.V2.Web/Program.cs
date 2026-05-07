@@ -158,6 +158,9 @@ builder.Services.AddScoped<ProjectStateService>();
 // Workspace explorer
 builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();
 
+// Artifact service (CC-generated artifact metadata)
+builder.Services.AddScoped<IArtifactService, ArtifactService>();
+
 var app = builder.Build();
 
 // Seed mcp_servers with forge-kb entry (idempotent)
