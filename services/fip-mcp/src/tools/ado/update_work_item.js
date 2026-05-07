@@ -18,7 +18,7 @@ export async function updateAdoWorkItem(user, { id, state, title, assignedTo, it
 
   if (ops.length === 0) throw new Error('[ADO] No fields provided to update_work_item');
 
-  const wi = await adoPatch(`/_apis/wit/workitems/${id}?api-version=7.1`, ops);
+  const wi = await adoPatch(`/_apis/wit/workitems/${id}?$expand=relations&api-version=7.1`, ops);
   const f = wi.fields ?? {};
 
   // Extract parentId from relations if present

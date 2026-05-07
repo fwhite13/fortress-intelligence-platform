@@ -16,7 +16,15 @@ export async function listAdoIterations(user, { project, team, timeframe } = {})
   let path = `/${projectSegment}/${teamSegment}/_apis/work/teamsettings/iterations?api-version=7.1`;
   if (timeframe) path += `&$timeframe=${encodeURIComponent(timeframe)}`;
 
-  const result = await adoGet(path);
+  let result;
+  try {
+    result = await adoGet(path);
+  } catch (err) {
+    if (err.statusCode === 404) {
+      throw new Error(`ADO team not found: '${team ?? project}' in project '${project}'. Provide an explicit 'team' parameter.`);
+    }
+    throw err;
+  }
 
   return (result.value ?? []).map(it => ({
     id: it.id,

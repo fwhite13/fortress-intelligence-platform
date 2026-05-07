@@ -2,6 +2,14 @@
 import { adoPost, adoGet } from './ado-client.js';
 
 /**
+ * Escape user-supplied values for safe WIQL interpolation.
+ * Doubles single quotes to prevent ADO 400 errors (e.g. O'Brien → O''Brien).
+ */
+function wiqlEscape(value) {
+  return value.replace(/'/g, "''");
+}
+
+/**
  * Query work items by project with optional filters.
  * @param {object} user
  * @param {{ project: string, state?: string, type?: string, assignedTo?: string, iteration?: string, top?: number }} options
@@ -10,11 +18,11 @@ export async function listAdoWorkItems(user, { project, state, type, assignedTo,
   if (!project) throw new Error('[ADO] project is required for list_work_items');
 
   // Build WIQL query dynamically — only include clauses for provided filters
-  const conditions = [`[System.TeamProject] = '${project}'`];
-  if (state) conditions.push(`[System.State] = '${state}'`);
-  if (type) conditions.push(`[System.WorkItemType] = '${type}'`);
-  if (assignedTo) conditions.push(`[System.AssignedTo] = '${assignedTo}'`);
-  if (iteration) conditions.push(`[System.IterationPath] UNDER '${iteration}'`);
+  const conditions = [`[System.TeamProject] = '${wiqlEscape(project)}'`];
+  if (state) conditions.push(`[System.State] = '${wiqlEscape(state)}'`);
+  if (type) conditions.push(`[System.WorkItemType] = '${wiqlEscape(type)}'`);
+  if (assignedTo) conditions.push(`[System.AssignedTo] = '${wiqlEscape(assignedTo)}'`);
+  if (iteration) conditions.push(`[System.IterationPath] UNDER '${wiqlEscape(iteration)}'`);
 
   const wiql = `SELECT [System.Id], [System.Title], [System.State], [System.AssignedTo], [System.WorkItemType], [System.IterationPath] FROM WorkItems WHERE ${conditions.join(' AND ')} ORDER BY [System.ChangedDate] DESC`;
 
@@ -23,7 +31,7 @@ export async function listAdoWorkItems(user, { project, state, type, assignedTo,
   const ids = wiqlResult.workItems?.map(wi => wi.id) ?? [];
   if (ids.length === 0) return [];
 
-  // Batch fetch fields
+  // Batch fetch fields (ADO limit: 200 IDs per request — WIQL $top keeps us under this)
   const fields = 'System.Id,System.Title,System.State,System.AssignedTo,System.WorkItemType,System.IterationPath';
   const batchResult = await adoGet(`/_apis/wit/workitems?ids=${ids.join(',')}&fields=${fields}&api-version=7.1`);
 
