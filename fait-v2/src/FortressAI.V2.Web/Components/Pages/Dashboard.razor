@@ -11,14 +11,11 @@
         <ChatView />
     </ChatContent>
     <PreviewContent>
-        @* Artifact preview goes here — built in Sprint 3 *@
-        <div class="dual-pane-preview-empty">
-            No artifact selected.
-        </div>
+        <MemoryManagerView />
     </PreviewContent>
 </DualPaneLayout>
 
 @code {
-    private bool _previewOpen = false;
-    private string _previewTitle = "Preview";
+    private bool _previewOpen = true;
+    private string _previewTitle = "Memory";
 }

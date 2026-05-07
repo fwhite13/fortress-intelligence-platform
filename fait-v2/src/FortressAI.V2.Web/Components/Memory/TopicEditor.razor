@@ -1,0 +1,132 @@
+@inject IMemoryFileService MemoryService
+
+<div class="topic-editor-panel">
+    <div class="topic-editor-header">
+        <h3 class="topic-editor-title">@TopicSlug</h3>
+        <label class="topic-upload-btn" title="Attach .txt or .md file">
+            <MudIcon Icon="@Icons.Material.Filled.UploadFile" Class="topic-upload-icon" />
+            <span class="topic-upload-label">Upload</span>
+            <InputFile OnChange="HandleFileUpload" style="display:none" accept=".txt,.md" />
+        </label>
+    </div>
+
+    @if (_errorMessage != null)
+    {
+        <div class="topic-upload-error">@_errorMessage</div>
+    }
+
+    @if (_uploading)
+    {
+        <div class="topic-upload-progress">
+            <MudProgressLinear Indeterminate="true" />
+            <span class="topic-upload-status">Uploading @_uploadingFileName...</span>
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <div class="topic-files-loading">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+        </div>
+    }
+    else
+    {
+        @if (_attachments.Any())
+        {
+            <div class="topic-section-label">Attachments</div>
+            <div class="topic-files-list">
+                @foreach (var file in _attachments)
+                {
+                    <div class="topic-file-item">
+                        <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Class="topic-file-icon" />
+                        <span class="topic-file-name">@System.IO.Path.GetFileName(file.FileName)</span>
+                        <span class="topic-file-size">@FormatSize(file.SizeBytes)</span>
+                        <button class="topic-file-delete"
+                                @onclick="() => DeleteAttachment(file.FileName)"
+                                title="Delete">
+                            <MudIcon Icon="@Icons.Material.Filled.Delete" Class="topic-action-icon" />
+                        </button>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <p class="topic-files-empty">No attachments. Upload a .txt or .md file to attach it to this topic.</p>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string UserId { get; set; } = "";
+    [Parameter, EditorRequired] public string TopicSlug { get; set; } = "";
+
+    private IReadOnlyList<MemoryFileInfo> _attachments = Array.Empty<MemoryFileInfo>();
+    private bool _loading = true;
+    private bool _uploading = false;
+    private string _uploadingFileName = "";
+    private string? _errorMessage = null;
+
+    // Attachment naming convention: topics/{topicSlug}/{filename}
+    private string AttachmentPrefix => $"topics/{TopicSlug}/";
+
+    protected override async Task OnParametersSetAsync() => await LoadAttachments();
+
+    private async Task LoadAttachments()
+    {
+        _loading = true;
+        var allFiles = await MemoryService.ListFilesAsync(UserId);
+        _attachments = allFiles
+            .Where(f => f.FileName.StartsWith(AttachmentPrefix, StringComparison.OrdinalIgnoreCase))
+            .ToList()
+            .AsReadOnly();
+        _loading = false;
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _errorMessage = null;
+        var file = e.File;
+        var ext = System.IO.Path.GetExtension(file.Name).ToLowerInvariant();
+        if (ext != ".txt" && ext != ".md")
+        {
+            _errorMessage = "Only .txt and .md files are supported.";
+            return;
+        }
+
+        _uploading = true;
+        _uploadingFileName = file.Name;
+        StateHasChanged();
+
+        try
+        {
+            using var reader = new System.IO.StreamReader(file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024));
+            var content = await reader.ReadToEndAsync();
+            var attachmentKey = $"{AttachmentPrefix}{file.Name}";
+            await MemoryService.WriteFileAsync(UserId, attachmentKey, content);
+            await LoadAttachments();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Upload failed: {ex.Message}";
+        }
+        finally
+        {
+            _uploading = false;
+            _uploadingFileName = "";
+        }
+    }
+
+    private async Task DeleteAttachment(string fileName)
+    {
+        await MemoryService.DeleteFileAsync(UserId, fileName);
+        await LoadAttachments();
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes}B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024}KB";
+        return $"{bytes / (1024 * 1024)}MB";
+    }
+}

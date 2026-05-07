@@ -94,3 +94,26 @@ Build succeeded.
 ```
 
 **Commit:** `c97fc00` — `feat(fait-v2#2848): IUserAgentRuntime + FargateUserAgentRuntime for per-user task lifecycle`
+
+---
+
+## Build Cycle 2 — I1 Fix
+
+**Date:** 2026-05-07
+**Commit:** `dda9573`
+**Reviewer finding:** I1 — Duplicate `AddDbContext<FaitV2DbContext>` registration in `Program.cs`
+
+### Fix applied
+Removed `AddDbContext<FaitV2DbContext>(...)` (8 lines, around line 82). Kept `AddDbContextFactory<FaitV2DbContext>(...)` only. In EF Core 8, `AddDbContextFactory` covers both factory-based and direct `DbContext` injection — the `AddDbContext` call was redundant and would cause double-registration warnings.
+
+### File changed
+- `src/FortressAI.V2.Web/Program.cs` — Removed 8 lines (the `AddDbContext` block)
+
+### Build result
+```
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+```
+
+**Commit:** `dda9573` — `fix(fait-v2#2848): remove duplicate AddDbContext registration, keep only AddDbContextFactory`
