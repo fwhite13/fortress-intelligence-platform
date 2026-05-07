@@ -68,6 +68,8 @@ builder.Services.AddAWSService<IAmazonS3>();
 
 // User provisioning
 builder.Services.AddScoped<IUserProvisioningService, UserProvisioningService>();
+// Memory file service
+builder.Services.AddScoped<IMemoryFileService, MemoryFileService>();
 
 var app = builder.Build();
 
