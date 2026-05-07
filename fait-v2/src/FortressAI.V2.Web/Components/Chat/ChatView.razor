@@ -139,12 +139,12 @@
         }
     }
 
-    private string BuildSystemPrompt()
+    private string? BuildSystemPrompt()
     {
         var parts = new List<string>();
         if (_fortressKbEnabled) parts.Add("Search the Fortress knowledge base for relevant context.");
         if (_personalKbEnabled) parts.Add("Search the user's personal knowledge base for relevant context.");
-        return string.Join(" ", parts);
+        return parts.Any() ? string.Join(" ", parts) : null;
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
