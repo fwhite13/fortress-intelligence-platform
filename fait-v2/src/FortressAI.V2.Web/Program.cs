@@ -82,14 +82,6 @@ builder.Services.AddCascadingAuthenticationState();
 // MudBlazor
 builder.Services.AddMudServices();
 
-// EF Core — FaitV2DbContext (Pomelo MySQL provider, GuidFormat=None in connection string)
-builder.Services.AddDbContext<FaitV2DbContext>(options =>
-    options.UseMySql(
-        builder.Configuration.GetConnectionString("DefaultConnection")!,
-        new MySqlServerVersion(new Version(8, 0, 28)),
-        mySqlOptions => mySqlOptions.EnableRetryOnFailure(3)
-    ));
-
 // AWS S3 (workspace bucket)
 builder.Services.AddAWSService<IAmazonS3>();
 
