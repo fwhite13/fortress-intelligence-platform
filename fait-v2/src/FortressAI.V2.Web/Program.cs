@@ -1,3 +1,4 @@
+using Amazon.ECS;
 using Amazon.S3;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
@@ -91,6 +92,17 @@ builder.Services.AddDbContext<FaitV2DbContext>(options =>
 
 // AWS S3 (workspace bucket)
 builder.Services.AddAWSService<IAmazonS3>();
+
+// AWS ECS (per-user Fargate runtime)
+builder.Services.AddSingleton<IAmazonECS>(sp => new AmazonECSClient(Amazon.RegionEndpoint.USEast1));
+builder.Services.AddHttpClient("HarnessClient");
+builder.Services.AddDbContextFactory<FaitV2DbContext>(options =>
+    options.UseMySql(
+        builder.Configuration.GetConnectionString("DefaultConnection")!,
+        new MySqlServerVersion(new Version(8, 0, 28)),
+        mySqlOptions => mySqlOptions.EnableRetryOnFailure(3)
+    ));
+builder.Services.AddScoped<IUserAgentRuntime, FargateUserAgentRuntime>();
 
 // User provisioning
 builder.Services.AddScoped<IUserProvisioningService, UserProvisioningService>();

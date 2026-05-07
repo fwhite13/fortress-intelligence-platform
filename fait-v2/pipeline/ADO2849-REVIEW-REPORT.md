@@ -118,3 +118,88 @@ That's it. Everything else is clean. Fix that one item and this ships.
 ---
 
 _Hawkeye out._
+
+---
+
+# Review Report — ADO#2849 — Cycle 2 (Final)
+
+**Reviewer:** Hawkeye (Clint Barton)  
+**Review cycle:** 2 of 2  
+**Commit:** `2042049`  
+**Date:** 2026-05-06  
+
+---
+
+### Verdict: NEEDS-CHANGES
+
+---
+
+### CC Review Summary
+
+CC Sonnet ran adversarial verification of the I1 fix (primary) plus build check. I1 is correctly implemented — `Style=` removed, CSS variable in `app.css`. However, the same commit `2042049` contains out-of-scope ADO#2846 Fargate infrastructure files (`FargateUserAgentRuntime.cs`, migrations, `UserSession.cs`, csproj) that introduce a build-breaking `Task` type ambiguity. Build is **2 errors, 0 warnings**. Not ADO#2849's bug — but the commit isn't green, so I can't issue PASS.
+
+**CC command:** `cat review-c2-2849-brief.md | claude --model sonnet --print --dangerously-skip-permissions`
+
+---
+
+### I1 Fix Verification — ✅ RESOLVED
+
+| Check | Status |
+|-------|--------|
+| `DualPaneLayout.razor` line 27 — MudIcon has NO `Style=` attribute | ✅ VERIFIED |
+| `app.css` has `.dual-pane-close-btn svg { width: var(--icon-sm, 16px); height: var(--icon-sm, 16px); }` | ✅ VERIFIED |
+| No remaining hardcoded `px` values in any `Style=` attribute across `Components/` | ✅ VERIFIED |
+
+**Evidence:**
+```razor
+<!-- DualPaneLayout.razor line 27 -->
+<MudIcon Icon="@Icons.Material.Filled.Close" />
+```
+```css
+/* app.css lines 437-440 */
+.dual-pane-close-btn svg {
+    width: var(--icon-sm, 16px);
+    height: var(--icon-sm, 16px);
+}
+```
+
+---
+
+### Build Status — ❌ BROKEN (out-of-scope cause)
+
+**2 errors, 0 warnings** — both in `FargateUserAgentRuntime.cs` (ADO#2846 Fargate infra, NOT ADO#2849):
+
+| # | File | Line | Error |
+|---|------|------|-------|
+| E1 | `Services/FargateUserAgentRuntime.cs` | 202 | `CS0104`: `Task` ambiguous between `Amazon.ECS.Model.Task` and `System.Threading.Tasks.Task` |
+| E2 | `Services/FargateUserAgentRuntime.cs` | 13 | `CS0738`: `StopAsync` does not implement interface — return type mismatch (cascade of E1) |
+
+**Root cause:** `using Amazon.ECS.Model;` pulls `Amazon.ECS.Model.Task` into scope. `StopAsync` at line 202 uses bare `Task` return type — now ambiguous. The `GetPrivateIpFromTask` helper correctly uses fully-qualified `Amazon.ECS.Model.Task`, demonstrating the fix pattern.
+
+**Fix (ADO#2846):** Qualify the ambiguous reference:
+```diff
+- public async Task StopAsync(string userId, CancellationToken ct = default)
++ public async System.Threading.Tasks.Task StopAsync(string userId, CancellationToken ct = default)
+```
+or add `using Task = System.Threading.Tasks.Task;` at the top of the file.
+
+---
+
+### Scope Note
+
+`FargateUserAgentRuntime.cs`, `IUserAgentRuntime.cs`, Fargate migration files, `UserSession.cs` Fargate columns, and `AWSSDK.ECS` csproj reference are **not in ADO#2849 scope** (dual-pane layout). They belong to ADO#2846. The dual-pane work itself is clean. The build failure must be resolved — regardless of which WI owns the fix — before PASS can be issued.
+
+---
+
+### What to Fix (NEEDS-CHANGES → PASS)
+
+**One fix required, owned by ADO#2846:**
+
+1. **`Services/FargateUserAgentRuntime.cs` line 202** — Resolve `Task` ambiguity:  
+   Change `public async Task StopAsync(...)` → `public async System.Threading.Tasks.Task StopAsync(...)`
+
+Once build is 0 errors 0 warnings, ADO#2849 PASSES — no further review of the dual-pane work required.
+
+---
+
+_Hawkeye — cycle 2 complete. I1 verified clean. Build broken by out-of-scope Fargate files. Fix the Task ambiguity and this ships.__
