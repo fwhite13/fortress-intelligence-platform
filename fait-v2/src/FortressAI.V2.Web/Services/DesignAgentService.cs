@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Amazon.S3;
 using Amazon.S3.Model;
+using FortressAI.V2.Web.Data;
+using FortressAI.V2.Web.Data.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace FortressAI.V2.Web.Services;
 
@@ -15,6 +18,7 @@ public class DesignAgentService : IDesignAgentService
     private readonly IAmazonS3 _s3;
     private readonly IConfiguration _config;
     private readonly ILogger<DesignAgentService> _logger;
+    private readonly IDbContextFactory<FaitV2DbContext> _dbFactory;
 
     private string Bucket => _config["AWS:WorkspaceBucket"]
         ?? throw new InvalidOperationException("AWS:WorkspaceBucket is not configured.");
@@ -23,12 +27,14 @@ public class DesignAgentService : IDesignAgentService
         IUserAgentRuntime runtime,
         IAmazonS3 s3,
         IConfiguration config,
-        ILogger<DesignAgentService> logger)
+        ILogger<DesignAgentService> logger,
+        IDbContextFactory<FaitV2DbContext> dbFactory)
     {
         _runtime = runtime;
         _s3 = s3;
         _config = config;
         _logger = logger;
+        _dbFactory = dbFactory;
     }
 
     // ─── GenerateScreenAsync ──────────────────────────────────────────────────
@@ -39,11 +45,28 @@ public class DesignAgentService : IDesignAgentService
         string? designDnaContext = null,
         CancellationToken ct = default)
     {
+        // Persist session before generating
+        var sessionId = Guid.NewGuid().ToString();
+        await using (var db = await _dbFactory.CreateDbContextAsync(ct))
+        {
+            var session = new DesignAgentSession
+            {
+                Id = sessionId,
+                UserId = userId,
+                StitchProjectId = null,
+                DesignDna = designDnaContext,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.DesignAgentSessions.Add(session);
+            await db.SaveChangesAsync(ct);
+        }
+
         if (!await IsStitchAvailableAsync(ct))
         {
             _logger.LogInformation("Stitch unavailable for user {UserId} — using CC-native HTML fallback", userId);
             var fallbackHtml = await GenerateFallbackHtmlAsync(userId, prompt, ct);
-            return new DesignAgentResult(fallbackHtml, ScreenId: null, ProjectId: null, IsFallback: true);
+            return new DesignAgentResult(fallbackHtml, ScreenId: null, ProjectId: null, IsFallback: true, SessionId: sessionId);
         }
 
         try
@@ -63,13 +86,13 @@ public class DesignAgentService : IDesignAgentService
 
             var html = result?.Html ?? string.Empty;
             _logger.LogInformation("Stitch generated screen for user {UserId}, screenId={ScreenId}", userId, result?.ScreenId);
-            return new DesignAgentResult(html, result?.ScreenId, result?.ProjectId, IsFallback: false);
+            return new DesignAgentResult(html, result?.ScreenId, result?.ProjectId, IsFallback: false, SessionId: sessionId);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Stitch GenerateScreen failed for user {UserId} — falling back to CC-native", userId);
             var fallbackHtml = await GenerateFallbackHtmlAsync(userId, prompt, ct);
-            return new DesignAgentResult(fallbackHtml, ScreenId: null, ProjectId: null, IsFallback: true);
+            return new DesignAgentResult(fallbackHtml, ScreenId: null, ProjectId: null, IsFallback: true, SessionId: sessionId);
         }
     }
 
@@ -150,6 +173,8 @@ public class DesignAgentService : IDesignAgentService
         string sessionId,
         string html,
         string artifactName,
+        string? stitchScreenId = null,
+        bool isFallback = false,
         CancellationToken ct = default)
     {
         var safeName = string.Concat(artifactName.Split(System.IO.Path.GetInvalidFileNameChars()));
@@ -163,27 +188,30 @@ public class DesignAgentService : IDesignAgentService
             ContentType = "text/html"
         }, ct);
 
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        db.DesignAgentArtifacts.Add(new DesignAgentArtifact
+        {
+            Id = Guid.NewGuid().ToString(),
+            SessionId = sessionId,
+            UserId = userId,
+            ArtifactName = artifactName,
+            S3Key = key,
+            StitchScreenId = stitchScreenId,
+            IsFallback = isFallback,
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync(ct);
+
         _logger.LogInformation("Saved design artifact {Key} for user {UserId}", key, userId);
         return key;
     }
 
     // ─── IsStitchAvailableAsync ───────────────────────────────────────────────
 
-    public async Task<bool> IsStitchAvailableAsync(CancellationToken ct = default)
+    public Task<bool> IsStitchAvailableAsync(CancellationToken ct = default)
     {
-        var gcpCredentials = _config["Stitch:GcpCredentialsConfigured"];
-        if (!string.Equals(gcpCredentials, "true", StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogDebug("Stitch unavailable: GCP credentials not configured");
-            return false;
-        }
-
-        var stitchEndpoint = _config["Stitch:HealthEndpoint"];
-        if (string.IsNullOrEmpty(stitchEndpoint))
-            return true; // Configured but no health endpoint — assume available
-
-        // Health check is best-effort; treat failures as unavailable
-        return await Task.FromResult(true);
+        var configured = _config["Stitch:GcpCredentialsConfigured"];
+        return Task.FromResult(string.Equals(configured, "true", StringComparison.OrdinalIgnoreCase));
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────

@@ -426,6 +426,7 @@
 
 @code {
     [Inject] private IDesignAgentService DesignAgent { get; set; } = default!;
+    [Inject] private ILogger<DesignAgentView> Logger { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private string _userId = "";
@@ -485,14 +486,16 @@
             if (result.IsFallback)
                 _stitchUnavailableNotice = true;
 
-            // Save to S3
+            // Save to S3 and DB
             var artifactName = $"design-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
-            await DesignAgent.SaveArtifactAsync(_userId, _currentSessionId, result.Html, artifactName);
+            var sessionId = result.SessionId ?? _currentSessionId;
+            await DesignAgent.SaveArtifactAsync(_userId, sessionId, result.Html, artifactName, result.ScreenId, result.IsFallback);
 
             _turns.Add(new DesignTurn("assistant", "Here's your design:", result, artifactName));
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Logger.LogError(ex, "SendPrompt failed for userId={UserId}", _userId);
             _turns.Add(new DesignTurn("assistant", "Something went wrong. Please try again.", null, string.Empty));
         }
         finally
