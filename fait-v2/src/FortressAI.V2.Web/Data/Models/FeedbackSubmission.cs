@@ -2,7 +2,7 @@ namespace FortressAI.V2.Web.Data.Models;
 
 public class FeedbackSubmission
 {
-    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..32];
+    public string Id { get; set; } = Guid.NewGuid().ToString();
     public string UserId { get; set; } = string.Empty;
     public string Type { get; set; } = string.Empty;            // "bug" | "suggestion"
     public string Description { get; set; } = string.Empty;

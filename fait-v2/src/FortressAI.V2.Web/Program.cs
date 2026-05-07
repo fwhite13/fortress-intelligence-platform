@@ -422,6 +422,8 @@ static async Task DispatchToJarvisAsync(FeedbackSubmission submission, IConfigur
     var ocBaseUrl = config["OpenClaw:BaseUrl"] ?? "http://localhost:3001";
     var ocToken = config["OpenClaw:ApiToken"];
 
+    var internalToken = config["Feedback:InternalToken"] ?? "fait-v2-internal-feedback-token";
+
     var screenshotLine = submission.ScreenshotS3Key != null
         ? $"**Screenshot:** s3://{submission.ScreenshotS3Key}"
         : "";
@@ -446,7 +448,7 @@ static async Task DispatchToJarvisAsync(FeedbackSubmission submission, IConfigur
         - Auto-dispatch if this is a clear UI bug, broken element, wrong data, or regression
         - Escalate to Fred if this involves auth/permissions, data integrity, scope-expanding features, or active WI duplicates
         - After triage, call back: POST https://fait-v2.dev.fortressam.ai/api/feedback/{{submission.Id}}/status
-          with headers: X-Internal-Token: fait-v2-internal-feedback-token
+          with headers: X-Internal-Token: {{internalToken}}
           with body: { "status": "dispatched"|"escalated", "adoWiId": "XXXX" (if dispatched), "message": "..." }
         """,
     };
