@@ -11,10 +11,16 @@ public class FaitV2DbContextDesignTimeFactory : IDesignTimeDbContextFactory<Fait
 {
     public FaitV2DbContext CreateDbContext(string[] args)
     {
+        var host = Environment.GetEnvironmentVariable("FORTRESS_DB_HOST") ?? "localhost";
+        var port = Environment.GetEnvironmentVariable("FORTRESS_DB_PORT") ?? "3306";
+        var user = Environment.GetEnvironmentVariable("FORTRESS_DB_USER") ?? "root";
+        var pass = Environment.GetEnvironmentVariable("FORTRESS_DB_PASS") ?? "dev";
+        var db   = Environment.GetEnvironmentVariable("FORTRESS_DB_NAME") ?? "fait_v2_dev";
+
+        var connStr = $"Server={host};Port={port};Database={db};User={user};Password={pass};GuidFormat=None;";
+
         var options = new DbContextOptionsBuilder<FaitV2DbContext>()
-            .UseMySql(
-                "Server=localhost;Database=fait_v2_dev;User=root;Password=dev;GuidFormat=None;",
-                new MySqlServerVersion(new Version(8, 0, 28)))
+            .UseMySql(connStr, new MySqlServerVersion(new Version(8, 0, 28)))
             .Options;
         return new FaitV2DbContext(options);
     }
