@@ -121,11 +121,13 @@
         @* Top row: KB toggles *@
         <div class="chat-input-top-row">
             <div class="chat-kb-pills">
-                <button @onclick="ToggleFortressKb" title="Search Fortress knowledge base" style="@GetFortressKbStyle()">
+                <button @onclick="ToggleFortressKb" title="Search Fortress knowledge base"
+                        class="chat-kb-pill @(_fortressKbEnabled ? "chat-kb-pill-active" : "")">
                     <MudIcon Icon="@Icons.Material.Filled.AccountBalance" Class="chat-pill-icon" />
                     <span class="chat-pill-label">Fortress KB</span>
                 </button>
-                <button @onclick="TogglePersonalKb" title="My personal knowledge base" style="@GetPersonalKbStyle()">
+                <button @onclick="TogglePersonalKb" title="My personal knowledge base"
+                        class="chat-kb-pill @(_personalKbEnabled ? "chat-kb-pill-active" : "")">
                     <MudIcon Icon="@Icons.Material.Filled.Person" Class="chat-pill-icon" />
                     <span class="chat-pill-label">My KB</span>
                 </button>
@@ -134,13 +136,14 @@
         @* Bottom row: text input + send *@
         <div class="chat-input-bottom-row">
             <textarea class="chat-input-field"
-                      @bind="_inputText"
-                      @bind:event="oninput"
+                      value="@_inputText"
+                      @oninput="@(e => _inputText = e.Value?.ToString() ?? string.Empty)"
                       @onkeydown="HandleKeyDown"
                       placeholder="Message your assistant..."
                       rows="1"
                       disabled="@(_isStreaming || _ccRunning)"></textarea>
             <button class="chat-send-btn"
+                    type="button"
                     @onclick="SendMessage"
                     disabled="@(string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _ccRunning)"
                     title="Send message">
@@ -245,6 +248,32 @@
         font-weight: 600;
         margin-left: auto;
     }
+
+    .chat-kb-pill {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: 0 var(--space-3);
+        height: var(--pill-height-sm);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        background: transparent;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        font-size: var(--font-size-sm);
+        transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base);
+    }
+
+    .chat-kb-pill:hover {
+        background: var(--color-surface-hover);
+        color: var(--color-text-primary);
+    }
+
+    .chat-kb-pill-active {
+        border-color: var(--color-gold);
+        background: var(--color-gold-muted);
+        color: var(--color-gold);
+    }
 </style>
 
 @code {
@@ -321,19 +350,10 @@
         }
     }
 
-    private string GetFortressKbStyle() =>
-        _fortressKbEnabled
-            ? "display: flex; align-items: center; padding: 0 var(--space-3); height: var(--pill-height-sm); border-radius: var(--radius-md); border: 1px solid var(--color-gold); background: var(--color-gold-muted); color: var(--color-gold); cursor: pointer;"
-            : "display: flex; align-items: center; padding: 0 var(--space-3); height: var(--pill-height-sm); border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); cursor: pointer;";
-
-    private string GetPersonalKbStyle() =>
-        _personalKbEnabled
-            ? "display: flex; align-items: center; padding: 0 var(--space-3); height: var(--pill-height-sm); border-radius: var(--radius-md); border: 1px solid var(--color-gold); background: var(--color-gold-muted); color: var(--color-gold); cursor: pointer;"
-            : "display: flex; align-items: center; padding: 0 var(--space-3); height: var(--pill-height-sm); border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); cursor: pointer;";
-
     private async Task SendMessage()
     {
         if (string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _ccRunning) return;
+        if (string.IsNullOrWhiteSpace(_userId)) return;
 
         var userMessage = _inputText.Trim();
         _inputText = "";
