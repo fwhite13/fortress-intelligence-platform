@@ -180,8 +180,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
 
             var items = JsonSerializer.Deserialize<List<AdoWorkItemDto>>(trimmed, new JsonSerializerOptions
             {
-                PropertyNameCaseInsensitive = true,
-                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase, allowIntegerValues: true) }
+                PropertyNameCaseInsensitive = true
             });
 
             return items ?? new List<AdoWorkItemDto>();
