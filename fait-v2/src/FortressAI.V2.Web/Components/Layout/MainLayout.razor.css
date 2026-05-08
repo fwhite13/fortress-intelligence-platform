@@ -11,7 +11,7 @@
     justify-content: space-between;
     align-items: center;
     padding: var(--spacing-xs, 4px) var(--spacing-sm, 8px);
-    border-radius: 4px;
+    border-radius: var(--radius-sm, 4px);
     cursor: pointer;
     touch-action: manipulation;
     gap: var(--spacing-xs, 4px);
