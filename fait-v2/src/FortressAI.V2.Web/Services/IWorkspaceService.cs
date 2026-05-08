@@ -6,6 +6,7 @@ public interface IWorkspaceService
     Task<List<WorkspaceFile>> ListFilesAsync(string userId, string folder, CancellationToken ct = default);
     Task<string> GetDownloadUrlAsync(string userId, string s3Key, CancellationToken ct = default);
     Task DeleteFileAsync(string userId, string s3Key, CancellationToken ct = default);
+    Task UploadFileAsync(string userId, string folder, string fileName, Stream content, CancellationToken ct = default);
 }
 
 public class WorkspaceFolder

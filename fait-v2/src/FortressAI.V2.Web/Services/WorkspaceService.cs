@@ -85,4 +85,17 @@ public class WorkspaceService : IWorkspaceService
 
         await _s3.DeleteObjectAsync(Bucket, s3Key, ct);
     }
+
+    public async Task UploadFileAsync(string userId, string folder, string fileName, Stream content, CancellationToken ct = default)
+    {
+        var key = $"workspaces/{userId}/{folder}/{fileName}";
+        var request = new PutObjectRequest
+        {
+            BucketName = Bucket,
+            Key = key,
+            InputStream = content,
+            AutoCloseStream = false,
+        };
+        await _s3.PutObjectAsync(request, ct);
+    }
 }

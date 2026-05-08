@@ -13,8 +13,9 @@
         {
             @foreach (var folder in _folders)
             {
+                var folderName = folder.Name;
                 <div class="workspace-folder-item @(_activeFolder == folder.Name ? "active" : "")"
-                     @onclick="() => SelectFolder(folder.Name)">
+                     @onclick="() => SelectFolder(folderName)">
                     <MudIcon Icon="@GetFolderIcon(folder.Name)" Size="Size.Small" />
                     <span>@folder.Name</span>
                     <span class="workspace-folder-count">@folder.FileCount</span>
@@ -24,6 +25,19 @@
     </div>
 
     <div class="workspace-content">
+        <div class="workspace-content-header">
+            <InputFile OnChange="HandleFileUpload"
+                       class="workspace-upload-input"
+                       id="workspace-file-input"
+                       accept="*/*" />
+            <MudButton StartIcon="@Icons.Material.Outlined.Upload"
+                       Variant="Variant.Outlined"
+                       Class="workspace-upload-btn"
+                       Disabled="@_uploading"
+                       OnClick="TriggerUploadClick">
+                @(_uploading ? "Uploading..." : "Upload File")
+            </MudButton>
+        </div>
         @if (_files == null)
         {
             <MudProgressCircular Indeterminate="true" />
@@ -105,6 +119,8 @@
     private bool _showDeleteDialog;
     private WorkspaceFile? _fileToDelete;
     private string _userId = string.Empty;
+    private bool _uploading;
+    private InputFile? _uploadInputRef;
 
     private IEnumerable<WorkspaceFile> FilteredFiles =>
         string.IsNullOrWhiteSpace(_searchQuery)
@@ -162,6 +178,32 @@
         _fileToDelete = null;
         await LoadFiles();
         _folders = await WorkspaceService.GetFolderStructureAsync(_userId);
+    }
+
+    private async Task TriggerUploadClick() =>
+        await JS.InvokeVoidAsync("eval", "document.getElementById('workspace-file-input').click()");
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _uploading = true;
+        StateHasChanged();
+        try
+        {
+            var file = e.File;
+            using var stream = file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+            await WorkspaceService.UploadFileAsync(_userId, _activeFolder, file.Name, stream);
+            await LoadFiles();
+            _folders = await WorkspaceService.GetFolderStructureAsync(_userId);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Upload failed: {ex.Message}");
+        }
+        finally
+        {
+            _uploading = false;
+            StateHasChanged();
+        }
     }
 
     private static string GetFolderIcon(string folder) => folder switch
