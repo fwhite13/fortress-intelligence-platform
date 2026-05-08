@@ -285,6 +285,8 @@
     [Inject] private ICCExecutionService CCExecutionService { get; set; } = default!;
     [Inject] private IArtifactService ArtifactService { get; set; } = default!;
     [Inject] private NavigationManager NavManager { get; set; } = default!;
+    [Inject] private IUserService UserService { get; set; } = default!;
+    [Inject] private ILogger<ChatView> _logger { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private List<ChatMessage> _messages = new();
@@ -317,8 +319,18 @@
     {
         if (AuthState == null) return;
         var auth = await AuthState;
-        _userId = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-               ?? auth.User.FindFirst("oid")?.Value ?? "";
+        var entraOid = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                   ?? auth.User.FindFirst("oid")?.Value ?? "";
+
+        // CRITICAL: resolve internal DB user ID — NOT entraOid
+        var user = await UserService.GetByEntraOidAsync(entraOid);
+        _userId = user?.Id ?? "";
+        if (string.IsNullOrEmpty(_userId))
+        {
+            _logger.LogError("Could not resolve internal userId for entraOid {EntraOid}", entraOid);
+            return; // bail — don't proceed with empty userId
+        }
+
         _userDisplayName = auth.User.FindFirst("name")?.Value
                         ?? auth.User.FindFirst("preferred_username")?.Value ?? "User";
 

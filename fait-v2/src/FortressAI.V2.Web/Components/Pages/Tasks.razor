@@ -285,6 +285,9 @@
 </MudContainer>
 
 @code {
+    [Inject] private IUserService UserService { get; set; } = default!;
+    [Inject] private ILogger<Tasks> _logger { get; set; } = default!;
+
     private bool _loading = true;
     private bool _historyLoading = false;
     private string _userId = string.Empty;
@@ -299,8 +302,15 @@
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthStateProvider.GetAuthenticationStateAsync();
-        _userId = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-               ?? auth.User.FindFirst("oid")?.Value ?? "";
+        var entraOid = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                   ?? auth.User.FindFirst("oid")?.Value ?? "";
+        var user = await UserService.GetByEntraOidAsync(entraOid);
+        _userId = user?.Id ?? "";
+        if (string.IsNullOrEmpty(_userId))
+        {
+            _logger.LogError("Could not resolve internal userId for entraOid {EntraOid}", entraOid);
+            return;
+        }
         await LoadTasksAsync();
         await LoadHistoryAsync();
     }

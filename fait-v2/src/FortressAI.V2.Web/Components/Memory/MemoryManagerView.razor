@@ -25,6 +25,8 @@
 
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [Inject] private IUserService UserService { get; set; } = default!;
+    [Inject] private ILogger<MemoryManagerView> _logger { get; set; } = default!;
 
     private string _userId = "";
     private string? _selectedSlug = null;
@@ -33,8 +35,15 @@
     {
         if (AuthState == null) return;
         var auth = await AuthState;
-        _userId = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-               ?? auth.User.FindFirst("oid")?.Value ?? "";
+        var entraOid = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                   ?? auth.User.FindFirst("oid")?.Value ?? "";
+        var user = await UserService.GetByEntraOidAsync(entraOid);
+        _userId = user?.Id ?? "";
+        if (string.IsNullOrEmpty(_userId))
+        {
+            _logger.LogError("Could not resolve internal userId for entraOid {EntraOid}", entraOid);
+            return;
+        }
     }
 
     private void HandleTopicSelected(string slug) => _selectedSlug = string.IsNullOrEmpty(slug) ? null : slug;

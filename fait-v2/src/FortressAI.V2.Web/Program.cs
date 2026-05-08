@@ -191,6 +191,7 @@ builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<ICompactionService, CompactionService>();
 builder.Services.AddScoped<IRAGWriteService, RAGWriteServiceStub>();
+builder.Services.AddScoped<IUserService, UserService>();
 
 var app = builder.Build();
 
