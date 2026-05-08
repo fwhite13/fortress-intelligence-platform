@@ -394,6 +394,7 @@
                 TaskMode: false,
                 History: _messages
                     .Where(m => m.Role != "system")
+                    .SkipLast(1)
                     .Select(m => new ChatHistoryEntry(m.Role, m.Content))
                     .ToList()
             );

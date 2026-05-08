@@ -168,7 +168,7 @@ app.post('/tools/:toolName', async (req, res) => {
 });
 
 app.post('/turn', async (req, res) => {
-    const { sessionId, userId, message, systemPrompt, taskMode, history } = req.body;
+    const { SessionId: sessionId, UserId: userId, Message: message, SystemPrompt: systemPrompt, TaskMode: taskMode, History: history } = req.body;
 
     if (!userId || !message) {
         return res.status(400).json({ error: 'userId and message required' });

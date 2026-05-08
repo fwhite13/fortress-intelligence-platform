@@ -121,7 +121,7 @@ builder.Services.AddDbContextFactory<FaitV2DbContext>(options =>
         new MySqlServerVersion(new Version(8, 0, 28)),
         mySqlOptions => mySqlOptions.EnableRetryOnFailure(3)
     ));
-builder.Services.AddScoped<IUserAgentRuntime, DirectBedrockUserAgentRuntime>();
+builder.Services.AddScoped<IUserAgentRuntime, FargateUserAgentRuntime>();
 
 // User provisioning
 builder.Services.AddScoped<IUserProvisioningService, UserProvisioningService>();
