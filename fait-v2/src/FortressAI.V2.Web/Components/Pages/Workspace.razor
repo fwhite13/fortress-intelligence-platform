@@ -3,6 +3,7 @@
 @inject IWorkspaceService WorkspaceService
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
+@inject ISnackbar Snackbar
 
 <PageTitle>Workspace — FAIT v2</PageTitle>
 
@@ -196,7 +197,7 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Upload failed: {ex.Message}");
+            Snackbar.Add($"Upload failed: {ex.Message}", Severity.Error);
         }
         finally
         {

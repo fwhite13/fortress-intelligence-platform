@@ -1752,7 +1752,12 @@ a:hover {
 }
 
 /* ADO#2939 — MudDrawer Mini overlay intercepts all clicks across viewport.
-   Mini variant needs no dismissible backdrop — suppress pointer-events entirely. */
+   Mini variant needs no dismissible backdrop — suppress pointer-events entirely.
+   ⚠ SCOPE NOTE: This rule applies to ALL drawer overlay instances globally.
+   If a future Temporary/Responsive drawer (e.g. Help drawer, mobile nav) needs
+   a dismissible backdrop, add a more-specific override:
+     .mud-drawer-temporary .mud-overlay.mud-overlay-drawer { pointer-events: auto !important; }
+   rather than removing this rule. */
 .mud-overlay.mud-overlay-drawer {
     pointer-events: none !important;
 }

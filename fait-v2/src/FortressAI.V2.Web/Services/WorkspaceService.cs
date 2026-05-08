@@ -89,11 +89,31 @@ public class WorkspaceService : IWorkspaceService
     public async Task UploadFileAsync(string userId, string folder, string fileName, Stream content, CancellationToken ct = default)
     {
         var key = $"workspaces/{userId}/{folder}/{fileName}";
+        var contentType = Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".html" or ".htm" => "text/html",
+            ".css"            => "text/css",
+            ".js"             => "application/javascript",
+            ".json"           => "application/json",
+            ".md"             => "text/markdown",
+            ".txt"            => "text/plain",
+            ".csv"            => "text/csv",
+            ".pdf"            => "application/pdf",
+            ".png"            => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif"            => "image/gif",
+            ".svg"            => "image/svg+xml",
+            ".zip"            => "application/zip",
+            ".docx"           => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xlsx"           => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            _                 => "application/octet-stream",
+        };
         var request = new PutObjectRequest
         {
             BucketName = Bucket,
             Key = key,
             InputStream = content,
+            ContentType = contentType,
             AutoCloseStream = false,
         };
         await _s3.PutObjectAsync(request, ct);
