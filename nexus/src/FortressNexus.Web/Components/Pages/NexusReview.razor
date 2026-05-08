@@ -39,14 +39,27 @@
                         <MudChip T="string" Color="Color.Success" Size="Size.Small" Class="nexus-review-approved-chip">Approved</MudChip>
                     }
                     <MudChip T="string" Color="Color.Info" Size="Size.Small" Class="nexus-review-status-chip">@_submission.Status.ToString()</MudChip>
-                    <MudToggleIconButton @bind-Toggled="_showEdit"
-                                        Icon="@Icons.Material.Filled.Visibility"
-                                        ToggledIcon="@Icons.Material.Filled.Edit"
-                                        Color="Color.Primary"
-                                        Class="nexus-review-toggle-btn" />
-                    <MudText Typo="Typo.caption" Class="nexus-review-toggle-label">
-                        @(_showEdit ? "Editing" : "AI Original")
-                    </MudText>
+                    @if (_canEdit && !_specDoc.IsApproved)
+                    {
+                        @if (_editAllMode)
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.Save"
+                                       OnClick="HandleSaveAll"
+                                       Disabled="@_isSaving"
+                                       Class="nexus-review-edit-all-btn">Save All</MudButton>
+                            <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small"
+                                       OnClick="@(() => { _editAllMode = false; _editingSections.Clear(); StateHasChanged(); })"
+                                       Class="nexus-review-cancel-btn">Cancel</MudButton>
+                        }
+                        else
+                        {
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.Edit"
+                                       OnClick="@(() => { _editAllMode = true; _editingSections = Enumerable.Range(0, _sections.Count).ToHashSet(); StateHasChanged(); })"
+                                       Class="nexus-review-edit-all-btn">Edit My Copy</MudButton>
+                        }
+                    }
                 </div>
 
                 <MudDivider Class="nexus-review-divider" />
@@ -87,23 +100,15 @@
                                         {
                                             <MudText Typo="Typo.h6" Class="nexus-review-section-title">@(sec.Heading)</MudText>
                                         }
-                                        @if (!_specDoc.IsApproved && _canEdit)
-                                        {
-                                            <MudIconButton Icon="@Icons.Material.Filled.Edit"
-                                                           Size="Size.Small"
-                                                           Color="Color.Primary"
-                                                           Class="nexus-review-section-edit-btn"
-                                                           OnClick="@(() => _editingSections.Add(idx))" />
-                                        }
                                     </div>
-                                    @if (_editingSections.Contains(idx))
+                                    @if (_canEdit && !_specDoc.IsApproved && _editingSections.Contains(idx))
                                     {
                                         <MudTextField Value="@(sec.Body)"
                                                       ValueChanged="@((string v) => UpdateSectionBody(idx, v))"
-                                                      Lines="8"
+                                                      Lines="10"
                                                       Variant="Variant.Outlined"
                                                       Class="nexus-review-section-editor"
-                                                      @onblur="@(async () => await SaveSectionAsync(idx))" />
+                                                      AutoGrow="true" />
                                     }
                                     else
                                     {
@@ -139,18 +144,17 @@
                             Save Draft
                         </MudButton>
 
-                        <AuthorizeView Roles="@NexusRoles.Admin" Context="adminContext">
-                            <Authorized>
-                                <MudButton Variant="Variant.Filled"
-                                           Color="Color.Success"
-                                           StartIcon="@Icons.Material.Filled.CheckCircle"
-                                           OnClick="HandleApprove"
-                                           Disabled="@_isApproving"
-                                           Class="nexus-review-approve-btn">
-                                    Approve
-                                </MudButton>
-                            </Authorized>
-                        </AuthorizeView>
+                        @if (_isAdmin)
+                        {
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Success"
+                                       StartIcon="@Icons.Material.Filled.CheckCircle"
+                                       OnClick="HandleApprove"
+                                       Disabled="@_isApproving"
+                                       Class="nexus-review-approve-btn">
+                                @(_isApproving ? "Approving…" : "Approve Spec")
+                            </MudButton>
+                        }
                     }
                     else
                     {
@@ -185,7 +189,6 @@
     private string? _error;
     private bool _isSaving;
     private bool _isApproving;
-    private bool _showEdit;
     private DateTime? _lastSavedAt;
     private bool _isAdmin;
     private bool _canEdit;
@@ -193,6 +196,7 @@
     private List<SpecSection> _sections = new();
     private HashSet<int> _editingSections = new();
     private bool _hasSections;
+    private bool _editAllMode;
 
     private record SpecSection(int Index, string Heading, string Body);
 
@@ -350,6 +354,32 @@
                 _editedContent = ReassembleSections();
             await SpecService.SaveDraftAsync(_specDoc.Id, _editedContent, _upn);
             _lastSavedAt = DateTime.UtcNow;
+            Snackbar.Add("Draft saved.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleSaveAll()
+    {
+        if (_specDoc is null) return;
+        _isSaving = true;
+        StateHasChanged();
+        try
+        {
+            if (_hasSections)
+                _editedContent = ReassembleSections();
+            await SpecService.SaveDraftAsync(_specDoc.Id, _editedContent, _upn);
+            _lastSavedAt = DateTime.UtcNow;
+            _editAllMode = false;
+            _editingSections.Clear();
             Snackbar.Add("Draft saved.", Severity.Success);
         }
         catch (Exception ex)
