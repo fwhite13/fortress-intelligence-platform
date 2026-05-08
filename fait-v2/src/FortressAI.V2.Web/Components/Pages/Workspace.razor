@@ -120,7 +120,6 @@
     private WorkspaceFile? _fileToDelete;
     private string _userId = string.Empty;
     private bool _uploading;
-    private InputFile? _uploadInputRef;
 
     private IEnumerable<WorkspaceFile> FilteredFiles =>
         string.IsNullOrWhiteSpace(_searchQuery)
