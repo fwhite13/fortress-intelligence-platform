@@ -305,7 +305,7 @@ public class UserProvisioningService : IUserProvisioningService
         {
             // JSON blob from Secrets Manager Aurora auto-rotate
             // Format: {"username":"...","password":"...","host":"...","port":5432,"dbname":"..."}
-            var doc = System.Text.Json.JsonDocument.Parse(raw);
+            using var doc = System.Text.Json.JsonDocument.Parse(raw);
             var root = doc.RootElement;
             var host = root.GetProperty("host").GetString()
                 ?? throw new InvalidOperationException("Secrets Manager JSON missing 'host' field");
