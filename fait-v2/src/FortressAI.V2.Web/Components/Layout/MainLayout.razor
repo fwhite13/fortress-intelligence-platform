@@ -53,11 +53,12 @@
             <div class="fait-v2-drawer__projects">
                 <div class="fait-v2-drawer__section-header">
                     <span class="fait-v2-drawer__section-title">Projects</span>
-                    <MudIconButton Icon="@Icons.Material.Outlined.Add"
-                                   Size="Size.Small"
-                                   Class="fait-v2-drawer__section-add"
-                                   title="New project"
-                                   OnClick="OpenNewProjectDialog" />
+                    <button class="fait-v2-drawer__section-add mud-icon-button"
+                            title="New project"
+                            type="button"
+                            @onclick="OpenNewProjectDialog">
+                        <MudIcon Icon="@Icons.Material.Outlined.Add" Size="Size.Small" />
+                    </button>
                 </div>
                 @if (_projects.Count == 0)
                 {

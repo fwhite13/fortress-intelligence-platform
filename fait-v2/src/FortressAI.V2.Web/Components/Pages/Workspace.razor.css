@@ -1,3 +1,31 @@
 .workspace-upload-input {
     display: none;
 }
+
+.workspace-folder-item {
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.workspace-upload-label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs, 4px);
+    padding: var(--spacing-xs, 4px) var(--spacing-sm, 8px);
+    border: 1px solid var(--mud-palette-primary);
+    border-radius: 4px;
+    cursor: pointer;
+    touch-action: manipulation;
+    color: var(--mud-palette-primary);
+    font-size: var(--font-size-sm, 0.875rem);
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    line-height: 1.5;
+}
+
+.workspace-upload-label--disabled {
+    opacity: 0.5;
+    pointer-events: none;
+    cursor: not-allowed;
+}

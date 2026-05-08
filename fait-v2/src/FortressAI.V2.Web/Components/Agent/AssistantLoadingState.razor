@@ -31,9 +31,12 @@
     private bool _timedOut = false;
     private CancellationTokenSource _cts = new();
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        await RunReadinessCheckAsync(_cts.Token);
+        if (firstRender)
+        {
+            await RunReadinessCheckAsync(_cts.Token);
+        }
     }
 
     private async Task RunReadinessCheckAsync(CancellationToken ct)

@@ -27,17 +27,11 @@
 
     <div class="workspace-content">
         <div class="workspace-content-header">
-            <InputFile OnChange="HandleFileUpload"
-                       class="workspace-upload-input"
-                       id="workspace-file-input"
-                       accept="*/*" />
-            <MudButton StartIcon="@Icons.Material.Outlined.Upload"
-                       Variant="Variant.Outlined"
-                       Class="workspace-upload-btn"
-                       Disabled="@_uploading"
-                       OnClick="TriggerUploadClick">
+            <InputFile id="workspace-file-input" OnChange="HandleFileUpload" class="workspace-upload-input" accept="*/*" />
+            <label for="workspace-file-input" class="workspace-upload-label @(_uploading ? "workspace-upload-label--disabled" : "")">
+                <MudIcon Icon="@Icons.Material.Outlined.Upload" Size="Size.Small" />
                 @(_uploading ? "Uploading..." : "Upload File")
-            </MudButton>
+            </label>
         </div>
         @if (_files == null)
         {
@@ -179,9 +173,6 @@
         await LoadFiles();
         _folders = await WorkspaceService.GetFolderStructureAsync(_userId);
     }
-
-    private async Task TriggerUploadClick() =>
-        await JS.InvokeVoidAsync("eval", "document.getElementById('workspace-file-input').click()");
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)
     {
