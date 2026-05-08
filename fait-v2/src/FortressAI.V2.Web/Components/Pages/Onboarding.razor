@@ -4,7 +4,7 @@
 @inject IUserProvisioningService ProvisioningService
 @inject NavigationManager Nav
 @inject ILogger<Onboarding> Logger
-@inject FaitV2DbContext Db
+@inject IDbContextFactory<FaitV2DbContext> DbFactory
 
 <PageTitle>Welcome — FAIT v2</PageTitle>
 
@@ -244,10 +244,20 @@
         }
 
         // Load resume step
-        var existingUser = await Db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid);
-        if (existingUser != null)
+        try
         {
-            _resumeStep = existingUser.OnboardingStep ?? 0;
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await using var db = await DbFactory.CreateDbContextAsync(cts.Token);
+            var existingUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid, cts.Token);
+            if (existingUser != null)
+            {
+                _resumeStep = existingUser.OnboardingStep ?? 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load resume step for {EntraOid}", _entraOid);
+            // Non-critical — start from step 0
         }
     }
 
@@ -292,11 +302,11 @@
                 wizardData: wizardData
             );
 
-            // Clear onboarding step — fully onboarded
-            await PersistOnboardingStepAsync(0);
-
             _isProvisioning = false;
             StateHasChanged();
+
+            // Best-effort step clear — fire and forget, don't block redirect
+            _ = PersistOnboardingStepAsync(0);
 
             await Task.Delay(800);
             Nav.NavigateTo("/", forceLoad: false);
@@ -313,8 +323,17 @@
 
     private async Task<string> GetOrCreateUserId()
     {
-        var existingUser = await Db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid);
-        if (existingUser != null) return existingUser.Id;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await using var db = await DbFactory.CreateDbContextAsync(cts.Token);
+            var existingUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid, cts.Token);
+            if (existingUser != null) return existingUser.Id;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "GetOrCreateUserId DB lookup failed for {EntraOid}", _entraOid);
+        }
         return Guid.NewGuid().ToString();
     }
 
@@ -341,16 +360,18 @@
     {
         try
         {
-            var user = await Db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await using var db = await DbFactory.CreateDbContextAsync(cts.Token);
+            var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid, cts.Token);
             if (user != null)
             {
                 user.OnboardingStep = step;
-                await Db.SaveChangesAsync();
+                await db.SaveChangesAsync(cts.Token);
             }
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Failed to persist onboarding step {Step}", step);
+            Logger.LogWarning(ex, "Failed to persist onboarding step {Step}", ex);
             // Non-critical — don't rethrow
         }
     }
