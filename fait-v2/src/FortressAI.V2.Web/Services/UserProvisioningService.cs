@@ -110,8 +110,9 @@ public class UserProvisioningService : IUserProvisioningService
         var s3Prefix = $"workspaces/{userId}/";
         var bucket = _config["AWS:WorkspaceBucket"]
             ?? throw new InvalidOperationException("AWS:WorkspaceBucket not configured");
-        var pgConnString = _config.GetConnectionString("PostgresConnection")
+        var pgConnStringRaw = _config.GetConnectionString("PostgresConnection")
             ?? throw new InvalidOperationException("ConnectionStrings:PostgresConnection not configured");
+        var pgConnString = ResolveNpgsqlConnectionString(pgConnStringRaw);
         var schemaName = GetPgSchemaName(userId);
 
         // Track what we've successfully created for rollback
@@ -288,6 +289,38 @@ public class UserProvisioningService : IUserProvisioningService
     }
 
     // ── PG helpers ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Resolves a raw connection string value that may be a JSON blob (AWS Secrets Manager
+    /// Aurora auto-rotate format) or a plain Npgsql connection string.
+    /// </summary>
+    private static string ResolveNpgsqlConnectionString(string raw)
+    {
+        raw = raw.Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+            throw new InvalidOperationException(
+                "ConnectionStrings:PostgresConnection is empty — check Secrets Manager secret fait-v2/postgres-master-VhGYDn");
+
+        if (raw.StartsWith("{"))
+        {
+            // JSON blob from Secrets Manager Aurora auto-rotate
+            // Format: {"username":"...","password":"...","host":"...","port":5432,"dbname":"..."}
+            var doc = System.Text.Json.JsonDocument.Parse(raw);
+            var root = doc.RootElement;
+            var host = root.GetProperty("host").GetString()
+                ?? throw new InvalidOperationException("Secrets Manager JSON missing 'host' field");
+            var port = root.TryGetProperty("port", out var p) ? p.GetInt32() : 5432;
+            var db = root.TryGetProperty("dbname", out var d) ? d.GetString() ?? "postgres" : "postgres";
+            var user = root.GetProperty("username").GetString()
+                ?? throw new InvalidOperationException("Secrets Manager JSON missing 'username' field");
+            var pass = root.GetProperty("password").GetString()
+                ?? throw new InvalidOperationException("Secrets Manager JSON missing 'password' field");
+            return $"Host={host};Port={port};Database={db};Username={user};Password={pass};SSL Mode=Require;Trust Server Certificate=true;";
+        }
+
+        // Already a valid Npgsql connection string
+        return raw;
+    }
 
     private static string GetPgSchemaName(string userId) =>
         "user_" + userId.Replace("-", "_");
