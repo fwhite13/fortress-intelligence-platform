@@ -1,26 +1,59 @@
-# Hawkeye Cycle 2 Review Brief — ADO#2960
+# Hawkeye Cycle 2 Spot-Check — ADO#2968
 
-## Target
-File: `Components/Pages/KnowledgeBase.razor`
-Commit: `0b4c899`
-Change: MudIcon at approximately line 146 — replaced `Style="font-size: 48px; color: var(--color-text-secondary); opacity: 0.4;"` with `Size="Size.Large" Style="color: var(--color-text-secondary); opacity: 0.4;"`
+You are Hawkeye (Clint Barton), code reviewer. This is a targeted cycle 2 spot-check on commit `adad621`.
 
-## Checks Required
+## What Was Fixed (Three Changes Only)
 
-1. **No hardcoded font-size** on that MudIcon anymore — confirm `font-size: 48px` is gone
-2. **`Size="Size.Large"` validity** — confirm this is a valid MudBlazor MudIcon parameter
-3. **Remaining Style attributes** — confirm they are CSS-variable-based (no new hardcodes introduced in the Style string)
-4. **Nearby code** — scan a few lines around line 146 for any incidental hardcoded values that may have snuck in
+1. `wwwroot/claude/rules/forge-kb.md` — rewritten to describe direct Bedrock KB context injection (no MCP references)
+2. `Program.cs` mcp_servers seed block — removed dead FipMcp:BaseUrl config read; EndpointUrl now seeded as empty string (rows kept for ConnectorService UI)
+3. `appsettings.json` — entire `FipMcp` block removed
 
-## Instructions
+## Your Review Tasks
 
-Read the file at `/home/fredw/projects/fip/fait-v2/Components/Pages/KnowledgeBase.razor` and focus on the MudIcon element around line 146.
+### 1. Check `wwwroot/claude/rules/forge-kb.md`
+- Read the full file
+- Confirm: NO references to "fip-mcp", "FipMcp", "mcp", or any MCP server in the forge-kb instructions
+- Confirm: Instructions describe direct Bedrock KB context injection
+- Flag any remaining MCP references as NEEDS-CHANGES
 
-Report:
-- Exact current content of the MudIcon element
-- Whether `font-size: 48px` is absent
-- Whether `Size="Size.Large"` is present and correct
-- Whether the Style attribute only uses CSS variables (no raw pixel/rem/color values)
-- Whether anything nearby looks wrong
+### 2. Check `Program.cs` — mcp_servers seed block
+- Search for the mcp_servers seed block (likely a SeedMcpServers or similar method, or inline seeding near ConnectorService)
+- Confirm: NO read of `FipMcp:BaseUrl` or `FipMcp:*` configuration
+- Confirm: EndpointUrl is seeded as empty string `""` (not removed entirely — rows kept for UI)
+- Flag any FipMcp config reads as NEEDS-CHANGES
 
-Verdict: PASS or NEEDS-CHANGES (with specifics if NEEDS-CHANGES)
+### 3. Check `appsettings.json`
+- Read the file (or search it)
+- Confirm: The entire `FipMcp` JSON section is gone
+- Flag any remaining FipMcp keys as NEEDS-CHANGES
+
+### 4. Regression Check
+- Quick scan of files adjacent to these changes for any obvious regressions
+- Check that no other file still references FipMcp:BaseUrl or expects it to exist
+
+## Output Format
+
+Produce a structured review report:
+
+```
+## Hawkeye Cycle 2 Review — ADO#2968
+
+### Verdict: PASS | NEEDS-CHANGES
+
+### Check 1: forge-kb.md
+[findings]
+
+### Check 2: Program.cs seed block
+[findings]
+
+### Check 3: appsettings.json
+[findings]
+
+### Check 4: Regression scan
+[findings]
+
+### Summary
+[One paragraph summary of findings and verdict rationale]
+```
+
+Be precise. Cite exact line content or grep results for each check. If anything is wrong, state exactly what and why.
