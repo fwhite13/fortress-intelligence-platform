@@ -92,9 +92,16 @@ builder.Services.AddMudServices();
 // AWS S3 (workspace bucket)
 builder.Services.AddAWSService<IAmazonS3>();
 
+// AWS Bedrock (KB direct access)
+builder.Services.AddAWSService<Amazon.BedrockAgentRuntime.IAmazonBedrockAgentRuntime>();
+builder.Services.AddAWSService<Amazon.BedrockAgent.IAmazonBedrockAgent>();
+
 // AWS ECS (per-user Fargate runtime)
 builder.Services.AddSingleton<IAmazonECS>(sp => new AmazonECSClient(Amazon.RegionEndpoint.USEast1));
 builder.Services.AddHttpClient("HarnessClient");
+builder.Services.AddHttpClient("BraveSearchClient");
+builder.Services.AddHttpClient("DevOpsTestClient");
+builder.Services.AddHttpClient("MicrosoftGraphClient");
 // FaitV2DbContext — main app DB (fait_v2_dev on Aurora MySQL)
 // Built from FORTRESS_DB_* env vars, consistent with keyring and fipPortal patterns
 var faitV2Csb = new MySqlConnector.MySqlConnectionStringBuilder
@@ -138,10 +145,17 @@ builder.Services.AddDbContextFactory<FipPortalDbContext>(options =>
         new MySqlServerVersion(new Version(8, 0, 28)),
         mysql => mysql.EnableRetryOnFailure(3)));
 
-// FORGE KB / fip-mcp integration
-builder.Services.AddHttpClient("FipMcpClient");
-builder.Services.AddScoped<IFipTokenProvider, FipTokenProvider>();
+// FORGE KB — direct Bedrock integration (replaces fip-mcp)
 builder.Services.AddScoped<IForgeKbService, ForgeKbService>();
+
+// Brave Search — direct API (replaces fip-mcp web-search)
+builder.Services.AddScoped<IBraveSearchService, BraveSearchService>();
+
+// ADO — direct PAT-based connection (replaces fip-mcp ado)
+builder.Services.AddScoped<IDevOpsConnectionService, DevOpsConnectionService>();
+
+// MS365 — direct Graph API via delegated tokens (replaces fip-mcp ms365)
+builder.Services.AddScoped<IMicrosoftTokenService, MicrosoftTokenService>();
 
 // Design Agent
 builder.Services.AddScoped<IDesignAgentService, DesignAgentService>();

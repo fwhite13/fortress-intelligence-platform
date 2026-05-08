@@ -23,6 +23,7 @@ public class FaitV2DbContext : DbContext
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
     public DbSet<ConversationTask> ConversationTasks => Set<ConversationTask>();
+    public DbSet<UserDevOpsConnection> UserDevOpsConnections => Set<UserDevOpsConnection>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -353,6 +354,26 @@ public class FaitV2DbContext : DbContext
                   .WithMany()
                   .HasForeignKey(e => e.UserId)
                   .HasConstraintName("fk_conversation_tasks_user")
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // user_devops_connections
+        modelBuilder.Entity<UserDevOpsConnection>(entity =>
+        {
+            entity.ToTable("user_devops_connections");
+            entity.HasKey(e => e.UserId);
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36);
+            entity.Property(e => e.OrgUrl).HasColumnName("org_url").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.PatEncrypted).HasColumnName("pat_encrypted").HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_user_devops_connections_user_id");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .HasConstraintName("fk_user_devops_connections_user")
                   .OnDelete(DeleteBehavior.Cascade);
         });
 

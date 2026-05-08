@@ -1,202 +1,178 @@
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
+using Amazon.BedrockAgentRuntime;
+using Amazon.BedrockAgentRuntime.Model;
+using Amazon.BedrockAgent;
+using Amazon.BedrockAgent.Model;
+using Amazon.S3;
+using Amazon.S3.Model;
 
 namespace FortressAI.V2.Web.Services;
 
+/// <summary>
+/// Direct AWS Bedrock Knowledge Base implementation.
+/// Replaces the old fip-mcp HTTP client approach (which required Entra auth that isn't wired yet).
+/// Reads KB IDs from config: KnowledgeBase:CorpKbId, KnowledgeBase:PersonalKbId, KnowledgeBase:TeamKbId.
+/// </summary>
 public class ForgeKbService : IForgeKbService
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IFipTokenProvider _tokenProvider;
+    private readonly IAmazonBedrockAgentRuntime _bedrockRuntime;
+    private readonly IAmazonBedrockAgent _bedrockAgent;
+    private readonly IAmazonS3 _s3;
     private readonly IConfiguration _config;
     private readonly ILogger<ForgeKbService> _logger;
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
+    private readonly string _corpKbId;
+    private readonly string _personalKbId;
+    private readonly string _teamKbId;
+    private readonly string _s3Bucket;
 
     public ForgeKbService(
-        IHttpClientFactory httpClientFactory,
-        IFipTokenProvider tokenProvider,
+        IAmazonBedrockAgentRuntime bedrockRuntime,
+        IAmazonBedrockAgent bedrockAgent,
+        IAmazonS3 s3,
         IConfiguration config,
         ILogger<ForgeKbService> logger)
     {
-        _httpClientFactory = httpClientFactory;
-        _tokenProvider = tokenProvider;
+        _bedrockRuntime = bedrockRuntime;
+        _bedrockAgent = bedrockAgent;
+        _s3 = s3;
         _config = config;
         _logger = logger;
+
+        _corpKbId = config["KnowledgeBase:CorpKbId"] ?? "";
+        _personalKbId = config["KnowledgeBase:PersonalKbId"] ?? "";
+        _teamKbId = config["KnowledgeBase:TeamKbId"] ?? "";
+        _s3Bucket = config["AWS:S3Bucket"] ?? "fortress-tools";
     }
 
-    // ── IForgeKbService ───────────────────────────────────────────────────
-
-    public async Task<IReadOnlyList<KbInfo>> ListKbsAsync(string entraOid, CancellationToken ct = default)
+    public Task<IReadOnlyList<KbInfo>> ListKbsAsync(string entraOid, CancellationToken ct = default)
     {
-        var result = await CallToolAsync("list_kbs", new { entra_oid = entraOid }, ct);
-        if (result == null) return Array.Empty<KbInfo>();
+        var kbs = new List<KbInfo>();
+
+        if (!string.IsNullOrEmpty(_corpKbId))
+            kbs.Add(new KbInfo(_corpKbId, "corp", "Fortress Corporate Knowledge Base", false));
+
+        if (!string.IsNullOrEmpty(_personalKbId))
+            kbs.Add(new KbInfo(_personalKbId, "personal", "Personal Knowledge Base", true));
+
+        if (!string.IsNullOrEmpty(_teamKbId))
+            kbs.Add(new KbInfo(_teamKbId, "team", "Team Knowledge Base", false));
+
+        return Task.FromResult<IReadOnlyList<KbInfo>>(kbs);
+    }
+
+    public async Task<IReadOnlyList<KbSearchResult>> SearchKbAsync(
+        string kbId, string query, int topK = 5, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(kbId))
+            return Array.Empty<KbSearchResult>();
 
         try
         {
-            var items = JsonSerializer.Deserialize<List<KbInfoDto>>(result, JsonOpts) ?? new();
-            return items.Select(x => new KbInfo(x.KbId, x.KbType, x.Description, x.Writable)).ToList();
+            var response = await _bedrockRuntime.RetrieveAsync(new RetrieveRequest
+            {
+                KnowledgeBaseId = kbId,
+                RetrievalQuery = new KnowledgeBaseQuery { Text = query },
+                RetrievalConfiguration = new KnowledgeBaseRetrievalConfiguration
+                {
+                    VectorSearchConfiguration = new KnowledgeBaseVectorSearchConfiguration
+                    {
+                        NumberOfResults = Math.Min(topK, 10)
+                    }
+                }
+            }, ct);
+
+            _logger.LogInformation("KB search: kbId={KbId} results={Count} query='{Query}'",
+                kbId, response.RetrievalResults.Count,
+                query.Length > 50 ? query[..50] + "..." : query);
+
+            return response.RetrievalResults
+                .Where(r => r.Score > 0.3)
+                .Select(r => new KbSearchResult(
+                    r.Content.Text,
+                    r.Location?.S3Location?.Uri ?? string.Empty,
+                    r.Score))
+                .ToList();
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to deserialize list_kbs response: {Raw}", result);
-            return Array.Empty<KbInfo>();
-        }
-    }
-
-    public async Task<IReadOnlyList<KbSearchResult>> SearchKbAsync(string kbId, string query, int topK = 5, CancellationToken ct = default)
-    {
-        var result = await CallToolAsync("search_kb", new { kb_id = kbId, query, top_k = topK }, ct);
-        if (result == null) return Array.Empty<KbSearchResult>();
-
-        try
-        {
-            var items = JsonSerializer.Deserialize<List<KbSearchResultDto>>(result, JsonOpts) ?? new();
-            return items.Select(x => new KbSearchResult(x.Content, x.Metadata ?? new object(), x.RelevanceScore)).ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to deserialize search_kb response: {Raw}", result);
+            _logger.LogWarning(ex, "KB search failed for kbId={KbId}", kbId);
             return Array.Empty<KbSearchResult>();
         }
     }
 
-    public async Task<string> AddToKbAsync(string kbId, string content, Dictionary<string, string> metadata, CancellationToken ct = default)
+    public async Task<string> AddToKbAsync(
+        string kbId, string content, Dictionary<string, string> metadata, CancellationToken ct = default)
     {
-        var result = await CallToolAsync("add_to_kb", new { kb_id = kbId, content, metadata }, ct);
-        return result ?? string.Empty;
+        if (string.IsNullOrEmpty(kbId))
+            return string.Empty;
+
+        try
+        {
+            var s3Key = $"kb-uploads/{kbId}/{Guid.NewGuid()}.txt";
+            using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+            await _s3.PutObjectAsync(new PutObjectRequest
+            {
+                BucketName = _s3Bucket,
+                Key = s3Key,
+                InputStream = stream,
+                ContentType = "text/plain"
+            }, ct);
+
+            _logger.LogInformation("Uploaded KB content to S3: {Key}", s3Key);
+
+            var dataSourceId = _config[$"KnowledgeBase:DataSourceId:{kbId}"]
+                            ?? _config["KnowledgeBase:DefaultDataSourceId"] ?? "";
+
+            if (!string.IsNullOrEmpty(dataSourceId))
+            {
+                var ingestionResponse = await _bedrockAgent.StartIngestionJobAsync(
+                    new StartIngestionJobRequest
+                    {
+                        KnowledgeBaseId = kbId,
+                        DataSourceId = dataSourceId,
+                    }, ct);
+
+                var jobId = ingestionResponse.IngestionJob.IngestionJobId;
+                _logger.LogInformation("Started KB ingestion job {JobId} for kbId={KbId}", jobId, kbId);
+                return jobId;
+            }
+
+            _logger.LogWarning("No DataSourceId configured for kbId={KbId}; S3 upload complete but ingestion not triggered", kbId);
+            return s3Key;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to add content to KB {KbId}", kbId);
+            return string.Empty;
+        }
     }
 
     public async Task<KbMetadata> GetKbMetadataAsync(string kbId, CancellationToken ct = default)
     {
-        var result = await CallToolAsync("get_kb_metadata", new { kb_id = kbId }, ct);
-        if (result == null) return new KbMetadata(kbId, "unknown", 0, DateTime.UtcNow, string.Empty);
+        if (string.IsNullOrEmpty(kbId))
+            return new KbMetadata(kbId, "unknown", 0, DateTime.UtcNow, string.Empty);
 
         try
         {
-            var dto = JsonSerializer.Deserialize<KbMetadataDto>(result, JsonOpts);
-            if (dto == null) return new KbMetadata(kbId, "unknown", 0, DateTime.UtcNow, string.Empty);
-            return new KbMetadata(dto.KbId, dto.KbType, dto.DocumentCount, dto.LastUpdated, dto.DataSourceId);
+            var response = await _bedrockAgent.GetKnowledgeBaseAsync(
+                new GetKnowledgeBaseRequest { KnowledgeBaseId = kbId }, ct);
+
+            var kb = response.KnowledgeBase;
+            var kbType = kbId == _corpKbId ? "corp" :
+                         kbId == _personalKbId ? "personal" :
+                         kbId == _teamKbId ? "team" : "unknown";
+
+            return new KbMetadata(
+                kbId,
+                kbType,
+                0,
+                kb.UpdatedAt,
+                kb.KnowledgeBaseId ?? string.Empty);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to deserialize get_kb_metadata response: {Raw}", result);
+            _logger.LogWarning(ex, "Failed to get KB metadata for kbId={KbId}", kbId);
             return new KbMetadata(kbId, "unknown", 0, DateTime.UtcNow, string.Empty);
         }
-    }
-
-    // ── MCP JSON-RPC transport ────────────────────────────────────────────
-
-    private async Task<string?> CallToolAsync(string toolName, object arguments, CancellationToken ct)
-    {
-        var baseUrl = _config["FipMcp:BaseUrl"]?.TrimEnd('/')
-            ?? throw new InvalidOperationException("FipMcp:BaseUrl not configured");
-
-        var token = await _tokenProvider.GetAccessTokenAsync();
-
-        var rpcId = Guid.NewGuid().ToString();
-        var body = new
-        {
-            jsonrpc = "2.0",
-            id = rpcId,
-            method = "tools/call",
-            @params = new
-            {
-                name = toolName,
-                arguments
-            }
-        };
-
-        var json = JsonSerializer.Serialize(body);
-        var client = _httpClientFactory.CreateClient("FipMcpClient");
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/forge-kb")
-        {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-
-        if (!string.IsNullOrEmpty(token))
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await client.SendAsync(request, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "HTTP call to fip-mcp failed for tool {Tool}", toolName);
-            return null;
-        }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogWarning("fip-mcp returned {Status} for tool {Tool}", response.StatusCode, toolName);
-            return null;
-        }
-
-        var responseJson = await response.Content.ReadAsStringAsync(ct);
-        return ExtractToolResult(responseJson, toolName);
-    }
-
-    private string? ExtractToolResult(string responseJson, string toolName)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(responseJson);
-            var root = doc.RootElement;
-
-            // MCP standard: result.content[0].text
-            if (root.TryGetProperty("result", out var result) &&
-                result.TryGetProperty("content", out var content) &&
-                content.ValueKind == JsonValueKind.Array &&
-                content.GetArrayLength() > 0)
-            {
-                var first = content[0];
-                if (first.TryGetProperty("text", out var text))
-                    return text.GetString();
-            }
-
-            // If response has "error", log it
-            if (root.TryGetProperty("error", out var error))
-            {
-                _logger.LogWarning("fip-mcp tool {Tool} returned error: {Error}", toolName, error.ToString());
-            }
-
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to parse fip-mcp response for tool {Tool}", toolName);
-            return null;
-        }
-    }
-
-    // ── DTOs ──────────────────────────────────────────────────────────────
-
-    private sealed class KbInfoDto
-    {
-        public string KbId { get; set; } = string.Empty;
-        public string KbType { get; set; } = string.Empty;
-        public string Description { get; set; } = string.Empty;
-        public bool Writable { get; set; }
-    }
-
-    private sealed class KbSearchResultDto
-    {
-        public string Content { get; set; } = string.Empty;
-        public object? Metadata { get; set; }
-        public double RelevanceScore { get; set; }
-    }
-
-    private sealed class KbMetadataDto
-    {
-        public string KbId { get; set; } = string.Empty;
-        public string KbType { get; set; } = string.Empty;
-        public int DocumentCount { get; set; }
-        public DateTime LastUpdated { get; set; }
-        public string DataSourceId { get; set; } = string.Empty;
     }
 }
