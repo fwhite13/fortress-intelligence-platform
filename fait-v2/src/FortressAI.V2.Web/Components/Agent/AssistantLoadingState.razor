@@ -44,11 +44,15 @@
             await Task.Delay(800, ct);
 
             // Check provisioning status via service (server-side, no HTTP round-trip)
-            await ProvisioningStatusService.CheckReadyAsync(ct);
+            var isReady = await ProvisioningStatusService.CheckReadyAsync(ct);
 
             if (!ct.IsCancellationRequested)
             {
-                // Fire OnReady regardless — Routes.razor handles redirect to /onboarding if not provisioned
+                if (!isReady)
+                {
+                    NavManager.NavigateTo("/onboarding", replace: true);
+                    return;
+                }
                 await OnReady.InvokeAsync();
             }
         }
@@ -83,4 +87,5 @@
 
     [Inject] private IProvisioningStatusService ProvisioningStatusService { get; set; } = default!;
     [Inject] private ILogger<AssistantLoadingState> Log { get; set; } = default!;
+    [Inject] private NavigationManager NavManager { get; set; } = default!;
 }
