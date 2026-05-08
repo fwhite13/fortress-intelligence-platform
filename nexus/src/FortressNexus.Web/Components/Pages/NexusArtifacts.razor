@@ -43,6 +43,29 @@ else if (_artifactSet is not null)
                 }
             </div>
             <div class="d-flex align-center gap-2">
+                @* ADO project selector — always visible to admins *@
+                @if (_isAdmin)
+                {
+                    @if (_headerProjectsLoading)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                    }
+                    else if (_headerProjects.Count > 0)
+                    {
+                        <MudSelect T="string"
+                                   Value="@_headerSelectedProject"
+                                   Label="ADO Project"
+                                   Variant="Variant.Outlined"
+                                   Margin="Margin.Dense"
+                                   Style="min-width:180px"
+                                   ValueChanged="@OnHeaderProjectChangedAsync">
+                            @foreach (var proj in _headerProjects)
+                            {
+                                <MudSelectItem T="string" Value="@proj">@proj</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                }
                 @if (_isEditor && !_editMode)
                 {
                     <MudButton Variant="Variant.Outlined"
@@ -91,7 +114,7 @@ else if (_artifactSet is not null)
         @if (_artifactSet.ExternalDependencyCount > 0)
         {
             <MudAlert Severity="Severity.Warning" Class="mb-4">
-                @_artifactSet.ExternalDependencyCount external dependencies require action before these WIs can be completed
+                @_artifactSet.ExternalDependencyCount external @(_artifactSet.ExternalDependencyCount == 1 ? "dependency requires" : "dependencies require") action before these WIs can be completed. These will <strong>not</strong> be posted to ADO.
             </MudAlert>
 
             <MudExpansionPanels Class="mb-4">
@@ -100,17 +123,25 @@ else if (_artifactSet is not null)
                     {
                         <MudCard Class="mb-2">
                             <MudCardContent>
-                                <MudText Typo="Typo.subtitle2"><strong>@extWi.ExternalOwner</strong></MudText>
-                                <MudText Typo="Typo.body1">@extWi.Title</MudText>
-                                <MudText Typo="Typo.body2">
-                                    @(extWi.Description?.Length > 120 ? extWi.Description[..120] + "\u2026" : extWi.Description)
-                                </MudText>
-                                <MudButton OnClick="@(() => CopyToClipboard(extWi.Description ?? extWi.Title))"
-                                           StartIcon="@Icons.Material.Outlined.ContentCopy"
-                                           Size="Size.Small"
-                                           Class="mt-1">
-                                    Copy brief
-                                </MudButton>
+                                <div class="d-flex align-center justify-space-between mb-1">
+                                    <div>
+                                        <MudText Typo="Typo.subtitle2"><strong>@extWi.ExternalOwner</strong></MudText>
+                                        <MudText Typo="Typo.body1">@extWi.Title</MudText>
+                                    </div>
+                                    <MudButton OnClick="@(() => CopyToClipboard(extWi.Description ?? extWi.Title))"
+                                               StartIcon="@Icons.Material.Outlined.ContentCopy"
+                                               Size="Size.Small">
+                                        Copy brief
+                                    </MudButton>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(extWi.Description))
+                                {
+                                    <MudExpansionPanels Class="mt-1">
+                                        <MudExpansionPanel Text="View brief" Dense="true">
+                                            <MudText Typo="Typo.body2" Style="white-space: pre-wrap;">@extWi.Description</MudText>
+                                        </MudExpansionPanel>
+                                    </MudExpansionPanels>
+                                }
                             </MudCardContent>
                         </MudCard>
                     }
@@ -119,6 +150,18 @@ else if (_artifactSet is not null)
         }
 
         @* ── WI Tree: Epic → Feature → Story → Task ── *@
+        @if (_editMode)
+        {
+            <div class="mb-3">
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           Size="Size.Small"
+                           OnClick="@AddEpic">
+                    Add Epic
+                </MudButton>
+            </div>
+        }
         <MudExpansionPanels MultiExpansion="true">
             @foreach (var epic in _epics)
             {
@@ -512,7 +555,11 @@ else if (_artifactSet is not null)
                 }
 
                 <MudText Typo="Typo.body1" Class="mb-4">
-                    Post <strong>@_workItems.Count</strong> work items to <strong>@(_selectedAdoProject ?? "...")</strong>?
+                    Post <strong>@(_workItems.Count(w => !w.IsExternalDependency))</strong> work items to <strong>@(_selectedAdoProject ?? "...")</strong>?
+                    @if (_workItems.Any(w => w.IsExternalDependency))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Warning">(@_workItems.Count(w => w.IsExternalDependency) external dependencies will be skipped.)</MudText>
+                    }
                 </MudText>
 
                 <div class="d-flex justify-end gap-2">
@@ -557,6 +604,11 @@ else if (_artifactSet is not null)
 
     // ADO confirmation dialog state
     private bool _showAdoConfirmDialog = false;
+
+    // Header ADO project selector (inline, always-visible for admins)
+    private List<string> _headerProjects = new();
+    private string? _headerSelectedProject;
+    private bool _headerProjectsLoading = false;
     private string _adoOrg = "FortressAffinityGroup";
     private List<string> _adoProjects = new();
     private string? _selectedAdoProject = null;
@@ -623,6 +675,20 @@ else if (_artifactSet is not null)
             _isEditor = await UserContextService.IsNexusEditorAsync();
             _isAdmin = await UserContextService.IsAdminAsync();
             _adoOrg = Configuration["NexusAdo:Organization"] ?? "FortressAffinityGroup";
+
+            // Load ADO projects for inline header selector
+            if (_isAdmin)
+            {
+                _headerProjectsLoading = true;
+                try
+                {
+                    _headerProjects = await AdoService.GetProjectsAsync(_adoOrg);
+                    _headerSelectedProject = _artifactSet?.AdoProjectName
+                        ?? (_headerProjects.Count > 0 ? _headerProjects[0] : null);
+                }
+                catch { /* silently skip — user can still use confirm dialog */ }
+                finally { _headerProjectsLoading = false; }
+            }
             // Snapshot originals for revert on save failure
             foreach (var w in _workItems)
             {
@@ -870,6 +936,8 @@ else if (_artifactSet is not null)
         }
     }
 
+    private Task AddEpic() => AddWi("Epic", null!);
+
     private async Task AddWi(string wiType, string parentTitle)
     {
         try
@@ -935,8 +1003,40 @@ else if (_artifactSet is not null)
 
     // ── ADO Post ──
 
+    private async Task OnHeaderProjectChangedAsync(string newProject)
+    {
+        _headerSelectedProject = newProject;
+        if (_artifactSet is null) return;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var set = await db.ArtifactSets.FindAsync(_artifactSet.Id);
+            if (set is not null)
+            {
+                set.AdoProjectName = newProject;
+                await db.SaveChangesAsync();
+                _artifactSet.AdoProjectName = newProject;
+            }
+            Snackbar.Add($"ADO project updated to {newProject}.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Failed to save project: {ex.Message}", Severity.Error);
+        }
+    }
+
     private async Task OpenAdoConfirmDialogAsync()
     {
+        // Reuse already-loaded header projects if available
+        if (_headerProjects.Count > 0)
+        {
+            _adoProjects = _headerProjects;
+            _selectedAdoProject = _headerSelectedProject ?? _artifactSet?.AdoProjectName ?? _headerProjects[0];
+            _showAdoConfirmDialog = true;
+            StateHasChanged();
+            return;
+        }
+
         _adoProjects = new List<string>();
         _selectedAdoProject = null;
         _showAdoConfirmDialog = true;
@@ -945,8 +1045,8 @@ else if (_artifactSet is not null)
         try
         {
             _adoProjects = await AdoService.GetProjectsAsync(_adoOrg);
-            if (_adoProjects.Count > 0)
-                _selectedAdoProject = _adoProjects[0];
+            _selectedAdoProject = _artifactSet?.AdoProjectName
+                ?? (_adoProjects.Count > 0 ? _adoProjects[0] : null);
             StateHasChanged();
         }
         catch (Exception ex)

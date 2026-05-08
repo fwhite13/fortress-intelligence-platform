@@ -86,7 +86,9 @@ public class ArtifactGenerationService : IArtifactGenerationService
                     items.AddRange(tcResult.TestCases);
                     tcCount = tcResult.TestCases.Count;
 
-                    var titleMap = items.ToDictionary(w => w.Title ?? "", w => w);
+                    var titleMap = items
+                        .GroupBy(w => w.Title ?? "", StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
                     foreach (var update in tcResult.ParentUpdates)
                     {
                         if (titleMap.TryGetValue(update.StoryTitle ?? "", out var parent))

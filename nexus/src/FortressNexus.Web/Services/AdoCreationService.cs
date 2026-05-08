@@ -79,8 +79,14 @@ public class AdoCreationService : IAdoService
         using var client = _httpClientFactory.CreateClient();
         client.DefaultRequestHeaders.Authorization = BuildBasicAuth(pat);
 
-        // Step 2: Sort DTOs — Epics first, then Features, Stories, Tasks, Test Cases
+        // Step 2: Filter out external dependencies — these require action outside ADO
+        var externalCount = items.Count(w => w.IsExternalDependency);
+        if (externalCount > 0)
+            _logger.LogInformation("[AdoCreationService] Skipping {Count} external dependency WIs — not posted to ADO", externalCount);
+
+        // Sort DTOs — Epics first, then Features, Stories, Tasks, Test Cases
         var orderedItems = items
+            .Where(w => !w.IsExternalDependency)
             .OrderBy(w => w.WorkItemType switch
             {
                 "Epic" => 0,

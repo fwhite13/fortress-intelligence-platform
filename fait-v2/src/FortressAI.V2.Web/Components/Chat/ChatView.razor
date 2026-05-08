@@ -6,6 +6,8 @@
 @implements IAsyncDisposable
 @inject IPluginAgentService PluginAgentService
 @inject IContextEnvelopeService ContextEnvelopeSvc
+@inject IConversationService ConversationService
+@inject ICompactionService CompactionService
 
 @* Main chat component — lives in DualPaneLayout's ChatContent slot *@
 
@@ -286,6 +288,7 @@
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private List<ChatMessage> _messages = new();
+    private string? _conversationId;
     private string _inputText = "";
     private bool _isStreaming = false;
     private string _streamingContent = "";
@@ -323,6 +326,15 @@
             .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "roles")
             .Select(c => c.Value);
         _availablePlugins = await PluginAgentService.GetAvailablePluginsAsync(_userId, userRoles);
+
+        // §15 — Load or create active conversation and restore history
+        var conv = await ConversationService.GetOrCreateActiveConversationAsync(_userId);
+        _conversationId = conv.Id;
+        var history = await ConversationService.GetFullHistoryAsync(_conversationId);
+        _messages = history
+            .Where(m => !m.IsCompactionSummary)
+            .Select(m => new ChatMessage(m.Role, m.Content))
+            .ToList();
 
         await ConnectSignalRAsync();
     }
@@ -388,15 +400,35 @@
         var assistantContent = new System.Text.StringBuilder();
         try
         {
+            // Persist user message to DB
+            if (!string.IsNullOrEmpty(_conversationId))
+                await ConversationService.AppendMessageAsync(_conversationId, "user", userMessage, EstimateTokens(userMessage));
+
+            // Build context from DB (compaction-aware)
+            List<FortressAI.V2.Web.Services.ChatHistoryEntry> contextHistory;
+            if (!string.IsNullOrEmpty(_conversationId))
+            {
+                var contextMessages = await ConversationService.GetMessagesForContextAsync(_conversationId);
+                contextHistory = contextMessages
+                    .Where(m => m.Role != "system" || m.IsCompactionSummary)
+                    .SkipLast(1)  // exclude the just-appended user message
+                    .Select(m => new FortressAI.V2.Web.Services.ChatHistoryEntry(m.Role, m.Content))
+                    .ToList();
+            }
+            else
+            {
+                contextHistory = _messages
+                    .Where(m => m.Role != "system")
+                    .SkipLast(1)
+                    .Select(m => new FortressAI.V2.Web.Services.ChatHistoryEntry(m.Role, m.Content))
+                    .ToList();
+            }
+
             var request = new TurnRequest(
                 Message: BuildContextualMessage(userMessage),
                 SystemPrompt: BuildSystemPrompt(),
                 TaskMode: false,
-                History: _messages
-                    .Where(m => m.Role != "system")
-                    .SkipLast(1)
-                    .Select(m => new ChatHistoryEntry(m.Role, m.Content))
-                    .ToList()
+                History: contextHistory
             );
             await foreach (var evt in AgentRuntime.SendTurnAsync(_userId, request))
             {
@@ -415,12 +447,30 @@
         finally
         {
             _isStreaming = false;
-            if (assistantContent.Length > 0)
-                _messages.Add(new ChatMessage(Role: "assistant", Content: assistantContent.ToString()));
+            var fullResponse = assistantContent.ToString();
+            if (fullResponse.Length > 0)
+            {
+                _messages.Add(new ChatMessage(Role: "assistant", Content: fullResponse));
+                // Persist assistant message to DB
+                if (!string.IsNullOrEmpty(_conversationId))
+                {
+                    await ConversationService.AppendMessageAsync(_conversationId, "assistant", fullResponse, EstimateTokens(fullResponse));
+                    await ConversationService.UpdateTokenCountAsync(_conversationId, EstimateTokens(userMessage) + EstimateTokens(fullResponse));
+                    // Fire-and-forget compaction check
+                    var convIdCapture = _conversationId;
+                    _ = Task.Run(async () =>
+                    {
+                        try { await CompactionService.CompactIfNeededAsync(convIdCapture); }
+                        catch (Exception) { /* compaction is non-critical */ }
+                    });
+                }
+            }
             _streamingContent = "";
             StateHasChanged();
         }
     }
+
+    private static int EstimateTokens(string text) => (int)Math.Ceiling(text.Length / 4.0);
 
     private async Task RunCCTaskAsync(string userMessage)
     {

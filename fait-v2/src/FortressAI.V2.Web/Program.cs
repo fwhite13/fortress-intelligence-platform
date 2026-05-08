@@ -187,6 +187,11 @@ builder.Services.AddScoped<IPluginAgentService, PluginAgentService>();
 builder.Services.AddScoped<IScheduledTaskService, ScheduledTaskService>();
 builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 
+// §15 — Conversation history + compaction pipeline
+builder.Services.AddScoped<IConversationService, ConversationService>();
+builder.Services.AddScoped<ICompactionService, CompactionService>();
+builder.Services.AddScoped<IRAGWriteService, RAGWriteServiceStub>();
+
 var app = builder.Build();
 
 // Seed mcp_servers with all MCP tool groups (idempotent)

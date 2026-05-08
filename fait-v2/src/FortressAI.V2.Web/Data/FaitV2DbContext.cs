@@ -24,6 +24,8 @@ public class FaitV2DbContext : DbContext
     public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
     public DbSet<ConversationTask> ConversationTasks => Set<ConversationTask>();
     public DbSet<UserDevOpsConnection> UserDevOpsConnections => Set<UserDevOpsConnection>();
+    public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<Message> Messages => Set<Message>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -395,6 +397,54 @@ public class FaitV2DbContext : DbContext
 
             entity.HasIndex(e => e.IsActive).HasDatabaseName("ix_agent_plugins_is_active");
             entity.HasIndex(e => e.Name).IsUnique().HasDatabaseName("ix_agent_plugins_name");
+        });
+
+        // conversations
+        modelBuilder.Entity<Conversation>(entity =>
+        {
+            entity.ToTable("conversations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(500);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.LastActiveAt).HasColumnName("last_active_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.EstimatedTokenCount).HasColumnName("estimated_token_count").HasDefaultValue(0);
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_conversations_user_id");
+            entity.HasIndex(e => e.LastActiveAt).HasDatabaseName("ix_conversations_last_active_at");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .HasConstraintName("fk_conversations_user")
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // messages
+        modelBuilder.Entity<Message>(entity =>
+        {
+            entity.ToTable("messages");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.ConversationId).HasColumnName("conversation_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Role).HasColumnName("role").HasMaxLength(20).IsRequired();
+            entity.Property(e => e.Content).HasColumnName("content").HasColumnType("longtext").IsRequired();
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.CompactedAt).HasColumnName("compacted_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.IsCompactionSummary).HasColumnName("is_compaction_summary").HasColumnType("tinyint(1)").HasDefaultValue(false);
+            entity.Property(e => e.SessionType).HasColumnName("session_type").HasMaxLength(10).HasDefaultValue("main");
+            entity.Property(e => e.PluginAgentId).HasColumnName("plugin_agent_id").HasMaxLength(50);
+            entity.Property(e => e.TokenCount).HasColumnName("token_count").HasDefaultValue(0);
+
+            entity.HasIndex(e => e.ConversationId).HasDatabaseName("ix_messages_conversation_id");
+            entity.HasIndex(e => e.CreatedAt).HasDatabaseName("ix_messages_created_at");
+
+            entity.HasOne(e => e.Conversation)
+                  .WithMany(c => c.Messages)
+                  .HasForeignKey(e => e.ConversationId)
+                  .HasConstraintName("fk_messages_conversation")
+                  .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
