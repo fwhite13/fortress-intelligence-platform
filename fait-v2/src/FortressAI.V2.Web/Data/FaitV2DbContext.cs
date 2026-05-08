@@ -22,6 +22,7 @@ public class FaitV2DbContext : DbContext
     public DbSet<AgentPlugin> AgentPlugins => Set<AgentPlugin>();
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
+    public DbSet<ConversationTask> ConversationTasks => Set<ConversationTask>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -331,6 +332,27 @@ public class FaitV2DbContext : DbContext
             entity.HasOne(e => e.Task)
                   .WithMany()
                   .HasForeignKey(e => e.TaskId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // conversation_tasks
+        modelBuilder.Entity<ConversationTask>(entity =>
+        {
+            entity.ToTable("conversation_tasks");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasColumnType("char(36)").IsRequired();
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasColumnType("char(36)").IsRequired();
+            entity.Property(e => e.Title).HasColumnName("title").HasColumnType("varchar(500)");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_conversation_tasks_user_id");
+            entity.HasIndex(e => e.UpdatedAt).HasDatabaseName("ix_conversation_tasks_updated_at");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .HasConstraintName("fk_conversation_tasks_user")
                   .OnDelete(DeleteBehavior.Cascade);
         });
 

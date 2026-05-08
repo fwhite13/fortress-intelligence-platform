@@ -1,2 +1,49 @@
 /* MainLayout scoped styles — component-level overrides only.
    Global styles are in wwwroot/css/app.css */
+
+/* Recent Tasks section */
+.fait-v2-drawer__recent-tasks {
+    padding: var(--spacing-sm, 8px) var(--spacing-xs, 4px);
+}
+
+.fait-v2-drawer__task-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-xs, 4px) var(--spacing-sm, 8px);
+    border-radius: 4px;
+    cursor: pointer;
+    touch-action: manipulation;
+    gap: var(--spacing-xs, 4px);
+}
+
+.fait-v2-drawer__task-item:hover {
+    background: var(--mud-palette-action-hover);
+}
+
+.fait-v2-drawer__task-title {
+    font-size: var(--font-size-sm, 0.8125rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.fait-v2-drawer__task-date {
+    font-size: var(--font-size-xs, 0.75rem);
+    color: var(--mud-palette-text-secondary);
+    flex-shrink: 0;
+}
+
+.fait-v2-drawer__see-all {
+    display: block;
+    font-size: var(--font-size-xs, 0.75rem);
+    color: var(--mud-palette-primary);
+    padding: var(--spacing-xs, 4px) var(--spacing-sm, 8px);
+    text-decoration: none;
+}
+
+/* New Task button */
+.fait-v2-drawer__new-task {
+    padding: var(--spacing-sm, 8px);
+}
