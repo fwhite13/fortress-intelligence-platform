@@ -43,11 +43,12 @@
     {
         try
         {
-            // Brief UX pause so the loading screen doesn't flash
             await Task.Delay(800, ct);
 
-            // Check provisioning status via service (server-side, no HTTP round-trip)
-            var isReady = await ProvisioningStatusService.CheckReadyAsync(ct);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(8));
+
+            var isReady = await ProvisioningStatusService.CheckReadyAsync(timeoutCts.Token);
 
             if (!ct.IsCancellationRequested)
             {
@@ -59,9 +60,15 @@
                 await OnReady.InvokeAsync();
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // Component disposed — swallow
+        }
+        catch (OperationCanceledException)
+        {
+            // Timeout — show retry UI
+            _timedOut = true;
+            StateHasChanged();
         }
         catch (Exception ex)
         {

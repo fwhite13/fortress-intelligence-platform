@@ -11,7 +11,7 @@
 @inject IJSRuntime JS
 @inject IProjectService ProjectService
 @inject ProjectStateService ProjectState
-@inject FaitV2DbContext Db
+@inject IDbContextFactory<FaitV2DbContext> DbFactory
 @inject ILogger<MainLayout> Logger
 @implements IDisposable
 
@@ -213,17 +213,19 @@
 
             try
             {
-                var dbUser = await Db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await using var db = await DbFactory.CreateDbContextAsync(cts.Token);
+                var dbUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid, cts.Token);
                 if (dbUser != null)
                 {
-                    _recentTasks = await Db.ConversationTasks
+                    _recentTasks = await db.ConversationTasks
                         .Where(t => t.UserId == dbUser.Id)
                         .OrderByDescending(t => t.UpdatedAt)
                         .Take(10)
-                        .ToListAsync();
+                        .ToListAsync(cts.Token);
                 }
             }
-            catch { /* non-critical */ }
+            catch { /* non-critical — leave empty */ }
         }
     }
 
@@ -308,7 +310,9 @@
     {
         try
         {
-            var dbUser = await Db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await using var db = await DbFactory.CreateDbContextAsync(cts.Token);
+            var dbUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid, cts.Token);
             if (dbUser != null)
             {
                 var newTask = new ConversationTask
@@ -318,8 +322,8 @@
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
-                Db.ConversationTasks.Add(newTask);
-                await Db.SaveChangesAsync();
+                db.ConversationTasks.Add(newTask);
+                await db.SaveChangesAsync(cts.Token);
                 _activeTaskId = newTask.Id;
                 _recentTasks.Insert(0, newTask);
                 if (_recentTasks.Count > 10) _recentTasks.RemoveAt(10);
