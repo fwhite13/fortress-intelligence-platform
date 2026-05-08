@@ -2,6 +2,14 @@ const express = require('express');
 const { spawn } = require('child_process');
 const { mkdirSync } = require('fs');
 const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
+const { BedrockRuntimeClient, ConverseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
+const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+
+const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
+const MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
+const S3_BUCKET = process.env.WORKSPACE_S3_BUCKET || 'fortress-user-workspaces';
+const S3_PREFIX = process.env.WORKSPACE_S3_PREFIX || '';
 const { existsSync, writeFileSync } = require('fs');
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -13,6 +21,19 @@ const WORKSPACE_DIR = process.env.WORKSPACE_DIR || '/workspace';
 app.get('/health', (req, res) => {
     res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
+
+async function fetchS3File(key) {
+    try {
+        const cmd = new GetObjectCommand({ Bucket: S3_BUCKET, Key: key });
+        const resp = await s3Client.send(cmd);
+        const chunks = [];
+        for await (const chunk of resp.Body) chunks.push(chunk);
+        return Buffer.concat(chunks).toString('utf-8');
+    } catch (err) {
+        console.warn(`[harness] Could not fetch ${key}: ${err.message}`);
+        return null;
+    }
+}
 
 // ─── GCP credential bootstrap ─────────────────────────────────────────────
 async function bootstrapGcpCredentials() {
@@ -146,52 +167,42 @@ app.post('/tools/:toolName', async (req, res) => {
     }
 });
 
-// Dispatch a turn to CC CLI
-// Body: { sessionId, userId, message, systemPrompt, tools }
-// Returns streaming SSE
 app.post('/turn', async (req, res) => {
-    const { sessionId, userId, message, systemPrompt } = req.body;
+    const { sessionId, userId, message, systemPrompt, taskMode, history } = req.body;
 
     if (!userId || !message) {
         return res.status(400).json({ error: 'userId and message required' });
     }
-
-    // Validate userId — no path traversal
     if (typeof userId !== 'string' ||
         userId.includes('..') || userId.includes('/') || userId.includes('\\') ||
         !/^[a-zA-Z0-9_-]{1,64}$/.test(userId)) {
         return res.status(400).json({ error: 'Invalid userId' });
     }
 
-    const userWorkspaceDir = `${WORKSPACE_DIR}/${userId}`;
-
-    // Set up SSE for streaming
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    try {
+    const sendEvent = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+    if (taskMode) {
+        // ── CC spawn path (unchanged) ─────────────────────────────────────
+        const userWorkspaceDir = `${WORKSPACE_DIR}/${userId}`;
         let ended = false;
         const endResponse = (data) => {
             if (ended) return;
             ended = true;
-            res.write(`data: ${JSON.stringify(data)}\n\n`);
+            sendEvent(data);
             res.end();
         };
-
-        // I5: Ensure workspace dir exists before spawning CC
         try {
             mkdirSync(userWorkspaceDir, { recursive: true });
         } catch (mkErr) {
             return endResponse({ type: 'error', message: `Cannot create workspace: ${mkErr.message}` });
         }
-
-        // Build CC CLI invocation
-        // System prompt passed via stdin as a brief file
         const briefContent = systemPrompt
             ? `${systemPrompt}\n\n---\n\nUser: ${message}`
             : message;
-
         const ccProcess = spawn('claude', [
             '--model', process.env.CC_MODEL || 'sonnet',
             '--print',
@@ -206,36 +217,71 @@ app.post('/turn', async (req, res) => {
             },
             stdio: ['pipe', 'pipe', 'pipe']
         });
-
         ccProcess.stdin.write(briefContent);
         ccProcess.stdin.end();
-
         const TURN_TIMEOUT_MS = parseInt(process.env.CC_TIMEOUT_MS || '300000', 10);
         const timeout = setTimeout(() => {
             ccProcess.kill('SIGTERM');
             endResponse({ type: 'error', message: 'Turn timed out after 5 minutes' });
         }, TURN_TIMEOUT_MS);
+        ccProcess.stdout.on('data', (chunk) => sendEvent({ type: 'text', content: chunk.toString() }));
+        ccProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', content: chunk.toString() }));
+        ccProcess.on('close', (code) => { clearTimeout(timeout); endResponse({ type: 'done', exitCode: code }); });
+        ccProcess.on('error', (err) => { clearTimeout(timeout); endResponse({ type: 'error', message: err.message }); });
+    } else {
+        // ── Bedrock ConverseStream path ───────────────────────────────────
+        try {
+            // Load user memory files from S3
+            const prefix = S3_PREFIX || `workspaces/${userId}/`;
+            const [soulMd, userMd, memoryMd] = await Promise.all([
+                fetchS3File(`${prefix}assistants/SOUL.md`),
+                fetchS3File(`${prefix}assistants/USER.md`),
+                fetchS3File(`${prefix}memory/MEMORY.md`),
+            ]);
 
-        ccProcess.stdout.on('data', (chunk) => {
-            res.write(`data: ${JSON.stringify({ type: 'text', content: chunk.toString() })}\n\n`);
-        });
+            const systemParts = [];
+            if (soulMd) systemParts.push(`## Assistant Identity\n${soulMd}`);
+            if (userMd) systemParts.push(`## About the User\n${userMd}`);
+            if (memoryMd) systemParts.push(`## Long-Term Memory\n${memoryMd}`);
+            if (systemPrompt) systemParts.push(systemPrompt);
+            const fullSystemPrompt = systemParts.join('\n\n---\n\n');
 
-        ccProcess.stderr.on('data', (chunk) => {
-            res.write(`data: ${JSON.stringify({ type: 'log', content: chunk.toString() })}\n\n`);
-        });
+            // Build message history
+            const messages = [];
+            if (Array.isArray(history)) {
+                for (const h of history) {
+                    if (h.role && h.content) {
+                        messages.push({
+                            role: h.role === 'assistant' ? 'assistant' : 'user',
+                            content: [{ text: h.content }]
+                        });
+                    }
+                }
+            }
+            messages.push({ role: 'user', content: [{ text: message }] });
 
-        ccProcess.on('close', (code) => {
-            clearTimeout(timeout);
-            endResponse({ type: 'done', exitCode: code });
-        });
+            const cmd = new ConverseStreamCommand({
+                modelId: MODEL_ID,
+                messages,
+                system: fullSystemPrompt ? [{ text: fullSystemPrompt }] : undefined,
+                inferenceConfig: { maxTokens: 4096, temperature: 0.7 }
+            });
 
-        ccProcess.on('error', (err) => {
-            clearTimeout(timeout);
-            endResponse({ type: 'error', message: err.message });
-        });
-
-    } catch (err) {
-        endResponse({ type: 'error', message: err.message });
+            const response = await bedrockClient.send(cmd);
+            for await (const event of response.stream) {
+                if (event.contentBlockDelta?.delta?.text) {
+                    sendEvent({ type: 'text', content: event.contentBlockDelta.delta.text });
+                } else if (event.messageStop) {
+                    break;
+                }
+            }
+            sendEvent({ type: 'done' });
+            res.end();
+        } catch (err) {
+            console.error('[harness] Bedrock ConverseStream error:', err.message);
+            sendEvent({ type: 'error', message: err.message });
+            res.end();
+        }
     }
 });
 

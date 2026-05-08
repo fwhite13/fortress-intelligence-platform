@@ -105,7 +105,9 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
                         Environment =
                         [
                             new Amazon.ECS.Model.KeyValuePair { Name = "FAIT_USER_ID",     Value = userId },
-                            new Amazon.ECS.Model.KeyValuePair { Name = "WORKSPACE_DIR",    Value = $"/workspace/{userId}" }
+                            new Amazon.ECS.Model.KeyValuePair { Name = "WORKSPACE_DIR",    Value = $"/workspace/{userId}" },
+                            new Amazon.ECS.Model.KeyValuePair { Name = "WORKSPACE_S3_PREFIX", Value = await GetUserS3PrefixAsync(userId, ct) },
+                            new Amazon.ECS.Model.KeyValuePair { Name = "WORKSPACE_S3_BUCKET", Value = _config["AWS:WorkspaceBucket"] ?? "fortress-user-workspaces" }
                         ]
                     }
                 ]
@@ -358,6 +360,23 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
         var response = await client.PostAsJsonAsync($"http://{harness.PrivateIp}:{harness.Port}/tools/{toolName}", args, ct);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadAsStringAsync(ct);
+    }
+
+    private async Task<string> GetUserS3PrefixAsync(string userId, CancellationToken ct)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await using var db = await _dbFactory.CreateDbContextAsync(cts.Token);
+            var assistant = await db.MainAssistants
+                .FirstOrDefaultAsync(a => a.UserId == userId, cts.Token);
+            return assistant?.WorkspaceS3Prefix ?? $"workspaces/{userId}/";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to look up S3 prefix for user {UserId}, using default", userId);
+            return $"workspaces/{userId}/";
+        }
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────

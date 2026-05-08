@@ -45,8 +45,12 @@ public enum RuntimeSessionStatus
 public record TurnRequest(
     string Message,
     string? SystemPrompt = null,
-    string? SessionId = null
+    string? SessionId = null,
+    bool TaskMode = false,
+    List<ChatHistoryEntry>? History = null
 );
+
+public record ChatHistoryEntry(string Role, string Content);
 
 public record HarnessEvent(
     string Type,         // "text" | "log" | "done" | "error"

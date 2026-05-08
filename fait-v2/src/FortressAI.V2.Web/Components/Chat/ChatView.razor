@@ -390,7 +390,12 @@
         {
             var request = new TurnRequest(
                 Message: BuildContextualMessage(userMessage),
-                SystemPrompt: BuildSystemPrompt()
+                SystemPrompt: BuildSystemPrompt(),
+                TaskMode: false,
+                History: _messages
+                    .Where(m => m.Role != "system")
+                    .Select(m => new ChatHistoryEntry(m.Role, m.Content))
+                    .ToList()
             );
             await foreach (var evt in AgentRuntime.SendTurnAsync(_userId, request))
             {
