@@ -92,7 +92,7 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
                 {
                     Subnets = [.. SubnetIds],
                     SecurityGroups = [.. SecurityGroupIds],
-                    AssignPublicIp = AssignPublicIp.DISABLED
+                    AssignPublicIp = AssignPublicIp.ENABLED
                 }
             },
             Overrides = new TaskOverride
