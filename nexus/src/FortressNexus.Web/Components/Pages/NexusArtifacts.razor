@@ -10,6 +10,8 @@
 @inject IDialogService DialogService
 @inject IConfiguration Configuration
 @inject IAdoService AdoService
+@inject IAdoCredentialService AdoCredentialService
+@inject ILogger<NexusArtifacts> PageLogger
 
 @using FortressNexus.Web.Data
 @using FortressNexus.Web.Models.DTOs
@@ -64,6 +66,18 @@ else if (_artifactSet is not null)
                                 <MudSelectItem T="string" Value="@proj">@proj</MudSelectItem>
                             }
                         </MudSelect>
+                    }
+                    else
+                    {
+                        <MudTooltip Text="Could not load ADO projects — click to retry">
+                            <MudButton Variant="Variant.Outlined"
+                                       Size="Size.Small"
+                                       Color="Color.Warning"
+                                       StartIcon="@Icons.Material.Filled.Refresh"
+                                       OnClick="@LoadHeaderProjectsAsync">
+                                ADO Project
+                            </MudButton>
+                        </MudTooltip>
                     }
                 }
                 @if (_isEditor && !_editMode)
@@ -678,17 +692,7 @@ else if (_artifactSet is not null)
 
             // Load ADO projects for inline header selector
             if (_isAdmin)
-            {
-                _headerProjectsLoading = true;
-                try
-                {
-                    _headerProjects = await AdoService.GetProjectsAsync(_adoOrg);
-                    _headerSelectedProject = _artifactSet?.AdoProjectName
-                        ?? (_headerProjects.Count > 0 ? _headerProjects[0] : null);
-                }
-                catch { /* silently skip — user can still use confirm dialog */ }
-                finally { _headerProjectsLoading = false; }
-            }
+                await LoadHeaderProjectsAsync();
             // Snapshot originals for revert on save failure
             foreach (var w in _workItems)
             {
@@ -1003,6 +1007,29 @@ else if (_artifactSet is not null)
 
     // ── ADO Post ──
 
+    private async Task LoadHeaderProjectsAsync()
+    {
+        _headerProjectsLoading = true;
+        _headerProjects = new();
+        StateHasChanged();
+        try
+        {
+            var upn = await UserContextService.GetUpnAsync();
+            _headerProjects = await AdoCredentialService.GetProjectsAsync(upn);
+            _headerSelectedProject = _artifactSet?.AdoProjectName
+                ?? (_headerProjects.Count > 0 ? _headerProjects[0] : null);
+        }
+        catch (Exception ex)
+        {
+            PageLogger.LogWarning("[NexusArtifacts] Failed to load header ADO projects: {Msg}", ex.Message);
+        }
+        finally
+        {
+            _headerProjectsLoading = false;
+            StateHasChanged();
+        }
+    }
+
     private async Task OnHeaderProjectChangedAsync(string newProject)
     {
         _headerSelectedProject = newProject;
@@ -1044,7 +1071,8 @@ else if (_artifactSet is not null)
 
         try
         {
-            _adoProjects = await AdoService.GetProjectsAsync(_adoOrg);
+            var upn2 = await UserContextService.GetUpnAsync();
+            _adoProjects = await AdoCredentialService.GetProjectsAsync(upn2);
             _selectedAdoProject = _artifactSet?.AdoProjectName
                 ?? (_adoProjects.Count > 0 ? _adoProjects[0] : null);
             StateHasChanged();

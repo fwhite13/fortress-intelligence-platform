@@ -32,8 +32,7 @@ public class AdoCredentialService : IAdoCredentialService
 
     public async Task<bool> HasCredentialAsync(string userUpn)
     {
-        return await _db.UserAdoCredentials
-            .AnyAsync(c => c.UserUpn == userUpn);
+        return await FindCredentialAsync(userUpn) is not null;
     }
 
     public async Task SaveCredentialAsync(string userUpn, string rawPat)
@@ -69,8 +68,7 @@ public class AdoCredentialService : IAdoCredentialService
 
     public async Task<string?> GetDecryptedPatAsync(string userUpn)
     {
-        var cred = await _db.UserAdoCredentials
-            .FirstOrDefaultAsync(c => c.UserUpn == userUpn);
+        var cred = await FindCredentialAsync(userUpn);
         if (cred is null) return null;
 
         try
@@ -86,9 +84,29 @@ public class AdoCredentialService : IAdoCredentialService
 
     public async Task<string?> GetPatHintAsync(string userUpn)
     {
+        var cred = await FindCredentialAsync(userUpn);
+        return cred?.PatHint;
+    }
+
+    /// <summary>
+    /// Finds a credential by UPN, falling back to username-only match across domains.
+    /// Handles cases where the same user has credentials stored under an alternate UPN
+    /// (e.g. fwhite@fortressinsurance.com vs fwhite@fortressaffinitygroup.com).
+    /// </summary>
+    private async Task<UserAdoCredential?> FindCredentialAsync(string userUpn)
+    {
+        // Exact match first
         var cred = await _db.UserAdoCredentials
             .FirstOrDefaultAsync(c => c.UserUpn == userUpn);
-        return cred?.PatHint;
+        if (cred is not null) return cred;
+
+        // Fallback: match on username portion only (before @)
+        var atIndex = userUpn.IndexOf('@');
+        if (atIndex <= 0) return null;
+        var username = userUpn[..atIndex].ToLowerInvariant();
+
+        return await _db.UserAdoCredentials
+            .FirstOrDefaultAsync(c => c.UserUpn.ToLower().StartsWith(username + "@"));
     }
 
     public async Task DeleteCredentialAsync(string userUpn)

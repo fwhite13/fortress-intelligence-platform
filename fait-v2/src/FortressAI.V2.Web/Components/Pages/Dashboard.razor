@@ -56,6 +56,7 @@ else
     [Inject] private IForgeKbService ForgeKbService { get; set; } = default!;
     [Inject] private IScheduledTaskService TaskService { get; set; } = default!;
     [Inject] private IUserService UserService { get; set; } = default!;
+    [Inject] private ILogger<Dashboard> _logger { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private bool _previewOpen = true;
@@ -78,7 +79,12 @@ else
         if (!string.IsNullOrEmpty(_entraOid))
         {
             var dbUser = await UserService.GetByEntraOidAsync(_entraOid);
-            var internalUserId = dbUser?.Id ?? "";
+            if (dbUser == null)
+            {
+                _logger.LogError("Could not resolve internal userId for entraOid {EntraOid}", _entraOid);
+                return;
+            }
+            var internalUserId = dbUser.Id;
             try
             {
                 var tasks = await TaskService.GetUserTasksAsync(internalUserId);

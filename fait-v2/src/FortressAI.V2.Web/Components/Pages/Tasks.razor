@@ -309,6 +309,7 @@
         if (string.IsNullOrEmpty(_userId))
         {
             _logger.LogError("Could not resolve internal userId for entraOid {EntraOid}", entraOid);
+            _loading = false;
             return;
         }
         await LoadTasksAsync();

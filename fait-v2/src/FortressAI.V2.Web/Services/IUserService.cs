@@ -17,6 +17,7 @@ public class UserService : IUserService
 
     public async Task<User?> GetByEntraOidAsync(string entraOid, CancellationToken ct = default)
     {
+        if (string.IsNullOrEmpty(entraOid)) return null;
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(5));
         await using var db = await _dbFactory.CreateDbContextAsync(cts.Token);
