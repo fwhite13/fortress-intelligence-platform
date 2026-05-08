@@ -727,6 +727,8 @@ a:hover {
   flex-direction: column;
   height: 100%;
   max-height: calc(100vh - var(--nav-height));
+  position: relative;
+  z-index: 1;
 }
 
 .chat-header {
@@ -1747,6 +1749,12 @@ a:hover {
 }
 .mud-drawer {
     background: var(--color-sidebar-bg) !important;
+}
+
+/* ADO#2939 — MudDrawer Mini overlay intercepts all clicks across viewport.
+   Mini variant needs no dismissible backdrop — suppress pointer-events entirely. */
+.mud-overlay.mud-overlay-drawer {
+    pointer-events: none !important;
 }
 
 /* === FIP Button Overrides === */
