@@ -11,7 +11,7 @@
     top: 0;
     left: 0;
     right: 0;
-    z-index: 1400;
+    z-index: 1350;
 }
 
 .fip-navbar__left {
@@ -74,5 +74,5 @@
     top: 48px;
     left: 0;
     right: 0;
-    z-index: 1399;
+    z-index: 1349;
 }
