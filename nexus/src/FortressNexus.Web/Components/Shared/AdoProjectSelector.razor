@@ -1,0 +1,249 @@
+@inject IAdoCredentialService CredentialService
+@inject ISnackbar Snackbar
+
+<div class="ado-project-selector">
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+        <MudText Typo="Typo.body2">Loading ADO setup...</MudText>
+    }
+    else if (!_hasPat || _changingPat)
+    {
+        <MudPaper Elevation="1" Class="pa-4 mb-2">
+            <MudText Typo="Typo.subtitle2" Class="mb-2">
+                @(_changingPat ? "Update ADO Personal Access Token" : "ADO Personal Access Token Required")
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mb-3" Color="Color.Secondary">
+                Enter a PAT with <strong>Work Items (Read &amp; Write)</strong> permission for the
+                <code>FortressAffinityGroup</code> organisation.
+            </MudText>
+
+            <MudTextField @bind-Value="_patInput"
+                          Label="Personal Access Token"
+                          InputType="InputType.Password"
+                          Variant="Variant.Outlined"
+                          FullWidth="true"
+                          Class="mb-3"
+                          Disabled="@_validating" />
+
+            <div class="d-flex gap-2 align-center">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           OnClick="@SaveAndValidateAsync"
+                           Disabled="@(string.IsNullOrWhiteSpace(_patInput) || _validating)">
+                    @(_validating ? "Validating…" : "Save & Validate")
+                </MudButton>
+
+                @if (_changingPat)
+                {
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Default"
+                               OnClick="@CancelChange">
+                        Cancel
+                    </MudButton>
+                }
+
+                @if (_validationResult.HasValue)
+                {
+                    @if (_validationResult.Value)
+                    {
+                        <MudChip T="string" Color="Color.Success" Size="Size.Small">✅ Valid</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Color="Color.Error" Size="Size.Small">❌ Invalid — check PAT</MudChip>
+                    }
+                }
+            </div>
+        </MudPaper>
+    }
+    else
+    {
+        @* PAT exists — show hint + change link *@
+        <div class="d-flex align-center gap-2 mb-2 flex-wrap">
+            <MudChip T="string" Color="Color.Default" Size="Size.Small">
+                🔑 PAT: ••••@_patHint
+            </MudChip>
+            <MudButton Variant="Variant.Text"
+                       Size="Size.Small"
+                       Color="Color.Default"
+                       OnClick="@(() => { _changingPat = true; _patInput = ""; _validationResult = null; StateHasChanged(); })">
+                Change PAT
+            </MudButton>
+        </div>
+
+        @* Project dropdown *@
+        @if (_loadingProjects)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Loading projects…</MudText>
+        }
+        else if (_projectLoadError is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@_projectLoadError</MudAlert>
+        }
+        else
+        {
+            <MudSelect T="string"
+                       Value="@_selectedProject"
+                       ValueChanged="@OnProjectChanged"
+                       Label="ADO Project"
+                       Variant="Variant.Outlined"
+                       FullWidth="true"
+                       Class="mb-3">
+                @foreach (var p in _projects)
+                {
+                    <MudSelectItem T="string" Value="@p">@p</MudSelectItem>
+                }
+            </MudSelect>
+        }
+
+        @* Decompose button *@
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Secondary"
+                   StartIcon="@Icons.Material.Filled.AutoAwesome"
+                   Disabled="@(string.IsNullOrEmpty(_selectedProject) || _decomposing)"
+                   OnClick="@HandleDecomposeClicked">
+            @(_decomposing ? "Decomposing…" : "Decompose")
+        </MudButton>
+    }
+</div>
+
+@code {
+    [Parameter] public string UserUpn { get; set; } = "";
+    [Parameter] public bool IsAdmin { get; set; }
+    [Parameter] public EventCallback<string> OnProjectSelected { get; set; }
+    [Parameter] public EventCallback<string> OnDecomposeClicked { get; set; }
+
+    // Allow parent to indicate that decomposition is running
+    [Parameter] public bool IsDecomposing { get; set; }
+
+    private bool _loading = true;
+    private bool _hasPat = false;
+    private string? _patHint;
+    private bool _changingPat = false;
+    private string _patInput = "";
+    private bool _validating = false;
+    private bool? _validationResult;
+
+    private bool _loadingProjects = false;
+    private string? _projectLoadError;
+    private List<string> _projects = new();
+    private string? _selectedProject;
+
+    private bool _decomposing => IsDecomposing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshStateAsync();
+    }
+
+    private async Task RefreshStateAsync()
+    {
+        _loading = true;
+        try
+        {
+            _hasPat = await CredentialService.HasCredentialAsync(UserUpn);
+            if (_hasPat)
+            {
+                _patHint = await CredentialService.GetPatHintAsync(UserUpn);
+                await LoadProjectsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error loading ADO setup: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveAndValidateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_patInput)) return;
+
+        _validating = true;
+        _validationResult = null;
+        StateHasChanged();
+
+        try
+        {
+            var isValid = await CredentialService.ValidatePatAsync(_patInput.Trim());
+            _validationResult = isValid;
+
+            if (isValid)
+            {
+                await CredentialService.SaveCredentialAsync(UserUpn, _patInput.Trim());
+                _hasPat = true;
+                _changingPat = false;
+                _patHint = await CredentialService.GetPatHintAsync(UserUpn);
+                _patInput = "";
+                Snackbar.Add("PAT saved and validated.", Severity.Success);
+                await LoadProjectsAsync();
+            }
+            else
+            {
+                Snackbar.Add("PAT validation failed — check the token and try again.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error validating PAT: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _validating = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CancelChange()
+    {
+        _changingPat = false;
+        _patInput = "";
+        _validationResult = null;
+    }
+
+    private async Task LoadProjectsAsync()
+    {
+        _loadingProjects = true;
+        _projectLoadError = null;
+        _projects = new();
+        _selectedProject = null;
+
+        try
+        {
+            _projects = await CredentialService.GetProjectsAsync(UserUpn);
+            if (_projects.Count > 0)
+            {
+                _selectedProject = _projects[0];
+                await OnProjectSelected.InvokeAsync(_selectedProject);
+            }
+        }
+        catch (Exception ex)
+        {
+            _projectLoadError = $"Could not load projects: {ex.Message}";
+            _logger?.LogWarning("AdoProjectSelector: failed to load projects for {Upn}: {Err}", UserUpn, ex.Message);
+        }
+        finally
+        {
+            _loadingProjects = false;
+        }
+    }
+
+    private async Task OnProjectChanged(string value)
+    {
+        _selectedProject = value;
+        await OnProjectSelected.InvokeAsync(value);
+    }
+
+    private async Task HandleDecomposeClicked()
+    {
+        if (string.IsNullOrEmpty(_selectedProject)) return;
+        await OnDecomposeClicked.InvokeAsync(_selectedProject);
+    }
+
+    // Injected for logging
+    [Inject] private ILogger<AdoProjectSelector>? _logger { get; set; }
+}

@@ -6,5 +6,5 @@ namespace FortressNexus.Web.Services;
 public interface IArtifactGenerationService
 {
     Task<List<AdoWorkItemDto>> GenerateWorkItemsAsync(int specDocumentId);
-    Task<ArtifactSet> DecomposeAndPersistAsync(int submissionId, int specDocumentId, string callerUpn);
+    Task<ArtifactSet> DecomposeAndPersistAsync(int submissionId, int specDocumentId, string callerUpn, string adoProjectName);
 }

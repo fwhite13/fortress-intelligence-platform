@@ -974,9 +974,17 @@ else if (_artifactSet is not null)
             await WriteBackResultsAsync(results);
             Snackbar.Add($"Posted {results.Count(r => r.Status == "Created")} work items to ADO.", Severity.Success);
         }
+        catch (HttpRequestException ex) when (ex.Message.Contains("401") || ex.Message.Contains("Unauthorized"))
+        {
+            Snackbar.Add("ADO posting failed: Unauthorized (401). Check your PAT in the project selector — it may have expired.", Severity.Error);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("No ADO credential"))
+        {
+            Snackbar.Add($"ADO posting failed: {ex.Message}. Set your PAT on the submission page before posting.", Severity.Error);
+        }
         catch (Exception ex)
         {
-            Snackbar.Add($"Post to ADO failed: {ex.Message}", Severity.Error);
+            Snackbar.Add($"ADO posting failed: {ex.Message}. Check your PAT in Account Settings.", Severity.Error);
         }
         finally
         {

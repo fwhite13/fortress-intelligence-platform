@@ -21,6 +21,7 @@ public class NexusDbContext : DbContext
     public DbSet<DiscoveryQuestion> DiscoveryQuestions => Set<DiscoveryQuestion>();
     public DbSet<DiscoveryAnswer> DiscoveryAnswers => Set<DiscoveryAnswer>();
     public DbSet<NexusUserRole> NexusUserRoles => Set<NexusUserRole>();
+    public DbSet<UserAdoCredential> UserAdoCredentials => Set<UserAdoCredential>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -239,6 +240,19 @@ public class NexusDbContext : DbContext
             entity.Property(e => e.AnswerText).HasColumnName("answer_text").HasMaxLength(2000);
             entity.Property(e => e.AnsweredBy).HasColumnName("answered_by").HasMaxLength(255);
             entity.Property(e => e.AnsweredAt).HasColumnName("answered_at");
+        });
+
+        // UserAdoCredential
+        modelBuilder.Entity<UserAdoCredential>(entity =>
+        {
+            entity.ToTable("user_ado_credentials");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.UserUpn).HasColumnName("user_upn").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.EncryptedPat).HasColumnName("encrypted_pat").HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.PatHint).HasColumnName("pat_hint").HasMaxLength(10);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.HasIndex(e => e.UserUpn).IsUnique();
         });
 
         // NexusUserRole

@@ -112,7 +112,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
         }
     }
 
-    public async Task<ArtifactSet> DecomposeAndPersistAsync(int submissionId, int specDocumentId, string callerUpn)
+    public async Task<ArtifactSet> DecomposeAndPersistAsync(int submissionId, int specDocumentId, string callerUpn, string adoProjectName)
     {
         // 1. Generate work item DTOs via Bedrock
         var dtos = await GenerateWorkItemsAsync(specDocumentId);
@@ -124,7 +124,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
         {
             SpecDocumentId = specDocumentId,
             AdoOrganization = "FortressAffinityGroup",
-            AdoProjectName = "Fortress",
+            AdoProjectName = adoProjectName,
             ProcessTemplateTypeId = "6b724908-ef14-45cf-84f8-768b5384da45",
             ExternalDependencyCount = dtos.Count(d => d.IsExternalDependency),
             CreatedAt = DateTime.UtcNow,

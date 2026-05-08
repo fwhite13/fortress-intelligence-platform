@@ -371,7 +371,7 @@
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Failed to persist onboarding step {Step}", ex);
+            Logger.LogWarning(ex, "Failed to persist onboarding step {Step}", step);
             // Non-critical — don't rethrow
         }
     }
