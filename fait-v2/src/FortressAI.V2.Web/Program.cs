@@ -196,7 +196,6 @@ using (var seedScope = app.Services.CreateScope())
     var seedLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
     await using var seedDb = await dbFactory.CreateDbContextAsync();
-    var baseUrl = cfg["FipMcp:BaseUrl"]?.TrimEnd('/') ?? "https://mcp.fortressam.ai/mcp";
 
     var toolGroups = new[]
     {
@@ -208,7 +207,6 @@ using (var seedScope = app.Services.CreateScope())
 
     foreach (var tg in toolGroups)
     {
-        var expectedUrl = $"{baseUrl}/{tg.Name}";
         var existing = await seedDb.McpServers.FirstOrDefaultAsync(s => s.Name == tg.Name);
         if (existing == null)
         {
@@ -216,7 +214,7 @@ using (var seedScope = app.Services.CreateScope())
             {
                 Id = Guid.NewGuid().ToString(),
                 Name = tg.Name,
-                EndpointUrl = expectedUrl,
+                EndpointUrl = string.Empty,
                 AuthType = tg.AuthType,
                 DefaultRead = tg.DefaultRead,
                 DefaultWrite = tg.DefaultWrite,
@@ -228,7 +226,6 @@ using (var seedScope = app.Services.CreateScope())
         else
         {
             bool changed = false;
-            if (existing.EndpointUrl != expectedUrl) { existing.EndpointUrl = expectedUrl; changed = true; }
             if (existing.AuthType != tg.AuthType) { existing.AuthType = tg.AuthType; changed = true; }
             if (changed)
             {

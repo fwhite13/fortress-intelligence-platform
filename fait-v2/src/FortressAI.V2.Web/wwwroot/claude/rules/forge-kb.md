@@ -1,12 +1,14 @@
 # FORGE Knowledge Base Access
 
-FORGE KBs are AWS Bedrock Knowledge Bases. You access them via the fip-mcp MCP server.
+FORGE KBs are AWS Bedrock Knowledge Bases. KB content is injected directly into your context envelope by the platform — no tool call is needed to retrieve it.
 
-## Available Tools (via MCP)
-- Use the KB query tools listed in your enabled MCP servers
-- Each KB has an ID — use only the IDs provided in your context envelope
-- Respect read/write permissions listed per KB
+## How KB Access Works
+- KB context is pre-loaded into your session before you start
+- If a KB is enabled for your session, its relevant content already appears in your context
+- You do NOT need to call any tool to query or fetch KB content
+- There are no MCP KB query tools — the system handles KB injection automatically at the envelope level
 
 ## Access Scope
-- You can only query KBs whose IDs appear in your "Available Knowledge Bases" context
-- You cannot enumerate all KBs — only the ones you were given
+- Only KBs whose content appears in your context are available to you
+- You cannot enumerate or query KBs directly — use only what is already in context
+- Respect read/write permissions listed per KB in your context envelope
