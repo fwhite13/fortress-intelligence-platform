@@ -98,6 +98,7 @@ builder.Services.AddAWSService<Amazon.BedrockAgent.IAmazonBedrockAgent>();
 
 // AWS ECS (per-user Fargate runtime)
 builder.Services.AddSingleton<IAmazonECS>(sp => new AmazonECSClient(Amazon.RegionEndpoint.USEast1));
+builder.Services.AddAWSService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
 builder.Services.AddHttpClient("HarnessClient");
 builder.Services.AddHttpClient("BraveSearchClient");
 builder.Services.AddHttpClient("DevOpsTestClient");
@@ -120,7 +121,7 @@ builder.Services.AddDbContextFactory<FaitV2DbContext>(options =>
         new MySqlServerVersion(new Version(8, 0, 28)),
         mySqlOptions => mySqlOptions.EnableRetryOnFailure(3)
     ));
-builder.Services.AddScoped<IUserAgentRuntime, FargateUserAgentRuntime>();
+builder.Services.AddScoped<IUserAgentRuntime, DirectBedrockUserAgentRuntime>();
 
 // User provisioning
 builder.Services.AddScoped<IUserProvisioningService, UserProvisioningService>();

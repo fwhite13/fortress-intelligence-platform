@@ -1,0 +1,127 @@
+@page "/admin/users"
+@using FortressNexus.Web.Data
+@using FortressNexus.Web.Models.Entities
+@using FortressNexus.Web.Services
+@using Microsoft.EntityFrameworkCore
+@inject NexusDbContext Db
+@inject UserContextService UserContextService
+@inject ISnackbar Snackbar
+@attribute [Authorize(Roles = NexusRoles.Admin)]
+
+<PageTitle>User Roles — NEXUS Admin</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">User Roles</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else
+{
+    <MudPaper Class="pa-4 mb-6">
+        <MudText Typo="Typo.h6" Class="mb-3">Add Role</MudText>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_newUpn" Label="User UPN" Placeholder="user@fortressaffinitygroup.com" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudSelect @bind-Value="_newRole" Label="Role" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@NexusRoles.Admin">Admin</MudSelectItem>
+                    <MudSelectItem Value="@NexusRoles.Reviewer">Reviewer</MudSelectItem>
+                    <MudSelectItem Value="@NexusRoles.User">User</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="2" Class="d-flex align-end">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddRoleAsync" Disabled="@(string.IsNullOrWhiteSpace(_newUpn) || string.IsNullOrWhiteSpace(_newRole))">
+                    Add
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <MudTable Items="@_roles" Hover="true" Striped="true" Dense="true">
+        <HeaderContent>
+            <MudTh>UPN</MudTh>
+            <MudTh>Role</MudTh>
+            <MudTh>Assigned</MudTh>
+            <MudTh>Assigned By</MudTh>
+            <MudTh></MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>@context.UserUpn</MudTd>
+            <MudTd>
+                <MudChip T="string" Color="@RoleColor(context.Role)" Size="Size.Small">@context.Role</MudChip>
+            </MudTd>
+            <MudTd>@context.AssignedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</MudTd>
+            <MudTd>@context.AssignedBy</MudTd>
+            <MudTd>
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                               OnClick="@(() => RemoveRoleAsync(context))" />
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText>No roles assigned yet.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+@code {
+    private List<NexusUserRole> _roles = new();
+    private bool _loading = true;
+    private string _newUpn = "";
+    private string _newRole = NexusRoles.Reviewer;
+    private string? _callerUpn;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _callerUpn = await UserContextService.GetUpnAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _roles = await Db.NexusUserRoles.OrderBy(r => r.UserUpn).ToListAsync();
+        _loading = false;
+    }
+
+    private async Task AddRoleAsync()
+    {
+        var upn = _newUpn.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(upn)) return;
+
+        var exists = await Db.NexusUserRoles.AnyAsync(r => r.UserUpn == upn && r.Role == _newRole);
+        if (exists)
+        {
+            Snackbar.Add($"{upn} already has role {_newRole}", Severity.Warning);
+            return;
+        }
+
+        Db.NexusUserRoles.Add(new NexusUserRole
+        {
+            UserUpn = upn,
+            Role = _newRole,
+            AssignedAt = DateTime.UtcNow,
+            AssignedBy = _callerUpn ?? "unknown"
+        });
+        await Db.SaveChangesAsync();
+        Snackbar.Add($"Role {_newRole} assigned to {upn}", Severity.Success);
+        _newUpn = "";
+        await LoadAsync();
+    }
+
+    private async Task RemoveRoleAsync(NexusUserRole role)
+    {
+        Db.NexusUserRoles.Remove(role);
+        await Db.SaveChangesAsync();
+        Snackbar.Add($"Role removed for {role.UserUpn}", Severity.Info);
+        await LoadAsync();
+    }
+
+    private Color RoleColor(string role) => role switch
+    {
+        NexusRoles.Admin => Color.Warning,
+        NexusRoles.Reviewer => Color.Info,
+        _ => Color.Default
+    };
+}

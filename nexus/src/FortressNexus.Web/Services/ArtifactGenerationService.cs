@@ -54,8 +54,8 @@ public class ArtifactGenerationService : IArtifactGenerationService
 
         try
         {
-            // Call 1 — Decomposition (TC-stripped prompt, 32768 max tokens)
-            var (call1Text, pt1, ct1) = await _bedrock.InvokeAsync(systemPrompt, specContent, 32768, resolvedModelId);
+            // Call 1 — Decomposition (64000 max tokens to avoid truncation on large specs)
+            var (call1Text, pt1, ct1) = await _bedrock.InvokeAsync(systemPrompt, specContent, 64000, resolvedModelId);
 
             _logger.LogInformation("[WI_GEN] Call 1 (decomposition) completed for SpecDocument {SpecDocumentId}: {Pt1} + {Ct1} tokens",
                 specDocumentId, pt1, ct1);
@@ -180,7 +180,8 @@ public class ArtifactGenerationService : IArtifactGenerationService
 
             var items = JsonSerializer.Deserialize<List<AdoWorkItemDto>>(trimmed, new JsonSerializerOptions
             {
-                PropertyNameCaseInsensitive = true
+                PropertyNameCaseInsensitive = true,
+                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase, allowIntegerValues: true) }
             });
 
             return items ?? new List<AdoWorkItemDto>();
