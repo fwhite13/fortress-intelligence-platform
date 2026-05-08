@@ -26,8 +26,8 @@
                IsDev="@_isDev" />
 
     <MudDrawer @bind-Open="_drawerOpen"
-               Variant="DrawerVariant.Responsive"
-               Breakpoint="Breakpoint.Md"
+               Variant="DrawerVariant.Mini"
+               MiniWidth="56px"
                ClipMode="DrawerClipMode.Always"
                Elevation="2"
                Class="fait-v2-drawer">
@@ -211,8 +211,13 @@
         {
             try
             {
-                var saved = await JS.InvokeAsync<string?>("localStorage.getItem", "fait-v2-dark-mode");
-                _isDarkMode = saved == "true";
+                var savedDark = await JS.InvokeAsync<string?>("localStorage.getItem", "fait-v2-dark-mode");
+                _isDarkMode = savedDark == "true";
+
+                var savedDrawer = await JS.InvokeAsync<string?>("localStorage.getItem", "fait-v2-drawer-open");
+                // Default open (true) if no saved value
+                _drawerOpen = savedDrawer == null || savedDrawer == "true";
+
                 StateHasChanged();
             }
             catch { /* localStorage not available in prerender */ }
@@ -225,9 +230,14 @@
         await JS.InvokeVoidAsync("localStorage.setItem", "fait-v2-dark-mode", _isDarkMode.ToString().ToLower());
     }
 
-    private void ToggleDrawer()
+    private async Task ToggleDrawer()
     {
         _drawerOpen = !_drawerOpen;
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", "fait-v2-drawer-open", _drawerOpen.ToString().ToLower());
+        }
+        catch { /* localStorage not available */ }
     }
 
     private void Logout()

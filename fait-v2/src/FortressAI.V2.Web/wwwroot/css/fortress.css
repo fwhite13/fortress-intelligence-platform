@@ -2344,3 +2344,38 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
 .feedback-modal__result {
     /* inherits MudSnackbar positioning */
 }
+
+/* === FAIT v2 Drawer — Mini variant collapsed state === */
+/* When drawer is Mini+closed, hide text labels; icons remain visible */
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__title,
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__subtitle,
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__section-title,
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__section-add,
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__project-name,
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__feedback-label,
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__footer-text,
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__section-empty {
+    display: none;
+}
+
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__brand {
+    justify-content: center;
+}
+
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__projects {
+    overflow: hidden;
+}
+
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__project-item {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+}
+
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__project-icon {
+    margin: 0;
+}
+
+.fait-v2-drawer.mud-drawer:not(.mud-drawer-open) .fait-v2-drawer__section-header {
+    display: none;
+}
