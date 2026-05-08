@@ -29,6 +29,9 @@ public class User
     [Column("onboarding_completed_at")]
     public DateTime? OnboardingCompletedAt { get; set; }
 
+    [Column("onboarding_step")]
+    public int? OnboardingStep { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

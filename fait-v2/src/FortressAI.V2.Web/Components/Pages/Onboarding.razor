@@ -15,6 +15,7 @@
     <MudPaper Class="fait-v2-onboarding__wizard" Elevation="2">
         <MudStepper @ref="_stepper"
                     Class="fait-v2-onboarding__stepper"
+                    ActiveIndex="@_resumeStep"
                     CurrentStepColor="Color.Primary"
                     CompletedStepColor="Color.Success"
                     OnPreviewInteraction="HandleStepInteraction">
@@ -168,6 +169,7 @@
 
 @code {
     private MudStepper? _stepper;
+    private int _resumeStep = 0;
 
     // Step 1 — Role
     private string _role = "";
@@ -240,6 +242,13 @@
             StateHasChanged();
             return;
         }
+
+        // Load resume step
+        var existingUser = await Db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid);
+        if (existingUser != null)
+        {
+            _resumeStep = existingUser.OnboardingStep ?? 0;
+        }
     }
 
     private void ToggleUseCase(string useCase, bool selected)
@@ -252,8 +261,14 @@
     {
         if (args.Action == StepAction.Complete)
         {
-            await FinishWizard();
-            return !_provisionError;
+            // Persist progress (next step index = current + 1)
+            await PersistOnboardingStepAsync(args.StepIndex + 1);
+
+            if (args.StepIndex == 3) // last step (0-indexed, 4 steps total)
+            {
+                await FinishWizard();
+                return !_provisionError;
+            }
         }
         return true;
     }
@@ -276,6 +291,9 @@
                 displayName: _displayName,
                 wizardData: wizardData
             );
+
+            // Clear onboarding step — fully onboarded
+            await PersistOnboardingStepAsync(0);
 
             _isProvisioning = false;
             StateHasChanged();
@@ -317,5 +335,23 @@
     {
         _provisionError = false;
         await FinishWizard();
+    }
+
+    private async Task PersistOnboardingStepAsync(int step)
+    {
+        try
+        {
+            var user = await Db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid);
+            if (user != null)
+            {
+                user.OnboardingStep = step;
+                await Db.SaveChangesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to persist onboarding step {Step}", step);
+            // Non-critical — don't rethrow
+        }
     }
 }
