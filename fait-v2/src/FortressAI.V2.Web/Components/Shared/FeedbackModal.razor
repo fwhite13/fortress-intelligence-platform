@@ -4,43 +4,40 @@
 @inject ISnackbar Snackbar
 @implements IAsyncDisposable
 
-@if (_isOpen)
-{
-    <MudDialog @bind-Visible="_isOpen" Options="_dialogOptions">
-        <TitleContent>
-            <MudText Typo="Typo.h6">
-                @(_type == "bug" ? "Report a Bug" : "Suggest a Feature")
-            </MudText>
-        </TitleContent>
-        <DialogContent>
-            <MudToggleGroup T="string" @bind-Value="_type" SelectionMode="SelectionMode.SingleSelection" Class="feedback-modal__toggle">
-                <MudToggleItem Value="@("bug")" Class="feedback-modal__toggle-item">Bug</MudToggleItem>
-                <MudToggleItem Value="@("suggestion")" Class="feedback-modal__toggle-item">Suggestion</MudToggleItem>
-            </MudToggleGroup>
+<MudDialog @bind-Visible="_isOpen" Options="_dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            @(_type == "bug" ? "Report a Bug" : "Suggest a Feature")
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudToggleGroup T="string" @bind-Value="_type" SelectionMode="SelectionMode.SingleSelection" Class="feedback-modal__toggle">
+            <MudToggleItem Value="@("bug")" Class="feedback-modal__toggle-item">Bug</MudToggleItem>
+            <MudToggleItem Value="@("suggestion")" Class="feedback-modal__toggle-item">Suggestion</MudToggleItem>
+        </MudToggleGroup>
 
-            <MudTextField @bind-Value="_description"
-                          Label="Describe the issue or idea"
-                          Lines="4"
-                          Required="true"
-                          Class="feedback-modal__description mt-3"
-                          Placeholder="What happened? What did you expect?" />
+        <MudTextField @bind-Value="_description"
+                      Label="Describe the issue or idea"
+                      Lines="4"
+                      Required="true"
+                      Class="feedback-modal__description mt-3"
+                      Placeholder="What happened? What did you expect?" />
 
-            <MudText Typo="Typo.caption" Class="feedback-modal__page-url mt-2" Color="Color.Secondary">
-                Current page: @_pageUrl
-            </MudText>
-        </DialogContent>
-        <DialogActions>
-            <MudButton OnClick="Close" Class="feedback-modal__cancel">Cancel</MudButton>
-            <MudButton Variant="Variant.Filled"
-                       Color="Color.Primary"
-                       OnClick="Submit"
-                       Disabled="@(string.IsNullOrWhiteSpace(_description) || _isSubmitting)"
-                       Class="feedback-modal__submit">
-                @(_isSubmitting ? "Sending..." : "Submit")
-            </MudButton>
-        </DialogActions>
-    </MudDialog>
-}
+        <MudText Typo="Typo.caption" Class="feedback-modal__page-url mt-2" Color="Color.Secondary">
+            Current page: @_pageUrl
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close" Class="feedback-modal__cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_description) || _isSubmitting)"
+                   Class="feedback-modal__submit">
+            @(_isSubmitting ? "Sending..." : "Submit")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
 
 @code {
     private bool _isOpen;
