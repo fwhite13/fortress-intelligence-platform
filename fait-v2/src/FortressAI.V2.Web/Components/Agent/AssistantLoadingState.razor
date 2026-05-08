@@ -1,4 +1,4 @@
-@implements IDisposable
+@implements IAsyncDisposable
 
 <div class="loading-state-container">
     <div class="loading-state-card">
@@ -29,123 +29,58 @@
 
     private string _statusMessage = "Starting your assistant...";
     private bool _timedOut = false;
-    private int _pollCount = 0;
-    private const int MaxPolls = 30; // 30 × 2s = 60s timeout
-    private System.Threading.Timer? _pollTimer;
+    private CancellationTokenSource _cts = new();
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        _pollTimer = new System.Threading.Timer(async _ =>
-        {
-            await InvokeAsync(async () =>
-            {
-                _pollCount++;
-
-                if (_pollCount >= MaxPolls)
-                {
-                    _pollTimer?.Dispose();
-                    _timedOut = true;
-                    StateHasChanged();
-                    return;
-                }
-
-                // Update status message based on poll count
-                _statusMessage = _pollCount switch
-                {
-                    <= 3 => "Starting your assistant...",
-                    <= 7 => "Loading your memory...",
-                    _ => "Almost ready..."
-                };
-
-                // TODO Sprint 3: call IRAGReadService.WarmupAsync() here to fire pgvector no-op query behind loading screen (OQ-15-2)
-
-                // Poll status endpoint
-                try
-                {
-                    var client = HttpClientFactory.CreateClient();
-                    client.BaseAddress = new Uri($"{NavigationManager.BaseUri}");
-                    var response = await client.GetAsync("/api/agent/status");
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var content = await response.Content.ReadAsStringAsync();
-                        if (content.Contains("\"status\":\"Running\"") || content.Contains("\"status\":\"running\""))
-                        {
-                            _pollTimer?.Dispose();
-                            await OnReady.InvokeAsync();
-                            return;
-                        }
-                        if (content.Contains("\"status\":\"Error\"") || content.Contains("\"status\":\"error\""))
-                        {
-                            _pollTimer?.Dispose();
-                            _timedOut = true;
-                            _statusMessage = "Initialization failed. Please refresh the page.";
-                            StateHasChanged();
-                            return;
-                        }
-                    }
-                }
-                catch { /* keep polling */ }
-
-                StateHasChanged();
-            });
-        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        await RunReadinessCheckAsync(_cts.Token);
     }
 
-    private void Retry()
+    private async Task RunReadinessCheckAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Brief UX pause so the loading screen doesn't flash
+            await Task.Delay(800, ct);
+
+            // Check provisioning status via service (server-side, no HTTP round-trip)
+            await ProvisioningStatusService.CheckReadyAsync(ct);
+
+            if (!ct.IsCancellationRequested)
+            {
+                // Fire OnReady regardless — Routes.razor handles redirect to /onboarding if not provisioned
+                await OnReady.InvokeAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Component disposed — swallow
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "AssistantLoadingState readiness check failed");
+            _timedOut = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Retry()
     {
         _timedOut = false;
-        _pollCount = 0;
+        _cts.Cancel();
+        _cts = new CancellationTokenSource();
         _statusMessage = "Starting your assistant...";
-        _pollTimer?.Dispose();
-        _pollTimer = new System.Threading.Timer(async _ =>
-        {
-            await InvokeAsync(async () =>
-            {
-                _pollCount++;
-                if (_pollCount >= MaxPolls)
-                {
-                    _timedOut = true;
-                    StateHasChanged();
-                    return;
-                }
-                _statusMessage = _pollCount switch
-                {
-                    <= 3 => "Starting your assistant...",
-                    <= 7 => "Loading your memory...",
-                    _ => "Almost ready..."
-                };
-                try
-                {
-                    var client = HttpClientFactory.CreateClient();
-                    client.BaseAddress = new Uri($"{NavigationManager.BaseUri}");
-                    var response = await client.GetAsync("/api/agent/status");
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var content = await response.Content.ReadAsStringAsync();
-                        if (content.Contains("\"status\":\"Running\"") || content.Contains("\"status\":\"running\""))
-                        {
-                            _pollTimer?.Dispose();
-                            await OnReady.InvokeAsync();
-                            return;
-                        }
-                        if (content.Contains("\"status\":\"Error\"") || content.Contains("\"status\":\"error\""))
-                        {
-                            _pollTimer?.Dispose();
-                            _timedOut = true;
-                            _statusMessage = "Initialization failed. Please refresh the page.";
-                            StateHasChanged();
-                            return;
-                        }
-                    }
-                }
-                catch { }
-                StateHasChanged();
-            });
-        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        StateHasChanged();
+        await RunReadinessCheckAsync(_cts.Token);
     }
 
-    public void Dispose() => _pollTimer?.Dispose();
+    public ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        return ValueTask.CompletedTask;
+    }
 
-    [Inject] private IHttpClientFactory HttpClientFactory { get; set; } = default!;
-    [Inject] private NavigationManager NavigationManager { get; set; } = default!;
+    [Inject] private IProvisioningStatusService ProvisioningStatusService { get; set; } = default!;
+    [Inject] private ILogger<AssistantLoadingState> Log { get; set; } = default!;
 }

@@ -117,6 +117,7 @@ builder.Services.AddScoped<IUserAgentRuntime, FargateUserAgentRuntime>();
 
 // User provisioning
 builder.Services.AddScoped<IUserProvisioningService, UserProvisioningService>();
+builder.Services.AddScoped<IProvisioningStatusService, ProvisioningStatusService>();
 // Memory file service
 builder.Services.AddScoped<IMemoryFileService, MemoryFileService>();
 
@@ -260,11 +261,10 @@ app.MapHub<CCProgressHub>("/hubs/cc-progress");
 // Health endpoint — public
 app.MapGet("/health", () => "OK").AllowAnonymous();
 
-// Provision user workspace on first call, report status to AssistantLoadingState poller
+// Status endpoint — authenticated clients only (debugging/external use)
 app.MapGet("/api/agent/status", async (
     HttpContext ctx,
-    IUserProvisioningService provisioning,
-    ILogger<Program> log,
+    IDbContextFactory<FaitV2DbContext> dbFactory,
     CancellationToken ct) =>
 {
     var entraOid = ctx.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
@@ -272,25 +272,23 @@ app.MapGet("/api/agent/status", async (
     if (string.IsNullOrEmpty(entraOid))
         return Results.Ok(new { status = "Error", message = "Not authenticated" });
 
-    var email = ctx.User.FindFirst("email")?.Value
-             ?? ctx.User.FindFirst("preferred_username")?.Value
-             ?? ctx.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value
-             ?? "";
-    var displayName = ctx.User.FindFirst("name")?.Value
-                   ?? ctx.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name")?.Value
-                   ?? email;
-
     try
     {
-        await provisioning.ProvisionAsync(entraOid, entraOid, email, displayName, null, ct);
-        return Results.Ok(new { status = "Running" });
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var user = await db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.EntraOid == entraOid, ct);
+
+        if (user?.OnboardingCompletedAt != null)
+            return Results.Ok(new { status = "Running" });
+        else
+            return Results.Ok(new { status = "Provisioning" });
     }
-    catch (Exception ex)
+    catch (Exception)
     {
-        log.LogError(ex, "Provisioning failed for user {EntraOid}", entraOid);
-        return Results.Ok(new { status = "Error", message = "Initialization failed. Please refresh." });
+        return Results.Ok(new { status = "Error", message = "Status check failed" });
     }
-}).AllowAnonymous(); // HttpClient in AssistantLoadingState has no auth cookies — handler guards on null entraOid
+}).RequireAuthorization();
 
 // Push a message from an external FIP app (e.g. FIRM) into the user's FAIT v2 inbox
 app.MapPost("/api/agent/push-message", async (
