@@ -53,6 +53,23 @@ public class CompactionService : ICompactionService
 
         _logger.LogInformation("Compaction triggered for conversation {ConvId}", conversationId);
 
+        // Part A: Find existing summary rows before loading live messages
+        List<Data.Models.Message> existingSummaries;
+        string? existingSummaryContent;
+        {
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            linkedCts.CancelAfter(TimeSpan.FromSeconds(10));
+            await using var db2 = await _dbFactory.CreateDbContextAsync(linkedCts.Token);
+            existingSummaries = await db2.Messages
+                .Where(m => m.ConversationId == conversationId && m.IsCompactionSummary && m.CompactedAt == null)
+                .OrderBy(m => m.CreatedAt)
+                .ToListAsync(linkedCts.Token);
+
+            existingSummaryContent = existingSummaries.Any()
+                ? string.Join("\n\n", existingSummaries.Select(s => s.Content))
+                : null;
+        }
+
         try
         {
             List<Message> liveMessages;
@@ -75,7 +92,10 @@ public class CompactionService : ICompactionService
             }
 
             var compactionTarget = liveMessages.Take(liveMessages.Count - LiveWindowSize).ToList();
-            var extractionText = string.Join("\n\n", compactionTarget.Select(m => $"[{m.Role.ToUpper()}]: {m.Content}"));
+            var newMessagesText = string.Join("\n\n", compactionTarget.Select(m => $"[{m.Role.ToUpper()}]: {m.Content}"));
+            var extractionText = existingSummaryContent != null
+                ? $"PREVIOUS SUMMARY:\n{existingSummaryContent}\n\nNEW MESSAGES TO INTEGRATE:\n{newMessagesText}"
+                : newMessagesText;
 
             var extractionOutput = await ExtractFactsAsync(extractionText, ct);
 
@@ -105,6 +125,18 @@ public class CompactionService : ICompactionService
                     .ExecuteUpdateAsync(s => s.SetProperty(m => m.CompactedAt, DateTime.UtcNow), cts.Token);
 
                 await db.SaveChangesAsync(cts.Token);
+
+                // Part C: Mark existing summaries as compacted
+                if (existingSummaries.Any())
+                {
+                    using var markCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    markCts.CancelAfter(TimeSpan.FromSeconds(10));
+                    await using var db3 = await _dbFactory.CreateDbContextAsync(markCts.Token);
+                    var summaryIds = existingSummaries.Select(s => s.Id).ToList();
+                    await db3.Messages
+                        .Where(m => summaryIds.Contains(m.Id))
+                        .ExecuteUpdateAsync(s => s.SetProperty(m => m.CompactedAt, DateTime.UtcNow), markCts.Token);
+                }
             }
 
             await RecalculateTokenCountAsync(conversationId, ct);

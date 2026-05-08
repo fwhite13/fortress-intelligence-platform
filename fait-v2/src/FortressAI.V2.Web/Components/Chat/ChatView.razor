@@ -7,7 +7,7 @@
 @inject IPluginAgentService PluginAgentService
 @inject IContextEnvelopeService ContextEnvelopeSvc
 @inject IConversationService ConversationService
-@inject ICompactionService CompactionService
+@inject IServiceScopeFactory ScopeFactory
 
 @* Main chat component — lives in DualPaneLayout's ChatContent slot *@
 
@@ -468,12 +468,21 @@
                 {
                     await ConversationService.AppendMessageAsync(_conversationId, "assistant", fullResponse, EstimateTokens(fullResponse));
                     await ConversationService.UpdateTokenCountAsync(_conversationId, EstimateTokens(userMessage) + EstimateTokens(fullResponse));
-                    // Fire-and-forget compaction check
+                    // Fire-and-forget compaction check — use fresh scope to avoid captured-scoped-service disposal
                     var convIdCapture = _conversationId;
                     _ = Task.Run(async () =>
                     {
-                        try { await CompactionService.CompactIfNeededAsync(convIdCapture); }
-                        catch (Exception) { /* compaction is non-critical */ }
+                        try
+                        {
+                            await using var scope = ScopeFactory.CreateAsyncScope();
+                            var compaction = scope.ServiceProvider.GetRequiredService<ICompactionService>();
+                            await compaction.CompactIfNeededAsync(convIdCapture);
+                        }
+                        catch (OperationCanceledException) { /* expected */ }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Compaction failed for conversation {ConvId}", convIdCapture);
+                        }
                     });
                 }
             }
