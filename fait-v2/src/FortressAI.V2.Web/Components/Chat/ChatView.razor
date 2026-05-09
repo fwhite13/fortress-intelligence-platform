@@ -333,10 +333,12 @@
             var entraOid = auth.User.FindFirst("oid")?.Value
                        ?? auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
                        ?? "";
+            _logger.LogInformation("ChatView init: entraOid={EntraOid}", entraOid);
 
             // CRITICAL: resolve internal DB user ID — NOT entraOid
             var user = await UserService.GetByEntraOidAsync(entraOid);
             _userId = user?.Id ?? "";
+            _logger.LogInformation("ChatView init: userId resolved={UserId}", _userId);
             if (string.IsNullOrEmpty(_userId))
             {
                 _logger.LogError("Could not resolve internal userId for entraOid {EntraOid}", entraOid);
@@ -354,13 +356,16 @@
             // §15 — Load or create active conversation and restore history
             var conv = await ConversationService.GetOrCreateActiveConversationAsync(_userId);
             _conversationId = conv.Id;
+            _logger.LogInformation("ChatView init: conversationId={ConvId}", _conversationId);
             var history = await ConversationService.GetFullHistoryAsync(_conversationId);
             _messages = history
                 .Where(m => !m.IsCompactionSummary)
                 .Select(m => new ChatMessage(m.Role, m.Content))
                 .ToList();
+            _logger.LogInformation("ChatView init: history loaded, {Count} messages", _messages.Count);
 
             await ConnectSignalRAsync();
+            _logger.LogInformation("ChatView init: complete");
         }
         catch (Exception ex)
         {
@@ -396,6 +401,8 @@
 
     private async Task SendMessage()
     {
+        _logger.LogInformation("SendMessage called: inputLen={Len}, isStreaming={IsStreaming}, userId={UserId}",
+            _inputText?.Length ?? 0, _isStreaming, _userId);
         if (string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _ccRunning) return;
         if (string.IsNullOrWhiteSpace(_userId)) return;
 
