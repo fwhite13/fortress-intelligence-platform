@@ -57,5 +57,7 @@ public record HarnessEvent(
     string Type,         // "text" | "log" | "done" | "error"
     string? Content = null,
     int? ExitCode = null,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    int? InputTokens = null,    // for Bedrock done event
+    int? OutputTokens = null    // for Bedrock done event
 );

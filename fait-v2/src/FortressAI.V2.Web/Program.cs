@@ -417,6 +417,25 @@ app.MapPost("/api/feedback", async (
     return Results.Ok(new { submissionId = submission.Id });
 }).RequireAuthorization();
 
+// FIRM → inject meeting context into user's active assistant conversation
+app.MapPost("/api/assistant/inject", async (
+    [FromBody] AssistantInjectRequest req,
+    IDbContextFactory<FaitV2DbContext> dbFactory,
+    IConversationService convService,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrEmpty(req.EntraOid)) return Results.BadRequest("entraOid required");
+    await using var db = await dbFactory.CreateDbContextAsync(ct);
+    var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == req.EntraOid, ct);
+    if (user == null) return Results.NotFound("User not found");
+    var conv = await convService.GetOrCreateActiveConversationAsync(user.Id);
+    var systemNote = $"[Context from {req.SourceType ?? "external"}: {req.Title ?? "Untitled"}]\n{req.Content}";
+    await convService.AppendMessageAsync(conv.Id, "system", systemNote, systemNote.Length / 4);
+    logger.LogInformation("AssistantInject: user={UserId} source={SourceType} id={SourceId}", user.Id, req.SourceType, req.SourceId);
+    return Results.Ok(new { injected = true });
+}).AllowAnonymous();
+
 // Jarvis callback — update feedback status and push result via SignalR
 app.MapPost("/api/feedback/{id}/status", async (
     string id,
@@ -544,4 +563,12 @@ public record FeedbackStatusUpdate(
     string Status,
     string? AdoWiId,
     string? Message
+);
+
+public record AssistantInjectRequest(
+    string EntraOid,
+    string Content,
+    string? SourceType,
+    string? SourceId,
+    string? Title
 );

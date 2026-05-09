@@ -555,6 +555,8 @@
             );
             _logger.LogInformation("RunStreamingTurnAsync: calling SendTurnAsync for userId={UserId}, requestMessageLen={Len}, historyCount={HistCount}",
                 _userId, request.Message?.Length ?? 0, request.History?.Count ?? 0);
+            int? tokensIn = null;
+            int? tokensOut = null;
             int evtCount = 0;
             await foreach (var evt in AgentRuntime.SendTurnAsync(_userId, request))
             {
@@ -575,6 +577,8 @@
                         _messages.Add(new ChatMessage(Role: "assistant", Content: $"⚠️ {evt.ErrorMessage}"));
                         StateHasChanged();
                     }
+                    tokensIn  = evt.InputTokens;
+                    tokensOut = evt.OutputTokens;
                     break;
                 }
             }
@@ -594,7 +598,11 @@
             var fullResponse = assistantContent.ToString();
             if (fullResponse.Length > 0)
             {
-                _messages.Add(new ChatMessage(Role: "assistant", Content: fullResponse));
+                _messages.Add(new ChatMessage(
+                    Role: "assistant",
+                    Content: fullResponse,
+                    TokensIn: tokensIn,
+                    TokensOut: tokensOut));
                 // Persist assistant message to DB
                 if (!string.IsNullOrEmpty(_conversationId))
                 {

@@ -535,6 +535,7 @@
 
         try
         {
+            var summaryText = _meeting.Summary?.SummaryText ?? "No summary available";
             var transcriptExcerpt = _meeting.Transcripts.Any()
                 ? string.Join("\n", _meeting.Transcripts
                     .OrderBy(t => t.StartTimeMs)
@@ -544,47 +545,42 @@
             if (transcriptExcerpt?.Length > 2000)
                 transcriptExcerpt = transcriptExcerpt[..2000] + "...";
 
+            var content = string.IsNullOrEmpty(transcriptExcerpt)
+                ? summaryText
+                : $"{summaryText}\n\n--- Transcript ---\n{transcriptExcerpt}";
+
             var payload = new
             {
-                Source = "firm",
-                Title = _meeting.Title ?? $"Meeting {_meeting.Id}",
-                Summary = _meeting.Summary?.SummaryText ?? "No summary available",
-                Transcript = transcriptExcerpt,
-                MeetingId = _meeting.Id.ToString(),
-                MeetingDate = _meeting.StartedAt ?? _meeting.CreatedAt
+                EntraOid = _user?.EntraOid ?? "",
+                Content = content,
+                SourceType = "firm_meeting",
+                SourceId = _meeting.Id.ToString(),
+                Title = _meeting.Title ?? $"Meeting {_meeting.Id}"
             };
 
             var faitV2BaseUrl = (Configuration["FaitV2:BaseUrl"] ?? "https://fait-v2.dev.fortressam.ai").TrimEnd('/');
             var client = HttpClientFactory.CreateClient();
 
-            if (!string.IsNullOrEmpty(_authCookie))
-            {
-                var cookieName = Configuration["Auth:CookieName"] ?? ".FortressAI.Session";
-                client.DefaultRequestHeaders.Add("Cookie", $"{cookieName}={_authCookie}");
-            }
-
-            var response = await client.PostAsJsonAsync($"{faitV2BaseUrl}/api/agent/push-message", payload);
+            var response = await client.PostAsJsonAsync($"{faitV2BaseUrl}/api/assistant/inject", payload);
 
             if (response.IsSuccessStatusCode)
             {
+                Snackbar.Add("Meeting context sent to your assistant", Severity.Success);
+                _sendResult = null;
                 _sendSuccess = true;
-                _sendResult = "Meeting sent! Open FAIT v2 to discuss it with your assistant.";
-            }
-            else if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
-            {
-                _sendSuccess = false;
-                _sendResult = "You don't have a FAIT v2 account yet. Contact your admin to get access.";
             }
             else
             {
                 _sendSuccess = false;
-                _sendResult = "Failed to send to FAIT v2. Please try again.";
+                _sendResult = "Failed to send to assistant";
+                Snackbar.Add("Failed to send to assistant", Severity.Error);
             }
         }
         catch (Exception ex)
         {
             _sendSuccess = false;
-            _sendResult = "Error connecting to FAIT v2.";
+            _sendResult = "Failed to send to assistant";
+            Snackbar.Add("Failed to send to assistant", Severity.Error);
             Logger.LogError(ex, "FIRM MeetingDetail: SendToFaitV2 failed for meeting {MeetingId}", _meeting?.Id);
         }
         finally

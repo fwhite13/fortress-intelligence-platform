@@ -344,8 +344,8 @@ app.post('/turn', async (req, res) => {
             clearTimeout(timeout);
             try {
                 const artifact = await scanAndUploadArtifacts(
-                    process.env.FAIT_USER_ID,
-                    process.env.WORKSPACE_DIR || '/workspace'
+                    userId,
+                    userWorkspaceDir
                 );
                 if (artifact) {
                     endResponse({
