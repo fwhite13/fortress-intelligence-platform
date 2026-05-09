@@ -697,6 +697,36 @@ app.post('/tools/stitch_extract_design_dna', async (req, res) => {
     }
 });
 
+app.post('/tools/list_workspace_files', async (req, res) => {
+    const { userId, folder = '' } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+
+    const prefix = `workspaces/${userId}/${folder ? folder.replace(/^\/+|\/+$/g, '') + '/' : ''}`;
+
+    try {
+        const { S3Client: S3ClientLocal, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+        const s3 = new S3ClientLocal({ region: process.env.AWS_REGION || 'us-east-1' });
+
+        const cmd = new ListObjectsV2Command({
+            Bucket: S3_BUCKET,
+            Prefix: prefix,
+            MaxKeys: 200,
+        });
+        const resp = await s3.send(cmd);
+
+        const files = (resp.Contents || []).map(obj => ({
+            name: obj.Key.replace(prefix, ''),
+            size: obj.Size,
+            modified: obj.LastModified,
+        })).filter(f => f.name && !f.name.endsWith('/'));
+
+        res.json({ files, prefix, truncated: resp.IsTruncated ?? false });
+    } catch (err) {
+        console.error('[harness] list_workspace_files error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Tool dispatch — Stitch MCP tools
 app.post('/tools/:toolName', async (req, res) => {
     const { toolName } = req.params;
@@ -894,6 +924,19 @@ app.post('/turn', async (req, res) => {
         const briefContent = fullContext
             ? `${fullContext}\n\n---\n\nUser: ${message}`
             : message;
+        // Pre-stage: sync user workspace from S3 → local
+        try {
+            const { execSync } = require('child_process');
+            execSync(
+                `aws s3 sync s3://${S3_BUCKET}/workspaces/${userId}/ ${userWorkspaceDir}/ --quiet`,
+                { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
+            );
+            console.log(`[harness] workspace synced from S3 for userId=${userId}`);
+        } catch (syncErr) {
+            console.warn(`[harness] pre-run S3 sync failed (non-fatal): ${syncErr.message}`);
+            // Never block — continue with whatever is already local
+        }
+
         const ccProcess = spawn('claude', [
             '--model', process.env.CC_MODEL || 'sonnet',
             '--print',
@@ -919,25 +962,35 @@ app.post('/turn', async (req, res) => {
         ccProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', content: chunk.toString() }));
         ccProcess.on('close', async (code) => {
             clearTimeout(timeout);
+            let artifact = null;
             try {
-                const artifact = await scanAndUploadArtifacts(
-                    userId,
-                    userWorkspaceDir
-                );
-                if (artifact) {
-                    endResponse({
-                        type: 'done',
-                        exitCode: code,
-                        artifactUrl: artifact.artifactUrl,
-                        artifactFileName: artifact.fileName,
-                        artifactType: artifact.artifactType,
-                        artifactS3Key: artifact.s3Key,
-                    });
-                } else {
-                    endResponse({ type: 'done', exitCode: code });
-                }
+                artifact = await scanAndUploadArtifacts(userId, userWorkspaceDir);
             } catch (err) {
                 console.error('[harness] artifact upload failed:', err.message);
+            }
+
+            // Post-run: sync local workspace back to S3
+            try {
+                const { execSync } = require('child_process');
+                execSync(
+                    `aws s3 sync ${userWorkspaceDir}/ s3://${S3_BUCKET}/workspaces/${userId}/ --quiet`,
+                    { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
+                );
+                console.log(`[harness] workspace synced to S3 for userId=${userId}`);
+            } catch (syncErr) {
+                console.warn(`[harness] post-run S3 sync failed (non-fatal): ${syncErr.message}`);
+            }
+
+            if (artifact) {
+                endResponse({
+                    type: 'done',
+                    exitCode: code,
+                    artifactUrl: artifact.artifactUrl,
+                    artifactFileName: artifact.fileName,
+                    artifactType: artifact.artifactType,
+                    artifactS3Key: artifact.s3Key,
+                });
+            } else {
                 endResponse({ type: 'done', exitCode: code });
             }
         });
@@ -983,29 +1036,48 @@ app.post('/turn', async (req, res) => {
             console.log(`[harness] /turn: message array built, count=${messages.length} (including current user message)`);
 
             const toolConfig = {
-                tools: [{
-                    toolSpec: {
-                        name: 'search_knowledge_base',
-                        description: 'Search the user knowledge base for relevant context, facts, and information. Use this when the user asks questions that may be answered by their stored knowledge.',
-                        inputSchema: {
-                            json: {
-                                type: 'object',
-                                properties: {
-                                    query: {
-                                        type: 'string',
-                                        description: 'The search query'
+                tools: [
+                    {
+                        toolSpec: {
+                            name: 'search_knowledge_base',
+                            description: 'Search the user knowledge base for relevant context, facts, and information. Use this when the user asks questions that may be answered by their stored knowledge.',
+                            inputSchema: {
+                                json: {
+                                    type: 'object',
+                                    properties: {
+                                        query: {
+                                            type: 'string',
+                                            description: 'The search query'
+                                        },
+                                        kb_type: {
+                                            type: 'string',
+                                            enum: ['corp', 'personal', 'team'],
+                                            description: 'Knowledge base type to search. Default: personal'
+                                        }
                                     },
-                                    kb_type: {
-                                        type: 'string',
-                                        enum: ['corp', 'personal', 'team'],
-                                        description: 'Knowledge base type to search. Default: personal'
+                                    required: ['query']
+                                }
+                            }
+                        }
+                    },
+                    {
+                        toolSpec: {
+                            name: 'list_workspace_files',
+                            description: 'List files in the user workspace. Returns filename, size, and last modified date.',
+                            inputSchema: {
+                                json: {
+                                    type: 'object',
+                                    properties: {
+                                        folder: {
+                                            type: 'string',
+                                            description: 'Optional subfolder path within the workspace (e.g. "memory" or "artifacts"). Omit for root workspace listing.'
+                                        }
                                     }
-                                },
-                                required: ['query']
+                                }
                             }
                         }
                     }
-                }]
+                ]
             };
 
             const cmd = new ConverseStreamCommand({
@@ -1039,8 +1111,27 @@ app.post('/turn', async (req, res) => {
                     // Tool call complete — execute it
                     console.log(`[harness] /turn: toolUse complete: name=${toolUseAccumulator.name}, input=${toolUseAccumulator.inputJson}`);
                     const toolInput = JSON.parse(toolUseAccumulator.inputJson || '{}');
-                    const kbResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal');
-                    sendEvent({ type: 'text', content: `\n\n[KB Search Results]\n${kbResult}\n\n` });
+                    let toolResultText = '';
+
+                    if (toolUseAccumulator.name === 'list_workspace_files') {
+                        try {
+                            const wsRes = await fetch(`http://localhost:${PORT}/tools/list_workspace_files`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ userId, folder: toolInput.folder || '' })
+                            });
+                            const wsData = await wsRes.json();
+                            toolResultText = `\n\n[Workspace Files]\n${JSON.stringify(wsData, null, 2)}\n\n`;
+                        } catch (wsErr) {
+                            toolResultText = `\n\n[Workspace Files Error]\n${wsErr.message}\n\n`;
+                        }
+                    } else {
+                        // default: search_knowledge_base
+                        const kbResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal');
+                        toolResultText = `\n\n[KB Search Results]\n${kbResult}\n\n`;
+                    }
+
+                    sendEvent({ type: 'text', content: toolResultText });
                     toolUseAccumulator = null;
                 } else if (event.contentBlockDelta?.delta?.text) {
                     tokenCount++;
