@@ -945,6 +945,33 @@ app.post('/turn', async (req, res) => {
         if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
         if (systemPrompt) contextParts.push(systemPrompt);
 
+        // ADO#3089 — inject session context recap on cold-start CC turns with existing history
+        const hasHistory = Array.isArray(history) && history.length > 0;
+        if (hasHistory) {
+            const MAX_RECAP_CHARS = 2000;
+            const MAX_MESSAGES = 5;
+            const recentMessages = history.slice(-MAX_MESSAGES);
+            const recapLines = recentMessages.map(h => {
+                const role = h.role ?? h.Role ?? 'unknown';
+                const content = h.content ?? h.Content ?? '';
+                let text = '';
+                if (typeof content === 'string') {
+                    text = content;
+                } else if (Array.isArray(content)) {
+                    text = content.map(c => c.text ?? c.Text ?? '').join(' ');
+                }
+                const preview = text.trim().replace(/\n+/g, ' ').substring(0, 200);
+                const roleLabel = role === 'user' ? 'User' : 'Assistant';
+                return `- ${roleLabel}: ${preview}`;
+            });
+            let recap = `[Session Context — continuing conversation]\nRecent messages:\n${recapLines.join('\n')}`;
+            if (recap.length > MAX_RECAP_CHARS) {
+                recap = recap.substring(0, MAX_RECAP_CHARS) + '\n[... recap truncated]';
+            }
+            contextParts.push(recap);
+            console.log(`[harness] /turn: injected session recap (${recap.length} chars, ${recentMessages.length} messages) into CC context`);
+        }
+
         const fullContext = contextParts.join('\n\n---\n\n');
         const briefContent = fullContext
             ? `${fullContext}\n\n---\n\nUser: ${message}`
