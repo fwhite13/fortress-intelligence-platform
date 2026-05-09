@@ -469,8 +469,8 @@ app.Run();
 static string? GetUserId(HttpContext ctx)
 {
     if (!(ctx.User.Identity?.IsAuthenticated ?? false)) return null;
-    var oid = ctx.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-           ?? ctx.User.FindFirst("oid")?.Value;
+    var oid = ctx.User.FindFirst("oid")?.Value
+           ?? ctx.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
     return string.IsNullOrEmpty(oid) ? null : oid;
 }
 

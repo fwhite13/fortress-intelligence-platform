@@ -317,38 +317,47 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (AuthState == null) return;
-        var auth = await AuthState;
-        var entraOid = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                   ?? auth.User.FindFirst("oid")?.Value ?? "";
-
-        // CRITICAL: resolve internal DB user ID — NOT entraOid
-        var user = await UserService.GetByEntraOidAsync(entraOid);
-        _userId = user?.Id ?? "";
-        if (string.IsNullOrEmpty(_userId))
+        try
         {
-            _logger.LogError("Could not resolve internal userId for entraOid {EntraOid}", entraOid);
-            return; // bail — don't proceed with empty userId
+            if (AuthState == null) return;
+            var auth = await AuthState;
+            var entraOid = auth.User.FindFirst("oid")?.Value
+                       ?? auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                       ?? "";
+
+            // CRITICAL: resolve internal DB user ID — NOT entraOid
+            var user = await UserService.GetByEntraOidAsync(entraOid);
+            _userId = user?.Id ?? "";
+            if (string.IsNullOrEmpty(_userId))
+            {
+                _logger.LogError("Could not resolve internal userId for entraOid {EntraOid}", entraOid);
+                return; // bail — don't proceed with empty userId
+            }
+
+            _userDisplayName = auth.User.FindFirst("name")?.Value
+                            ?? auth.User.FindFirst("preferred_username")?.Value ?? "User";
+
+            var userRoles = auth.User.Claims
+                .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "roles")
+                .Select(c => c.Value);
+            _availablePlugins = await PluginAgentService.GetAvailablePluginsAsync(_userId, userRoles);
+
+            // §15 — Load or create active conversation and restore history
+            var conv = await ConversationService.GetOrCreateActiveConversationAsync(_userId);
+            _conversationId = conv.Id;
+            var history = await ConversationService.GetFullHistoryAsync(_conversationId);
+            _messages = history
+                .Where(m => !m.IsCompactionSummary)
+                .Select(m => new ChatMessage(m.Role, m.Content))
+                .ToList();
+
+            await ConnectSignalRAsync();
         }
-
-        _userDisplayName = auth.User.FindFirst("name")?.Value
-                        ?? auth.User.FindFirst("preferred_username")?.Value ?? "User";
-
-        var userRoles = auth.User.Claims
-            .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "roles")
-            .Select(c => c.Value);
-        _availablePlugins = await PluginAgentService.GetAvailablePluginsAsync(_userId, userRoles);
-
-        // §15 — Load or create active conversation and restore history
-        var conv = await ConversationService.GetOrCreateActiveConversationAsync(_userId);
-        _conversationId = conv.Id;
-        var history = await ConversationService.GetFullHistoryAsync(_conversationId);
-        _messages = history
-            .Where(m => !m.IsCompactionSummary)
-            .Select(m => new ChatMessage(m.Role, m.Content))
-            .ToList();
-
-        await ConnectSignalRAsync();
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ChatView OnInitializedAsync failed");
+            throw;
+        }
     }
 
     private async Task ConnectSignalRAsync()
