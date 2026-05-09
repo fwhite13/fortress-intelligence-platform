@@ -96,7 +96,11 @@
         }
 
         @* CC progress indicator *@
-        @if (_ccRunning)
+        @if (_ccRunning && _activeTaskId != null)
+        {
+            <TaskProgressTimeline UserId="@_userId" TaskId="@_activeTaskId" OnCancel="CancelCCTask" />
+        }
+        else if (_ccRunning)
         {
             <div class="chat-artifact-progress">
                 <MudProgressLinear Indeterminate="true" Color="Color.Primary" />

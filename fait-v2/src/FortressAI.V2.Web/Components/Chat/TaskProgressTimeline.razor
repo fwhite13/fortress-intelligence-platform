@@ -1,0 +1,303 @@
+@using FortressAI.V2.Web.Services
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager NavigationManager
+@inject IUserAgentRuntime AgentRuntime
+@inject ILogger<TaskProgressTimeline> Logger
+@implements IAsyncDisposable
+
+<div class="task-timeline">
+    <div class="task-timeline-header">
+        <span class="task-timeline-title">Task Progress</span>
+        <span class="task-timeline-elapsed">@_elapsedSeconds s</span>
+        <button class="task-timeline-cancel-btn" @onclick="OnCancel">Cancel</button>
+    </div>
+
+    @if (_lastUpdate != null)
+    {
+        <div class="task-timeline-current-step">
+            <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Class="task-timeline-step-icon" />
+            <span>@_lastUpdate.CurrentStep</span>
+        </div>
+
+        @if (_lastUpdate.CompletedSteps.Any())
+        {
+            <div class="task-timeline-completed">
+                @foreach (var step in _lastUpdate.CompletedSteps.AsEnumerable().Reverse())
+                {
+                    <div class="task-timeline-completed-step">
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Class="task-timeline-done-icon" />
+                        <span>@step</span>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (_lastUpdate.ToolCallsMade.Any())
+        {
+            <div class="task-timeline-tools">
+                <span class="task-timeline-tools-label">Tool calls:</span>
+                @foreach (var call in _lastUpdate.ToolCallsMade.TakeLast(5))
+                {
+                    <span class="task-timeline-tool-badge">@call</span>
+                }
+            </div>
+        }
+
+        @if (_lastUpdate.InterventionPrompt != null)
+        {
+            <div class="task-timeline-intervention">
+                <p class="task-timeline-intervention-prompt">@_lastUpdate.InterventionPrompt</p>
+                <div class="task-timeline-intervention-input-row">
+                    <input class="task-timeline-intervention-input"
+                           @bind="_interventionText"
+                           @bind:event="oninput"
+                           placeholder="Type your response..."
+                           disabled="@_submittingIntervention" />
+                    <button class="task-timeline-intervention-submit"
+                            @onclick="SubmitInterventionAsync"
+                            disabled="@(_submittingIntervention || string.IsNullOrWhiteSpace(_interventionText))">
+                        @if (_submittingIntervention)
+                        {
+                            <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+                        }
+                        else
+                        {
+                            <span>Send</span>
+                        }
+                    </button>
+                </div>
+            </div>
+        }
+    }
+    else
+    {
+        <div class="task-timeline-waiting">
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="task-timeline-spinner" />
+            <span>Waiting for task updates...</span>
+        </div>
+    }
+</div>
+
+<style>
+    .task-timeline {
+        padding: var(--space-3);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface);
+    }
+
+    .task-timeline-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: var(--space-3);
+        margin-bottom: var(--space-3);
+    }
+
+    .task-timeline-title {
+        font-weight: 600;
+        font-size: var(--font-size-sm);
+        color: var(--color-text-primary);
+    }
+
+    .task-timeline-elapsed {
+        font-size: var(--font-size-xs);
+        color: var(--color-text-secondary);
+    }
+
+    .task-timeline-cancel-btn {
+        color: var(--color-error);
+        border: 1px solid var(--color-error);
+        background: transparent;
+        border-radius: var(--radius-sm);
+        padding: var(--space-1) var(--space-2);
+        cursor: pointer;
+        font-size: var(--font-size-xs);
+    }
+
+    .task-timeline-current-step {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--font-size-sm);
+        color: var(--color-text-primary);
+        margin-bottom: var(--space-2);
+    }
+
+    .task-timeline-step-icon {
+        color: var(--color-primary);
+    }
+
+    .task-timeline-completed {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        margin-bottom: var(--space-2);
+    }
+
+    .task-timeline-completed-step {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--font-size-xs);
+        color: var(--color-text-secondary);
+    }
+
+    .task-timeline-done-icon {
+        color: var(--color-success);
+    }
+
+    .task-timeline-tools {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-1);
+        margin-bottom: var(--space-2);
+    }
+
+    .task-timeline-tools-label {
+        font-size: var(--font-size-xs);
+        color: var(--color-text-secondary);
+    }
+
+    .task-timeline-tool-badge {
+        font-size: var(--font-size-xs);
+        background: var(--color-surface-sunken);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        padding: 2px var(--space-1);
+    }
+
+    .task-timeline-intervention {
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3);
+        background: var(--color-surface-elevated);
+        margin-top: var(--space-2);
+    }
+
+    .task-timeline-intervention-prompt {
+        font-size: var(--font-size-sm);
+        color: var(--color-text-primary);
+        margin-bottom: var(--space-2);
+    }
+
+    .task-timeline-intervention-input-row {
+        display: flex;
+        gap: var(--space-2);
+    }
+
+    .task-timeline-intervention-input {
+        flex: 1;
+        padding: var(--space-2);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+        font-size: var(--font-size-sm);
+    }
+
+    .task-timeline-intervention-submit {
+        padding: var(--space-2) var(--space-3);
+        background: var(--color-primary);
+        color: var(--color-on-primary);
+        border: none;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: var(--font-size-sm);
+    }
+
+    .task-timeline-intervention-submit:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .task-timeline-waiting {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-sm);
+    }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public string UserId { get; set; } = "";
+    [Parameter, EditorRequired] public string TaskId { get; set; } = "";
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private CCProgressUpdate? _lastUpdate = null;
+    private System.Threading.Timer? _timer;
+    private HubConnection? _hubConnection;
+    private int _elapsedSeconds = 0;
+    private string _interventionText = "";
+    private bool _submittingIntervention = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/cc-progress"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.On<CCProgressUpdate>("ReceiveProgress", update =>
+            {
+                if (update.TaskId == TaskId)
+                {
+                    _lastUpdate = update;
+                    InvokeAsync(StateHasChanged);
+                }
+            });
+
+            await _hubConnection.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "TaskProgressTimeline: SignalR connection failed — progress updates unavailable");
+        }
+
+        _timer = new System.Threading.Timer(_ =>
+        {
+            _elapsedSeconds++;
+            InvokeAsync(StateHasChanged);
+        }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private Task SubmitInterventionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_interventionText) || _submittingIntervention) return Task.CompletedTask;
+        _submittingIntervention = true;
+        var text = _interventionText;
+        _interventionText = "";
+        try
+        {
+            var request = new TurnRequest(UserId: UserId, Message: text, SystemPrompt: null, TaskMode: true);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await foreach (var _ in AgentRuntime.SendTurnAsync(UserId, request)) { break; }
+                }
+                catch (Exception ex) { Logger.LogWarning(ex, "Intervention send failed"); }
+            });
+        }
+        finally
+        {
+            _submittingIntervention = false;
+            StateHasChanged();
+        }
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _timer?.Dispose();
+        if (_hubConnection != null)
+        {
+            await _hubConnection.StopAsync();
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}
