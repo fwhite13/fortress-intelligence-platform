@@ -519,15 +519,14 @@
             // Save to S3 and DB
             var artifactName = $"design-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
             var sessionId = result.SessionId ?? _currentSessionId;
-            await DesignAgent.SaveArtifactAsync(_userId, sessionId, result.Html, artifactName, result.ScreenId, result.IsFallback);
+            var savedS3Key = await DesignAgent.SaveArtifactAsync(_userId, sessionId, result.Html, artifactName, result.ScreenId, result.IsFallback);
 
             _turns.Add(new DesignTurn("assistant", "Here's your design:", result, artifactName));
 
             // Fire OnDesignComplete after first artifact if BA handoff context is set
             if (BAContext != null && OnDesignComplete.HasDelegate && _turns.Count(t => t.Result != null) == 1)
             {
-                var s3Key = $"designs/{_userId}/{sessionId}/{artifactName}.html";
-                await OnDesignComplete.InvokeAsync(s3Key);
+                await OnDesignComplete.InvokeAsync(savedS3Key);
             }
         }
         catch (Exception ex)

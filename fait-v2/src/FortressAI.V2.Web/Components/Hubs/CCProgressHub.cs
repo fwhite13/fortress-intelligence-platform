@@ -19,7 +19,9 @@ public class CCProgressHub : Hub
     // Client → harness: user responded to intervention request
     public async Task RespondToIntervention(string interventionId, bool approved)
     {
-        await Clients.Group($"harness-{Context.UserIdentifier}")
+        var userId = Context.UserIdentifier;
+        if (string.IsNullOrEmpty(userId)) return; // unauthenticated connection — ignore
+        await Clients.Group($"harness-{userId}")
             .SendAsync("InterventionResponse", new { interventionId, approved });
     }
 }
