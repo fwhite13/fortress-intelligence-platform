@@ -55,7 +55,7 @@
         @if (_initError != null)
         {
             <div class="chat-empty-state">
-                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Class="chat-empty-icon" Style="color: var(--color-error, #f44336)" />
+                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Class="chat-empty-icon" />
                 <p class="chat-empty-title">Something went wrong</p>
                 <p class="chat-empty-subtitle">@_initError</p>
             </div>
@@ -292,6 +292,10 @@
         background: var(--color-gold-muted);
         color: var(--color-gold);
     }
+
+    .chat-empty-icon {
+        color: var(--color-error);
+    }
 </style>
 
 @code {
@@ -351,7 +355,8 @@
             if (string.IsNullOrEmpty(_userId))
             {
                 _logger.LogError("Could not resolve internal userId for entraOid {EntraOid}", entraOid);
-                return; // bail — don't proceed with empty userId
+                _initError = "Could not resolve your user account. Please reload the page.";
+                return;
             }
 
             _userDisplayName = auth.User.FindFirst("name")?.Value
@@ -374,17 +379,19 @@
             _logger.LogInformation("ChatView init: history loaded, {Count} messages", _messages.Count);
 
             // Pre-warm harness — fire and forget, spinner guards input until ready
+            var capturedUserId = _userId;
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    _logger.LogInformation("ChatView: pre-warming harness for userId={UserId}", _userId);
-                    await AgentRuntime.EnsureRunningAsync(_userId);
-                    _logger.LogInformation("ChatView: harness pre-warm complete for userId={UserId}", _userId);
+                    _logger.LogInformation("ChatView: pre-warming harness for userId={UserId}", capturedUserId);
+                    using var warmupCts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                    await AgentRuntime.EnsureRunningAsync(capturedUserId, warmupCts.Token);
+                    _logger.LogInformation("ChatView: harness pre-warm complete for userId={UserId}", capturedUserId);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "ChatView: harness pre-warm failed for userId={UserId} — will retry on first message", _userId);
+                    _logger.LogWarning(ex, "ChatView: harness pre-warm failed for userId={UserId} — will retry on first message", capturedUserId);
                 }
                 finally
                 {
@@ -432,7 +439,7 @@
     {
         _logger.LogInformation("SendMessage called: inputLen={Len}, isStreaming={IsStreaming}, userId={UserId}",
             _inputText?.Length ?? 0, _isStreaming, _userId);
-        if (string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _ccRunning) return;
+        if (string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _ccRunning || !_harnessReady) return;
         if (string.IsNullOrWhiteSpace(_userId)) return;
 
         var userMessage = _inputText.Trim();
