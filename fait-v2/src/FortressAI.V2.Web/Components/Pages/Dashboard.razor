@@ -41,15 +41,36 @@ else
         </div>
     }
 
-    <DualPaneLayout @bind-IsPanelOpen="_previewOpen"
-                    PreviewTitle="@_previewTitle">
-        <ChatContent>
-            <ChatView />
-        </ChatContent>
-        <PreviewContent>
-            <MemoryManagerView />
-        </PreviewContent>
-    </DualPaneLayout>
+    <div class="agent-cards-row">
+        <div class="agent-card @(_selectedAgent == "main" ? "agent-card-active" : "")" @onclick='() => _selectedAgent = "main"'>
+            <MudIcon Icon="@Icons.Material.Filled.SmartToy" Class="agent-card-icon" />
+            <span class="agent-card-name">Main Assistant</span>
+        </div>
+        <div class="agent-card @(_selectedAgent == "design" ? "agent-card-active" : "")" @onclick='() => _selectedAgent = "design"'>
+            <MudIcon Icon="@Icons.Material.Filled.Palette" Class="agent-card-icon" />
+            <span class="agent-card-name">Design Agent</span>
+        </div>
+        <div class="agent-card @(_selectedAgent == "marketing" ? "agent-card-active" : "")" @onclick='() => _selectedAgent = "marketing"'>
+            <MudIcon Icon="@Icons.Material.Filled.Campaign" Class="agent-card-icon" />
+            <span class="agent-card-name">Marketing</span>
+        </div>
+    </div>
+    @if (_selectedAgent == "design")
+    {
+        <DesignAgentView />
+    }
+    else
+    {
+        <DualPaneLayout @bind-IsPanelOpen="_previewOpen"
+                        PreviewTitle="@_previewTitle">
+            <ChatContent>
+                <ChatView />
+            </ChatContent>
+            <PreviewContent>
+                <MemoryManagerView />
+            </PreviewContent>
+        </DualPaneLayout>
+    }
 }
 
 @code {
@@ -62,6 +83,7 @@ else
     private bool _previewOpen = true;
     private string _previewTitle = "Memory";
     private bool _agentReady = false;
+    private string _selectedAgent = "main";
     private IReadOnlyList<KbInfo> _kbs = Array.Empty<KbInfo>();
     private string _entraOid = "";
     private int _activeRecurringCount = 0;
@@ -127,3 +149,12 @@ else
         return dt.Value.ToLocalTime().ToString("MMM d");
     }
 }
+
+<style>
+    .agent-cards-row { display:flex; gap:var(--spacing-sm,8px); padding:var(--spacing-sm,8px) 0; flex-wrap:wrap; }
+    .agent-card { display:flex; flex-direction:column; align-items:center; gap:4px; padding:var(--spacing-sm,8px) var(--spacing-md,12px); border:1px solid var(--color-border); border-radius:var(--radius-md,8px); cursor:pointer; transition:background 0.15s; }
+    .agent-card:hover { background:var(--color-surface-sunken,#f3f4f6); }
+    .agent-card-active { border-color:var(--color-primary); background:var(--color-primary-light,#EEF2F7); }
+    .agent-card-name { font-size:var(--text-xs,0.75rem); font-weight:500; color:var(--color-text-secondary); }
+    .agent-card-icon { color:var(--color-primary); }
+</style>

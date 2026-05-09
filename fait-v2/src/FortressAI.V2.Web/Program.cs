@@ -193,6 +193,7 @@ builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<ICompactionService, CompactionService>();
 builder.Services.AddScoped<IRAGWriteService, RAGWriteService>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IConversationTitleService, ConversationTitleService>();
 
 var app = builder.Build();
 
@@ -242,6 +243,26 @@ using (var seedScope = app.Services.CreateScope())
         }
     }
     await seedDb.SaveChangesAsync();
+
+    // Seed Marketing plugin agent
+    var marketingPlugin = await seedDb.AgentPlugins.FirstOrDefaultAsync(p => p.Name == "Marketing Assistant");
+    if (marketingPlugin == null)
+    {
+        seedDb.AgentPlugins.Add(new FortressAI.V2.Web.Data.Models.AgentPlugin
+        {
+            Id = "plugin-marketing",
+            Name = "Marketing Assistant",
+            Description = "Specialized assistant for insurance marketing copy, campaign briefs, and brand-consistent content",
+            AllowedRoles = "[\"user\",\"admin\"]",
+            AllowedMcpServers = "[]",
+            IsActive = true,
+            CreatedBy = "system",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await seedDb.SaveChangesAsync();
+        seedLogger.LogInformation("Seeded Marketing plugin agent");
+    }
 }
 
 if (!app.Environment.IsDevelopment())
