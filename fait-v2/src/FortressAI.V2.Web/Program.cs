@@ -810,6 +810,8 @@ public record AssistantInjectRequest(
 
 public record MemorySearchRequest(string Query, int? TopK, string? UserId = null);
 
+public record MemoryWriteRequest(string TopicSlug, string Content, string? UserId = null, string? Source = null);
+
 public record InterventionRequestBody(
     string UserId,
     string InterventionId,

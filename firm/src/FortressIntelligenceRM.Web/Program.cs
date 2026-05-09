@@ -91,6 +91,8 @@ builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>
 builder.Services.AddTransient<IBot, FirmBot>();
 builder.Services.AddSingleton<IFirmBotService, FirmBotService>();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("FaitV2Client");
+builder.Services.AddScoped<IFaitV2IntegrationService, FaitV2IntegrationService>();
 // Named client for same-container (self) API calls — bypasses Cloudflare
 builder.Services.AddHttpClient("local", client =>
 {

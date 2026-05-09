@@ -1238,6 +1238,10 @@ app.post('/turn', async (req, res) => {
                 }
             }
             console.log(`[harness] /turn: stream complete, sending done event for userId=${userId}`);
+            // ADO#3093 — fire-and-forget preference detection write
+            if (hasPreferenceSignal(message)) {
+                firePreferenceWrite(userId, message);
+            }
             sendEvent({ type: 'done', inputTokens, outputTokens });
             res.end();
         } catch (err) {

@@ -190,6 +190,41 @@
                 </button>
             </div>
         </div>
+        @* ADO#3094 — File upload destination selector *@
+        <div class="chat-upload-trigger-row">
+            <label class="chat-file-attach-btn" title="Attach file">
+                <InputFile OnChange="HandleFileSelected" class="chat-file-input" accept="*/*" />
+                <MudIcon Icon="@Icons.Material.Filled.AttachFile" Class="chat-pill-icon" />
+                <span class="chat-pill-label">Attach</span>
+            </label>
+            @if (!string.IsNullOrEmpty(_uploadStatusMessage))
+            {
+                <span class="chat-upload-status">@_uploadStatusMessage</span>
+                <button class="chat-upload-clear-btn" @onclick="ClearFile" title="Clear">×</button>
+            }
+        </div>
+
+        @if (_pendingFile != null)
+        {
+            <div class="chat-upload-panel">
+                <span class="chat-upload-filename">📎 @_pendingFile.Name</span>
+                <div class="chat-upload-dest-group">
+                    <button class="chat-upload-dest-btn @(_uploadDestination == "chat" ? "chat-upload-dest-btn--active" : "")"
+                            @onclick="@(() => _uploadDestination = "chat")">Chat only</button>
+                    <button class="chat-upload-dest-btn @(_uploadDestination == "project" ? "chat-upload-dest-btn--active" : "")"
+                            @onclick="@(() => _uploadDestination = "project")">Project</button>
+                    <button class="chat-upload-dest-btn @(_uploadDestination == "kb" ? "chat-upload-dest-btn--active" : "")"
+                            @onclick="@(() => _uploadDestination = "kb")">Knowledge Base</button>
+                    <button class="chat-upload-dest-btn @(_uploadDestination == "workspace" ? "chat-upload-dest-btn--active" : "")"
+                            @onclick="@(() => _uploadDestination = "workspace")">Workspace</button>
+                </div>
+                <button class="chat-upload-confirm-btn" @onclick="UploadFile" disabled="@_fileUploading">
+                    @(_fileUploading ? "Uploading..." : "Upload")
+                </button>
+                <button class="chat-upload-cancel-btn" @onclick="ClearFile">Cancel</button>
+            </div>
+        }
+
         @* Bottom row: text input + send *@
         <div class="chat-input-bottom-row">
             <textarea class="chat-input-field"
