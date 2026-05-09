@@ -174,7 +174,13 @@ app.post('/turn', async (req, res) => {
     const rawBody = req.body || {};
     console.log(`[harness] /turn: raw body dump: ${JSON.stringify(rawBody).substring(0, 500)}`);
 
-    const { SessionId: sessionId, UserId: userId, Message: message, SystemPrompt: systemPrompt, TaskMode: taskMode, History: history } = rawBody;
+    // Support both PascalCase (legacy) and camelCase (JsonContent.Create default) field names
+    const sessionId   = rawBody.SessionId   ?? rawBody.sessionId;
+    const userId      = rawBody.UserId      ?? rawBody.userId;
+    const message     = rawBody.Message     ?? rawBody.message;
+    const systemPrompt= rawBody.SystemPrompt?? rawBody.systemPrompt;
+    const taskMode    = rawBody.TaskMode    ?? rawBody.taskMode;
+    const history     = rawBody.History     ?? rawBody.history;
     console.log(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, taskMode=${taskMode}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
 
     if (!userId || !message) {
