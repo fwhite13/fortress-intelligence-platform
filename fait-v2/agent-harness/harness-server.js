@@ -200,8 +200,23 @@ app.post('/turn', async (req, res) => {
         } catch (mkErr) {
             return endResponse({ type: 'error', errorMessage: `Cannot create workspace: ${mkErr.message}` });
         }
-        const briefContent = systemPrompt
-            ? `${systemPrompt}\n\n---\n\nUser: ${message}`
+        // Always load S3 context for task mode
+        const prefix = S3_PREFIX || `workspaces/${userId}/`;
+        const [soulMd, userMd, memoryMd] = await Promise.all([
+            fetchS3File(`${prefix}assistants/SOUL.md`),
+            fetchS3File(`${prefix}assistants/USER.md`),
+            fetchS3File(`${prefix}memory/MEMORY.md`),
+        ]);
+
+        const contextParts = [];
+        if (soulMd) contextParts.push(`## Assistant Identity\n${soulMd}`);
+        if (userMd) contextParts.push(`## About the User\n${userMd}`);
+        if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
+        if (systemPrompt) contextParts.push(systemPrompt);
+
+        const fullContext = contextParts.join('\n\n---\n\n');
+        const briefContent = fullContext
+            ? `${fullContext}\n\n---\n\nUser: ${message}`
             : message;
         const ccProcess = spawn('claude', [
             '--model', process.env.CC_MODEL || 'sonnet',
@@ -244,6 +259,9 @@ app.post('/turn', async (req, res) => {
             if (userMd) systemParts.push(`## About the User\n${userMd}`);
             if (memoryMd) systemParts.push(`## Long-Term Memory\n${memoryMd}`);
             if (systemPrompt) systemParts.push(systemPrompt);
+            if (systemParts.length === 0) {
+                systemParts.push('You are a helpful AI assistant.');
+            }
             const fullSystemPrompt = systemParts.join('\n\n---\n\n');
 
             // Build message history
@@ -263,7 +281,7 @@ app.post('/turn', async (req, res) => {
             const cmd = new ConverseStreamCommand({
                 modelId: MODEL_ID,
                 messages,
-                system: fullSystemPrompt ? [{ text: fullSystemPrompt }] : undefined,
+                system: [{ text: fullSystemPrompt }],
                 inferenceConfig: { maxTokens: 4096, temperature: 0.7 }
             });
 
