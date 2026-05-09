@@ -109,6 +109,14 @@
             </div>
         }
 
+        @* Intervention approval gate *@
+        @if (_pendingIntervention != null)
+        {
+            <ApprovalDialog Request="@_pendingIntervention"
+                            HarnessUrl="@_harnessBaseUrl"
+                            OnRespond="HandleInterventionResponse" />
+        }
+
         @* Artifact result card *@
         @if (_lastArtifact != null)
         {
@@ -387,6 +395,10 @@
     private bool _isPanelOpen = false;
     private HubConnection? _hubConnection;
 
+    // Intervention gate state
+    private CCInterventionRequest? _pendingIntervention = null;
+    private string _harnessBaseUrl = "";
+
     // ConversationTask tracking
     private string? _activeTaskId;
     private bool _taskCreated = false;
@@ -461,6 +473,16 @@
             });
 
             await ConnectSignalRAsync();
+
+            // Resolve harness base URL for ApprovalDialog response posting
+            try
+            {
+                var session = await AgentRuntime.GetSessionAsync(_userId);
+                if (session != null && !string.IsNullOrEmpty(session.PrivateIp))
+                    _harnessBaseUrl = $"http://{session.PrivateIp}:{session.Port}";
+            }
+            catch { /* non-fatal — ApprovalDialog will skip POST if URL is empty */ }
+
             _logger.LogInformation("ChatView init: complete");
         }
         catch (Exception ex)
@@ -485,6 +507,12 @@
             {
                 _ccCurrentStep = update.CurrentStep;
                 InvokeAsync(StateHasChanged);
+            });
+
+            _hubConnection.On<CCInterventionRequest>("ReceiveInterventionRequired", async (request) =>
+            {
+                _pendingIntervention = request;
+                await InvokeAsync(StateHasChanged);
             });
 
             await _hubConnection.StartAsync();
@@ -785,6 +813,14 @@
     private void CancelCCTask()
     {
         _ccCts?.Cancel();
+    }
+
+    private async Task HandleInterventionResponse(bool approved)
+    {
+        _pendingIntervention = null;
+        var action = approved ? "approved" : "denied";
+        _messages.Add(new ChatMessage(Role: "assistant", Content: $"[Intervention {action}]"));
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task DownloadArtifact()

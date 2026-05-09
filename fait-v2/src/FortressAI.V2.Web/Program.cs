@@ -548,6 +548,47 @@ app.MapPost("/api/feedback/{id}/status", async (
     return Results.Ok();
 }).WithMetadata(new AllowAnonymousAttribute());
 
+// Intervention request — harness POSTs here to trigger ApprovalDialog on client
+app.MapPost("/api/intervention/request", async (
+    [FromBody] InterventionRequestBody request,
+    IHubContext<CCProgressHub> hub,
+    IConfiguration config,
+    HttpContext httpContext,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    // Shared-secret guard — harness must send X-Harness-Secret
+    var expectedSecret = config["HarnessInternal:Secret"] ?? "";
+    if (!string.IsNullOrEmpty(expectedSecret))
+    {
+        var providedSecret = httpContext.Request.Headers["X-Harness-Secret"].FirstOrDefault();
+        if (providedSecret != expectedSecret)
+        {
+            logger.LogWarning("InterventionRequest: rejected — missing or invalid X-Harness-Secret");
+            return Results.Unauthorized();
+        }
+    }
+
+    if (string.IsNullOrEmpty(request.UserId) || string.IsNullOrEmpty(request.InterventionId))
+        return Results.BadRequest(new { error = "userId and interventionId required" });
+
+    var interventionRequest = new CCInterventionRequest(
+        InterventionId: request.InterventionId,
+        TaskId: request.TaskId ?? "",
+        ActionType: request.ActionType ?? "unknown",
+        ActionSummary: request.ActionSummary ?? "Perform action",
+        ActionDetails: request.ActionDetails
+    );
+
+    await hub.Clients.User(request.UserId)
+        .SendAsync("ReceiveInterventionRequired", interventionRequest, ct);
+
+    logger.LogInformation("InterventionRequest: sent to userId={UserId}, interventionId={Id}, actionType={ActionType}",
+        request.UserId, request.InterventionId, request.ActionType);
+
+    return Results.Ok(new { ok = true });
+}).AllowAnonymous(); // guarded by X-Harness-Secret header, not auth cookie
+
 // Memory search endpoint (for agent-harness search_memory tool)
 app.MapPost("/api/memory/search", async (
     [FromBody] MemorySearchRequest searchRequest,
@@ -694,3 +735,12 @@ public record AssistantInjectRequest(
 );
 
 public record MemorySearchRequest(string Query, int? TopK, string? UserId = null);
+
+public record InterventionRequestBody(
+    string UserId,
+    string InterventionId,
+    string? TaskId,
+    string? ActionType,
+    string? ActionSummary,
+    string? ActionDetails
+);

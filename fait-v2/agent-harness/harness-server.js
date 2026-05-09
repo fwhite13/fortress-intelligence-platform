@@ -73,6 +73,41 @@ async function getUserAdoToken(userId) {
 }
 
 const MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
+const FAIT_BASE_URL = process.env.FAIT_BASE_URL || 'http://localhost:8080';
+const HARNESS_INTERNAL_SECRET = process.env.HARNESS_INTERNAL_SECRET || '';
+
+// ─── Intervention hold-for-approval ───────────────────────────────────────
+const pendingInterventions = new Map(); // interventionId → { resolve, reject }
+
+async function requireApproval(userId, actionType, actionSummary, actionDetails) {
+    const interventionId = crypto.randomUUID();
+
+    // POST intervention request to Blazor — holds harness until user responds
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (HARNESS_INTERNAL_SECRET) headers['X-Harness-Secret'] = HARNESS_INTERNAL_SECRET;
+        await fetch(`${FAIT_BASE_URL}/api/intervention/request`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ userId, interventionId, actionType, actionSummary, actionDetails })
+        });
+    } catch (err) {
+        console.error('[harness] requireApproval: failed to send intervention request:', err.message);
+        throw new Error('Could not reach Blazor to request approval — action cancelled');
+    }
+
+    // Wait for user response (timeout: 5 minutes)
+    return new Promise((resolve, reject) => {
+        pendingInterventions.set(interventionId, { resolve, reject });
+        setTimeout(() => {
+            if (pendingInterventions.has(interventionId)) {
+                pendingInterventions.delete(interventionId);
+                reject(new Error('Intervention timed out after 5 minutes — action cancelled'));
+            }
+        }, 5 * 60 * 1000);
+    });
+}
+
 const S3_BUCKET = process.env.WORKSPACE_S3_BUCKET || 'fortress-user-workspaces';
 const S3_PREFIX = process.env.WORKSPACE_S3_PREFIX || '';
 const { existsSync, writeFileSync } = require('fs');
@@ -329,6 +364,22 @@ app.post('/tools/graph_send_email', async (req, res) => {
         if (cc) {
             payload.message.ccRecipients = [{ emailAddress: { address: cc } }];
         }
+        // G2 gate: require user approval before sending
+        let approved = false;
+        try {
+            approved = await requireApproval(
+                userId,
+                'send_email',
+                `Send email to ${to}: "${subject}"`,
+                JSON.stringify(payload).substring(0, 500)
+            );
+        } catch (approvalErr) {
+            return res.status(200).json({ result: { denied: true, reason: approvalErr.message } });
+        }
+        if (!approved) {
+            return res.status(200).json({ result: { denied: true, reason: 'User denied the action' } });
+        }
+
         await graphRequest(token, 'POST', '/me/sendMail', payload);
         res.json({ result: { sent: true } });
     } catch (err) {
@@ -444,6 +495,23 @@ app.post('/tools/ado_update_work_item', async (req, res) => {
         if (comment) ops.push({ op: 'add', path: '/fields/System.History', value: comment });
         if (ops.length === 0) return res.status(400).json({ error: 'Nothing to update — provide state, title, or comment' });
 
+        // G2 gate: require user approval before updating work item
+        const updateSummary = [state && `state→${state}`, title && `title→"${title}"`, comment && 'add comment'].filter(Boolean).join(', ');
+        let approved = false;
+        try {
+            approved = await requireApproval(
+                userId,
+                'ado_post',
+                `Update ADO work item #${id}: ${updateSummary}`,
+                JSON.stringify({ id, state, title, comment }).substring(0, 500)
+            );
+        } catch (approvalErr) {
+            return res.status(200).json({ result: { denied: true, reason: approvalErr.message } });
+        }
+        if (!approved) {
+            return res.status(200).json({ result: { denied: true, reason: 'User denied the action' } });
+        }
+
         const resp = await fetch(url, {
             method: 'PATCH',
             headers: {
@@ -478,6 +546,22 @@ app.post('/tools/ado_create_work_item', async (req, res) => {
         ];
         if (description) ops.push({ op: 'add', path: '/fields/System.Description', value: description });
         if (priority) ops.push({ op: 'add', path: '/fields/Microsoft.VSTS.Common.Priority', value: priority });
+
+        // G2 gate: require user approval before creating work item
+        let approved = false;
+        try {
+            approved = await requireApproval(
+                userId,
+                'ado_post',
+                `Create ADO work item in ${project}: [${type}] ${title}`,
+                JSON.stringify({ project, type, title, description, priority }).substring(0, 500)
+            );
+        } catch (approvalErr) {
+            return res.status(200).json({ result: { denied: true, reason: approvalErr.message } });
+        }
+        if (!approved) {
+            return res.status(200).json({ result: { denied: true, reason: 'User denied the action' } });
+        }
 
         const resp = await fetch(url, {
             method: 'POST',
@@ -947,6 +1031,20 @@ app.post('/turn', async (req, res) => {
             res.end();
         }
     }
+});
+
+// Blazor delivers user's approval/denial back to harness
+app.post('/intervention/respond', (req, res) => {
+    const { interventionId, approved } = req.body || {};
+    if (!interventionId) return res.status(400).json({ error: 'interventionId required' });
+    const pending = pendingInterventions.get(interventionId);
+    if (pending) {
+        pendingInterventions.delete(interventionId);
+        pending.resolve(approved === true);
+    } else {
+        console.warn('[harness] /intervention/respond: no pending intervention for id', interventionId);
+    }
+    res.json({ ok: true });
 });
 
 // Session info
