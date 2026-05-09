@@ -350,7 +350,6 @@
     [Inject] private IArtifactService ArtifactService { get; set; } = default!;
     [Inject] private NavigationManager NavManager { get; set; } = default!;
     [Inject] private IUserService UserService { get; set; } = default!;
-    [Inject] private IConversationTitleService TitleService { get; set; } = default!;
     [Inject] private IDbContextFactory<FaitV2DbContext> DbFactory { get; set; } = default!;
     [Inject] private ILogger<ChatView> _logger { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
@@ -659,15 +658,23 @@
                     });
 
                     // Fire title generation after the first exchange only
-                    // _messages now has 1 user + 1 assistant = 2 messages (the assistant one was just added above)
-                    if (!string.IsNullOrEmpty(_activeTaskId) && _messages.Count == 2)
+                    if (!string.IsNullOrEmpty(_activeTaskId) && _titlePending)
                     {
+                        _titlePending = false;   // clear before firing so it never double-fires
                         var capturedTaskId = _activeTaskId;
                         var capturedUserId = _userId;
                         var capturedUserMsg = userMessage;
                         var capturedResponse = fullResponse;
-                        _ = Task.Run(() => TitleService.CreateTaskAndUpdateTitleAsync(
-                            capturedUserId, capturedTaskId, capturedUserMsg, capturedResponse));
+                        var capturedScopeFactory = ScopeFactory;
+                        _ = Task.Run(async () =>
+                        {
+                            await using var scope = capturedScopeFactory.CreateAsyncScope();
+                            var svc = scope.ServiceProvider.GetRequiredService<IConversationTitleService>();
+                            await svc.CreateTaskAndUpdateTitleAsync(capturedUserId, capturedTaskId, capturedUserMsg, capturedResponse);
+                            // Notify sidebar to refresh after title is written
+                            var notifier = scope.ServiceProvider.GetRequiredService<ITaskListNotifier>();
+                            notifier.NotifyChanged();
+                        });
                     }
                 }
             }

@@ -194,6 +194,7 @@ builder.Services.AddScoped<ICompactionService, CompactionService>();
 builder.Services.AddScoped<IRAGWriteService, RAGWriteService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IConversationTitleService, ConversationTitleService>();
+builder.Services.AddSingleton<ITaskListNotifier, TaskListNotifier>();
 
 var app = builder.Build();
 

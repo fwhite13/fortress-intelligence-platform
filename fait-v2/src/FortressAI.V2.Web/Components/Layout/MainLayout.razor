@@ -13,6 +13,7 @@
 @inject ProjectStateService ProjectState
 @inject IDbContextFactory<FaitV2DbContext> DbFactory
 @inject ILogger<MainLayout> Logger
+@inject ITaskListNotifier TaskListNotifier
 @implements IDisposable
 
 <MudThemeProvider Theme="_theme" @bind-IsDarkMode="_isDarkMode" />
@@ -179,6 +180,7 @@
     private List<ConversationTask> _recentTasks = new();
     private string? _activeTaskId;
 
+    private Action? _taskListChangedHandler;
     private MudTheme _theme = FipTheme.Create();
 
     [CascadingParameter]
@@ -228,6 +230,9 @@
             }
             catch { /* non-critical — leave empty */ }
         }
+
+        _taskListChangedHandler = async () => await InvokeAsync(RefreshRecentTasksAsync);
+        TaskListNotifier.OnTaskListChanged += _taskListChangedHandler;
     }
 
     private async Task SelectProjectAsync(ProjectSummary project)
@@ -368,5 +373,9 @@
         catch (Exception ex) { Logger.LogWarning(ex, "RefreshRecentTasks failed"); }
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        if (_taskListChangedHandler != null)
+            TaskListNotifier.OnTaskListChanged -= _taskListChangedHandler;
+    }
 }
