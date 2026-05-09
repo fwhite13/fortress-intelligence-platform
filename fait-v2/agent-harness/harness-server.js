@@ -7,6 +7,8 @@ const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 
 const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
+const { BedrockAgentRuntimeClient, RetrieveCommand } = require('@aws-sdk/client-bedrock-agent-runtime');
+const bedrockAgentClient = new BedrockAgentRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
 const S3_BUCKET = process.env.WORKSPACE_S3_BUCKET || 'fortress-user-workspaces';
 const S3_PREFIX = process.env.WORKSPACE_S3_PREFIX || '';
@@ -167,6 +169,35 @@ app.post('/tools/:toolName', async (req, res) => {
     }
 });
 
+async function executeKbSearch(query, kbType) {
+    const kbId = kbType === 'corp' ? process.env.CORP_KB_ID
+               : kbType === 'team' ? process.env.TEAM_KB_ID
+               : process.env.PERSONAL_KB_ID;
+
+    if (!kbId) {
+        console.warn(`[harness] KB search: no KB ID configured for type ${kbType}`);
+        return `No knowledge base configured for type: ${kbType}`;
+    }
+
+    try {
+        const cmd = new RetrieveCommand({
+            knowledgeBaseId: kbId,
+            retrievalQuery: { text: query },
+            retrievalConfiguration: {
+                vectorSearchConfiguration: { numberOfResults: 5 }
+            }
+        });
+        const resp = await bedrockAgentClient.send(cmd);
+        const results = (resp.retrievalResults || [])
+            .map((r, i) => `[${i+1}] ${r.content?.text || ''}`)
+            .join('\n\n');
+        return results || 'No results found.';
+    } catch (err) {
+        console.error(`[harness] KB search error:`, err.message);
+        return `KB search failed: ${err.message}`;
+    }
+}
+
 app.post('/turn', async (req, res) => {
     console.log('[harness] /turn received: userId=%s, hasMessage=%s, taskMode=%s',
         req.body?.UserId ?? '(none)', !!req.body?.Message, req.body?.TaskMode ?? false);
@@ -303,23 +334,69 @@ app.post('/turn', async (req, res) => {
             messages.push({ role: 'user', content: [{ text: message }] });
             console.log(`[harness] /turn: message array built, count=${messages.length} (including current user message)`);
 
+            const toolConfig = {
+                tools: [{
+                    toolSpec: {
+                        name: 'search_knowledge_base',
+                        description: 'Search the user knowledge base for relevant context, facts, and information. Use this when the user asks questions that may be answered by their stored knowledge.',
+                        inputSchema: {
+                            json: {
+                                type: 'object',
+                                properties: {
+                                    query: {
+                                        type: 'string',
+                                        description: 'The search query'
+                                    },
+                                    kb_type: {
+                                        type: 'string',
+                                        enum: ['corp', 'personal', 'team'],
+                                        description: 'Knowledge base type to search. Default: personal'
+                                    }
+                                },
+                                required: ['query']
+                            }
+                        }
+                    }
+                }]
+            };
+
             const cmd = new ConverseStreamCommand({
                 modelId: MODEL_ID,
                 messages,
                 system: [{ text: fullSystemPrompt }],
-                inferenceConfig: { maxTokens: 4096, temperature: 0.7 }
+                inferenceConfig: { maxTokens: 4096, temperature: 0.7 },
+                toolConfig
             });
 
             console.log(`[harness] /turn: calling bedrockClient.send for userId=${userId}, modelId=${MODEL_ID}`);
             const response = await bedrockClient.send(cmd);
             console.log(`[harness] /turn: Bedrock stream opened, beginning event iteration`);
             let tokenCount = 0;
+            let toolUseAccumulator = null;
             for await (const event of response.stream) {
-                if (event.contentBlockDelta?.delta?.text) {
+                if (event.contentBlockStart?.start?.toolUse) {
+                    toolUseAccumulator = {
+                        toolUseId: event.contentBlockStart.start.toolUse.toolUseId,
+                        name: event.contentBlockStart.start.toolUse.name,
+                        inputJson: ''
+                    };
+                    console.log(`[harness] /turn: toolUse start: name=${toolUseAccumulator.name}, id=${toolUseAccumulator.toolUseId}`);
+                } else if (event.contentBlockDelta?.delta?.toolUse) {
+                    if (toolUseAccumulator) {
+                        toolUseAccumulator.inputJson += event.contentBlockDelta.delta.toolUse.input || '';
+                    }
+                } else if (event.contentBlockStop && toolUseAccumulator) {
+                    // Tool call complete — execute it
+                    console.log(`[harness] /turn: toolUse complete: name=${toolUseAccumulator.name}, input=${toolUseAccumulator.inputJson}`);
+                    const toolInput = JSON.parse(toolUseAccumulator.inputJson || '{}');
+                    const kbResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal');
+                    sendEvent({ type: 'token', content: `\n\n[KB Search Results]\n${kbResult}\n\n` });
+                    toolUseAccumulator = null;
+                } else if (event.contentBlockDelta?.delta?.text) {
                     tokenCount++;
                     sendEvent({ type: 'text', content: event.contentBlockDelta.delta.text });
                 } else if (event.messageStop) {
-                    console.log(`[harness] /turn: messageStop received after ${tokenCount} text events`);
+                    console.log(`[harness] /turn: messageStop received after ${tokenCount} text events, stopReason=${event.messageStop.stopReason}`);
                     break;
                 } else {
                     console.log(`[harness] /turn: stream event (non-text): ${JSON.stringify(Object.keys(event))}`);
