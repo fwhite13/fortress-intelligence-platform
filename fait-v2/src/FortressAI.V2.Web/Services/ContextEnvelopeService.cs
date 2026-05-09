@@ -104,9 +104,9 @@ public class ContextEnvelopeService : IContextEnvelopeService
                         memorySummary = $"# Plugin Skills\n{skills}";
 
                     // §5 — per-server read/write permissions in system prompt
-                    if (pluginMcpServers.Count > 0)
+                    if (pluginMcpServers.Any(s => s.Read))
                     {
-                        var mcpPermLines = pluginMcpServers.Select(s =>
+                        var mcpPermLines = pluginMcpServers.Where(s => s.Read).Select(s =>
                             $"- {s.ServerId}: {(s.Write ? "read+write" : "read-only")}");
                         var mcpPermSection = "## MCP Server Permissions\n" + string.Join("\n", mcpPermLines);
                         memorySummary = memorySummary != null

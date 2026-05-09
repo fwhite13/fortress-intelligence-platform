@@ -809,7 +809,7 @@ app.post('/tools/list_workspace_files', async (req, res) => {
 });
 
 // ─── Write tool classification ─────────────────────────────────────────────
-const WRITE_TOOL_PATTERNS = /create|update|delete|write|send|post|add|remove|modify|set/i;
+const WRITE_TOOL_PATTERNS = /create|update|delete|write|send|add|remove|modify|\bset\b/i;
 const KB_WRITE_PATTERNS = /kb_write|kb_upsert|kb_create|knowledge_write/i;
 
 function isWriteTool(toolName) {
