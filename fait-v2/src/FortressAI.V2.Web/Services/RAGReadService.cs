@@ -11,12 +11,14 @@ public class RAGReadService : IRAGReadService
 {
     private readonly IConfiguration _config;
     private readonly ILogger<RAGReadService> _logger;
+    private readonly AmazonBedrockRuntimeClient _bedrockClient;
     private const string EMBED_MODEL = "amazon.titan-embed-text-v2:0";
 
     public RAGReadService(IConfiguration config, ILogger<RAGReadService> logger)
     {
         _config = config;
         _logger = logger;
+        _bedrockClient = new AmazonBedrockRuntimeClient(RegionEndpoint.USEast1);
     }
 
     public Task WarmupAsync(string userId, CancellationToken ct = default)
@@ -45,7 +47,6 @@ public class RAGReadService : IRAGReadService
 
     private async Task<float[]> GetEmbeddingAsync(string text, CancellationToken ct)
     {
-        var bedrockClient = new AmazonBedrockRuntimeClient(RegionEndpoint.USEast1);
         var body = JsonSerializer.Serialize(new { inputText = text });
         var request = new InvokeModelRequest
         {
@@ -54,7 +55,7 @@ public class RAGReadService : IRAGReadService
             Accept = "application/json",
             Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(body))
         };
-        var response = await bedrockClient.InvokeModelAsync(request, ct);
+        var response = await _bedrockClient.InvokeModelAsync(request, ct);
         using var reader = new StreamReader(response.Body);
         var json = await reader.ReadToEndAsync(ct);
         using var doc = JsonDocument.Parse(json);

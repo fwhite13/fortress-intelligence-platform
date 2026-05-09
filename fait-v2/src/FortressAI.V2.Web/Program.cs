@@ -604,10 +604,10 @@ app.MapPost("/api/memory/search", async (
     var providedToken = httpContext.Request.Headers["X-Internal-Token"].FirstOrDefault();
     string? userId;
 
-    if (!string.IsNullOrEmpty(providedToken))
+    if (!string.IsNullOrEmpty(providedToken) && !string.IsNullOrEmpty(internalToken))
     {
-        // Harness path — validate shared secret
-        if (string.IsNullOrEmpty(internalToken) || providedToken != internalToken)
+        // Harness path — validate shared secret (only if Harness:InternalApiToken is configured)
+        if (providedToken != internalToken)
         {
             logger.LogWarning("MemorySearch: rejected invalid X-Internal-Token");
             return Results.Unauthorized();
