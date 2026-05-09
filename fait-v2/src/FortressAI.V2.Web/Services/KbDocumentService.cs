@@ -272,6 +272,7 @@ public class KbDocumentService
         var prefix = tier switch
         {
             KbTier.Team      => $"kb-docs/teams/{teamId}/",
+            KbTier.Corporate => "kb-docs/fortress/",
             KbTier.Developer => "kb-docs/dev/",
             _                => $"kb-docs/personal/{userId}/"
         };

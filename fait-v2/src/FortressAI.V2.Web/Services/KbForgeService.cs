@@ -85,6 +85,7 @@ public class KbForgeService
             KbTier.Personal  => entry.UserId == userId,
             KbTier.Team      => entry.TeamId != null && await IsTeamMemberAsync(userId, entry.TeamId),
             KbTier.Corporate => false,
+            KbTier.Developer => entry.UserId == userId,
             _                => false
         };
     }
