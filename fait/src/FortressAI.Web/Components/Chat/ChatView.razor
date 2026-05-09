@@ -35,7 +35,7 @@
 }
 else if (!_agentReady)
 {
-    <AssistantLoadingState OnReady="HandleAgentReady" OnRetry="HandleAgentRetry" />
+    <AssistantLoadingState UserId="@Session.UserId.ToString()" OnReady="HandleAgentReady" OnRetry="HandleAgentRetry" />
 }
 else
 {

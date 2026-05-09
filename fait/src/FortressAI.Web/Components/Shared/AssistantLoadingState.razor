@@ -90,8 +90,9 @@
     [Parameter] public EventCallback OnRetry { get; set; }
     [Parameter] public EventCallback OnReady { get; set; }
 
-    [Inject] private HttpClient Http { get; set; } = default!;
-    [Inject] private NavigationManager Nav { get; set; } = default!;
+    [Parameter] public string UserId { get; set; } = "";
+
+    [Inject] private IUserAgentRuntime AgentRuntime { get; set; } = default!;
 
     private string _statusMessage = "Starting your assistant...";
     private bool _timedOut = false;
@@ -131,15 +132,13 @@
             return;
         }
 
-        // Poll status endpoint
+        // Poll via DI — avoids 403 from server-side Blazor HttpClient
         try
         {
-            var baseUri = Nav.BaseUri.TrimEnd('/');
-            var response = await Http.GetFromJsonAsync<AgentStatusResponse>(
-                $"{baseUri}/api/agent/status",
-                cancellationToken: _cts?.Token ?? CancellationToken.None);
-
-            if (response?.Status == "Running")
+            var session = await AgentRuntime.GetSessionAsync(
+                UserId,
+                _cts?.Token ?? CancellationToken.None);
+            if (session?.Status == RuntimeSessionStatus.Running)
             {
                 StopPolling();
                 await InvokeAsync(async () =>
@@ -189,8 +188,4 @@
         _cts?.Dispose();
     }
 
-    private class AgentStatusResponse
-    {
-        public string Status { get; set; } = "";
-    }
 }
