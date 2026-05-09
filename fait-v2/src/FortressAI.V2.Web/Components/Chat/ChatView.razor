@@ -603,11 +603,14 @@
             if (!string.IsNullOrEmpty(_conversationId))
             {
                 var contextMessages = await ConversationService.GetMessagesForContextAsync(_conversationId);
+                if (contextMessages.Count > 0 && contextMessages.Last().Role != "user")
+                    _logger.LogWarning("GetMessagesForContextAsync last message is not user role — SkipLast(1) may exclude wrong message. Last role={LastRole}", contextMessages.Last().Role);
                 contextHistory = contextMessages
                     .Where(m => m.Role != "system" || m.IsCompactionSummary)
                     .SkipLast(1)  // exclude the just-appended user message
                     .Select(m => new FortressAI.V2.Web.Services.ChatHistoryEntry(m.Role, m.Content))
                     .ToList();
+                _logger.LogInformation("Context history: {Count} messages sent to harness for turn", contextHistory.Count);
             }
             else
             {
@@ -732,6 +735,19 @@
 
         try
         {
+            // Persist user message to DB (mirrors RunStreamingTurnAsync)
+            if (!string.IsNullOrEmpty(_conversationId))
+            {
+                try
+                {
+                    await ConversationService.AppendMessageAsync(_conversationId, "user", userMessage, EstimateTokens(userMessage));
+                }
+                catch (Exception persistEx)
+                {
+                    _logger.LogWarning(persistEx, "RunCCTaskAsync: failed to persist user message — non-fatal");
+                }
+            }
+
             var envelope = BuildEnvelope(_userId, _userDisplayName);
             if (_selectedPluginId != null)
             {
@@ -769,6 +785,20 @@
             {
                 var errorMsg = result.Error ?? "The artifact generation did not produce a file. Please try again with a more specific request.";
                 _messages.Add(new ChatMessage(Role: "assistant", Content: $"Artifact generation failed: {errorMsg}"));
+            }
+
+            // Persist assistant response to DB
+            var assistantResponseText = _messages.LastOrDefault(m => m.Role == "assistant")?.Content;
+            if (!string.IsNullOrEmpty(_conversationId) && !string.IsNullOrEmpty(assistantResponseText))
+            {
+                try
+                {
+                    await ConversationService.AppendMessageAsync(_conversationId, "assistant", assistantResponseText, EstimateTokens(assistantResponseText));
+                }
+                catch (Exception persistEx)
+                {
+                    _logger.LogWarning(persistEx, "RunCCTaskAsync: failed to persist assistant response — non-fatal");
+                }
             }
         }
         catch (OperationCanceledException)

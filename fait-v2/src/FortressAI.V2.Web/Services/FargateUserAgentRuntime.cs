@@ -387,8 +387,9 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
         try
         {
             var client = _httpClientFactory.CreateClient("HarnessClient");
-            client.Timeout = TimeSpan.FromSeconds(5);
-            var resp = await client.GetAsync($"http://{session.PrivateIp}:{session.Port}/health", ct);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, cts.Token);
+            var resp = await client.GetAsync($"http://{session.PrivateIp}:{session.Port}/health", linkedCts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch (Exception ex)
