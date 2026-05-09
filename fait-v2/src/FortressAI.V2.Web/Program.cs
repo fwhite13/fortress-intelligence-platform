@@ -639,6 +639,18 @@ app.MapPost("/api/memory/search", async (
     }));
 }).AllowAnonymous();
 
+// §6.1 — serve agent soul content for harness pluginAgentId switching
+app.MapGet("/api/agents/{pluginAgentId}/soul", async (
+    string pluginAgentId,
+    IPluginAgentService pluginAgentService,
+    CancellationToken ct) =>
+{
+    var plugin = await pluginAgentService.GetPluginByIdAsync(pluginAgentId, ct);
+    if (plugin == null) return Results.NotFound(new { error = "Agent not found" });
+    var content = await pluginAgentService.GetSkillsContentAsync(plugin, ct);
+    return Results.Ok(new { content });
+}).RequireAuthorization();
+
 // Blazor components — all routes require auth
 app.MapRazorComponents<App>()
    .AddInteractiveServerRenderMode()

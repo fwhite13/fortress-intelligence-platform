@@ -129,6 +129,28 @@ public class ContextEnvelopeService : IContextEnvelopeService
             _logger.LogWarning(ex, "ContextEnvelopeService: failed to retrieve memory summary for user {UserId}", userId);
         }
 
+        // §6.1 — inject available specialist agents into system prompt
+        try
+        {
+            var activePlugins = await _pluginAgentService.ListActivePluginsAsync(userId, ct);
+            if (activePlugins.Count > 0)
+            {
+                var agentLines = activePlugins.Select(p =>
+                    $"- **{p.Name}** — {p.Description}");
+                var agentSection = "## Available Specialist Agents\n" +
+                    "You have access to the following specialist agents. When a request is better served by one, suggest switching — do not handle it yourself.\n" +
+                    string.Join("\n", agentLines) + "\n" +
+                    "To suggest: say e.g. 'This looks like a great task for the Marketing Agent — want me to hand it off?' Do NOT switch autonomously. Always ask first.";
+                memorySummary = memorySummary != null
+                    ? memorySummary + "\n\n" + agentSection
+                    : agentSection;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "ContextEnvelopeService: failed to load plugin agents for user {UserId}", userId);
+        }
+
         return new CCContextEnvelope
         {
             UserId = userId,

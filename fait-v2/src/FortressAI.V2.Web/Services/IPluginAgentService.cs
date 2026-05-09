@@ -23,6 +23,9 @@ public interface IPluginAgentService
 
     /// <summary>Get skill content for a plugin (reads markdown from skills directory).</summary>
     Task<string> GetSkillsContentAsync(AgentPlugin plugin, CancellationToken ct = default);
+
+    /// <summary>List all active plugins (no user filter — all active plugins visible to all users).</summary>
+    Task<List<AgentPlugin>> ListActivePluginsAsync(string userId, CancellationToken ct = default);
 }
 
 /// <summary>

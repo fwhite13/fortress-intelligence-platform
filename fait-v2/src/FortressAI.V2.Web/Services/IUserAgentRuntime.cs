@@ -49,7 +49,8 @@ public record TurnRequest(
     string? SessionId = null,
     bool TaskMode = false,
     bool ForceTaskMode = false,
-    List<ChatHistoryEntry>? History = null
+    List<ChatHistoryEntry>? History = null,
+    string? PluginAgentId = null         // §6.1 — active specialist agent
 );
 
 public record ChatHistoryEntry(string Role, string Content);

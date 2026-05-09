@@ -38,6 +38,14 @@
         {
             <AgentPluginBadge AgentName="Design Agent" IsActive="true" />
         }
+        @if (_activePluginAgentId != null)
+        {
+            var activeName = _availablePlugins.FirstOrDefault(p => p.Id == _activePluginAgentId)?.Name ?? "Plugin Agent";
+            <AgentPluginBadge AgentName="@activeName" IsActive="true" />
+            <button class="agent-dismiss-btn" @onclick="DismissAgent">
+                × Back to main assistant
+            </button>
+        }
         @if (!string.IsNullOrEmpty(_taskProjectId))
         {
             <a href="/projects/@_taskProjectId" class="chat-project-badge">
@@ -149,6 +157,32 @@
             {
                 <span class="chat-plugin-active-badge">[@(_availablePlugins.FirstOrDefault(p => p.Id == _selectedPluginId)?.Name ?? "")]</span>
             }
+        </div>
+    }
+
+    @* §6.1 — agent suggestion quick-reply *@
+    @if (_suggestedAgentId != null)
+    {
+        <div class="agent-suggest-bar">
+            <button class="agent-suggest-btn" @onclick="AcceptAgentSuggestion">
+                Switch to @_suggestedAgentName
+            </button>
+            <button class="agent-suggest-dismiss" @onclick="DismissAgentSuggestion">
+                No thanks
+            </button>
+        </div>
+    }
+
+    @* §6.1 — agent suggestion quick-reply *@
+    @if (_suggestedAgentId != null)
+    {
+        <div class="agent-suggest-bar">
+            <button class="agent-suggest-btn" @onclick="AcceptAgentSuggestion">
+                Switch to @_suggestedAgentName
+            </button>
+            <button class="agent-suggest-dismiss" @onclick="DismissAgentSuggestion">
+                No thanks
+            </button>
         </div>
     }
 
@@ -377,6 +411,67 @@
     }
     .chat-run-as-task-icon { font-style: normal; }
     .chat-run-as-task-label { white-space: nowrap; }
+
+    .agent-suggest-bar {
+        display: flex;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-4);
+        background: var(--color-surface);
+        border-top: 1px solid var(--color-border);
+    }
+
+    .agent-suggest-btn {
+        padding: var(--space-1) var(--space-3);
+        height: var(--pill-height-sm);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-accent);
+        background: var(--color-accent-bg);
+        color: var(--color-accent);
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+        font-weight: 600;
+        transition: background var(--transition-base);
+    }
+
+    .agent-suggest-btn:hover {
+        background: var(--color-accent);
+        color: #fff;
+    }
+
+    .agent-suggest-dismiss {
+        padding: var(--space-1) var(--space-3);
+        height: var(--pill-height-sm);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+        transition: background var(--transition-base);
+    }
+
+    .agent-suggest-dismiss:hover {
+        background: var(--color-surface-hover);
+        color: var(--color-text-primary);
+    }
+
+    .agent-dismiss-btn {
+        padding: var(--space-1) var(--space-3);
+        height: var(--pill-height-sm);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-xs);
+        cursor: pointer;
+        transition: background var(--transition-base);
+        white-space: nowrap;
+    }
+
+    .agent-dismiss-btn:hover {
+        background: var(--color-surface-hover);
+        color: var(--color-text-primary);
+    }
 </style>
 
     </ChatContent>
@@ -416,6 +511,11 @@
     // Plugin state
     private List<AgentPlugin> _availablePlugins = new();
     private string? _selectedPluginId = null;
+
+    // §6.1 — Plugin agent switching state
+    private string? _activePluginAgentId = null;      // currently active plugin agent
+    private string? _suggestedAgentId = null;         // agent suggested by last assistant turn
+    private string? _suggestedAgentName = null;       // display name of suggested agent
 
     // CC task state
     private bool _ccRunning = false;
@@ -661,7 +761,8 @@
                 SystemPrompt: BuildSystemPrompt(),
                 TaskMode: false,
                 ForceTaskMode: _forceTaskMode,
-                History: contextHistory
+                History: contextHistory,
+                PluginAgentId: _activePluginAgentId   // §6.1
             );
             _forceTaskMode = false; // reset after send
             _logger.LogInformation("RunStreamingTurnAsync: calling SendTurnAsync for userId={UserId}, requestMessageLen={Len}, historyCount={HistCount}",
@@ -705,6 +806,9 @@
         {
             _isStreaming = false;
             var fullResponse = assistantContent.ToString();
+            // §6.1 — detect agent suggestion in assistant response
+            if (fullResponse.Length > 0)
+                DetectAgentSuggestion(fullResponse);
             if (fullResponse.Length > 0)
             {
                 _messages.Add(new ChatMessage(
@@ -973,6 +1077,50 @@ The filename should be descriptive of the content.",
                 // non-fatal — badge simply won't show
             }
         });
+    }
+
+    private void DetectAgentSuggestion(string response)
+    {
+        _suggestedAgentId = null;
+        _suggestedAgentName = null;
+
+        var lower = response.ToLowerInvariant();
+        if (!lower.Contains("hand it off") && !lower.Contains("want me to switch") && !lower.Contains("specialist agent"))
+            return;
+
+        // Match known plugin agent names from available plugins
+        foreach (var plugin in _availablePlugins)
+        {
+            if (lower.Contains(plugin.Name.ToLowerInvariant()))
+            {
+                _suggestedAgentId = plugin.Id;
+                _suggestedAgentName = plugin.Name;
+                return;
+            }
+        }
+    }
+
+    private void AcceptAgentSuggestion()
+    {
+        if (_suggestedAgentId != null)
+        {
+            _activePluginAgentId = _suggestedAgentId;
+            _selectedPluginId = _suggestedAgentId;
+        }
+        _suggestedAgentId = null;
+        _suggestedAgentName = null;
+    }
+
+    private void DismissAgentSuggestion()
+    {
+        _suggestedAgentId = null;
+        _suggestedAgentName = null;
+    }
+
+    private void DismissAgent()
+    {
+        _activePluginAgentId = null;
+        _selectedPluginId = null;
     }
 
     public async ValueTask DisposeAsync()

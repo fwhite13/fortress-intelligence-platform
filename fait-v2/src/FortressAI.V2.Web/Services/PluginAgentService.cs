@@ -37,6 +37,13 @@ public class PluginAgentService : IPluginAgentService
         }).ToList();
     }
 
+    public async Task<List<AgentPlugin>> ListActivePluginsAsync(string userId, CancellationToken ct = default)
+    {
+        return await _db.AgentPlugins
+            .Where(p => p.IsActive)
+            .ToListAsync(ct);
+    }
+
     public async Task<AgentPlugin?> GetPluginByIdAsync(string pluginId, CancellationToken ct = default)
     {
         return await _db.AgentPlugins.FindAsync(new object[] { pluginId }, ct);

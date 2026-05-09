@@ -866,6 +866,7 @@ app.post('/turn', async (req, res) => {
     const systemPrompt= rawBody.SystemPrompt?? rawBody.systemPrompt;
     const history     = rawBody.History     ?? rawBody.history;
     const forceTaskMode = rawBody.ForceTaskMode ?? rawBody.force_task_mode ?? false;
+    const pluginAgentId = rawBody.PluginAgentId ?? rawBody.pluginAgentId ?? null;
     const taskMode = forceTaskMode || classifyRequest(message, history);
     console.log(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, forceTaskMode=${forceTaskMode}, classifiedTaskMode=${taskMode}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
 
@@ -889,6 +890,24 @@ app.post('/turn', async (req, res) => {
         console.log(`[harness] /turn: sendEvent type=${data.type}, contentLen=${data.content?.length ?? 0}, errorMessage=${data.errorMessage ?? ''}`);
         res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
+
+    // §6.1 — load plugin agent soul if pluginAgentId specified
+    let pluginAgentSoul = null;
+    if (pluginAgentId) {
+        try {
+            const headers = { 'Accept': 'application/json' };
+            if (HARNESS_INTERNAL_SECRET) headers['X-Harness-Secret'] = HARNESS_INTERNAL_SECRET;
+            const soulResp = await fetch(`${FAIT_BASE_URL}/api/agents/${encodeURIComponent(pluginAgentId)}/soul`, { headers });
+            if (soulResp.ok) {
+                const soulData = await soulResp.json();
+                if (soulData?.content) pluginAgentSoul = soulData.content;
+            } else {
+                console.warn(`[harness] /turn: could not load soul for pluginAgentId=${pluginAgentId} — status=${soulResp.status}`);
+            }
+        } catch (soulErr) {
+            console.warn(`[harness] /turn: pluginAgentId soul fetch failed: ${soulErr.message}`);
+        }
+    }
 
     if (taskMode) {
         console.log(`[harness] /turn: taskMode=true — entering CC spawn path for userId=${userId}`);
@@ -915,7 +934,12 @@ app.post('/turn', async (req, res) => {
         ]);
 
         const contextParts = [];
-        if (soulMd) contextParts.push(`## Assistant Identity\n${soulMd}`);
+        if (pluginAgentSoul) {
+            // §6.1 — plugin agent soul replaces default identity for this turn
+            contextParts.push(`## Plugin Agent Identity\n${pluginAgentSoul}`);
+        } else if (soulMd) {
+            contextParts.push(`## Assistant Identity\n${soulMd}`);
+        }
         if (userMd) contextParts.push(`## About the User\n${userMd}`);
         if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
         if (systemPrompt) contextParts.push(systemPrompt);
@@ -1010,7 +1034,12 @@ app.post('/turn', async (req, res) => {
             console.log(`[harness] /turn: S3 fetch complete — soulMd=${soulMd ? soulMd.length + ' chars' : 'null'}, userMd=${userMd ? userMd.length + ' chars' : 'null'}, memoryMd=${memoryMd ? memoryMd.length + ' chars' : 'null'}`);
 
             const systemParts = [];
-            if (soulMd) systemParts.push(`## Assistant Identity\n${soulMd}`);
+            if (pluginAgentSoul) {
+                // §6.1 — plugin agent soul replaces default identity for this turn
+                systemParts.push(`## Plugin Agent Identity\n${pluginAgentSoul}`);
+            } else if (soulMd) {
+                systemParts.push(`## Assistant Identity\n${soulMd}`);
+            }
             if (userMd) systemParts.push(`## About the User\n${userMd}`);
             if (memoryMd) systemParts.push(`## Long-Term Memory\n${memoryMd}`);
             if (systemPrompt) systemParts.push(systemPrompt);
