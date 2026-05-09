@@ -75,7 +75,13 @@ public class UserProvisioningService
         }
         catch (Amazon.S3.AmazonS3Exception ex) when (ex.ErrorCode == "AccessDenied")
         {
-            _logger.LogError(ex, "[Provision] AccessDeniedException writing S3 for user {UserId} — halting", userId);
+            _logger.LogError(ex, "[Provision] AccessDeniedException writing S3 for user {UserId} — halting, rolling back {Count} written files", userId, writtenKeys.Count);
+            // Rollback any files already written before the AccessDenied
+            foreach (var key in writtenKeys)
+            {
+                try { await _s3.DeleteObjectAsync(BucketName, key); }
+                catch (Exception delEx) { _logger.LogWarning(delEx, "[Provision] Rollback: failed to delete {Key}", key); }
+            }
             throw; // halt and report — do NOT proceed to DB writes
         }
         catch (Exception ex)
