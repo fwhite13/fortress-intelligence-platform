@@ -1,13 +1,23 @@
 @using FortressAI.V2.Web.Models
 
-@* Single chat message bubble *@
+@* Single chat message bubble — v1-style with token count display *@
 
 <div class="message-bubble @(Message.Role == "user" ? "message-user" : "message-assistant")">
     <div class="message-content">@((MarkupString)RenderMarkdown(Message.Content))</div>
+    @if (!IsStreaming && Message.Role == "assistant" && (Message.TokensIn > 0 || Message.TokensOut > 0))
+    {
+        <div class="message-meta">
+            <span class="token-count">
+                <MudIcon Icon="@Icons.Material.Filled.Memory" Size="Size.Small" />
+                @(Message.TokensIn?.ToString("N0") ?? "?")→@(Message.TokensOut?.ToString("N0") ?? "?") tokens
+            </span>
+        </div>
+    }
 </div>
 
 @code {
     [Parameter, EditorRequired] public ChatMessage Message { get; set; } = default!;
+    [Parameter] public bool IsStreaming { get; set; } = false;
 
     private string RenderMarkdown(string content)
     {

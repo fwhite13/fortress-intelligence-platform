@@ -72,7 +72,7 @@
         {
             @foreach (var msg in _messages)
             {
-                <MessageBubble Message="@msg" />
+                <MessageBubble Message="@msg" IsStreaming="@(msg == _messages.LastOrDefault() && _isStreaming)" />
             }
             @if (_isStreaming)
             {
