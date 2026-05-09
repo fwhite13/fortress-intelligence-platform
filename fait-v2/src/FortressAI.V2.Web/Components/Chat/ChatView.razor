@@ -1,6 +1,7 @@
 @using FortressAI.V2.Web.Models
 @using FortressAI.V2.Web.Services
 @using FortressAI.V2.Web.Data.Models
+@using FortressAI.V2.Web.Components.Layout
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.SignalR.Client
 @implements IAsyncDisposable
@@ -11,6 +12,9 @@
 
 @* Main chat component — lives in DualPaneLayout's ChatContent slot *@
 
+<DualPaneLayout @bind-IsPanelOpen="_isPanelOpen"
+                PreviewTitle="@(_lastArtifact?.FileName ?? "Preview")">
+    <ChatContent>
 <div class="chat-container">
 
     @* Agent selector toolbar *@
@@ -300,7 +304,42 @@
     .chat-welcome-icon {
         color: var(--color-primary);
     }
+
+    .artifact-download-pane {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        gap: var(--spacing-md, 16px);
+        color: var(--color-text-secondary);
+    }
+    .artifact-download-icon { font-size: 48px; color: var(--color-primary); }
+    .artifact-download-name { font-size: var(--text-sm, 0.875rem); font-weight: 500; }
+    .artifact-preview-frame { width: 100%; height: 100%; border: none; }
 </style>
+
+    </ChatContent>
+    <PreviewContent>
+        @if (_lastArtifact != null)
+        {
+            @if (_lastArtifact.Type == "html" && _artifactPreviewUrl != null)
+            {
+                <iframe src="@_artifactPreviewUrl" class="artifact-preview-frame" title="@_lastArtifact.FileName"></iframe>
+            }
+            else
+            {
+                <div class="artifact-download-pane">
+                    <MudIcon Icon="@GetArtifactIcon(_lastArtifact.Type)" Class="artifact-download-icon" />
+                    <p class="artifact-download-name">@_lastArtifact.FileName</p>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DownloadArtifact" StartIcon="@Icons.Material.Filled.Download">
+                        Download
+                    </MudButton>
+                </div>
+            }
+        }
+    </PreviewContent>
+</DualPaneLayout>
 
 @code {
     [Inject] private IUserAgentRuntime AgentRuntime { get; set; } = default!;
@@ -336,6 +375,8 @@
     private string _ccCurrentStep = "Generating artifact...";
     private CancellationTokenSource? _ccCts;
     private ArtifactRecord? _lastArtifact;
+    private string? _artifactPreviewUrl = null;
+    private bool _isPanelOpen = false;
     private HubConnection? _hubConnection;
 
     private static readonly string[] ArtifactKeywords = { "create", "generate", "write", "make", "build" };
@@ -612,6 +653,16 @@
             {
                 _lastArtifact = await ArtifactService.RecordArtifactAsync(
                     _userId, result, userMessage, _ccCts.Token);
+                _isPanelOpen = true;
+                if (_lastArtifact.Type == "html")
+                {
+                    try { _artifactPreviewUrl = await ArtifactService.GetDownloadUrlAsync(_userId, _lastArtifact.Id); }
+                    catch { _artifactPreviewUrl = null; }
+                }
+                else
+                {
+                    _artifactPreviewUrl = null;
+                }
 
                 var responseMsg = $"I've generated **{_lastArtifact.FileName}** for you. Use the buttons below to preview or download it.";
                 _messages.Add(new ChatMessage(Role: "assistant", Content: responseMsg));

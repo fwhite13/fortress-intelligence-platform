@@ -123,28 +123,30 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
                         return MapToRuntimeSession(existing);
                     }
                 }
-
-                // Health check failed — invalidate stale session and fall through to launch a new task
-                _logger.LogWarning("Cached session for user {UserId} failed health check — invalidating and launching new task", userId);
-                // Stop old ECS task explicitly before launching replacement
-                try
+                else
                 {
-                    await _ecs.StopTaskAsync(new StopTaskRequest
+                    // Health check failed — invalidate stale session and fall through to launch a new task
+                    _logger.LogWarning("Cached session for user {UserId} failed health check — invalidating and launching new task", userId);
+                    // Stop old ECS task explicitly before launching replacement
+                    try
                     {
-                        Cluster = ClusterArn,
-                        Task = existing.TaskArn,
-                        Reason = "Stale session — harness health check failed, replacing"
-                    }, ct);
-                    _logger.LogInformation("EnsureRunningAsync: stopped stale task {TaskArn} for user {UserId} after health check failure", existing.TaskArn, userId);
+                        await _ecs.StopTaskAsync(new StopTaskRequest
+                        {
+                            Cluster = ClusterArn,
+                            Task = existing.TaskArn,
+                            Reason = "Stale session — harness health check failed, replacing"
+                        }, ct);
+                        _logger.LogInformation("EnsureRunningAsync: stopped stale task {TaskArn} for user {UserId} after health check failure", existing.TaskArn, userId);
+                    }
+                    catch (Exception stopEx)
+                    {
+                        _logger.LogWarning(stopEx, "EnsureRunningAsync: failed to stop stale task {TaskArn} — continuing to launch replacement", existing.TaskArn);
+                    }
+                    existing.FargateStatus = "Stopped";
+                    existing.EndedAt = DateTime.UtcNow;
+                    existing.UpdatedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync(ct);
                 }
-                catch (Exception stopEx)
-                {
-                    _logger.LogWarning(stopEx, "EnsureRunningAsync: failed to stop stale task {TaskArn} — continuing to launch replacement", existing.TaskArn);
-                }
-                existing.FargateStatus = "Stopped";
-                existing.EndedAt = DateTime.UtcNow;
-                existing.UpdatedAt = DateTime.UtcNow;
-                await db.SaveChangesAsync(ct);
             }
             else
             {
