@@ -41,7 +41,8 @@ if (!string.IsNullOrEmpty(dbHost))
         Database = dbName,
         UserID = dbUser,
         Password = dbPass,
-        ConnectionTimeout = 10
+        ConnectionTimeout = 10,
+        GuidFormat = MySqlGuidFormat.None
     };
     fredConnectionString = csb.ConnectionString;
     Console.WriteLine($"Using Aurora MySQL: {dbHost}/{dbName}");
@@ -74,7 +75,8 @@ var keyRingCsb = new MySqlConnector.MySqlConnectionStringBuilder
     Database = keyRingDbName,
     UserID = keyRingDbUser,
     Password = keyRingDbPass,
-    ConnectionTimeout = 10
+    ConnectionTimeout = 10,
+    GuidFormat = MySqlGuidFormat.None
 };
 
 builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
