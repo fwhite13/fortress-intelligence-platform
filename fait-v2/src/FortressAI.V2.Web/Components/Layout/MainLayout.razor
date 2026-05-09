@@ -329,6 +329,7 @@
                 _recentTasks.Insert(0, newTask);
                 if (_recentTasks.Count > 10) _recentTasks.RemoveAt(10);
                 StateHasChanged();
+                Nav.NavigateTo("/");
             }
         }
         catch (Exception ex)
@@ -340,7 +341,31 @@
     private void SelectTask(ConversationTask task)
     {
         _activeTaskId = task.Id;
+        Nav.NavigateTo("/");
         StateHasChanged();
+    }
+
+    public async Task RefreshRecentTasksAsync()
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await using var db = await DbFactory.CreateDbContextAsync(cts.Token);
+            if (!string.IsNullOrEmpty(_entraOid))
+            {
+                var dbUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == _entraOid, cts.Token);
+                if (dbUser != null)
+                {
+                    _recentTasks = await db.ConversationTasks
+                        .Where(t => t.UserId == dbUser.Id)
+                        .OrderByDescending(t => t.UpdatedAt)
+                        .Take(10)
+                        .ToListAsync(cts.Token);
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+        catch (Exception ex) { Logger.LogWarning(ex, "RefreshRecentTasks failed"); }
     }
 
     public void Dispose() { }

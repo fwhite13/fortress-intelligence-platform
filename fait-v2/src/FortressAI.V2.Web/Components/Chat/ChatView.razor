@@ -4,6 +4,7 @@
 @using FortressAI.V2.Web.Components.Layout
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.EntityFrameworkCore
 @implements IAsyncDisposable
 @inject IPluginAgentService PluginAgentService
 @inject IContextEnvelopeService ContextEnvelopeSvc
@@ -349,6 +350,8 @@
     [Inject] private IArtifactService ArtifactService { get; set; } = default!;
     [Inject] private NavigationManager NavManager { get; set; } = default!;
     [Inject] private IUserService UserService { get; set; } = default!;
+    [Inject] private IConversationTitleService TitleService { get; set; } = default!;
+    [Inject] private IDbContextFactory<FaitV2DbContext> DbFactory { get; set; } = default!;
     [Inject] private ILogger<ChatView> _logger { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
@@ -378,6 +381,10 @@
     private string? _artifactPreviewUrl = null;
     private bool _isPanelOpen = false;
     private HubConnection? _hubConnection;
+
+    // ConversationTask tracking
+    private string? _activeTaskId;
+    private bool _taskCreated = false;
 
     private static readonly string[] ArtifactKeywords = { "create", "generate", "write", "make", "build" };
     private static readonly string[] ArtifactTypeHints = { "word doc", "docx", "excel", "spreadsheet", "xlsx", "presentation", "pptx", "powerpoint", "report", "html", "webpage" };
@@ -492,6 +499,30 @@
         _messages.Add(new ChatMessage(Role: "user", Content: userMessage));
         _lastArtifact = null;
         StateHasChanged();
+
+        // Create ConversationTask row on first message
+        if (!_taskCreated && !string.IsNullOrEmpty(_userId))
+        {
+            _taskCreated = true;
+            var newTask = new ConversationTask
+            {
+                UserId = _userId,
+                Title = "New conversation",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _activeTaskId = newTask.Id; // optimistic — Id is set before DB write
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var db = await DbFactory.CreateDbContextAsync();
+                    db.ConversationTasks.Add(newTask);
+                    await db.SaveChangesAsync();
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to create conversation task"); }
+            });
+        }
 
         if (IsArtifactRequest(userMessage))
         {
@@ -624,6 +655,18 @@
                             _logger.LogWarning(ex, "Compaction failed for conversation {ConvId}", convIdCapture);
                         }
                     });
+
+                    // Fire title generation after the first exchange only
+                    // _messages now has 1 user + 1 assistant = 2 messages (the assistant one was just added above)
+                    if (!string.IsNullOrEmpty(_activeTaskId) && _messages.Count == 2)
+                    {
+                        var capturedTaskId = _activeTaskId;
+                        var capturedUserId = _userId;
+                        var capturedUserMsg = userMessage;
+                        var capturedResponse = fullResponse;
+                        _ = Task.Run(() => TitleService.CreateTaskAndUpdateTitleAsync(
+                            capturedUserId, capturedTaskId, capturedUserMsg, capturedResponse));
+                    }
                 }
             }
             _streamingContent = "";
