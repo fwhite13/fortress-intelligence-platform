@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using FortressAI.V2.Web.Data;
 
 #nullable disable
 
 namespace FortressAI.V2.Web.Data.Migrations
 {
+    [DbContext(typeof(FaitV2DbContext))]
+    [Migration("20260509000000_FaitDevConsolidation")]
     /// <inheritdoc />
     public partial class FaitDevConsolidation : Migration
     {
@@ -22,35 +26,234 @@ CREATE TABLE IF NOT EXISTS `__EFMigrationsHistory` (
 
             // ── Add new columns to existing fait_dev tables ───────────────────
             // users: onboarding_completed_at, onboarding_step, updated_at, avatar_url
-            migrationBuilder.Sql("ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `onboarding_completed_at` datetime(6) NULL;");
-            migrationBuilder.Sql("ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `onboarding_step` int NULL;");
-            migrationBuilder.Sql("ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `updated_at` datetime(6) NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6);");
-            migrationBuilder.Sql("ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `avatar_url` varchar(1000) NULL;");
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'users';
+SET @columnname = 'onboarding_completed_at';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `users` ADD COLUMN `onboarding_completed_at` datetime(6) NULL'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
+
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'users';
+SET @columnname = 'onboarding_step';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `users` ADD COLUMN `onboarding_step` int NULL'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
+
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'users';
+SET @columnname = 'updated_at';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `users` ADD COLUMN `updated_at` datetime(6) NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
+
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'users';
+SET @columnname = 'avatar_url';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `users` ADD COLUMN `avatar_url` varchar(1000) NULL'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
 
             // conversations: last_active_at, estimated_token_count
-            migrationBuilder.Sql("ALTER TABLE `conversations` ADD COLUMN IF NOT EXISTS `last_active_at` datetime(6) NULL;");
-            migrationBuilder.Sql("ALTER TABLE `conversations` ADD COLUMN IF NOT EXISTS `estimated_token_count` int NOT NULL DEFAULT 0;");
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'conversations';
+SET @columnname = 'last_active_at';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `conversations` ADD COLUMN `last_active_at` datetime(6) NULL'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
+
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'conversations';
+SET @columnname = 'estimated_token_count';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `conversations` ADD COLUMN `estimated_token_count` int NOT NULL DEFAULT 0'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
 
             // messages: compacted_at, is_compaction_summary, session_type, plugin_agent_id, token_count
-            migrationBuilder.Sql("ALTER TABLE `messages` ADD COLUMN IF NOT EXISTS `compacted_at` datetime(6) NULL;");
-            migrationBuilder.Sql("ALTER TABLE `messages` ADD COLUMN IF NOT EXISTS `is_compaction_summary` tinyint(1) NOT NULL DEFAULT 0;");
-            migrationBuilder.Sql("ALTER TABLE `messages` ADD COLUMN IF NOT EXISTS `session_type` varchar(10) NOT NULL DEFAULT 'main';");
-            migrationBuilder.Sql("ALTER TABLE `messages` ADD COLUMN IF NOT EXISTS `plugin_agent_id` varchar(50) NULL;");
-            migrationBuilder.Sql("ALTER TABLE `messages` ADD COLUMN IF NOT EXISTS `token_count` int NOT NULL DEFAULT 0;");
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'messages';
+SET @columnname = 'compacted_at';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `messages` ADD COLUMN `compacted_at` datetime(6) NULL'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
+
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'messages';
+SET @columnname = 'is_compaction_summary';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `messages` ADD COLUMN `is_compaction_summary` tinyint(1) NOT NULL DEFAULT 0'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
+
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'messages';
+SET @columnname = 'session_type';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `messages` ADD COLUMN `session_type` varchar(10) NOT NULL DEFAULT \'main\''
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
+
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'messages';
+SET @columnname = 'plugin_agent_id';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `messages` ADD COLUMN `plugin_agent_id` varchar(50) NULL'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
+
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'messages';
+SET @columnname = 'token_count';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `messages` ADD COLUMN `token_count` int NOT NULL DEFAULT 0'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
 
             // projects: v1_project_id
-            migrationBuilder.Sql("ALTER TABLE `projects` ADD COLUMN IF NOT EXISTS `v1_project_id` int NULL;");
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'projects';
+SET @columnname = 'v1_project_id';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `projects` ADD COLUMN `v1_project_id` int NULL'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
 
             // mcp_servers: default_read, default_write
-            migrationBuilder.Sql("ALTER TABLE `mcp_servers` ADD COLUMN IF NOT EXISTS `default_read` tinyint(1) NOT NULL DEFAULT 1;");
-            migrationBuilder.Sql("ALTER TABLE `mcp_servers` ADD COLUMN IF NOT EXISTS `default_write` tinyint(1) NOT NULL DEFAULT 0;");
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'mcp_servers';
+SET @columnname = 'default_read';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `mcp_servers` ADD COLUMN `default_read` tinyint(1) NOT NULL DEFAULT 1'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
+
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @tablename = 'mcp_servers';
+SET @columnname = 'default_write';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `mcp_servers` ADD COLUMN `default_write` tinyint(1) NOT NULL DEFAULT 0'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
 
             // user_mcp_tokens: server_name (new column for v2 connector service)
-            migrationBuilder.Sql("ALTER TABLE `user_mcp_tokens` ADD COLUMN IF NOT EXISTS `server_name` varchar(100) NULL;");
             migrationBuilder.Sql(@"
-CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
-    ON `user_mcp_tokens` (`user_id`, `server_name`);
-");
+SET @dbname = DATABASE();
+SET @tablename = 'user_mcp_tokens';
+SET @columnname = 'server_name';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+    'SELECT 1',
+    'ALTER TABLE `user_mcp_tokens` ADD COLUMN `server_name` varchar(100) NULL'
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;");
+
+            migrationBuilder.Sql(@"
+SET @dbname = DATABASE();
+SET @indexname = 'ix_mcp_user_tokens_user_server';
+SET @tablename = 'user_mcp_tokens';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE UNIQUE INDEX ix_mcp_user_tokens_user_server ON user_mcp_tokens (user_id, server_name)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
 
             // ── Create new v2-only tables ─────────────────────────────────────
 
@@ -60,7 +263,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 {
                     id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
+                    user_id = table.Column<string>(type: "char(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     soul_blob_path = table.Column<string>(type: "varchar(500)", maxLength: 500, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
@@ -78,12 +281,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_main_assistants", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_main_assistants_users_user_id",
-                        column: x => x.user_id,
-                        principalTable: "users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
@@ -93,7 +290,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 {
                     id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
+                    user_id = table.Column<string>(type: "char(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     topic_name = table.Column<string>(type: "varchar(200)", maxLength: 200, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
@@ -107,12 +304,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_memory_topics", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_memory_topics_users_user_id",
-                        column: x => x.user_id,
-                        principalTable: "users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
@@ -122,7 +313,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 {
                     id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
+                    user_id = table.Column<string>(type: "char(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     started_at = table.Column<DateTime>(type: "datetime(6)", nullable: false),
                     last_active_at = table.Column<DateTime>(type: "datetime(6)", nullable: false),
@@ -147,12 +338,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_user_sessions", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_user_sessions_users_user_id",
-                        column: x => x.user_id,
-                        principalTable: "users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
@@ -162,9 +347,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 {
                     id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
+                    user_id = table.Column<string>(type: "char(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    conversation_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: true)
+                    conversation_id = table.Column<string>(type: "char(36)", maxLength: 36, nullable: true)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     stitch_project_id = table.Column<string>(type: "varchar(200)", maxLength: 200, nullable: true)
                         .Annotation("MySql:CharSet", "utf8mb4"),
@@ -176,12 +361,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_design_agent_sessions", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_design_agent_sessions_users_user_id",
-                        column: x => x.user_id,
-                        principalTable: "users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
@@ -193,7 +372,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     session_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
+                    user_id = table.Column<string>(type: "char(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     artifact_name = table.Column<string>(type: "varchar(200)", maxLength: 200, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
@@ -207,12 +386,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_design_agent_artifacts", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_design_agent_artifacts_design_agent_sessions_session_id",
-                        column: x => x.session_id,
-                        principalTable: "design_agent_sessions",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
@@ -222,7 +395,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 {
                     id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
+                    user_id = table.Column<string>(type: "char(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     source = table.Column<string>(type: "varchar(50)", maxLength: 50, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
@@ -239,12 +412,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_pushed_messages", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_pushed_messages_users_user_id",
-                        column: x => x.user_id,
-                        principalTable: "users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
@@ -254,7 +421,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 {
                     id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
+                    user_id = table.Column<string>(type: "char(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     type = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
@@ -285,7 +452,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 {
                     id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
+                    user_id = table.Column<string>(type: "char(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     type = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
@@ -339,7 +506,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 {
                     id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    user_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: false)
+                    user_id = table.Column<string>(type: "char(36)", maxLength: 36, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     project_id = table.Column<string>(type: "varchar(36)", maxLength: 36, nullable: true)
                         .Annotation("MySql:CharSet", "utf8mb4"),
@@ -393,12 +560,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_scheduled_task_runs", x => x.id);
-                    table.ForeignKey(
-                        name: "FK_scheduled_task_runs_scheduled_tasks_task_id",
-                        column: x => x.task_id,
-                        principalTable: "scheduled_tasks",
-                        principalColumn: "id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
@@ -446,12 +607,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_conversation_tasks", x => x.id);
-                    table.ForeignKey(
-                        name: "fk_conversation_tasks_user",
-                        column: x => x.user_id,
-                        principalTable: "users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
@@ -577,41 +732,172 @@ CREATE UNIQUE INDEX IF NOT EXISTS `ix_mcp_user_tokens_user_server`
 
             // ── Indexes for existing tables (new ones only) ───────────────────
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_conversations_user_id` ON `conversations` (`UserId`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_conversations_user_id';
+SET @tablename = 'conversations';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_conversations_user_id ON conversations (UserId)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_conversations_last_active_at` ON `conversations` (`last_active_at`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_conversations_last_active_at';
+SET @tablename = 'conversations';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_conversations_last_active_at ON conversations (last_active_at)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_messages_conversation_id` ON `messages` (`ConversationId`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_messages_conversation_id';
+SET @tablename = 'messages';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_messages_conversation_id ON messages (ConversationId)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_messages_created_at` ON `messages` (`CreatedAt`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_messages_created_at';
+SET @tablename = 'messages';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_messages_created_at ON messages (CreatedAt)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_projects_user_id` ON `projects` (`UserId`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_projects_user_id';
+SET @tablename = 'projects';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_projects_user_id ON projects (UserId)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_kb_entries_user_id` ON `kb_entries` (`UserId`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_kb_entries_user_id';
+SET @tablename = 'kb_entries';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_kb_entries_user_id ON kb_entries (UserId)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_kb_entries_team_id` ON `kb_entries` (`TeamId`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_kb_entries_team_id';
+SET @tablename = 'kb_entries';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_kb_entries_team_id ON kb_entries (TeamId)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_kb_teams_creator_id` ON `kb_teams` (`CreatorId`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_kb_teams_creator_id';
+SET @tablename = 'kb_teams';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_kb_teams_creator_id ON kb_teams (CreatorId)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE UNIQUE INDEX IF NOT EXISTS `ix_kb_team_members_team_user` ON `kb_team_members` (`TeamId`, `UserId`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_kb_team_members_team_user';
+SET @tablename = 'kb_team_members';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE UNIQUE INDEX ix_kb_team_members_team_user ON kb_team_members (TeamId, UserId)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_kb_team_members_team_id` ON `kb_team_members` (`TeamId`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_kb_team_members_team_id';
+SET @tablename = 'kb_team_members';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_kb_team_members_team_id ON kb_team_members (TeamId)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_kb_team_members_user_id` ON `kb_team_members` (`UserId`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_kb_team_members_user_id';
+SET @tablename = 'kb_team_members';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_kb_team_members_user_id ON kb_team_members (UserId)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
+
             migrationBuilder.Sql(@"
-CREATE INDEX IF NOT EXISTS `ix_project_documents_project_id` ON `project_documents` (`ProjectId`);
-");
+SET @dbname = DATABASE();
+SET @indexname = 'ix_project_documents_project_id';
+SET @tablename = 'project_documents';
+SET @preparedStatement = (SELECT IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+     WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND INDEX_NAME = @indexname) > 0,
+    'SELECT 1',
+    'CREATE INDEX ix_project_documents_project_id ON project_documents (ProjectId)'
+));
+PREPARE createIfNotExists FROM @preparedStatement;
+EXECUTE createIfNotExists;
+DEALLOCATE PREPARE createIfNotExists;");
         }
 
         /// <inheritdoc />
