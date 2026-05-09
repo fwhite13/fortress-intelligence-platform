@@ -2595,7 +2595,8 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
 }
 
 .message-bubble.message-user .message-content {
-    background: var(--color-primary-light);
+    background: var(--color-primary);
+    color: var(--color-text-on-primary);
     padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-lg);
     border-top-right-radius: var(--radius-sm);
