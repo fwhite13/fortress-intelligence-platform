@@ -1,9 +1,11 @@
 const express = require('express');
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const { mkdirSync } = require('fs');
 const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
 const { BedrockRuntimeClient, ConverseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
-const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
@@ -198,6 +200,52 @@ async function executeKbSearch(query, kbType) {
     }
 }
 
+const ARTIFACT_EXTENSIONS = ['.docx', '.xlsx', '.pptx', '.html', '.pdf', '.zip'];
+const ARTIFACT_TYPES = { '.docx': 'word', '.xlsx': 'excel', '.pptx': 'powerpoint', '.html': 'html', '.pdf': 'pdf', '.zip': 'zip' };
+
+async function scanAndUploadArtifacts(userId, workspaceDir) {
+    const artifactsDir = path.join(workspaceDir, 'artifacts');
+    if (!fs.existsSync(artifactsDir)) return null;
+
+    const files = fs.readdirSync(artifactsDir);
+    const artifacts = files.filter(f => ARTIFACT_EXTENSIONS.includes(path.extname(f).toLowerCase()));
+    if (artifacts.length === 0) return null;
+
+    // Upload the most recently modified artifact
+    const latestFile = artifacts
+        .map(f => ({ name: f, mtime: fs.statSync(path.join(artifactsDir, f)).mtime }))
+        .sort((a, b) => b.mtime - a.mtime)[0];
+
+    const filePath = path.join(artifactsDir, latestFile.name);
+    const s3Key = `${S3_PREFIX}artifacts/${latestFile.name}`;
+    const fileBuffer = fs.readFileSync(filePath);
+    const ext = path.extname(latestFile.name).toLowerCase();
+
+    const contentTypes = {
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.html': 'text/html',
+        '.pdf': 'application/pdf',
+        '.zip': 'application/zip',
+    };
+
+    await s3Client.send(new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: s3Key,
+        Body: fileBuffer,
+        ContentType: contentTypes[ext] || 'application/octet-stream',
+    }));
+
+    console.log(`[harness] Uploaded artifact ${latestFile.name} to s3://${S3_BUCKET}/${s3Key}`);
+    return {
+        s3Key,
+        fileName: latestFile.name,
+        artifactType: ARTIFACT_TYPES[ext] || 'file',
+        artifactUrl: `s3://${S3_BUCKET}/${s3Key}`,
+    };
+}
+
 app.post('/turn', async (req, res) => {
     console.log('[harness] /turn received: userId=%s, hasMessage=%s, taskMode=%s',
         req.body?.UserId ?? '(none)', !!req.body?.Message, req.body?.TaskMode ?? false);
@@ -292,7 +340,30 @@ app.post('/turn', async (req, res) => {
         }, TURN_TIMEOUT_MS);
         ccProcess.stdout.on('data', (chunk) => sendEvent({ type: 'text', content: chunk.toString() }));
         ccProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', content: chunk.toString() }));
-        ccProcess.on('close', (code) => { clearTimeout(timeout); endResponse({ type: 'done', exitCode: code }); });
+        ccProcess.on('close', async (code) => {
+            clearTimeout(timeout);
+            try {
+                const artifact = await scanAndUploadArtifacts(
+                    process.env.FAIT_USER_ID,
+                    process.env.WORKSPACE_DIR || '/workspace'
+                );
+                if (artifact) {
+                    endResponse({
+                        type: 'done',
+                        exitCode: code,
+                        artifactUrl: artifact.artifactUrl,
+                        artifactFileName: artifact.fileName,
+                        artifactType: artifact.artifactType,
+                        artifactS3Key: artifact.s3Key,
+                    });
+                } else {
+                    endResponse({ type: 'done', exitCode: code });
+                }
+            } catch (err) {
+                console.error('[harness] artifact upload failed:', err.message);
+                endResponse({ type: 'done', exitCode: code });
+            }
+        });
         ccProcess.on('error', (err) => { clearTimeout(timeout); endResponse({ type: 'error', errorMessage: err.message }); });
     } else {
         // ── Bedrock ConverseStream path ───────────────────────────────────
@@ -373,6 +444,8 @@ app.post('/turn', async (req, res) => {
             console.log(`[harness] /turn: Bedrock stream opened, beginning event iteration`);
             let tokenCount = 0;
             let toolUseAccumulator = null;
+            let inputTokens = 0;
+            let outputTokens = 0;
             for await (const event of response.stream) {
                 if (event.contentBlockStart?.start?.toolUse) {
                     toolUseAccumulator = {
@@ -398,12 +471,15 @@ app.post('/turn', async (req, res) => {
                 } else if (event.messageStop) {
                     console.log(`[harness] /turn: messageStop received after ${tokenCount} text events, stopReason=${event.messageStop.stopReason}`);
                     break;
+                } else if (event.metadata?.usage) {
+                    inputTokens = event.metadata.usage.inputTokens || 0;
+                    outputTokens = event.metadata.usage.outputTokens || 0;
                 } else {
                     console.log(`[harness] /turn: stream event (non-text): ${JSON.stringify(Object.keys(event))}`);
                 }
             }
             console.log(`[harness] /turn: stream complete, sending done event for userId=${userId}`);
-            sendEvent({ type: 'done' });
+            sendEvent({ type: 'done', inputTokens, outputTokens });
             res.end();
         } catch (err) {
             console.error(`[harness] /turn: Bedrock ConverseStream error for userId=${userId}: ${err.message}`, err.stack);
