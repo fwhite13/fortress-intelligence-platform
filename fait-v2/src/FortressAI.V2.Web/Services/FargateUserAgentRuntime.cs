@@ -18,6 +18,7 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<FargateUserAgentRuntime> _logger;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _launchLocks = new();
 
     // Config helpers
     private string ClusterArn => _config["Fargate:ClusterArn"] ?? throw new InvalidOperationException("Fargate:ClusterArn not configured");
@@ -95,6 +96,21 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
 
                 // Health check failed — invalidate stale session and fall through to launch a new task
                 _logger.LogWarning("Cached session for user {UserId} failed health check — invalidating and launching new task", userId);
+                // Stop old ECS task explicitly before launching replacement
+                try
+                {
+                    await _ecs.StopTaskAsync(new StopTaskRequest
+                    {
+                        Cluster = ClusterArn,
+                        Task = existing.TaskArn,
+                        Reason = "Stale session — harness health check failed, replacing"
+                    }, ct);
+                    _logger.LogInformation("EnsureRunningAsync: stopped stale task {TaskArn} for user {UserId} after health check failure", existing.TaskArn, userId);
+                }
+                catch (Exception stopEx)
+                {
+                    _logger.LogWarning(stopEx, "EnsureRunningAsync: failed to stop stale task {TaskArn} — continuing to launch replacement", existing.TaskArn);
+                }
                 existing.FargateStatus = "Stopped";
                 existing.EndedAt = DateTime.UtcNow;
                 existing.UpdatedAt = DateTime.UtcNow;
@@ -103,6 +119,21 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
             else
             {
                 // Task no longer running in ECS — mark ended and fall through to launch
+                // Stop old ECS task explicitly
+                try
+                {
+                    await _ecs.StopTaskAsync(new StopTaskRequest
+                    {
+                        Cluster = ClusterArn,
+                        Task = existing.TaskArn,
+                        Reason = "Stale session — ECS task no longer RUNNING, replacing"
+                    }, ct);
+                    _logger.LogInformation("EnsureRunningAsync: stopped stale task {TaskArn} for user {UserId} (ECS status not RUNNING)", existing.TaskArn, userId);
+                }
+                catch (Exception stopEx)
+                {
+                    _logger.LogWarning(stopEx, "EnsureRunningAsync: failed to stop stale task {TaskArn} — continuing", existing.TaskArn);
+                }
                 existing.FargateStatus = "Stopped";
                 existing.EndedAt = DateTime.UtcNow;
                 existing.UpdatedAt = DateTime.UtcNow;
@@ -110,125 +141,150 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
             }
         }
 
-        // 2. Launch a new Fargate task
-        _logger.LogInformation("Launching new Fargate task for user {UserId}", userId);
-
-        var runResp = await _ecs.RunTaskAsync(new RunTaskRequest
+        // 2. Launch a new Fargate task (per-user mutex prevents double-spawn)
+        var launchLock = _launchLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
+        await launchLock.WaitAsync(ct);
+        try
         {
-            Cluster = ClusterArn,
-            TaskDefinition = TaskDefinition,
-            LaunchType = LaunchType.FARGATE,
-            NetworkConfiguration = new NetworkConfiguration
+            // Re-check: another concurrent request may have already launched a task
+            await using var db2 = await _dbFactory.CreateDbContextAsync(ct);
+            var recheck = await db2.UserSessions
+                .Where(s => s.UserId == userId
+                         && s.TaskArn != null
+                         && s.EndedAt == null
+                         && (s.FargateStatus == "Running" || s.FargateStatus == "Starting"))
+                .OrderByDescending(s => s.StartedAt)
+                .FirstOrDefaultAsync(ct);
+
+            if (recheck != null)
             {
-                AwsvpcConfiguration = new AwsVpcConfiguration
-                {
-                    Subnets = [.. SubnetIds],
-                    SecurityGroups = [.. SecurityGroupIds],
-                    AssignPublicIp = AssignPublicIp.ENABLED
-                }
-            },
-            Overrides = new TaskOverride
-            {
-                ContainerOverrides =
-                [
-                    new ContainerOverride
-                    {
-                        Name = ContainerName,
-                        Environment =
-                        [
-                            new Amazon.ECS.Model.KeyValuePair { Name = "FAIT_USER_ID",     Value = userId },
-                            new Amazon.ECS.Model.KeyValuePair { Name = "WORKSPACE_DIR",    Value = $"/workspace/{userId}" },
-                            new Amazon.ECS.Model.KeyValuePair { Name = "WORKSPACE_S3_PREFIX", Value = await GetUserS3PrefixAsync(userId, ct) },
-                            new Amazon.ECS.Model.KeyValuePair { Name = "WORKSPACE_S3_BUCKET", Value = _config["AWS:WorkspaceBucket"] ?? "fortress-user-workspaces" }
-                        ]
-                    }
-                ]
+                _logger.LogInformation("EnsureRunningAsync: concurrent launch already completed for user {UserId} — returning existing session", userId);
+                return MapToRuntimeSession(recheck);
             }
-        }, ct);
 
-        if (runResp.Failures.Count > 0)
-        {
-            var reason = runResp.Failures[0].Reason;
-            _logger.LogError("RunTask failed for user {UserId}: {Reason}", userId, reason);
-            throw new InvalidOperationException($"Failed to start Fargate task: {reason}");
-        }
+            _logger.LogInformation("Launching new Fargate task for user {UserId}", userId);
 
-        var newEcsTask = runResp.Tasks[0];
-        var taskArn = newEcsTask.TaskArn ?? string.Empty;
-
-        // 3. Create Aurora record with Starting status
-        var sessionId = Guid.NewGuid().ToString();
-        var session = new UserSession
-        {
-            Id = sessionId,
-            UserId = userId,
-            TaskArn = taskArn,
-            FargateStatus = "Starting",
-            FargateSessionId = sessionId,
-            StartedAt = DateTime.UtcNow,
-            LastActiveAt = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-        db.UserSessions.Add(session);
-        await db.SaveChangesAsync(ct);
-
-        // 4. Poll until RUNNING (max 90s, every 3s)
-        const int MaxPolls = 30;
-        const int PollDelayMs = 3000;
-
-        for (int i = 0; i < MaxPolls; i++)
-        {
-            await System.Threading.Tasks.Task.Delay(PollDelayMs, ct);
-
-            var pollResp = await _ecs.DescribeTasksAsync(new DescribeTasksRequest
+            var runResp = await _ecs.RunTaskAsync(new RunTaskRequest
             {
                 Cluster = ClusterArn,
-                Tasks = [taskArn]
+                TaskDefinition = TaskDefinition,
+                LaunchType = LaunchType.FARGATE,
+                NetworkConfiguration = new NetworkConfiguration
+                {
+                    AwsvpcConfiguration = new AwsVpcConfiguration
+                    {
+                        Subnets = [.. SubnetIds],
+                        SecurityGroups = [.. SecurityGroupIds],
+                        AssignPublicIp = AssignPublicIp.ENABLED
+                    }
+                },
+                Overrides = new TaskOverride
+                {
+                    ContainerOverrides =
+                    [
+                        new ContainerOverride
+                        {
+                            Name = ContainerName,
+                            Environment =
+                            [
+                                new Amazon.ECS.Model.KeyValuePair { Name = "FAIT_USER_ID",     Value = userId },
+                                new Amazon.ECS.Model.KeyValuePair { Name = "WORKSPACE_DIR",    Value = $"/workspace/{userId}" },
+                                new Amazon.ECS.Model.KeyValuePair { Name = "WORKSPACE_S3_PREFIX", Value = await GetUserS3PrefixAsync(userId, ct) },
+                                new Amazon.ECS.Model.KeyValuePair { Name = "WORKSPACE_S3_BUCKET", Value = _config["AWS:WorkspaceBucket"] ?? "fortress-user-workspaces" }
+                            ]
+                        }
+                    ]
+                }
             }, ct);
 
-            var polledTask = pollResp.Tasks.FirstOrDefault();
-            if (polledTask == null)
+            if (runResp.Failures.Count > 0)
             {
-                _logger.LogWarning("DescribeTasks returned empty for {TaskArn}, poll {Poll}", taskArn, i + 1);
-                continue;
+                var reason = runResp.Failures[0].Reason;
+                _logger.LogError("RunTask failed for user {UserId}: {Reason}", userId, reason);
+                throw new InvalidOperationException($"Failed to start Fargate task: {reason}");
             }
 
-            _logger.LogDebug("Task {TaskArn} status: {Status} (poll {Poll}/{Max})", taskArn, polledTask.LastStatus, i + 1, MaxPolls);
+            var newEcsTask = runResp.Tasks[0];
+            var taskArn = newEcsTask.TaskArn ?? string.Empty;
 
-            if (polledTask.LastStatus == "RUNNING")
+            // 3. Create Aurora record with Starting status
+            var sessionId = Guid.NewGuid().ToString();
+            var session = new UserSession
             {
-                // 5. Get private IP from ENI attachment
-                var privateIp = GetPrivateIpFromTask(polledTask);
+                Id = sessionId,
+                UserId = userId,
+                TaskArn = taskArn,
+                FargateStatus = "Starting",
+                FargateSessionId = sessionId,
+                StartedAt = DateTime.UtcNow,
+                LastActiveAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.UserSessions.Add(session);
+            await db.SaveChangesAsync(ct);
 
-                // 6. Update Aurora record
-                session.PrivateIp = privateIp;
-                session.FargateStatus = "Running";
-                session.UpdatedAt = DateTime.UtcNow;
-                await db.SaveChangesAsync(ct);
+            // 4. Poll until RUNNING (max 90s, every 3s)
+            const int MaxPolls = 30;
+            const int PollDelayMs = 3000;
 
-                _logger.LogInformation("Fargate task RUNNING for user {UserId}: {TaskArn} @ {Ip}", userId, taskArn, privateIp);
-                return MapToRuntimeSession(session);
+            for (int i = 0; i < MaxPolls; i++)
+            {
+                await System.Threading.Tasks.Task.Delay(PollDelayMs, ct);
+
+                var pollResp = await _ecs.DescribeTasksAsync(new DescribeTasksRequest
+                {
+                    Cluster = ClusterArn,
+                    Tasks = [taskArn]
+                }, ct);
+
+                var polledTask = pollResp.Tasks.FirstOrDefault();
+                if (polledTask == null)
+                {
+                    _logger.LogWarning("DescribeTasks returned empty for {TaskArn}, poll {Poll}", taskArn, i + 1);
+                    continue;
+                }
+
+                _logger.LogDebug("Task {TaskArn} status: {Status} (poll {Poll}/{Max})", taskArn, polledTask.LastStatus, i + 1, MaxPolls);
+
+                if (polledTask.LastStatus == "RUNNING")
+                {
+                    // 5. Get private IP from ENI attachment
+                    var privateIp = GetPrivateIpFromTask(polledTask);
+
+                    // 6. Update Aurora record
+                    session.PrivateIp = privateIp;
+                    session.FargateStatus = "Running";
+                    session.UpdatedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync(ct);
+
+                    _logger.LogInformation("Fargate task RUNNING for user {UserId}: {TaskArn} @ {Ip}", userId, taskArn, privateIp);
+                    return MapToRuntimeSession(session);
+                }
+
+                if (polledTask.LastStatus is "STOPPED" or "DEPROVISIONING")
+                {
+                    var reason = polledTask.StoppedReason ?? "Unknown";
+                    session.FargateStatus = "Stopped";
+                    session.EndedAt = DateTime.UtcNow;
+                    session.UpdatedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync(ct);
+                    throw new InvalidOperationException($"Fargate task stopped unexpectedly: {reason}");
+                }
             }
 
-            if (polledTask.LastStatus is "STOPPED" or "DEPROVISIONING")
-            {
-                var reason = polledTask.StoppedReason ?? "Unknown";
-                session.FargateStatus = "Stopped";
-                session.EndedAt = DateTime.UtcNow;
-                session.UpdatedAt = DateTime.UtcNow;
-                await db.SaveChangesAsync(ct);
-                throw new InvalidOperationException($"Fargate task stopped unexpectedly: {reason}");
-            }
+            // Timeout
+            session.FargateStatus = "Stopped";
+            session.EndedAt = DateTime.UtcNow;
+            session.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+
+            throw new TimeoutException($"Fargate task for user {userId} did not reach RUNNING state within 90 seconds.");
         }
-
-        // Timeout
-        session.FargateStatus = "Stopped";
-        session.EndedAt = DateTime.UtcNow;
-        session.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
-
-        throw new TimeoutException($"Fargate task for user {userId} did not reach RUNNING state within 90 seconds.");
+        finally
+        {
+            launchLock.Release();
+        }
     }
 
     // ─── StopAsync ────────────────────────────────────────────────────────────
@@ -375,6 +431,24 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
             try
             {
                 _logger.LogInformation("SendTurnAsync: retrying EnsureRunningAsync after connection refused for userId={UserId}", userId);
+                // Explicitly stop the stale ECS task before relaunching
+                if (session.TaskArn != null)
+                {
+                    try
+                    {
+                        await _ecs.StopTaskAsync(new StopTaskRequest
+                        {
+                            Cluster = ClusterArn,
+                            Task = session.TaskArn,
+                            Reason = "Connection refused — stopping stale task before relaunch"
+                        }, ct);
+                        _logger.LogInformation("SendTurnAsync: stopped stale task {TaskArn} for user {UserId} after connection refused", session.TaskArn, userId);
+                    }
+                    catch (Exception stopEx)
+                    {
+                        _logger.LogWarning(stopEx, "SendTurnAsync: failed to stop stale task {TaskArn} — relaunching anyway", session.TaskArn);
+                    }
+                }
                 session = await EnsureRunningAsync(userId, ct);
                 url = $"http://{session.PrivateIp}:{session.Port}/turn";
                 _logger.LogInformation("SendTurnAsync: retry POST to {Url} for userId={UserId}", url, userId);
