@@ -577,7 +577,7 @@ else
             // Inject personality prefix from assistant config
             if (_assistantConfig != null)
             {
-                var personalityPrefix = ConfigSvc.GetPersonalitySystemPrompt(_assistantConfig, Session.CurrentUser?.DisplayName, Session.CurrentUser?.Email);
+                var personalityPrefix = await ConfigSvc.BuildSystemPromptAsync(_assistantConfig, Session.UserId, Session.CurrentUser?.DisplayName, Session.CurrentUser?.Email);
                 systemPrompt = string.IsNullOrEmpty(systemPrompt)
                     ? personalityPrefix
                     : personalityPrefix + "\n\n" + systemPrompt;

@@ -1,4 +1,6 @@
+using Amazon.S3;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using FortressAI.Shared.Models;
 using FortressAI.Web.Data;
 
@@ -8,11 +10,19 @@ public class AssistantConfigService
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<AssistantConfigService> _logger;
+    private readonly IAmazonS3 _s3;
+    private readonly IConfiguration _config;
 
-    public AssistantConfigService(IDbContextFactory<AppDbContext> dbFactory, ILogger<AssistantConfigService> logger)
+    public AssistantConfigService(
+        IDbContextFactory<AppDbContext> dbFactory,
+        ILogger<AssistantConfigService> logger,
+        IAmazonS3 s3,
+        IConfiguration config)
     {
         _dbFactory = dbFactory;
         _logger = logger;
+        _s3 = s3;
+        _config = config;
     }
 
     public async Task<UserAssistantConfig> GetOrCreateConfigAsync(Guid userId)
@@ -101,6 +111,96 @@ public class AssistantConfigService
         await db.SaveChangesAsync();
         _logger.LogInformation("Saved wizard config for user {UserId}: preferredName={PreferredName}, role={Role}", userId, preferredName, role);
         return config;
+    }
+
+    /// <summary>
+    /// Builds the personality system prompt, preferring S3 SOUL.md/USER.md when available.
+    /// Falls back to DB-field-based construction (GetPersonalitySystemPrompt) if S3 files missing or unreadable.
+    /// </summary>
+    public async Task<string> BuildSystemPromptAsync(
+        UserAssistantConfig config,
+        Guid userId,
+        string? userDisplayName = null,
+        string? userEmail = null)
+    {
+        var bucket = _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
+        var s3Prefix = _config["WORKSPACE_S3_PREFIX"] ?? "";
+        var userPrefix = $"{s3Prefix}workspaces/{userId}/";
+
+        string? soulMd = null;
+        string? userMd = null;
+
+        try
+        {
+            soulMd = await ReadS3FileAsync(bucket, $"{userPrefix}assistants/SOUL.md");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[AssistantConfig] Could not read SOUL.md for user {UserId} — falling back to DB", userId);
+        }
+
+        try
+        {
+            userMd = await ReadS3FileAsync(bucket, $"{userPrefix}assistants/USER.md");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[AssistantConfig] Could not read USER.md for user {UserId} — falling back to DB", userId);
+        }
+
+        // If neither S3 file available, use existing DB-field-based construction
+        if (string.IsNullOrWhiteSpace(soulMd) && string.IsNullOrWhiteSpace(userMd))
+        {
+            return GetPersonalitySystemPrompt(config, userDisplayName, userEmail);
+        }
+
+        // Build from S3 files
+        var todayStr = DateTimeOffset.Now.ToString("dddd, MMMM d, yyyy");
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Today's date is {todayStr}.");
+        sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(soulMd))
+        {
+            sb.AppendLine(soulMd.Trim());
+            sb.AppendLine();
+        }
+        else
+        {
+            // Partial fallback: no SOUL.md — use name + preset from DB
+            var preset = config.PersonalityPreset switch
+            {
+                "formal" => $"You are a formal, professional assistant named {config.AssistantName}.",
+                "concise" => $"You are a concise, efficient assistant named {config.AssistantName}.",
+                _ => $"You are a friendly, helpful assistant named {config.AssistantName}."
+            };
+            sb.AppendLine(preset);
+            sb.AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(userMd))
+        {
+            sb.AppendLine("## User Context");
+            sb.AppendLine(userMd.Trim());
+            sb.AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(userEmail))
+            sb.AppendLine($"The authenticated user's own email address is {userEmail}. Use this as the canonical source for the current user's email — do not look it up or guess it.");
+
+        // Standard artifact/document instructions (always appended)
+        sb.AppendLine(" When asked to create, write, or generate a document or file, output the content directly in your chat response as formatted markdown — do not attempt to use tools to save it. If tool calls are needed but keep failing, explain what you tried and provide the output directly in your response.");
+        sb.AppendLine("\n\nWhen you create, rewrite, or generate a document, code file, or structured content, wrap it in an artifact tag:\n<artifact type=\"markdown\" title=\"Document Title\">\n...content...\n</artifact>\nFor code, use: <artifact type=\"code\" language=\"python\" title=\"Script Name\">\nFor plain text, use: <artifact type=\"text\" title=\"Note Title\">\nYou cannot save files to disk or modify the Knowledge Base. Artifacts are the correct output format for any document you produce.");
+
+        return sb.ToString();
+    }
+
+    private async Task<string> ReadS3FileAsync(string bucket, string key)
+    {
+        var request = new Amazon.S3.Model.GetObjectRequest { BucketName = bucket, Key = key };
+        using var response = await _s3.GetObjectAsync(request);
+        using var reader = new System.IO.StreamReader(response.ResponseStream);
+        return await reader.ReadToEndAsync();
     }
 
     public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null, string? userEmail = null)
