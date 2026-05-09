@@ -8,13 +8,11 @@ public class KbTeamMember
 {
     [Key]
     [Column("id")]
-    [MaxLength(36)]
-    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public int Id { get; set; }
 
     [Column("team_id")]
-    [MaxLength(36)]
     [Required]
-    public string TeamId { get; set; } = "";
+    public int TeamId { get; set; }
 
     [Column("user_id")]
     [MaxLength(36)]

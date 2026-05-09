@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace FortressAI.V2.Web.Data.Models;
 
-[Table("mcp_user_tokens")]
+[Table("user_mcp_tokens")]
 public class McpUserToken
 {
     [Key]
@@ -18,8 +18,7 @@ public class McpUserToken
 
     [Column("server_name")]
     [MaxLength(100)]
-    [Required]
-    public string ServerName { get; set; } = string.Empty;
+    public string? ServerName { get; set; }
 
     [Column("access_token")]
     [Required]

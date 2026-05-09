@@ -207,6 +207,25 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<KbSyncRetryService
 
 var app = builder.Build();
 
+// Run EF Core migrations before any seeding or DB access
+using (var migrateScope = app.Services.CreateScope())
+{
+    var migrateLogger = migrateScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    try
+    {
+        var dbFactory = migrateScope.ServiceProvider.GetRequiredService<IDbContextFactory<FaitV2DbContext>>();
+        await using var migrateDb = await dbFactory.CreateDbContextAsync();
+        migrateLogger.LogInformation("Running EF Core migrations...");
+        await migrateDb.Database.MigrateAsync();
+        migrateLogger.LogInformation("EF Core migrations complete.");
+    }
+    catch (Exception ex)
+    {
+        migrateLogger.LogError(ex, "EF Core migration failed. Startup aborted.");
+        throw;
+    }
+}
+
 // Seed mcp_servers with all MCP tool groups (idempotent)
 using (var seedScope = app.Services.CreateScope())
 {
@@ -233,7 +252,8 @@ using (var seedScope = app.Services.CreateScope())
             {
                 Id = Guid.NewGuid().ToString(),
                 Name = tg.Name,
-                EndpointUrl = string.Empty,
+                Slug = tg.Name.ToLowerInvariant().Replace("-", "_"),
+                EndpointUrl = null,
                 AuthType = tg.AuthType,
                 DefaultRead = tg.DefaultRead,
                 DefaultWrite = tg.DefaultWrite,

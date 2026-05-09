@@ -29,6 +29,12 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .HasColumnType("varchar(36)")
                         .HasColumnName("id");
 
+                    b.Property<bool>("AllowKbWrite")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint(1)")
+                        .HasDefaultValue(false)
+                        .HasColumnName("allow_kb_write");
+
                     b.Property<string>("AllowedMcpServers")
                         .IsRequired()
                         .HasColumnType("longtext")
@@ -38,10 +44,6 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .IsRequired()
                         .HasColumnType("longtext")
                         .HasColumnName("allowed_roles");
-
-                    b.Property<bool>("AllowKbWrite")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("allow_kb_write");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
@@ -147,11 +149,11 @@ namespace FortressAI.V2.Web.Data.Migrations
                     b.Property<string>("Id")
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
+                        .HasColumnName("Id");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
+                        .HasColumnName("CreatedAt");
 
                     b.Property<int>("EstimatedTokenCount")
                         .ValueGeneratedOnAdd()
@@ -166,13 +168,13 @@ namespace FortressAI.V2.Web.Data.Migrations
                     b.Property<string>("Title")
                         .HasMaxLength(500)
                         .HasColumnType("varchar(500)")
-                        .HasColumnName("title");
+                        .HasColumnName("Title");
 
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("user_id");
+                        .HasColumnName("UserId");
 
                     b.HasKey("Id");
 
@@ -396,54 +398,55 @@ namespace FortressAI.V2.Web.Data.Migrations
 
             modelBuilder.Entity("FortressAI.V2.Web.Data.Models.KbEntry", b =>
                 {
-                    b.Property<string>("Id")
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("Id");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasColumnType("longtext")
-                        .HasColumnName("content");
+                        .HasColumnName("Content");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
+                        .HasColumnName("CreatedAt");
 
                     b.Property<string>("SourceUrl")
                         .HasMaxLength(2000)
                         .HasColumnType("varchar(2000)")
-                        .HasColumnName("source_url");
+                        .HasColumnName("SourceUrl");
 
                     b.Property<string>("Tags")
                         .HasMaxLength(1000)
                         .HasColumnType("varchar(1000)")
-                        .HasColumnName("tags");
+                        .HasColumnName("Tags");
 
-                    b.Property<string>("TeamId")
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("team_id");
+                    b.Property<int?>("TeamId")
+                        .HasColumnType("int")
+                        .HasColumnName("TeamId");
 
                     b.Property<int>("Tier")
                         .HasColumnType("int")
-                        .HasColumnName("tier");
+                        .HasColumnName("Tier");
 
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("varchar(500)")
-                        .HasColumnName("title");
+                        .HasColumnName("Title");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
+                        .HasColumnName("UpdatedAt");
 
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("user_id");
+                        .HasColumnName("UserId");
 
                     b.HasKey("Id");
 
@@ -458,31 +461,33 @@ namespace FortressAI.V2.Web.Data.Migrations
 
             modelBuilder.Entity("FortressAI.V2.Web.Data.Models.KbTeam", b =>
                 {
-                    b.Property<string>("Id")
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("Id");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
+                        .HasColumnName("CreatedAt");
 
                     b.Property<string>("CreatorId")
                         .IsRequired()
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("creator_id");
+                        .HasColumnName("CreatorId");
 
                     b.Property<string>("Description")
                         .HasMaxLength(1000)
                         .HasColumnType("varchar(1000)")
-                        .HasColumnName("description");
+                        .HasColumnName("Description");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)")
-                        .HasColumnName("name");
+                        .HasColumnName("Name");
 
                     b.HasKey("Id");
 
@@ -494,30 +499,30 @@ namespace FortressAI.V2.Web.Data.Migrations
 
             modelBuilder.Entity("FortressAI.V2.Web.Data.Models.KbTeamMember", b =>
                 {
-                    b.Property<string>("Id")
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("Id");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<DateTime>("JoinedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("joined_at");
+                        .HasColumnName("JoinedAt");
 
                     b.Property<int>("Role")
                         .HasColumnType("int")
-                        .HasColumnName("role");
+                        .HasColumnName("Role");
 
-                    b.Property<string>("TeamId")
-                        .IsRequired()
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("team_id");
+                    b.Property<int>("TeamId")
+                        .HasColumnType("int")
+                        .HasColumnName("TeamId");
 
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("user_id");
+                        .HasColumnName("UserId");
 
                     b.HasKey("Id");
 
@@ -624,7 +629,6 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .HasColumnName("default_write");
 
                     b.Property<string>("EndpointUrl")
-                        .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("varchar(500)")
                         .HasColumnName("endpoint_url");
@@ -640,6 +644,12 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)")
                         .HasColumnName("name");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("slug");
 
                     b.HasKey("Id");
 
@@ -671,7 +681,6 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .HasColumnName("refresh_token");
 
                     b.Property<string>("ServerName")
-                        .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)")
                         .HasColumnName("server_name");
@@ -699,7 +708,7 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_mcp_user_tokens_user_server");
 
-                    b.ToTable("mcp_user_tokens", (string)null);
+                    b.ToTable("user_mcp_tokens", (string)null);
                 });
 
             modelBuilder.Entity("FortressAI.V2.Web.Data.Models.MemoryTopic", b =>
@@ -758,7 +767,7 @@ namespace FortressAI.V2.Web.Data.Migrations
                     b.Property<string>("Id")
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
+                        .HasColumnName("Id");
 
                     b.Property<DateTime?>("CompactedAt")
                         .HasColumnType("datetime(6)")
@@ -767,17 +776,17 @@ namespace FortressAI.V2.Web.Data.Migrations
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasColumnType("longtext")
-                        .HasColumnName("content");
+                        .HasColumnName("Content");
 
                     b.Property<string>("ConversationId")
                         .IsRequired()
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("conversation_id");
+                        .HasColumnName("ConversationId");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
+                        .HasColumnName("CreatedAt");
 
                     b.Property<bool>("IsCompactionSummary")
                         .ValueGeneratedOnAdd()
@@ -794,7 +803,7 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("varchar(20)")
-                        .HasColumnName("role");
+                        .HasColumnName("Role");
 
                     b.Property<string>("SessionType")
                         .IsRequired()
@@ -826,19 +835,19 @@ namespace FortressAI.V2.Web.Data.Migrations
                     b.Property<string>("Id")
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
+                        .HasColumnName("Id");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
+                        .HasColumnName("CreatedAt");
 
                     b.Property<string>("CustomInstructions")
                         .HasColumnType("TEXT")
-                        .HasColumnName("custom_instructions");
+                        .HasColumnName("CustomInstructions");
 
                     b.Property<string>("Description")
                         .HasColumnType("TEXT")
-                        .HasColumnName("description");
+                        .HasColumnName("Description");
 
                     b.Property<bool>("EnableFortressKb")
                         .ValueGeneratedOnAdd()
@@ -858,23 +867,23 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)")
                         .HasDefaultValue("claude-sonnet-4-6")
-                        .HasColumnName("model");
+                        .HasColumnName("Model");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)")
-                        .HasColumnName("name");
+                        .HasColumnName("Name");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("updated_at");
+                        .HasColumnName("UpdatedAt");
 
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("user_id");
+                        .HasColumnName("UserId");
 
                     b.Property<int?>("V1ProjectId")
                         .HasColumnType("int")
@@ -893,30 +902,30 @@ namespace FortressAI.V2.Web.Data.Migrations
                     b.Property<string>("Id")
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
+                        .HasColumnName("Id");
 
                     b.Property<string>("Content")
                         .HasColumnType("longtext")
-                        .HasColumnName("content");
+                        .HasColumnName("Content");
 
                     b.Property<string>("ContentType")
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)")
-                        .HasColumnName("content_type");
+                        .HasColumnName("ContentType");
 
                     b.Property<long>("FileSize")
                         .HasColumnType("bigint")
-                        .HasColumnName("file_size");
+                        .HasColumnName("FileSize");
 
                     b.Property<string>("Filename")
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("varchar(500)")
-                        .HasColumnName("filename");
+                        .HasColumnName("Filename");
 
                     b.Property<DateTime?>("IngestedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("ingested_at");
+                        .HasColumnName("IngestedAt");
 
                     b.Property<string>("IngestionStatus")
                         .IsRequired()
@@ -924,21 +933,21 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)")
                         .HasDefaultValue("none")
-                        .HasColumnName("ingestion_status");
+                        .HasColumnName("IngestionStatus");
 
                     b.Property<string>("ProjectId")
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("project_id");
+                        .HasColumnName("ProjectId");
 
                     b.Property<string>("S3Key")
                         .HasMaxLength(1000)
                         .HasColumnType("varchar(1000)")
-                        .HasColumnName("s3_key");
+                        .HasColumnName("S3Key");
 
                     b.Property<DateTime>("UploadedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("uploaded_at");
+                        .HasColumnName("UploadedAt");
 
                     b.HasKey("Id");
 
@@ -1153,7 +1162,13 @@ namespace FortressAI.V2.Web.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("scheduled_task_approvals");
+                    b.HasIndex("ScheduledTaskId")
+                        .HasDatabaseName("ix_scheduled_task_approvals_task_id");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("ix_scheduled_task_approvals_status");
+
+                    b.ToTable("scheduled_task_approvals", (string)null);
                 });
 
             modelBuilder.Entity("FortressAI.V2.Web.Data.Models.ScheduledTaskRun", b =>
@@ -1214,28 +1229,31 @@ namespace FortressAI.V2.Web.Data.Migrations
                     b.Property<string>("Id")
                         .HasMaxLength(36)
                         .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
+                        .HasColumnName("Id");
+
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)")
+                        .HasColumnName("avatar_url");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
+                        .HasColumnName("CreatedAt");
 
                     b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("varchar(200)")
-                        .HasColumnName("display_name");
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("DisplayName");
 
                     b.Property<string>("Email")
                         .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("varchar(200)")
-                        .HasColumnName("email");
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("Email");
 
                     b.Property<string>("EntraOid")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
                         .HasColumnName("entra_oid");
 
                     b.Property<DateTime?>("OnboardingCompletedAt")
@@ -1250,16 +1268,11 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("updated_at");
 
-                    b.Property<string>("AvatarUrl")
-                        .HasMaxLength(1000)
-                        .HasColumnType("varchar(1000)")
-                        .HasColumnName("avatar_url");
-
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
                         .IsUnique()
-                        .HasDatabaseName("ix_users_email");
+                        .HasDatabaseName("IX_users_Email");
 
                     b.HasIndex("EntraOid")
                         .IsUnique()

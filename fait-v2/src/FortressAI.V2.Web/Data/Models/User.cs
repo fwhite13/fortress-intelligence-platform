@@ -12,19 +12,17 @@ public class User
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
     [Column("entra_oid")]
-    [MaxLength(100)]
-    [Required]
-    public string EntraOid { get; set; } = string.Empty;
+    [MaxLength(255)]
+    public string? EntraOid { get; set; }
 
     [Column("email")]
-    [MaxLength(200)]
+    [MaxLength(255)]
     [Required]
     public string Email { get; set; } = string.Empty;
 
     [Column("display_name")]
-    [MaxLength(200)]
-    [Required]
-    public string DisplayName { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string? DisplayName { get; set; }
 
     [Column("onboarding_completed_at")]
     public DateTime? OnboardingCompletedAt { get; set; }

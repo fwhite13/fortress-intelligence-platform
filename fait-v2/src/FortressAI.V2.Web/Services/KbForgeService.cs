@@ -51,7 +51,7 @@ public class KbForgeService
         });
 
         var metadataDict = entry.Tier == KbTier.Team
-            ? new Dictionary<string, object> { ["teamId"] = entry.TeamId! }
+            ? new Dictionary<string, object> { ["teamId"] = entry.TeamId!.Value }
             : new Dictionary<string, object> { ["ownerId"] = entry.UserId };
 
         var metadata = new { metadataAttributes = metadataDict };
@@ -83,14 +83,14 @@ public class KbForgeService
         return entry.Tier switch
         {
             KbTier.Personal  => entry.UserId == userId,
-            KbTier.Team      => entry.TeamId != null && await IsTeamMemberAsync(userId, entry.TeamId),
+            KbTier.Team      => entry.TeamId != null && await IsTeamMemberAsync(userId, entry.TeamId.Value),
             KbTier.Corporate => false,
             KbTier.Developer => entry.UserId == userId,
             _                => false
         };
     }
 
-    public async Task<bool> IsTeamMemberAsync(string userId, string teamId)
+    public async Task<bool> IsTeamMemberAsync(string userId, int teamId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.KbTeamMembers.AnyAsync(m => m.TeamId == teamId && m.UserId == userId);
@@ -107,7 +107,7 @@ public class KbForgeService
             .ToListAsync();
     }
 
-    public async Task<List<KbEntry>> GetTeamEntriesAsync(string userId, string teamId)
+    public async Task<List<KbEntry>> GetTeamEntriesAsync(string userId, int teamId)
     {
         if (!await IsTeamMemberAsync(userId, teamId))
             throw new UnauthorizedAccessException($"User {userId} is not a member of team {teamId}.");
@@ -119,16 +119,16 @@ public class KbForgeService
             .ToListAsync();
     }
 
-    public async Task<KbEntry> CreateEntryAsync(string userId, KbTier tier, string title, string content, string? tags = null, string? teamId = null)
+    public async Task<KbEntry> CreateEntryAsync(string userId, KbTier tier, string title, string content, string? tags = null, int? teamId = null)
     {
         if (tier == KbTier.Corporate)
             throw new InvalidOperationException("Corporate KB entries can only be created by administrators.");
 
         if (tier == KbTier.Team)
         {
-            if (string.IsNullOrEmpty(teamId))
+            if (teamId == null)
                 throw new ArgumentException("TeamId is required for Team-tier entries.");
-            if (!await IsTeamMemberAsync(userId, teamId))
+            if (!await IsTeamMemberAsync(userId, teamId.Value))
                 throw new UnauthorizedAccessException($"User {userId} is not a member of team {teamId}.");
         }
 
@@ -171,7 +171,7 @@ public class KbForgeService
         return entry;
     }
 
-    public async Task<KbEntry> UpdateEntryAsync(string userId, string entryId, string title, string content, string? tags)
+    public async Task<KbEntry> UpdateEntryAsync(string userId, int entryId, string title, string content, string? tags)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -209,7 +209,7 @@ public class KbForgeService
         return entry;
     }
 
-    public async Task DeleteEntryAsync(string userId, string entryId)
+    public async Task DeleteEntryAsync(string userId, int entryId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -295,7 +295,7 @@ public class KbForgeService
         });
     }
 
-    public async Task AddMemberAsync(string requestingUserId, string teamId, string newMemberId)
+    public async Task AddMemberAsync(string requestingUserId, int teamId, string newMemberId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -324,7 +324,7 @@ public class KbForgeService
         _logger.LogInformation("Added user {NewMemberId} to team {TeamId} by {RequestingUserId}", newMemberId, teamId, requestingUserId);
     }
 
-    public async Task RemoveMemberAsync(string requestingUserId, string teamId, string memberId)
+    public async Task RemoveMemberAsync(string requestingUserId, int teamId, string memberId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
