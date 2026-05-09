@@ -62,18 +62,18 @@
     }
 
     .approval-dialog__icon {
-        font-size: var(--font-size-lg);
+        font-size: var(--text-lg);
     }
 
     .approval-dialog__title {
         font-weight: 600;
-        font-size: var(--font-size-sm);
+        font-size: var(--text-sm);
         color: var(--color-text-primary);
         flex: 1;
     }
 
     .approval-dialog__type-badge {
-        font-size: var(--font-size-xs);
+        font-size: var(--text-xs);
         padding: 2px var(--space-2);
         border-radius: var(--radius-sm);
         background: var(--color-surface-sunken);
@@ -83,7 +83,7 @@
     }
 
     .approval-dialog__summary {
-        font-size: var(--font-size-sm);
+        font-size: var(--text-sm);
         color: var(--color-text-primary);
         margin-bottom: var(--space-3);
         line-height: 1.5;
@@ -93,7 +93,7 @@
         display: flex;
         align-items: center;
         gap: var(--space-1);
-        font-size: var(--font-size-xs);
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         cursor: pointer;
         margin-bottom: var(--space-2);
@@ -105,11 +105,11 @@
     }
 
     .approval-dialog__chevron {
-        font-size: var(--font-size-sm);
+        font-size: var(--text-sm);
     }
 
     .approval-dialog__details {
-        font-size: var(--font-size-xs);
+        font-size: var(--text-xs);
         color: var(--color-text-secondary);
         background: var(--color-surface-sunken);
         border: 1px solid var(--color-border);
@@ -134,10 +134,10 @@
         padding: var(--space-2) var(--space-4);
         border-radius: var(--radius-md);
         border: 1px solid var(--color-border);
-        font-size: var(--font-size-sm);
+        font-size: var(--text-sm);
         font-weight: 500;
         cursor: pointer;
-        transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base);
+        transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
     }
 
     .approval-dialog__btn:disabled {
@@ -157,7 +157,7 @@
 
     .approval-dialog__btn--approve {
         background: var(--color-accent);
-        color: var(--color-on-accent, #fff);
+        color: var(--color-text-on-accent);
         border-color: var(--color-accent);
     }
 

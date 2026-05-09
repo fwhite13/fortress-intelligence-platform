@@ -74,7 +74,8 @@ async function getUserAdoToken(userId) {
 
 const MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
 const FAIT_BASE_URL = process.env.FAIT_BASE_URL || 'http://localhost:8080';
-const HARNESS_INTERNAL_SECRET = process.env.HARNESS_INTERNAL_SECRET || '';
+const HARNESS_INTERNAL_SECRET = process.env.HARNESS_INTERNAL_SECRET || ''; // legacy — unused
+const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN || '';
 
 // ─── Intervention hold-for-approval ───────────────────────────────────────
 const pendingInterventions = new Map(); // interventionId → { resolve, reject }
@@ -85,7 +86,7 @@ async function requireApproval(userId, actionType, actionSummary, actionDetails)
     // POST intervention request to Blazor — holds harness until user responds
     try {
         const headers = { 'Content-Type': 'application/json' };
-        if (HARNESS_INTERNAL_SECRET) headers['X-Harness-Secret'] = HARNESS_INTERNAL_SECRET;
+        if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
         await fetch(`${FAIT_BASE_URL}/api/intervention/request`, {
             method: 'POST',
             headers,
@@ -896,7 +897,7 @@ app.post('/turn', async (req, res) => {
     if (pluginAgentId) {
         try {
             const headers = { 'Accept': 'application/json' };
-            if (HARNESS_INTERNAL_SECRET) headers['X-Harness-Secret'] = HARNESS_INTERNAL_SECRET;
+            if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
             const soulResp = await fetch(`${FAIT_BASE_URL}/api/agents/${encodeURIComponent(pluginAgentId)}/soul`, { headers });
             if (soulResp.ok) {
                 const soulData = await soulResp.json();

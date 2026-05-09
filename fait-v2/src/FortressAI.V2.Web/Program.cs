@@ -557,16 +557,13 @@ app.MapPost("/api/intervention/request", async (
     ILogger<Program> logger,
     CancellationToken ct) =>
 {
-    // Shared-secret guard — harness must send X-Harness-Secret
-    var expectedSecret = config["HarnessInternal:Secret"] ?? "";
-    if (!string.IsNullOrEmpty(expectedSecret))
+    // Shared-secret guard — harness must send X-Internal-Token (same pattern as memory search)
+    var expectedSecret = config["Feedback:InternalToken"] ?? "fait-v2-internal-feedback-token";
+    var providedSecret = httpContext.Request.Headers["X-Internal-Token"].FirstOrDefault();
+    if (string.IsNullOrEmpty(providedSecret) || providedSecret != expectedSecret)
     {
-        var providedSecret = httpContext.Request.Headers["X-Harness-Secret"].FirstOrDefault();
-        if (providedSecret != expectedSecret)
-        {
-            logger.LogWarning("InterventionRequest: rejected — missing or invalid X-Harness-Secret");
-            return Results.Unauthorized();
-        }
+        logger.LogWarning("InterventionRequest: rejected — missing or invalid X-Internal-Token");
+        return Results.Unauthorized();
     }
 
     if (string.IsNullOrEmpty(request.UserId) || string.IsNullOrEmpty(request.InterventionId))
@@ -642,14 +639,27 @@ app.MapPost("/api/memory/search", async (
 // §6.1 — serve agent soul content for harness pluginAgentId switching
 app.MapGet("/api/agents/{pluginAgentId}/soul", async (
     string pluginAgentId,
+    HttpContext httpContext,
+    IConfiguration config,
     IPluginAgentService pluginAgentService,
     CancellationToken ct) =>
 {
+    // Dual-auth: X-Internal-Token (harness) or cookie auth (browser)
+    var internalToken = config["Feedback:InternalToken"] ?? "fait-v2-internal-feedback-token";
+    var providedToken = httpContext.Request.Headers["X-Internal-Token"].FirstOrDefault();
+    if (!string.IsNullOrEmpty(providedToken))
+    {
+        if (providedToken != internalToken) return Results.Unauthorized();
+    }
+    else
+    {
+        if (GetUserId(httpContext) == null) return Results.Unauthorized();
+    }
     var plugin = await pluginAgentService.GetPluginByIdAsync(pluginAgentId, ct);
     if (plugin == null) return Results.NotFound(new { error = "Agent not found" });
     var content = await pluginAgentService.GetSkillsContentAsync(plugin, ct);
     return Results.Ok(new { content });
-}).RequireAuthorization();
+}).AllowAnonymous(); // guarded by X-Internal-Token or cookie auth
 
 // Blazor components — all routes require auth
 app.MapRazorComponents<App>()
