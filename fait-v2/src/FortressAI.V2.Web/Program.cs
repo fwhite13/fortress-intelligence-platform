@@ -584,7 +584,7 @@ app.MapPost("/api/intervention/request", async (
         request.UserId, request.InterventionId, request.ActionType);
 
     return Results.Ok(new { ok = true });
-}).AllowAnonymous(); // guarded by X-Harness-Secret header, not auth cookie
+}).AllowAnonymous(); // guarded by X-Internal-Token header, not auth cookie
 
 // Memory search endpoint (for agent-harness search_memory tool)
 app.MapPost("/api/memory/search", async (
