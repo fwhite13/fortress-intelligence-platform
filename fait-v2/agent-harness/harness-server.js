@@ -113,6 +113,25 @@ const S3_BUCKET = process.env.WORKSPACE_S3_BUCKET || 'fortress-user-workspaces';
 const S3_PREFIX = process.env.WORKSPACE_S3_PREFIX || '';
 const { existsSync, writeFileSync } = require('fs');
 const app = express();
+
+// ─── Secret scrubber ──────────────────────────────────────────────────────
+const SECRET_PATTERNS = [
+  /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi,          // Bearer tokens
+  /[A-Za-z0-9]{20,}==[A-Za-z0-9]{5,}/g,         // Base64-like secrets
+  /sk-[A-Za-z0-9]{20,}/g,                        // OpenAI-style keys
+  /AKIA[0-9A-Z]{16}/g,                            // AWS access key IDs
+  /(?:password|passwd|secret|token|key)\s*[:=]\s*['"]?[^\s'"]{8,}['"]?/gi,  // key=value patterns
+];
+
+function scrubSecrets(text) {
+  if (!text) return text;
+  let result = text;
+  for (const pattern of SECRET_PATTERNS) {
+    result = result.replace(new RegExp(pattern.source, pattern.flags), '[REDACTED]');
+  }
+  return result;
+}
+
 app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || 3000;
@@ -892,7 +911,7 @@ app.post('/turn', async (req, res) => {
         req.body?.UserId ?? '(none)', !!req.body?.Message, req.body?.TaskMode ?? false);
     console.log(`[harness] /turn: request received. body keys=${Object.keys(req.body || {}).join(',')}, contentType=${req.headers['content-type']}`);
     const rawBody = req.body || {};
-    console.log(`[harness] /turn: raw body dump: ${JSON.stringify(rawBody).substring(0, 500)}`);
+    console.log(`[harness] /turn: raw body dump: ${scrubSecrets(JSON.stringify(rawBody).substring(0, 500))}`);
 
     // Support both PascalCase (legacy) and camelCase (JsonContent.Create default) field names
     const sessionId   = rawBody.SessionId   ?? rawBody.sessionId;
@@ -1044,8 +1063,8 @@ app.post('/turn', async (req, res) => {
             ccProcess.kill('SIGTERM');
             endResponse({ type: 'error', errorMessage: 'Turn timed out after 5 minutes' });
         }, TURN_TIMEOUT_MS);
-        ccProcess.stdout.on('data', (chunk) => sendEvent({ type: 'text', content: chunk.toString() }));
-        ccProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', content: chunk.toString() }));
+        ccProcess.stdout.on('data', (chunk) => sendEvent({ type: 'text', content: scrubSecrets(chunk.toString()) }));
+        ccProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', content: scrubSecrets(chunk.toString()) }));
         ccProcess.on('close', async (code) => {
             clearTimeout(timeout);
             let artifact = null;
@@ -1080,7 +1099,7 @@ app.post('/turn', async (req, res) => {
                 endResponse({ type: 'done', exitCode: code });
             }
         });
-        ccProcess.on('error', (err) => { clearTimeout(timeout); endResponse({ type: 'error', errorMessage: err.message }); });
+        ccProcess.on('error', (err) => { clearTimeout(timeout); endResponse({ type: 'error', errorMessage: scrubSecrets(err.message) }); });
     } else {
         // ── Bedrock ConverseStream path ───────────────────────────────────
         console.log(`[harness] /turn: taskMode=false — entering Bedrock ConverseStream path for userId=${userId}`);
@@ -1238,15 +1257,11 @@ app.post('/turn', async (req, res) => {
                 }
             }
             console.log(`[harness] /turn: stream complete, sending done event for userId=${userId}`);
-            // ADO#3093 — fire-and-forget preference detection write
-            if (hasPreferenceSignal(message)) {
-                firePreferenceWrite(userId, message);
-            }
             sendEvent({ type: 'done', inputTokens, outputTokens });
             res.end();
         } catch (err) {
             console.error(`[harness] /turn: Bedrock ConverseStream error for userId=${userId}: ${err.message}`, err.stack);
-            sendEvent({ type: 'error', errorMessage: err.message });
+            sendEvent({ type: 'error', errorMessage: scrubSecrets(err.message) });
             res.end();
         }
     }
