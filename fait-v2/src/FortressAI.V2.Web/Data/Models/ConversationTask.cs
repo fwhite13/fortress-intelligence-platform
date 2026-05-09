@@ -26,6 +26,12 @@ public class ConversationTask
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    [Column("project_id")]
+    [MaxLength(36)]
+    public string? ProjectId { get; set; }
+
     // Navigation
     public User? User { get; set; }
+
+    public Project? Project { get; set; }
 }

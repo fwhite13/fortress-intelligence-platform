@@ -196,6 +196,12 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IConversationTitleService, ConversationTitleService>();
 builder.Services.AddSingleton<ITaskListNotifier, TaskListNotifier>();
 
+// KB management services
+builder.Services.AddScoped<KbDocumentService>();
+builder.Services.AddScoped<KbForgeService>();
+builder.Services.AddSingleton<KbSyncRetryService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<KbSyncRetryService>());
+
 var app = builder.Build();
 
 // Seed mcp_servers with all MCP tool groups (idempotent)

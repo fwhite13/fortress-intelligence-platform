@@ -23,9 +23,13 @@ public class FaitV2DbContext : DbContext
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
     public DbSet<ConversationTask> ConversationTasks => Set<ConversationTask>();
+    public DbSet<ProjectDocument> ProjectDocuments => Set<ProjectDocument>();
     public DbSet<UserDevOpsConnection> UserDevOpsConnections => Set<UserDevOpsConnection>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<Message> Messages => Set<Message>();
+    public DbSet<KbEntry> KbEntries => Set<KbEntry>();
+    public DbSet<KbTeam> KbTeams => Set<KbTeam>();
+    public DbSet<KbTeamMember> KbTeamMembers => Set<KbTeamMember>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -84,6 +88,10 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.V1ProjectId).HasColumnName("v1_project_id");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.CustomInstructions).HasColumnName("custom_instructions").HasColumnType("TEXT");
+            entity.Property(e => e.Model).HasColumnName("model").HasMaxLength(100).HasDefaultValue("claude-sonnet-4-6");
+            entity.Property(e => e.EnableFortressKb).HasColumnName("enable_fortress_kb").HasColumnType("tinyint(1)").HasDefaultValue(false);
+            entity.Property(e => e.EnablePersonalKb).HasColumnName("enable_personal_kb").HasColumnType("tinyint(1)").HasDefaultValue(false);
 
             entity.HasIndex(e => e.UserId).HasDatabaseName("ix_projects_user_id");
 
@@ -91,6 +99,16 @@ public class FaitV2DbContext : DbContext
                   .WithMany(u => u.Projects)
                   .HasForeignKey(e => e.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.Documents)
+                  .WithOne(d => d.Project)
+                  .HasForeignKey(d => d.ProjectId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.ConversationTasks)
+                  .WithOne(ct => ct.Project)
+                  .HasForeignKey(ct => ct.ProjectId)
+                  .OnDelete(DeleteBehavior.SetNull);
         });
 
         // memory_topics
@@ -348,11 +366,13 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id").HasColumnType("char(36)").IsRequired();
             entity.Property(e => e.UserId).HasColumnName("user_id").HasColumnType("char(36)").IsRequired();
             entity.Property(e => e.Title).HasColumnName("title").HasColumnType("varchar(500)");
+            entity.Property(e => e.ProjectId).HasColumnName("project_id").HasColumnType("char(36)");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
 
             entity.HasIndex(e => e.UserId).HasDatabaseName("ix_conversation_tasks_user_id");
             entity.HasIndex(e => e.UpdatedAt).HasDatabaseName("ix_conversation_tasks_updated_at");
+            entity.HasIndex(e => e.ProjectId).HasDatabaseName("ix_conversation_tasks_project_id");
 
             entity.HasOne(e => e.User)
                   .WithMany()
@@ -446,6 +466,90 @@ public class FaitV2DbContext : DbContext
                   .WithMany(c => c.Messages)
                   .HasForeignKey(e => e.ConversationId)
                   .HasConstraintName("fk_messages_conversation")
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // project_documents
+        modelBuilder.Entity<ProjectDocument>(entity =>
+        {
+            entity.ToTable("project_documents");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.ProjectId).HasColumnName("project_id").HasMaxLength(36);
+            entity.Property(e => e.Filename).HasColumnName("filename").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.ContentType).HasColumnName("content_type").HasMaxLength(200);
+            entity.Property(e => e.Content).HasColumnName("content").HasColumnType("longtext");
+            entity.Property(e => e.FileSize).HasColumnName("file_size");
+            entity.Property(e => e.UploadedAt).HasColumnName("uploaded_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.S3Key).HasColumnName("s3_key").HasMaxLength(1000);
+            entity.Property(e => e.IngestionStatus).HasColumnName("ingestion_status").HasMaxLength(50).HasDefaultValue("none");
+            entity.Property(e => e.IngestedAt).HasColumnName("ingested_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.ProjectId).HasDatabaseName("ix_project_documents_project_id");
+
+            entity.HasOne(e => e.Project)
+                  .WithMany(p => p.Documents)
+                  .HasForeignKey(e => e.ProjectId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // kb_entries
+        modelBuilder.Entity<KbEntry>(entity =>
+        {
+            entity.ToTable("kb_entries");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.TeamId).HasColumnName("team_id").HasMaxLength(36);
+            entity.Property(e => e.Tier).HasColumnName("tier");
+            entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(500);
+            entity.Property(e => e.Content).HasColumnName("content").HasColumnType("longtext");
+            entity.Property(e => e.Tags).HasColumnName("tags").HasMaxLength(1000);
+            entity.Property(e => e.SourceUrl).HasColumnName("source_url").HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_kb_entries_user_id");
+            entity.HasIndex(e => e.TeamId).HasDatabaseName("ix_kb_entries_team_id");
+
+            entity.HasOne(e => e.Team)
+                  .WithMany(t => t.Entries)
+                  .HasForeignKey(e => e.TeamId)
+                  .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // kb_teams
+        modelBuilder.Entity<KbTeam>(entity =>
+        {
+            entity.ToTable("kb_teams");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.CreatorId).HasColumnName("creator_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasColumnName("description").HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.CreatorId).HasDatabaseName("ix_kb_teams_creator_id");
+        });
+
+        // kb_team_members
+        modelBuilder.Entity<KbTeamMember>(entity =>
+        {
+            entity.ToTable("kb_team_members");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.TeamId).HasColumnName("team_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Role).HasColumnName("role");
+            entity.Property(e => e.JoinedAt).HasColumnName("joined_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.TeamId).HasDatabaseName("ix_kb_team_members_team_id");
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_kb_team_members_user_id");
+            entity.HasIndex(new[] { "TeamId", "UserId" }).IsUnique().HasDatabaseName("ix_kb_team_members_team_user");
+
+            entity.HasOne(e => e.Team)
+                  .WithMany(t => t.Members)
+                  .HasForeignKey(e => e.TeamId)
                   .OnDelete(DeleteBehavior.Cascade);
         });
     }

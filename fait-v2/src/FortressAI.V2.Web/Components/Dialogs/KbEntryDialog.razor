@@ -1,0 +1,31 @@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(IsEdit ? "Edit Entry" : "New Entry")</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="Title" Label="Title" Required="true" RequiredError="Title is required"
+                      MaxLength="500" Immediate="true" Class="mb-3" />
+        <MudTextField @bind-Value="Content" Label="Content" Required="true" RequiredError="Content is required"
+                      Lines="6" Immediate="true" Class="mb-3" />
+        <MudTextField @bind-Value="Tags" Label="Tags (comma-separated)" Class="mb-3" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
+        <MudButton OnClick="Submit" Variant="Variant.Filled" Color="Color.Primary"
+                   Disabled="@(string.IsNullOrWhiteSpace(Title) || string.IsNullOrWhiteSpace(Content))">
+            Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter] public bool IsEdit { get; set; }
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Content { get; set; } = "";
+    [Parameter] public string Tags { get; set; } = "";
+
+    private void Cancel() => MudDialog.Cancel();
+    private void Submit() => MudDialog.Close(DialogResult.Ok(new KbEntryDialogResult(Title, Content, Tags)));
+}

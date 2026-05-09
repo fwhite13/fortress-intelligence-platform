@@ -1,10 +1,20 @@
+@page "/kb-management"
 @page "/knowledge-base"
+@implements IDisposable
 @attribute [Authorize]
-@inject IForgeKbService ForgeKbService
+@using FortressAI.V2.Web.Data
+@using FortressAI.V2.Web.Data.Models
+@using FortressAI.V2.Web.Components.Dialogs
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<FaitV2DbContext> DbFactory
+@inject KbForgeService Forge
+@inject KbDocumentService KbDocumentService
+@inject AuthenticationStateProvider AuthStateProvider
 @inject ISnackbar Snackbar
-@inject ILogger<KnowledgeBase> Logger
+@inject IDialogService DialogService
+@inject ILogger<KnowledgeBase> _logger
 
-<PageTitle>Knowledge Base — FAIT v2</PageTitle>
+<PageTitle>Knowledge Base — FAIT</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
     <div class="kb-page-header">
@@ -17,7 +27,13 @@
         Manage your personal, team, and corporate knowledge entries.
     </MudText>
 
-    @if (_loading)
+    @if (!string.IsNullOrEmpty(_authError))
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+            @_authError
+        </MudAlert>
+    }
+    else if (_loading)
     {
         <div class="kb-page-loading">
             <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
@@ -28,145 +44,193 @@
         <MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4"
                  @bind-ActivePanelIndex="_activeTab">
 
-            <!-- My KB Tab -->
+            <!-- ══ MY KB TAB ══════════════════════════════════════════════════ -->
             <MudTabPanel Text="My KB" Icon="@Icons.Material.Filled.Person">
-                @if (_personalKb == null)
-                {
-                    <MudAlert Severity="Severity.Info">No personal Knowledge Base found. Your KB will be provisioned automatically.</MudAlert>
-                }
-                else
-                {
-                    <!-- Stats -->
-                    @if (_personalMetadata != null)
-                    {
-                        <div class="kb-stats-row">
-                            <MudChip T="string" Icon="@Icons.Material.Filled.LibraryBooks" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">
-                                @_personalMetadata.DocumentCount docs
-                            </MudChip>
-                            <MudChip T="string" Icon="@Icons.Material.Filled.AccessTime" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">
-                                Updated @_personalMetadata.LastUpdated.ToLocalTime().ToString("MMM d, yyyy")
-                            </MudChip>
-                        </div>
-                    }
-
-                    <!-- Add text content -->
-                    <MudCard Elevation="1" Class="mb-4">
-                        <MudCardHeader>
-                            <CardHeaderContent>
-                                <MudText Typo="Typo.subtitle1" Style="font-weight: var(--font-semibold);">Add Text to My KB</MudText>
-                            </CardHeaderContent>
-                        </MudCardHeader>
-                        <MudCardContent>
-                            <MudTextField @bind-Value="_personalAddContent"
-                                          Label="Content to add"
-                                          Lines="5"
-                                          Variant="Variant.Outlined"
-                                          Placeholder="Paste or type content to add to your knowledge base..."
-                                          FullWidth="true" />
-                        </MudCardContent>
-                        <MudCardActions>
-                            <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                                       StartIcon="@Icons.Material.Filled.Add"
-                                       Disabled="@(string.IsNullOrWhiteSpace(_personalAddContent) || _personalAdding)"
-                                       OnClick="AddPersonalTextContent">
-                                @if (_personalAdding)
+                <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap;">
+                    <MudTextField @bind-Value="_personalSearch"
+                                  Placeholder="Search entries..."
+                                  Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Search"
+                                  Variant="Variant.Outlined"
+                                  Clearable="true"
+                                  Style="max-width: 400px;"
+                                  Immediate="true" />
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="OpenNewPersonalEntry">
+                        + New Note
+                    </MudButton>
+                    <MudFileUpload T="IBrowserFile"
+                                   Accept=".pdf,.docx,.xlsx,.pptx,.rtf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.cs,.js,.ts,.tsx,.jsx,.py,.html,.css,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.swift,.kt,.sh,.bash,.ps1,.r,.scala,.vue,.svelte,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.tiff,.tif"
+                                   FilesChanged="UploadPersonalDocument"
+                                   Hidden="false"
+                                   InputClass="absolute mud-width-full mud-height-full overflow-hidden z-10"
+                                   InputStyle="opacity:0">
+                        <ActivatorContent>
+                            <MudButton Variant="Variant.Outlined"
+                                       Color="Color.Secondary"
+                                       StartIcon="@Icons.Material.Filled.Upload"
+                                       Disabled="_uploadingPersonalDoc">
+                                @if (_uploadingPersonalDoc)
                                 {
                                     <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                    <span>Adding...</span>
+                                    <span>Uploading…</span>
                                 }
                                 else
                                 {
-                                    <span>Add to My KB</span>
+                                    <span>Upload Document</span>
                                 }
                             </MudButton>
-                        </MudCardActions>
-                    </MudCard>
+                        </ActivatorContent>
+                    </MudFileUpload>
+                    <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); margin-top: 4px;">
+                        Supported: PDF, DOCX, TXT, MD, PPTX, JPG, PNG, GIF, WEBP · Max 10 MB · PPTX auto-converted to PDF · Ingestion takes 1–5 minutes
+                    </MudText>
+                </div>
 
-                    <!-- Upload document -->
-                    <MudCard Elevation="1" Class="mb-4">
-                        <MudCardHeader>
-                            <CardHeaderContent>
-                                <MudText Typo="Typo.subtitle1" Style="font-weight: var(--font-semibold);">Upload Document to My KB</MudText>
-                            </CardHeaderContent>
-                        </MudCardHeader>
-                        <MudCardContent>
-                            <div class="kb-upload-hint">Supported: PDF, DOCX, TXT, MD, PPTX, JPG, PNG, GIF, WEBP and more · Max 10 MB · PPTX auto-converted to PDF · Ingestion takes 1–5 minutes</div>
-                            <MudFileUpload T="IBrowserFile"
-                                           Accept=".pdf,.docx,.xlsx,.pptx,.rtf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.cs,.js,.ts,.tsx,.jsx,.py,.html,.css,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.swift,.kt,.sh,.bash,.ps1,.r,.scala,.vue,.svelte,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.tiff,.tif"
-                                           FilesChanged="UploadPersonalDocument"
-                                           Hidden="false"
-                                           InputClass="absolute mud-width-full mud-height-full overflow-hidden z-10"
-                                           InputStyle="opacity:0">
-                                <ActivatorContent>
-                                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
-                                               StartIcon="@Icons.Material.Filled.Upload"
-                                               Disabled="_personalUploading">
-                                        @if (_personalUploading)
-                                        {
-                                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                            <span>Uploading...</span>
-                                        }
-                                        else
-                                        {
-                                            <span>Upload Document</span>
-                                        }
-                                    </MudButton>
-                                </ActivatorContent>
-                            </MudFileUpload>
-                        </MudCardContent>
-                    </MudCard>
+                @{
+                    var filteredPersonal = FilterEntries(_personalEntries, _personalSearch);
+                }
+
+                @if (!filteredPersonal.Any() && !_personalDocuments.Any())
+                {
+                    <div class="kb-empty-state">
+                        <MudIcon Icon="@Icons.Material.Filled.LibraryBooks" Style="font-size: 48px; opacity: 0.4;" />
+                        <MudText Typo="Typo.body1" Class="mt-3">
+                            @(string.IsNullOrWhiteSpace(_personalSearch)
+                                ? "Your personal knowledge base is empty. Add your first entry."
+                                : "No entries match your search.")
+                        </MudText>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var entry in filteredPersonal)
+                    {
+                        <MudCard Elevation="1" Class="mb-3">
+                            <MudCardContent>
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                    <div style="flex: 1; min-width: 0;">
+                                        <MudText Typo="Typo.h6" Style="font-weight: 600;">@entry.Title</MudText>
+                                        <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin: 4px 0 8px; overflow-wrap: break-word;">
+                                            @(entry.Content.Length > 100 ? entry.Content[..100] + "…" : entry.Content)
+                                        </MudText>
+                                        <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                                            @if (!string.IsNullOrWhiteSpace(entry.Tags))
+                                            {
+                                                @foreach (var tag in entry.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@tag</MudChip>
+                                                }
+                                            }
+                                            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); margin-left: 8px;">
+                                                @entry.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")
+                                            </MudText>
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; gap: 4px; margin-left: 12px;">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                                       Size="Size.Small"
+                                                       aria-label="Edit"
+                                                       OnClick="() => OpenEditEntry(entry)" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Size="Size.Small"
+                                                       Color="Color.Error"
+                                                       aria-label="Delete"
+                                                       OnClick="() => DeleteEntry(entry)" />
+                                    </div>
+                                </div>
+                            </MudCardContent>
+                        </MudCard>
+                    }
+                }
+
+                @if (_personalDocumentsLoadError != null)
+                {
+                    <MudDivider Class="my-4" />
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+                        @_personalDocumentsLoadError
+                    </MudAlert>
+                }
+                else if (_personalDocuments.Any())
+                {
+                    <MudDivider Class="my-4" />
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600; margin-bottom: 12px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Small" Style="vertical-align: middle; margin-right: 4px;" />
+                        Knowledge Documents
+                    </MudText>
+                    @foreach (var doc in _personalDocuments)
+                    {
+                        <MudPaper Elevation="1" Class="mb-2 pa-3" Style="display: flex; justify-content: space-between; align-items: center;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Style="color: var(--color-text-secondary);" />
+                                <div>
+                                    <MudText Typo="Typo.body2" Style="font-weight: 500;">@doc.Filename</MudText>
+                                    <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+                                        @FormatFileSize(doc.Size) · @doc.LastModified.ToLocalTime().ToString("MMM d, yyyy")
+                                    </MudText>
+                                </div>
+                            </div>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                           Size="Size.Small"
+                                           Color="Color.Error"
+                                           aria-label="Delete document"
+                                           OnClick="() => DeletePersonalDocument(doc.S3Key)" />
+                        </MudPaper>
+                    }
                 }
             </MudTabPanel>
 
-            <!-- Teams KB Tab -->
+            <!-- ══ TEAMS TAB ══════════════════════════════════════════════════ -->
             <MudTabPanel Text="Teams" Icon="@Icons.Material.Filled.FolderShared">
-                @if (_selectedTeamKb == null)
+                @if (_selectedTeam == null)
                 {
-                    <!-- Team list -->
                     <div class="kb-teams-header">
-                        <MudButton Variant="Variant.Outlined" Color="Color.Primary"
-                                   StartIcon="@Icons.Material.Filled.Info"
-                                   OnClick="ShowNewTeamInfo">
-                            New Team KB
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.CreateNewFolder"
+                                   OnClick="OpenNewTeam">
+                            New Team
                         </MudButton>
                     </div>
 
-                    @if (_showNewTeamInfo)
-                    {
-                        <MudAlert Severity="Severity.Info" Class="mb-4" ShowCloseIcon="true" CloseIconClicked="() => _showNewTeamInfo = false">
-                            To create a new Team Knowledge Base, contact your administrator. Team KBs are provisioned at the organizational level.
-                        </MudAlert>
-                    }
-
-                    @if (!_teamKbs.Any())
+                    @if (!_teams.Any())
                     {
                         <div class="kb-empty-state">
-                            <MudIcon Icon="@Icons.Material.Filled.FolderOff" Size="Size.Large" Style="color: var(--color-text-secondary); opacity: 0.4;" />
-                            <MudText Typo="Typo.body1" Style="color: var(--color-text-secondary); margin-top: var(--space-3);">
-                                No team Knowledge Bases available. Contact your administrator to request one.
+                            <MudIcon Icon="@Icons.Material.Filled.FolderOff" Style="font-size: 48px; opacity: 0.4;" />
+                            <MudText Typo="Typo.body1" Class="mt-3">
+                                No teams yet. Create a team to share KB entries.
                             </MudText>
                         </div>
                     }
                     else
                     {
-                        @foreach (var team in _teamKbs)
+                        @foreach (var team in _teams)
                         {
-                            var t = team;
-                            <MudCard Elevation="1" Class="mb-3" Style="cursor: pointer;" @onclick="() => SelectTeamKb(t)">
+                            <MudCard Elevation="1" Class="mb-3" Style="cursor: pointer;"
+                                     @onclick="() => SelectTeam(team)">
                                 <MudCardContent>
                                     <div class="kb-team-card-row">
                                         <div>
-                                            <MudText Typo="Typo.h6" Style="font-weight: var(--font-semibold);">@t.Description</MudText>
-                                            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">ID: @t.KbId</MudText>
+                                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                                <MudText Typo="Typo.h6" Style="font-weight: 600;">@team.Name</MudText>
+                                                @if (team.CreatorId == _userId)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">Owner</MudChip>
+                                                }
+                                            </div>
+                                            @if (!string.IsNullOrWhiteSpace(team.Description))
+                                            {
+                                                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">@team.Description</MudText>
+                                            }
                                         </div>
-                                        @if (t.Writable)
-                                        {
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Writable</MudChip>
-                                        }
-                                        else
-                                        {
-                                            <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">Read-only</MudChip>
-                                        }
+                                        <div style="text-align: right;">
+                                            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+                                                <MudIcon Icon="@Icons.Material.Filled.Group" Size="Size.Small" Style="vertical-align: middle;" />
+                                                @team.Members.Count @(team.Members.Count == 1 ? "member" : "members")
+                                            </MudText>
+                                        </div>
                                     </div>
                                 </MudCardContent>
                             </MudCard>
@@ -175,187 +239,174 @@
                 }
                 else
                 {
-                    <!-- Team detail view -->
                     <div class="kb-detail-back">
-                        <MudButton StartIcon="@Icons.Material.Filled.ArrowBack" Variant="Variant.Text" OnClick="BackToTeams">
+                        <MudButton StartIcon="@Icons.Material.Filled.ArrowBack"
+                                   Variant="Variant.Text"
+                                   OnClick="BackToTeams">
                             Back to Teams
                         </MudButton>
                     </div>
 
-                    <MudText Typo="Typo.h5" Style="font-weight: var(--font-bold); color: var(--color-gold); margin-bottom: var(--space-2);">
-                        @_selectedTeamKb.Description
-                    </MudText>
+                    <div style="margin-bottom: 20px;">
+                        <MudText Typo="Typo.h5" Style="font-weight: 700; color: var(--color-gold);">@_selectedTeam.Name</MudText>
+                        @if (!string.IsNullOrWhiteSpace(_selectedTeam.Description))
+                        {
+                            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">@_selectedTeam.Description</MudText>
+                        }
+                    </div>
 
-                    @if (_selectedTeamKb.Writable)
-                    {
-                        <!-- Add text -->
-                        <MudCard Elevation="1" Class="mb-4">
-                            <MudCardHeader>
-                                <CardHeaderContent>
-                                    <MudText Typo="Typo.subtitle1" Style="font-weight: var(--font-semibold);">Add Text to Team KB</MudText>
-                                </CardHeaderContent>
-                            </MudCardHeader>
-                            <MudCardContent>
-                                <MudTextField @bind-Value="_teamAddContent"
-                                              Label="Content to add"
-                                              Lines="5"
-                                              Variant="Variant.Outlined"
-                                              Placeholder="Paste or type content to add to this team knowledge base..."
-                                              FullWidth="true" />
-                            </MudCardContent>
-                            <MudCardActions>
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                                           StartIcon="@Icons.Material.Filled.Add"
-                                           Disabled="@(string.IsNullOrWhiteSpace(_teamAddContent) || _teamAdding)"
-                                           OnClick="AddTeamTextContent">
-                                    @if (_teamAdding)
+                    <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="OpenNewTeamEntry">
+                            + New Note
+                        </MudButton>
+                        <MudFileUpload T="IBrowserFile"
+                                       Accept=".pdf,.docx,.xlsx,.pptx,.rtf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.cs,.js,.ts,.tsx,.jsx,.py,.html,.css,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.swift,.kt,.sh,.bash,.ps1,.r,.scala,.vue,.svelte,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.tiff,.tif"
+                                       FilesChanged="UploadTeamDocument"
+                                       Hidden="false"
+                                       InputClass="absolute mud-width-full mud-height-full overflow-hidden z-10"
+                                       InputStyle="opacity:0">
+                            <ActivatorContent>
+                                <MudButton Variant="Variant.Outlined"
+                                           Color="Color.Secondary"
+                                           StartIcon="@Icons.Material.Filled.Upload"
+                                           Disabled="_uploadingTeamDoc">
+                                    @if (_uploadingTeamDoc)
                                     {
                                         <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                        <span>Adding...</span>
+                                        <span>Uploading…</span>
                                     }
                                     else
                                     {
-                                        <span>Add to Team KB</span>
+                                        <span>Upload Document</span>
                                     }
                                 </MudButton>
-                            </MudCardActions>
-                        </MudCard>
+                            </ActivatorContent>
+                        </MudFileUpload>
+                        @if (_selectedTeam.CreatorId == _userId)
+                        {
+                            <MudButton Variant="Variant.Outlined"
+                                       Color="Color.Default"
+                                       StartIcon="@Icons.Material.Filled.PersonAdd"
+                                       OnClick="OpenAddMember">
+                                Add Member
+                            </MudButton>
+                        }
+                    </div>
 
-                        <!-- Upload document -->
-                        <MudCard Elevation="1" Class="mb-4">
-                            <MudCardHeader>
-                                <CardHeaderContent>
-                                    <MudText Typo="Typo.subtitle1" Style="font-weight: var(--font-semibold);">Upload Document to Team KB</MudText>
-                                </CardHeaderContent>
-                            </MudCardHeader>
-                            <MudCardContent>
-                                <div class="kb-upload-hint">Supported: PDF, DOCX, TXT, MD, PPTX, JPG, PNG, GIF, WEBP and more · Max 10 MB · PPTX auto-converted to PDF · Ingestion takes 1–5 minutes</div>
-                                <MudFileUpload T="IBrowserFile"
-                                               Accept=".pdf,.docx,.xlsx,.pptx,.rtf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.cs,.js,.ts,.tsx,.jsx,.py,.html,.css,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.swift,.kt,.sh,.bash,.ps1,.r,.scala,.vue,.svelte,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.tiff,.tif"
-                                               FilesChanged="UploadTeamDocument"
-                                               Hidden="false"
-                                               InputClass="absolute mud-width-full mud-height-full overflow-hidden z-10"
-                                               InputStyle="opacity:0">
-                                    <ActivatorContent>
-                                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
-                                                   StartIcon="@Icons.Material.Filled.Upload"
-                                                   Disabled="_teamUploading">
-                                            @if (_teamUploading)
-                                            {
-                                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                                <span>Uploading...</span>
-                                            }
-                                            else
-                                            {
-                                                <span>Upload Document</span>
-                                            }
-                                        </MudButton>
-                                    </ActivatorContent>
-                                </MudFileUpload>
-                            </MudCardContent>
-                        </MudCard>
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600; margin-bottom: 12px;">Entries</MudText>
+
+                    @if (_loadingTeamEntries)
+                    {
+                        <div style="display: flex; justify-content: center; padding: 24px 0;">
+                            <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                        </div>
+                    }
+                    else if (!_teamEntries.Any())
+                    {
+                        <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-bottom: 20px;">
+                            No entries in this team yet. Add the first one.
+                        </MudText>
                     }
                     else
                     {
-                        <MudAlert Severity="Severity.Info" Class="mb-4">This team Knowledge Base is read-only.</MudAlert>
-                    }
-
-                    <!-- Team KB Metadata -->
-                    @if (_selectedTeamMetadata != null)
-                    {
-                        <div class="kb-stats-row">
-                            <MudChip T="string" Icon="@Icons.Material.Filled.LibraryBooks" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">
-                                @_selectedTeamMetadata.DocumentCount docs
-                            </MudChip>
-                            <MudChip T="string" Icon="@Icons.Material.Filled.AccessTime" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">
-                                Updated @_selectedTeamMetadata.LastUpdated.ToLocalTime().ToString("MMM d, yyyy")
-                            </MudChip>
-                        </div>
-                    }
-                }
-            </MudTabPanel>
-
-            <!-- Corporate KB Tab -->
-            <MudTabPanel Text="Corporate KB" Icon="@Icons.Material.Filled.AccountBalance">
-                @if (_corporateKb == null)
-                {
-                    <MudAlert Severity="Severity.Info">No corporate Knowledge Base is configured for this environment.</MudAlert>
-                }
-                else
-                {
-                    <MudText Typo="Typo.h6" Style="font-weight: var(--font-semibold); margin-bottom: var(--space-3);">Fortress Corporate Knowledge Base</MudText>
-                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-bottom: var(--space-4);">
-                        Read-only. Managed by Fortress administrators.
-                    </MudText>
-
-                    @if (_corporateMetadata != null)
-                    {
-                        <div class="kb-stats-row mb-4">
-                            <MudChip T="string" Icon="@Icons.Material.Filled.LibraryBooks" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">
-                                @_corporateMetadata.DocumentCount documents
-                            </MudChip>
-                            <MudChip T="string" Icon="@Icons.Material.Filled.AccessTime" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">
-                                Last updated @_corporateMetadata.LastUpdated.ToLocalTime().ToString("MMM d, yyyy HH:mm")
-                            </MudChip>
-                        </div>
-                    }
-
-                    <!-- Search -->
-                    <MudCard Elevation="1" Class="mb-4">
-                        <MudCardHeader>
-                            <CardHeaderContent>
-                                <MudText Typo="Typo.subtitle1" Style="font-weight: var(--font-semibold);">Search Corporate KB</MudText>
-                            </CardHeaderContent>
-                        </MudCardHeader>
-                        <MudCardContent>
-                            <div class="kb-search-row">
-                                <MudTextField @bind-Value="_corporateSearchQuery"
-                                              Placeholder="Enter search query..."
-                                              Variant="Variant.Outlined"
-                                              Adornment="Adornment.Start"
-                                              AdornmentIcon="@Icons.Material.Filled.Search"
-                                              Clearable="true"
-                                              FullWidth="true" />
-                                <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                                           StartIcon="@Icons.Material.Filled.Search"
-                                           Disabled="@(string.IsNullOrWhiteSpace(_corporateSearchQuery) || _corporateSearching)"
-                                           OnClick="SearchCorporateKb">
-                                    @if (_corporateSearching)
-                                    {
-                                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                        <span>Searching...</span>
-                                    }
-                                    else
-                                    {
-                                        <span>Search</span>
-                                    }
-                                </MudButton>
-                            </div>
-                        </MudCardContent>
-                    </MudCard>
-
-                    @if (_corporateSearchResults.Any())
-                    {
-                        <MudText Typo="Typo.subtitle2" Style="color: var(--color-text-secondary); margin-bottom: var(--space-3);">
-                            @_corporateSearchResults.Count result(s) for "@_lastCorporateSearchQuery"
-                        </MudText>
-                        @foreach (var result in _corporateSearchResults)
+                        @foreach (var entry in _teamEntries)
                         {
                             <MudCard Elevation="1" Class="mb-3">
                                 <MudCardContent>
-                                    <MudText Typo="Typo.body2" Style="white-space: pre-wrap; overflow-wrap: break-word;">
-                                        @(result.Content.Length > 500 ? result.Content[..500] + "…" : result.Content)
-                                    </MudText>
-                                    <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); margin-top: var(--space-2);">
-                                        Relevance: @result.RelevanceScore.ToString("P0")
-                                    </MudText>
+                                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                        <div style="flex: 1; min-width: 0;">
+                                            <MudText Typo="Typo.h6" Style="font-weight: 600;">@entry.Title</MudText>
+                                            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin: 4px 0 8px; overflow-wrap: break-word;">
+                                                @(entry.Content.Length > 100 ? entry.Content[..100] + "…" : entry.Content)
+                                            </MudText>
+                                            <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                                                @if (!string.IsNullOrWhiteSpace(entry.Tags))
+                                                {
+                                                    @foreach (var tag in entry.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                                    {
+                                                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@tag</MudChip>
+                                                    }
+                                                }
+                                                <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); margin-left: 8px;">
+                                                    @entry.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")
+                                                </MudText>
+                                            </div>
+                                        </div>
+                                        <div style="display: flex; gap: 4px; margin-left: 12px;">
+                                            <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                                           Size="Size.Small"
+                                                           aria-label="Edit"
+                                                           OnClick="() => OpenEditEntry(entry)" />
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                           Size="Size.Small"
+                                                           Color="Color.Error"
+                                                           aria-label="Delete"
+                                                           OnClick="() => DeleteEntry(entry)" />
+                                        </div>
+                                    </div>
                                 </MudCardContent>
                             </MudCard>
                         }
                     }
-                    else if (_corporateSearchPerformed)
+
+                    @if (_teamDocuments.Any())
                     {
-                        <MudAlert Severity="Severity.Info">No results found for "@_lastCorporateSearchQuery".</MudAlert>
+                        <MudDivider Class="my-3" />
+                        <MudText Typo="Typo.subtitle1" Style="font-weight: 600; margin-bottom: 12px;">
+                            <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Small" Style="vertical-align: middle; margin-right: 4px;" />
+                            Knowledge Documents
+                        </MudText>
+                        @foreach (var doc in _teamDocuments)
+                        {
+                            <MudPaper Elevation="1" Class="mb-2 pa-3" Style="display: flex; justify-content: space-between; align-items: center;">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Style="color: var(--color-text-secondary);" />
+                                    <div>
+                                        <MudText Typo="Typo.body2" Style="font-weight: 500;">@doc.Filename</MudText>
+                                        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+                                            @FormatFileSize(doc.Size) · @doc.LastModified.ToLocalTime().ToString("MMM d, yyyy")
+                                        </MudText>
+                                    </div>
+                                </div>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Size="Size.Small"
+                                               Color="Color.Error"
+                                               aria-label="Delete document"
+                                               OnClick="() => DeleteTeamDocument(doc.S3Key)" />
+                            </MudPaper>
+                        }
+                    }
+
+                    <MudDivider Class="my-4" />
+                    <MudText Typo="Typo.subtitle1" Style="font-weight: 600; margin-bottom: 12px;">Members</MudText>
+
+                    @foreach (var member in _selectedTeam.Members)
+                    {
+                        <MudPaper Elevation="1" Class="mb-2 pa-3" Style="display: flex; justify-content: space-between; align-items: center;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <MudIcon Icon="@Icons.Material.Filled.Person" Style="color: var(--color-text-secondary);" />
+                                <div>
+                                    <MudText Typo="Typo.body2">@(_memberDisplayNames.TryGetValue(member.UserId, out var mdn) ? mdn : member.UserId)</MudText>
+                                </div>
+                                <MudChip T="string"
+                                         Size="Size.Small"
+                                         Color="@(member.Role == KbTeamRole.Owner ? Color.Warning : Color.Default)"
+                                         Variant="Variant.Outlined">
+                                    @member.Role.ToString()
+                                </MudChip>
+                            </div>
+                            @if (_selectedTeam.CreatorId == _userId && member.UserId != _userId)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.PersonRemove"
+                                               Size="Size.Small"
+                                               Color="Color.Error"
+                                               aria-label="Remove member"
+                                               OnClick="() => RemoveMember(member.UserId)" />
+                            }
+                        </MudPaper>
                     }
                 }
             </MudTabPanel>
@@ -394,19 +445,13 @@
         padding: var(--space-12) 0;
     }
 
-    .kb-stats-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2);
-        margin-bottom: var(--space-4);
-    }
-
     .kb-empty-state {
         display: flex;
         flex-direction: column;
         align-items: center;
         padding: var(--space-12) 0;
         text-align: center;
+        color: var(--color-text-secondary);
     }
 
     .kb-teams-header {
@@ -424,266 +469,421 @@
     .kb-detail-back {
         margin-bottom: var(--space-4);
     }
-
-    .kb-search-row {
-        display: flex;
-        gap: var(--space-3);
-        align-items: flex-start;
-    }
-
-    .kb-upload-hint {
-        font-size: var(--text-xs, 0.75rem);
-        color: var(--color-text-muted);
-        margin-top: var(--spacing-xs, 4px);
-        margin-bottom: var(--space-3);
-    }
 </style>
 
 @code {
-    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    // ── State ─────────────────────────────────────────────────────────────────
 
     private bool _loading = true;
     private int _activeTab = 0;
-    private string _entraOid = "";
+    private string _userId = "";
+    private string? _authError;
 
     // Personal KB
-    private KbInfo? _personalKb;
-    private KbMetadata? _personalMetadata;
-    private string _personalAddContent = "";
-    private bool _personalAdding = false;
-    private bool _personalUploading = false;
+    private List<KbEntry> _personalEntries = new();
+    private string _personalSearch = "";
 
-    // Teams KB
-    private List<KbInfo> _teamKbs = new();
-    private KbInfo? _selectedTeamKb;
-    private KbMetadata? _selectedTeamMetadata;
-    private string _teamAddContent = "";
-    private bool _teamAdding = false;
-    private bool _teamUploading = false;
-    private bool _showNewTeamInfo = false;
+    // Teams
+    private List<KbTeam> _teams = new();
+    private KbTeam? _selectedTeam;
+    private List<KbEntry> _teamEntries = new();
+    private bool _loadingTeamEntries = false;
+    private Dictionary<string, string> _memberDisplayNames = new();
 
-    // Corporate KB
-    private KbInfo? _corporateKb;
-    private KbMetadata? _corporateMetadata;
-    private string _corporateSearchQuery = "";
-    private string _lastCorporateSearchQuery = "";
-    private bool _corporateSearching = false;
-    private bool _corporateSearchPerformed = false;
-    private List<KbSearchResult> _corporateSearchResults = new();
+    // Document management
+    private List<KbDocumentInfo> _personalDocuments = new();
+    private List<KbDocumentInfo> _teamDocuments = new();
+    private bool _uploadingPersonalDoc = false;
+    private bool _uploadingTeamDoc = false;
+    private string? _personalDocumentsLoadError = null;
+
+    // Status auto-refresh
+    private Timer? _statusRefreshTimer;
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     protected override async Task OnInitializedAsync()
     {
-        if (AuthState != null)
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var oid = authState.User.FindFirst("oid")?.Value
+               ?? authState.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+        if (!string.IsNullOrEmpty(oid))
         {
-            var auth = await AuthState;
-            _entraOid = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                     ?? auth.User.FindFirst("oid")?.Value ?? "";
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var dbUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == oid);
+            _userId = dbUser?.Id ?? "";
         }
 
-        if (!string.IsNullOrEmpty(_entraOid))
+        if (string.IsNullOrEmpty(_userId))
         {
+            _authError = "Please log in to access the Knowledge Base.";
+            _loading = false;
+            return;
+        }
+
+        try
+        {
+            var personalTask = Forge.GetPersonalEntriesAsync(_userId);
+            var teamsTask    = Forge.GetUserTeamsAsync(_userId);
+
+            await Task.WhenAll(personalTask, teamsTask);
+
+            _personalEntries = personalTask.Result;
+            _teams           = teamsTask.Result;
+
             try
             {
-                var kbs = await ForgeKbService.ListKbsAsync(_entraOid);
-                _personalKb = kbs.FirstOrDefault(k => k.KbType == "personal");
-                _teamKbs = kbs.Where(k => k.KbType == "team").ToList();
-                _corporateKb = kbs.FirstOrDefault(k => k.KbType == "corporate");
-
-                // Load metadata in parallel (non-fatal)
-                var metadataTasks = new List<Task>();
-                if (_personalKb != null)
-                    metadataTasks.Add(LoadPersonalMetadataAsync(_personalKb.KbId));
-                if (_corporateKb != null)
-                    metadataTasks.Add(LoadCorporateMetadataAsync(_corporateKb.KbId));
-                await Task.WhenAll(metadataTasks);
+                _personalDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Personal, _userId);
+                _personalDocumentsLoadError = null;
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Failed to load KB list for user {UserId}", _entraOid);
-                Snackbar.Add("Failed to load Knowledge Base information. Please refresh.", Severity.Warning);
+                _logger.LogError(ex, "Failed to load personal KB documents");
+                _personalDocumentsLoadError = "Failed to load your documents. Please refresh the page.";
+                Snackbar.Add("Could not load your KB documents — check connectivity or permissions.", Severity.Warning);
             }
-        }
-
-        _loading = false;
-    }
-
-    private async Task LoadPersonalMetadataAsync(string kbId)
-    {
-        try { _personalMetadata = await ForgeKbService.GetKbMetadataAsync(kbId); }
-        catch (Exception ex) { Logger.LogWarning(ex, "Failed to load personal KB metadata"); }
-    }
-
-    private async Task LoadCorporateMetadataAsync(string kbId)
-    {
-        try { _corporateMetadata = await ForgeKbService.GetKbMetadataAsync(kbId); }
-        catch (Exception ex) { Logger.LogWarning(ex, "Failed to load corporate KB metadata"); }
-    }
-
-    private async Task AddPersonalTextContent()
-    {
-        if (_personalKb == null || string.IsNullOrWhiteSpace(_personalAddContent)) return;
-        _personalAdding = true;
-        StateHasChanged();
-        try
-        {
-            var metadata = new Dictionary<string, string>
-            {
-                { "source", "web-manual" },
-                { "added_by", _entraOid },
-                { "added_at", DateTime.UtcNow.ToString("O") }
-            };
-            await ForgeKbService.AddToKbAsync(_personalKb.KbId, _personalAddContent.Trim(), metadata);
-            Snackbar.Add("Content added to your Knowledge Base.", Severity.Success);
-            _personalAddContent = "";
-            if (_personalKb != null) await LoadPersonalMetadataAsync(_personalKb.KbId);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to add content to personal KB");
-            Snackbar.Add($"Failed to add content: {ex.Message}", Severity.Error);
+            Snackbar.Add($"Error loading knowledge base: {ex.Message}", Severity.Error);
         }
         finally
         {
-            _personalAdding = false;
-            StateHasChanged();
+            _loading = false;
         }
     }
 
-    private async Task UploadPersonalDocument(IBrowserFile file)
+    public void Dispose()
     {
-        if (_personalKb == null) return;
-        _personalUploading = true;
-        StateHasChanged();
+        _statusRefreshTimer?.Dispose();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static List<KbEntry> FilterEntries(List<KbEntry> entries, string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return entries;
+
+        var q = query.Trim().ToLowerInvariant();
+        return entries
+            .Where(e => e.Title.ToLowerInvariant().Contains(q) || e.Content.ToLowerInvariant().Contains(q))
+            .ToList();
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024):F1} MB";
+    }
+
+    // ── Personal entry actions ────────────────────────────────────────────────
+
+    private async Task OpenNewPersonalEntry()
+    {
+        var parameters = new DialogParameters<KbEntryDialog>();
+        var dialog = await DialogService.ShowAsync<KbEntryDialog>("New Entry", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is KbEntryDialogResult r)
+            await SaveEntry(KbTier.Personal, null, r.Title, r.Content, r.Tags);
+    }
+
+    private async Task OpenEditEntry(KbEntry entry)
+    {
+        var parameters = new DialogParameters<KbEntryDialog>
+        {
+            { x => x.IsEdit, true },
+            { x => x.Title, entry.Title },
+            { x => x.Content, entry.Content },
+            { x => x.Tags, entry.Tags ?? "" }
+        };
+        var dialog = await DialogService.ShowAsync<KbEntryDialog>("Edit Entry", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is KbEntryDialogResult r)
+            await UpdateEntry(entry, r.Title, r.Content, r.Tags);
+    }
+
+    private async Task SaveEntry(KbTier tier, string? teamId, string title, string content, string rawTags)
+    {
         try
         {
-            const long maxSize = 10 * 1024 * 1024; // 10MB
-            var ext = Path.GetExtension(file.Name).ToLowerInvariant();
-            var contentType = file.ContentType;
-
-            if (ext == ".pptx")
-                Snackbar.Add("Converting PPTX to PDF...", Severity.Info);
-
-            using var stream = file.OpenReadStream(maxSize);
-            await ForgeKbService.UploadFileAsync(_personalKb.KbId, stream, file.Name, contentType);
-            Snackbar.Add($"'{file.Name}' added to your Knowledge Base. Ingestion takes 1–5 minutes.", Severity.Success);
-            if (_personalKb != null) await LoadPersonalMetadataAsync(_personalKb.KbId);
+            var tags = string.IsNullOrWhiteSpace(rawTags) ? null : rawTags.Trim();
+            await Forge.CreateEntryAsync(_userId, tier, title, content, tags, teamId);
+            Snackbar.Add("Entry created.", Severity.Success);
+            await ReloadAfterEntryChange(tier, isEdit: false);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to upload document to personal KB");
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task UpdateEntry(KbEntry entry, string title, string content, string rawTags)
+    {
+        try
+        {
+            var tags = string.IsNullOrWhiteSpace(rawTags) ? null : rawTags.Trim();
+            await Forge.UpdateEntryAsync(_userId, entry.Id, title, content, tags);
+            Snackbar.Add("Entry updated.", Severity.Success);
+            await ReloadAfterEntryChange(entry.Tier, isEdit: true);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task DeleteEntry(KbEntry entry)
+    {
+        try
+        {
+            await Forge.DeleteEntryAsync(_userId, entry.Id);
+            Snackbar.Add("Entry deleted.", Severity.Success);
+            await ReloadAfterEntryChange(entry.Tier, isEdit: false);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task ReloadAfterEntryChange(KbTier tier, bool isEdit)
+    {
+        if (tier == KbTier.Personal || (!isEdit && _selectedTeam == null))
+            _personalEntries = await Forge.GetPersonalEntriesAsync(_userId);
+
+        if (_selectedTeam != null)
+        {
+            _loadingTeamEntries = true;
+            try
+            {
+                _teamEntries = await Forge.GetTeamEntriesAsync(_userId, _selectedTeam.Id);
+            }
+            finally
+            {
+                _loadingTeamEntries = false;
+            }
+        }
+    }
+
+    // ── Document actions ──────────────────────────────────────────────────────
+
+    private async Task UploadPersonalDocument(IBrowserFile file)
+    {
+        _uploadingPersonalDoc = true;
+        StateHasChanged();
+        try
+        {
+            const long maxSize = 10 * 1024 * 1024;
+            var fileBytes = new byte[file.Size];
+            await using var rawStream = file.OpenReadStream(maxSize);
+            await rawStream.ReadExactlyAsync(fileBytes, 0, (int)file.Size);
+            await using var safeStream = new MemoryStream(fileBytes);
+
+            if (file.Name.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase))
+                Snackbar.Add("Converting PPTX to PDF for KB compatibility...", Severity.Info);
+
+            await KbDocumentService.UploadDocumentAsync(safeStream, file.Name, file.ContentType, KbTier.Personal, _userId);
+            await KbDocumentService.StartIngestionAsync();
+            Snackbar.Add("Document uploaded. It will be searchable in 1–5 minutes as it's being processed.", Severity.Success);
+            _personalDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Personal, _userId);
+        }
+        catch (Exception ex)
+        {
             Snackbar.Add($"Upload failed: {ex.Message}", Severity.Error);
         }
         finally
         {
-            _personalUploading = false;
+            _uploadingPersonalDoc = false;
             StateHasChanged();
         }
     }
 
-    private async Task SelectTeamKb(KbInfo teamKb)
+    private async Task DeletePersonalDocument(string s3Key)
     {
-        _selectedTeamKb = teamKb;
-        _selectedTeamMetadata = null;
-        try { _selectedTeamMetadata = await ForgeKbService.GetKbMetadataAsync(teamKb.KbId); }
-        catch (Exception ex) { Logger.LogWarning(ex, "Failed to load team KB metadata for {KbId}", teamKb.KbId); }
-        StateHasChanged();
-    }
-
-    private void BackToTeams()
-    {
-        _selectedTeamKb = null;
-        _selectedTeamMetadata = null;
-        _teamAddContent = "";
-    }
-
-    private void ShowNewTeamInfo()
-    {
-        _showNewTeamInfo = true;
-    }
-
-    private async Task AddTeamTextContent()
-    {
-        if (_selectedTeamKb == null || string.IsNullOrWhiteSpace(_teamAddContent)) return;
-        _teamAdding = true;
-        StateHasChanged();
         try
         {
-            var metadata = new Dictionary<string, string>
-            {
-                { "source", "web-manual" },
-                { "added_by", _entraOid },
-                { "added_at", DateTime.UtcNow.ToString("O") }
-            };
-            await ForgeKbService.AddToKbAsync(_selectedTeamKb.KbId, _teamAddContent.Trim(), metadata);
-            Snackbar.Add("Content added to the Team Knowledge Base.", Severity.Success);
-            _teamAddContent = "";
-            if (_selectedTeamKb != null) _selectedTeamMetadata = await ForgeKbService.GetKbMetadataAsync(_selectedTeamKb.KbId);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to add content to team KB {KbId}", _selectedTeamKb.KbId);
-            Snackbar.Add($"Failed to add content: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _teamAdding = false;
+            await KbDocumentService.DeleteDocumentAsync(s3Key);
+            try { await KbDocumentService.StartIngestionAsync(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Ingestion trigger after delete failed (non-fatal)"); }
+            Snackbar.Add("Document deleted. Vector store will sync in 1–5 minutes.", Severity.Success);
+            _personalDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Personal, _userId);
             StateHasChanged();
         }
+        catch (Exception ex) { Snackbar.Add($"Delete failed: {ex.Message}", Severity.Error); }
     }
 
     private async Task UploadTeamDocument(IBrowserFile file)
     {
-        if (_selectedTeamKb == null) return;
-        _teamUploading = true;
+        if (_selectedTeam == null) return;
+        _uploadingTeamDoc = true;
         StateHasChanged();
         try
         {
-            const long maxSize = 10 * 1024 * 1024; // 10MB
-            var ext = Path.GetExtension(file.Name).ToLowerInvariant();
-            var contentType = file.ContentType;
+            const long maxSize = 10 * 1024 * 1024;
+            var fileBytes = new byte[file.Size];
+            await using var rawStream = file.OpenReadStream(maxSize);
+            await rawStream.ReadExactlyAsync(fileBytes, 0, (int)file.Size);
+            await using var safeStream = new MemoryStream(fileBytes);
 
-            if (ext == ".pptx")
-                Snackbar.Add("Converting PPTX to PDF...", Severity.Info);
+            if (file.Name.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase))
+                Snackbar.Add("Converting PPTX to PDF for KB compatibility...", Severity.Info);
 
-            using var stream = file.OpenReadStream(maxSize);
-            await ForgeKbService.UploadFileAsync(_selectedTeamKb.KbId, stream, file.Name, contentType);
-            Snackbar.Add($"'{file.Name}' added to the Team Knowledge Base. Ingestion takes 1–5 minutes.", Severity.Success);
-            if (_selectedTeamKb != null) _selectedTeamMetadata = await ForgeKbService.GetKbMetadataAsync(_selectedTeamKb.KbId);
+            await KbDocumentService.UploadDocumentAsync(safeStream, file.Name, file.ContentType, KbTier.Team, _userId, _selectedTeam.Id);
+            await KbDocumentService.StartIngestionAsync(KbTier.Team);
+            Snackbar.Add("Document uploaded. It will be searchable in 1–5 minutes as it's being processed.", Severity.Success);
+            _teamDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Team, _userId, _selectedTeam.Id);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to upload document to team KB {KbId}", _selectedTeamKb.KbId);
             Snackbar.Add($"Upload failed: {ex.Message}", Severity.Error);
         }
         finally
         {
-            _teamUploading = false;
+            _uploadingTeamDoc = false;
             StateHasChanged();
         }
     }
 
-    private async Task SearchCorporateKb()
+    private async Task DeleteTeamDocument(string s3Key)
     {
-        if (_corporateKb == null || string.IsNullOrWhiteSpace(_corporateSearchQuery)) return;
-        _corporateSearching = true;
-        _corporateSearchPerformed = false;
-        _lastCorporateSearchQuery = _corporateSearchQuery;
-        StateHasChanged();
+        if (_selectedTeam == null) return;
         try
         {
-            var results = await ForgeKbService.SearchKbAsync(_corporateKb.KbId, _corporateSearchQuery.Trim(), 5);
-            _corporateSearchResults = results.ToList();
-            _corporateSearchPerformed = true;
+            await KbDocumentService.DeleteDocumentAsync(s3Key);
+            try { await KbDocumentService.StartIngestionAsync(KbTier.Team); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Ingestion trigger after delete failed (non-fatal)"); }
+            Snackbar.Add("Document deleted. Vector store will sync in 1–5 minutes.", Severity.Success);
+            _teamDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Team, _userId, _selectedTeam.Id);
+            StateHasChanged();
+        }
+        catch (Exception ex) { Snackbar.Add($"Delete failed: {ex.Message}", Severity.Error); }
+    }
+
+    // ── Team actions ──────────────────────────────────────────────────────────
+
+    private async Task OpenNewTeam()
+    {
+        var parameters = new DialogParameters<KbTeamDialog>();
+        var dialog = await DialogService.ShowAsync<KbTeamDialog>("New Team", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is KbTeamDialogResult r)
+            await CreateTeam(r.Name, r.Description);
+    }
+
+    private async Task CreateTeam(string name, string? description)
+    {
+        try
+        {
+            var desc = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+            await Forge.CreateTeamAsync(_userId, name.Trim(), desc);
+            Snackbar.Add("Team created!", Severity.Success);
+            _teams = await Forge.GetUserTeamsAsync(_userId);
+            StateHasChanged();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to search corporate KB");
-            Snackbar.Add($"Search failed: {ex.Message}", Severity.Error);
+            _logger.LogError(ex, "CreateTeam failed for user {UserId}", _userId);
+            Snackbar.Add($"Failed to create team: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SelectTeam(KbTeam team)
+    {
+        _selectedTeam       = team;
+        _loadingTeamEntries = true;
+        StateHasChanged();
+        try
+        {
+            _teamEntries   = await Forge.GetTeamEntriesAsync(_userId, team.Id);
+            _teamDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Team, _userId, team.Id);
+
+            var userIds = team.Members.Select(m => m.UserId).ToList();
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var users = await db.Users
+                .Where(u => userIds.Contains(u.Id))
+                .Select(u => new { u.Id, Name = u.DisplayName ?? u.Email })
+                .ToListAsync();
+            _memberDisplayNames = users.ToDictionary(u => u.Id, u => u.Name);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
         }
         finally
         {
-            _corporateSearching = false;
+            _loadingTeamEntries = false;
+        }
+    }
+
+    private void BackToTeams()
+    {
+        _selectedTeam       = null;
+        _memberDisplayNames = new();
+        _teamEntries        = new();
+    }
+
+    private async Task OpenNewTeamEntry()
+    {
+        var parameters = new DialogParameters<KbEntryDialog>();
+        var dialog = await DialogService.ShowAsync<KbEntryDialog>("Add Entry", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is KbEntryDialogResult r)
+            await SaveEntry(KbTier.Team, _selectedTeam!.Id, r.Title, r.Content, r.Tags);
+    }
+
+    // ── Member actions ────────────────────────────────────────────────────────
+
+    private async Task OpenAddMember()
+    {
+        var existingMemberIds = _selectedTeam?.Members.Select(m => m.UserId).ToHashSet() ?? new HashSet<string>();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var availableUsers = await db.Users
+            .Where(u => u.Id != _userId && !existingMemberIds.Contains(u.Id))
+            .OrderBy(u => u.DisplayName ?? u.Email)
+            .ToListAsync();
+
+        var parameters = new DialogParameters<KbAddMemberDialog>
+        {
+            { x => x.AvailableUsers, availableUsers }
+        };
+        var dialog = await DialogService.ShowAsync<KbAddMemberDialog>("Add Member", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled && result.Data is string newMemberId)
+            await AddMember(newMemberId);
+    }
+
+    private async Task AddMember(string memberId)
+    {
+        try
+        {
+            await Forge.AddMemberAsync(_userId, _selectedTeam!.Id, memberId);
+            Snackbar.Add("Member added successfully.", Severity.Success);
+            _teams        = await Forge.GetUserTeamsAsync(_userId);
+            _selectedTeam = _teams.FirstOrDefault(p => p.Id == _selectedTeam!.Id);
             StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task RemoveMember(string memberId)
+    {
+        try
+        {
+            await Forge.RemoveMemberAsync(_userId, _selectedTeam!.Id, memberId);
+            Snackbar.Add("Member removed.", Severity.Success);
+            _teams        = await Forge.GetUserTeamsAsync(_userId);
+            _selectedTeam = _teams.FirstOrDefault(p => p.Id == _selectedTeam!.Id);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
         }
     }
 }

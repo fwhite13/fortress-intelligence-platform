@@ -1,0 +1,254 @@
+@page "/projects/{Id}"
+@attribute [Authorize]
+@using FortressAI.V2.Web.Data
+@using FortressAI.V2.Web.Data.Models
+@using FortressAI.V2.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IProjectService ProjectSvc
+@inject IDbContextFactory<FaitV2DbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+
+<PageTitle>Project — FAIT v2</PageTitle>
+
+<div class="page-container">
+    @if (_project == null)
+    {
+        <div class="loading-state">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" /> Loading project...
+        </div>
+    }
+    else
+    {
+        <div class="page-header">
+            <div>
+                <h1><MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" /> @_project.Name</h1>
+                @if (!string.IsNullOrEmpty(_project.Description))
+                {
+                    <p class="page-subtitle">@_project.Description</p>
+                }
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-accent" @onclick="NewTask">
+                    <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" /> New Task
+                </button>
+                <button class="btn btn-secondary" @onclick="GoToSettings">
+                    <MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Small" /> Settings
+                </button>
+            </div>
+        </div>
+
+        <div class="project-layout">
+            <div class="project-main">
+                <h2>Tasks</h2>
+                @if (_project.ConversationTasks.Any())
+                {
+                    <div class="conversation-list">
+                        @foreach (var task in _project.ConversationTasks)
+                        {
+                            <div class="conversation-item" @onclick="@(() => GoToTask(task.Id))">
+                                <div class="conversation-info">
+                                    <MudIcon Icon="@Icons.Material.Filled.ChatBubble" Size="Size.Small" />
+                                    <div>
+                                        <span class="conversation-title">@(task.Title ?? "New task")</span>
+                                        <span class="conversation-date">@task.UpdatedAt.ToString("MMM d, yyyy h:mm tt")</span>
+                                    </div>
+                                </div>
+                                <button class="btn-icon btn-danger-icon" @onclick:stopPropagation @onclick="@(() => DeleteTask(task.Id))">
+                                    <MudIcon Icon="@Icons.Material.Filled.Delete" Size="Size.Small" />
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="empty-state-sm">
+                        <p>No tasks yet. Start a new task!</p>
+                        <button class="btn btn-accent btn-sm" @onclick="NewTask">
+                            <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" /> Start a task
+                        </button>
+                    </div>
+                }
+            </div>
+
+            <div class="project-sidebar">
+                <div class="document-panel">
+                    <h3><MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Small" /> Documents</h3>
+                    <p class="panel-hint">Upload documents to include as context in tasks.</p>
+
+                    <div class="document-upload-area">
+                        <InputFile OnChange="HandleFileUpload" multiple
+                                   accept=".pdf,.docx,.xlsx,.pptx,.rtf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.cs,.js,.ts,.tsx,.jsx,.py,.html,.css,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.swift,.kt,.sh,.bash,.ps1,.r,.scala,.vue,.svelte,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.tiff,.tif" />
+                        <div class="upload-label">
+                            <MudIcon Icon="@Icons.Material.Filled.CloudUpload" Size="Size.Small" />
+                            <span>Drop files or click to upload</span>
+                            <small>PDF, DOCX, XLSX, TXT, MD, CSV, JSON, code files, images — max 10MB</small>
+                        </div>
+                    </div>
+
+                    @if (_uploading)
+                    {
+                        <div class="upload-progress">
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" /> Uploading @_uploadingFilename...
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_uploadError))
+                    {
+                        <div class="alert alert-error alert-sm">@_uploadError</div>
+                    }
+
+                    @if (_project.Documents.Any())
+                    {
+                        <div class="document-list">
+                            @foreach (var doc in _project.Documents)
+                            {
+                                <div class="document-item">
+                                    <div class="document-info">
+                                        <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Size="Size.Small" />
+                                        <div>
+                                            <span class="document-name">@doc.Filename</span>
+                                            <span class="document-size">@FormatSize(doc.FileSize)</span>
+                                        </div>
+                                    </div>
+                                    <button class="btn-icon btn-danger-icon" @onclick="@(() => DeleteDocument(doc.Id))" title="Remove">
+                                        <MudIcon Icon="@Icons.Material.Filled.Close" Size="Size.Small" />
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="empty-state-sm">
+                            <p>No documents uploaded yet.</p>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private Project? _project;
+    private string _userId = "";
+    private bool _uploading = false;
+    private string? _uploadingFilename;
+    private string? _uploadError;
+
+    private const long MaxFileSize = 10 * 1024 * 1024;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await ResolveUserAsync();
+        await ReloadProject();
+    }
+
+    private async Task ResolveUserAsync()
+    {
+        if (!string.IsNullOrEmpty(_userId)) return;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var oid = authState.User.FindFirst("oid")?.Value
+               ?? authState.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        if (string.IsNullOrEmpty(oid)) return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var dbUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == oid);
+        _userId = dbUser?.Id ?? "";
+    }
+
+    private async Task ReloadProject()
+    {
+        if (string.IsNullOrEmpty(Id) || string.IsNullOrEmpty(_userId)) return;
+        _project = await ProjectSvc.GetProjectAsync(Id, _userId);
+        StateHasChanged();
+    }
+
+    private void NewTask() => Nav.NavigateTo($"/tasks/new?projectId={Id}");
+    private void GoToSettings() => Nav.NavigateTo($"/projects/{Id}/settings");
+    private void GoToTask(string taskId) => Nav.NavigateTo($"/tasks/{taskId}");
+
+    private async Task DeleteTask(string taskId)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var task = await db.ConversationTasks.FindAsync(taskId);
+        if (task != null)
+        {
+            db.ConversationTasks.Remove(task);
+            await db.SaveChangesAsync();
+        }
+        await ReloadProject();
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _uploadError = null;
+        foreach (var file in e.GetMultipleFiles(10))
+        {
+            if (file.Size > MaxFileSize)
+            {
+                _uploadError = $"{file.Name} is too large (max 10MB).";
+                continue;
+            }
+
+            _uploading = true;
+            _uploadingFilename = file.Name;
+            StateHasChanged();
+
+            try
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                using var stream = file.OpenReadStream(MaxFileSize);
+                var bytes = new byte[file.Size];
+                _ = await stream.ReadAsync(bytes, 0, (int)file.Size);
+                var content = System.Text.Encoding.UTF8.GetString(bytes);
+
+                var doc = new ProjectDocument
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    ProjectId = Id,
+                    Filename = file.Name,
+                    ContentType = file.ContentType,
+                    Content = content,
+                    FileSize = file.Size,
+                    UploadedAt = DateTime.UtcNow,
+                    IngestionStatus = "none"
+                };
+                db.ProjectDocuments.Add(doc);
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _uploadError = $"Failed to upload {file.Name}: {ex.Message}";
+            }
+        }
+
+        _uploading = false;
+        _uploadingFilename = null;
+        await ReloadProject();
+    }
+
+    private async Task DeleteDocument(string docId)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var doc = await db.ProjectDocuments.FindAsync(docId);
+        if (doc != null)
+        {
+            db.ProjectDocuments.Remove(doc);
+            await db.SaveChangesAsync();
+        }
+        await ReloadProject();
+    }
+
+    private string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
+    }
+}

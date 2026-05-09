@@ -1,0 +1,180 @@
+@page "/projects/{Id}/settings"
+@attribute [Authorize]
+@using FortressAI.V2.Web.Data
+@using FortressAI.V2.Web.Data.Models
+@using FortressAI.V2.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@inject IProjectService ProjectSvc
+@inject IDbContextFactory<FaitV2DbContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+
+<PageTitle>Project Settings — FAIT v2</PageTitle>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1><MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Small" /> Project Settings</h1>
+        <button class="btn btn-secondary" @onclick="Back">
+            <MudIcon Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" /> Back
+        </button>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="loading-state">
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" /> Loading...
+        </div>
+    }
+    else
+    {
+        <div class="settings-panel">
+            <h2>@_name</h2>
+
+            <div class="form-group">
+                <label>Name <span class="required">*</span></label>
+                <input type="text" class="form-input" @bind="_name" placeholder="Project name" />
+            </div>
+
+            <div class="form-group">
+                <label>Description</label>
+                <input type="text" class="form-input" @bind="_description" placeholder="Brief description" />
+            </div>
+
+            <div class="form-group">
+                <label>Custom Instructions</label>
+                <textarea class="form-input form-textarea" @bind="_instructions" rows="6"
+                          placeholder="These instructions will be included as system context for every task in this project..."></textarea>
+                <small class="form-hint">Think of this as a system prompt — tell the AI about this project's context, style, and rules.</small>
+            </div>
+
+            <div class="form-group">
+                <label>Default Model</label>
+                <select class="form-input" @bind="_model">
+                    <option value="claude-sonnet-4-6">Claude Sonnet 4.6 — Balanced performance</option>
+                    <option value="claude-opus-4-5">Claude Opus 4.5 — Maximum capability</option>
+                    <option value="claude-haiku-3-5">Claude Haiku 3.5 — Fast, lightweight</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Knowledge Base</label>
+                <div class="kb-toggle">
+                    <label class="toggle-label">
+                        <input type="checkbox" @bind="_enableFortressKb" />
+                        <span>Fortress Knowledge Base</span>
+                    </label>
+                </div>
+                <div class="kb-toggle kb-toggle--disabled" title="Coming soon — personal document search">
+                    <label class="toggle-label toggle-label--disabled">
+                        <input type="checkbox" disabled />
+                        <span>Personal Knowledge Base (coming soon)</span>
+                    </label>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-error">@_error</div>
+            }
+
+            <div class="form-actions">
+                <button class="btn btn-accent" @onclick="Save" disabled="@_saving">
+                    @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" /> }
+                    Save Changes
+                </button>
+                <button class="btn btn-danger" @onclick="Delete">
+                    <MudIcon Icon="@Icons.Material.Filled.Delete" Size="Size.Small" /> Delete Project
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private string _userId = "";
+    private bool _loading = true;
+    private bool _saving = false;
+    private string? _error;
+
+    private string _name = "";
+    private string _description = "";
+    private string _instructions = "";
+    private string _model = "claude-sonnet-4-6";
+    private bool _enableFortressKb = false;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await ResolveUserAsync();
+        await LoadProjectAsync();
+    }
+
+    private async Task ResolveUserAsync()
+    {
+        if (!string.IsNullOrEmpty(_userId)) return;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var oid = authState.User.FindFirst("oid")?.Value
+               ?? authState.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        if (string.IsNullOrEmpty(oid)) return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var dbUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == oid);
+        _userId = dbUser?.Id ?? "";
+    }
+
+    private async Task LoadProjectAsync()
+    {
+        _loading = true;
+        try
+        {
+            var project = await ProjectSvc.GetProjectAsync(Id, _userId);
+            if (project != null)
+            {
+                _name = project.Name;
+                _description = project.Description ?? "";
+                _instructions = project.CustomInstructions ?? "";
+                _model = project.Model;
+                _enableFortressKb = project.EnableFortressKb;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            _error = "Project name is required.";
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+        try
+        {
+            await ProjectSvc.UpdateProjectAsync(Id, _userId, _name, _description, _instructions, _model, enableFortressKb: _enableFortressKb);
+            Nav.NavigateTo($"/projects/{Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task Delete()
+    {
+        await ProjectSvc.DeleteProjectAsync(Id, _userId);
+        Nav.NavigateTo("/projects");
+    }
+
+    private void Back() => Nav.NavigateTo($"/projects/{Id}");
+}

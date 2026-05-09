@@ -33,7 +33,23 @@ public class Project
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    [Column("custom_instructions")]
+    public string? CustomInstructions { get; set; }
+
+    [Column("model")]
+    [MaxLength(100)]
+    public string Model { get; set; } = "claude-sonnet-4-6";
+
+    [Column("enable_fortress_kb")]
+    public bool EnableFortressKb { get; set; } = false;
+
+    [Column("enable_personal_kb")]
+    public bool EnablePersonalKb { get; set; } = false;
+
     // Navigation
     [ForeignKey(nameof(UserId))]
     public User? User { get; set; }
+
+    public List<ProjectDocument> Documents { get; set; } = new();
+    public List<ConversationTask> ConversationTasks { get; set; } = new();
 }
