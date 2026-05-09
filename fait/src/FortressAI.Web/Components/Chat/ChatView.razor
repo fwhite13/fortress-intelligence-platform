@@ -74,6 +74,18 @@ else
             }
             else
             {
+                @if (_briefContent.Length > 0 || _isBriefStreaming)
+                {
+                    <div class="resumption-brief-card">
+                        <div class="resumption-brief-content">@_briefContent.ToString()</div>
+                        @if (_isBriefStreaming)
+                        {
+                            <div class="resumption-brief-loading">
+                                <span class="streaming-cursor">▊</span>
+                            </div>
+                        }
+                    </div>
+                }
                 @if (wasSummarized)
                 {
                     <div class="context-summary-indicator">
@@ -312,6 +324,10 @@ else
     // Cold start UX — guard fields
     private bool _agentReady = false;
     private bool _checkingAgent = true;
+    private bool _wasColdStart = false;
+    private bool _resumptionBriefSent = false;
+    private bool _isBriefStreaming = false;
+    private System.Text.StringBuilder _briefContent = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -464,6 +480,14 @@ else
         {
             _needsScroll = false;
             await ScrollToBottom();
+        }
+
+        // Cold start resumption brief — fires once after agent becomes ready
+        if (_wasColdStart && _agentReady && !_resumptionBriefSent)
+        {
+            _resumptionBriefSent = true;
+            _wasColdStart = false;
+            await SendResumptionBrief();
         }
     }
 
@@ -1210,8 +1234,58 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
         _dotNetRef?.Dispose();
     }
 
+    private async Task SendResumptionBrief()
+    {
+        try
+        {
+            // Build history from last 3 messages if any
+            var recentHistory = messages
+                .TakeLast(3)
+                .Select(m => new ChatHistoryEntry(m.Role, m.Content))
+                .ToList();
+
+            var briefRequest = new TurnRequest(
+                UserId: Session.UserId.ToString(),
+                Message: "__resumption_brief__",
+                History: recentHistory.Any() ? recentHistory : null,
+                TaskMode: false
+            );
+
+            _isBriefStreaming = true;
+            _briefContent = new System.Text.StringBuilder();
+            StateHasChanged();
+
+            await foreach (var evt in AgentRuntime.SendTurnAsync(Session.UserId.ToString(), briefRequest, CancellationToken.None))
+            {
+                if (evt.Type == "text")
+                {
+                    var content = evt.Content ?? "";
+                    // Strip the __brief_start__ sentinel
+                    if (_briefContent.Length == 0 && content.Contains("__brief_start__"))
+                        content = content.Replace("__brief_start__", "").TrimStart('\n', '\r');
+                    _briefContent.Append(content);
+                    StateHasChanged();
+                }
+                else if (evt.Type is "done" or "error")
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[ChatView] Resumption brief failed — non-fatal");
+        }
+        finally
+        {
+            _isBriefStreaming = false;
+            StateHasChanged();
+        }
+    }
+
     private void HandleAgentReady()
     {
+        _wasColdStart = true;  // OnReady only fires from AssistantLoadingState (cold start path)
         _agentReady = true;
         StateHasChanged();
     }
@@ -1273,5 +1347,23 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
     background: var(--color-accent-light, rgba(212, 175, 55, 0.1));
     border-radius: var(--radius-sm);
+}
+.resumption-brief-card {
+    margin: var(--space-3, 0.75rem) var(--space-4, 1rem);
+    padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+    background: var(--color-accent-light, rgba(212, 175, 55, 0.08));
+    border-left: 3px solid var(--color-accent);
+    border-radius: var(--radius-md);
+    font-family: var(--font-primary);
+    font-size: var(--text-sm, 0.875rem);
+    color: var(--color-text-secondary);
+}
+.resumption-brief-content {
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+.resumption-brief-loading {
+    margin-top: var(--space-1, 0.25rem);
+    color: var(--color-accent);
 }
 </style>

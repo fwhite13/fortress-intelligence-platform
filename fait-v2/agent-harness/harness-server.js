@@ -5,7 +5,7 @@ const path = require('path');
 const { mkdirSync } = require('fs');
 const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
 const { BedrockRuntimeClient, ConverseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
-const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const { BedrockAgentRuntimeClient, RetrieveCommand } = require('@aws-sdk/client-bedrock-agent-runtime');
 const mysql = require('mysql2/promise');
 
@@ -1090,6 +1090,57 @@ app.post('/turn', async (req, res) => {
             console.warn(`[harness] /turn: pluginAgentId soul fetch failed: ${soulErr.message}`);
         }
     }
+
+    // ─── Resumption brief ─────────────────────────────────────────────────────
+    if (message === '__resumption_brief__') {
+        console.log(`[harness] /turn: resumption brief requested for userId=${userId}`);
+        try {
+            // Get MEMORY.md last-modified timestamp from S3
+            let memoryTimestamp = null;
+            try {
+                const memKey = `${S3_PREFIX}users/${userId}/MEMORY.md`;
+                const headCmd = new HeadObjectCommand({ Bucket: S3_BUCKET, Key: memKey });
+                const headResp = await s3Client.send(headCmd);
+                memoryTimestamp = headResp.LastModified ? new Date(headResp.LastModified).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+            } catch (e) {
+                console.warn(`[harness] resumption brief: could not get MEMORY.md timestamp: ${e.message}`);
+            }
+
+            // Extract last topic from history
+            let lastTopic = null;
+            if (Array.isArray(history) && history.length > 0) {
+                const lastUserTurn = [...history].reverse().find(h => h.Role === 'user' || h.role === 'user');
+                if (lastUserTurn) {
+                    const content = lastUserTurn.Content ?? lastUserTurn.content ?? '';
+                    lastTopic = content.length > 80 ? content.substring(0, 80) + '...' : content;
+                }
+            }
+
+            // Compose and stream brief
+            const briefParts = ['__brief_start__\n\n'];
+            briefParts.push('**Picking up where we left off**\n\n');
+            if (lastTopic) {
+                briefParts.push(`Last time: *${lastTopic}*\n\n`);
+            }
+            if (memoryTimestamp) {
+                briefParts.push(`Memory synced: ${memoryTimestamp}\n`);
+            }
+            if (!lastTopic && !memoryTimestamp) {
+                briefParts.push('Ready when you are.\n');
+            }
+
+            for (const part of briefParts) {
+                sendEvent({ type: 'text', content: part });
+            }
+            sendEvent({ type: 'done', exitCode: 0 });
+        } catch (briefErr) {
+            console.error(`[harness] resumption brief error: ${briefErr.message}`);
+            sendEvent({ type: 'error', errorMessage: 'Could not load resumption brief.' });
+        }
+        res.end();
+        return;
+    }
+    // ─── End resumption brief ──────────────────────────────────────────────────
 
     if (taskMode) {
         console.log(`[harness] /turn: taskMode=true — entering CC spawn path for userId=${userId}`);
