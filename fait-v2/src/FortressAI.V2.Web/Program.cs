@@ -440,12 +440,25 @@ app.MapPost("/api/feedback", async (
 
 // FIRM → inject meeting context into user's active assistant conversation
 app.MapPost("/api/assistant/inject", async (
+    HttpContext httpContext,
     [FromBody] AssistantInjectRequest req,
     IDbContextFactory<FaitV2DbContext> dbFactory,
     IConversationService convService,
+    IConfiguration config,
     ILogger<Program> logger,
     CancellationToken ct) =>
 {
+    // Shared-secret guard — FIRM must send X-Firm-Secret matching FirmIntegration:SharedSecret
+    var expectedSecret = config["FirmIntegration:SharedSecret"];
+    if (!string.IsNullOrEmpty(expectedSecret))
+    {
+        var providedSecret = httpContext.Request.Headers["X-Firm-Secret"].FirstOrDefault();
+        if (providedSecret != expectedSecret)
+        {
+            logger.LogWarning("AssistantInject: rejected — missing or invalid X-Firm-Secret");
+            return Results.Unauthorized();
+        }
+    }
     if (string.IsNullOrEmpty(req.EntraOid)) return Results.BadRequest("entraOid required");
     await using var db = await dbFactory.CreateDbContextAsync(ct);
     var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == req.EntraOid, ct);

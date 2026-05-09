@@ -385,6 +385,7 @@
     // ConversationTask tracking
     private string? _activeTaskId;
     private bool _taskCreated = false;
+    private bool _titlePending = false;
 
     private static readonly string[] ArtifactKeywords = { "create", "generate", "write", "make", "build" };
     private static readonly string[] ArtifactTypeHints = { "word doc", "docx", "excel", "spreadsheet", "xlsx", "presentation", "pptx", "powerpoint", "report", "html", "webpage" };
@@ -512,6 +513,7 @@
                 UpdatedAt = DateTime.UtcNow
             };
             _activeTaskId = newTask.Id; // optimistic — Id is set before DB write
+            _titlePending = true;
             _ = Task.Run(async () =>
             {
                 try

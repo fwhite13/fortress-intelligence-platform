@@ -9,7 +9,6 @@
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
 @inject IHttpClientFactory HttpClientFactory
-@inject IHttpContextAccessor HttpContextAccessor
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
@@ -292,7 +291,6 @@
     private bool _isSending = false;
     private string? _sendResult;
     private bool _sendSuccess;
-    private string? _authCookie;
 
     private bool CanSendToFaitV2 =>
         _meeting?.Status == MeetingStatus.Complete &&
@@ -344,10 +342,6 @@
                        || claimsUser.HasClaim("roles", "admin");
 
             _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
-
-            // Capture auth cookie for server-side forwarding to FAIT v2 API
-            var cookieName = Configuration["Auth:CookieName"] ?? ".FortressAI.Session";
-            _authCookie = HttpContextAccessor.HttpContext?.Request.Cookies[cookieName];
 
             // Load KB push status
             if (_meeting != null && _meeting.Status == MeetingStatus.Complete)
@@ -560,6 +554,9 @@
 
             var faitV2BaseUrl = (Configuration["FaitV2:BaseUrl"] ?? "https://fait-v2.dev.fortressam.ai").TrimEnd('/');
             var client = HttpClientFactory.CreateClient();
+            var firmSecret = Configuration["FirmIntegration:SharedSecret"];
+            if (!string.IsNullOrEmpty(firmSecret))
+                client.DefaultRequestHeaders.Add("X-Firm-Secret", firmSecret);
 
             var response = await client.PostAsJsonAsync($"{faitV2BaseUrl}/api/assistant/inject", payload);
 

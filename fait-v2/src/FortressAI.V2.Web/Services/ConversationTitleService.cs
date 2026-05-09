@@ -15,14 +15,20 @@ public interface IConversationTitleService
 public class ConversationTitleService : IConversationTitleService
 {
     private readonly IDbContextFactory<FaitV2DbContext> _dbFactory;
+    private readonly IAmazonBedrockRuntime _bedrock;
     private readonly IConfiguration _config;
     private readonly ILogger<ConversationTitleService> _logger;
 
     private string TitleModelId => _config.GetValue<string>("Bedrock:TitleModelId", "us.anthropic.claude-haiku-4-5-20251001-v1:0")!;
 
-    public ConversationTitleService(IDbContextFactory<FaitV2DbContext> dbFactory, IConfiguration config, ILogger<ConversationTitleService> logger)
+    public ConversationTitleService(
+        IDbContextFactory<FaitV2DbContext> dbFactory,
+        IAmazonBedrockRuntime bedrock,
+        IConfiguration config,
+        ILogger<ConversationTitleService> logger)
     {
         _dbFactory = dbFactory;
+        _bedrock = bedrock;
         _config = config;
         _logger = logger;
     }
@@ -39,7 +45,6 @@ public class ConversationTitleService : IConversationTitleService
                 Title:
                 """;
 
-            var bedrockClient = new AmazonBedrockRuntimeClient(Amazon.RegionEndpoint.USEast1);
             var body = JsonSerializer.Serialize(new
             {
                 anthropic_version = "bedrock-2023-05-31",
@@ -48,7 +53,7 @@ public class ConversationTitleService : IConversationTitleService
                 messages = new[] { new { role = "user", content = prompt } }
             });
 
-            var response = await bedrockClient.InvokeModelAsync(new InvokeModelRequest
+            var response = await _bedrock.InvokeModelAsync(new InvokeModelRequest
             {
                 ModelId = TitleModelId,
                 ContentType = "application/json",
