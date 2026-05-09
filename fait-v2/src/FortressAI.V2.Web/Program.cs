@@ -302,6 +302,50 @@ app.UseStaticFiles();
 
 app.UseRouting();
 app.UseAuthentication();
+
+// ADO#3119 — Backfill entra_oid for authenticated users (cookie consumer — no OIDC callback)
+app.Use(async (context, next) =>
+{
+    try
+    {
+        if (context.User.Identity?.IsAuthenticated == true)
+        {
+            var oid = context.User.FindFirst("oid")?.Value
+                   ?? context.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+            if (!string.IsNullOrEmpty(oid))
+            {
+                var dbFactory = context.RequestServices.GetRequiredService<IDbContextFactory<FaitV2DbContext>>();
+                await using var db = await dbFactory.CreateDbContextAsync();
+                var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == oid);
+                if (user == null)
+                {
+                    var email = context.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                             ?? context.User.FindFirst("preferred_username")?.Value;
+                    if (!string.IsNullOrEmpty(email))
+                    {
+                        var staleUser = await db.Users.FirstOrDefaultAsync(
+                            u => u.Email == email && (u.EntraOid == null || u.EntraOid == ""));
+                        if (staleUser != null)
+                        {
+                            staleUser.EntraOid = oid;
+                            staleUser.UpdatedAt = DateTime.UtcNow;
+                            await db.SaveChangesAsync();
+                            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+                            logger.LogInformation("[ADO#3119] Backfilled entra_oid for user {UserId}", staleUser.Id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        var logger = context.RequestServices.GetService<ILogger<Program>>();
+        logger?.LogWarning(ex, "[ADO#3119] entra_oid backfill failed — continuing");
+    }
+    await next(context);
+});
+
 app.UseAuthorization();
 app.UseAntiforgery();
 

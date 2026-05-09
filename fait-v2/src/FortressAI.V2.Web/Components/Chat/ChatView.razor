@@ -92,7 +92,7 @@
         {
             @foreach (var msg in _messages)
             {
-                <MessageBubble Message="@msg" IsStreaming="@(msg == _messages.LastOrDefault() && _isStreaming)" />
+                <MessageBubble Message="@msg" IsStreaming="@(msg == _messages.LastOrDefault() && _isStreaming)" UserInitial="@_userInitial" />
             }
             @if (_isStreaming)
             {
@@ -240,6 +240,12 @@
                     title="Run as Task (force Claude Code)">
                 <span class="chat-run-as-task-icon">⚡</span>
                 <span class="chat-run-as-task-label">Run as Task</span>
+            </button>
+            <button class="chat-mic-btn"
+                    type="button"
+                    disabled="@(_isStreaming || _ccRunning || !_harnessReady)"
+                    title="Voice input (coming soon)">
+                <MudIcon Icon="@Icons.Material.Filled.Mic" Class="chat-send-icon" />
             </button>
             <button class="chat-send-btn"
                     type="button"
@@ -643,6 +649,7 @@
     private string _userId = "";
     private string _userDisplayName = "";
     private string? _userEmail = null;
+    private string _userInitial = "U";
     private bool _fortressKbEnabled = false;
     private bool _personalKbEnabled = true;
     private ActiveAgent _activeAgent = ActiveAgent.MainAssistant;
@@ -712,6 +719,7 @@
 
             _userDisplayName = auth.User.FindFirst("name")?.Value
                             ?? auth.User.FindFirst("preferred_username")?.Value ?? "User";
+            _userInitial = string.IsNullOrEmpty(_userDisplayName) ? "U" : _userDisplayName.Trim()[0].ToString().ToUpperInvariant();
             _userEmail = auth.User.FindFirst("preferred_username")?.Value
                       ?? auth.User.FindFirst("upn")?.Value;
 
