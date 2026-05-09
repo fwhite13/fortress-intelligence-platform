@@ -387,8 +387,9 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE project_documents ADD COLUMN IngestedAt DATETIME(6) NULL",
                 "ALTER TABLE user_assistant_config ADD COLUMN firm_auto_transcript TINYINT(1) NOT NULL DEFAULT 0",
                 "ALTER TABLE user_assistant_config ADD COLUMN firm_auto_summary TINYINT(1) NOT NULL DEFAULT 0",
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed_at DATETIME(6) NULL",
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_step INT NULL"
+                // Idempotent via 1060 catch — Aurora MySQL does not support ADD COLUMN IF NOT EXISTS
+                "ALTER TABLE users ADD COLUMN onboarding_completed_at DATETIME(6) NULL",
+                "ALTER TABLE users ADD COLUMN onboarding_step INT NULL"
             };
 
             foreach (var alterSql in alterStatements)
