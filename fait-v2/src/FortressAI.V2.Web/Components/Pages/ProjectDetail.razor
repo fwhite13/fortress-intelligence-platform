@@ -6,6 +6,7 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
 @inject IProjectService ProjectSvc
+@inject KbDocumentService KbDocSvc
 @inject IDbContextFactory<FaitV2DbContext> DbFactory
 @inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
@@ -176,7 +177,8 @@
     private async Task DeleteTask(string taskId)
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        var task = await db.ConversationTasks.FindAsync(taskId);
+        var task = await db.ConversationTasks
+            .FirstOrDefaultAsync(t => t.Id == taskId && t.ProjectId == Id);
         if (task != null)
         {
             db.ConversationTasks.Remove(task);
@@ -184,6 +186,14 @@
         }
         await ReloadProject();
     }
+
+    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log",
+        ".cs", ".js", ".ts", ".tsx", ".jsx", ".py", ".html", ".css",
+        ".java", ".cpp", ".c", ".h", ".go", ".rs", ".rb", ".php",
+        ".swift", ".kt", ".sh", ".bash", ".ps1", ".r", ".scala", ".vue", ".svelte"
+    };
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)
     {
@@ -202,24 +212,36 @@
 
             try
             {
-                await using var db = await DbFactory.CreateDbContextAsync();
-                using var stream = file.OpenReadStream(MaxFileSize);
-                var bytes = new byte[file.Size];
-                _ = await stream.ReadAsync(bytes, 0, (int)file.Size);
-                var content = System.Text.Encoding.UTF8.GetString(bytes);
+                var ext = Path.GetExtension(file.Name).ToLowerInvariant();
+                string? content = null;
+                string? s3Key = null;
 
-                var doc = new ProjectDocument
+                await using var stream = file.OpenReadStream(MaxFileSize);
+
+                if (TextExtensions.Contains(ext))
+                {
+                    using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+                    content = await reader.ReadToEndAsync();
+                }
+                else
+                {
+                    // Binary: upload raw bytes to S3 via KbDocumentService (project-scoped key)
+                    s3Key = await KbDocSvc.UploadProjectDocumentAsync(stream, file.Name, file.ContentType, Id, _userId);
+                }
+
+                await using var db = await DbFactory.CreateDbContextAsync();
+                db.ProjectDocuments.Add(new ProjectDocument
                 {
                     Id = Guid.NewGuid().ToString(),
                     ProjectId = Id,
                     Filename = file.Name,
                     ContentType = file.ContentType,
                     Content = content,
+                    S3Key = s3Key,
                     FileSize = file.Size,
                     UploadedAt = DateTime.UtcNow,
-                    IngestionStatus = "none"
-                };
-                db.ProjectDocuments.Add(doc);
+                    IngestionStatus = s3Key != null ? "pending" : "none"
+                });
                 await db.SaveChangesAsync();
             }
             catch (Exception ex)
@@ -236,7 +258,8 @@
     private async Task DeleteDocument(string docId)
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        var doc = await db.ProjectDocuments.FindAsync(docId);
+        var doc = await db.ProjectDocuments
+            .FirstOrDefaultAsync(d => d.Id == docId && d.ProjectId == Id);
         if (doc != null)
         {
             db.ProjectDocuments.Remove(doc);
