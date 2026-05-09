@@ -190,7 +190,7 @@ builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 // §15 — Conversation history + compaction pipeline
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<ICompactionService, CompactionService>();
-builder.Services.AddScoped<IRAGWriteService, RAGWriteServiceStub>();
+builder.Services.AddScoped<IRAGWriteService, RAGWriteService>();
 builder.Services.AddScoped<IUserService, UserService>();
 
 var app = builder.Build();

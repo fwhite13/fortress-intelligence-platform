@@ -15,14 +15,17 @@ public class MemoryFileService : IMemoryFileService
     private readonly IAmazonS3 _s3;
     private readonly ILogger<MemoryFileService> _logger;
     private readonly string _bucket;
+    private readonly IRAGWriteService _ragWriteService;
 
     public MemoryFileService(
         IAmazonS3 s3,
         IConfiguration config,
-        ILogger<MemoryFileService> logger)
+        ILogger<MemoryFileService> logger,
+        IRAGWriteService ragWriteService)
     {
         _s3 = s3;
         _logger = logger;
+        _ragWriteService = ragWriteService;
         _bucket = config["AWS:WorkspaceBucket"]
             ?? throw new InvalidOperationException("AWS:WorkspaceBucket is not configured.");
     }
@@ -318,22 +321,26 @@ public class MemoryFileService : IMemoryFileService
     // ── pgvector stub ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// Syncs a topic to the pgvector index.
-    /// TODO: wire pgvector sync via PostgresMemoryService (Sprint 2 #2847 follow-up)
+    /// Syncs a topic to the pgvector index via RAGWriteService.
     /// </summary>
-    private static Task SyncToVectorIndexAsync(string userId, string topicSlug, string content)
+    private async Task SyncToVectorIndexAsync(string userId, string topicSlug, string content)
     {
-        // No-op stub — pgvector integration is Sprint 2
-        return Task.CompletedTask;
+        await _ragWriteService.WriteFactAsync(new MemoryChunk(
+            UserId: userId,
+            TopicSlug: topicSlug,
+            Content: content,
+            Source: "memory_file",
+            CreatedAt: DateTimeOffset.UtcNow
+        ));
     }
 
     /// <summary>
     /// Removes a topic from the pgvector index.
-    /// TODO: wire pgvector delete via PostgresMemoryService (Sprint 2 #2847 follow-up)
+    /// Full delete deferred to Sprint 3 — logs only for now.
     /// </summary>
-    private static Task RemoveFromVectorIndexAsync(string userId, string topicSlug, CancellationToken ct)
+    private Task RemoveFromVectorIndexAsync(string userId, string topicSlug, CancellationToken ct)
     {
-        // No-op stub — pgvector removal is Sprint 2
+        _logger.LogInformation("RAGWrite: topic deletion from pgvector deferred to Sprint 3 for user={UserId} topic={TopicSlug}", userId, topicSlug);
         return Task.CompletedTask;
     }
 }
