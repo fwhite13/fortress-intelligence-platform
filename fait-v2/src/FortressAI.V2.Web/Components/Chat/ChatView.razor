@@ -112,15 +112,9 @@
         @* Artifact result card *@
         @if (_lastArtifact != null)
         {
-            <div class="chat-artifact-result">
-                <MudIcon Icon="@GetArtifactIcon(_lastArtifact.Type)" Class="chat-artifact-icon" />
-                <span class="chat-artifact-filename">@_lastArtifact.FileName</span>
-                @if (_lastArtifact.Type == "html")
-                {
-                    <MudButton Size="Size.Small" OnClick="PreviewArtifact" Class="chat-artifact-action-btn">Preview</MudButton>
-                }
-                <MudButton Size="Size.Small" OnClick="DownloadArtifact" Class="chat-artifact-action-btn">Download</MudButton>
-            </div>
+            <ArtifactCard Artifact="_lastArtifact"
+                          OnPreview="OpenArtifactPreview"
+                          OnDownload="DownloadArtifact" />
         }
     </div>
 
@@ -317,19 +311,6 @@
         color: var(--color-primary);
     }
 
-    .artifact-download-pane {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        height: 100%;
-        gap: var(--spacing-md, 16px);
-        color: var(--color-text-secondary);
-    }
-    .artifact-download-icon { font-size: 48px; color: var(--color-primary); }
-    .artifact-download-name { font-size: var(--text-sm, 0.875rem); font-weight: 500; }
-    .artifact-preview-frame { width: 100%; height: 100%; border: none; }
-
     .chat-project-badge {
         display: inline-flex;
         align-items: center;
@@ -362,20 +343,7 @@
     <PreviewContent>
         @if (_lastArtifact != null)
         {
-            @if (_lastArtifact.Type == "html" && _artifactPreviewUrl != null)
-            {
-                <iframe src="@_artifactPreviewUrl" class="artifact-preview-frame" title="@_lastArtifact.FileName"></iframe>
-            }
-            else
-            {
-                <div class="artifact-download-pane">
-                    <MudIcon Icon="@GetArtifactIcon(_lastArtifact.Type)" Class="artifact-download-icon" />
-                    <p class="artifact-download-name">@_lastArtifact.FileName</p>
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="DownloadArtifact" StartIcon="@Icons.Material.Filled.Download">
-                        Download
-                    </MudButton>
-                </div>
-            }
+            <ArtifactPreviewPanel Artifact="_lastArtifact" DownloadUrl="_artifactPreviewUrl" />
         }
     </PreviewContent>
 </DualPaneLayout>
@@ -771,16 +739,7 @@
             {
                 _lastArtifact = await ArtifactService.RecordArtifactAsync(
                     _userId, result, userMessage, _ccCts.Token);
-                _isPanelOpen = true;
-                if (_lastArtifact.Type == "html")
-                {
-                    try { _artifactPreviewUrl = await ArtifactService.GetDownloadUrlAsync(_userId, _lastArtifact.Id); }
-                    catch { _artifactPreviewUrl = null; }
-                }
-                else
-                {
-                    _artifactPreviewUrl = null;
-                }
+                await OpenArtifactPreview();
 
                 var responseMsg = $"I've generated **{_lastArtifact.FileName}** for you. Use the buttons below to preview or download it.";
                 _messages.Add(new ChatMessage(Role: "assistant", Content: responseMsg));
@@ -842,18 +801,19 @@
         }
     }
 
-    private async Task PreviewArtifact()
+    private async Task OpenArtifactPreview()
     {
-        if (_lastArtifact == null || _lastArtifact.Type != "html") return;
+        if (_lastArtifact == null) return;
         try
         {
-            var url = await ArtifactService.GetDownloadUrlAsync(_userId, _lastArtifact.Id);
-            NavManager.NavigateTo(url, forceLoad: true);
+            _artifactPreviewUrl = await ArtifactService.GetDownloadUrlAsync(_userId, _lastArtifact.Id);
         }
         catch (Exception)
         {
-            // preview URL generation failure — silently ignore
+            _artifactPreviewUrl = null;
         }
+        _isPanelOpen = true;
+        StateHasChanged();
     }
 
     private static string GetArtifactIcon(string type) => type switch

@@ -1,0 +1,58 @@
+<div class="artifact-card">
+    <div class="artifact-card-icon-area">
+        <MudIcon Icon="@GetTypeIcon(Artifact.Type)" Class="artifact-card-file-icon" />
+    </div>
+    <div class="artifact-card-info">
+        <span class="artifact-card-filename">@Artifact.FileName</span>
+        <span class="artifact-card-meta">@FormatSize(Artifact.SizeBytes) &middot; @Artifact.Type.ToUpperInvariant()</span>
+    </div>
+    <div class="artifact-card-actions">
+        <button class="artifact-card-btn artifact-card-btn-preview" @onclick="OnPreview">
+            <MudIcon Icon="@Icons.Material.Filled.Visibility" Class="artifact-card-btn-icon" />
+            Preview
+        </button>
+        <button class="artifact-card-btn artifact-card-btn-download" @onclick="OnDownload">
+            <MudIcon Icon="@Icons.Material.Filled.Download" Class="artifact-card-btn-icon" />
+            Download
+        </button>
+    </div>
+</div>
+
+<style>
+    .artifact-card { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); max-width: 480px; }
+    .artifact-card-icon-area { flex-shrink: 0; }
+    .artifact-card-file-icon { font-size: 2rem !important; color: var(--color-accent); }
+    .artifact-card-info { flex: 1; min-width: 0; }
+    .artifact-card-filename { display: block; font-size: 0.875rem; font-weight: 600; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .artifact-card-meta { display: block; font-size: 0.75rem; color: var(--color-text-secondary); margin-top: var(--space-1); }
+    .artifact-card-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
+    .artifact-card-btn { display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); font-size: 0.75rem; cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast); }
+    .artifact-card-btn:hover { background: var(--color-surface-sunken); color: var(--color-text-primary); }
+    .artifact-card-btn-preview { border-color: var(--color-accent); color: var(--color-accent); }
+    .artifact-card-btn-preview:hover { background: var(--color-accent-light); }
+    .artifact-card-btn-icon { font-size: 0.875rem !important; }
+</style>
+
+@code {
+    [Parameter] public ArtifactRecord Artifact { get; set; } = default!;
+    [Parameter] public EventCallback OnPreview { get; set; }
+    [Parameter] public EventCallback OnDownload { get; set; }
+
+    private static string GetTypeIcon(string type) => type switch
+    {
+        "docx" => Icons.Material.Filled.Description,
+        "xlsx" => Icons.Material.Filled.TableChart,
+        "pptx" => Icons.Material.Filled.Slideshow,
+        "html" => Icons.Material.Filled.Code,
+        "json" => Icons.Material.Filled.DataObject,
+        "code" => Icons.Material.Filled.Code,
+        _ => Icons.Material.Filled.InsertDriveFile,
+    };
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024:N0} KB";
+        return $"{bytes / (1024 * 1024.0):N1} MB";
+    }
+}
