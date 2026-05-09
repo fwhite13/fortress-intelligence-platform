@@ -230,7 +230,13 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
                 throw new InvalidOperationException($"Failed to start Fargate task: {reason}");
             }
 
-            var newEcsTask = runResp.Tasks[0];
+            if (runResp.Tasks.Count == 0)
+            {
+                _logger.LogError("RunTask returned no tasks and no failures for user {UserId} — possible throttle or transient error", userId);
+                throw new InvalidOperationException("ECS RunTask returned no tasks and no failures — possible throttle or transient error, retry recommended.");
+            }
+
+            var newEcsTask = runResp.Tasks.FirstOrDefault();
             var taskArn = newEcsTask.TaskArn ?? string.Empty;
 
             // 3. Create DB record with Starting status
