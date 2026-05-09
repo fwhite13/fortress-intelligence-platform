@@ -27,7 +27,7 @@ public class V1ProjectQueryService : IV1ProjectQueryService
             // Join to fait_dev.app_users by entra_oid to filter to this user's projects
             var results = await db.Database
                 .SqlQueryRaw<FaitV1Project>(
-                    @"SELECT p.id, p.name, p.description, p.custom_instructions, p.created_at, p.updated_at
+                    @"SELECT p.id, p.name, p.description, p.custom_instructions AS CustomInstructions, p.created_at AS CreatedAt, p.updated_at AS UpdatedAt
                       FROM fait_dev.projects p
                       INNER JOIN fait_dev.app_users u ON u.id = p.user_id
                       WHERE u.entra_oid = {0}
