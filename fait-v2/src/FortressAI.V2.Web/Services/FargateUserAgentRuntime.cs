@@ -326,7 +326,9 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
         Exception? postError = null;
         try
         {
-            response = await client.PostAsJsonAsync(url, request, ct);
+            var jsonContent = System.Net.Http.Json.JsonContent.Create(request);
+            var httpReq = new HttpRequestMessage(HttpMethod.Post, url) { Content = jsonContent };
+            response = await client.SendAsync(httpReq, HttpCompletionOption.ResponseHeadersRead, ct);
             response.EnsureSuccessStatusCode();
         }
         catch (Exception ex) when (IsConnectionRefused(ex))
@@ -363,7 +365,9 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
             {
                 session = await EnsureRunningAsync(userId, ct);
                 url = $"http://{session.PrivateIp}:{session.Port}/turn";
-                response = await client.PostAsJsonAsync(url, request, ct);
+                var retryContent = System.Net.Http.Json.JsonContent.Create(request);
+                var retryReq = new HttpRequestMessage(HttpMethod.Post, url) { Content = retryContent };
+                response = await client.SendAsync(retryReq, HttpCompletionOption.ResponseHeadersRead, ct);
                 response.EnsureSuccessStatusCode();
             }
             catch (Exception retryEx)
