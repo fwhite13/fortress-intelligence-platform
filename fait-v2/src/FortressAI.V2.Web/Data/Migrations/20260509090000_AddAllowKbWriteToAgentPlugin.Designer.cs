@@ -4,6 +4,7 @@ using FortressAI.V2.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace FortressAI.V2.Web.Data.Migrations
 {
     [DbContext(typeof(FaitV2DbContext))]
-    partial class FaitV2DbContextModelSnapshot : ModelSnapshot
+    [Migration("20260509090000_AddAllowKbWriteToAgentPlugin")]
+    partial class AddAllowKbWriteToAgentPlugin
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1100,60 +1103,6 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .HasDatabaseName("ix_scheduled_tasks_user_id");
 
                     b.ToTable("scheduled_tasks", (string)null);
-                });
-
-            modelBuilder.Entity("FortressAI.V2.Web.Data.Models.ScheduledTaskApproval", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("id");
-
-                    b.Property<string>("ActionSummary")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("varchar(2000)")
-                        .HasColumnName("action_summary");
-
-                    b.Property<string>("ActionType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)")
-                        .HasColumnName("action_type");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("expires_at");
-
-                    b.Property<string>("InterventionId")
-                        .IsRequired()
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("intervention_id");
-
-                    b.Property<DateTime?>("ResolvedAt")
-                        .HasColumnType("datetime(6)")
-                        .HasColumnName("resolved_at");
-
-                    b.Property<string>("ScheduledTaskId")
-                        .IsRequired()
-                        .HasMaxLength(36)
-                        .HasColumnType("varchar(36)")
-                        .HasColumnName("scheduled_task_id");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("varchar(20)")
-                        .HasColumnName("status");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("scheduled_task_approvals");
                 });
 
             modelBuilder.Entity("FortressAI.V2.Web.Data.Models.ScheduledTaskRun", b =>

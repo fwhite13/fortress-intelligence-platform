@@ -102,6 +102,24 @@ public class ContextEnvelopeService : IContextEnvelopeService
                     var skills = await _pluginAgentService.GetSkillsContentAsync(plugin, ct);
                     if (!string.IsNullOrEmpty(skills))
                         memorySummary = $"# Plugin Skills\n{skills}";
+
+                    // §5 — per-server read/write permissions in system prompt
+                    if (pluginMcpServers.Count > 0)
+                    {
+                        var mcpPermLines = pluginMcpServers.Select(s =>
+                            $"- {s.ServerId}: {(s.Write ? "read+write" : "read-only")}");
+                        var mcpPermSection = "## MCP Server Permissions\n" + string.Join("\n", mcpPermLines);
+                        memorySummary = memorySummary != null
+                            ? memorySummary + "\n\n" + mcpPermSection
+                            : mcpPermSection;
+                    }
+
+                    // §7 — KB write access status
+                    bool kbWriteAllowed = plugin.AllowKbWrite;
+                    string kbSection = $"## KB Write Access\nKB write access: {(kbWriteAllowed ? "allowed" : "not allowed")}";
+                    memorySummary = memorySummary != null
+                        ? memorySummary + "\n\n" + kbSection
+                        : kbSection;
                 }
             }
             catch (Exception ex)

@@ -80,10 +80,36 @@ const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN || '';
 // ─── Intervention hold-for-approval ───────────────────────────────────────
 const pendingInterventions = new Map(); // interventionId → { resolve, reject }
 
+// §G7 — Track which userIds are currently in a scheduled task turn
+const scheduledTaskUsers = new Set();
+
 async function requireApproval(userId, actionType, actionSummary, actionDetails) {
     const interventionId = crypto.randomUUID();
 
-    // POST intervention request to Blazor — holds harness until user responds
+    // §G7: If this user is in a scheduled task context, use async-safe path
+    if (scheduledTaskUsers.has(userId)) {
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
+            await fetch(`${FAIT_BASE_URL}/api/scheduled-tasks/approval/request`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    ScheduledTaskId: '', // not available at harness level — blank
+                    InterventionId: interventionId,
+                    ActionType: actionType,
+                    ActionSummary: actionSummary,
+                    UserId: userId
+                })
+            });
+        } catch (err) {
+            console.error('[harness] G7 requireApproval: failed to store approval request:', err.message);
+        }
+        // Immediately return denied — CC continues without waiting
+        return false;
+    }
+
+    // §G2: Real-time SignalR path (interactive turns)
     try {
         const headers = { 'Content-Type': 'application/json' };
         if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
@@ -921,8 +947,16 @@ app.post('/turn', async (req, res) => {
     const history     = rawBody.History     ?? rawBody.history;
     const forceTaskMode = rawBody.ForceTaskMode ?? rawBody.force_task_mode ?? false;
     const pluginAgentId = rawBody.PluginAgentId ?? rawBody.pluginAgentId ?? null;
-    const userEmail     = rawBody.UserEmail     ?? rawBody.userEmail     ?? null;
+    const userEmail       = rawBody.UserEmail       ?? rawBody.userEmail       ?? null;
+    const isScheduledTask = rawBody.IsScheduledTask ?? rawBody.isScheduledTask ?? false;
     const taskMode = forceTaskMode || classifyRequest(message, history);
+
+    // §G7 — track scheduled task context so requireApproval uses async-safe path
+    if (isScheduledTask === true && userId) {
+        scheduledTaskUsers.add(userId);
+    } else if (userId) {
+        scheduledTaskUsers.delete(userId);
+    }
     console.log(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, forceTaskMode=${forceTaskMode}, classifiedTaskMode=${taskMode}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
 
     if (!userId || !message) {
@@ -1069,6 +1103,8 @@ app.post('/turn', async (req, res) => {
         ccProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', content: scrubSecrets(chunk.toString()) }));
         ccProcess.on('close', async (code) => {
             clearTimeout(timeout);
+            // §G7 — clean up scheduled task context
+            if (userId) scheduledTaskUsers.delete(userId);
             let artifact = null;
             try {
                 artifact = await scanAndUploadArtifacts(userId, userWorkspaceDir);
@@ -1265,10 +1301,14 @@ app.post('/turn', async (req, res) => {
                 firePreferenceWrite(userId, message);
             }
             sendEvent({ type: 'done', inputTokens, outputTokens });
+            // §G7 — clean up scheduled task context
+            if (userId) scheduledTaskUsers.delete(userId);
             res.end();
         } catch (err) {
             console.error(`[harness] /turn: Bedrock ConverseStream error for userId=${userId}: ${err.message}`, err.stack);
             sendEvent({ type: 'error', errorMessage: scrubSecrets(err.message) });
+            // §G7 — clean up scheduled task context
+            if (userId) scheduledTaskUsers.delete(userId);
             res.end();
         }
     }

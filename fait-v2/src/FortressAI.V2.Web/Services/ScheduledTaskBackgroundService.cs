@@ -108,7 +108,8 @@ public class ScheduledTaskBackgroundService : BackgroundService
                     UserId: task.UserId,
                     Message: task.Prompt,
                     SystemPrompt: "You are a scheduled task executor. Complete the requested task and provide a concise response.",
-                    TaskMode: true
+                    TaskMode: true,
+                    IsScheduledTask: true   // §G7
                 );
 
                 var outputBuilder = new System.Text.StringBuilder();
@@ -167,6 +168,21 @@ public class ScheduledTaskBackgroundService : BackgroundService
                 }
 
                 await db.SaveChangesAsync(ct);
+
+                // Fire-and-forget notification — never blocks the background loop
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var notifyScope = _services.CreateScope();
+                        var notifySvc = notifyScope.ServiceProvider.GetRequiredService<IScheduledTaskNotificationService>();
+                        await notifySvc.SendCompletionEmailAsync(task, run, task.UserId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to send task notification for task {TaskId}", task.Id);
+                    }
+                });
             }
             else
             {
@@ -225,6 +241,21 @@ public class ScheduledTaskBackgroundService : BackgroundService
                 }
 
                 await db.SaveChangesAsync(ct);
+
+                // Fire-and-forget notification — never blocks the background loop
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var notifyScope = _services.CreateScope();
+                        var notifySvc = notifyScope.ServiceProvider.GetRequiredService<IScheduledTaskNotificationService>();
+                        await notifySvc.SendCompletionEmailAsync(task, run, task.UserId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to send task notification for task {TaskId}", task.Id);
+                    }
+                });
             }
         }
         catch (Exception ex)
@@ -255,6 +286,21 @@ public class ScheduledTaskBackgroundService : BackgroundService
             }
 
             await db.SaveChangesAsync(ct);
+
+            // Fire-and-forget notification — never blocks the background loop
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var notifyScope = _services.CreateScope();
+                    var notifySvc = notifyScope.ServiceProvider.GetRequiredService<IScheduledTaskNotificationService>();
+                    await notifySvc.SendCompletionEmailAsync(task, run, task.UserId);
+                }
+                catch (Exception notifyEx)
+                {
+                    _logger.LogWarning(notifyEx, "Failed to send task notification for task {TaskId}", task.Id);
+                }
+            });
         }
     }
 

@@ -8,6 +8,7 @@ public class AgentPlugin
     public string? SkillsDirectory { get; set; }
     public string AllowedMcpServers { get; set; } = "[]";
     public string AllowedRoles { get; set; } = "[]";
+    public bool AllowKbWrite { get; set; } = false;
     public bool IsActive { get; set; } = true;
     public string? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

@@ -14,12 +14,12 @@ public interface IPluginAgentService
     /// <summary>Create a new plugin (admin only — caller must enforce).</summary>
     Task<AgentPlugin> CreatePluginAsync(string name, string description, string? skillsDirectory,
         List<McpServerPermission> allowedMcpServers, List<string> allowedRoles,
-        string createdBy, CancellationToken ct = default);
+        string createdBy, bool allowKbWrite = false, CancellationToken ct = default);
 
     /// <summary>Update plugin (admin only).</summary>
     Task<AgentPlugin> UpdatePluginAsync(string pluginId, string name, string description,
         string? skillsDirectory, List<McpServerPermission> allowedMcpServers,
-        List<string> allowedRoles, bool isActive, CancellationToken ct = default);
+        List<string> allowedRoles, bool isActive, bool allowKbWrite = false, CancellationToken ct = default);
 
     /// <summary>Get skill content for a plugin (reads markdown from skills directory).</summary>
     Task<string> GetSkillsContentAsync(AgentPlugin plugin, CancellationToken ct = default);

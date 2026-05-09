@@ -56,7 +56,7 @@ public class PluginAgentService : IPluginAgentService
 
     public async Task<AgentPlugin> CreatePluginAsync(string name, string description,
         string? skillsDirectory, List<McpServerPermission> allowedMcpServers,
-        List<string> allowedRoles, string createdBy, CancellationToken ct = default)
+        List<string> allowedRoles, string createdBy, bool allowKbWrite = false, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var plugin = new AgentPlugin
@@ -66,6 +66,7 @@ public class PluginAgentService : IPluginAgentService
             SkillsDirectory = skillsDirectory,
             AllowedMcpServers = JsonSerializer.Serialize(allowedMcpServers, _json),
             AllowedRoles = JsonSerializer.Serialize(allowedRoles, _json),
+            AllowKbWrite = allowKbWrite,
             CreatedBy = createdBy,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -78,7 +79,7 @@ public class PluginAgentService : IPluginAgentService
 
     public async Task<AgentPlugin> UpdatePluginAsync(string pluginId, string name, string description,
         string? skillsDirectory, List<McpServerPermission> allowedMcpServers,
-        List<string> allowedRoles, bool isActive, CancellationToken ct = default)
+        List<string> allowedRoles, bool isActive, bool allowKbWrite = false, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var plugin = await db.AgentPlugins.FindAsync(new object[] { pluginId }, ct)
@@ -90,6 +91,7 @@ public class PluginAgentService : IPluginAgentService
         plugin.AllowedMcpServers = JsonSerializer.Serialize(allowedMcpServers, _json);
         plugin.AllowedRoles = JsonSerializer.Serialize(allowedRoles, _json);
         plugin.IsActive = isActive;
+        plugin.AllowKbWrite = allowKbWrite;
         plugin.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);

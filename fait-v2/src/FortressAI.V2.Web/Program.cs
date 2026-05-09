@@ -186,6 +186,7 @@ builder.Services.AddScoped<IPluginAgentService, PluginAgentService>();
 
 // Scheduled task service + background poller
 builder.Services.AddScoped<IScheduledTaskService, ScheduledTaskService>();
+builder.Services.AddScoped<IScheduledTaskNotificationService, ScheduledTaskNotificationService>();
 builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 
 // §15 — Conversation history + compaction pipeline
@@ -586,6 +587,129 @@ app.MapPost("/api/intervention/request", async (
     return Results.Ok(new { ok = true });
 }).AllowAnonymous(); // guarded by X-Internal-Token header, not auth cookie
 
+// §G7 — Scheduled task approval request (harness POSTs here when scheduled task needs approval for an action)
+app.MapPost("/api/scheduled-tasks/approval/request", async (
+    [FromBody] ScheduledTaskApprovalRequestBody request,
+    IDbContextFactory<FaitV2DbContext> dbFactory,
+    IMicrosoftTokenService microsoftTokenService,
+    IConfiguration config,
+    ILogger<Program> logger,
+    HttpContext httpContext,
+    CancellationToken ct) =>
+{
+    var expectedSecret = config["Feedback:InternalToken"] ?? "fait-v2-internal-feedback-token";
+    var providedSecret = httpContext.Request.Headers["X-Internal-Token"].FirstOrDefault();
+    if (string.IsNullOrEmpty(providedSecret) || providedSecret != expectedSecret)
+    {
+        logger.LogWarning("ScheduledTaskApprovalRequest: rejected — missing or invalid X-Internal-Token");
+        return Results.Unauthorized();
+    }
+
+    if (string.IsNullOrEmpty(request.ScheduledTaskId) || string.IsNullOrEmpty(request.InterventionId)
+        || string.IsNullOrEmpty(request.ActionType) || string.IsNullOrEmpty(request.ActionSummary))
+        return Results.BadRequest(new { error = "ScheduledTaskId, InterventionId, ActionType, and ActionSummary are required" });
+
+    await using var db = await dbFactory.CreateDbContextAsync(ct);
+
+    var approval = new FortressAI.V2.Web.Data.Models.ScheduledTaskApproval
+    {
+        ScheduledTaskId = request.ScheduledTaskId,
+        InterventionId = request.InterventionId,
+        ActionType = request.ActionType,
+        ActionSummary = request.ActionSummary,
+        Status = "pending",
+        CreatedAt = DateTime.UtcNow,
+        ExpiresAt = DateTime.UtcNow.AddHours(24),
+    };
+    db.ScheduledTaskApprovals.Add(approval);
+    await db.SaveChangesAsync(ct);
+
+    // Send email notification if UserId provided
+    if (!string.IsNullOrEmpty(request.UserId))
+    {
+        try
+        {
+            var user = await db.Users.FindAsync(new object[] { request.UserId }, ct);
+            if (user != null)
+            {
+                var token = await microsoftTokenService.GetValidAccessTokenAsync(user.EntraOid);
+                if (!string.IsNullOrEmpty(token))
+                {
+                    var emailBody = $"""
+                        <h3>Scheduled Task Approval Required</h3>
+                        <p>Your scheduled task wants to perform the following action:</p>
+                        <p><strong>Action:</strong> {request.ActionSummary}</p>
+                        <p>This approval request expires in 24 hours.</p>
+                        <p><em>To approve or deny, visit your FAIT dashboard and check the scheduled tasks page.</em></p>
+                        """;
+                    using var http = new HttpClient();
+                    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                    var emailPayload = new
+                    {
+                        message = new
+                        {
+                            subject = $"[FAIT] Approval Required: {request.ActionType}",
+                            body = new { contentType = "HTML", content = emailBody },
+                            toRecipients = new[] { new { emailAddress = new { address = user.Email } } }
+                        }
+                    };
+                    await http.PostAsJsonAsync("https://graph.microsoft.com/v1.0/me/sendMail", emailPayload, ct);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "ScheduledTaskApprovalRequest: failed to send notification email for userId={UserId}", request.UserId);
+        }
+    }
+
+    logger.LogInformation("ScheduledTaskApprovalRequest: created approvalId={ApprovalId}, interventionId={InterventionId}, actionType={ActionType}",
+        approval.Id, request.InterventionId, request.ActionType);
+
+    return Results.Ok(new { ok = true, approvalId = approval.Id });
+}).AllowAnonymous(); // guarded by X-Internal-Token
+
+// §G7 — Scheduled task approval respond (user approves/denies via dashboard)
+app.MapPost("/api/scheduled-tasks/approval/respond", async (
+    [FromBody] ScheduledTaskApprovalRespondBody request,
+    IDbContextFactory<FaitV2DbContext> dbFactory,
+    ILogger<Program> logger,
+    HttpContext httpContext,
+    CancellationToken ct) =>
+{
+    var userId = GetUserId(httpContext);
+    if (userId == null) return Results.Unauthorized();
+
+    if (string.IsNullOrEmpty(request.ApprovalId))
+        return Results.BadRequest(new { error = "ApprovalId is required" });
+
+    if (request.Response != "approved" && request.Response != "denied")
+        return Results.BadRequest(new { error = "Response must be 'approved' or 'denied'" });
+
+    await using var db = await dbFactory.CreateDbContextAsync(ct);
+    var approval = await db.ScheduledTaskApprovals.FindAsync(new object[] { request.ApprovalId }, ct);
+    if (approval == null) return Results.NotFound();
+
+    if (approval.Status != "pending")
+        return Results.BadRequest(new { error = "Approval already resolved" });
+
+    if (approval.ExpiresAt < DateTime.UtcNow)
+    {
+        approval.Status = "expired";
+        await db.SaveChangesAsync(ct);
+        return Results.BadRequest(new { error = "Approval expired" });
+    }
+
+    approval.Status = request.Response;
+    approval.ResolvedAt = DateTime.UtcNow;
+    await db.SaveChangesAsync(ct);
+
+    logger.LogInformation("ScheduledTaskApprovalRespond: approvalId={ApprovalId} set to {Response} by userId={UserId}",
+        request.ApprovalId, request.Response, userId);
+
+    return Results.Ok(new { ok = true });
+}).RequireAuthorization();
+
 // Memory search endpoint (for agent-harness search_memory tool)
 app.MapPost("/api/memory/search", async (
     [FromBody] MemorySearchRequest searchRequest,
@@ -859,4 +983,17 @@ public record InterventionRequestBody(
     string? ActionType,
     string? ActionSummary,
     string? ActionDetails
+);
+
+public record ScheduledTaskApprovalRequestBody(
+    string ScheduledTaskId,
+    string InterventionId,
+    string ActionType,
+    string ActionSummary,
+    string? UserId
+);
+
+public record ScheduledTaskApprovalRespondBody(
+    string ApprovalId,
+    string Response  // "approved" | "denied"
 );

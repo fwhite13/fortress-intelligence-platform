@@ -51,7 +51,9 @@ public record TurnRequest(
     bool ForceTaskMode = false,
     List<ChatHistoryEntry>? History = null,
     string? PluginAgentId = null,        // §6.1 — active specialist agent
-    string? UserEmail = null             // §G1 — Entra UPN for CC identity context
+    string? UserEmail = null,            // §G1 — Entra UPN for CC identity context
+    bool IsScheduledTask = false,        // §G7 — signals harness to use async-safe approval path
+    bool KbWriteAllowed = true           // §G3 — KB write permission for plugin agents
 );
 
 public record ChatHistoryEntry(string Role, string Content);

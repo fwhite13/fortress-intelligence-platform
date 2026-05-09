@@ -22,6 +22,7 @@ public class FaitV2DbContext : DbContext
     public DbSet<AgentPlugin> AgentPlugins => Set<AgentPlugin>();
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
+    public DbSet<ScheduledTaskApproval> ScheduledTaskApprovals => Set<ScheduledTaskApproval>();
     public DbSet<ConversationTask> ConversationTasks => Set<ConversationTask>();
     public DbSet<ProjectDocument> ProjectDocuments => Set<ProjectDocument>();
     public DbSet<UserDevOpsConnection> UserDevOpsConnections => Set<UserDevOpsConnection>();
@@ -412,6 +413,9 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.SkillsDirectory).HasColumnName("skills_directory").HasMaxLength(500);
             entity.Property(e => e.AllowedMcpServers).HasColumnName("allowed_mcp_servers").HasColumnType("longtext");
             entity.Property(e => e.AllowedRoles).HasColumnName("allowed_roles").HasColumnType("longtext");
+            entity.Property(e => e.AllowKbWrite)
+                .HasColumnName("allow_kb_write")
+                .HasDefaultValue(false);
             entity.Property(e => e.IsActive).HasColumnName("is_active");
             entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasMaxLength(36);
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");

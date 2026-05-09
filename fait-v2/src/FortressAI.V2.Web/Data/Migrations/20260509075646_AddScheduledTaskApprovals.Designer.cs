@@ -4,6 +4,7 @@ using FortressAI.V2.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace FortressAI.V2.Web.Data.Migrations
 {
     [DbContext(typeof(FaitV2DbContext))]
-    partial class FaitV2DbContextModelSnapshot : ModelSnapshot
+    [Migration("20260509075646_AddScheduledTaskApprovals")]
+    partial class AddScheduledTaskApprovals
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -38,10 +41,6 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .IsRequired()
                         .HasColumnType("longtext")
                         .HasColumnName("allowed_roles");
-
-                    b.Property<bool>("AllowKbWrite")
-                        .HasColumnType("tinyint(1)")
-                        .HasColumnName("allow_kb_write");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)")
