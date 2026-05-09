@@ -902,6 +902,9 @@
                     .ToList();
             }
 
+            var activePlugin = _activePluginAgentId != null
+                ? _availablePlugins.FirstOrDefault(p => p.Id == _activePluginAgentId)
+                : null;
             var request = new TurnRequest(
                 UserId: _userId,
                 Message: BuildContextualMessage(userMessage),
@@ -910,7 +913,8 @@
                 ForceTaskMode: _forceTaskMode,
                 History: contextHistory,
                 PluginAgentId: _activePluginAgentId,   // §6.1
-                UserEmail: _userEmail                   // §G1 — Entra UPN
+                UserEmail: _userEmail,                  // §G1 — Entra UPN
+                KbWriteAllowed: activePlugin?.AllowKbWrite ?? true  // §G3
             );
             _forceTaskMode = false; // reset after send
             _logger.LogInformation("RunStreamingTurnAsync: calling SendTurnAsync for userId={UserId}, requestMessageLen={Len}, historyCount={HistCount}",

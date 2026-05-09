@@ -288,6 +288,41 @@ async function invokeStitchTool(toolName, args, timeoutMs = 30000) {
     });
 }
 
+// ─── G4: MCP Tool Allowlist ────────────────────────────────────────────────
+// ADO#3109 — Only explicitly allowlisted tools may be dispatched via the generic route.
+// Named routes above (graph_*, ado_*, stitch_*, list_workspace_files, search_memory)
+// are inherently allowed by virtue of being registered; this catches the catch-all.
+const MCP_TOOL_ALLOWLIST = {
+    'graph': new Set([
+        'graph_list_emails', 'graph_list_calendar', 'graph_get_email',
+        'graph_send_email', 'graph_list_files', 'graph_get_file_content',
+        'graph_list_calendar_events'
+    ]),
+    'ado': new Set([
+        'ado_list_work_items', 'ado_get_work_item', 'ado_create_work_item',
+        'ado_update_work_item', 'ado_list_projects', 'ado_wiql_query'
+    ]),
+    'stitch': new Set([
+        'stitch_generate_screen', 'stitch_refine_screen', 'stitch_extract_design_dna',
+        'generate_screen_from_text', 'extract_design_context', 'fetch_screen_code',
+        'fetch_screen_image', 'list_projects', 'list_screens', 'refine_screen'
+    ]),
+};
+
+const BUILTIN_TOOLS = new Set([
+    'list_workspace_files', 'search_memory'
+]);
+
+function isToolAllowed(toolName) {
+    // Check against each server's allowlist
+    for (const [, tools] of Object.entries(MCP_TOOL_ALLOWLIST)) {
+        if (tools.has(toolName)) return true;
+    }
+    // Built-in harness tools are always allowed
+    if (BUILTIN_TOOLS.has(toolName)) return true;
+    return false;
+}
+
 // Stitch MCP health check
 app.get('/tools/stitch/health', (req, res) => {
     const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -773,11 +808,68 @@ app.post('/tools/list_workspace_files', async (req, res) => {
     }
 });
 
-// Tool dispatch — Stitch MCP tools
+// ─── Write tool classification ─────────────────────────────────────────────
+const WRITE_TOOL_PATTERNS = /create|update|delete|write|send|post|add|remove|modify|set/i;
+const KB_WRITE_PATTERNS = /kb_write|kb_upsert|kb_create|knowledge_write/i;
+
+function isWriteTool(toolName) {
+    return WRITE_TOOL_PATTERNS.test(toolName);
+}
+
+function isKbWriteTool(toolName) {
+    return KB_WRITE_PATTERNS.test(toolName);
+}
+
+// Tool dispatch — generic MCP tools with per-connector enforcement (ADO#3101) + KB write enforcement (ADO#3106)
 app.post('/tools/:toolName', async (req, res) => {
     const { toolName } = req.params;
     const args = req.body || {};
+    const reqPluginAgentId = args.pluginAgentId ?? null;
+    const reqMcpServerPermissions = args.mcpServerPermissions ?? null; // JSON array of {serverId, read, write}
+    const reqKbWriteAllowed = args.kbWriteAllowed ?? true;
 
+    // ── ADO#3106: KB write enforcement ──────────────────────────────────
+    if (reqPluginAgentId && isKbWriteTool(toolName)) {
+        if (!reqKbWriteAllowed) {
+            console.warn(`[harness] KB write blocked: tool=${toolName}, pluginAgentId=${reqPluginAgentId}`);
+            return res.status(403).json({ error: 'KB write not permitted for this agent' });
+        }
+    }
+
+    // ── ADO#3101: MCP server write enforcement ───────────────────────────
+    if (reqPluginAgentId && reqMcpServerPermissions) {
+        let permissions;
+        try {
+            permissions = typeof reqMcpServerPermissions === 'string'
+                ? JSON.parse(reqMcpServerPermissions)
+                : reqMcpServerPermissions;
+        } catch {
+            permissions = [];
+        }
+
+        // Determine which server this tool belongs to (if any)
+        // Convention: toolName may be prefixed with serverId_ or passed as args.serverId
+        const serverId = args.serverId ?? args.server_id ?? null;
+        if (serverId) {
+            const perm = permissions.find(p => p.serverId === serverId);
+            if (!perm) {
+                console.warn(`[harness] MCP tool blocked: server ${serverId} not in allowed list for pluginAgentId=${reqPluginAgentId}`);
+                return res.status(403).json({ error: 'MCP server not allowed for this agent' });
+            }
+            if (!perm.write && isWriteTool(toolName)) {
+                console.warn(`[harness] MCP write blocked: tool=${toolName}, server=${serverId}, pluginAgentId=${reqPluginAgentId}`);
+                return res.status(403).json({ error: 'Write access not allowed for this MCP server' });
+            }
+        }
+    }
+
+    // ── G4: MCP Tool Allowlist check (ADO#3109) ───────────────────────────
+    if (!isToolAllowed(toolName)) {
+        console.warn(`[harness] /tools/${toolName}: rejected — not in MCP_TOOL_ALLOWLIST`);
+        return res.status(403).json({ error: `Tool '${toolName}' is not in the allowed tool list` });
+    }
+
+    // ── Stitch MCP tools ──────────────────────────────────────────────────
     if (!STITCH_TOOLS.has(toolName)) {
         return res.status(404).json({ error: `Unknown tool: ${toolName}` });
     }
@@ -949,6 +1041,7 @@ app.post('/turn', async (req, res) => {
     const pluginAgentId = rawBody.PluginAgentId ?? rawBody.pluginAgentId ?? null;
     const userEmail       = rawBody.UserEmail       ?? rawBody.userEmail       ?? null;
     const isScheduledTask = rawBody.IsScheduledTask ?? rawBody.isScheduledTask ?? false;
+    const kbWriteAllowed  = rawBody.KbWriteAllowed  ?? rawBody.kbWriteAllowed  ?? true;
     const taskMode = forceTaskMode || classifyRequest(message, history);
 
     // §G7 — track scheduled task context so requireApproval uses async-safe path
@@ -1089,6 +1182,8 @@ app.post('/turn', async (req, res) => {
                 CLAUDE_CODE_ENTRYPOINT: 'fargate-harness',
                 CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
                 CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1',
+                HARNESS_KB_WRITE_ALLOWED: String(kbWriteAllowed),
+                HARNESS_PLUGIN_AGENT_ID: pluginAgentId || '',
             },
             stdio: ['pipe', 'pipe', 'pipe']
         });

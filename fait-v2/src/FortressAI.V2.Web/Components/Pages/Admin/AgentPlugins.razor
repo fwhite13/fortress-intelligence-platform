@@ -97,6 +97,44 @@
                        Label="Active"
                        Color="Color.Primary"
                        Class="admin-agents-form-active mt-3" />
+            <MudSwitch T="bool"
+                       @bind-Value="_formAllowKbWrite"
+                       Label="Allow KB Write"
+                       Color="Color.Warning"
+                       Class="admin-agents-form-allow-kb-write mt-3" />
+            <div class="admin-agents-form-section mt-4">
+                <div class="admin-agents-form-section-header">
+                    <span class="admin-agents-form-section-label">MCP Server Permissions</span>
+                    <MudIconButton Icon="@Icons.Material.Outlined.Add"
+                                   Size="Size.Small"
+                                   Color="Color.Primary"
+                                   OnClick="AddMcpServer"
+                                   Class="admin-agents-add-mcp-btn" />
+                </div>
+                @foreach (var (mcpEntry, idx) in _formMcpServers.Select((e, i) => (e, i)))
+                {
+                    <div class="admin-agents-mcp-row mt-2">
+                        <MudTextField @bind-Value="mcpEntry.ServerId"
+                                      Label="Server ID"
+                                      Placeholder="e.g. graph, ado, stitch"
+                                      Class="admin-agents-mcp-server-id" />
+                        <MudSwitch T="bool"
+                                   @bind-Value="mcpEntry.AllowWrite"
+                                   Label="Allow Write"
+                                   Color="Color.Warning"
+                                   Class="admin-agents-mcp-write-toggle" />
+                        <MudIconButton Icon="@Icons.Material.Outlined.Delete"
+                                       Size="Size.Small"
+                                       Color="Color.Error"
+                                       OnClick="@(() => RemoveMcpServer(idx))"
+                                       Class="admin-agents-mcp-delete-btn" />
+                    </div>
+                }
+                @if (_formMcpServers.Count == 0)
+                {
+                    <p class="admin-agents-mcp-empty">No MCP servers configured.</p>
+                }
+            </div>
         </div>
     </DialogContent>
     <DialogActions>
@@ -123,6 +161,14 @@
     private string _formDescription = string.Empty;
     private string? _formSkillsDirectory;
     private bool _formIsActive = true;
+    private bool _formAllowKbWrite = false;
+    private List<McpServerPermissionForm> _formMcpServers = new();
+
+    private class McpServerPermissionForm
+    {
+        public string ServerId { get; set; } = string.Empty;
+        public bool AllowWrite { get; set; } = false;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -159,12 +205,22 @@
     {
         try
         {
+            var existingMcpPerms = new List<McpServerPermission>();
+            try
+            {
+                existingMcpPerms = System.Text.Json.JsonSerializer.Deserialize<List<McpServerPermission>>(
+                    plugin.AllowedMcpServers,
+                    new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)) ?? new();
+            }
+            catch { }
+
             await PluginAgentService.UpdatePluginAsync(
                 plugin.Id, plugin.Name, plugin.Description,
                 plugin.SkillsDirectory,
-                new List<McpServerPermission>(),
+                existingMcpPerms,
                 new List<string>(),
-                newValue);
+                newValue,
+                plugin.AllowKbWrite);
             plugin.IsActive = newValue;
             Snackbar.Add($"{plugin.Name} {(newValue ? "enabled" : "disabled")}.", Severity.Success);
             StateHasChanged();
@@ -182,6 +238,8 @@
         _formDescription = string.Empty;
         _formSkillsDirectory = null;
         _formIsActive = true;
+        _formAllowKbWrite = false;
+        _formMcpServers = new();
         _showForm = true;
     }
 
@@ -192,6 +250,24 @@
         _formDescription = plugin.Description;
         _formSkillsDirectory = plugin.SkillsDirectory;
         _formIsActive = plugin.IsActive;
+        _formAllowKbWrite = plugin.AllowKbWrite;
+
+        try
+        {
+            var mcpPerms = System.Text.Json.JsonSerializer.Deserialize<List<McpServerPermission>>(
+                plugin.AllowedMcpServers,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)) ?? new();
+            _formMcpServers = mcpPerms.Select(p => new McpServerPermissionForm
+            {
+                ServerId = p.ServerId,
+                AllowWrite = p.Write
+            }).ToList();
+        }
+        catch
+        {
+            _formMcpServers = new();
+        }
+
         _showForm = true;
     }
 
@@ -201,9 +277,29 @@
         _editingPlugin = null;
     }
 
+    private void AddMcpServer()
+    {
+        _formMcpServers.Add(new McpServerPermissionForm());
+        StateHasChanged();
+    }
+
+    private void RemoveMcpServer(int idx)
+    {
+        if (idx >= 0 && idx < _formMcpServers.Count)
+        {
+            _formMcpServers.RemoveAt(idx);
+            StateHasChanged();
+        }
+    }
+
     private async Task SaveForm()
     {
         if (string.IsNullOrWhiteSpace(_formName)) return;
+
+        var mcpPermissions = _formMcpServers
+            .Where(s => !string.IsNullOrWhiteSpace(s.ServerId))
+            .Select(s => new McpServerPermission { ServerId = s.ServerId, Read = true, Write = s.AllowWrite })
+            .ToList();
 
         try
         {
@@ -214,9 +310,10 @@
                     _formName.Trim(),
                     _formDescription.Trim(),
                     string.IsNullOrWhiteSpace(_formSkillsDirectory) ? null : _formSkillsDirectory.Trim(),
-                    new List<McpServerPermission>(),
+                    mcpPermissions,
                     new List<string>(),
-                    _currentUserEmail ?? "admin");
+                    _currentUserEmail ?? "admin",
+                    _formAllowKbWrite);
                 _agents.Add(created);
                 _agents = _agents.OrderBy(p => p.Name).ToList();
                 Snackbar.Add($"Agent '{created.Name}' created.", Severity.Success);
@@ -229,9 +326,10 @@
                     _formName.Trim(),
                     _formDescription.Trim(),
                     string.IsNullOrWhiteSpace(_formSkillsDirectory) ? null : _formSkillsDirectory.Trim(),
-                    new List<McpServerPermission>(),
+                    mcpPermissions,
                     new List<string>(),
-                    _formIsActive);
+                    _formIsActive,
+                    _formAllowKbWrite);
                 var idx = _agents.FindIndex(p => p.Id == updated.Id);
                 if (idx >= 0) _agents[idx] = updated;
                 Snackbar.Add($"Agent '{updated.Name}' updated.", Severity.Success);
