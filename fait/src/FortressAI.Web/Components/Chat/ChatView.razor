@@ -761,7 +761,8 @@ else
                 UserId: Session.UserId.ToString(),
                 Message: text.Trim(),
                 History: chatHistory.Select(m => new ChatHistoryEntry(m.Role, m.Content)).ToList(),
-                TaskMode: false
+                TaskMode: false,
+                SystemPrompt: string.IsNullOrEmpty(effectiveSystemPrompt) ? null : effectiveSystemPrompt
             );
 
             await foreach (var evt in AgentRuntime.SendTurnAsync(Session.UserId.ToString(), turnRequest, streamingCts!.Token))
