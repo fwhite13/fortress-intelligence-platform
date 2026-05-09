@@ -192,6 +192,7 @@ builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<ICompactionService, CompactionService>();
 builder.Services.AddScoped<IRAGWriteService, RAGWriteService>();
+builder.Services.AddScoped<IRAGReadService, RAGReadService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IConversationTitleService, ConversationTitleService>();
 builder.Services.AddSingleton<ITaskListNotifier, TaskListNotifier>();
@@ -334,6 +335,31 @@ app.MapGet("/api/agent/status", async (
     catch (Exception)
     {
         return Results.Ok(new { status = "Error", message = "Status check failed" });
+    }
+}).RequireAuthorization();
+
+// Artifact download redirect — resolves presigned URL server-side (auth required)
+app.MapGet("/api/artifacts/{artifactId}/download", async (
+    string artifactId,
+    HttpContext httpContext,
+    IArtifactService artifactSvc,
+    IUserService userSvc) =>
+{
+    var entraOid = httpContext.User.FindFirst("oid")?.Value
+                ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+    if (string.IsNullOrEmpty(entraOid)) return Results.Unauthorized();
+
+    var user = await userSvc.GetByEntraOidAsync(entraOid);
+    if (user == null) return Results.Unauthorized();
+
+    try
+    {
+        var url = await artifactSvc.GetDownloadUrlAsync(user.Id, artifactId);
+        return Results.Redirect(url);
+    }
+    catch (InvalidOperationException)
+    {
+        return Results.NotFound();
     }
 }).RequireAuthorization();
 
@@ -522,6 +548,31 @@ app.MapPost("/api/feedback/{id}/status", async (
     return Results.Ok();
 }).WithMetadata(new AllowAnonymousAttribute());
 
+// Memory search endpoint (for agent-harness search_memory tool)
+app.MapPost("/api/memory/search", async (
+    [FromBody] MemorySearchRequest searchRequest,
+    IRAGReadService ragReadService,
+    HttpContext httpContext,
+    CancellationToken ct) =>
+{
+    var userId = GetUserId(httpContext);
+    if (userId == null) return Results.Unauthorized();
+
+    var results = await ragReadService.SearchAsync(
+        userId,
+        searchRequest.Query,
+        searchRequest.TopK ?? 5,
+        ct);
+
+    return Results.Ok(results.Select(r => new
+    {
+        topicSlug = r.TopicSlug,
+        source = r.Source,
+        content = r.Content,
+        similarity = r.Similarity,
+    }));
+}).RequireAuthorization();
+
 // Blazor components — all routes require auth
 app.MapRazorComponents<App>()
    .AddInteractiveServerRenderMode()
@@ -616,3 +667,5 @@ public record AssistantInjectRequest(
     string? SourceId,
     string? Title
 );
+
+public record MemorySearchRequest(string Query, int? TopK);

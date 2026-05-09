@@ -9,6 +9,7 @@ public class ContextEnvelopeService : IContextEnvelopeService
     private readonly IForgeKbService _forgeKbService;
     private readonly IConnectorService _connectorService;
     private readonly IPluginAgentService _pluginAgentService;
+    private readonly IRAGReadService _ragReadService;
     private readonly ILogger<ContextEnvelopeService> _logger;
 
     public ContextEnvelopeService(
@@ -16,12 +17,14 @@ public class ContextEnvelopeService : IContextEnvelopeService
         IForgeKbService forgeKbService,
         IConnectorService connectorService,
         IPluginAgentService pluginAgentService,
+        IRAGReadService ragReadService,
         ILogger<ContextEnvelopeService> logger)
     {
         _env = env;
         _forgeKbService = forgeKbService;
         _connectorService = connectorService;
         _pluginAgentService = pluginAgentService;
+        _ragReadService = ragReadService;
         _logger = logger;
     }
 
@@ -104,6 +107,26 @@ public class ContextEnvelopeService : IContextEnvelopeService
             {
                 _logger.LogWarning(ex, "Failed to load plugin {PluginId} for envelope", pluginId);
             }
+        }
+
+        // §4.3 — pgvector memory summary: top-3 relevant memory chunks
+        try
+        {
+            var memChunks = await _ragReadService.SearchAsync(userId, taskInstructions, topK: 3, ct);
+            if (memChunks.Count > 0)
+            {
+                var memSection = "## Relevant Memory\n" +
+                    string.Join("\n", memChunks.Select(c =>
+                        $"{c.TopicSlug}: {c.Content.Substring(0, Math.Min(200, c.Content.Length))}"));
+
+                memorySummary = memorySummary != null
+                    ? memorySummary + "\n\n" + memSection
+                    : memSection;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "ContextEnvelopeService: failed to retrieve memory summary for user {UserId}", userId);
         }
 
         return new CCContextEnvelope

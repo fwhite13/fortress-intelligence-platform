@@ -506,6 +506,36 @@ app.post('/tools/ado_create_work_item', async (req, res) => {
     }
 });
 
+// ─── search_memory tool handler (ADO#3102) ────────────────────────────────
+app.post('/tools/search_memory', async (req, res) => {
+    const { userId, query, topK = 5 } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!query) return res.status(400).json({ error: 'query required' });
+
+    const blazorBase = process.env.BLAZOR_BASE_URL || 'http://localhost:5000';
+    const internalToken = process.env.INTERNAL_API_TOKEN || '';
+
+    try {
+        const resp = await fetch(`${blazorBase}/api/memory/search`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(internalToken ? { 'Authorization': `Bearer ${internalToken}` } : {}),
+            },
+            body: JSON.stringify({ query, topK }),
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`memory/search failed (${resp.status}): ${text}`);
+        }
+        const results = await resp.json();
+        res.json({ results });
+    } catch (err) {
+        console.error('[harness] search_memory error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Tool dispatch — Stitch MCP tools
 app.post('/tools/:toolName', async (req, res) => {
     const { toolName } = req.params;
