@@ -1446,6 +1446,7 @@ app.post('/turn', async (req, res) => {
             if (hasPreferenceSignal(message)) {
                 firePreferenceWrite(userId, message);
             }
+            console.log(`[harness] /turn: done event — inputTokens=${inputTokens}, outputTokens=${outputTokens}`);
             sendEvent({ type: 'done', inputTokens, outputTokens });
             // §G7 — clean up scheduled task context
             if (userId) scheduledTaskUsers.delete(userId);
