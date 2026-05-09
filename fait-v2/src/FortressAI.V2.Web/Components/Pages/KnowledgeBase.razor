@@ -508,12 +508,24 @@
         var oid = authState.User.FindFirst("oid")?.Value
                ?? authState.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
 
+        if (string.IsNullOrEmpty(oid))
+        {
+            _logger.LogWarning("KnowledgeBase: could not extract OID from auth claims");
+            _authError = "Please log in to access the Knowledge Base.";
+            _loading = false;
+            return;
+        }
+
         if (!string.IsNullOrEmpty(oid))
         {
             await using var db = await DbFactory.CreateDbContextAsync();
             var dbUser = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == oid);
+            if (dbUser == null)
+                _logger.LogWarning("KnowledgeBase: no user record found for oid={Oid}", oid);
             _userId = dbUser?.Id ?? "";
         }
+
+        _logger.LogInformation("KnowledgeBase init: resolved userId={UserId} from oid={Oid}", _userId, oid);
 
         if (string.IsNullOrEmpty(_userId))
         {
@@ -536,6 +548,8 @@
             {
                 _personalDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Personal, _userId);
                 _personalDocumentsLoadError = null;
+                _logger.LogInformation("KnowledgeBase init: loaded personalEntries={PersonalCount} teams={TeamCount} personalDocs={DocCount} for userId={UserId}",
+                    _personalEntries.Count, _teams.Count, _personalDocuments.Count, _userId);
             }
             catch (Exception ex)
             {
