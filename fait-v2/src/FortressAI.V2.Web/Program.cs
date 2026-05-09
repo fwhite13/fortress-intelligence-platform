@@ -191,8 +191,8 @@ builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 // §15 — Conversation history + compaction pipeline
 builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddScoped<ICompactionService, CompactionService>();
-builder.Services.AddScoped<IRAGWriteService, RAGWriteService>();
-builder.Services.AddScoped<IRAGReadService, RAGReadService>();
+builder.Services.AddSingleton<IRAGWriteService, RAGWriteService>();
+builder.Services.AddSingleton<IRAGReadService, RAGReadService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IConversationTitleService, ConversationTitleService>();
 builder.Services.AddSingleton<ITaskListNotifier, TaskListNotifier>();
