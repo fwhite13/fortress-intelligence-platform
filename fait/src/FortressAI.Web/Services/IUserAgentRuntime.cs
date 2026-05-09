@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 
 namespace FortressAI.Web.Services;
 
@@ -59,11 +60,11 @@ public record TurnRequest(
 public record ChatHistoryEntry(string Role, string Content);
 
 public record HarnessEvent(
-    string Type,         // "text" | "log" | "done" | "error" | "mode_switch"
-    string? Content = null,
-    int? ExitCode = null,
-    string? ErrorMessage = null,
-    int? InputTokens = null,
-    int? OutputTokens = null,
-    string? Payload = null   // JSON payload for mode_switch and future event types
+    [property: JsonPropertyName("type")] string Type,         // "text" | "log" | "done" | "error" | "mode_switch"
+    [property: JsonPropertyName("content")] string? Content = null,
+    [property: JsonPropertyName("exitCode")] int? ExitCode = null,
+    [property: JsonPropertyName("errorMessage")] string? ErrorMessage = null,
+    [property: JsonPropertyName("inputTokens")] int? InputTokens = null,
+    [property: JsonPropertyName("outputTokens")] int? OutputTokens = null,
+    [property: JsonPropertyName("payload")] string? Payload = null   // JSON payload for mode_switch and future event types
 );
