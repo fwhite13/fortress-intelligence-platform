@@ -756,260 +756,37 @@ else
             var fullResponse = new System.Text.StringBuilder();
             int inputTokens = 0, outputTokens = 0;
 
-            if (availableTools.Any())
+            // Route through Fargate harness (SSE streaming via IUserAgentRuntime)
+            var turnRequest = new TurnRequest(
+                UserId: Session.UserId.ToString(),
+                Message: text.Trim(),
+                History: chatHistory.Select(m => new ChatHistoryEntry(m.Role, m.Content)).ToList(),
+                TaskMode: false
+            );
+
+            await foreach (var evt in AgentRuntime.SendTurnAsync(Session.UserId.ToString(), turnRequest, streamingCts!.Token))
             {
-                // Inject tool-use guidance into system prompt so the model is judicious about tool calls
-                var hasSearchTool = availableTools.Any(t => t.FullName.Contains("search", StringComparison.OrdinalIgnoreCase));
-                var hasDevOpsTool = availableTools.Any(t => t.FullName.StartsWith("devops__", StringComparison.OrdinalIgnoreCase));
+                if (streamingCts.IsCancellationRequested) break;
 
-                if (hasDevOpsTool)
+                if (evt.Type == "text")
                 {
-                    var devOpsGuidance = @"
-## Azure DevOps Tools Available
-You have access to the user's Azure DevOps organization. Use these tools when the user asks about:
-- Work items, bugs, tasks, user stories, sprints, backlogs
-- Git repositories, branches, clone URLs
-- Build or release pipelines
-- Triggering pipeline runs
-
-**Tool usage guidance:**
-- Use `list_devops_projects` first if you don't know the project name.
-- For work item queries, use `query_work_items` with a WIQL query (SELECT...) or natural language description.
-- Default WIQL for open items assigned to user: SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo] FROM WorkItems WHERE [System.AssignedTo]=@Me AND [System.State]<>'Closed' AND [System.State]<>'Resolved' ORDER BY [System.ChangedDate] DESC
-- The `project` parameter is optional for `query_work_items` — if omitted, it defaults to the first project.
-- Use `trigger_pipeline` only when the user explicitly requests it (it triggers a real build).
-
-**Write tools available:**
-- `devops__create_work_item` — create a new work item (Task, Bug, User Story, etc.)
-- `devops__update_work_item` — update state, title, description, assigned to, priority, tags
-- `devops__add_work_item_comment` — add a comment/discussion entry to a work item
-- `devops__create_branch` — create a new Git branch from a base ref
-- `devops__create_pull_request` — create a pull request between branches
-- `devops__update_pull_request` — complete, abandon, or update a pull request
-
-Use write tools only when the user explicitly asks to create, update, or modify something. Always confirm the action with the user before executing write operations (creating items, completing PRs, etc.).";
-                    effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
-                        ? devOpsGuidance
-                        : effectiveSystemPrompt + "\n\n" + devOpsGuidance;
+                    fullResponse.Append(evt.Content ?? "");
+                    streamingMessage.Content = fullResponse.ToString();
+                    StateHasChanged();
+                    await ScrollToBottom();
                 }
-
-                var hasM365Tools = availableTools.Any(t => t.FullName.StartsWith("m365__", StringComparison.OrdinalIgnoreCase));
-                if (hasM365Tools)
+                else if (evt.Type == "done")
                 {
-                    var userEmail = Session.CurrentUser?.Email;
-                    var ownEmailBullet = string.IsNullOrEmpty(userEmail)
-                        ? "- The authenticated user's email address is not available in this session — use m365 tools to look up recipient addresses as needed."
-                        : "- The authenticated user's own email address is provided in your context (see system prompt). Use it as the canonical source — do not look it up.";
-                    var m365Guidance = $@"
-## Microsoft 365 Tools Available
-You have access to the user's Microsoft 365 account via Graph API tools:
-- `m365__list_emails` — list recent inbox emails (supports top/filter params)
-- `m365__get_email` — get full email content by ID
-- `m365__send_email` — send an email (to, subject, body)
-- `m365__list_calendar_events` — list calendar events in a date range
-- `m365__create_calendar_event` — create a new calendar event
-
-Use these tools proactively when the user asks about their email, inbox, calendar, meetings, or scheduling.
-
-**CRITICAL — Email sending confirmation (MANDATORY — no exceptions):**
-Before calling `m365__send_email`, you MUST ALWAYS present a preview to the user in your chat response showing:
-- To: [recipient address]
-- Subject: [subject line]
-- Message preview: [first 200 characters of the body]
-Then ask: Shall I send this email? (yes / no)
-
-Wait for the user's explicit yes (or equivalent confirmation) before calling `m365__send_email`.
-If the user says no, cancel, stop, or similar — do NOT send. Offer to edit instead.
-This rule applies even if the user previously asked you to send — you must still show the preview and get confirmation for that specific send.
-Email sending is irreversible. Never skip this step.
-
-**CRITICAL — Email addresses:**
-- NEVER fabricate, guess, or infer email addresses. This is a strict rule with no exceptions.
-- If you need a recipient's email address and do not have it from the conversation context, you MUST either:
-  (a) Call `m365__list_emails` or search the inbox to look up the person, OR
-  (b) Ask the user to provide the email address directly.
-{ownEmailBullet}
-- Never use personal email domains (gmail.com, outlook.com, hotmail.com, yahoo.com, etc.) for work contacts unless the user explicitly provides such an address.";
-                    effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
-                        ? m365Guidance
-                        : effectiveSystemPrompt + "\n\n" + m365Guidance;
+                    inputTokens = evt.InputTokens ?? 0;
+                    outputTokens = evt.OutputTokens ?? 0;
                 }
-
-                // Pre-warm M365 token — trigger refresh before Bedrock streaming starts.
-                // Prevents cold-start token refresh during tool execution → null token → Bedrock retry loop → maxIterations hit.
-                if (hasM365Tools)
+                else if (evt.Type == "error")
                 {
-                    try
-                    {
-                        var m365AccessToken = await M365TokenSvc.GetValidAccessTokenAsync(Session.UserId);
-                        if (m365AccessToken == null)
-                        {
-                            // Token null (expired/refresh failed) — remove M365 tools so Bedrock doesn't retry 5x
-                            Logger.LogWarning("[M365] Token null for user {UserId} — removing M365 tools from this request", Session.UserId);
-                            availableTools = availableTools.Where(t => !t.FullName.StartsWith("m365__", StringComparison.OrdinalIgnoreCase)).ToList();
-                            hasM365Tools = false;
-                        }
-                        else
-                        {
-                            Logger.LogInformation("[M365] Token validated for user {UserId}", Session.UserId);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogWarning(ex, "[M365] Token validation failed for user {UserId} — removing M365 tools", Session.UserId);
-                        availableTools = availableTools.Where(t => !t.FullName.StartsWith("m365__", StringComparison.OrdinalIgnoreCase)).ToList();
-                        hasM365Tools = false;
-                    }
-                }
-
-                if (hasSearchTool)
-                {
-                    var toolGuidance = @"
-## Tool Usage Guidelines
-You have access to tools including web search. Use them wisely:
-- **Do NOT use web search** for tasks you can handle from your own knowledge — creative writing, code generation, general knowledge questions, math, analysis, summarization, or conversation.
-- **DO use web search** only when the user is asking for current/real-time information you genuinely do not have (recent news, live prices, current events, specific URLs, up-to-date statistics, or when they explicitly ask you to search).
-- When in doubt, answer directly first. If the user wants you to search, they will ask.
-- Never use web search as a stalling tactic or to appear more thorough — it slows down the response and adds no value when you already know the answer.";
-                    effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
-                        ? toolGuidance
-                        : effectiveSystemPrompt + "\n\n" + toolGuidance;
-                }
-
-                // Tool-enabled streaming with agentic loop
-                var bedrockTools = availableTools.Select(t => new BedrockToolSpec
-                {
-                    Name = t.FullName,
-                    Description = t.Description ?? "",
-                    InputSchemaJson = t.InputSchema.GetRawText()
-                }).ToList();
-
-                var historyForLoop = new List<MessageDto>(chatHistory);
-                // maxIterations = 5: caps tool call loops to prevent runaway agentic cycles.
-                // Primary mitigation for tool-call-limit UX: the system prompt instructs the model
-                // to output content directly in the chat response rather than repeatedly calling tools.
-                const int maxIterations = 5;
-                int iteration = 0;
-
-                while (iteration++ < maxIterations)
-                {
-                    _activeToolCalls.Clear();
-                    var toolCalls = new List<ToolCallAccumulator>();
-                    string? stopReason = null;
-                    var iterationText = new System.Text.StringBuilder();
-
-                    await foreach (var chunk in BedrockSvc.StreamChatWithToolsAsync(historyForLoop, effectiveSystemPrompt, currentModel, bedrockTools, ct: streamingCts!.Token))
-                    {
-                        if (streamingCts.IsCancellationRequested) break;
-
-                        if (chunk.Type == "text")
-                        {
-                            iterationText.Append(chunk.Text);
-                            fullResponse.Append(chunk.Text);
-                            streamingMessage.Content = fullResponse.ToString();
-                            StateHasChanged();
-                            await ScrollToBottom();
-                        }
-                        else if (chunk.Type == "tool_use_start")
-                        {
-                            var acc = new ToolCallAccumulator(chunk.ToolUseId!, chunk.ToolName!);
-                            toolCalls.Add(acc);
-                            _currentToolName = chunk.ToolName;
-                            _toolCallInProgress = true;
-                            StateHasChanged();
-                        }
-                        else if (chunk.Type == "tool_input_delta")
-                        {
-                            toolCalls.LastOrDefault()?.AppendInput(chunk.Text ?? "");
-                        }
-                        else if (chunk.Type == "done")
-                        {
-                            stopReason = chunk.StopReason;
-                            inputTokens += chunk.InputTokens;   // accumulate across tool iterations
-                            outputTokens += chunk.OutputTokens; // accumulate across tool iterations
-                        }
-                        else if (chunk.Type == "error")
-                        {
-                            fullResponse.Append($"\n\n⚠️ {chunk.Text}");
-                            streamingMessage.Content = fullResponse.ToString();
-                            StateHasChanged();
-                        }
-                    }
-
-                    // If no tool calls or stop reason is end_turn, we're done
-                    if (!toolCalls.Any() || stopReason != "tool_use")
-                    {
-                        _toolCallInProgress = false;
-                        _currentToolName = null;
-                        StateHasChanged();
-                        break;
-                    }
-
-                    // Build assistant turn with text + tool_use blocks
-                    var assistantContentParts = new System.Text.StringBuilder("[");
-                    if (iterationText.Length > 0)
-                    {
-                        assistantContentParts.Append($"{{\"type\":\"text\",\"text\":{System.Text.Json.JsonSerializer.Serialize(iterationText.ToString())}}},");
-                    }
-                    foreach (var tc in toolCalls)
-                    {
-                        assistantContentParts.Append($"{{\"type\":\"tool_use\",\"id\":{System.Text.Json.JsonSerializer.Serialize(tc.ToolUseId)},\"name\":{System.Text.Json.JsonSerializer.Serialize(tc.ToolName)},\"input\":{tc.GetInputJson()}}},");
-                    }
-                    var assistantJson = assistantContentParts.ToString().TrimEnd(',') + "]";
-                    historyForLoop.Add(new MessageDto { Role = "assistant", Content = assistantJson });
-
-                    // Execute tool calls
-                    var toolResultParts = new System.Text.StringBuilder("[");
-                    foreach (var tc in toolCalls)
-                    {
-                        _currentToolName = tc.ToolName;
-                        StateHasChanged();
-                        var toolResult = await McpToolSvc.ExecuteToolAsync(
-                            Session.UserId, conversation.Id, tc.ToolName, tc.GetInputElement(), streamingCts!.Token);
-                        var resultContent = toolResult.Success ? (toolResult.Content ?? "") : $"Tool error: {toolResult.ErrorMessage}";
-                        toolResultParts.Append($"{{\"type\":\"tool_result\",\"tool_use_id\":{System.Text.Json.JsonSerializer.Serialize(tc.ToolUseId)},\"content\":{System.Text.Json.JsonSerializer.Serialize(resultContent)}}},");
-                    }
-                    var toolResultJson = toolResultParts.ToString().TrimEnd(',') + "]";
-                    historyForLoop.Add(new MessageDto { Role = "user", Content = toolResultJson });
-                }
-
-                // Guard: hit max iterations
-                if (iteration >= maxIterations)
-                {
-                    fullResponse.Append("\n\n⚠️ *Tool call limit reached for this response.*");
+                    fullResponse.Append($"\n\n⚠️ {evt.ErrorMessage ?? "An error occurred."}");
                     streamingMessage.Content = fullResponse.ToString();
                     StateHasChanged();
                 }
-
-                _toolCallInProgress = false;
-                _currentToolName = null;
-            }
-            else
-            {
-                // No tools — use existing streaming
-                await foreach (var chunk in BedrockSvc.StreamChatAsync(chatHistory, effectiveSystemPrompt, currentModel))
-                {
-                    if (streamingCts!.IsCancellationRequested) break;
-
-                    if (chunk.Type == "text")
-                    {
-                        fullResponse.Append(chunk.Text);
-                        streamingMessage.Content = fullResponse.ToString();
-                        StateHasChanged();
-                        await ScrollToBottom();
-                    }
-                    else if (chunk.Type == "done")
-                    {
-                        inputTokens = chunk.InputTokens;
-                        outputTokens = chunk.OutputTokens;
-                    }
-                    else if (chunk.Type == "error")
-                    {
-                        fullResponse.Append($"\n\n⚠️ {chunk.Text}");
-                        streamingMessage.Content = fullResponse.ToString();
-                        StateHasChanged();
-                    }
-                }
+                // "log" events: swallow silently
             }
 
             // Save assistant message
