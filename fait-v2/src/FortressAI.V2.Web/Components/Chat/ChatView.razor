@@ -44,7 +44,15 @@
 
     @* Message history — scrollable *@
     <div class="chat-messages" @ref="_messagesRef">
-        @if (!_messages.Any())
+        @if (_initError != null)
+        {
+            <div class="chat-empty-state">
+                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Class="chat-empty-icon" Style="color: var(--color-error, #f44336)" />
+                <p class="chat-empty-title">Something went wrong</p>
+                <p class="chat-empty-subtitle">@_initError</p>
+            </div>
+        }
+        else if (!_messages.Any())
         {
             <div class="chat-empty-state">
                 <MudIcon Icon="@Icons.Material.Filled.Chat" Class="chat-empty-icon" />
@@ -290,6 +298,7 @@
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private List<ChatMessage> _messages = new();
+    private string? _initError = null;
     private string? _conversationId;
     private string _inputText = "";
     private bool _isStreaming = false;
@@ -355,8 +364,10 @@
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "ChatView OnInitializedAsync failed");
-            throw;
+            _logger.LogError(ex, "ChatView OnInitializedAsync failed for entraOid {EntraOid}", 
+                AuthState == null ? "(no AuthState)" : "(see above)");
+            _initError = ex.Message;
+            StateHasChanged();
         }
     }
 
