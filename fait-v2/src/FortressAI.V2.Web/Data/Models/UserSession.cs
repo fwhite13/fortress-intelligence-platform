@@ -50,6 +50,10 @@ public class UserSession
     [MaxLength(200)]
     public string? FargateSessionId { get; set; }
 
+    [Column("task_definition_revision")]
+    [MaxLength(100)]
+    public string? TaskDefinitionRevision { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

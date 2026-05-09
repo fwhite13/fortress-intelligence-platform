@@ -90,8 +90,38 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
 
                 if (harnessReachable)
                 {
-                    _logger.LogDebug("Returning existing running Fargate task for user {UserId}: {TaskArn}", userId, existing.TaskArn);
-                    return MapToRuntimeSession(existing);
+                    // Version check — stop and replace if task def revision changed
+                    var currentRevision = TaskDefinition;
+                    if (!string.IsNullOrEmpty(existing.TaskDefinitionRevision)
+                        && existing.TaskDefinitionRevision != currentRevision)
+                    {
+                        _logger.LogInformation(
+                            "EnsureRunningAsync: task def revision changed ({OldRev} → {NewRev}) for user {UserId} — replacing",
+                            existing.TaskDefinitionRevision, currentRevision, userId);
+                        try
+                        {
+                            await _ecs.StopTaskAsync(new StopTaskRequest
+                            {
+                                Cluster = ClusterArn,
+                                Task = existing.TaskArn,
+                                Reason = $"Task def revision changed: {existing.TaskDefinitionRevision} → {currentRevision}"
+                            }, ct);
+                        }
+                        catch (Exception stopEx)
+                        {
+                            _logger.LogWarning(stopEx, "EnsureRunningAsync: failed to stop stale revision task {TaskArn}", existing.TaskArn);
+                        }
+                        existing.FargateStatus = "Stopped";
+                        existing.EndedAt = DateTime.UtcNow;
+                        existing.UpdatedAt = DateTime.UtcNow;
+                        await db.SaveChangesAsync(ct);
+                        // Fall through to launch new task
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Returning existing running Fargate task for user {UserId}: {TaskArn}", userId, existing.TaskArn);
+                        return MapToRuntimeSession(existing);
+                    }
                 }
 
                 // Health check failed — invalidate stale session and fall through to launch a new task
@@ -216,6 +246,7 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
                 TaskArn = taskArn,
                 FargateStatus = "Starting",
                 FargateSessionId = sessionId,
+                TaskDefinitionRevision = TaskDefinition,
                 StartedAt = DateTime.UtcNow,
                 LastActiveAt = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow,
