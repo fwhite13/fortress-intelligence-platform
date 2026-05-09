@@ -536,6 +536,83 @@ app.post('/tools/search_memory', async (req, res) => {
     }
 });
 
+// ─── Stitch-specific route handlers (ADO#3099) ────────────────────────────
+app.post('/tools/stitch_generate_screen', async (req, res) => {
+    const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    if (!credPath || !existsSync(credPath)) {
+        return res.status(503).json({ error: 'Stitch unavailable — GCP credentials not configured' });
+    }
+    const { userId, prompt, design_dna } = req.body || {};
+    const args = { prompt };
+    if (design_dna !== undefined) args.design_dna = design_dna;
+    try {
+        const result = await invokeStitchTool('generate_screen_from_text', args);
+        // Extract html, screenId, projectId from result
+        const content = result?.content;
+        let parsed = {};
+        if (Array.isArray(content)) {
+            const textBlock = content.find(b => b.type === 'text');
+            if (textBlock?.text) {
+                try { parsed = JSON.parse(textBlock.text); } catch { parsed = { html: textBlock.text }; }
+            }
+        } else if (typeof result === 'object') {
+            parsed = result;
+        }
+        res.json({
+            html: parsed.html || parsed.code || '',
+            screenId: parsed.screenId || parsed.screen_id || null,
+            projectId: parsed.projectId || parsed.project_id || null,
+        });
+    } catch (err) {
+        console.error('[harness] stitch_generate_screen error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/tools/stitch_refine_screen', async (req, res) => {
+    const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    if (!credPath || !existsSync(credPath)) {
+        return res.status(503).json({ error: 'Stitch unavailable — GCP credentials not configured' });
+    }
+    const { userId, screen_id, prompt } = req.body || {};
+    try {
+        const result = await invokeStitchTool('refine_screen', { screen_id, prompt });
+        const content = result?.content;
+        let parsed = {};
+        if (Array.isArray(content)) {
+            const textBlock = content.find(b => b.type === 'text');
+            if (textBlock?.text) {
+                try { parsed = JSON.parse(textBlock.text); } catch { parsed = { html: textBlock.text }; }
+            }
+        } else if (typeof result === 'object') {
+            parsed = result;
+        }
+        res.json({
+            html: parsed.html || parsed.code || '',
+            screenId: parsed.screenId || parsed.screen_id || null,
+            projectId: parsed.projectId || parsed.project_id || null,
+        });
+    } catch (err) {
+        console.error('[harness] stitch_refine_screen error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/tools/stitch_extract_design_dna', async (req, res) => {
+    const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    if (!credPath || !existsSync(credPath)) {
+        return res.status(503).json({ error: 'Stitch unavailable — GCP credentials not configured' });
+    }
+    const { userId, content } = req.body || {};
+    try {
+        const result = await invokeStitchTool('extract_design_context', { content });
+        res.json(result);
+    } catch (err) {
+        console.error('[harness] stitch_extract_design_dna error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Tool dispatch — Stitch MCP tools
 app.post('/tools/:toolName', async (req, res) => {
     const { toolName } = req.params;

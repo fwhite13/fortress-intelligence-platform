@@ -16,6 +16,13 @@
                 <span>Stitch unavailable — using CC-native generation</span>
             </div>
         }
+        @if (BAContext != null)
+        {
+            <div class="design-agent-ba-notice">
+                <MudIcon Icon="@Icons.Material.Filled.Assignment" Class="design-agent-notice-icon" />
+                <span>Designing for BA submission: @BAContext.FeatureTitle</span>
+            </div>
+        }
     </div>
 
     @* Turn history *@
@@ -139,6 +146,18 @@
         color: var(--color-gold);
         background: var(--color-gold-muted);
         border: 1px solid var(--color-gold);
+        border-radius: var(--radius-md);
+        padding: var(--space-1) var(--space-3);
+    }
+
+    .design-agent-ba-notice {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--font-size-sm);
+        color: var(--color-accent);
+        background: var(--color-accent-bg);
+        border: 1px solid var(--color-accent);
         border-radius: var(--radius-md);
         padding: var(--space-1) var(--space-3);
     }
@@ -429,6 +448,15 @@
     [Inject] private ILogger<DesignAgentView> Logger { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
+    [Parameter] public BAHandoffContext? BAContext { get; set; }
+    [Parameter] public EventCallback<string> OnDesignComplete { get; set; }
+
+    public record BAHandoffContext(
+        string SubmissionId,
+        string FeatureTitle,
+        string FeatureDescription
+    );
+
     private string _userId = "";
     private string _inputText = "";
     private bool _isGenerating = false;
@@ -494,6 +522,13 @@
             await DesignAgent.SaveArtifactAsync(_userId, sessionId, result.Html, artifactName, result.ScreenId, result.IsFallback);
 
             _turns.Add(new DesignTurn("assistant", "Here's your design:", result, artifactName));
+
+            // Fire OnDesignComplete after first artifact if BA handoff context is set
+            if (BAContext != null && OnDesignComplete.HasDelegate && _turns.Count(t => t.Result != null) == 1)
+            {
+                var s3Key = $"designs/{_userId}/{sessionId}/{artifactName}.html";
+                await OnDesignComplete.InvokeAsync(s3Key);
+            }
         }
         catch (Exception ex)
         {
