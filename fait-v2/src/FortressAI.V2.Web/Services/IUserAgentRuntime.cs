@@ -48,6 +48,7 @@ public record TurnRequest(
     string? SystemPrompt = null,
     string? SessionId = null,
     bool TaskMode = false,
+    bool ForceTaskMode = false,
     List<ChatHistoryEntry>? History = null
 );
 

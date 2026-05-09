@@ -8,6 +8,24 @@ RUN apt-get update && apt-get install -y \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
+# Python runtime + artifact generation libraries
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir \
+    pandas \
+    openpyxl \
+    python-pptx \
+    matplotlib \
+    plotly \
+    kaleido \
+    reportlab \
+    Pillow \
+    requests
+
 # Install AWS CLI v2 (for S3 workspace access)
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip \
     && unzip /tmp/awscli.zip -d /tmp \

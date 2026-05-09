@@ -178,6 +178,14 @@
                       placeholder="Message your assistant..."
                       rows="1"
                       disabled="@(_isStreaming || _ccRunning || !_harnessReady)"></textarea>
+            <button class="chat-run-as-task-btn"
+                    type="button"
+                    @onclick="RunAsTask"
+                    disabled="@(string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _ccRunning || !_harnessReady)"
+                    title="Run as Task (force Claude Code)">
+                <span class="chat-run-as-task-icon">⚡</span>
+                <span class="chat-run-as-task-label">Run as Task</span>
+            </button>
             <button class="chat-send-btn"
                     type="button"
                     @onclick="SendMessage"
@@ -345,6 +353,30 @@
     .chat-project-badge__name {
         font-weight: 500;
     }
+
+    .chat-run-as-task-btn {
+        background: transparent;
+        border: 1px solid var(--chat-border-color, #444);
+        color: var(--chat-text-muted, #999);
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-size: 0.8rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .chat-run-as-task-btn:hover:not(:disabled) {
+        color: var(--chat-accent-color, #7c83ff);
+        border-color: var(--chat-accent-color, #7c83ff);
+    }
+    .chat-run-as-task-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+    .chat-run-as-task-icon { font-style: normal; }
+    .chat-run-as-task-label { white-space: nowrap; }
 </style>
 
     </ChatContent>
@@ -405,6 +437,8 @@
     private bool _titlePending = false;
     private string? _taskProjectId;
     private string? _taskProjectName;
+
+    private bool _forceTaskMode = false;
 
     private static readonly string[] ArtifactKeywords = { "create", "generate", "write", "make", "build" };
     private static readonly string[] ArtifactTypeHints = { "word doc", "docx", "excel", "spreadsheet", "xlsx", "presentation", "pptx", "powerpoint", "report", "html", "webpage" };
@@ -626,8 +660,10 @@
                 Message: BuildContextualMessage(userMessage),
                 SystemPrompt: BuildSystemPrompt(),
                 TaskMode: false,
+                ForceTaskMode: _forceTaskMode,
                 History: contextHistory
             );
+            _forceTaskMode = false; // reset after send
             _logger.LogInformation("RunStreamingTurnAsync: calling SendTurnAsync for userId={UserId}, requestMessageLen={Len}, historyCount={HistCount}",
                 _userId, request.Message?.Length ?? 0, request.History?.Count ?? 0);
             int evtCount = 0;
@@ -899,6 +935,12 @@ The filename should be descriptive of the content.",
     {
         if (e.Key == "Enter" && !e.ShiftKey)
             await SendMessage();
+    }
+
+    private async Task RunAsTask()
+    {
+        _forceTaskMode = true;
+        await SendMessage();
     }
 
     private void ToggleFortressKb() => _fortressKbEnabled = !_fortressKbEnabled;

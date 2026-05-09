@@ -790,6 +790,38 @@ async function scanAndUploadArtifacts(userId, workspaceDir) {
     };
 }
 
+/**
+ * Classify whether a request should use the CC task path vs Bedrock conversational path.
+ * Returns true = CC, false = Bedrock.
+ */
+function classifyRequest(message, history) {
+    const msg = (message || '').toLowerCase();
+
+    // File extension signals
+    const fileExtensions = /\.(docx|xlsx|pptx|csv|pdf|py|js|ts|json|yaml|xml)\b/i;
+    if (fileExtensions.test(msg)) return true;
+
+    // Action verbs (strong CC signals)
+    const actionVerbs = /\b(create|build|generate|write|make|produce|analyze|run|execute|compile|draft|develop|implement|code|script|automate)\b/i;
+
+    // Scope signals (multi-step work)
+    const scopeSignals = /\b(multi.?step|comprehensive|full|complete|entire|all|section|chapter|report|document|presentation|spreadsheet|dataset)\b/i;
+
+    // Long message with action verb = CC candidate
+    if (message.length > 200 && actionVerbs.test(msg)) return true;
+
+    // Action verb + scope signal
+    if (actionVerbs.test(msg) && scopeSignals.test(msg)) return true;
+
+    // Prior turn was CC task = stay on CC path
+    if (Array.isArray(history) && history.length > 0) {
+        const lastTurn = history[history.length - 1];
+        if (lastTurn?.role === 'assistant' && lastTurn?.wasCC === true) return true;
+    }
+
+    return false;
+}
+
 app.post('/turn', async (req, res) => {
     console.log('[harness] /turn received: userId=%s, hasMessage=%s, taskMode=%s',
         req.body?.UserId ?? '(none)', !!req.body?.Message, req.body?.TaskMode ?? false);
@@ -802,9 +834,10 @@ app.post('/turn', async (req, res) => {
     const userId      = rawBody.UserId      ?? rawBody.userId;
     const message     = rawBody.Message     ?? rawBody.message;
     const systemPrompt= rawBody.SystemPrompt?? rawBody.systemPrompt;
-    const taskMode    = rawBody.TaskMode    ?? rawBody.taskMode;
     const history     = rawBody.History     ?? rawBody.history;
-    console.log(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, taskMode=${taskMode}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
+    const forceTaskMode = rawBody.ForceTaskMode ?? rawBody.force_task_mode ?? false;
+    const taskMode = forceTaskMode || classifyRequest(message, history);
+    console.log(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, forceTaskMode=${forceTaskMode}, classifiedTaskMode=${taskMode}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
 
     if (!userId || !message) {
         console.warn(`[harness] /turn: 400 — userId=${userId}, message=${!!message} — 'userId and message required'`);
