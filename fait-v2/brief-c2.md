@@ -1,210 +1,230 @@
-# CC Task Brief — ADO#2847 Build Cycle 2
-# Fix MemoryFileService.cs — 5 specific issues only
+# CSS Variable Compliance Fixes — ADO#3117 Cycle 2
 
-## Target file (ONLY file to modify)
-`/home/fredw/projects/fip/fait-v2/src/FortressAI.V2.Web/Services/MemoryFileService.cs`
+## File: src/FortressAI.V2.Web/wwwroot/css/fortress.css
 
-## DO NOT touch any other files. No new files. No reformatting of unchanged code.
+Make the following precise edits to fortress.css. Use exact text matching.
 
 ---
 
-## Fix I1 — Wrap inner GetObjectAsync calls with per-file error handling
+### Step 1: Add new :root variables
 
-### In `GetTopicsAsync` (around line 152-160):
-Currently there is a bare `GetObjectAsync` call inside the foreach loop with NO try/catch.
-Wrap it so each per-file fetch is isolated:
-
-```csharp
-// REPLACE this block:
-var getResponse = await _s3.GetObjectAsync(new GetObjectRequest
-{
-    BucketName = _bucket,
-    Key = obj.Key
-}, ct);
-using var reader = new StreamReader(getResponse.ResponseStream);
-var content = await reader.ReadToEndAsync(ct);
-
-topics.Add(new MemoryTopicEntry(slug, content, obj.LastModified));
-
-// WITH this block:
-try
-{
-    var getResponse = await _s3.GetObjectAsync(new GetObjectRequest
-    {
-        BucketName = _bucket,
-        Key = obj.Key
-    }, ct);
-    using var reader = new StreamReader(getResponse.ResponseStream);
-    var content = await reader.ReadToEndAsync(ct);
-    topics.Add(new MemoryTopicEntry(slug, content, obj.LastModified));
-}
-catch (AmazonS3Exception ex) when (ex.ErrorCode == "NoSuchKey" || ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-{
-    _logger.LogWarning("Topic key {Key} listed but not found — skipping", obj.Key);
-}
-catch (Exception ex)
-{
-    _logger.LogError(ex, "Unexpected error fetching topic key {Key} — skipping", obj.Key);
-}
+Find this exact text near the end of the :root block:
 ```
-
-### In `ExportZipAsync` (around line 253-261):
-Currently there is a bare `GetObjectAsync` call inside the foreach loop with NO try/catch.
-Wrap it similarly:
-
-```csharp
-// REPLACE this block:
-var getResponse = await _s3.GetObjectAsync(new GetObjectRequest
-{
-    BucketName = _bucket,
-    Key = obj.Key
-}, ct);
-
-using var ms = new MemoryStream();
-await getResponse.ResponseStream.CopyToAsync(ms, ct);
-files.Add((relPath, ms.ToArray()));
-
-// WITH this block:
-try
-{
-    var getResponse = await _s3.GetObjectAsync(new GetObjectRequest
-    {
-        BucketName = _bucket,
-        Key = obj.Key
-    }, ct);
-    using var ms = new MemoryStream();
-    await getResponse.ResponseStream.CopyToAsync(ms, ct);
-    files.Add((relPath, ms.ToArray()));
-}
-catch (AmazonS3Exception ex) when (ex.ErrorCode == "NoSuchKey" || ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-{
-    _logger.LogWarning("Export: key {Key} listed but not found — skipping", obj.Key);
-}
-catch (Exception ex)
-{
-    _logger.LogError(ex, "Export: unexpected error fetching key {Key} — skipping", obj.Key);
-}
-```
-
----
-
-## Fix I2 — Remove dead 404 catch blocks from Delete methods
-
-### In `DeleteFileAsync`:
-Currently:
-```csharp
-try
-{
-    await _s3.DeleteObjectAsync(new DeleteObjectRequest
-    {
-        BucketName = _bucket,
-        Key = key
-    }, ct);
-    _logger.LogInformation("Deleted memory file {Key}", key);
-}
-catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-{
-    _logger.LogDebug("Memory file already absent: {Key}", key);
+  --mobile-nav-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
 }
 ```
 
 Replace with:
-```csharp
-// S3 DeleteObject is idempotent — returns 204 whether or not the key exists; no 404 to catch
-await _s3.DeleteObjectAsync(new DeleteObjectRequest
-{
-    BucketName = _bucket,
-    Key = key
-}, ct);
-_logger.LogInformation("Deleted memory file {Key}", key);
+```
+  --mobile-nav-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+  --chat-input-max-height: 200px;
+  --chat-content-max-width: 900px;
+  --font-weight-light: 300;
+}
 ```
 
-### In `DeleteTopicAsync`:
-Currently:
-```csharp
-try
-{
-    await _s3.DeleteObjectAsync(new DeleteObjectRequest
-    {
-        BucketName = _bucket,
-        Key = key
-    }, ct);
-    _logger.LogInformation("Deleted topic {Slug} for user {UserId}", topicSlug, userId);
-}
-catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-{
-    _logger.LogDebug("Topic already absent: {Key}", key);
+---
+
+### Step 2: Fix .chat-empty-state padding
+
+Find:
+```
+    padding: 3rem 2rem;
+    color: var(--color-text-muted);
+```
+
+Replace with:
+```
+    padding: var(--space-12) var(--space-8);
+    color: var(--color-text-muted);
+```
+
+---
+
+### Step 3: Fix .chat-input-field height values
+
+Find:
+```
+    min-height: 40px;
+    max-height: 200px;
+```
+
+Replace with:
+```
+    min-height: var(--space-10);
+    max-height: var(--chat-input-max-height);
+```
+
+---
+
+### Step 4: Fix .chat-send-btn dimensions
+
+Find:
+```
+.chat-send-btn {
+    width: 40px;
+    height: 40px;
+```
+
+Replace with:
+```
+.chat-send-btn {
+    width: var(--space-10);
+    height: var(--space-10);
+```
+
+---
+
+### Step 5: Fix .chat-streaming-cursor font-weight
+
+Find this exact block (the one in .chat-streaming-cursor):
+```
+.chat-streaming-cursor {
+    animation: blink 1s infinite;
+    color: var(--color-accent);
+    font-weight: 300;
 }
 ```
 
 Replace with:
-```csharp
-// S3 DeleteObject is idempotent — returns 204 whether or not the key exists; no 404 to catch
-await _s3.DeleteObjectAsync(new DeleteObjectRequest
-{
-    BucketName = _bucket,
-    Key = key
-}, ct);
-_logger.LogInformation("Deleted topic {Slug} for user {UserId}", topicSlug, userId);
 ```
-
----
-
-## Fix I3 + I4 — Add input validation via a private helper + call it
-
-Add this private static helper method to the class (place it right after the existing helpers section, before the S3 file operations region):
-
-```csharp
-/// <summary>
-/// Validates that an id-style string (userId or topicSlug) contains only safe characters.
-/// Prevents path traversal attacks in S3 key construction.
-/// </summary>
-private static void ValidateId(string value, string paramName)
-{
-    if (string.IsNullOrWhiteSpace(value) || value.Contains('/') || value.Contains(".."))
-        throw new ArgumentException($"Invalid {paramName}: value is empty or contains disallowed characters.", paramName);
-}
-```
-
-Then add calls at the top of each public method as follows:
-
-- `ReadFileAsync`: add `ValidateId(userId, nameof(userId));` before `var key = FileKey(...)`
-- `WriteFileAsync`: add `ValidateId(userId, nameof(userId));` before `var key = FileKey(...)`
-- `DeleteFileAsync`: add `ValidateId(userId, nameof(userId));` before `var key = FileKey(...)`
-- `ListFilesAsync`: add `ValidateId(userId, nameof(userId));` before `var prefix = MemoryPrefix(...)`
-- `GetTopicsAsync`: add `ValidateId(userId, nameof(userId));` before `var prefix = TopicsPrefix(...)`
-- `GetTopicAsync`: add `ValidateId(userId, nameof(userId));` then `ValidateId(topicSlug, nameof(topicSlug));` before `var key = TopicKey(...)`
-- `UpsertTopicAsync`: add `ValidateId(userId, nameof(userId));` then `ValidateId(topicSlug, nameof(topicSlug));` before `var key = TopicKey(...)`
-- `DeleteTopicAsync`: add `ValidateId(userId, nameof(userId));` then `ValidateId(topicSlug, nameof(topicSlug));` before `var key = TopicKey(...)`
-- `ExportZipAsync`: add `ValidateId(userId, nameof(userId));` before `var prefix = MemoryPrefix(...)`
-
----
-
-## Fix I6 — Add RemoveFromVectorIndexAsync stub in DeleteTopicAsync
-
-After the S3 delete call in `DeleteTopicAsync` (after the logger line), add:
-```csharp
-// TODO: remove from pgvector index when PostgresMemoryService is wired (Sprint 2 follow-up)
-await RemoveFromVectorIndexAsync(userId, topicSlug, ct);
-```
-
-Add the stub method alongside `SyncToVectorIndexAsync` at the bottom of the file (in the pgvector stub region):
-
-```csharp
-/// <summary>
-/// Removes a topic from the pgvector index.
-/// TODO: wire pgvector delete via PostgresMemoryService (Sprint 2 #2847 follow-up)
-/// </summary>
-private static Task RemoveFromVectorIndexAsync(string userId, string topicSlug, CancellationToken ct)
-{
-    // No-op stub — pgvector removal is Sprint 2
-    return Task.CompletedTask;
+.chat-streaming-cursor {
+    animation: blink 1s infinite;
+    color: var(--color-accent);
+    font-weight: var(--font-weight-light);
 }
 ```
 
 ---
 
-## After making all changes:
-1. Verify the file compiles — run: `cd /home/fredw/projects/fip/fait-v2 && dotnet build 2>&1 | tail -20`
-2. Report exactly what lines were changed for each fix
-3. Do NOT commit — Tony will commit after reviewing your output
+### Step 6: Fix .chat-streaming-indicator max-width
+
+Find:
+```
+.chat-streaming-indicator {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    padding: var(--space-1) 0;
+    color: var(--color-text-primary);
+    font-size: var(--text-base);
+    line-height: 1.65;
+    max-width: 900px;
+```
+
+Replace with:
+```
+.chat-streaming-indicator {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    padding: var(--space-1) 0;
+    color: var(--color-text-primary);
+    font-size: var(--text-base);
+    line-height: 1.65;
+    max-width: var(--chat-content-max-width);
+```
+
+---
+
+### Step 7: Fix .chat-artifact-progress max-width
+
+Find:
+```
+.chat-artifact-progress {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    background: var(--color-surface-sunken);
+    border-radius: var(--radius-md);
+    max-width: 900px;
+```
+
+Replace with:
+```
+.chat-artifact-progress {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    background: var(--color-surface-sunken);
+    border-radius: var(--radius-md);
+    max-width: var(--chat-content-max-width);
+```
+
+---
+
+### Step 8: Fix .chat-pill-icon — remove !important, use tokens, fix specificity
+
+Find:
+```
+.chat-pill-icon {
+    font-size: 1rem !important;
+    width: 16px !important;
+    height: 16px !important;
+}
+```
+
+Replace with:
+```
+.chat-pill-icon,
+.mud-chip .chat-pill-icon {
+    font-size: var(--text-lg);
+    width: var(--space-4);
+    height: var(--space-4);
+}
+```
+
+---
+
+### Step 9: Fix .message-bubble max-width
+
+Find:
+```
+.message-bubble {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: var(--space-4);
+    max-width: 900px;
+```
+
+Replace with:
+```
+.message-bubble {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: var(--space-4);
+    max-width: var(--chat-content-max-width);
+```
+
+---
+
+### Step 10: Fix .message-bubble.message-user corner radius (WRONG SIDE)
+
+Find:
+```
+    border-top-left-radius: var(--radius-sm);
+    align-self: flex-end;
+```
+
+Replace with:
+```
+    border-top-right-radius: var(--radius-sm);
+    align-self: flex-end;
+```
+
+---
+
+## After all edits, run these commands in order:
+
+1. `cd /home/fredw/projects/fip/fait-v2 && dotnet build 2>&1 | tail -10`
+2. Verify 0 errors
+3. `git -C /home/fredw/projects/fip/fait-v2 add src/FortressAI.V2.Web/wwwroot/css/fortress.css`
+4. `git -C /home/fredw/projects/fip/fait-v2 commit -m "fix(fait#3117): CSS variable compliance — space tokens, correct user bubble corner radius, blue-purple accent var"`
+5. Report the commit hash
+
+## Notes
+- Fix 6 (#7c83ff accent color in ChatView.razor): NOT PRESENT in codebase — skip.
+- Do NOT change max-width: 900px in `.message` (line ~898) or `.chat-input-wrapper` (line ~1072) — those are not in scope.
+- Do NOT change the `font-weight: 300` that may appear elsewhere — only change the one in `.chat-streaming-cursor`.

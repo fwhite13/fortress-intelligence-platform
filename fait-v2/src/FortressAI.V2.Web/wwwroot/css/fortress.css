@@ -137,6 +137,9 @@
   --mobile-icon-size: 1.25rem;
   --mobile-nav-border: 1px;
   --mobile-nav-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+  --chat-input-max-height: 200px;
+  --chat-content-max-width: 900px;
+  --font-weight-light: 300;
 }
 
 /* ============ RESET & BASE ============ */
@@ -1167,8 +1170,8 @@ a:hover {
     background: var(--color-surface);
     color: var(--color-text-primary);
     transition: border-color var(--transition-fast);
-    min-height: 40px;
-    max-height: 200px;
+    min-height: var(--space-10);
+    max-height: var(--chat-input-max-height);
 }
 
 .chat-input-field:focus {
@@ -1187,8 +1190,8 @@ a:hover {
 }
 
 .chat-send-btn {
-    width: 40px;
-    height: 40px;
+    width: var(--space-10);
+    height: var(--space-10);
     border: none;
     border-radius: var(--radius-md);
     background: var(--color-primary);
@@ -1222,7 +1225,7 @@ a:hover {
     justify-content: center;
     flex: 1;
     text-align: center;
-    padding: 3rem 2rem;
+    padding: var(--space-12) var(--space-8);
     color: var(--color-text-muted);
 }
 
@@ -1248,7 +1251,7 @@ a:hover {
     color: var(--color-text-primary);
     font-size: var(--text-base);
     line-height: 1.65;
-    max-width: 900px;
+    max-width: var(--chat-content-max-width);
     width: 100%;
     margin: 0 auto;
 }
@@ -1261,7 +1264,7 @@ a:hover {
 .chat-streaming-cursor {
     animation: blink 1s infinite;
     color: var(--color-accent);
-    font-weight: 300;
+    font-weight: var(--font-weight-light);
 }
 
 /* Artifact / CC progress */
@@ -1272,7 +1275,7 @@ a:hover {
     padding: var(--space-2) var(--space-4);
     background: var(--color-surface-sunken);
     border-radius: var(--radius-md);
-    max-width: 900px;
+    max-width: var(--chat-content-max-width);
     margin: 0 auto;
     width: 100%;
 }
@@ -1290,10 +1293,11 @@ a:hover {
 }
 
 /* Pill icon + label sizing */
-.chat-pill-icon {
-    font-size: 1rem !important;
-    width: 16px !important;
-    height: 16px !important;
+.chat-pill-icon,
+.mud-chip .chat-pill-icon {
+    font-size: var(--text-lg);
+    width: var(--space-4);
+    height: var(--space-4);
 }
 
 .chat-pill-label {
@@ -2579,7 +2583,7 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     display: flex;
     flex-direction: column;
     margin-bottom: var(--space-4);
-    max-width: 900px;
+    max-width: var(--chat-content-max-width);
     width: 100%;
     margin-left: auto;
     margin-right: auto;
@@ -2594,7 +2598,7 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     background: var(--color-primary-light);
     padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-lg);
-    border-top-left-radius: var(--radius-sm);
+    border-top-right-radius: var(--radius-sm);
     align-self: flex-end;
     max-width: 80%;
 }
