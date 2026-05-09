@@ -636,6 +636,58 @@ app.MapPost("/api/memory/search", async (
     }));
 }).AllowAnonymous();
 
+// Memory write endpoint (ADO#3093 — preference detection from harness)
+app.MapPost("/api/memory/write", async (
+    [FromBody] MemoryWriteRequest writeRequest,
+    IRAGWriteService ragWriteService,
+    HttpContext httpContext,
+    IConfiguration config,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    // Dual-auth: X-Internal-Token (harness) or cookie auth (browser)
+    var internalToken = config["Harness:InternalApiToken"];
+    var providedToken = httpContext.Request.Headers["X-Internal-Token"].FirstOrDefault();
+    string? userId;
+
+    if (!string.IsNullOrEmpty(providedToken) && !string.IsNullOrEmpty(internalToken))
+    {
+        if (providedToken != internalToken)
+        {
+            logger.LogWarning("MemoryWrite: rejected invalid X-Internal-Token");
+            return Results.Unauthorized();
+        }
+        if (string.IsNullOrEmpty(writeRequest.UserId))
+            return Results.BadRequest(new { error = "userId required for harness calls" });
+        userId = writeRequest.UserId;
+    }
+    else
+    {
+        userId = GetUserId(httpContext);
+        if (userId == null) return Results.Unauthorized();
+    }
+
+    if (string.IsNullOrEmpty(writeRequest.TopicSlug))
+        return Results.BadRequest(new { error = "topicSlug required" });
+    if (string.IsNullOrEmpty(writeRequest.Content))
+        return Results.BadRequest(new { error = "content required" });
+
+    var chunk = new MemoryChunk(
+        UserId: userId,
+        TopicSlug: writeRequest.TopicSlug,
+        Content: writeRequest.Content,
+        Source: writeRequest.Source ?? "api",
+        CreatedAt: DateTimeOffset.UtcNow
+    );
+
+    await ragWriteService.WriteFactAsync(chunk, ct);
+
+    logger.LogInformation("MemoryWrite: wrote chunk for userId={UserId}, topicSlug={TopicSlug}, source={Source}",
+        userId, writeRequest.TopicSlug, writeRequest.Source);
+
+    return Results.Ok(new { ok = true });
+}).AllowAnonymous(); // guarded by X-Internal-Token or cookie auth
+
 // §6.1 — serve agent soul content for harness pluginAgentId switching
 app.MapGet("/api/agents/{pluginAgentId}/soul", async (
     string pluginAgentId,
