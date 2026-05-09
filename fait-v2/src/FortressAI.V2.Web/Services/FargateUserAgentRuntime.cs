@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Amazon;
@@ -67,8 +68,37 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
             var ecsTask = describeResp.Tasks.FirstOrDefault();
             if (ecsTask?.LastStatus == "RUNNING")
             {
-                _logger.LogDebug("Returning existing running Fargate task for user {UserId}: {TaskArn}", userId, existing.TaskArn);
-                return MapToRuntimeSession(existing);
+                // Health-check the actual harness process — ECS RUNNING doesn't mean the harness is reachable
+                // (e.g., new task after restart has a different IP; cached session row has the old one)
+                var harnessReachable = false;
+                try
+                {
+                    using var healthCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    healthCts.CancelAfter(TimeSpan.FromSeconds(3));
+                    var healthClient = _httpClientFactory.CreateClient("HarnessClient");
+                    var healthResp = await healthClient.GetAsync(
+                        $"http://{existing.PrivateIp}:{HarnessPort}/health",
+                        healthCts.Token);
+                    harnessReachable = healthResp.IsSuccessStatusCode;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Harness health check failed for user {UserId} at {Ip}:{Port} — invalidating session",
+                        userId, existing.PrivateIp, HarnessPort);
+                }
+
+                if (harnessReachable)
+                {
+                    _logger.LogDebug("Returning existing running Fargate task for user {UserId}: {TaskArn}", userId, existing.TaskArn);
+                    return MapToRuntimeSession(existing);
+                }
+
+                // Health check failed — invalidate stale session and fall through to launch a new task
+                _logger.LogWarning("Cached session for user {UserId} failed health check — invalidating and launching new task", userId);
+                existing.FargateStatus = "Stopped";
+                existing.EndedAt = DateTime.UtcNow;
+                existing.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
             }
 
             // Task no longer running — mark ended and fall through to launch
@@ -285,7 +315,7 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         // Ensure task is running (start if needed)
-        var session = await EnsureRunningAsync(userId, ct);
+        RuntimeSession session = await EnsureRunningAsync(userId, ct);
 
         var url = $"http://{session.PrivateIp}:{session.Port}/turn";
         var client = _httpClientFactory.CreateClient("HarnessClient");
@@ -296,6 +326,49 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
         {
             response = await client.PostAsJsonAsync(url, request, ct);
             response.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex) when (IsConnectionRefused(ex))
+        {
+            // Stale cached IP — harness is unreachable. Invalidate session and retry once.
+            _logger.LogWarning("Harness at {Ip}:{Port} refused connection for user {UserId} — invalidating session and retrying",
+                session.PrivateIp, session.Port, userId);
+
+            // Invalidate the stale session row
+            try
+            {
+                await using var invalidateDb = await _dbFactory.CreateDbContextAsync(ct);
+                var staleSession = await invalidateDb.UserSessions
+                    .Where(s => s.UserId == userId
+                             && s.EndedAt == null
+                             && (s.FargateStatus == "Running" || s.FargateStatus == "Starting"))
+                    .OrderByDescending(s => s.StartedAt)
+                    .FirstOrDefaultAsync(ct);
+                if (staleSession != null)
+                {
+                    staleSession.FargateStatus = "Stopped";
+                    staleSession.EndedAt = DateTime.UtcNow;
+                    staleSession.UpdatedAt = DateTime.UtcNow;
+                    await invalidateDb.SaveChangesAsync(ct);
+                }
+            }
+            catch (Exception dbEx)
+            {
+                _logger.LogWarning(dbEx, "Failed to invalidate stale session for user {UserId}", userId);
+            }
+
+            // Re-launch and retry the POST once
+            try
+            {
+                session = await EnsureRunningAsync(userId, ct);
+                url = $"http://{session.PrivateIp}:{session.Port}/turn";
+                response = await client.PostAsJsonAsync(url, request, ct);
+                response.EnsureSuccessStatusCode();
+            }
+            catch (Exception retryEx)
+            {
+                _logger.LogError(retryEx, "Retry POST /turn failed for user {UserId} after session refresh", userId);
+                postError = retryEx;
+            }
         }
         catch (Exception ex)
         {
@@ -401,6 +474,22 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
             StartedAt: new DateTimeOffset(s.StartedAt, TimeSpan.Zero),
             SessionId: s.FargateSessionId
         );
+    }
+
+    /// <summary>
+    /// Walks the exception's InnerException chain to detect a SocketException
+    /// with SocketError.ConnectionRefused, which indicates a stale/dead harness IP.
+    /// </summary>
+    private static bool IsConnectionRefused(Exception ex)
+    {
+        var current = ex;
+        while (current != null)
+        {
+            if (current is SocketException se && se.SocketErrorCode == SocketError.ConnectionRefused)
+                return true;
+            current = current.InnerException;
+        }
+        return false;
     }
 
     private static string GetPrivateIpFromTask(Amazon.ECS.Model.Task task)

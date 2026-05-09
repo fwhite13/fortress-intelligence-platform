@@ -66,6 +66,10 @@ public class WiClassifierService : IWiClassifier
 
     public bool IsExternalDependency(AdoWorkItemDto wi)
     {
+        // Epics and Features are structural containers — never external dependencies
+        if (wi.WorkItemType is "Epic" or "Feature")
+            return false;
+
         var text = CombineTitleAndDescription(wi);
         return ContainsAny(text, ExternalDependencySignals);
     }

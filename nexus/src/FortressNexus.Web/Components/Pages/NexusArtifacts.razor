@@ -15,6 +15,7 @@
 
 @using FortressNexus.Web.Data
 @using FortressNexus.Web.Models.DTOs
+@using FortressNexus.Web.Models.Enums
 @using FortressNexus.Web.Services
 @using Microsoft.EntityFrameworkCore
 
@@ -80,7 +81,7 @@ else if (_artifactSet is not null)
                         </MudTooltip>
                     }
                 }
-                @if (_isEditor && !_editMode)
+                @if (_isEditor && !_editMode && !_alreadyPosted)
                 {
                     <MudButton Variant="Variant.Outlined"
                                Color="Color.Primary"
@@ -100,7 +101,7 @@ else if (_artifactSet is not null)
                         Done Editing
                     </MudButton>
                 }
-                @if (_isAdmin)
+                @if (_isAdmin && !_alreadyPosted)
                 {
                     <MudTooltip Text="@(_editMode ? "Exit edit mode to post" : (_isPosting ? "Posting..." : "Post work items to ADO"))">
                         <MudButton Variant="Variant.Filled"
@@ -120,6 +121,10 @@ else if (_artifactSet is not null)
                             }
                         </MudButton>
                     </MudTooltip>
+                }
+                @if (_alreadyPosted)
+                {
+                    <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.CheckCircle">Posted to ADO</MudChip>
                 }
             </div>
         </div>
@@ -614,6 +619,7 @@ else if (_artifactSet is not null)
     private bool _isAdmin = false;
     private bool _isPosting = false;
     private string _postingStatus = "";
+    private bool _alreadyPosted => _artifactSet?.Status is ArtifactSetStatus.Success or ArtifactSetStatus.PartialFailure;
     private List<WorkItemRecord>? _postResults = null;
 
     // ADO confirmation dialog state
@@ -1124,17 +1130,28 @@ else if (_artifactSet is not null)
     private async Task WriteBackResultsAsync(List<WorkItemRecord> results)
     {
         await using var db = await DbFactory.CreateDbContextAsync();
+
+        // Build a lookup of all existing WI records for this artifact set, keyed by title.
+        // AdoCreationService returns new (unsaved) WorkItemRecord objects, so result.Id is 0.
+        // Match back to the persisted rows by ArtifactSetId + Title instead.
+        var existingRecords = await db.WorkItemRecords
+            .Where(w => w.ArtifactSetId == _artifactSet!.Id)
+            .ToListAsync();
+        var existingByTitle = existingRecords
+            .GroupBy(r => r.Title, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
         foreach (var result in results)
         {
-            var record = await db.WorkItemRecords.FindAsync(result.Id);
-            if (record is null) continue;
+            if (!existingByTitle.TryGetValue(result.Title, out var record)) continue;
 
             record.AdoWorkItemId = result.AdoWorkItemId;
             record.AdoWorkItemUrl = result.AdoWorkItemUrl;
             record.Status = result.Status;
             record.ErrorDetail = result.ErrorDetail;
 
-            var local = _workItems.FirstOrDefault(w => w.Id == record.Id);
+            var local = _workItems.FirstOrDefault(w =>
+                string.Equals(w.Title, result.Title, StringComparison.OrdinalIgnoreCase));
             if (local is not null)
             {
                 local.AdoWorkItemId = result.AdoWorkItemId;
@@ -1143,6 +1160,16 @@ else if (_artifactSet is not null)
                 local.ErrorDetail = result.ErrorDetail;
             }
         }
+
+        // Mark the artifact set as Posted
+        var artifactSetRecord = await db.ArtifactSets.FindAsync(_artifactSet!.Id);
+        if (artifactSetRecord is not null)
+        {
+            var createdCount = results.Count(r => r.Status == "Created");
+            var errorCount = results.Count(r => r.Status == "Error");
+            artifactSetRecord.Status = errorCount == 0 ? ArtifactSetStatus.Success : ArtifactSetStatus.PartialFailure;
+        }
+
         await db.SaveChangesAsync();
     }
 

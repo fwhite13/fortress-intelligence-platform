@@ -62,6 +62,9 @@ public class ArtifactGenerationService : IArtifactGenerationService
 
             var items = ParseWorkItems(call1Text, specDocumentId);
 
+            // Sanitize person names out of titles/descriptions before classifying
+            SanitizePersonNames(items);
+
             // Classify each WI candidate
             foreach (var item in items)
             {
@@ -83,6 +86,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
                         specDocumentId, pt2, ct2);
 
                     var tcResult = ParseTcScanResult(call2Text);
+                    SanitizePersonNames(tcResult.TestCases);
                     items.AddRange(tcResult.TestCases);
                     tcCount = tcResult.TestCases.Count;
 
@@ -250,6 +254,55 @@ public class ArtifactGenerationService : IArtifactGenerationService
 
     private record TcScanResult(List<AdoWorkItemDto> TestCases, List<TcParentUpdate> ParentUpdates);
     private record TcParentUpdate(string? StoryTitle, List<string>? TestedByTitles);
+
+    /// <summary>
+    /// Replaces known person names in WI titles and descriptions with role-based equivalents.
+    /// Handles "As [Name], I want..." user story patterns and inline mentions.
+    /// </summary>
+    private static void SanitizePersonNames(List<AdoWorkItemDto> items)
+    {
+        // Name → role replacement map
+        var nameRoles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Rob Nethery"]     = "the Network/Infrastructure team",
+            ["Rob"]             = "the Network/Infrastructure team",
+            ["Tony"]            = "the developer",
+            ["Clint"]           = "the reviewer",
+            ["Fred"]            = "the administrator",
+            ["Elise"]           = "the administrator",
+            ["Elise Lippe"]     = "the administrator",
+        };
+
+        foreach (var item in items)
+        {
+            item.Title       = ReplaceNames(item.Title, nameRoles);
+            item.Description = ReplaceNames(item.Description, nameRoles);
+            item.AcceptanceCriteria = ReplaceNames(item.AcceptanceCriteria, nameRoles);
+        }
+    }
+
+    private static string ReplaceNames(string? text, Dictionary<string, string> nameRoles)
+    {
+        if (string.IsNullOrEmpty(text)) return text ?? "";
+
+        // Longest names first to avoid partial replacement ("Rob Nethery" before "Rob")
+        foreach (var (name, role) in nameRoles.OrderByDescending(kv => kv.Key.Length))
+        {
+            // "As Rob Nethery, I want" → "As the Network/Infrastructure team representative, I want"
+            text = Regex.Replace(text,
+                $@"(?<=\bAs\s+){Regex.Escape(name)}(?=\s*,)",
+                $"{role} representative",
+                RegexOptions.IgnoreCase);
+
+            // "Send ... to Rob" / "request to Rob" inline mentions — word-boundary match
+            text = Regex.Replace(text,
+                $@"\b{Regex.Escape(name)}\b",
+                role,
+                RegexOptions.IgnoreCase);
+        }
+
+        return text;
+    }
 
     internal static List<string> ParseAcItems(string? acceptanceCriteria)
     {
