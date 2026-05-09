@@ -257,6 +257,13 @@ builder.Services.AddScoped<IUserManagementService, UserManagementService>();
 
 builder.Services.AddHostedService<DatabaseInitializationService>();
 
+// Fargate agent runtime
+builder.Services.AddSingleton<Amazon.ECS.IAmazonECS>(sp =>
+    new Amazon.ECS.AmazonECSClient(
+        Amazon.RegionEndpoint.GetBySystemName(
+            builder.Configuration["AWS:Region"] ?? "us-east-1")));
+builder.Services.AddSingleton<IUserAgentRuntime, FargateUserAgentRuntime>();
+
 // MCP services
 builder.Services.AddScoped<IMcpRegistryService, McpRegistryService>();
 builder.Services.AddScoped<McpTokenRefreshService>();
@@ -291,6 +298,12 @@ builder.Services.AddHttpClient("graph", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(30);
     client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+
+// Named HttpClient for Fargate harness communication — long timeout for SSE streaming
+builder.Services.AddHttpClient("HarnessClient", client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(10);
 });
 
 // DataProtection: use SharedKeyRingDbContext (standard scoped DbContext) to persist/read keys.
@@ -492,6 +505,15 @@ Func<HttpContext, IDbContextFactory<AppDbContext>, IHttpClientFactory, IConfigur
 
 app.MapGet("/auth/microsoft-callback", msCallbackHandler).AllowAnonymous().DisableAntiforgery();
 app.MapGet("/auth/ms-callback", msCallbackHandler).AllowAnonymous().DisableAntiforgery();
+
+app.MapGet("/api/agent/status", async (IUserAgentRuntime runtime, System.Security.Claims.ClaimsPrincipal user) =>
+{
+    var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    if (string.IsNullOrEmpty(userId))
+        return Results.Unauthorized();
+    var session = await runtime.GetSessionAsync(userId);
+    return Results.Ok(new { status = session?.Status.ToString() ?? "Stopped" });
+}).RequireAuthorization();
 
 // API endpoint for Lambda to get user access token
 app.MapGet("/api/tokens/{userId}", async (HttpContext context, string userId, IDbContextFactory<AppDbContext> dbFactory, IHttpClientFactory httpFactory, IConfiguration config) =>

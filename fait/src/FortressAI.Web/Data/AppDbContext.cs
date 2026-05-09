@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using FortressAI.Shared.Models;
+using FortressAI.Web.Data.Models;
 
 namespace FortressAI.Web.Data;
 
@@ -37,6 +38,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<ConversationTeamKb> ConversationTeamKbs { get; set; } = null!;
     public DbSet<UserModulePermission> UserModulePermissions { get; set; } = null!;
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -410,6 +412,26 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.HasOne(e => e.Conversation).WithMany().HasForeignKey(e => e.ConversationId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => e.ConversationId);
             entity.HasIndex(e => e.MessageId);
+        });
+
+        modelBuilder.Entity<UserSession>(entity =>
+        {
+            entity.ToTable("user_sessions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.StartedAt).HasColumnName("started_at");
+            entity.Property(e => e.LastActiveAt).HasColumnName("last_active_at");
+            entity.Property(e => e.EndedAt).HasColumnName("ended_at");
+            entity.Property(e => e.TaskArn).HasColumnName("task_arn").HasMaxLength(500);
+            entity.Property(e => e.PrivateIp).HasColumnName("private_ip").HasMaxLength(45);
+            entity.Property(e => e.FargateStatus).HasColumnName("fargate_status").HasMaxLength(20);
+            entity.Property(e => e.FargateSessionId).HasColumnName("fargate_session_id").HasMaxLength(200);
+            entity.Property(e => e.TaskDefinitionRevision).HasColumnName("task_definition_revision").HasMaxLength(100);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.HasIndex(e => e.UserId).HasDatabaseName("ix_user_sessions_user_id");
+            entity.HasIndex(e => e.LastActiveAt).HasDatabaseName("ix_user_sessions_last_active_at");
         });
 
     }

@@ -316,6 +316,22 @@ public class DatabaseInitializationService : IHostedService
     CONSTRAINT FK_chat_attachments_conversations_ConversationId
         FOREIGN KEY (ConversationId) REFERENCES conversations(Id) ON DELETE CASCADE
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                ,("user_sessions", @"CREATE TABLE IF NOT EXISTS user_sessions (
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    started_at DATETIME(6) NOT NULL,
+    last_active_at DATETIME(6) NOT NULL,
+    ended_at DATETIME(6) NULL,
+    task_arn VARCHAR(500) NULL,
+    private_ip VARCHAR(45) NULL,
+    fargate_status VARCHAR(20) NULL,
+    fargate_session_id VARCHAR(200) NULL,
+    task_definition_revision VARCHAR(100) NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    INDEX ix_user_sessions_user_id (user_id),
+    INDEX ix_user_sessions_last_active_at (last_active_at)
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 
             foreach (var (name, sql) in extraTables)
@@ -370,7 +386,9 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE project_documents ADD COLUMN IngestionStatus VARCHAR(20) NOT NULL DEFAULT 'none'",
                 "ALTER TABLE project_documents ADD COLUMN IngestedAt DATETIME(6) NULL",
                 "ALTER TABLE user_assistant_config ADD COLUMN firm_auto_transcript TINYINT(1) NOT NULL DEFAULT 0",
-                "ALTER TABLE user_assistant_config ADD COLUMN firm_auto_summary TINYINT(1) NOT NULL DEFAULT 0"
+                "ALTER TABLE user_assistant_config ADD COLUMN firm_auto_summary TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed_at DATETIME(6) NULL",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_step INT NULL"
             };
 
             foreach (var alterSql in alterStatements)
