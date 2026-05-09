@@ -7,10 +7,71 @@ const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client
 const { BedrockRuntimeClient, ConverseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { BedrockAgentRuntimeClient, RetrieveCommand } = require('@aws-sdk/client-bedrock-agent-runtime');
+const mysql = require('mysql2/promise');
 
 const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
 const bedrockAgentClient = new BedrockAgentRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
+
+// ─── DB helpers ───────────────────────────────────────────────────────────
+async function getDbConnection() {
+    return mysql.createConnection({
+        host: process.env.DB_HOST || 'localhost',
+        database: process.env.DB_NAME || 'fait',
+        user: process.env.DB_USER || 'fait',
+        password: process.env.DB_PASSWORD || '',
+        ssl: process.env.DB_SSL !== 'false' ? { rejectUnauthorized: false } : false,
+        connectTimeout: 10000,
+    });
+}
+
+async function getUserMs365Token(userId) {
+    let conn;
+    try {
+        conn = await getDbConnection();
+        // Try mcp_user_tokens table first (provider='graph'), then user_ms365_tokens
+        const [rows] = await conn.execute(
+            `SELECT access_token FROM mcp_user_tokens WHERE user_id = ? AND provider = 'graph' LIMIT 1`,
+            [userId]
+        );
+        if (rows.length > 0) return rows[0].access_token;
+        // Fallback: user_ms365_tokens table
+        const [rows2] = await conn.execute(
+            `SELECT access_token FROM user_ms365_tokens WHERE user_id = ? LIMIT 1`,
+            [userId]
+        );
+        return rows2.length > 0 ? rows2[0].access_token : null;
+    } catch (err) {
+        console.error('[harness] getUserMs365Token error:', err.message);
+        return null;
+    } finally {
+        if (conn) await conn.end();
+    }
+}
+
+async function getUserAdoToken(userId) {
+    let conn;
+    try {
+        conn = await getDbConnection();
+        // Try user_ado_connections first, then user_dev_ops_connections
+        const [rows] = await conn.execute(
+            `SELECT personal_access_token, access_token FROM user_ado_connections WHERE user_id = ? LIMIT 1`,
+            [userId]
+        );
+        if (rows.length > 0) return rows[0].personal_access_token || rows[0].access_token;
+        const [rows2] = await conn.execute(
+            `SELECT personal_access_token, access_token FROM user_dev_ops_connections WHERE user_id = ? LIMIT 1`,
+            [userId]
+        );
+        return rows2.length > 0 ? (rows2[0].personal_access_token || rows2[0].access_token) : null;
+    } catch (err) {
+        console.error('[harness] getUserAdoToken error:', err.message);
+        return null;
+    } finally {
+        if (conn) await conn.end();
+    }
+}
+
 const MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
 const S3_BUCKET = process.env.WORKSPACE_S3_BUCKET || 'fortress-user-workspaces';
 const S3_PREFIX = process.env.WORKSPACE_S3_PREFIX || '';
@@ -151,6 +212,295 @@ app.get('/tools/stitch/health', (req, res) => {
     const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     const available = !!(credPath && existsSync(credPath));
     res.json({ available, reason: available ? 'ok' : 'GCP credentials not configured' });
+});
+
+// ─── MS365 Graph API tool handlers (ADO#3069) ─────────────────────────────
+const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
+
+async function graphRequest(accessToken, method, path, body) {
+    const url = `${GRAPH_BASE}${path}`;
+    const opts = {
+        method,
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+        },
+    };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(url, opts);
+    if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`Graph API ${method} ${path} failed (${resp.status}): ${text}`);
+    }
+    if (resp.status === 204) return null;
+    return resp.json();
+}
+
+app.post('/tools/graph_list_emails', async (req, res) => {
+    const { userId, maxResults = 10, folder = 'inbox' } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    const token = await getUserMs365Token(userId);
+    if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
+    try {
+        const data = await graphRequest(token, 'GET',
+            `/me/mailFolders/${encodeURIComponent(folder)}/messages?$top=${maxResults}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead`
+        );
+        const emails = (data.value || []).map(m => ({
+            id: m.id,
+            subject: m.subject,
+            from: m.from?.emailAddress?.address,
+            receivedDateTime: m.receivedDateTime,
+            bodyPreview: m.bodyPreview,
+            isRead: m.isRead,
+        }));
+        res.json({ result: emails });
+    } catch (err) {
+        console.error('[harness] graph_list_emails error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/tools/graph_get_email', async (req, res) => {
+    const { userId, messageId } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!messageId) return res.status(400).json({ error: 'messageId required' });
+    const token = await getUserMs365Token(userId);
+    if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
+    try {
+        const m = await graphRequest(token, 'GET',
+            `/me/messages/${encodeURIComponent(messageId)}?$select=id,subject,from,body,receivedDateTime`
+        );
+        res.json({
+            result: {
+                id: m.id,
+                subject: m.subject,
+                from: m.from?.emailAddress?.address,
+                body: m.body?.content,
+                receivedDateTime: m.receivedDateTime,
+            }
+        });
+    } catch (err) {
+        console.error('[harness] graph_get_email error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/tools/graph_list_calendar_events', async (req, res) => {
+    const { userId, days = 7 } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    const token = await getUserMs365Token(userId);
+    if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
+    try {
+        const now = new Date().toISOString();
+        const end = new Date(Date.now() + days * 86400000).toISOString();
+        const data = await graphRequest(token, 'GET',
+            `/me/calendarView?startDateTime=${encodeURIComponent(now)}&endDateTime=${encodeURIComponent(end)}&$orderby=start/dateTime&$select=id,subject,start,end,location,organizer`
+        );
+        const events = (data.value || []).map(e => ({
+            id: e.id,
+            subject: e.subject,
+            start: e.start,
+            end: e.end,
+            location: e.location?.displayName,
+            organizer: e.organizer?.emailAddress?.address,
+        }));
+        res.json({ result: events });
+    } catch (err) {
+        console.error('[harness] graph_list_calendar_events error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/tools/graph_send_email', async (req, res) => {
+    const { userId, to, subject, body, cc } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, and body required' });
+    const token = await getUserMs365Token(userId);
+    if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
+    try {
+        const payload = {
+            message: {
+                subject,
+                body: { contentType: 'Text', content: body },
+                toRecipients: [{ emailAddress: { address: to } }],
+            }
+        };
+        if (cc) {
+            payload.message.ccRecipients = [{ emailAddress: { address: cc } }];
+        }
+        await graphRequest(token, 'POST', '/me/sendMail', payload);
+        res.json({ result: { sent: true } });
+    } catch (err) {
+        console.error('[harness] graph_send_email error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── Azure DevOps tool handlers (ADO#3070) ────────────────────────────────
+const ADO_ORG = process.env.ADO_ORG || 'FortressAffinityGroup';
+const ADO_BASE = `https://dev.azure.com/${ADO_ORG}`;
+
+function adoAuthHeader(pat) {
+    return 'Basic ' + Buffer.from(':' + pat).toString('base64');
+}
+
+async function adoRequest(pat, method, url, body) {
+    const opts = {
+        method,
+        headers: {
+            'Authorization': adoAuthHeader(pat),
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+        },
+    };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(url, opts);
+    if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`ADO ${method} ${url} failed (${resp.status}): ${text}`);
+    }
+    if (resp.status === 204) return null;
+    return resp.json();
+}
+
+app.post('/tools/ado_list_work_items', async (req, res) => {
+    const { userId, project, iteration, state, assignedTo, top = 20 } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!project) return res.status(400).json({ error: 'project required' });
+    const pat = await getUserAdoToken(userId);
+    if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
+    try {
+        let wiql = `SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo],[Microsoft.VSTS.Common.Priority] FROM WorkItems WHERE [System.TeamProject] = '${project}'`;
+        if (iteration) wiql += ` AND [System.IterationPath] = '${iteration}'`;
+        if (state) wiql += ` AND [System.State] = '${state}'`;
+        if (assignedTo) wiql += ` AND [System.AssignedTo] = '${assignedTo}'`;
+        wiql += ` ORDER BY [System.ChangedDate] DESC`;
+
+        const wiqlUrl = `${ADO_BASE}/${encodeURIComponent(project)}/_apis/wit/wiql?api-version=7.1&$top=${top}`;
+        const wiqlResp = await adoRequest(pat, 'POST', wiqlUrl, { query: wiql });
+        const ids = (wiqlResp.workItems || []).map(w => w.id);
+        if (ids.length === 0) return res.json({ result: [] });
+
+        // Batch fetch work item details
+        const fields = 'System.Id,System.Title,System.State,System.AssignedTo,Microsoft.VSTS.Common.Priority';
+        const detailUrl = `${ADO_BASE}/_apis/wit/workitems?ids=${ids.join(',')}&fields=${fields}&api-version=7.1`;
+        const detailResp = await adoRequest(pat, 'GET', detailUrl, null);
+        const items = (detailResp.value || []).map(w => ({
+            id: w.id,
+            title: w.fields['System.Title'],
+            state: w.fields['System.State'],
+            assignedTo: w.fields['System.AssignedTo']?.displayName,
+            priority: w.fields['Microsoft.VSTS.Common.Priority'],
+        }));
+        res.json({ result: items });
+    } catch (err) {
+        console.error('[harness] ado_list_work_items error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/tools/ado_get_work_item', async (req, res) => {
+    const { userId, id } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!id) return res.status(400).json({ error: 'id required' });
+    const pat = await getUserAdoToken(userId);
+    if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
+    try {
+        const url = `${ADO_BASE}/_apis/wit/workitems/${id}?api-version=7.1`;
+        const w = await adoRequest(pat, 'GET', url, null);
+        res.json({
+            result: {
+                id: w.id,
+                title: w.fields['System.Title'],
+                state: w.fields['System.State'],
+                description: w.fields['System.Description'],
+                assignedTo: w.fields['System.AssignedTo']?.displayName,
+                priority: w.fields['Microsoft.VSTS.Common.Priority'],
+                workItemType: w.fields['System.WorkItemType'],
+            }
+        });
+    } catch (err) {
+        console.error('[harness] ado_get_work_item error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/tools/ado_update_work_item', async (req, res) => {
+    const { userId, id, state, title, comment } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!id) return res.status(400).json({ error: 'id required' });
+    const pat = await getUserAdoToken(userId);
+    if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
+    try {
+        const project = process.env.ADO_DEFAULT_PROJECT || 'FAIT';
+        const url = `${ADO_BASE}/${encodeURIComponent(project)}/_apis/wit/workItems/${id}?api-version=7.1`;
+        const ops = [];
+        if (state) ops.push({ op: 'add', path: '/fields/System.State', value: state });
+        if (title) ops.push({ op: 'add', path: '/fields/System.Title', value: title });
+        if (comment) ops.push({ op: 'add', path: '/fields/System.History', value: comment });
+        if (ops.length === 0) return res.status(400).json({ error: 'Nothing to update — provide state, title, or comment' });
+
+        const resp = await fetch(url, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': adoAuthHeader(pat),
+                'Content-Type': 'application/json-patch+json',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify(ops),
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`ADO PATCH ${url} failed (${resp.status}): ${text}`);
+        }
+        res.json({ result: { updated: true, id } });
+    } catch (err) {
+        console.error('[harness] ado_update_work_item error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/tools/ado_create_work_item', async (req, res) => {
+    const { userId, project, type = 'Task', title, description, priority } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!project) return res.status(400).json({ error: 'project required' });
+    if (!title) return res.status(400).json({ error: 'title required' });
+    const pat = await getUserAdoToken(userId);
+    if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
+    try {
+        const url = `${ADO_BASE}/${encodeURIComponent(project)}/_apis/wit/workItems/$${encodeURIComponent(type)}?api-version=7.1`;
+        const ops = [
+            { op: 'add', path: '/fields/System.Title', value: title },
+        ];
+        if (description) ops.push({ op: 'add', path: '/fields/System.Description', value: description });
+        if (priority) ops.push({ op: 'add', path: '/fields/Microsoft.VSTS.Common.Priority', value: priority });
+
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': adoAuthHeader(pat),
+                'Content-Type': 'application/json-patch+json',
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify(ops),
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`ADO POST ${url} failed (${resp.status}): ${text}`);
+        }
+        const w = await resp.json();
+        res.json({
+            result: {
+                id: w.id,
+                title: w.fields['System.Title'],
+                url: w._links?.html?.href || w.url,
+            }
+        });
+    } catch (err) {
+        console.error('[harness] ado_create_work_item error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Tool dispatch — Stitch MCP tools
