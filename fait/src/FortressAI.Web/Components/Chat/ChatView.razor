@@ -305,6 +305,17 @@ else
             return;
         }
 
+        // Launch the user's Fargate task if not already running
+        try
+        {
+            await AgentRuntime.EnsureRunningAsync(Session.UserId.ToString());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[ChatView] EnsureRunningAsync failed — will poll for status");
+            // Non-fatal — polling loop will surface the real status
+        }
+
         // Check if Fargate session is running
         try
         {
