@@ -47,7 +47,7 @@ public class AssistantConfigService
         return config;
     }
 
-    /// <summary>Save full assistant config including FIRM integration toggles.</summary>
+    /// <summary>Save full assistant config including FIRM integration toggles and wizard fields.</summary>
     public async Task<UserAssistantConfig> SaveConfigAsync(Guid userId, string assistantName, string avatarId, string colorHex, string personalityPreset, bool firmAutoTranscript, bool firmAutoSummary)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -70,6 +70,39 @@ public class AssistantConfigService
         return config;
     }
 
+    /// <summary>Save full wizard config fields.</summary>
+    public async Task<UserAssistantConfig> SaveWizardConfigAsync(
+        Guid userId,
+        string? preferredName,
+        string? role,
+        string? responsibilities,
+        string? communicationStyle,
+        string? responseFormat,
+        bool? showCitations,
+        string? useCasesJson,
+        string? additionalContext)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var config = await db.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == userId);
+        if (config == null)
+        {
+            config = new UserAssistantConfig { UserId = userId };
+            db.UserAssistantConfigs.Add(config);
+        }
+        config.PreferredName = preferredName;
+        config.Role = role;
+        config.Responsibilities = responsibilities;
+        config.CommunicationStyle = communicationStyle;
+        config.ResponseFormat = responseFormat;
+        config.ShowCitations = showCitations;
+        config.UseCasesJson = useCasesJson;
+        config.AdditionalContext = additionalContext;
+        config.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        _logger.LogInformation("Saved wizard config for user {UserId}: preferredName={PreferredName}, role={Role}", userId, preferredName, role);
+        return config;
+    }
+
     public string GetPersonalitySystemPrompt(UserAssistantConfig config, string? userDisplayName = null, string? userEmail = null)
     {
         var todayStr = DateTimeOffset.Now.ToString("dddd, MMMM d, yyyy");
@@ -84,11 +117,36 @@ public class AssistantConfigService
 
         prefix = datePrefix + prefix;
 
-        if (!string.IsNullOrWhiteSpace(userDisplayName))
-            prefix += $" The user's name is {userDisplayName}. Address them by name occasionally to personalize responses.";
+        // PreferredName overrides display name if set
+        var nameToUse = !string.IsNullOrWhiteSpace(config.PreferredName) ? config.PreferredName : userDisplayName;
+        if (!string.IsNullOrWhiteSpace(nameToUse))
+            prefix += $" The user's name is {nameToUse}. Address them by name occasionally to personalize responses.";
 
         if (!string.IsNullOrWhiteSpace(userEmail))
             prefix += $" The authenticated user's own email address is {userEmail}. Use this as the canonical source for the current user's email — do not look it up or guess it.";
+
+        if (!string.IsNullOrWhiteSpace(config.Role))
+            prefix += $" The user's role is: {config.Role}.";
+
+        if (!string.IsNullOrWhiteSpace(config.Responsibilities))
+            prefix += $" Their key responsibilities include: {config.Responsibilities}.";
+
+        if (!string.IsNullOrWhiteSpace(config.CommunicationStyle))
+            prefix += $" Communication style preference: {config.CommunicationStyle}.";
+
+        if (!string.IsNullOrWhiteSpace(config.ResponseFormat))
+            prefix += $" Preferred response format: {config.ResponseFormat}.";
+
+        if (config.ShowCitations == true)
+            prefix += " Always include citations or source references when drawing on specific information.";
+        else if (config.ShowCitations == false)
+            prefix += " Do not include inline citations unless explicitly asked.";
+
+        if (!string.IsNullOrWhiteSpace(config.UseCasesJson))
+            prefix += $" Primary use cases the user has configured: {config.UseCasesJson}.";
+
+        if (!string.IsNullOrWhiteSpace(config.AdditionalContext))
+            prefix += $"\n\nAdditional context from the user: {config.AdditionalContext}";
 
         prefix += " When asked to create, write, or generate a document or file, output the content directly in your chat response as formatted markdown — do not attempt to use tools to save it. If tool calls are needed but keep failing, explain what you tried and provide the output directly in your response.";
 
