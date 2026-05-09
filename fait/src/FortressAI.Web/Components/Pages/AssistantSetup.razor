@@ -1,0 +1,246 @@
+@page "/assistant-setup"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+<PageTitle>Set Up Your Assistant — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
+@inject NavigationManager Nav
+@inject ILogger<AssistantSetup> Logger
+@using Microsoft.EntityFrameworkCore
+@using FortressAI.Web.Data
+
+<div class="setup-page">
+    <div class="setup-card">
+        <div class="setup-header">
+            <svg class="setup-shield" width="48" height="48" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="var(--color-accent)" opacity="0.9"/>
+                <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h1 class="setup-title">Set Up Your Assistant</h1>
+            <p class="setup-subtitle">Tell your assistant a bit about you.</p>
+        </div>
+
+        @if (_errorMessage != null)
+        {
+            <div class="setup-error">@_errorMessage</div>
+        }
+
+        <div class="setup-form">
+            <div class="setup-field">
+                <label class="setup-label" for="displayName">Your name</label>
+                <input id="displayName"
+                       class="setup-input"
+                       type="text"
+                       placeholder="e.g. Jane Smith"
+                       @bind="_displayName"
+                       disabled="@_isSubmitting"
+                       maxlength="100" />
+            </div>
+
+            <button class="setup-submit" @onclick="HandleSubmit" disabled="@_isSubmitting">
+                @if (_isSubmitting)
+                {
+                    <span class="setup-spinner"></span>
+                    <span>Setting up...</span>
+                }
+                else
+                {
+                    <span>Get Started</span>
+                }
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _displayName = string.Empty;
+    private string? _errorMessage;
+    private bool _isSubmitting = false;
+
+    protected override void OnInitialized()
+    {
+        if (Session.CurrentUser?.DisplayName is { Length: > 0 } name)
+            _displayName = name;
+    }
+
+    private async Task HandleSubmit()
+    {
+        _errorMessage = null;
+
+        if (string.IsNullOrWhiteSpace(_displayName))
+        {
+            _errorMessage = "Please enter your name.";
+            return;
+        }
+
+        _isSubmitting = true;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == Session.UserId);
+
+            if (user == null)
+            {
+                Logger.LogError("[AssistantSetup] User not found for UserId={UserId}", Session.UserId);
+                _errorMessage = "User account not found. Please contact support.";
+                return;
+            }
+
+            user.DisplayName = _displayName.Trim();
+            user.OnboardingCompletedAt = DateTime.UtcNow;
+            user.OnboardingStep = 1;
+            await db.SaveChangesAsync();
+
+            Nav.NavigateTo("/chat", replace: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[AssistantSetup] Failed to save setup for UserId={UserId}", Session.UserId);
+            _errorMessage = "Something went wrong. Please try again.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+}
+
+<style>
+    .setup-page {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        background: var(--color-background);
+        padding: var(--space-6);
+    }
+
+    .setup-card {
+        background: var(--color-surface);
+        border: var(--border-width) solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: var(--space-8);
+        width: var(--setup-card-width, min(100%, 420px));
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-6);
+    }
+
+    .setup-header {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-3);
+        text-align: center;
+    }
+
+    .setup-shield {
+        flex-shrink: 0;
+    }
+
+    .setup-title {
+        font-family: var(--font-primary);
+        font-size: var(--text-2xl);
+        font-weight: var(--font-bold);
+        color: var(--color-text-primary);
+        margin: 0;
+    }
+
+    .setup-subtitle {
+        font-family: var(--font-primary);
+        color: var(--color-text-secondary);
+        margin: 0;
+    }
+
+    .setup-error {
+        background: color-mix(in srgb, var(--color-error) 15%, transparent);
+        border: var(--border-width) solid var(--color-error);
+        border-radius: var(--radius-md);
+        color: var(--color-error);
+        padding: var(--space-3) var(--space-4);
+        font-family: var(--font-primary);
+        font-size: var(--text-sm);
+    }
+
+    .setup-form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-5);
+    }
+
+    .setup-field {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+
+    .setup-label {
+        font-family: var(--font-primary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--color-text-primary);
+    }
+
+    .setup-input {
+        background: var(--color-background);
+        border: var(--border-width) solid var(--color-border);
+        border-radius: var(--radius-md);
+        color: var(--color-text-primary);
+        font-family: var(--font-primary);
+        padding: var(--space-3) var(--space-4);
+        width: 100%;
+        box-sizing: border-box;
+        outline: none;
+        transition: border-color var(--transition-fast, 0.15s ease);
+    }
+
+    .setup-input:focus {
+        border-color: var(--color-border-focus);
+    }
+
+    .setup-input:disabled {
+        opacity: var(--opacity-disabled, 0.6);
+        cursor: not-allowed;
+    }
+
+    .setup-submit {
+        background: var(--color-accent);
+        border: none;
+        border-radius: var(--radius-md);
+        color: var(--color-text-on-accent);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        font-family: var(--font-primary);
+        font-weight: var(--font-semibold);
+        padding: var(--space-3) var(--space-6);
+        width: 100%;
+        transition: opacity var(--transition-fast, 0.15s ease);
+    }
+
+    .setup-submit:hover:not(:disabled) {
+        opacity: var(--opacity-hover, 0.85);
+    }
+
+    .setup-submit:disabled {
+        opacity: var(--opacity-disabled, 0.6);
+        cursor: not-allowed;
+    }
+
+    .setup-spinner {
+        width: var(--spinner-size, 1em);
+        height: var(--spinner-size, 1em);
+        border: 2px solid color-mix(in srgb, var(--color-text-on-accent) 30%, transparent);
+        border-top-color: var(--color-text-on-accent);
+        border-radius: 50%;
+        animation: setup-spin 0.6s linear infinite;
+        display: inline-block;
+    }
+
+    @@keyframes setup-spin {
+        to { transform: rotate(360deg); }
+    }
+</style>

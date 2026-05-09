@@ -305,6 +305,23 @@ else
             return;
         }
 
+        // Onboarding gate — redirect new users to setup
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == Session.UserId);
+            if (user != null && user.OnboardingCompletedAt == null)
+            {
+                Nav.NavigateTo("/assistant-setup", replace: true);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[ChatView] Onboarding check failed — skipping gate");
+            // Fail open: don't block chat on DB error
+        }
+
         // Launch the user's Fargate task if not already running
         try
         {

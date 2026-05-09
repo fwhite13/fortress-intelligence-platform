@@ -17,6 +17,9 @@ public class AppUser
     [MaxLength(255)]
     public string? EntraOid { get; set; }
 
+    public DateTime? OnboardingCompletedAt { get; set; }
+    public int? OnboardingStep { get; set; }
+
     // Navigation
     public List<Project> Projects { get; set; } = new();
     public List<Conversation> Conversations { get; set; } = new();

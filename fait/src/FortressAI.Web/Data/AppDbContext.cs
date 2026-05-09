@@ -58,6 +58,8 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
             entity.Property(e => e.IsEntraUser).HasColumnName("is_entra_user").HasDefaultValue(false);
             entity.Property(e => e.EntraOid).HasColumnName("entra_oid").HasMaxLength(255);
+            entity.Property(e => e.OnboardingCompletedAt).HasColumnName("onboarding_completed_at");
+            entity.Property(e => e.OnboardingStep).HasColumnName("onboarding_step");
         });
 
         modelBuilder.Entity<Project>(entity =>
