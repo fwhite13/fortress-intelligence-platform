@@ -94,6 +94,7 @@ builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<ChatAttachmentService>();
 builder.Services.AddSingleton<BedrockService>();
 builder.Services.AddScoped<AssistantConfigService>();
+builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<BriefingService>();
 builder.Services.AddScoped<BriefingGenerationService>();
 builder.Services.AddHttpClient();

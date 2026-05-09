@@ -7,6 +7,7 @@
 @inject NavigationManager Nav
 @inject ILogger<AssistantSetup> Logger
 @inject AssistantConfigService ConfigSvc
+@inject UserProvisioningService ProvisioningSvc
 @using Microsoft.EntityFrameworkCore
 @using FortressAI.Web.Data
 @using FortressAI.Shared.Models
@@ -368,6 +369,10 @@
             config.UpdatedAt = DateTime.UtcNow;
 
             await db.SaveChangesAsync();
+
+            // Provision S3 workspace files
+            await ProvisioningSvc.ProvisionAsync(Session.UserId);
+
             Nav.NavigateTo("/chat", replace: true);
         }
         catch (Exception ex)
