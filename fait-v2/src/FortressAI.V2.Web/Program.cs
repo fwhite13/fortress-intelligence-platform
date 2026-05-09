@@ -450,15 +450,18 @@ app.MapPost("/api/assistant/inject", async (
     CancellationToken ct) =>
 {
     // Shared-secret guard — FIRM must send X-Firm-Secret matching FirmIntegration:SharedSecret
+    // Fails CLOSED: if config key is missing, endpoint is locked down entirely
     var expectedSecret = config["FirmIntegration:SharedSecret"];
-    if (!string.IsNullOrEmpty(expectedSecret))
+    if (string.IsNullOrEmpty(expectedSecret))
     {
-        var providedSecret = httpContext.Request.Headers["X-Firm-Secret"].FirstOrDefault();
-        if (providedSecret != expectedSecret)
-        {
-            logger.LogWarning("AssistantInject: rejected — missing or invalid X-Firm-Secret");
-            return Results.Unauthorized();
-        }
+        logger.LogError("AssistantInject: FirmIntegration:SharedSecret not configured — rejecting all requests");
+        return Results.Unauthorized();
+    }
+    var providedSecret = httpContext.Request.Headers["X-Firm-Secret"].FirstOrDefault();
+    if (providedSecret != expectedSecret)
+    {
+        logger.LogWarning("AssistantInject: rejected — missing or invalid X-Firm-Secret");
+        return Results.Unauthorized();
     }
     if (string.IsNullOrEmpty(req.EntraOid)) return Results.BadRequest("entraOid required");
     await using var db = await dbFactory.CreateDbContextAsync(ct);
