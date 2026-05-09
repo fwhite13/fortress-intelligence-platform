@@ -243,6 +243,7 @@ public class DesignAgentService : IDesignAgentService
         try
         {
             var turnRequest = new TurnRequest(
+                UserId: userId,
                 Message: $"Generate a complete, styled HTML page for the following design request. Return only the HTML markup with embedded CSS, no markdown, no explanation:\n\n{prompt}",
                 SystemPrompt: "You are a UI design assistant. Generate clean, modern HTML/CSS only. Return raw HTML with embedded styles."
             );

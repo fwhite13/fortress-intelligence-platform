@@ -43,6 +43,7 @@ public enum RuntimeSessionStatus
 }
 
 public record TurnRequest(
+    string UserId,
     string Message,
     string? SystemPrompt = null,
     string? SessionId = null,

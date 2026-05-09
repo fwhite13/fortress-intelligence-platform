@@ -437,6 +437,7 @@
             }
 
             var request = new TurnRequest(
+                UserId: _userId,
                 Message: BuildContextualMessage(userMessage),
                 SystemPrompt: BuildSystemPrompt(),
                 TaskMode: false,
