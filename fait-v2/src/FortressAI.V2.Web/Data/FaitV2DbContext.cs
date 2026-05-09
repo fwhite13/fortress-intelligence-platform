@@ -309,6 +309,7 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.AlertOnCompletion).HasColumnName("alert_on_completion");
             entity.Property(e => e.AlertOnFailure).HasColumnName("alert_on_failure");
             entity.Property(e => e.IsActive).HasColumnName("is_active");
+            entity.Property(e => e.TaskMode).HasColumnName("task_mode").HasDefaultValue(false);
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
 
@@ -329,6 +330,7 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.ErrorMessage).HasColumnName("error_message").HasColumnType("TEXT");
             entity.Property(e => e.ArtifactS3Key).HasColumnName("artifact_s3_key").HasMaxLength(500);
             entity.Property(e => e.SandboxId).HasColumnName("sandbox_id").HasMaxLength(200);
+            entity.Property(e => e.OutputText).HasColumnName("output_text").HasColumnType("LONGTEXT");
 
             entity.HasIndex(e => e.TaskId).HasDatabaseName("ix_scheduled_task_runs_task_id");
 

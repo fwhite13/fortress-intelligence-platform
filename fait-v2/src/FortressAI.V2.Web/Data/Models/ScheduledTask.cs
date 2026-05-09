@@ -16,6 +16,8 @@ public class ScheduledTask
     public bool AlertOnCompletion { get; set; } = false;
     public bool AlertOnFailure { get; set; } = true;
     public bool IsActive { get; set; } = true;
+    /// <summary>false = CC execution (default); true = IUserAgentRuntime SendTurnAsync execution</summary>
+    public bool TaskMode { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

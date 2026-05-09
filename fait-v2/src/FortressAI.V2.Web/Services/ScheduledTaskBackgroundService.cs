@@ -96,60 +96,136 @@ public class ScheduledTaskBackgroundService : BackgroundService
         try
         {
             using var scope = _services.CreateScope();
-            var ccService = scope.ServiceProvider.GetRequiredService<ICCExecutionService>();
 
-            var envelope = new CCContextEnvelope
+            if (task.TaskMode)
             {
-                UserId = task.UserId,
-                UserDisplayName = string.Empty,
-                TaskInstructions = task.Prompt,
-            };
+                // IUserAgentRuntime path — SendTurnAsync
+                var runtime = scope.ServiceProvider.GetRequiredService<IUserAgentRuntime>();
 
-            var result = await ccService.DispatchTaskAsync(
-                task.UserId,
-                task.Prompt,
-                envelope,
-                cancellationToken: ct);
+                await runtime.EnsureRunningAsync(task.UserId, ct);
 
-            // Update run record
-            run.Status = result.Success ? "success" : "failed";
-            run.CompletedAt = DateTime.UtcNow;
-            run.ArtifactS3Key = result.ArtifactS3Key;
-            if (!result.Success)
-                run.ErrorMessage = result.Error;
+                var turnRequest = new TurnRequest(
+                    UserId: task.UserId,
+                    Message: task.Prompt,
+                    SystemPrompt: "You are a scheduled task executor. Complete the requested task and provide a concise response.",
+                    TaskMode: true
+                );
 
-            // Reload task to update against latest DB state
-            var dbTask = await db.ScheduledTasks.FindAsync(new object[] { task.Id }, ct);
-            if (dbTask != null)
-            {
-                if (result.Success)
+                var outputBuilder = new System.Text.StringBuilder();
+                string? errorMsg = null;
+                bool success = false;
+
+                await foreach (var evt in runtime.SendTurnAsync(task.UserId, turnRequest, ct))
                 {
-                    dbTask.LastRunStatus = "success";
-                    dbTask.FailureCount = 0;
-                    dbTask.NextRunAt = ComputeNextRun(dbTask);
-                }
-                else
-                {
-                    dbTask.LastRunStatus = "failed";
-                    dbTask.FailureCount += 1;
-
-                    if (dbTask.FailureCount == 1)
+                    if (evt.Type == "text" && evt.Content != null)
+                        outputBuilder.Append(evt.Content);
+                    else if (evt.Type == "done")
                     {
-                        dbTask.NextRunAt = DateTime.UtcNow.AddMinutes(5);
-                        _logger.LogWarning("Task {TaskId} failed; scheduling retry in 5 minutes.", task.Id);
+                        success = true;
+                        break;
+                    }
+                    else if (evt.Type == "error")
+                    {
+                        errorMsg = evt.ErrorMessage ?? "Unknown error from agent runtime";
+                        break;
+                    }
+                }
+
+                run.Status = success ? "success" : "failed";
+                run.CompletedAt = DateTime.UtcNow;
+                run.OutputText = outputBuilder.Length > 0 ? outputBuilder.ToString() : null;
+                if (!success) run.ErrorMessage = errorMsg;
+
+                // Reload task to update
+                var dbTask2 = await db.ScheduledTasks.FindAsync(new object[] { task.Id }, ct);
+                if (dbTask2 != null)
+                {
+                    if (success)
+                    {
+                        dbTask2.LastRunStatus = "success";
+                        dbTask2.FailureCount = 0;
+                        dbTask2.NextRunAt = ComputeNextRun(dbTask2);
                     }
                     else
                     {
-                        dbTask.IsActive = false;
-                        dbTask.NextRunAt = null;
-                        _logger.LogWarning("Task {TaskId} failed twice; deactivating.", task.Id);
+                        dbTask2.LastRunStatus = "failed";
+                        dbTask2.FailureCount += 1;
+                        if (dbTask2.FailureCount == 1)
+                        {
+                            dbTask2.NextRunAt = DateTime.UtcNow.AddMinutes(5);
+                            _logger.LogWarning("Task {TaskId} (agent mode) failed; retry in 5m.", task.Id);
+                        }
+                        else
+                        {
+                            dbTask2.IsActive = false;
+                            dbTask2.NextRunAt = null;
+                            _logger.LogWarning("Task {TaskId} (agent mode) failed twice; deactivated.", task.Id);
+                        }
                     }
+                    dbTask2.LastRunAt = DateTime.UtcNow;
+                    dbTask2.UpdatedAt = DateTime.UtcNow;
                 }
-                dbTask.LastRunAt = DateTime.UtcNow;
-                dbTask.UpdatedAt = DateTime.UtcNow;
-            }
 
-            await db.SaveChangesAsync(ct);
+                await db.SaveChangesAsync(ct);
+            }
+            else
+            {
+                // CC execution path (original code)
+                var ccService = scope.ServiceProvider.GetRequiredService<ICCExecutionService>();
+
+                var envelope = new CCContextEnvelope
+                {
+                    UserId = task.UserId,
+                    UserDisplayName = string.Empty,
+                    TaskInstructions = task.Prompt,
+                };
+
+                var result = await ccService.DispatchTaskAsync(
+                    task.UserId,
+                    task.Prompt,
+                    envelope,
+                    cancellationToken: ct);
+
+                // Update run record
+                run.Status = result.Success ? "success" : "failed";
+                run.CompletedAt = DateTime.UtcNow;
+                run.ArtifactS3Key = result.ArtifactS3Key;
+                if (!result.Success)
+                    run.ErrorMessage = result.Error;
+
+                // Reload task to update against latest DB state
+                var dbTask = await db.ScheduledTasks.FindAsync(new object[] { task.Id }, ct);
+                if (dbTask != null)
+                {
+                    if (result.Success)
+                    {
+                        dbTask.LastRunStatus = "success";
+                        dbTask.FailureCount = 0;
+                        dbTask.NextRunAt = ComputeNextRun(dbTask);
+                    }
+                    else
+                    {
+                        dbTask.LastRunStatus = "failed";
+                        dbTask.FailureCount += 1;
+
+                        if (dbTask.FailureCount == 1)
+                        {
+                            dbTask.NextRunAt = DateTime.UtcNow.AddMinutes(5);
+                            _logger.LogWarning("Task {TaskId} failed; scheduling retry in 5 minutes.", task.Id);
+                        }
+                        else
+                        {
+                            dbTask.IsActive = false;
+                            dbTask.NextRunAt = null;
+                            _logger.LogWarning("Task {TaskId} failed twice; deactivating.", task.Id);
+                        }
+                    }
+                    dbTask.LastRunAt = DateTime.UtcNow;
+                    dbTask.UpdatedAt = DateTime.UtcNow;
+                }
+
+                await db.SaveChangesAsync(ct);
+            }
         }
         catch (Exception ex)
         {

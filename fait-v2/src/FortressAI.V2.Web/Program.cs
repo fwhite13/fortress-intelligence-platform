@@ -173,6 +173,7 @@ builder.Services.AddScoped<ICCExecutionService, FargateCCExecutionService>();
 // Project service (FAIT v1 carry-over)
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<ProjectStateService>();
+builder.Services.AddScoped<IV1ProjectQueryService, V1ProjectQueryService>();
 
 // Workspace explorer
 builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();

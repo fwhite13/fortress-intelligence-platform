@@ -10,6 +10,7 @@ public class ScheduledTaskRun
     public string? ErrorMessage { get; set; }
     public string? ArtifactS3Key { get; set; }
     public string? SandboxId { get; set; }
+    public string? OutputText { get; set; }
     // Navigation
     public ScheduledTask? Task { get; set; }
 }

@@ -1,0 +1,287 @@
+@page "/projects"
+@attribute [Authorize]
+@using FortressAI.V2.Web.Data.Models
+@using FortressAI.V2.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@inject IV1ProjectQueryService V1ProjectQuery
+@inject ProjectStateService ProjectState
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+
+<PageTitle>Projects — FAIT v2</PageTitle>
+
+<div class="projects-container">
+    <div class="projects-header">
+        <h1 class="projects-title">Projects</h1>
+        <p class="projects-subtitle">Select a project to set it as the active context for your assistant.</p>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="projects-loading">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Medium" />
+            <p class="projects-loading-text">Loading projects...</p>
+        </div>
+    }
+    else if (_error != null)
+    {
+        <div class="projects-error">
+            <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Class="projects-error-icon" />
+            <p class="projects-error-text">@_error</p>
+        </div>
+    }
+    else if (_projects.Count == 0)
+    {
+        <div class="projects-empty">
+            <MudIcon Icon="@Icons.Material.Outlined.FolderOpen" Class="projects-empty-icon" />
+            <p class="projects-empty-title">No projects found</p>
+            <p class="projects-empty-subtitle">Your FAIT v1 projects will appear here.</p>
+        </div>
+    }
+    else
+    {
+        <div class="projects-grid">
+            @foreach (var project in _projects)
+            {
+                var isActive = _activeProjectId == project.Id;
+                <div class="projects-card @(isActive ? "projects-card--active" : "")"
+                     @onclick="() => SetActiveProject(project)">
+                    <div class="projects-card-header">
+                        <MudIcon Icon="@Icons.Material.Outlined.FolderOpen" Class="projects-card-icon" />
+                        <span class="projects-card-name">@project.Name</span>
+                        @if (isActive)
+                        {
+                            <span class="projects-card-badge">Active Context</span>
+                        }
+                    </div>
+                    @if (!string.IsNullOrEmpty(project.Description))
+                    {
+                        <p class="projects-card-description">@project.Description</p>
+                    }
+                    <div class="projects-card-footer">
+                        <span class="projects-card-date">Updated @project.UpdatedAt.ToString("MMM d, yyyy")</span>
+                        @if (!isActive)
+                        {
+                            <button class="projects-card-btn" @onclick:stopPropagation="true" @onclick="() => SetActiveProject(project)">
+                                Set as Context
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="projects-card-btn projects-card-btn--clear" @onclick:stopPropagation="true" @onclick="ClearProject">
+                                Clear Context
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+<style>
+    .projects-container {
+        padding: var(--space-6, 24px);
+        max-width: 1200px;
+    }
+
+    .projects-header {
+        margin-bottom: var(--space-6, 24px);
+    }
+
+    .projects-title {
+        font-size: var(--font-size-2xl, 1.5rem);
+        font-weight: 700;
+        color: var(--color-text-primary);
+        margin: 0 0 var(--space-1, 4px);
+    }
+
+    .projects-subtitle {
+        font-size: var(--font-size-sm, 0.875rem);
+        color: var(--color-text-secondary);
+        margin: 0;
+    }
+
+    .projects-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-3, 12px);
+        padding: var(--space-12, 48px);
+        color: var(--color-text-secondary);
+    }
+
+    .projects-loading-text {
+        font-size: var(--font-size-sm, 0.875rem);
+    }
+
+    .projects-error, .projects-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-3, 12px);
+        padding: var(--space-12, 48px);
+        color: var(--color-text-secondary);
+        text-align: center;
+    }
+
+    .projects-error-icon { color: var(--color-error); font-size: 48px; }
+    .projects-empty-icon { font-size: 48px; color: var(--color-text-muted); }
+
+    .projects-error-text, .projects-empty-title {
+        font-size: var(--font-size-base, 1rem);
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
+
+    .projects-empty-subtitle {
+        font-size: var(--font-size-sm, 0.875rem);
+        color: var(--color-text-secondary);
+    }
+
+    .projects-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: var(--space-4, 16px);
+    }
+
+    .projects-card {
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg, 8px);
+        padding: var(--space-4, 16px);
+        background: var(--color-surface);
+        cursor: pointer;
+        transition: border-color var(--transition-base), box-shadow var(--transition-base);
+    }
+
+    .projects-card:hover {
+        border-color: var(--color-accent);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .projects-card--active {
+        border-color: var(--color-accent);
+        background: var(--color-accent-bg);
+    }
+
+    .projects-card-header {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2, 8px);
+        margin-bottom: var(--space-2, 8px);
+    }
+
+    .projects-card-icon { color: var(--color-accent); }
+
+    .projects-card-name {
+        font-size: var(--font-size-base, 1rem);
+        font-weight: 600;
+        color: var(--color-text-primary);
+        flex: 1;
+    }
+
+    .projects-card-badge {
+        font-size: var(--font-size-xs, 0.75rem);
+        font-weight: 600;
+        color: var(--color-accent);
+        background: var(--color-accent-bg);
+        border: 1px solid var(--color-accent);
+        border-radius: var(--radius-sm, 4px);
+        padding: 2px 8px;
+    }
+
+    .projects-card-description {
+        font-size: var(--font-size-sm, 0.875rem);
+        color: var(--color-text-secondary);
+        margin: 0 0 var(--space-3, 12px);
+        line-height: 1.5;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .projects-card-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: var(--space-3, 12px);
+    }
+
+    .projects-card-date {
+        font-size: var(--font-size-xs, 0.75rem);
+        color: var(--color-text-muted);
+    }
+
+    .projects-card-btn {
+        font-size: var(--font-size-xs, 0.75rem);
+        font-weight: 600;
+        color: var(--color-accent);
+        background: transparent;
+        border: 1px solid var(--color-accent);
+        border-radius: var(--radius-sm, 4px);
+        padding: 4px 12px;
+        cursor: pointer;
+        transition: background var(--transition-base);
+    }
+
+    .projects-card-btn:hover { background: var(--color-accent-bg); }
+
+    .projects-card-btn--clear {
+        color: var(--color-text-secondary);
+        border-color: var(--color-border);
+    }
+
+    .projects-card-btn--clear:hover { background: var(--color-surface-hover); }
+</style>
+
+@code {
+    private List<FaitV1Project> _projects = new();
+    private string? _activeProjectId;
+    private bool _loading = true;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var entraOid = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                        ?? auth.User.FindFirst("oid")?.Value ?? "";
+
+            if (string.IsNullOrEmpty(entraOid))
+            {
+                _error = "Could not resolve your user account.";
+                return;
+            }
+
+            _projects = await V1ProjectQuery.GetV1ProjectsForUserAsync(entraOid);
+            _activeProjectId = ProjectState.ActiveProjectId;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load projects: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void SetActiveProject(FaitV1Project project)
+    {
+        _activeProjectId = project.Id;
+        var context = $"# Active Project: {project.Name}\n{project.Description ?? ""}\n{project.CustomInstructions ?? ""}".Trim();
+        ProjectState.SetActiveProject(project.Id, context);
+        Snackbar.Add($"Project \"{project.Name}\" set as active context.", Severity.Success);
+        StateHasChanged();
+    }
+
+    private void ClearProject()
+    {
+        _activeProjectId = null;
+        ProjectState.ClearActiveProject();
+        Snackbar.Add("Project context cleared.", Severity.Info);
+        StateHasChanged();
+    }
+}
