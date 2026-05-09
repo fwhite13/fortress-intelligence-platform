@@ -90,11 +90,9 @@
                             </CardHeaderContent>
                         </MudCardHeader>
                         <MudCardContent>
-                            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); margin-bottom: var(--space-3);">
-                                Supported: TXT, MD, CSV (max 2 MB). Content will be extracted and added to your KB.
-                            </MudText>
+                            <div class="kb-upload-hint">Supported: PDF, DOCX, TXT, MD, PPTX, JPG, PNG, GIF, WEBP and more · Max 10 MB · PPTX auto-converted to PDF · Ingestion takes 1–5 minutes</div>
                             <MudFileUpload T="IBrowserFile"
-                                           Accept=".txt,.md,.csv"
+                                           Accept=".pdf,.docx,.xlsx,.pptx,.rtf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.cs,.js,.ts,.tsx,.jsx,.py,.html,.css,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.swift,.kt,.sh,.bash,.ps1,.r,.scala,.vue,.svelte,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.tiff,.tif"
                                            FilesChanged="UploadPersonalDocument"
                                            Hidden="false"
                                            InputClass="absolute mud-width-full mud-height-full overflow-hidden z-10"
@@ -231,8 +229,9 @@
                                 </CardHeaderContent>
                             </MudCardHeader>
                             <MudCardContent>
+                                <div class="kb-upload-hint">Supported: PDF, DOCX, TXT, MD, PPTX, JPG, PNG, GIF, WEBP and more · Max 10 MB · PPTX auto-converted to PDF · Ingestion takes 1–5 minutes</div>
                                 <MudFileUpload T="IBrowserFile"
-                                               Accept=".txt,.md,.csv"
+                                               Accept=".pdf,.docx,.xlsx,.pptx,.rtf,.txt,.md,.csv,.json,.xml,.yaml,.yml,.log,.cs,.js,.ts,.tsx,.jsx,.py,.html,.css,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.swift,.kt,.sh,.bash,.ps1,.r,.scala,.vue,.svelte,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.tiff,.tif"
                                                FilesChanged="UploadTeamDocument"
                                                Hidden="false"
                                                InputClass="absolute mud-width-full mud-height-full overflow-hidden z-10"
@@ -431,6 +430,13 @@
         gap: var(--space-3);
         align-items: flex-start;
     }
+
+    .kb-upload-hint {
+        font-size: var(--text-xs, 0.75rem);
+        color: var(--color-text-muted);
+        margin-top: var(--spacing-xs, 4px);
+        margin-bottom: var(--space-3);
+    }
 </style>
 
 @code {
@@ -550,26 +556,16 @@
         StateHasChanged();
         try
         {
-            const long maxSize = 2 * 1024 * 1024; // 2MB
+            const long maxSize = 10 * 1024 * 1024; // 10MB
+            var ext = Path.GetExtension(file.Name).ToLowerInvariant();
+            var contentType = file.ContentType;
+
+            if (ext == ".pptx")
+                Snackbar.Add("Converting PPTX to PDF...", Severity.Info);
+
             using var stream = file.OpenReadStream(maxSize);
-            using var reader = new System.IO.StreamReader(stream, System.Text.Encoding.UTF8);
-            var content = await reader.ReadToEndAsync();
-
-            if (string.IsNullOrWhiteSpace(content))
-            {
-                Snackbar.Add("File appears to be empty.", Severity.Warning);
-                return;
-            }
-
-            var metadata = new Dictionary<string, string>
-            {
-                { "source", "file-upload" },
-                { "filename", file.Name },
-                { "added_by", _entraOid },
-                { "added_at", DateTime.UtcNow.ToString("O") }
-            };
-            await ForgeKbService.AddToKbAsync(_personalKb.KbId, content, metadata);
-            Snackbar.Add($"'{file.Name}' added to your Knowledge Base.", Severity.Success);
+            await ForgeKbService.UploadFileAsync(_personalKb.KbId, stream, file.Name, contentType);
+            Snackbar.Add($"'{file.Name}' added to your Knowledge Base. Ingestion takes 1–5 minutes.", Severity.Success);
             if (_personalKb != null) await LoadPersonalMetadataAsync(_personalKb.KbId);
         }
         catch (Exception ex)
@@ -642,26 +638,16 @@
         StateHasChanged();
         try
         {
-            const long maxSize = 2 * 1024 * 1024; // 2MB
+            const long maxSize = 10 * 1024 * 1024; // 10MB
+            var ext = Path.GetExtension(file.Name).ToLowerInvariant();
+            var contentType = file.ContentType;
+
+            if (ext == ".pptx")
+                Snackbar.Add("Converting PPTX to PDF...", Severity.Info);
+
             using var stream = file.OpenReadStream(maxSize);
-            using var reader = new System.IO.StreamReader(stream, System.Text.Encoding.UTF8);
-            var content = await reader.ReadToEndAsync();
-
-            if (string.IsNullOrWhiteSpace(content))
-            {
-                Snackbar.Add("File appears to be empty.", Severity.Warning);
-                return;
-            }
-
-            var metadata = new Dictionary<string, string>
-            {
-                { "source", "file-upload" },
-                { "filename", file.Name },
-                { "added_by", _entraOid },
-                { "added_at", DateTime.UtcNow.ToString("O") }
-            };
-            await ForgeKbService.AddToKbAsync(_selectedTeamKb.KbId, content, metadata);
-            Snackbar.Add($"'{file.Name}' added to the Team Knowledge Base.", Severity.Success);
+            await ForgeKbService.UploadFileAsync(_selectedTeamKb.KbId, stream, file.Name, contentType);
+            Snackbar.Add($"'{file.Name}' added to the Team Knowledge Base. Ingestion takes 1–5 minutes.", Severity.Success);
             if (_selectedTeamKb != null) _selectedTeamMetadata = await ForgeKbService.GetKbMetadataAsync(_selectedTeamKb.KbId);
         }
         catch (Exception ex)

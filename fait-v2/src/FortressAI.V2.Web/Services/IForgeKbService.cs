@@ -11,6 +11,9 @@ public interface IForgeKbService
     /// <summary>Add content to a KB. Returns job ID for polling.</summary>
     Task<string> AddToKbAsync(string kbId, string content, Dictionary<string, string> metadata, CancellationToken ct = default);
 
+    /// <summary>Upload raw file bytes to S3 and start KB ingestion. Returns job ID.</summary>
+    Task<string> UploadFileAsync(string kbId, Stream fileStream, string filename, string contentType, CancellationToken ct = default);
+
     /// <summary>Get metadata for a KB.</summary>
     Task<KbMetadata> GetKbMetadataAsync(string kbId, CancellationToken ct = default);
 }

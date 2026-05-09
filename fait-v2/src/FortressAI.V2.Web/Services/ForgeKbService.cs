@@ -147,6 +147,87 @@ public class ForgeKbService : IForgeKbService
         }
     }
 
+    public async Task<string> UploadFileAsync(string kbId, Stream fileStream, string filename, string contentType, CancellationToken ct = default)
+    {
+        var ext = Path.GetExtension(filename).ToLowerInvariant();
+        var s3Key = $"kb-uploads/{kbId}/{Guid.NewGuid()}{ext}";
+
+        // PPTX → PDF conversion (best-effort)
+        Stream uploadStream = fileStream;
+        string uploadContentType = contentType;
+        string uploadKey = s3Key;
+
+        if (ext == ".pptx")
+        {
+            var pdfBytes = await ConvertPptxToPdfAsync(fileStream, filename, _logger);
+            if (pdfBytes != null)
+            {
+                uploadStream = new MemoryStream(pdfBytes);
+                uploadContentType = "application/pdf";
+                uploadKey = Path.ChangeExtension(s3Key, ".pdf");
+            }
+            // If conversion fails, fall through and upload original .pptx
+        }
+
+        await _s3.PutObjectAsync(new PutObjectRequest
+        {
+            BucketName = _s3Bucket,
+            Key = uploadKey,
+            InputStream = uploadStream,
+            ContentType = uploadContentType
+        }, ct);
+
+        _logger.LogInformation("Uploaded KB file to S3: {Key}", uploadKey);
+
+        // Start ingestion job
+        var dataSourceId = _config[$"KnowledgeBase:DataSourceId:{kbId}"]
+                        ?? _config["KnowledgeBase:DefaultDataSourceId"] ?? "";
+
+        if (!string.IsNullOrEmpty(dataSourceId))
+        {
+            var ingestionResponse = await _bedrockAgent.StartIngestionJobAsync(
+                new StartIngestionJobRequest
+                {
+                    KnowledgeBaseId = kbId,
+                    DataSourceId = dataSourceId
+                }, ct);
+            return ingestionResponse.IngestionJob?.IngestionJobId ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static async Task<byte[]?> ConvertPptxToPdfAsync(Stream pptxStream, string filename, ILogger logger)
+    {
+        try
+        {
+            var tempDir = Path.GetTempPath();
+            var pptxPath = Path.Combine(tempDir, filename);
+            var pdfPath = Path.ChangeExtension(pptxPath, ".pdf");
+            await using (var fs = File.Create(pptxPath)) await pptxStream.CopyToAsync(fs);
+
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "libreoffice",
+                Arguments = $"--headless --convert-to pdf --outdir \"{tempDir}\" \"{pptxPath}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return null;
+            await proc.WaitForExitAsync();
+            if (proc.ExitCode == 0 && File.Exists(pdfPath))
+                return await File.ReadAllBytesAsync(pdfPath);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "PPTX→PDF conversion failed — uploading original");
+            return null;
+        }
+    }
+
     public async Task<KbMetadata> GetKbMetadataAsync(string kbId, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(kbId))
