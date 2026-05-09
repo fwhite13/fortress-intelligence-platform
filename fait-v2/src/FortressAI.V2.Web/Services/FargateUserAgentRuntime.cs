@@ -100,12 +100,14 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
                 existing.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(ct);
             }
-
-            // Task no longer running — mark ended and fall through to launch
-            existing.FargateStatus = "Stopped";
-            existing.EndedAt = DateTime.UtcNow;
-            existing.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(ct);
+            else
+            {
+                // Task no longer running in ECS — mark ended and fall through to launch
+                existing.FargateStatus = "Stopped";
+                existing.EndedAt = DateTime.UtcNow;
+                existing.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+            }
         }
 
         // 2. Launch a new Fargate task
