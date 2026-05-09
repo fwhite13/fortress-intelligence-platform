@@ -195,6 +195,7 @@ builder.Services.AddScoped<ICompactionService, CompactionService>();
 builder.Services.AddSingleton<IRAGWriteService, RAGWriteService>();
 builder.Services.AddSingleton<IRAGReadService, RAGReadService>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IAvatarModerationService, AvatarModerationService>();
 builder.Services.AddScoped<IConversationTitleService, ConversationTitleService>();
 builder.Services.AddSingleton<ITaskListNotifier, TaskListNotifier>();
 
@@ -875,6 +876,97 @@ app.MapPost("/api/workspace/upload", async (
 
     logger.LogInformation("WorkspaceUpload: userId={UserId} s3Key={S3Key}", userId, s3Key);
     return Results.Ok(new { s3Key });
+}).RequireAuthorization();
+
+// Avatar upload with NSFW moderation
+app.MapPost("/api/profile/avatar", async (
+    HttpContext httpContext,
+    IAvatarModerationService moderation,
+    IAmazonS3 s3,
+    IDbContextFactory<FaitV2DbContext> dbFactory,
+    IConfiguration config,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    var userId = GetUserId(httpContext);
+    if (userId == null) return Results.Unauthorized();
+
+    if (!httpContext.Request.HasFormContentType)
+        return Results.BadRequest(new { error = "multipart/form-data required" });
+
+    var form = await httpContext.Request.ReadFormAsync(ct);
+    var file = form.Files.FirstOrDefault();
+    if (file == null)
+        return Results.BadRequest(new { error = "No file provided" });
+
+    // Validate MIME type
+    var allowedTypes = new[] { "image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif" };
+    var mimeType = file.ContentType?.ToLowerInvariant() ?? string.Empty;
+    if (!allowedTypes.Contains(mimeType))
+        return Results.BadRequest(new { error = "Only image files are accepted (jpeg, png, webp, gif)" });
+
+    // Validate size (2MB)
+    const long maxBytes = 2 * 1024 * 1024;
+    if (file.Length > maxBytes)
+        return Results.BadRequest(new { error = "Image must be 2MB or smaller" });
+
+    // Run NSFW moderation
+    using var imageStream = file.OpenReadStream();
+    var modResult = await moderation.CheckImageAsync(imageStream, mimeType, ct);
+    if (!modResult.IsAllowed)
+    {
+        logger.LogWarning("AvatarUpload rejected for userId={UserId}: {Reason}", userId, modResult.Reason);
+        return Results.BadRequest(new { error = $"Image rejected: {modResult.Reason}" });
+    }
+
+    // Upload to S3
+    var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+    if (string.IsNullOrEmpty(ext)) ext = mimeType switch
+    {
+        "image/jpeg" or "image/jpg" => ".jpg",
+        "image/png"  => ".png",
+        "image/webp" => ".webp",
+        "image/gif"  => ".gif",
+        _ => ".jpg"
+    };
+    var s3Key = $"avatars/{userId}/{Guid.NewGuid()}{ext}";
+    var bucket = config["AWS:WorkspaceBucket"] ?? config["AWS:S3Bucket"] ?? "fortress-user-workspaces";
+
+    using var uploadStream = file.OpenReadStream();
+    await s3.PutObjectAsync(new Amazon.S3.Model.PutObjectRequest
+    {
+        BucketName = bucket,
+        Key = s3Key,
+        InputStream = uploadStream,
+        ContentType = mimeType,
+        AutoCloseStream = false,
+        CannedACL = Amazon.S3.S3CannedACL.PublicRead
+    }, ct);
+
+    var avatarUrl = $"https://{bucket}.s3.amazonaws.com/{s3Key}";
+
+    // Update user record
+    try
+    {
+        using var cts2 = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts2.CancelAfter(TimeSpan.FromSeconds(5));
+        await using var db = await dbFactory.CreateDbContextAsync(cts2.Token);
+        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == userId, cts2.Token);
+        if (user != null)
+        {
+            user.AvatarUrl = avatarUrl;
+            user.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cts2.Token);
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "AvatarUpload: failed to update user record for userId={UserId}", userId);
+        // Don't fail the request — S3 upload succeeded
+    }
+
+    logger.LogInformation("AvatarUpload: userId={UserId} s3Key={S3Key}", userId, s3Key);
+    return Results.Ok(new { avatarUrl });
 }).RequireAuthorization();
 
 // Blazor components — all routes require auth

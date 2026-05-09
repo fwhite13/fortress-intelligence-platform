@@ -38,6 +38,10 @@ public class User
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    [Column("avatar_url")]
+    [MaxLength(1000)]
+    public string? AvatarUrl { get; set; }
+
     // Navigation
     public MainAssistant? MainAssistant { get; set; }
     public ICollection<Project> Projects { get; set; } = new List<Project>();

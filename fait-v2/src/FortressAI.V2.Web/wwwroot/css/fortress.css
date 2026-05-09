@@ -131,6 +131,8 @@
   --transition-fast: 150ms ease;
   --transition-normal: 200ms ease;
   --transition-slow: 300ms ease;
+  --mobile-nav-height: 60px;
+  --mobile-breakpoint: 767px;
 }
 
 /* ============ RESET & BASE ============ */
@@ -2403,4 +2405,171 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     flex-direction: column;
     margin-bottom: var(--spacing-md, 1rem);
     max-width: 80%;
+}
+
+/* ============================================
+   MOBILE RESPONSIVE — <768px
+   ============================================ */
+
+@media (max-width: 767px) {
+  /* Layout: main content full-width */
+  .mud-main-content,
+  .fait-v2-main {
+    width: 100% !important;
+    margin-left: 0 !important;
+    padding: var(--space-2) !important;
+  }
+
+  /* Sidebar: hidden off-screen by default on mobile */
+  .mud-drawer,
+  .fait-v2-drawer {
+    transform: translateX(-100%) !important;
+    transition: transform var(--transition-slow) !important;
+    z-index: 300;
+  }
+
+  /* Sidebar shown when body has .sidebar-open class */
+  body.sidebar-open .mud-drawer,
+  body.sidebar-open .fait-v2-drawer {
+    transform: translateX(0) !important;
+  }
+
+  /* Sidebar overlay backdrop when open */
+  body.sidebar-open::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 299;
+  }
+
+  /* Bottom navigation bar */
+  .mobile-bottom-nav {
+    display: flex !important;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: var(--mobile-nav-height);
+    background: var(--color-primary);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 200;
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  .mobile-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    color: rgba(255, 255, 255, 0.75);
+    text-decoration: none;
+    font-size: var(--text-xs);
+    min-height: 44px;
+    min-width: 44px;
+    transition: color var(--transition-fast);
+  }
+
+  .mobile-nav-item:hover,
+  .mobile-nav-item.active {
+    color: var(--color-gold, #d4af37);
+    text-decoration: none;
+  }
+
+  .mobile-nav-item .mud-icon-root {
+    font-size: 1.25rem;
+  }
+
+  /* Add padding to main content so bottom nav doesn't overlap */
+  .chat-container,
+  .page-container {
+    padding-bottom: calc(var(--mobile-nav-height) + var(--space-4)) !important;
+  }
+
+  /* Chat input: full-width, larger touch targets */
+  .chat-input-container {
+    padding: var(--space-2) !important;
+    padding-bottom: calc(var(--mobile-nav-height) + var(--space-2)) !important;
+  }
+
+  .chat-input-wrapper {
+    max-width: 100% !important;
+    width: 100%;
+  }
+
+  .chat-input {
+    min-height: 44px !important;
+    font-size: var(--text-base) !important;
+  }
+
+  /* Send button touch target */
+  .btn-send {
+    min-width: 44px !important;
+    min-height: 44px !important;
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  /* Message bubbles: full-width */
+  .message {
+    max-width: 100% !important;
+    gap: var(--space-2);
+  }
+
+  .message-content {
+    font-size: var(--text-base) !important;
+  }
+
+  /* All buttons min 44x44 touch targets */
+  .btn,
+  .mud-button-root,
+  .btn-icon,
+  .hamburger-btn {
+    min-height: 44px !important;
+    min-width: 44px !important;
+  }
+
+  /* Hamburger button: visible on mobile */
+  .hamburger-btn,
+  .mobile-only {
+    display: flex !important;
+  }
+
+  /* Top nav: hide desktop nav links on mobile */
+  .nav-links,
+  .user-name {
+    display: none !important;
+  }
+
+  /* Chat messages padding */
+  .chat-messages {
+    padding: var(--space-3) !important;
+  }
+
+  /* Page container */
+  .page-container {
+    padding: var(--space-3) !important;
+  }
+
+  /* Projects grid: single column */
+  .projects-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Hide desktop-only elements */
+  .desktop-only {
+    display: none !important;
+  }
+}
+
+/* Bottom nav hidden on desktop by default */
+.mobile-bottom-nav {
+  display: none;
+}
+
+/* mobile-only elements hidden on desktop */
+.mobile-only {
+  display: none;
 }

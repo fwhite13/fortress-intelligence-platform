@@ -1250,6 +1250,11 @@ namespace FortressAI.V2.Web.Data.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("updated_at");
 
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)")
+                        .HasColumnName("avatar_url");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Email")

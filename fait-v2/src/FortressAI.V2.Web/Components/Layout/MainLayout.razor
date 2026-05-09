@@ -152,6 +152,26 @@
 
 <FeedbackModal @ref="_feedbackModal" />
 
+<!-- Mobile bottom navigation — hidden on desktop via CSS -->
+<nav class="mobile-bottom-nav">
+    <a href="/" class="mobile-nav-item">
+        <MudIcon Icon="@Icons.Material.Filled.Chat" />
+        <span>Chat</span>
+    </a>
+    <a href="/projects" class="mobile-nav-item">
+        <MudIcon Icon="@Icons.Material.Filled.Folder" />
+        <span>Projects</span>
+    </a>
+    <a href="/knowledge-base" class="mobile-nav-item">
+        <MudIcon Icon="@Icons.Material.Filled.MenuBook" />
+        <span>KB</span>
+    </a>
+    <a href="/settings" class="mobile-nav-item">
+        <MudIcon Icon="@Icons.Material.Filled.Settings" />
+        <span>Settings</span>
+    </a>
+</nav>
+
 <MudDialog @bind-Visible="_showNewProjectDialog">
     <TitleContent>New Project</TitleContent>
     <DialogContent>
@@ -306,6 +326,8 @@
         try
         {
             await JS.InvokeVoidAsync("localStorage.setItem", "fait-v2-drawer-open", _drawerOpen.ToString().ToLower());
+            // On mobile: toggle sidebar-open class on body for CSS-driven slide-in
+            await JS.InvokeVoidAsync("eval", "document.body.classList.toggle('sidebar-open')");
         }
         catch { /* localStorage not available */ }
     }

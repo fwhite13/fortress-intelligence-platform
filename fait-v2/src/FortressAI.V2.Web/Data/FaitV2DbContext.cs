@@ -49,6 +49,7 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.OnboardingStep).HasColumnName("onboarding_step").HasColumnType("int").IsRequired(false);
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.AvatarUrl).HasColumnName("avatar_url").HasMaxLength(1000);
 
             entity.HasIndex(e => e.EntraOid).IsUnique().HasDatabaseName("ix_users_entra_oid");
             entity.HasIndex(e => e.Email).IsUnique().HasDatabaseName("ix_users_email");
