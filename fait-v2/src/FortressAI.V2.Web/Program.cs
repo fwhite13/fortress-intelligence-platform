@@ -713,6 +713,46 @@ app.MapGet("/api/agents/{pluginAgentId}/soul", async (
     return Results.Ok(new { content });
 }).AllowAnonymous(); // guarded by X-Internal-Token or cookie auth
 
+// Workspace file upload endpoint (ADO#3094 — chat file upload destination)
+app.MapPost("/api/workspace/upload", async (
+    HttpContext httpContext,
+    IAmazonS3 s3,
+    IConfiguration config,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    var userId = GetUserId(httpContext);
+    if (userId == null) return Results.Unauthorized();
+
+    if (!httpContext.Request.HasFormContentType)
+        return Results.BadRequest(new { error = "multipart/form-data required" });
+
+    var form = await httpContext.Request.ReadFormAsync(ct);
+    var file = form.Files.FirstOrDefault();
+    if (file == null)
+        return Results.BadRequest(new { error = "No file provided" });
+
+    var folder = form["folder"].FirstOrDefault() ?? "uploads";
+    folder = System.Text.RegularExpressions.Regex.Replace(folder, @"[^a-zA-Z0-9_\-]", "_");
+
+    var fileName = Path.GetFileName(file.FileName);
+    var s3Key = $"workspaces/{userId}/{folder}/{fileName}";
+    var bucket = config["AWS:WorkspaceBucket"] ?? config["AWS:S3Bucket"] ?? "fortress-user-workspaces";
+
+    using var stream = file.OpenReadStream();
+    await s3.PutObjectAsync(new Amazon.S3.Model.PutObjectRequest
+    {
+        BucketName = bucket,
+        Key = s3Key,
+        InputStream = stream,
+        ContentType = file.ContentType ?? "application/octet-stream",
+        AutoCloseStream = false,
+    }, ct);
+
+    logger.LogInformation("WorkspaceUpload: userId={UserId} s3Key={S3Key}", userId, s3Key);
+    return Results.Ok(new { s3Key });
+}).RequireAuthorization();
+
 // Blazor components — all routes require auth
 app.MapRazorComponents<App>()
    .AddInteractiveServerRenderMode()

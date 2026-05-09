@@ -190,6 +190,40 @@
                 </button>
             </div>
         </div>
+        @* ADO#3094 — File upload destination selector *@
+        <div class="chat-upload-trigger-row">
+            <label class="chat-file-attach-btn" title="Attach file">
+                <InputFile OnChange="HandleFileSelected" class="chat-file-input" accept="*/*" />
+                <MudIcon Icon="@Icons.Material.Filled.AttachFile" Class="chat-pill-icon" />
+                <span class="chat-pill-label">Attach</span>
+            </label>
+            @if (!string.IsNullOrEmpty(_uploadStatusMessage))
+            {
+                <span class="chat-upload-status">@_uploadStatusMessage</span>
+                <button class="chat-upload-clear-btn" @onclick="ClearFile" title="Clear">×</button>
+            }
+        </div>
+
+        @if (_pendingFile != null)
+        {
+            <div class="chat-upload-panel">
+                <span class="chat-upload-filename">📎 @_pendingFile.Name</span>
+                <div class="chat-upload-dest-group">
+                    <button class="chat-upload-dest-btn @(_uploadDestination == "chat" ? "chat-upload-dest-btn--active" : "")"
+                            @onclick="@(() => _uploadDestination = "chat")">Chat only</button>
+                    <button class="chat-upload-dest-btn @(_uploadDestination == "project" ? "chat-upload-dest-btn--active" : "")"
+                            @onclick="@(() => _uploadDestination = "project")">Project</button>
+                    <button class="chat-upload-dest-btn @(_uploadDestination == "kb" ? "chat-upload-dest-btn--active" : "")"
+                            @onclick="@(() => _uploadDestination = "kb")">Knowledge Base</button>
+                    <button class="chat-upload-dest-btn @(_uploadDestination == "workspace" ? "chat-upload-dest-btn--active" : "")"
+                            @onclick="@(() => _uploadDestination = "workspace")">Workspace</button>
+                </div>
+                <button class="chat-upload-confirm-btn" @onclick="UploadFile" disabled="@_fileUploading">
+                    @(_fileUploading ? "Uploading..." : "Upload")
+                </button>
+                <button class="chat-upload-cancel-btn" @onclick="ClearFile">Cancel</button>
+            </div>
+        }
         @* Bottom row: text input + send *@
         <div class="chat-input-bottom-row">
             <textarea class="chat-input-field"
@@ -459,6 +493,121 @@
         background: var(--color-surface-hover);
         color: var(--color-text-primary);
     }
+
+    .chat-upload-trigger-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-4);
+    }
+
+    .chat-file-attach-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+        padding: var(--space-1) var(--space-2);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-sm);
+        cursor: pointer;
+        transition: background var(--transition-base), color var(--transition-base);
+    }
+
+    .chat-file-attach-btn:hover {
+        background: var(--color-surface-hover);
+        color: var(--color-text-primary);
+    }
+
+    .chat-file-input {
+        display: none;
+    }
+
+    .chat-upload-status {
+        font-size: var(--font-size-xs);
+        color: var(--color-text-secondary);
+    }
+
+    .chat-upload-clear-btn {
+        background: transparent;
+        border: none;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        font-size: var(--font-size-sm);
+        padding: 0 var(--space-1);
+    }
+
+    .chat-upload-panel {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-4);
+        background: var(--color-surface-sunken);
+        border-top: 1px solid var(--color-border);
+        flex-wrap: wrap;
+    }
+
+    .chat-upload-filename {
+        font-size: var(--font-size-sm);
+        color: var(--color-text-primary);
+        font-weight: 500;
+        margin-right: var(--space-2);
+    }
+
+    .chat-upload-dest-group {
+        display: flex;
+        gap: var(--space-1);
+    }
+
+    .chat-upload-dest-btn {
+        padding: var(--space-1) var(--space-2);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-xs);
+        cursor: pointer;
+        transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base);
+    }
+
+    .chat-upload-dest-btn:hover {
+        background: var(--color-surface-hover);
+        color: var(--color-text-primary);
+    }
+
+    .chat-upload-dest-btn--active {
+        border-color: var(--color-accent);
+        background: var(--color-accent-bg);
+        color: var(--color-accent);
+    }
+
+    .chat-upload-confirm-btn {
+        padding: var(--space-1) var(--space-3);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-accent);
+        background: var(--color-accent);
+        color: var(--color-text-on-accent);
+        font-size: var(--font-size-xs);
+        cursor: pointer;
+        font-weight: 600;
+        transition: opacity var(--transition-base);
+    }
+
+    .chat-upload-confirm-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .chat-upload-cancel-btn {
+        padding: var(--space-1) var(--space-2);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-size: var(--font-size-xs);
+        cursor: pointer;
+    }
 </style>
 
     </ChatContent>
@@ -480,6 +629,8 @@
     [Inject] private IUserService UserService { get; set; } = default!;
     [Inject] private IDbContextFactory<FaitV2DbContext> DbFactory { get; set; } = default!;
     [Inject] private ILogger<ChatView> _logger { get; set; } = default!;
+    [Inject] private KbDocumentService KbDocSvc { get; set; } = default!;
+    [Inject] private IWorkspaceService WorkspaceService { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private List<ChatMessage> _messages = new();
@@ -514,6 +665,12 @@
     private string? _artifactPreviewUrl = null;
     private bool _isPanelOpen = false;
     private HubConnection? _hubConnection;
+
+    // ADO#3094 — File upload destination selector
+    private IBrowserFile? _pendingFile = null;
+    private string _uploadDestination = "chat"; // "chat" | "project" | "kb" | "workspace"
+    private bool _fileUploading = false;
+    private string? _uploadStatusMessage = null;
 
     // Intervention gate state
     private CCInterventionRequest? _pendingIntervention = null;
@@ -1043,6 +1200,83 @@ The filename should be descriptive of the content.",
     private void TogglePersonalKb() => _personalKbEnabled = !_personalKbEnabled;
 
     private void SetAgent(ActiveAgent agent) => _activeAgent = agent;
+
+    // ADO#3094 — File upload destination selector
+    private void HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        _pendingFile = e.File;
+        _uploadDestination = "chat";
+        _uploadStatusMessage = null;
+        StateHasChanged();
+    }
+
+    private void ClearFile()
+    {
+        _pendingFile = null;
+        _uploadStatusMessage = null;
+        StateHasChanged();
+    }
+
+    private async Task UploadFile()
+    {
+        if (_pendingFile == null || _fileUploading) return;
+        _fileUploading = true;
+        StateHasChanged();
+        try
+        {
+            var fileName = _pendingFile.Name;
+            var destLabel = _uploadDestination switch
+            {
+                "project"   => "Project",
+                "kb"        => "Knowledge Base",
+                "workspace" => "Workspace",
+                _           => "Chat",
+            };
+
+            if (_uploadDestination == "chat")
+            {
+                _uploadStatusMessage = $"📎 {fileName} → {destLabel} (attached to next message)";
+            }
+            else if (_uploadDestination == "project")
+            {
+                if (string.IsNullOrEmpty(ProjectState.ActiveProjectId))
+                {
+                    _uploadStatusMessage = "No project selected — select one in the sidebar";
+                }
+                else
+                {
+                    using var stream = _pendingFile.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+                    await KbDocSvc.UploadProjectDocumentAsync(stream, fileName, _pendingFile.ContentType, ProjectState.ActiveProjectId, _userId);
+                    _uploadStatusMessage = $"📎 {fileName} → {destLabel}";
+                    _pendingFile = null;
+                }
+            }
+            else if (_uploadDestination == "kb")
+            {
+                using var stream = _pendingFile.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+                await KbDocSvc.UploadDocumentAsync(stream, fileName, _pendingFile.ContentType, KbTier.Personal, _userId);
+                _uploadStatusMessage = $"📎 {fileName} → {destLabel}";
+                _pendingFile = null;
+            }
+            else if (_uploadDestination == "workspace")
+            {
+                using var stream = _pendingFile.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+                await WorkspaceService.UploadFileAsync(_userId, "uploads", fileName, stream);
+                _uploadStatusMessage = $"📎 {fileName} → {destLabel}";
+                _pendingFile = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _uploadStatusMessage = $"⚠️ Upload failed: {ex.Message}";
+            _logger.LogError(ex, "File upload failed for userId={UserId}, destination={Dest}", _userId, _uploadDestination);
+        }
+        finally
+        {
+            _fileUploading = false;
+            StateHasChanged();
+        }
+    }
 
     private Task LoadTaskProjectAsync(string taskId)
     {
