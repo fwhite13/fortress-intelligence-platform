@@ -371,13 +371,16 @@ app.post('/tools/ado_list_work_items', async (req, res) => {
     const pat = await getUserAdoToken(userId);
     if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
     try {
-        let wiql = `SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo],[Microsoft.VSTS.Common.Priority] FROM WorkItems WHERE [System.TeamProject] = '${project}'`;
-        if (iteration) wiql += ` AND [System.IterationPath] = '${iteration}'`;
-        if (state) wiql += ` AND [System.State] = '${state}'`;
-        if (assignedTo) wiql += ` AND [System.AssignedTo] = '${assignedTo}'`;
+        // Sanitize WIQL string params to prevent injection
+        const sanitize = (s) => String(s || '').replace(/'/g, "''");
+        const safeTop = Math.min(parseInt(top, 10) || 20, 200);
+        let wiql = `SELECT [System.Id],[System.Title],[System.State],[System.AssignedTo],[Microsoft.VSTS.Common.Priority] FROM WorkItems WHERE [System.TeamProject] = '${sanitize(project)}'`;
+        if (iteration) wiql += ` AND [System.IterationPath] = '${sanitize(iteration)}'`;
+        if (state) wiql += ` AND [System.State] = '${sanitize(state)}'`;
+        if (assignedTo) wiql += ` AND [System.AssignedTo] = '${sanitize(assignedTo)}'`;
         wiql += ` ORDER BY [System.ChangedDate] DESC`;
 
-        const wiqlUrl = `${ADO_BASE}/${encodeURIComponent(project)}/_apis/wit/wiql?api-version=7.1&$top=${top}`;
+        const wiqlUrl = `${ADO_BASE}/${encodeURIComponent(project)}/_apis/wit/wiql?api-version=7.1&$top=${safeTop}`;
         const wiqlResp = await adoRequest(pat, 'POST', wiqlUrl, { query: wiql });
         const ids = (wiqlResp.workItems || []).map(w => w.id);
         if (ids.length === 0) return res.json({ result: [] });
