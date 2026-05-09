@@ -159,6 +159,7 @@ public class FargateCCExecutionService : ICCExecutionService
 ## Identity
 User ID: {envelope.UserId}
 User Name: {envelope.UserDisplayName}
+Email: {envelope.UserEmail ?? "unknown"}
 
 ## Available Knowledge Bases
 {kb}

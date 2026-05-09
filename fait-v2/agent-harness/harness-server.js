@@ -921,6 +921,7 @@ app.post('/turn', async (req, res) => {
     const history     = rawBody.History     ?? rawBody.history;
     const forceTaskMode = rawBody.ForceTaskMode ?? rawBody.force_task_mode ?? false;
     const pluginAgentId = rawBody.PluginAgentId ?? rawBody.pluginAgentId ?? null;
+    const userEmail     = rawBody.UserEmail     ?? rawBody.userEmail     ?? null;
     const taskMode = forceTaskMode || classifyRequest(message, history);
     console.log(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, forceTaskMode=${forceTaskMode}, classifiedTaskMode=${taskMode}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
 
@@ -994,6 +995,7 @@ app.post('/turn', async (req, res) => {
         } else if (soulMd) {
             contextParts.push(`## Assistant Identity\n${soulMd}`);
         }
+        if (userEmail) contextParts.push(`## User Identity\nEmail: ${userEmail}`);
         if (userMd) contextParts.push(`## About the User\n${userMd}`);
         if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
         if (systemPrompt) contextParts.push(systemPrompt);
@@ -1121,6 +1123,7 @@ app.post('/turn', async (req, res) => {
             } else if (soulMd) {
                 systemParts.push(`## Assistant Identity\n${soulMd}`);
             }
+            if (userEmail) systemParts.push(`## User Identity\nEmail: ${userEmail}`);
             if (userMd) systemParts.push(`## About the User\n${userMd}`);
             if (memoryMd) systemParts.push(`## Long-Term Memory\n${memoryMd}`);
             if (systemPrompt) systemParts.push(systemPrompt);
@@ -1257,6 +1260,10 @@ app.post('/turn', async (req, res) => {
                 }
             }
             console.log(`[harness] /turn: stream complete, sending done event for userId=${userId}`);
+            // ADO#3093 — fire-and-forget preference detection write
+            if (hasPreferenceSignal(message)) {
+                firePreferenceWrite(userId, message);
+            }
             sendEvent({ type: 'done', inputTokens, outputTokens });
             res.end();
         } catch (err) {
