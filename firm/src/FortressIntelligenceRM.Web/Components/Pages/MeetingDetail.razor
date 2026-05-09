@@ -8,7 +8,7 @@
 @inject FirmKbService FirmKbService
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
-@inject IHttpClientFactory HttpClientFactory
+@inject IFaitV2IntegrationService FaitV2Service
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
@@ -543,35 +543,15 @@
                 ? summaryText
                 : $"{summaryText}\n\n--- Transcript ---\n{transcriptExcerpt}";
 
-            var payload = new
-            {
-                EntraOid = _user?.EntraOid ?? "",
-                Content = content,
-                SourceType = "firm_meeting",
-                SourceId = _meeting.Id.ToString(),
-                Title = _meeting.Title ?? $"Meeting {_meeting.Id}"
-            };
+            await FaitV2Service.SendTranscriptAsync(
+                entraOid: _user?.EntraOid ?? "",
+                meetingId: _meeting.Id.ToString(),
+                transcript: content,
+                title: _meeting.Title ?? $"Meeting {_meeting.Id}");
 
-            var faitV2BaseUrl = (Configuration["FaitV2:BaseUrl"] ?? "https://fait-v2.dev.fortressam.ai").TrimEnd('/');
-            var client = HttpClientFactory.CreateClient();
-            var firmSecret = Configuration["FaitV2:SharedSecret"];
-            if (!string.IsNullOrEmpty(firmSecret))
-                client.DefaultRequestHeaders.Add("X-Firm-Secret", firmSecret);
-
-            var response = await client.PostAsJsonAsync($"{faitV2BaseUrl}/api/assistant/inject", payload);
-
-            if (response.IsSuccessStatusCode)
-            {
-                Snackbar.Add("Meeting context sent to your assistant", Severity.Success);
-                _sendResult = null;
-                _sendSuccess = true;
-            }
-            else
-            {
-                _sendSuccess = false;
-                _sendResult = "Failed to send to assistant";
-                Snackbar.Add("Failed to send to assistant", Severity.Error);
-            }
+            Snackbar.Add("Meeting context sent to your assistant", Severity.Success);
+            _sendResult = null;
+            _sendSuccess = true;
         }
         catch (Exception ex)
         {
