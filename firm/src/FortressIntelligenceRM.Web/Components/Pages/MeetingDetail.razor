@@ -554,7 +554,7 @@
 
             var faitV2BaseUrl = (Configuration["FaitV2:BaseUrl"] ?? "https://fait-v2.dev.fortressam.ai").TrimEnd('/');
             var client = HttpClientFactory.CreateClient();
-            var firmSecret = Configuration["FirmIntegration:SharedSecret"];
+            var firmSecret = Configuration["FaitV2:SharedSecret"];
             if (!string.IsNullOrEmpty(firmSecret))
                 client.DefaultRequestHeaders.Add("X-Firm-Secret", firmSecret);
 
