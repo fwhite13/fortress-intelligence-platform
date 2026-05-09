@@ -432,6 +432,7 @@
 
     private async Task RunStreamingTurnAsync(string userMessage)
     {
+        _logger.LogInformation("RunStreamingTurnAsync: starting for userId={UserId}", _userId);
         _isStreaming = true;
         _streamingContent = "";
         StateHasChanged();
@@ -444,6 +445,7 @@
                 await ConversationService.AppendMessageAsync(_conversationId, "user", userMessage, EstimateTokens(userMessage));
 
             // Build context from DB (compaction-aware)
+            _logger.LogInformation("RunStreamingTurnAsync: building context history");
             List<FortressAI.V2.Web.Services.ChatHistoryEntry> contextHistory;
             if (!string.IsNullOrEmpty(_conversationId))
             {
@@ -470,6 +472,7 @@
                 TaskMode: false,
                 History: contextHistory
             );
+            _logger.LogInformation("RunStreamingTurnAsync: calling SendTurnAsync");
             await foreach (var evt in AgentRuntime.SendTurnAsync(_userId, request))
             {
                 if (evt.Type == "text" && evt.Content != null)
@@ -489,6 +492,13 @@
                     break;
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "RunStreamingTurnAsync failed for userId={UserId}", _userId);
+            _streamingContent = "";
+            _messages.Add(new ChatMessage(Role: "assistant", Content: $"⚠️ Error: {ex.Message}"));
+            StateHasChanged();
         }
         finally
         {
@@ -571,7 +581,8 @@
         }
         catch (Exception ex)
         {
-            _messages.Add(new ChatMessage(Role: "assistant", Content: $"An error occurred during artifact generation: {ex.Message}"));
+            _logger.LogError(ex, "RunCCTaskAsync failed for userId={UserId}", _userId);
+            _messages.Add(new ChatMessage(Role: "assistant", Content: $"⚠️ Error: {ex.Message}"));
         }
         finally
         {
