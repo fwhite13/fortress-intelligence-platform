@@ -217,7 +217,7 @@ async function scanAndUploadArtifacts(userId, workspaceDir) {
         .sort((a, b) => b.mtime - a.mtime)[0];
 
     const filePath = path.join(artifactsDir, latestFile.name);
-    const s3Key = `${S3_PREFIX}artifacts/${latestFile.name}`;
+    const s3Key = `${S3_PREFIX}artifacts/${userId}/${latestFile.name}`;
     const fileBuffer = fs.readFileSync(filePath);
     const ext = path.extname(latestFile.name).toLowerCase();
 
@@ -468,12 +468,12 @@ app.post('/turn', async (req, res) => {
                 } else if (event.contentBlockDelta?.delta?.text) {
                     tokenCount++;
                     sendEvent({ type: 'text', content: event.contentBlockDelta.delta.text });
-                } else if (event.messageStop) {
-                    console.log(`[harness] /turn: messageStop received after ${tokenCount} text events, stopReason=${event.messageStop.stopReason}`);
-                    break;
                 } else if (event.metadata?.usage) {
                     inputTokens = event.metadata.usage.inputTokens || 0;
                     outputTokens = event.metadata.usage.outputTokens || 0;
+                } else if (event.messageStop) {
+                    console.log(`[harness] /turn: messageStop received after ${tokenCount} text events, stopReason=${event.messageStop.stopReason}`);
+                    break;
                 } else {
                     console.log(`[harness] /turn: stream event (non-text): ${JSON.stringify(Object.keys(event))}`);
                 }

@@ -519,6 +519,8 @@
         StateHasChanged();
 
         var assistantContent = new System.Text.StringBuilder();
+        int? tokensIn = null;
+        int? tokensOut = null;
         try
         {
             // Persist user message to DB
@@ -555,8 +557,6 @@
             );
             _logger.LogInformation("RunStreamingTurnAsync: calling SendTurnAsync for userId={UserId}, requestMessageLen={Len}, historyCount={HistCount}",
                 _userId, request.Message?.Length ?? 0, request.History?.Count ?? 0);
-            int? tokensIn = null;
-            int? tokensOut = null;
             int evtCount = 0;
             await foreach (var evt in AgentRuntime.SendTurnAsync(_userId, request))
             {
