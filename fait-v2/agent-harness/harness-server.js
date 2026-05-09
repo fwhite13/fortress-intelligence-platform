@@ -520,9 +520,9 @@ app.post('/tools/search_memory', async (req, res) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                ...(internalToken ? { 'Authorization': `Bearer ${internalToken}` } : {}),
+                ...(internalToken ? { 'X-Internal-Token': internalToken } : {}),
             },
-            body: JSON.stringify({ query, topK }),
+            body: JSON.stringify({ query, topK, userId }),
         });
         if (!resp.ok) {
             const text = await resp.text();

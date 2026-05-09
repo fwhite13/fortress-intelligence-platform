@@ -553,10 +553,35 @@ app.MapPost("/api/memory/search", async (
     [FromBody] MemorySearchRequest searchRequest,
     IRAGReadService ragReadService,
     HttpContext httpContext,
+    IConfiguration config,
+    ILogger<Program> logger,
     CancellationToken ct) =>
 {
-    var userId = GetUserId(httpContext);
-    if (userId == null) return Results.Unauthorized();
+    // Internal harness calls use X-Internal-Token shared secret (AllowAnonymous)
+    // Browser/component calls use standard cookie auth
+    var internalToken = config["Harness:InternalApiToken"];
+    var providedToken = httpContext.Request.Headers["X-Internal-Token"].FirstOrDefault();
+    string? userId;
+
+    if (!string.IsNullOrEmpty(providedToken))
+    {
+        // Harness path — validate shared secret
+        if (string.IsNullOrEmpty(internalToken) || providedToken != internalToken)
+        {
+            logger.LogWarning("MemorySearch: rejected invalid X-Internal-Token");
+            return Results.Unauthorized();
+        }
+        // userId must be in request body for harness calls
+        if (string.IsNullOrEmpty(searchRequest.UserId))
+            return Results.BadRequest("userId required for harness calls");
+        userId = searchRequest.UserId;
+    }
+    else
+    {
+        // Browser path — require cookie auth
+        userId = GetUserId(httpContext);
+        if (userId == null) return Results.Unauthorized();
+    }
 
     var results = await ragReadService.SearchAsync(
         userId,
@@ -571,7 +596,7 @@ app.MapPost("/api/memory/search", async (
         content = r.Content,
         similarity = r.Similarity,
     }));
-}).RequireAuthorization();
+}).AllowAnonymous();
 
 // Blazor components — all routes require auth
 app.MapRazorComponents<App>()
@@ -668,4 +693,4 @@ public record AssistantInjectRequest(
     string? Title
 );
 
-public record MemorySearchRequest(string Query, int? TopK);
+public record MemorySearchRequest(string Query, int? TopK, string? UserId = null);
