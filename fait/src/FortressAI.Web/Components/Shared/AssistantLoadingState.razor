@@ -163,9 +163,14 @@
         _elapsedSeconds = 0;
         _statusMessage = "Starting your assistant...";
         _cts?.Cancel();
+        _cts?.Dispose();                                    // dispose old before replacing
         _cts = new CancellationTokenSource();
         _timer?.Stop();
-        _timer?.Start();
+        _timer?.Dispose();
+        _timer = new System.Timers.Timer(2000);             // recreate — StopPolling nulled it
+        _timer.Elapsed += async (_, _) => await PollStatusAsync();
+        _timer.AutoReset = true;
+        _timer.Start();
         StateHasChanged();
         await OnRetry.InvokeAsync();
     }
