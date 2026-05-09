@@ -133,6 +133,10 @@
   --transition-slow: 300ms ease;
   --mobile-nav-height: 60px;
   --mobile-breakpoint: 767px;
+  --touch-target-size: 44px;
+  --mobile-icon-size: 1.25rem;
+  --mobile-nav-border: 1px;
+  --mobile-nav-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
 }
 
 /* ============ RESET & BASE ============ */
@@ -2407,6 +2411,16 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     max-width: 80%;
 }
 
+/* Bottom nav hidden on desktop by default */
+.mobile-bottom-nav {
+  display: none;
+}
+
+/* mobile-only elements hidden on desktop */
+.mobile-only {
+  display: none;
+}
+
 /* ============================================
    MOBILE RESPONSIVE — <768px
    ============================================ */
@@ -2434,12 +2448,10 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     transform: translateX(0) !important;
   }
 
-  /* Sidebar overlay backdrop when open */
-  body.sidebar-open::before {
-    content: '';
+  .mobile-sidebar-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.45);
+    background: rgba(0, 0, 0, 0.5);
     z-index: 299;
   }
 
@@ -2452,9 +2464,9 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     right: 0;
     height: var(--mobile-nav-height);
     background: var(--color-primary);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: var(--mobile-nav-border) solid rgba(255, 255, 255, 0.1);
     z-index: 200;
-    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--mobile-nav-shadow);
   }
 
   .mobile-nav-item {
@@ -2467,8 +2479,8 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
     color: rgba(255, 255, 255, 0.75);
     text-decoration: none;
     font-size: var(--text-xs);
-    min-height: 44px;
-    min-width: 44px;
+    min-height: var(--touch-target-size);
+    min-width: var(--touch-target-size);
     transition: color var(--transition-fast);
   }
 
@@ -2479,7 +2491,7 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
   }
 
   .mobile-nav-item .mud-icon-root {
-    font-size: 1.25rem;
+    font-size: var(--mobile-icon-size);
   }
 
   /* Add padding to main content so bottom nav doesn't overlap */
@@ -2500,16 +2512,16 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
   }
 
   .chat-input {
-    min-height: 44px !important;
+    min-height: var(--touch-target-size) !important;
     font-size: var(--text-base) !important;
   }
 
   /* Send button touch target */
   .btn-send {
-    min-width: 44px !important;
-    min-height: 44px !important;
-    width: 44px !important;
-    height: 44px !important;
+    min-width: var(--touch-target-size) !important;
+    min-height: var(--touch-target-size) !important;
+    width: var(--touch-target-size) !important;
+    height: var(--touch-target-size) !important;
   }
 
   /* Message bubbles: full-width */
@@ -2527,8 +2539,8 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
   .mud-button-root,
   .btn-icon,
   .hamburger-btn {
-    min-height: 44px !important;
-    min-width: 44px !important;
+    min-height: var(--touch-target-size) !important;
+    min-width: var(--touch-target-size) !important;
   }
 
   /* Hamburger button: visible on mobile */
@@ -2562,14 +2574,4 @@ input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focu
   .desktop-only {
     display: none !important;
   }
-}
-
-/* Bottom nav hidden on desktop by default */
-.mobile-bottom-nav {
-  display: none;
-}
-
-/* mobile-only elements hidden on desktop */
-.mobile-only {
-  display: none;
 }

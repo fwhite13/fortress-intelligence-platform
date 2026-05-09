@@ -6,3 +6,7 @@ window.downloadBase64 = function (fileName, mimeType, base64String) {
     link.click();
     document.body.removeChild(link);
 };
+
+window.toggleSidebarClass = function () {
+    document.body.classList.toggle('sidebar-open');
+};
