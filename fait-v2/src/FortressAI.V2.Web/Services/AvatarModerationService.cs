@@ -13,15 +13,16 @@ public record AvatarModerationResult(bool IsAllowed, string? Reason = null);
 
 public class AvatarModerationService : IAvatarModerationService
 {
-    private const string ModerationModel = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+    private readonly string _moderationModel;
 
     private readonly IAmazonBedrockRuntime _bedrock;
     private readonly ILogger<AvatarModerationService> _logger;
 
-    public AvatarModerationService(IAmazonBedrockRuntime bedrock, ILogger<AvatarModerationService> logger)
+    public AvatarModerationService(IAmazonBedrockRuntime bedrock, ILogger<AvatarModerationService> logger, IConfiguration config)
     {
         _bedrock = bedrock;
         _logger = logger;
+        _moderationModel = config["Bedrock:AvatarModerationModelId"] ?? "us.anthropic.claude-haiku-4-5-20251001-v1:0";
     }
 
     public async Task<AvatarModerationResult> CheckImageAsync(Stream imageStream, string contentType, CancellationToken ct = default)
@@ -79,7 +80,7 @@ public class AvatarModerationService : IAvatarModerationService
 
             var response = await _bedrock.InvokeModelAsync(new InvokeModelRequest
             {
-                ModelId = ModerationModel,
+                ModelId = _moderationModel,
                 ContentType = "application/json",
                 Accept = "application/json",
                 Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(body))

@@ -905,6 +905,22 @@ app.MapPost("/api/profile/avatar", async (
     if (!allowedTypes.Contains(mimeType))
         return Results.BadRequest(new { error = "Only image files are accepted (jpeg, png, webp, gif)" });
 
+    // Magic-byte MIME validation (prevent spoofed Content-Type)
+    using var magicStream = file.OpenReadStream();
+    var magicBuffer = new byte[12];
+    var magicBytesRead = await magicStream.ReadAsync(magicBuffer, 0, 12, ct);
+    bool validMagic = mimeType switch
+    {
+        "image/jpeg" or "image/jpg" => magicBytesRead >= 3 && magicBuffer[0] == 0xFF && magicBuffer[1] == 0xD8 && magicBuffer[2] == 0xFF,
+        "image/png"  => magicBytesRead >= 8 && magicBuffer[0] == 0x89 && magicBuffer[1] == 0x50 && magicBuffer[2] == 0x4E && magicBuffer[3] == 0x47,
+        "image/gif"  => magicBytesRead >= 4 && magicBuffer[0] == 0x47 && magicBuffer[1] == 0x49 && magicBuffer[2] == 0x46 && magicBuffer[3] == 0x38,
+        "image/webp" => magicBytesRead >= 12 && magicBuffer[0] == 0x52 && magicBuffer[1] == 0x49 && magicBuffer[2] == 0x46 && magicBuffer[3] == 0x46
+                        && magicBuffer[8] == 0x57 && magicBuffer[9] == 0x45 && magicBuffer[10] == 0x42 && magicBuffer[11] == 0x50,
+        _ => false
+    };
+    if (!validMagic)
+        return Results.BadRequest(new { error = "File content does not match declared image type." });
+
     // Validate size (2MB)
     const long maxBytes = 2 * 1024 * 1024;
     if (file.Length > maxBytes)
@@ -943,7 +959,10 @@ app.MapPost("/api/profile/avatar", async (
         CannedACL = Amazon.S3.S3CannedACL.PublicRead
     }, ct);
 
-    var avatarUrl = $"https://{bucket}.s3.amazonaws.com/{s3Key}";
+    var avatarBaseUrl = config["AWS:AvatarBaseUrl"];
+    if (string.IsNullOrWhiteSpace(avatarBaseUrl))
+        avatarBaseUrl = $"https://{bucket}.s3.amazonaws.com";
+    var avatarUrl = $"{avatarBaseUrl}/{s3Key}";
 
     // Update user record
     try
