@@ -14,6 +14,7 @@ public class CCContextEnvelope
 {
     public string UserId { get; set; } = string.Empty;
     public string UserDisplayName { get; set; } = string.Empty;
+    public string? UserEmail { get; init; }
     public List<string> KbIds { get; set; } = new();
     public List<string> EnabledMcpServers { get; set; } = new();
     public string? MemorySummary { get; set; }

@@ -50,6 +50,7 @@ public class ContextEnvelopeService : IContextEnvelopeService
     public async Task<CCContextEnvelope> BuildEnvelopeAsync(
         string userId,
         string userDisplayName,
+        string? userEmail,
         string taskInstructions,
         string? pluginId = null,
         CancellationToken ct = default)
@@ -155,6 +156,7 @@ public class ContextEnvelopeService : IContextEnvelopeService
         {
             UserId = userId,
             UserDisplayName = userDisplayName,
+            UserEmail = userEmail,
             KbIds = kbIds,
             EnabledMcpServers = enabledMcpServers,
             MemorySummary = memorySummary,

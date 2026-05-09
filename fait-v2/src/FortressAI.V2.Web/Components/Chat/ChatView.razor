@@ -491,6 +491,7 @@
     private ElementReference _messagesRef;
     private string _userId = "";
     private string _userDisplayName = "";
+    private string? _userEmail = null;
     private bool _fortressKbEnabled = false;
     private bool _personalKbEnabled = true;
     private ActiveAgent _activeAgent = ActiveAgent.MainAssistant;
@@ -554,6 +555,8 @@
 
             _userDisplayName = auth.User.FindFirst("name")?.Value
                             ?? auth.User.FindFirst("preferred_username")?.Value ?? "User";
+            _userEmail = auth.User.FindFirst("preferred_username")?.Value
+                      ?? auth.User.FindFirst("upn")?.Value;
 
             var userRoles = auth.User.Claims
                 .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "roles")
@@ -749,7 +752,8 @@
                 TaskMode: false,
                 ForceTaskMode: _forceTaskMode,
                 History: contextHistory,
-                PluginAgentId: _activePluginAgentId   // §6.1
+                PluginAgentId: _activePluginAgentId,   // §6.1
+                UserEmail: _userEmail                   // §G1 — Entra UPN
             );
             _forceTaskMode = false; // reset after send
             _logger.LogInformation("RunStreamingTurnAsync: calling SendTurnAsync for userId={UserId}, requestMessageLen={Len}, historyCount={HistCount}",
@@ -879,7 +883,7 @@
             if (_selectedPluginId != null)
             {
                 var pluginEnvelope = await ContextEnvelopeSvc.BuildEnvelopeAsync(
-                    _userId, _userDisplayName, envelope.TaskInstructions,
+                    _userId, _userDisplayName, _userEmail, envelope.TaskInstructions,
                     _selectedPluginId, _ccCts!.Token);
                 envelope.EnabledMcpServers = pluginEnvelope.EnabledMcpServers;
                 envelope.MemorySummary = pluginEnvelope.MemorySummary;
@@ -996,6 +1000,7 @@
         {
             UserId = userId,
             UserDisplayName = displayName,
+            UserEmail = _userEmail,
             KbIds = new List<string>(),
             EnabledMcpServers = new List<string>(),
             MemorySummary = null,

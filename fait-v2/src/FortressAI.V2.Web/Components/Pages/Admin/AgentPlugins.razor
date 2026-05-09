@@ -1,0 +1,248 @@
+@page "/admin/agents"
+@attribute [Authorize]
+@using FortressAI.V2.Web.Data
+@using FortressAI.V2.Web.Data.Models
+@using FortressAI.V2.Web.Services
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<FaitV2DbContext> DbFactory
+@inject IPluginAgentService PluginAgentService
+@inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Agent Plugins — FAIT Admin</PageTitle>
+
+<div class="admin-agents-page">
+    <div class="admin-agents-header">
+        <div class="admin-agents-header__left">
+            <h1 class="admin-agents-title">Agent Plugins</h1>
+            <p class="admin-agents-subtitle">Manage AI agent plugins available in FAIT.</p>
+        </div>
+        <div class="admin-agents-header__right">
+            <MudButton StartIcon="@Icons.Material.Outlined.Add"
+                       Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Class="admin-agents-add-btn"
+                       OnClick="OpenNewForm">
+                New Agent
+            </MudButton>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="admin-agents-loading">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        </div>
+    }
+    else if (_error != null)
+    {
+        <MudAlert Severity="Severity.Error" Class="admin-agents-error">@_error</MudAlert>
+    }
+    else
+    {
+        <div class="admin-agents-table-wrap">
+            <MudTable Items="_agents" Hover="true" Striped="false" Class="admin-agents-table">
+                <HeaderContent>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Description</MudTh>
+                    <MudTh>Active</MudTh>
+                    <MudTh>Actions</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Name">
+                        <span class="admin-agents-name">@context.Name</span>
+                    </MudTd>
+                    <MudTd DataLabel="Description">
+                        <span class="admin-agents-description">@context.Description</span>
+                    </MudTd>
+                    <MudTd DataLabel="Active">
+                        <MudSwitch T="bool"
+                                   Value="@context.IsActive"
+                                   ValueChanged="@(async (val) => await ToggleActive(context, val))"
+                                   Color="Color.Primary"
+                                   Class="admin-agents-toggle" />
+                    </MudTd>
+                    <MudTd DataLabel="Actions">
+                        <MudIconButton Icon="@Icons.Material.Outlined.Edit"
+                                       Size="Size.Small"
+                                       Color="Color.Default"
+                                       Class="admin-agents-edit-btn"
+                                       OnClick="@(() => OpenEditForm(context))" />
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </div>
+    }
+</div>
+
+@* Create/Edit form dialog — NOT inside @if blocks per Blazor rules *@
+<MudDialog @bind-Visible="_showForm">
+    <TitleContent>@(_editingPlugin == null ? "New Agent" : "Edit Agent")</TitleContent>
+    <DialogContent>
+        <div class="admin-agents-form">
+            <MudTextField @bind-Value="_formName"
+                          Label="Name"
+                          Required="true"
+                          Class="admin-agents-form-field" />
+            <MudTextField @bind-Value="_formDescription"
+                          Label="Description"
+                          Lines="3"
+                          Class="admin-agents-form-field mt-3" />
+            <MudTextField @bind-Value="_formSkillsDirectory"
+                          Label="Skills Directory (optional)"
+                          Placeholder="e.g. wwwroot/claude/agents/custom.md"
+                          Class="admin-agents-form-field mt-3" />
+            <MudSwitch T="bool"
+                       @bind-Value="_formIsActive"
+                       Label="Active"
+                       Color="Color.Primary"
+                       Class="admin-agents-form-active mt-3" />
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Disabled="@(string.IsNullOrWhiteSpace(_formName))"
+                   OnClick="SaveForm">
+            @(_editingPlugin == null ? "Create" : "Save")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private List<AgentPlugin> _agents = new();
+    private string? _currentUserEmail;
+
+    // Form state
+    private bool _showForm;
+    private AgentPlugin? _editingPlugin;
+    private string _formName = string.Empty;
+    private string _formDescription = string.Empty;
+    private string? _formSkillsDirectory;
+    private bool _formIsActive = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _currentUserEmail = auth.User.FindFirst("preferred_username")?.Value
+                         ?? auth.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                         ?? "admin";
+        await LoadAgents();
+    }
+
+    private async Task LoadAgents()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _agents = await db.AgentPlugins
+                .OrderBy(p => p.Name)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = "Failed to load agent plugins.";
+            _ = ex;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task ToggleActive(AgentPlugin plugin, bool newValue)
+    {
+        try
+        {
+            await PluginAgentService.UpdatePluginAsync(
+                plugin.Id, plugin.Name, plugin.Description,
+                plugin.SkillsDirectory,
+                new List<McpServerPermission>(),
+                new List<string>(),
+                newValue);
+            plugin.IsActive = newValue;
+            Snackbar.Add($"{plugin.Name} {(newValue ? "enabled" : "disabled")}.", Severity.Success);
+            StateHasChanged();
+        }
+        catch
+        {
+            Snackbar.Add($"Failed to update {plugin.Name}.", Severity.Error);
+        }
+    }
+
+    private void OpenNewForm()
+    {
+        _editingPlugin = null;
+        _formName = string.Empty;
+        _formDescription = string.Empty;
+        _formSkillsDirectory = null;
+        _formIsActive = true;
+        _showForm = true;
+    }
+
+    private void OpenEditForm(AgentPlugin plugin)
+    {
+        _editingPlugin = plugin;
+        _formName = plugin.Name;
+        _formDescription = plugin.Description;
+        _formSkillsDirectory = plugin.SkillsDirectory;
+        _formIsActive = plugin.IsActive;
+        _showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        _showForm = false;
+        _editingPlugin = null;
+    }
+
+    private async Task SaveForm()
+    {
+        if (string.IsNullOrWhiteSpace(_formName)) return;
+
+        try
+        {
+            if (_editingPlugin == null)
+            {
+                // Create
+                var created = await PluginAgentService.CreatePluginAsync(
+                    _formName.Trim(),
+                    _formDescription.Trim(),
+                    string.IsNullOrWhiteSpace(_formSkillsDirectory) ? null : _formSkillsDirectory.Trim(),
+                    new List<McpServerPermission>(),
+                    new List<string>(),
+                    _currentUserEmail ?? "admin");
+                _agents.Add(created);
+                _agents = _agents.OrderBy(p => p.Name).ToList();
+                Snackbar.Add($"Agent '{created.Name}' created.", Severity.Success);
+            }
+            else
+            {
+                // Update
+                var updated = await PluginAgentService.UpdatePluginAsync(
+                    _editingPlugin.Id,
+                    _formName.Trim(),
+                    _formDescription.Trim(),
+                    string.IsNullOrWhiteSpace(_formSkillsDirectory) ? null : _formSkillsDirectory.Trim(),
+                    new List<McpServerPermission>(),
+                    new List<string>(),
+                    _formIsActive);
+                var idx = _agents.FindIndex(p => p.Id == updated.Id);
+                if (idx >= 0) _agents[idx] = updated;
+                Snackbar.Add($"Agent '{updated.Name}' updated.", Severity.Success);
+            }
+            _showForm = false;
+            _editingPlugin = null;
+            StateHasChanged();
+        }
+        catch
+        {
+            Snackbar.Add("Failed to save agent. Please try again.", Severity.Error);
+        }
+    }
+}

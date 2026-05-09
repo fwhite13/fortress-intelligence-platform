@@ -853,6 +853,40 @@ function classifyRequest(message, history) {
     return false;
 }
 
+// ─── Preference signal detection (ADO#3093) ───────────────────────────────
+const PREFERENCE_PATTERNS = [
+    /\bi prefer\b/i,
+    /\balways use\b/i,
+    /\bcall me\b/i,
+    /\bi like\b/i,
+    /\bi work in\b/i,
+    /\bi am a\b/i,
+    /\bmy name is\b/i,
+    /\bi want you to\b/i,
+    /\bplease always\b/i,
+    /\bdon't use\b/i,
+    /\bnever use\b/i,
+];
+
+function hasPreferenceSignal(text) {
+    return PREFERENCE_PATTERNS.some(p => p.test(text));
+}
+
+function firePreferenceWrite(userId, message) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
+    fetch(`${FAIT_BASE_URL}/api/memory/write`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+            userId,
+            topicSlug: 'user-preferences',
+            content: message,
+            source: 'preference-detection',
+        }),
+    }).catch(err => console.error('[harness] preference-write error:', err.message));
+}
+
 app.post('/turn', async (req, res) => {
     console.log('[harness] /turn received: userId=%s, hasMessage=%s, taskMode=%s',
         req.body?.UserId ?? '(none)', !!req.body?.Message, req.body?.TaskMode ?? false);

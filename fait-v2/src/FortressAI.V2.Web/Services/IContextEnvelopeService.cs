@@ -15,6 +15,7 @@ public interface IContextEnvelopeService
     Task<CCContextEnvelope> BuildEnvelopeAsync(
         string userId,
         string userDisplayName,
+        string? userEmail,
         string taskInstructions,
         string? pluginId = null,
         CancellationToken ct = default);

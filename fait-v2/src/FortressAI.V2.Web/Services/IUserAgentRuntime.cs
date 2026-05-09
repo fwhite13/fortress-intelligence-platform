@@ -50,7 +50,8 @@ public record TurnRequest(
     bool TaskMode = false,
     bool ForceTaskMode = false,
     List<ChatHistoryEntry>? History = null,
-    string? PluginAgentId = null         // §6.1 — active specialist agent
+    string? PluginAgentId = null,        // §6.1 — active specialist agent
+    string? UserEmail = null             // §G1 — Entra UPN for CC identity context
 );
 
 public record ChatHistoryEntry(string Role, string Content);
