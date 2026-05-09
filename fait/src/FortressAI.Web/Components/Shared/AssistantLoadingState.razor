@@ -1,0 +1,191 @@
+<style>
+    @@keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+</style>
+
+<div class="assistant-loading-wrapper">
+    @if (_timedOut)
+    {
+        <div class="assistant-loading-card">
+            <div class="assistant-loading-error-icon">⚠</div>
+            <p class="assistant-loading-error-text">Your assistant took too long to start.</p>
+            <button class="assistant-loading-retry-btn" @onclick="HandleRetry">Try Again</button>
+        </div>
+    }
+    else
+    {
+        <div class="assistant-loading-card">
+            <div class="assistant-loading-spinner"></div>
+            <p class="assistant-loading-status">@_statusMessage</p>
+        </div>
+    }
+</div>
+
+<style>
+    .assistant-loading-wrapper {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 60vh;
+        width: 100%;
+    }
+
+    .assistant-loading-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-4);
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        padding: var(--space-8, 2rem) var(--space-10, 2.5rem);
+        min-width: var(--size-card-min, 280px);
+    }
+
+    .assistant-loading-spinner {
+        width: var(--size-spinner, 40px);
+        height: var(--size-spinner, 40px);
+        border: 3px solid var(--color-primary);
+        border-top-color: var(--color-accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+
+    .assistant-loading-status {
+        color: var(--color-text-secondary);
+        font-family: var(--font-primary);
+        margin: 0;
+    }
+
+    .assistant-loading-error-icon {
+        font-size: var(--text-2xl, 2rem);
+        color: var(--color-error);
+    }
+
+    .assistant-loading-error-text {
+        color: var(--color-error);
+        font-family: var(--font-primary);
+        margin: 0;
+        text-align: center;
+    }
+
+    .assistant-loading-retry-btn {
+        background: var(--color-accent);
+        color: var(--color-text-on-accent, #fff);
+        border: none;
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-6);
+        font-family: var(--font-primary);
+        cursor: pointer;
+    }
+
+    .assistant-loading-retry-btn:hover {
+        opacity: 0.88;
+    }
+</style>
+
+@code {
+    [Parameter] public EventCallback OnRetry { get; set; }
+    [Parameter] public EventCallback OnReady { get; set; }
+
+    [Inject] private HttpClient Http { get; set; } = default!;
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+
+    private string _statusMessage = "Starting your assistant...";
+    private bool _timedOut = false;
+    private CancellationTokenSource? _cts;
+    private System.Timers.Timer? _timer;
+    private int _elapsedSeconds = 0;
+
+    protected override void OnInitialized()
+    {
+        _cts = new CancellationTokenSource();
+        _timer = new System.Timers.Timer(2000);
+        _timer.Elapsed += async (_, _) => await PollStatusAsync();
+        _timer.AutoReset = true;
+        _timer.Start();
+    }
+
+    private async Task PollStatusAsync()
+    {
+        if (_cts?.IsCancellationRequested == true) return;
+
+        _elapsedSeconds += 2;
+
+        // Update status message based on elapsed time
+        _statusMessage = _elapsedSeconds switch
+        {
+            <= 10 => "Starting your assistant...",
+            <= 25 => "Loading your memory...",
+            _ => "Almost ready..."
+        };
+
+        // Check for timeout
+        if (_elapsedSeconds >= 60)
+        {
+            StopPolling();
+            _timedOut = true;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        // Poll status endpoint
+        try
+        {
+            var baseUri = Nav.BaseUri.TrimEnd('/');
+            var response = await Http.GetFromJsonAsync<AgentStatusResponse>(
+                $"{baseUri}/api/agent/status",
+                cancellationToken: _cts?.Token ?? CancellationToken.None);
+
+            if (response?.Status == "Running")
+            {
+                StopPolling();
+                await InvokeAsync(async () =>
+                {
+                    await OnReady.InvokeAsync();
+                });
+                return;
+            }
+        }
+        catch (Exception)
+        {
+            // swallow — keep polling until timeout
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task HandleRetry()
+    {
+        _timedOut = false;
+        _elapsedSeconds = 0;
+        _statusMessage = "Starting your assistant...";
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        _timer?.Stop();
+        _timer?.Start();
+        StateHasChanged();
+        await OnRetry.InvokeAsync();
+    }
+
+    private void StopPolling()
+    {
+        _timer?.Stop();
+        _timer?.Dispose();
+        _timer = null;
+        _cts?.Cancel();
+    }
+
+    public void Dispose()
+    {
+        StopPolling();
+        _cts?.Dispose();
+    }
+
+    private class AgentStatusResponse
+    {
+        public string Status { get; set; } = "";
+    }
+}
