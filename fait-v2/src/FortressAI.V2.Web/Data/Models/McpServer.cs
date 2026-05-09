@@ -16,10 +16,13 @@ public class McpServer
     [Required]
     public string Name { get; set; } = string.Empty;
 
+    [Column("slug")]
+    [MaxLength(50)]
+    public string Slug { get; set; } = string.Empty;
+
     [Column("endpoint_url")]
     [MaxLength(500)]
-    [Required]
-    public string EndpointUrl { get; set; } = string.Empty;
+    public string? EndpointUrl { get; set; }
 
     [Column("auth_type")]
     [MaxLength(20)]

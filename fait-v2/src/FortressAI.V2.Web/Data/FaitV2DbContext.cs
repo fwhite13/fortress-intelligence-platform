@@ -36,26 +36,26 @@ public class FaitV2DbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // users
+        // ── users (fait_dev: PascalCase Id/Email/DisplayName/CreatedAt, entra_oid snake_case) ──
         modelBuilder.Entity<User>(entity =>
         {
             entity.ToTable("users");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
-            entity.Property(e => e.EntraOid).HasColumnName("entra_oid").HasMaxLength(100).IsRequired();
-            entity.Property(e => e.Email).HasColumnName("email").HasMaxLength(200).IsRequired();
-            entity.Property(e => e.DisplayName).HasColumnName("display_name").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Id).HasColumnName("Id").HasMaxLength(36);
+            entity.Property(e => e.EntraOid).HasColumnName("entra_oid").HasMaxLength(255).IsRequired(false);
+            entity.Property(e => e.Email).HasColumnName("Email").HasMaxLength(255).IsRequired();
+            entity.Property(e => e.DisplayName).HasColumnName("DisplayName").HasMaxLength(100).IsRequired(false);
             entity.Property(e => e.OnboardingCompletedAt).HasColumnName("onboarding_completed_at").HasColumnType("datetime(6)");
             entity.Property(e => e.OnboardingStep).HasColumnName("onboarding_step").HasColumnType("int").IsRequired(false);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.CreatedAt).HasColumnName("CreatedAt").HasColumnType("datetime(6)");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
             entity.Property(e => e.AvatarUrl).HasColumnName("avatar_url").HasMaxLength(1000);
 
             entity.HasIndex(e => e.EntraOid).IsUnique().HasDatabaseName("ix_users_entra_oid");
-            entity.HasIndex(e => e.Email).IsUnique().HasDatabaseName("ix_users_email");
+            entity.HasIndex(e => e.Email).IsUnique().HasDatabaseName("IX_users_Email");
         });
 
-        // main_assistants
+        // ── main_assistants (new v2 table, FK → users.Id) ──────────────────────
         modelBuilder.Entity<MainAssistant>(entity =>
         {
             entity.ToTable("main_assistants");
@@ -78,20 +78,20 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // projects
+        // ── projects (fait_dev: PascalCase Id/Name/etc., snake_case KB flags) ───
         modelBuilder.Entity<Project>(entity =>
         {
             entity.ToTable("projects");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
-            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
-            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
-            entity.Property(e => e.Description).HasColumnName("description").HasColumnType("TEXT");
+            entity.Property(e => e.Id).HasColumnName("Id").HasMaxLength(36);
+            entity.Property(e => e.UserId).HasColumnName("UserId").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Name).HasColumnName("Name").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasColumnName("Description").HasColumnType("TEXT");
             entity.Property(e => e.V1ProjectId).HasColumnName("v1_project_id");
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
-            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
-            entity.Property(e => e.CustomInstructions).HasColumnName("custom_instructions").HasColumnType("TEXT");
-            entity.Property(e => e.Model).HasColumnName("model").HasMaxLength(100).HasDefaultValue("claude-sonnet-4-6");
+            entity.Property(e => e.CreatedAt).HasColumnName("CreatedAt").HasColumnType("datetime(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("UpdatedAt").HasColumnType("datetime(6)");
+            entity.Property(e => e.CustomInstructions).HasColumnName("CustomInstructions").HasColumnType("TEXT");
+            entity.Property(e => e.Model).HasColumnName("Model").HasMaxLength(100).HasDefaultValue("claude-sonnet-4-6");
             entity.Property(e => e.EnableFortressKb).HasColumnName("enable_fortress_kb").HasColumnType("tinyint(1)").HasDefaultValue(false);
             entity.Property(e => e.EnablePersonalKb).HasColumnName("enable_personal_kb").HasColumnType("tinyint(1)").HasDefaultValue(false);
 
@@ -113,7 +113,7 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.SetNull);
         });
 
-        // memory_topics
+        // ── memory_topics (new v2 table) ─────────────────────────────────────────
         modelBuilder.Entity<MemoryTopic>(entity =>
         {
             entity.ToTable("memory_topics");
@@ -135,7 +135,7 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // user_sessions
+        // ── user_sessions (new v2 table) ─────────────────────────────────────────
         modelBuilder.Entity<UserSession>(entity =>
         {
             entity.ToTable("user_sessions");
@@ -151,6 +151,7 @@ public class FaitV2DbContext : DbContext
             entity.Property(e => e.PrivateIp).HasColumnName("private_ip").HasMaxLength(45);
             entity.Property(e => e.FargateStatus).HasColumnName("fargate_status").HasMaxLength(20);
             entity.Property(e => e.FargateSessionId).HasColumnName("fargate_session_id").HasMaxLength(200);
+            entity.Property(e => e.TaskDefinitionRevision).HasColumnName("task_definition_revision").HasMaxLength(100);
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
 
@@ -163,14 +164,15 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // mcp_servers
+        // ── mcp_servers (fait_dev: snake_case, nullable endpoint_url, slug NOT NULL) ──
         modelBuilder.Entity<McpServer>(entity =>
         {
             entity.ToTable("mcp_servers");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
             entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(100).IsRequired();
-            entity.Property(e => e.EndpointUrl).HasColumnName("endpoint_url").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.Slug).HasColumnName("slug").HasMaxLength(50).IsRequired();
+            entity.Property(e => e.EndpointUrl).HasColumnName("endpoint_url").HasMaxLength(500).IsRequired(false);
             entity.Property(e => e.AuthType).HasColumnName("auth_type").HasMaxLength(20).IsRequired().HasDefaultValue("oauth_entra");
             entity.Property(e => e.DefaultRead).HasColumnName("default_read").HasDefaultValue(true);
             entity.Property(e => e.DefaultWrite).HasColumnName("default_write").HasDefaultValue(false);
@@ -180,14 +182,14 @@ public class FaitV2DbContext : DbContext
             entity.HasIndex(e => e.Name).IsUnique().HasDatabaseName("ix_mcp_servers_name");
         });
 
-        // mcp_user_tokens
+        // ── user_mcp_tokens (v1 table name; server_name is new column) ───────────
         modelBuilder.Entity<McpUserToken>(entity =>
         {
-            entity.ToTable("mcp_user_tokens");
+            entity.ToTable("user_mcp_tokens");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
             entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
-            entity.Property(e => e.ServerName).HasColumnName("server_name").HasMaxLength(100).IsRequired();
+            entity.Property(e => e.ServerName).HasColumnName("server_name").HasMaxLength(100).IsRequired(false);
             entity.Property(e => e.AccessToken).HasColumnName("access_token").HasColumnType("TEXT").IsRequired();
             entity.Property(e => e.RefreshToken).HasColumnName("refresh_token").HasColumnType("TEXT");
             entity.Property(e => e.TokenExpiresAt).HasColumnName("token_expires_at").HasColumnType("datetime(6)");
@@ -204,7 +206,7 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // design_agent_sessions
+        // ── design_agent_sessions (new v2 table) ─────────────────────────────────
         modelBuilder.Entity<DesignAgentSession>(entity =>
         {
             entity.ToTable("design_agent_sessions");
@@ -225,7 +227,7 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // design_agent_artifacts
+        // ── design_agent_artifacts (new v2 table) ────────────────────────────────
         modelBuilder.Entity<DesignAgentArtifact>(entity =>
         {
             entity.ToTable("design_agent_artifacts");
@@ -247,7 +249,7 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // pushed_messages
+        // ── pushed_messages (new v2 table) ───────────────────────────────────────
         modelBuilder.Entity<PushedMessage>(entity =>
         {
             entity.ToTable("pushed_messages");
@@ -271,7 +273,7 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // artifact_records
+        // ── artifact_records (new v2 table) ──────────────────────────────────────
         modelBuilder.Entity<ArtifactRecord>(entity =>
         {
             entity.ToTable("artifact_records");
@@ -289,7 +291,7 @@ public class FaitV2DbContext : DbContext
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("ix_artifact_records_created_at");
         });
 
-        // feedback_submissions
+        // ── feedback_submissions (new v2 table) ───────────────────────────────────
         modelBuilder.Entity<FeedbackSubmission>(entity =>
         {
             entity.ToTable("feedback_submissions");
@@ -310,7 +312,7 @@ public class FaitV2DbContext : DbContext
             entity.HasIndex(e => e.Status).HasDatabaseName("ix_feedback_submissions_status");
         });
 
-        // scheduled_tasks
+        // ── scheduled_tasks (new v2 table) ───────────────────────────────────────
         modelBuilder.Entity<ScheduledTask>(entity =>
         {
             entity.ToTable("scheduled_tasks");
@@ -337,7 +339,7 @@ public class FaitV2DbContext : DbContext
             entity.HasIndex(e => e.NextRunAt).HasDatabaseName("ix_scheduled_tasks_next_run_at");
         });
 
-        // scheduled_task_runs
+        // ── scheduled_task_runs (new v2 table) ───────────────────────────────────
         modelBuilder.Entity<ScheduledTaskRun>(entity =>
         {
             entity.ToTable("scheduled_task_runs");
@@ -360,7 +362,7 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // conversation_tasks
+        // ── conversation_tasks (new v2 table) ────────────────────────────────────
         modelBuilder.Entity<ConversationTask>(entity =>
         {
             entity.ToTable("conversation_tasks");
@@ -383,7 +385,7 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // user_devops_connections
+        // ── user_devops_connections (fait_dev: snake_case, already compatible) ───
         modelBuilder.Entity<UserDevOpsConnection>(entity =>
         {
             entity.ToTable("user_devops_connections");
@@ -403,7 +405,7 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // agent_plugins
+        // ── agent_plugins (new v2 table) ──────────────────────────────────────────
         modelBuilder.Entity<AgentPlugin>(entity =>
         {
             entity.ToTable("agent_plugins");
@@ -426,15 +428,15 @@ public class FaitV2DbContext : DbContext
             entity.HasIndex(e => e.Name).IsUnique().HasDatabaseName("ix_agent_plugins_name");
         });
 
-        // conversations
+        // ── conversations (fait_dev: PascalCase Id/UserId/Title/CreatedAt) ───────
         modelBuilder.Entity<Conversation>(entity =>
         {
             entity.ToTable("conversations");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
-            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
-            entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(500);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.Id).HasColumnName("Id").HasMaxLength(36);
+            entity.Property(e => e.UserId).HasColumnName("UserId").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Title).HasColumnName("Title").HasMaxLength(500);
+            entity.Property(e => e.CreatedAt).HasColumnName("CreatedAt").HasColumnType("datetime(6)");
             entity.Property(e => e.LastActiveAt).HasColumnName("last_active_at").HasColumnType("datetime(6)");
             entity.Property(e => e.EstimatedTokenCount).HasColumnName("estimated_token_count").HasDefaultValue(0);
 
@@ -448,16 +450,16 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // messages
+        // ── messages (fait_dev: PascalCase Id/ConversationId/Role/Content/CreatedAt) ──
         modelBuilder.Entity<Message>(entity =>
         {
             entity.ToTable("messages");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
-            entity.Property(e => e.ConversationId).HasColumnName("conversation_id").HasMaxLength(36).IsRequired();
-            entity.Property(e => e.Role).HasColumnName("role").HasMaxLength(20).IsRequired();
-            entity.Property(e => e.Content).HasColumnName("content").HasColumnType("longtext").IsRequired();
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.Id).HasColumnName("Id").HasMaxLength(36);
+            entity.Property(e => e.ConversationId).HasColumnName("ConversationId").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Role).HasColumnName("Role").HasMaxLength(20).IsRequired();
+            entity.Property(e => e.Content).HasColumnName("Content").HasColumnType("longtext").IsRequired();
+            entity.Property(e => e.CreatedAt).HasColumnName("CreatedAt").HasColumnType("datetime(6)");
             entity.Property(e => e.CompactedAt).HasColumnName("compacted_at").HasColumnType("datetime(6)");
             entity.Property(e => e.IsCompactionSummary).HasColumnName("is_compaction_summary").HasColumnType("tinyint(1)").HasDefaultValue(false);
             entity.Property(e => e.SessionType).HasColumnName("session_type").HasMaxLength(10).HasDefaultValue("main");
@@ -474,21 +476,21 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // project_documents
+        // ── project_documents (fait_dev: PascalCase columns) ─────────────────────
         modelBuilder.Entity<ProjectDocument>(entity =>
         {
             entity.ToTable("project_documents");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
-            entity.Property(e => e.ProjectId).HasColumnName("project_id").HasMaxLength(36);
-            entity.Property(e => e.Filename).HasColumnName("filename").HasMaxLength(500).IsRequired();
-            entity.Property(e => e.ContentType).HasColumnName("content_type").HasMaxLength(200);
-            entity.Property(e => e.Content).HasColumnName("content").HasColumnType("longtext");
-            entity.Property(e => e.FileSize).HasColumnName("file_size");
-            entity.Property(e => e.UploadedAt).HasColumnName("uploaded_at").HasColumnType("datetime(6)");
-            entity.Property(e => e.S3Key).HasColumnName("s3_key").HasMaxLength(1000);
-            entity.Property(e => e.IngestionStatus).HasColumnName("ingestion_status").HasMaxLength(50).HasDefaultValue("none");
-            entity.Property(e => e.IngestedAt).HasColumnName("ingested_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.Id).HasColumnName("Id").HasMaxLength(36);
+            entity.Property(e => e.ProjectId).HasColumnName("ProjectId").HasMaxLength(36);
+            entity.Property(e => e.Filename).HasColumnName("Filename").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.ContentType).HasColumnName("ContentType").HasMaxLength(200);
+            entity.Property(e => e.Content).HasColumnName("Content").HasColumnType("longtext");
+            entity.Property(e => e.FileSize).HasColumnName("FileSize");
+            entity.Property(e => e.UploadedAt).HasColumnName("UploadedAt").HasColumnType("datetime(6)");
+            entity.Property(e => e.S3Key).HasColumnName("S3Key").HasMaxLength(1000);
+            entity.Property(e => e.IngestionStatus).HasColumnName("IngestionStatus").HasMaxLength(50).HasDefaultValue("none");
+            entity.Property(e => e.IngestedAt).HasColumnName("IngestedAt").HasColumnType("datetime(6)");
 
             entity.HasIndex(e => e.ProjectId).HasDatabaseName("ix_project_documents_project_id");
 
@@ -498,21 +500,21 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
-        // kb_entries
+        // ── kb_entries (fait_dev: PascalCase, int PK auto-increment) ─────────────
         modelBuilder.Entity<KbEntry>(entity =>
         {
             entity.ToTable("kb_entries");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
-            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
-            entity.Property(e => e.TeamId).HasColumnName("team_id").HasMaxLength(36);
-            entity.Property(e => e.Tier).HasColumnName("tier");
-            entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(500);
-            entity.Property(e => e.Content).HasColumnName("content").HasColumnType("longtext");
-            entity.Property(e => e.Tags).HasColumnName("tags").HasMaxLength(1000);
-            entity.Property(e => e.SourceUrl).HasColumnName("source_url").HasMaxLength(2000);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
-            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            entity.Property(e => e.UserId).HasColumnName("UserId").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.TeamId).HasColumnName("TeamId");
+            entity.Property(e => e.Tier).HasColumnName("Tier");
+            entity.Property(e => e.Title).HasColumnName("Title").HasMaxLength(500);
+            entity.Property(e => e.Content).HasColumnName("Content").HasColumnType("longtext");
+            entity.Property(e => e.Tags).HasColumnName("Tags").HasMaxLength(1000);
+            entity.Property(e => e.SourceUrl).HasColumnName("SourceUrl").HasMaxLength(2000);
+            entity.Property(e => e.CreatedAt).HasColumnName("CreatedAt").HasColumnType("datetime(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnName("UpdatedAt").HasColumnType("datetime(6)");
 
             entity.HasIndex(e => e.UserId).HasDatabaseName("ix_kb_entries_user_id");
             entity.HasIndex(e => e.TeamId).HasDatabaseName("ix_kb_entries_team_id");
@@ -523,30 +525,30 @@ public class FaitV2DbContext : DbContext
                   .OnDelete(DeleteBehavior.SetNull);
         });
 
-        // kb_teams
+        // ── kb_teams (fait_dev: PascalCase, int PK auto-increment) ───────────────
         modelBuilder.Entity<KbTeam>(entity =>
         {
             entity.ToTable("kb_teams");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
-            entity.Property(e => e.CreatorId).HasColumnName("creator_id").HasMaxLength(36).IsRequired();
-            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
-            entity.Property(e => e.Description).HasColumnName("description").HasMaxLength(1000);
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            entity.Property(e => e.CreatorId).HasColumnName("CreatorId").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Name).HasColumnName("Name").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasColumnName("Description").HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasColumnName("CreatedAt").HasColumnType("datetime(6)");
 
             entity.HasIndex(e => e.CreatorId).HasDatabaseName("ix_kb_teams_creator_id");
         });
 
-        // kb_team_members
+        // ── kb_team_members (fait_dev: PascalCase, int PK + int TeamId) ──────────
         modelBuilder.Entity<KbTeamMember>(entity =>
         {
             entity.ToTable("kb_team_members");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
-            entity.Property(e => e.TeamId).HasColumnName("team_id").HasMaxLength(36).IsRequired();
-            entity.Property(e => e.UserId).HasColumnName("user_id").HasMaxLength(36).IsRequired();
-            entity.Property(e => e.Role).HasColumnName("role");
-            entity.Property(e => e.JoinedAt).HasColumnName("joined_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.Id).HasColumnName("Id").ValueGeneratedOnAdd();
+            entity.Property(e => e.TeamId).HasColumnName("TeamId").IsRequired();
+            entity.Property(e => e.UserId).HasColumnName("UserId").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.Role).HasColumnName("Role");
+            entity.Property(e => e.JoinedAt).HasColumnName("JoinedAt").HasColumnType("datetime(6)");
 
             entity.HasIndex(e => e.TeamId).HasDatabaseName("ix_kb_team_members_team_id");
             entity.HasIndex(e => e.UserId).HasDatabaseName("ix_kb_team_members_user_id");
@@ -556,6 +558,25 @@ public class FaitV2DbContext : DbContext
                   .WithMany(t => t.Members)
                   .HasForeignKey(e => e.TeamId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── scheduled_task_approvals (new v2 table) ───────────────────────────────
+        modelBuilder.Entity<ScheduledTaskApproval>(entity =>
+        {
+            entity.ToTable("scheduled_task_approvals");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").HasMaxLength(36);
+            entity.Property(e => e.ScheduledTaskId).HasColumnName("scheduled_task_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.InterventionId).HasColumnName("intervention_id").HasMaxLength(36).IsRequired();
+            entity.Property(e => e.ActionType).HasColumnName("action_type").HasMaxLength(100);
+            entity.Property(e => e.ActionSummary).HasColumnName("action_summary").HasMaxLength(2000);
+            entity.Property(e => e.Status).HasColumnName("status").HasMaxLength(20);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at").HasColumnType("datetime(6)");
+            entity.Property(e => e.ResolvedAt).HasColumnName("resolved_at").HasColumnType("datetime(6)");
+
+            entity.HasIndex(e => e.ScheduledTaskId).HasDatabaseName("ix_scheduled_task_approvals_task_id");
+            entity.HasIndex(e => e.Status).HasDatabaseName("ix_scheduled_task_approvals_status");
         });
     }
 }

@@ -619,7 +619,7 @@
             await UpdateEntry(entry, r.Title, r.Content, r.Tags);
     }
 
-    private async Task SaveEntry(KbTier tier, string? teamId, string title, string content, string rawTags)
+    private async Task SaveEntry(KbTier tier, int? teamId, string title, string content, string rawTags)
     {
         try
         {
@@ -745,10 +745,10 @@
             if (file.Name.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase))
                 Snackbar.Add("Converting PPTX to PDF for KB compatibility...", Severity.Info);
 
-            await KbDocumentService.UploadDocumentAsync(safeStream, file.Name, file.ContentType, KbTier.Team, _userId, _selectedTeam.Id);
+            await KbDocumentService.UploadDocumentAsync(safeStream, file.Name, file.ContentType, KbTier.Team, _userId, _selectedTeam.Id.ToString());
             await KbDocumentService.StartIngestionAsync(KbTier.Team);
             Snackbar.Add("Document uploaded. It will be searchable in 1–5 minutes as it's being processed.", Severity.Success);
-            _teamDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Team, _userId, _selectedTeam.Id);
+            _teamDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Team, _userId, _selectedTeam.Id.ToString());
         }
         catch (Exception ex)
         {
@@ -770,7 +770,7 @@
             try { await KbDocumentService.StartIngestionAsync(KbTier.Team); }
             catch (Exception ex) { _logger.LogWarning(ex, "Ingestion trigger after delete failed (non-fatal)"); }
             Snackbar.Add("Document deleted. Vector store will sync in 1–5 minutes.", Severity.Success);
-            _teamDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Team, _userId, _selectedTeam.Id);
+            _teamDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Team, _userId, _selectedTeam.Id.ToString());
             StateHasChanged();
         }
         catch (Exception ex) { Snackbar.Add($"Delete failed: {ex.Message}", Severity.Error); }
@@ -812,7 +812,7 @@
         try
         {
             _teamEntries   = await Forge.GetTeamEntriesAsync(_userId, team.Id);
-            _teamDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Team, _userId, team.Id);
+            _teamDocuments = await KbDocumentService.ListDocumentsAsync(KbTier.Team, _userId, team.Id.ToString());
 
             var userIds = team.Members.Select(m => m.UserId).ToList();
             await using var db = await DbFactory.CreateDbContextAsync();

@@ -8,8 +8,7 @@ public class KbTeam
 {
     [Key]
     [Column("id")]
-    [MaxLength(36)]
-    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public int Id { get; set; }
 
     [Column("creator_id")]
     [MaxLength(36)]
