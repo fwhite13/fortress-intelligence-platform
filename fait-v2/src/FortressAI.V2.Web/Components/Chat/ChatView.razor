@@ -462,6 +462,12 @@
                 }
                 else if (evt.Type == "done" || evt.Type == "error")
                 {
+                    if (evt.Type == "error" && !string.IsNullOrEmpty(evt.ErrorMessage))
+                    {
+                        _logger.LogError("Harness returned error for user {UserId}: {Error}", _userId, evt.ErrorMessage);
+                        _messages.Add(new ChatMessage(Role: "assistant", Content: $"⚠️ {evt.ErrorMessage}"));
+                        StateHasChanged();
+                    }
                     break;
                 }
             }

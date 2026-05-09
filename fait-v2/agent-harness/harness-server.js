@@ -198,7 +198,7 @@ app.post('/turn', async (req, res) => {
         try {
             mkdirSync(userWorkspaceDir, { recursive: true });
         } catch (mkErr) {
-            return endResponse({ type: 'error', message: `Cannot create workspace: ${mkErr.message}` });
+            return endResponse({ type: 'error', errorMessage: `Cannot create workspace: ${mkErr.message}` });
         }
         const briefContent = systemPrompt
             ? `${systemPrompt}\n\n---\n\nUser: ${message}`
@@ -222,12 +222,12 @@ app.post('/turn', async (req, res) => {
         const TURN_TIMEOUT_MS = parseInt(process.env.CC_TIMEOUT_MS || '300000', 10);
         const timeout = setTimeout(() => {
             ccProcess.kill('SIGTERM');
-            endResponse({ type: 'error', message: 'Turn timed out after 5 minutes' });
+            endResponse({ type: 'error', errorMessage: 'Turn timed out after 5 minutes' });
         }, TURN_TIMEOUT_MS);
         ccProcess.stdout.on('data', (chunk) => sendEvent({ type: 'text', content: chunk.toString() }));
         ccProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', content: chunk.toString() }));
         ccProcess.on('close', (code) => { clearTimeout(timeout); endResponse({ type: 'done', exitCode: code }); });
-        ccProcess.on('error', (err) => { clearTimeout(timeout); endResponse({ type: 'error', message: err.message }); });
+        ccProcess.on('error', (err) => { clearTimeout(timeout); endResponse({ type: 'error', errorMessage: err.message }); });
     } else {
         // ── Bedrock ConverseStream path ───────────────────────────────────
         try {
@@ -279,7 +279,7 @@ app.post('/turn', async (req, res) => {
             res.end();
         } catch (err) {
             console.error('[harness] Bedrock ConverseStream error:', err.message);
-            sendEvent({ type: 'error', message: err.message });
+            sendEvent({ type: 'error', errorMessage: err.message });
             res.end();
         }
     }
