@@ -389,7 +389,16 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE user_assistant_config ADD COLUMN firm_auto_summary TINYINT(1) NOT NULL DEFAULT 0",
                 // Idempotent via 1060 catch — Aurora MySQL does not support ADD COLUMN IF NOT EXISTS
                 "ALTER TABLE users ADD COLUMN onboarding_completed_at DATETIME(6) NULL",
-                "ALTER TABLE users ADD COLUMN onboarding_step INT NULL"
+                "ALTER TABLE users ADD COLUMN onboarding_step INT NULL",
+                // Setup wizard columns for user_assistant_config (idempotent — 1060 catch handles duplicate)
+                "ALTER TABLE user_assistant_config ADD COLUMN role VARCHAR(100) NULL",
+                "ALTER TABLE user_assistant_config ADD COLUMN responsibilities TEXT NULL",
+                "ALTER TABLE user_assistant_config ADD COLUMN communication_style VARCHAR(20) NULL",
+                "ALTER TABLE user_assistant_config ADD COLUMN response_format VARCHAR(30) NULL",
+                "ALTER TABLE user_assistant_config ADD COLUMN show_citations TINYINT(1) NULL DEFAULT 1",
+                "ALTER TABLE user_assistant_config ADD COLUMN use_cases_json TEXT NULL",
+                "ALTER TABLE user_assistant_config ADD COLUMN additional_context TEXT NULL",
+                "ALTER TABLE user_assistant_config ADD COLUMN preferred_name VARCHAR(100) NULL"
             };
 
             foreach (var alterSql in alterStatements)

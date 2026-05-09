@@ -6,18 +6,45 @@
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
 @inject NavigationManager Nav
 @inject ILogger<AssistantSetup> Logger
+@inject AssistantConfigService ConfigSvc
 @using Microsoft.EntityFrameworkCore
 @using FortressAI.Web.Data
+@using FortressAI.Shared.Models
 
 <div class="setup-page">
+    <div class="setup-progress-bar">
+        <div class="setup-progress-label">Step @(_currentStep + 1) of @TotalSteps</div>
+        <div class="setup-progress-track">
+            <div class="setup-progress-fill" style="width: @((_currentStep + 1) * 100 / TotalSteps)%"></div>
+        </div>
+    </div>
+
     <div class="setup-card">
         <div class="setup-header">
             <svg class="setup-shield" width="48" height="48" viewBox="0 0 24 24" fill="none">
                 <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.5C17.25 22.15 21 17.25 21 12V7L12 2z" fill="var(--color-accent)" opacity="0.9"/>
                 <path d="M9 12l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-            <h1 class="setup-title">Set Up Your Assistant</h1>
-            <p class="setup-subtitle">Tell your assistant a bit about you.</p>
+            @if (_currentStep == 0)
+            {
+                <h1 class="setup-title">Define Your Role</h1>
+                <p class="setup-subtitle">Help your assistant understand your job and responsibilities.</p>
+            }
+            else if (_currentStep == 1)
+            {
+                <h1 class="setup-title">Set Preferences</h1>
+                <p class="setup-subtitle">How should your assistant communicate with you?</p>
+            }
+            else if (_currentStep == 2)
+            {
+                <h1 class="setup-title">Choose Use Cases</h1>
+                <p class="setup-subtitle">What will you primarily use your assistant for?</p>
+            }
+            else
+            {
+                <h1 class="setup-title">Personalize</h1>
+                <p class="setup-subtitle">Make your assistant feel like yours.</p>
+            }
         </div>
 
         @if (_errorMessage != null)
@@ -25,83 +52,330 @@
             <div class="setup-error">@_errorMessage</div>
         }
 
-        <div class="setup-form">
-            <div class="setup-field">
-                <label class="setup-label" for="displayName">Your name</label>
-                <input id="displayName"
-                       class="setup-input"
-                       type="text"
-                       placeholder="e.g. Jane Smith"
-                       @bind="_displayName"
-                       disabled="@_isSubmitting"
-                       maxlength="100" />
+        @* Step 1 — Role *@
+        @if (_currentStep == 0)
+        {
+            <div class="setup-form">
+                <div class="setup-field">
+                    <label class="setup-label" for="role">Your role / job title</label>
+                    <input id="role"
+                           class="setup-input"
+                           type="text"
+                           placeholder="e.g. Director of Technology Strategy"
+                           @bind="_role"
+                           maxlength="100" />
+                </div>
+                <div class="setup-field">
+                    <label class="setup-label" for="responsibilities">Key responsibilities</label>
+                    <textarea id="responsibilities"
+                              class="setup-textarea"
+                              placeholder="e.g. Oversee AI initiatives, manage vendor relationships, drive digital transformation..."
+                              @bind="_responsibilities"
+                              rows="4"
+                              maxlength="2000"></textarea>
+                </div>
             </div>
+        }
 
-            <button class="setup-submit" @onclick="HandleSubmit" disabled="@_isSubmitting">
-                @if (_isSubmitting)
-                {
-                    <span class="setup-spinner"></span>
-                    <span>Setting up...</span>
-                }
-                else
-                {
-                    <span>Get Started</span>
-                }
-            </button>
+        @* Step 2 — Preferences *@
+        else if (_currentStep == 1)
+        {
+            <div class="setup-form">
+                <div class="setup-field">
+                    <label class="setup-label" for="commStyle">Communication style</label>
+                    <select id="commStyle" class="setup-select" @bind="_communicationStyle">
+                        <option value="Concise">Concise — short, direct answers</option>
+                        <option value="Balanced">Balanced — clear with context</option>
+                        <option value="Detailed">Detailed — thorough explanations</option>
+                    </select>
+                </div>
+                <div class="setup-field">
+                    <label class="setup-label" for="responseFormat">Response format</label>
+                    <select id="responseFormat" class="setup-select" @bind="_responseFormat">
+                        <option value="Prose">Prose — flowing paragraphs</option>
+                        <option value="Structured">Structured — headers and sections</option>
+                        <option value="Mixed">Mixed — best of both</option>
+                        <option value="Bullets">Bullets — lists when possible</option>
+                    </select>
+                </div>
+                <div class="setup-field">
+                    <label class="setup-label">Citations</label>
+                    <label class="setup-toggle-label">
+                        <input type="checkbox" class="setup-toggle-input" @bind="_showCitations" />
+                        <span class="setup-toggle-track">
+                            <span class="setup-toggle-thumb"></span>
+                        </span>
+                        <span class="setup-toggle-text">Show source citations in responses</span>
+                    </label>
+                </div>
+            </div>
+        }
+
+        @* Step 3 — Use Cases *@
+        else if (_currentStep == 2)
+        {
+            <div class="setup-form">
+                <div class="setup-field">
+                    <label class="setup-label">Select all that apply</label>
+                    <div class="setup-checkbox-grid">
+                        @foreach (var uc in _useCaseOptions)
+                        {
+                            <label class="setup-checkbox-item @(_selectedUseCases.Contains(uc) ? "setup-checkbox-item--selected" : "")">
+                                <input type="checkbox"
+                                       class="setup-checkbox-input"
+                                       checked="@_selectedUseCases.Contains(uc)"
+                                       @onchange="() => ToggleUseCase(uc)" />
+                                <span class="setup-checkbox-label">@uc</span>
+                            </label>
+                        }
+                    </div>
+                </div>
+                <div class="setup-field">
+                    <label class="setup-label" for="additionalCtx">Anything else? (optional)</label>
+                    <textarea id="additionalCtx"
+                              class="setup-textarea"
+                              placeholder="e.g. I often work with insurance regulatory documents and need precise language..."
+                              @bind="_additionalContext"
+                              rows="3"
+                              maxlength="1000"></textarea>
+                </div>
+            </div>
+        }
+
+        @* Step 4 — Personalization *@
+        else
+        {
+            <div class="setup-form">
+                <div class="setup-field">
+                    <label class="setup-label" for="preferredName">What should your assistant call you?</label>
+                    <input id="preferredName"
+                           class="setup-input"
+                           type="text"
+                           placeholder="e.g. Fred"
+                           @bind="_preferredName"
+                           maxlength="100" />
+                </div>
+                <div class="setup-field">
+                    <label class="setup-label" for="assistantName">Your assistant's name</label>
+                    <input id="assistantName"
+                           class="setup-input"
+                           type="text"
+                           placeholder="e.g. Aria"
+                           @bind="_assistantName"
+                           maxlength="100" />
+                </div>
+                <div class="setup-field">
+                    <label class="setup-label">Accent color</label>
+                    <div class="setup-color-swatches">
+                        @foreach (var color in _colorOptions)
+                        {
+                            <button type="button"
+                                    class="setup-color-swatch @(_accentColor == color ? "setup-color-swatch--selected" : "")"
+                                    style="background-color: @color"
+                                    @onclick="() => _accentColor = color"
+                                    aria-label="Select color @color"></button>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+
+        <div class="setup-nav">
+            @if (_currentStep > 0)
+            {
+                <button class="setup-btn-secondary" @onclick="PrevStep" disabled="@_isSubmitting">Previous</button>
+            }
+            else
+            {
+                <span></span>
+            }
+            @if (_currentStep < TotalSteps - 1)
+            {
+                <button class="setup-btn-primary" @onclick="NextStep" disabled="@_isSubmitting">Next</button>
+            }
+            else
+            {
+                <button class="setup-btn-primary" @onclick="HandleSubmit" disabled="@_isSubmitting">
+                    @(_isSubmitting ? "Setting up..." : "Get Started")
+                </button>
+            }
         </div>
     </div>
 </div>
 
 @code {
-    private string _displayName = string.Empty;
-    private string? _errorMessage;
+    private int _currentStep = 0;
+    private const int TotalSteps = 4;
     private bool _isSubmitting = false;
+    private string? _errorMessage;
 
-    protected override void OnInitialized()
+    // Step 1 — Role
+    private string _role = "";
+    private string _responsibilities = "";
+
+    // Step 2 — Preferences
+    private string _communicationStyle = "Balanced";
+    private string _responseFormat = "Mixed";
+    private bool _showCitations = true;
+
+    // Step 3 — Use Cases
+    private HashSet<string> _selectedUseCases = new();
+    private string _additionalContext = "";
+    private readonly List<string> _useCaseOptions = new()
     {
-        if (Session.CurrentUser?.DisplayName is { Length: > 0 } name)
-            _displayName = name;
-    }
+        "Document Analysis", "Research", "Writing",
+        "Data Analysis", "Meeting Summaries", "Task Planning"
+    };
 
-    private async Task HandleSubmit()
+    // Step 4 — Personalization
+    private string _preferredName = "";
+    private string _assistantName = "Aria";
+    private string _accentColor = "#0066CC";
+    private readonly List<string> _colorOptions = new()
     {
-        _errorMessage = null;
+        "#0066CC", "#6B21A8", "#166534", "#B45309", "#BE123C", "#0E7490"
+    };
 
-        if (string.IsNullOrWhiteSpace(_displayName))
-        {
-            _errorMessage = "Please enter your name.";
-            return;
-        }
-
-        _isSubmitting = true;
-
+    protected override async Task OnInitializedAsync()
+    {
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
             var user = await db.Users.FirstOrDefaultAsync(u => u.Id == Session.UserId);
-
-            if (user == null)
+            if (user != null)
             {
-                Logger.LogError("[AssistantSetup] User not found for UserId={UserId}", Session.UserId);
-                _errorMessage = "User account not found. Please contact support.";
-                return;
+                // Pre-populate preferred name from display name
+                if (!string.IsNullOrWhiteSpace(user.DisplayName))
+                    _preferredName = user.DisplayName;
+
+                // Resume at saved step
+                _currentStep = user.OnboardingStep ?? 0;
+                if (_currentStep >= TotalSteps)
+                    _currentStep = 0;
             }
 
-            user.DisplayName = _displayName.Trim();
-            user.OnboardingCompletedAt = DateTime.UtcNow;
-            user.OnboardingStep = 1;
-            await db.SaveChangesAsync();
+            // Pre-populate from existing config if resuming
+            var config = await ConfigSvc.GetOrCreateConfigAsync(Session.UserId);
+            if (config != null)
+            {
+                if (!string.IsNullOrWhiteSpace(config.Role)) _role = config.Role;
+                if (!string.IsNullOrWhiteSpace(config.Responsibilities)) _responsibilities = config.Responsibilities;
+                if (!string.IsNullOrWhiteSpace(config.CommunicationStyle)) _communicationStyle = config.CommunicationStyle;
+                if (!string.IsNullOrWhiteSpace(config.ResponseFormat)) _responseFormat = config.ResponseFormat;
+                if (config.ShowCitations.HasValue) _showCitations = config.ShowCitations.Value;
+                if (!string.IsNullOrWhiteSpace(config.UseCasesJson))
+                {
+                    try
+                    {
+                        var cases = System.Text.Json.JsonSerializer.Deserialize<HashSet<string>>(config.UseCasesJson);
+                        if (cases != null) _selectedUseCases = cases;
+                    }
+                    catch { /* ignore deserialization errors */ }
+                }
+                if (!string.IsNullOrWhiteSpace(config.AdditionalContext)) _additionalContext = config.AdditionalContext;
+                if (!string.IsNullOrWhiteSpace(config.PreferredName)) _preferredName = config.PreferredName;
+                if (!string.IsNullOrWhiteSpace(config.AssistantName) && config.AssistantName != "Assistant") _assistantName = config.AssistantName;
+                if (!string.IsNullOrWhiteSpace(config.ColorHex) && config.ColorHex != "#d4af37") _accentColor = config.ColorHex;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[AssistantSetup] Failed to load initial state");
+        }
+    }
 
+    private void ToggleUseCase(string useCase)
+    {
+        if (!_selectedUseCases.Remove(useCase))
+            _selectedUseCases.Add(useCase);
+    }
+
+    private async Task NextStep()
+    {
+        _errorMessage = null;
+
+        // Validate current step
+        if (_currentStep == 0 && string.IsNullOrWhiteSpace(_role))
+        {
+            _errorMessage = "Please enter your role to continue.";
+            return;
+        }
+
+        // Save step progress
+        await SaveStepProgress(_currentStep + 1);
+        _currentStep++;
+    }
+
+    private void PrevStep()
+    {
+        if (_currentStep > 0)
+            _currentStep--;
+    }
+
+    private async Task SaveStepProgress(int step)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == Session.UserId);
+            if (user != null)
+            {
+                user.OnboardingStep = step;
+                await db.SaveChangesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[AssistantSetup] Failed to save step progress");
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        _isSubmitting = true;
+        _errorMessage = null;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            // Update user record
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == Session.UserId);
+            if (user != null)
+            {
+                if (!string.IsNullOrWhiteSpace(_preferredName))
+                    user.DisplayName = _preferredName.Trim();
+                user.OnboardingCompletedAt = DateTime.UtcNow;
+                user.OnboardingStep = 0;
+            }
+
+            // Upsert UserAssistantConfig
+            var config = await db.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == Session.UserId);
+            if (config == null)
+            {
+                config = new UserAssistantConfig { UserId = Session.UserId };
+                db.UserAssistantConfigs.Add(config);
+            }
+            config.Role = _role.Trim();
+            config.Responsibilities = string.IsNullOrWhiteSpace(_responsibilities) ? null : _responsibilities.Trim();
+            config.CommunicationStyle = _communicationStyle;
+            config.ResponseFormat = _responseFormat;
+            config.ShowCitations = _showCitations;
+            config.UseCasesJson = System.Text.Json.JsonSerializer.Serialize(_selectedUseCases);
+            config.AdditionalContext = string.IsNullOrWhiteSpace(_additionalContext) ? null : _additionalContext.Trim();
+            config.PreferredName = string.IsNullOrWhiteSpace(_preferredName) ? null : _preferredName.Trim();
+            config.AssistantName = string.IsNullOrWhiteSpace(_assistantName) ? "Aria" : _assistantName.Trim();
+            config.ColorHex = _accentColor;
+            config.UpdatedAt = DateTime.UtcNow;
+
+            await db.SaveChangesAsync();
             Nav.NavigateTo("/chat", replace: true);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "[AssistantSetup] Failed to save setup for UserId={UserId}", Session.UserId);
+            Logger.LogError(ex, "[AssistantSetup] Submit failed for UserId={UserId}", Session.UserId);
             _errorMessage = "Something went wrong. Please try again.";
-        }
-        finally
-        {
             _isSubmitting = false;
+            StateHasChanged();
         }
     }
 }
@@ -109,11 +383,41 @@
 <style>
     .setup-page {
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        min-height: 100vh;
+        min-height: var(--setup-page-min-height, 100vh);
         background: var(--color-background);
         padding: var(--space-6);
+        gap: var(--space-4);
+    }
+
+    .setup-progress-bar {
+        width: var(--setup-card-width, min(100%, 480px));
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+    }
+
+    .setup-progress-label {
+        font-family: var(--font-primary);
+        font-size: var(--text-xs);
+        color: var(--color-text-secondary);
+        text-align: right;
+    }
+
+    .setup-progress-track {
+        background: var(--color-border);
+        border-radius: var(--radius-full, 9999px);
+        height: var(--setup-progress-height, 4px);
+        overflow: hidden;
+    }
+
+    .setup-progress-fill {
+        background: var(--color-accent);
+        height: 100%;
+        border-radius: var(--radius-full, 9999px);
+        transition: width var(--transition-normal, 0.2s ease);
     }
 
     .setup-card {
@@ -121,7 +425,7 @@
         border: var(--border-width) solid var(--color-border);
         border-radius: var(--radius-md);
         padding: var(--space-8);
-        width: var(--setup-card-width, min(100%, 420px));
+        width: var(--setup-card-width, min(100%, 480px));
         display: flex;
         flex-direction: column;
         gap: var(--space-6);
@@ -182,12 +486,15 @@
         color: var(--color-text-primary);
     }
 
-    .setup-input {
+    .setup-input,
+    .setup-select,
+    .setup-textarea {
         background: var(--color-background);
         border: var(--border-width) solid var(--color-border);
         border-radius: var(--radius-md);
         color: var(--color-text-primary);
         font-family: var(--font-primary);
+        font-size: var(--text-base);
         padding: var(--space-3) var(--space-4);
         width: 100%;
         box-sizing: border-box;
@@ -195,52 +502,184 @@
         transition: border-color var(--transition-fast, 0.15s ease);
     }
 
-    .setup-input:focus {
+    .setup-input:focus,
+    .setup-select:focus,
+    .setup-textarea:focus {
         border-color: var(--color-border-focus);
     }
 
-    .setup-input:disabled {
-        opacity: var(--opacity-disabled, 0.6);
-        cursor: not-allowed;
+    .setup-textarea {
+        resize: vertical;
+        min-height: var(--setup-textarea-min-height, 80px);
     }
 
-    .setup-submit {
-        background: var(--color-accent);
-        border: none;
-        border-radius: var(--radius-md);
-        color: var(--color-text-on-accent);
+    .setup-select {
         cursor: pointer;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right var(--space-3) center;
+        padding-right: var(--space-8);
+    }
+
+    /* Toggle */
+    .setup-toggle-label {
         display: flex;
         align-items: center;
-        justify-content: center;
+        gap: var(--space-3);
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .setup-toggle-input {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+
+    .setup-toggle-track {
+        position: relative;
+        display: inline-block;
+        width: var(--setup-toggle-width, 42px);
+        height: var(--setup-toggle-height, 24px);
+        background: var(--color-border);
+        border-radius: var(--radius-full, 9999px);
+        transition: background var(--transition-fast, 0.15s ease);
+        flex-shrink: 0;
+    }
+
+    .setup-toggle-input:checked + .setup-toggle-track {
+        background: var(--color-accent);
+    }
+
+    .setup-toggle-thumb {
+        position: absolute;
+        top: var(--setup-toggle-thumb-offset, 3px);
+        left: var(--setup-toggle-thumb-offset, 3px);
+        width: var(--setup-toggle-thumb-size, 18px);
+        height: var(--setup-toggle-thumb-size, 18px);
+        background: var(--color-surface);
+        border-radius: 50%;
+        transition: transform var(--transition-fast, 0.15s ease);
+        box-shadow: var(--shadow-xs, 0 1px 3px rgba(0,0,0,0.2));
+    }
+
+    .setup-toggle-input:checked + .setup-toggle-track .setup-toggle-thumb {
+        transform: translateX(var(--setup-toggle-travel, 18px));
+    }
+
+    .setup-toggle-text {
+        font-family: var(--font-primary);
+        font-size: var(--text-sm);
+        color: var(--color-text-primary);
+    }
+
+    /* Checkbox grid (use cases) */
+    .setup-checkbox-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(var(--setup-checkbox-min-width, 140px), 1fr));
         gap: var(--space-2);
+    }
+
+    .setup-checkbox-item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        background: var(--color-background);
+        border: var(--border-width) solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: var(--space-2) var(--space-3);
+        cursor: pointer;
+        transition: border-color var(--transition-fast, 0.15s ease), background var(--transition-fast, 0.15s ease);
+        user-select: none;
+    }
+
+    .setup-checkbox-item--selected {
+        border-color: var(--color-accent);
+        background: color-mix(in srgb, var(--color-accent) 10%, var(--color-background));
+    }
+
+    .setup-checkbox-input {
+        accent-color: var(--color-accent);
+        width: var(--setup-checkbox-size, 16px);
+        height: var(--setup-checkbox-size, 16px);
+        flex-shrink: 0;
+    }
+
+    .setup-checkbox-label {
+        font-family: var(--font-primary);
+        font-size: var(--text-sm);
+        color: var(--color-text-primary);
+    }
+
+    /* Color swatches */
+    .setup-color-swatches {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+    }
+
+    .setup-color-swatch {
+        width: var(--setup-swatch-size, 40px);
+        height: var(--setup-swatch-size, 40px);
+        border-radius: 50%;
+        border: var(--border-width-thick, 2px) solid transparent;
+        cursor: pointer;
+        padding: 0;
+        transition: outline var(--transition-fast, 0.15s ease), transform var(--transition-fast, 0.15s ease);
+        outline: 3px solid transparent;
+        outline-offset: var(--setup-swatch-outline-offset, 2px);
+    }
+
+    .setup-color-swatch:hover {
+        transform: scale(var(--setup-swatch-hover-scale, 1.1));
+    }
+
+    .setup-color-swatch--selected {
+        outline-color: var(--color-accent);
+    }
+
+    /* Navigation */
+    .setup-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: var(--space-3);
+        padding-top: var(--space-2);
+        border-top: var(--border-width) solid var(--color-border);
+    }
+
+    .setup-btn-primary,
+    .setup-btn-secondary {
+        border-radius: var(--radius-md);
+        cursor: pointer;
         font-family: var(--font-primary);
         font-weight: var(--font-semibold);
         padding: var(--space-3) var(--space-6);
-        width: 100%;
         transition: opacity var(--transition-fast, 0.15s ease);
+        border: none;
     }
 
-    .setup-submit:hover:not(:disabled) {
+    .setup-btn-primary {
+        background: var(--color-accent);
+        color: var(--color-text-on-accent);
+    }
+
+    .setup-btn-secondary {
+        background: transparent;
+        border: var(--border-width) solid var(--color-border) !important;
+        color: var(--color-text-secondary);
+    }
+
+    .setup-btn-primary:hover:not(:disabled),
+    .setup-btn-secondary:hover:not(:disabled) {
         opacity: var(--opacity-hover, 0.85);
     }
 
-    .setup-submit:disabled {
+    .setup-btn-primary:disabled,
+    .setup-btn-secondary:disabled {
         opacity: var(--opacity-disabled, 0.6);
         cursor: not-allowed;
-    }
-
-    .setup-spinner {
-        width: var(--spinner-size, 1em);
-        height: var(--spinner-size, 1em);
-        border: var(--border-width-spinner, 2px) solid color-mix(in srgb, var(--color-text-on-accent) 30%, transparent);
-        border-top-color: var(--color-text-on-accent);
-        border-radius: 50%;
-        animation: setup-spin 0.6s linear infinite;
-        display: inline-block;
-    }
-
-    @@keyframes setup-spin {
-        to { transform: rotate(360deg); }
     }
 </style>
