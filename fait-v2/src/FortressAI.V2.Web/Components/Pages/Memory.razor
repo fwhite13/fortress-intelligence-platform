@@ -13,11 +13,8 @@
 <PageTitle>Memory — FAIT v2</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="fait-v2-page">
-    <div class="memory-page__header">
-        <div class="memory-page__header-text">
-            <MudText Typo="Typo.h5" Class="fait-v2-page__title">Memory Management</MudText>
-            <MudText Typo="Typo.body2" Class="fait-v2-page__subtitle">View and manage your AI assistant's memory.</MudText>
-        </div>
+    <div class="memory-page-header">
+        <MudText Typo="Typo.h5" Class="fait-v2-page__title">Memory Management</MudText>
         <MudButton Variant="Variant.Outlined"
                    StartIcon="@Icons.Material.Filled.Download"
                    Disabled="@_exporting"
@@ -25,15 +22,15 @@
                    Class="memory-export-btn">
             @if (_exporting)
             {
-                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="memory-export-btn__spinner" />
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" />
             }
             else
             {
-                <span>Export Memory</span>
+                @("Export Memory")
             }
         </MudButton>
     </div>
-
+    <MudText Typo="Typo.body2" Class="fait-v2-page__subtitle">View and manage your AI assistant's memory.</MudText>
     <MudPaper Class="fait-v2-placeholder-card" Elevation="0">
         <MudText Typo="Typo.body2" Color="Color.Secondary">Memory Management UI — coming in Phase B2</MudText>
     </MudPaper>
@@ -42,15 +39,16 @@
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
-    private string _userId = "";
     private bool _exporting = false;
+    private string _userId = "";
 
     protected override async Task OnInitializedAsync()
     {
         if (AuthState == null) return;
         var auth = await AuthState;
-        var entraOid = auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                   ?? auth.User.FindFirst("oid")?.Value ?? "";
+        var entraOid = auth.User.FindFirst("oid")?.Value
+                    ?? auth.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                    ?? "";
         var user = await UserService.GetByEntraOidAsync(entraOid);
         _userId = user?.Id ?? "";
         if (string.IsNullOrEmpty(_userId))
@@ -65,8 +63,7 @@
         {
             var bytes = await MemoryFileService.ExportZipAsync(_userId);
             var base64 = Convert.ToBase64String(bytes);
-            var fileName = $"fait-memory-{_userId}-{DateTime.UtcNow:yyyyMMdd}.zip";
-            await JSRuntime.InvokeVoidAsync("downloadBase64", fileName, "application/zip", base64);
+            await JSRuntime.InvokeVoidAsync("downloadBase64", $"fait-memory-{_userId}-{DateTime.UtcNow:yyyyMMdd}.zip", "application/zip", base64);
         }
         catch (Exception ex)
         {
@@ -76,6 +73,7 @@
         finally
         {
             _exporting = false;
+            StateHasChanged();
         }
     }
 
@@ -83,31 +81,10 @@
 }
 
 <style>
-    .memory-page__header {
+    .memory-page-header {
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         justify-content: space-between;
-        gap: var(--space-4, 16px);
-        margin-bottom: var(--space-4, 16px);
-    }
-
-    .memory-page__header-text {
-        display: flex;
-        flex-direction: column;
-    }
-
-    .memory-export-btn {
-        align-self: center;
-        border-color: var(--fait-v2-primary);
-        color: var(--fait-v2-primary);
-        white-space: nowrap;
-    }
-
-    .memory-export-btn:hover:not(:disabled) {
-        background-color: color-mix(in srgb, var(--fait-v2-primary) 8%, transparent);
-    }
-
-    .memory-export-btn__spinner {
-        margin-right: var(--space-1, 4px);
+        margin-bottom: var(--space-4);
     }
 </style>
