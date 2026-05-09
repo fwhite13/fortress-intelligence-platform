@@ -168,6 +168,8 @@ app.post('/tools/:toolName', async (req, res) => {
 });
 
 app.post('/turn', async (req, res) => {
+    console.log('[harness] /turn received: userId=%s, hasMessage=%s, taskMode=%s',
+        req.body?.UserId ?? '(none)', !!req.body?.Message, req.body?.TaskMode ?? false);
     console.log(`[harness] /turn: request received. body keys=${Object.keys(req.body || {}).join(',')}, contentType=${req.headers['content-type']}`);
     const rawBody = req.body || {};
     console.log(`[harness] /turn: raw body dump: ${JSON.stringify(rawBody).substring(0, 500)}`);
