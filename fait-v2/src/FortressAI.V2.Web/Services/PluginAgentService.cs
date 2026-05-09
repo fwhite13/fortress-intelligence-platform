@@ -8,15 +8,15 @@ namespace FortressAI.V2.Web.Services;
 
 public class PluginAgentService : IPluginAgentService
 {
-    private readonly FaitV2DbContext _db;
+    private readonly IDbContextFactory<FaitV2DbContext> _dbFactory;
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<PluginAgentService> _logger;
 
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
-    public PluginAgentService(FaitV2DbContext db, IWebHostEnvironment env, ILogger<PluginAgentService> logger)
+    public PluginAgentService(IDbContextFactory<FaitV2DbContext> dbFactory, IWebHostEnvironment env, ILogger<PluginAgentService> logger)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _env = env;
         _logger = logger;
     }
@@ -24,7 +24,8 @@ public class PluginAgentService : IPluginAgentService
     public async Task<List<AgentPlugin>> GetAvailablePluginsAsync(string userId,
         IEnumerable<string> userRoles, CancellationToken ct = default)
     {
-        var activePlugins = await _db.AgentPlugins
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var activePlugins = await db.AgentPlugins
             .Where(p => p.IsActive)
             .ToListAsync(ct);
 
@@ -39,20 +40,25 @@ public class PluginAgentService : IPluginAgentService
 
     public async Task<List<AgentPlugin>> ListActivePluginsAsync(string userId, CancellationToken ct = default)
     {
-        return await _db.AgentPlugins
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.AgentPlugins
             .Where(p => p.IsActive)
             .ToListAsync(ct);
     }
 
     public async Task<AgentPlugin?> GetPluginByIdAsync(string pluginId, CancellationToken ct = default)
     {
-        return await _db.AgentPlugins.FindAsync(new object[] { pluginId }, ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.AgentPlugins
+            .Where(p => p.Id == pluginId && p.IsActive)
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task<AgentPlugin> CreatePluginAsync(string name, string description,
         string? skillsDirectory, List<McpServerPermission> allowedMcpServers,
         List<string> allowedRoles, string createdBy, CancellationToken ct = default)
     {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var plugin = new AgentPlugin
         {
             Name = name,
@@ -65,8 +71,8 @@ public class PluginAgentService : IPluginAgentService
             UpdatedAt = DateTime.UtcNow,
         };
 
-        _db.AgentPlugins.Add(plugin);
-        await _db.SaveChangesAsync(ct);
+        db.AgentPlugins.Add(plugin);
+        await db.SaveChangesAsync(ct);
         return plugin;
     }
 
@@ -74,7 +80,8 @@ public class PluginAgentService : IPluginAgentService
         string? skillsDirectory, List<McpServerPermission> allowedMcpServers,
         List<string> allowedRoles, bool isActive, CancellationToken ct = default)
     {
-        var plugin = await _db.AgentPlugins.FindAsync(new object[] { pluginId }, ct)
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var plugin = await db.AgentPlugins.FindAsync(new object[] { pluginId }, ct)
             ?? throw new InvalidOperationException($"Plugin {pluginId} not found.");
 
         plugin.Name = name;
@@ -85,7 +92,7 @@ public class PluginAgentService : IPluginAgentService
         plugin.IsActive = isActive;
         plugin.UpdatedAt = DateTime.UtcNow;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return plugin;
     }
 

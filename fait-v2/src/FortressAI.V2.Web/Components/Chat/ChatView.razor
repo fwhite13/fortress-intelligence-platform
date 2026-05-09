@@ -173,19 +173,6 @@
         </div>
     }
 
-    @* §6.1 — agent suggestion quick-reply *@
-    @if (_suggestedAgentId != null)
-    {
-        <div class="agent-suggest-bar">
-            <button class="agent-suggest-btn" @onclick="AcceptAgentSuggestion">
-                Switch to @_suggestedAgentName
-            </button>
-            <button class="agent-suggest-dismiss" @onclick="DismissAgentSuggestion">
-                No thanks
-            </button>
-        </div>
-    }
-
     @* Input bar — sticky bottom *@
     <div class="chat-input-bar">
         @* Top row: KB toggles *@
@@ -435,7 +422,7 @@
 
     .agent-suggest-btn:hover {
         background: var(--color-accent);
-        color: #fff;
+        color: var(--color-text-on-accent);
     }
 
     .agent-suggest-dismiss {
