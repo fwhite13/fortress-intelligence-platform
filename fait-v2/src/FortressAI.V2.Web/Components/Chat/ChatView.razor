@@ -44,6 +44,14 @@
 
     @* Message history — scrollable *@
     <div class="chat-messages" @ref="_messagesRef">
+        @if (!_harnessReady && _initError == null)
+        {
+            <div class="chat-empty-state">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="Size.Medium" Class="mb-3" />
+                <p class="chat-empty-title">Setting up your assistant...</p>
+                <p class="chat-empty-subtitle">This takes about 30–60 seconds on first load.</p>
+            </div>
+        }
         @if (_initError != null)
         {
             <div class="chat-empty-state">
@@ -52,7 +60,7 @@
                 <p class="chat-empty-subtitle">@_initError</p>
             </div>
         }
-        else if (!_messages.Any())
+        else if (!_messages.Any() && _harnessReady)
         {
             <div class="chat-empty-state">
                 <MudIcon Icon="@Icons.Material.Filled.Chat" Class="chat-empty-icon" />
@@ -151,11 +159,11 @@
                       @onkeydown="HandleKeyDown"
                       placeholder="Message your assistant..."
                       rows="1"
-                      disabled="@(_isStreaming || _ccRunning)"></textarea>
+                      disabled="@(_isStreaming || _ccRunning || !_harnessReady)"></textarea>
             <button class="chat-send-btn"
                     type="button"
                     @onclick="SendMessage"
-                    disabled="@(string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _ccRunning)"
+                    disabled="@(string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _ccRunning || !_harnessReady)"
                     title="Send message">
                 <MudIcon Icon="@Icons.Material.Filled.Send" Class="chat-send-icon" />
             </button>
@@ -316,6 +324,7 @@
 
     // CC task state
     private bool _ccRunning = false;
+    private bool _harnessReady = false;
     private string _ccCurrentStep = "Generating artifact...";
     private CancellationTokenSource? _ccCts;
     private ArtifactRecord? _lastArtifact;
@@ -363,6 +372,26 @@
                 .Select(m => new ChatMessage(m.Role, m.Content))
                 .ToList();
             _logger.LogInformation("ChatView init: history loaded, {Count} messages", _messages.Count);
+
+            // Pre-warm harness — fire and forget, spinner guards input until ready
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    _logger.LogInformation("ChatView: pre-warming harness for userId={UserId}", _userId);
+                    await AgentRuntime.EnsureRunningAsync(_userId);
+                    _logger.LogInformation("ChatView: harness pre-warm complete for userId={UserId}", _userId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "ChatView: harness pre-warm failed for userId={UserId} — will retry on first message", _userId);
+                }
+                finally
+                {
+                    _harnessReady = true;
+                    await InvokeAsync(StateHasChanged);
+                }
+            });
 
             await ConnectSignalRAsync();
             _logger.LogInformation("ChatView init: complete");
