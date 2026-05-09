@@ -15,7 +15,7 @@ public class FaitV2DbContextDesignTimeFactory : IDesignTimeDbContextFactory<Fait
         var port = Environment.GetEnvironmentVariable("FORTRESS_DB_PORT") ?? "3306";
         var user = Environment.GetEnvironmentVariable("FORTRESS_DB_USER") ?? "root";
         var pass = Environment.GetEnvironmentVariable("FORTRESS_DB_PASS") ?? "dev";
-        var db   = Environment.GetEnvironmentVariable("FORTRESS_DB_NAME") ?? "fait_v2_dev";
+        var db   = Environment.GetEnvironmentVariable("FORTRESS_DB_NAME") ?? "fait_dev";
 
         // Use MySqlConnectionStringBuilder to safely handle special characters in password
         var csb = new MySqlConnector.MySqlConnectionStringBuilder

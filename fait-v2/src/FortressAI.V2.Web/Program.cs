@@ -103,13 +103,13 @@ builder.Services.AddHttpClient("HarnessClient");
 builder.Services.AddHttpClient("BraveSearchClient");
 builder.Services.AddHttpClient("DevOpsTestClient");
 builder.Services.AddHttpClient("MicrosoftGraphClient");
-// FaitV2DbContext — main app DB (fait_v2_dev on Aurora MySQL)
+// FaitV2DbContext — main app DB (fait_dev on Aurora MySQL)
 // Built from FORTRESS_DB_* env vars, consistent with keyring and fipPortal patterns
 var faitV2Csb = new MySqlConnector.MySqlConnectionStringBuilder
 {
     Server = keyRingDbHost ?? "localhost",
     Port = uint.Parse(keyRingDbPort),
-    Database = builder.Configuration["FORTRESS_DB_NAME"] ?? "fait_v2_dev",
+    Database = builder.Configuration["FORTRESS_DB_NAME"] ?? "fait_dev",
     UserID = keyRingDbUser,
     Password = keyRingDbPass,
     ConnectionTimeout = 10,
