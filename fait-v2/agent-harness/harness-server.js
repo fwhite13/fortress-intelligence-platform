@@ -168,24 +168,36 @@ app.post('/tools/:toolName', async (req, res) => {
 });
 
 app.post('/turn', async (req, res) => {
-    const { SessionId: sessionId, UserId: userId, Message: message, SystemPrompt: systemPrompt, TaskMode: taskMode, History: history } = req.body;
+    console.log(`[harness] /turn: request received. body keys=${Object.keys(req.body || {}).join(',')}, contentType=${req.headers['content-type']}`);
+    const rawBody = req.body || {};
+    console.log(`[harness] /turn: raw body dump: ${JSON.stringify(rawBody).substring(0, 500)}`);
+
+    const { SessionId: sessionId, UserId: userId, Message: message, SystemPrompt: systemPrompt, TaskMode: taskMode, History: history } = rawBody;
+    console.log(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, taskMode=${taskMode}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
 
     if (!userId || !message) {
+        console.warn(`[harness] /turn: 400 — userId=${userId}, message=${!!message} — 'userId and message required'`);
         return res.status(400).json({ error: 'userId and message required' });
     }
     if (typeof userId !== 'string' ||
         userId.includes('..') || userId.includes('/') || userId.includes('\\') ||
         !/^[a-zA-Z0-9_-]{1,64}$/.test(userId)) {
+        console.warn(`[harness] /turn: 400 — userId failed validation: '${userId}'`);
         return res.status(400).json({ error: 'Invalid userId' });
     }
 
+    console.log(`[harness] /turn: validation passed for userId=${userId}, starting SSE response`);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    const sendEvent = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+    const sendEvent = (data) => {
+        console.log(`[harness] /turn: sendEvent type=${data.type}, contentLen=${data.content?.length ?? 0}, errorMessage=${data.errorMessage ?? ''}`);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
 
     if (taskMode) {
+        console.log(`[harness] /turn: taskMode=true — entering CC spawn path for userId=${userId}`);
         // ── CC spawn path (unchanged) ─────────────────────────────────────
         const userWorkspaceDir = `${WORKSPACE_DIR}/${userId}`;
         let ended = false;
@@ -245,14 +257,17 @@ app.post('/turn', async (req, res) => {
         ccProcess.on('error', (err) => { clearTimeout(timeout); endResponse({ type: 'error', errorMessage: err.message }); });
     } else {
         // ── Bedrock ConverseStream path ───────────────────────────────────
+        console.log(`[harness] /turn: taskMode=false — entering Bedrock ConverseStream path for userId=${userId}`);
         try {
             // Load user memory files from S3
             const prefix = S3_PREFIX || `workspaces/${userId}/`;
+            console.log(`[harness] /turn: fetching S3 context files from prefix=${prefix}`);
             const [soulMd, userMd, memoryMd] = await Promise.all([
                 fetchS3File(`${prefix}assistants/SOUL.md`),
                 fetchS3File(`${prefix}assistants/USER.md`),
                 fetchS3File(`${prefix}memory/MEMORY.md`),
             ]);
+            console.log(`[harness] /turn: S3 fetch complete — soulMd=${soulMd ? soulMd.length + ' chars' : 'null'}, userMd=${userMd ? userMd.length + ' chars' : 'null'}, memoryMd=${memoryMd ? memoryMd.length + ' chars' : 'null'}`);
 
             const systemParts = [];
             if (soulMd) systemParts.push(`## Assistant Identity\n${soulMd}`);
@@ -263,6 +278,7 @@ app.post('/turn', async (req, res) => {
                 systemParts.push('You are a helpful AI assistant.');
             }
             const fullSystemPrompt = systemParts.join('\n\n---\n\n');
+            console.log(`[harness] /turn: system prompt built, totalLen=${fullSystemPrompt.length}`);
 
             // Build message history
             const messages = [];
@@ -277,6 +293,7 @@ app.post('/turn', async (req, res) => {
                 }
             }
             messages.push({ role: 'user', content: [{ text: message }] });
+            console.log(`[harness] /turn: message array built, count=${messages.length} (including current user message)`);
 
             const cmd = new ConverseStreamCommand({
                 modelId: MODEL_ID,
@@ -285,18 +302,26 @@ app.post('/turn', async (req, res) => {
                 inferenceConfig: { maxTokens: 4096, temperature: 0.7 }
             });
 
+            console.log(`[harness] /turn: calling bedrockClient.send for userId=${userId}, modelId=${MODEL_ID}`);
             const response = await bedrockClient.send(cmd);
+            console.log(`[harness] /turn: Bedrock stream opened, beginning event iteration`);
+            let tokenCount = 0;
             for await (const event of response.stream) {
                 if (event.contentBlockDelta?.delta?.text) {
+                    tokenCount++;
                     sendEvent({ type: 'text', content: event.contentBlockDelta.delta.text });
                 } else if (event.messageStop) {
+                    console.log(`[harness] /turn: messageStop received after ${tokenCount} text events`);
                     break;
+                } else {
+                    console.log(`[harness] /turn: stream event (non-text): ${JSON.stringify(Object.keys(event))}`);
                 }
             }
+            console.log(`[harness] /turn: stream complete, sending done event for userId=${userId}`);
             sendEvent({ type: 'done' });
             res.end();
         } catch (err) {
-            console.error('[harness] Bedrock ConverseStream error:', err.message);
+            console.error(`[harness] /turn: Bedrock ConverseStream error for userId=${userId}: ${err.message}`, err.stack);
             sendEvent({ type: 'error', errorMessage: err.message });
             res.end();
         }

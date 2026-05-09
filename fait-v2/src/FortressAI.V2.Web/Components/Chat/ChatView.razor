@@ -472,9 +472,14 @@
                 TaskMode: false,
                 History: contextHistory
             );
-            _logger.LogInformation("RunStreamingTurnAsync: calling SendTurnAsync");
+            _logger.LogInformation("RunStreamingTurnAsync: calling SendTurnAsync for userId={UserId}, requestMessageLen={Len}, historyCount={HistCount}",
+                _userId, request.Message?.Length ?? 0, request.History?.Count ?? 0);
+            int evtCount = 0;
             await foreach (var evt in AgentRuntime.SendTurnAsync(_userId, request))
             {
+                evtCount++;
+                _logger.LogInformation("RunStreamingTurnAsync: received event #{EvtCount} type={Type} contentLen={ContentLen} error={Error}",
+                    evtCount, evt.Type, evt.Content?.Length ?? 0, evt.ErrorMessage ?? "");
                 if (evt.Type == "text" && evt.Content != null)
                 {
                     assistantContent.Append(evt.Content);
@@ -492,6 +497,8 @@
                     break;
                 }
             }
+            _logger.LogInformation("RunStreamingTurnAsync: SendTurnAsync enumeration complete — totalEvents={EvtCount}, contentLen={ContentLen} for userId={UserId}",
+                evtCount, assistantContent.Length, _userId);
         }
         catch (Exception ex)
         {

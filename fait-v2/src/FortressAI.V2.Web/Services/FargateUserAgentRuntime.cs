@@ -317,10 +317,17 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         // Ensure task is running (start if needed)
+        _logger.LogInformation("SendTurnAsync: calling EnsureRunningAsync for userId={UserId}", userId);
         RuntimeSession session = await EnsureRunningAsync(userId, ct);
+        _logger.LogInformation("SendTurnAsync: EnsureRunningAsync returned session — taskArn={TaskArn}, ip={Ip}, port={Port}, status={Status}",
+            session.TaskArn, session.PrivateIp, session.Port, session.Status);
 
         var url = $"http://{session.PrivateIp}:{session.Port}/turn";
+        _logger.LogInformation("SendTurnAsync: preparing POST to {Url} for userId={UserId}, messageLen={MessageLen}, historyCount={HistoryCount}, taskMode={TaskMode}",
+            url, userId, request.Message?.Length ?? 0, request.History?.Count ?? 0, request.TaskMode);
+
         var client = _httpClientFactory.CreateClient("HarnessClient");
+        _logger.LogInformation("SendTurnAsync: HttpClient timeout={Timeout}", client.Timeout);
 
         HttpResponseMessage? response = null;
         Exception? postError = null;
@@ -328,8 +335,12 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
         {
             var jsonContent = System.Net.Http.Json.JsonContent.Create(request);
             var httpReq = new HttpRequestMessage(HttpMethod.Post, url) { Content = jsonContent };
+            _logger.LogInformation("SendTurnAsync: calling client.SendAsync (ResponseHeadersRead) to {Url}", url);
             response = await client.SendAsync(httpReq, HttpCompletionOption.ResponseHeadersRead, ct);
+            _logger.LogInformation("SendTurnAsync: POST /turn response received — status={StatusCode} ({StatusInt}) for userId={UserId}",
+                response.StatusCode, (int)response.StatusCode, userId);
             response.EnsureSuccessStatusCode();
+            _logger.LogInformation("SendTurnAsync: EnsureSuccessStatusCode passed, beginning SSE stream read for userId={UserId}", userId);
         }
         catch (Exception ex) when (IsConnectionRefused(ex))
         {
@@ -363,12 +374,17 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
             // Re-launch and retry the POST once
             try
             {
+                _logger.LogInformation("SendTurnAsync: retrying EnsureRunningAsync after connection refused for userId={UserId}", userId);
                 session = await EnsureRunningAsync(userId, ct);
                 url = $"http://{session.PrivateIp}:{session.Port}/turn";
+                _logger.LogInformation("SendTurnAsync: retry POST to {Url} for userId={UserId}", url, userId);
                 var retryContent = System.Net.Http.Json.JsonContent.Create(request);
                 var retryReq = new HttpRequestMessage(HttpMethod.Post, url) { Content = retryContent };
                 response = await client.SendAsync(retryReq, HttpCompletionOption.ResponseHeadersRead, ct);
+                _logger.LogInformation("SendTurnAsync: retry POST response — status={StatusCode} ({StatusInt}) for userId={UserId}",
+                    response.StatusCode, (int)response.StatusCode, userId);
                 response.EnsureSuccessStatusCode();
+                _logger.LogInformation("SendTurnAsync: retry EnsureSuccessStatusCode passed for userId={UserId}", userId);
             }
             catch (Exception retryEx)
             {
@@ -378,24 +394,34 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to POST /turn to harness for user {UserId}", userId);
+            _logger.LogError(ex, "Failed to POST /turn to harness for user {UserId} at {Url} — exType={ExType}", userId, url, ex.GetType().Name);
             postError = ex;
         }
 
         if (postError != null)
         {
+            _logger.LogError("SendTurnAsync: yielding error event for userId={UserId}: {Error}", userId, postError.Message);
             yield return new HarnessEvent("error", ErrorMessage: postError.Message);
             yield break;
         }
 
         // Read SSE stream line by line
+        _logger.LogInformation("SendTurnAsync: calling ReadAsStreamAsync for userId={UserId}", userId);
         using var stream = await response!.Content.ReadAsStreamAsync(ct);
+        _logger.LogInformation("SendTurnAsync: SSE stream opened, entering read loop for userId={UserId}", userId);
         using var reader = new StreamReader(stream);
 
+        int lineCount = 0;
+        int eventCount = 0;
         while (!reader.EndOfStream && !ct.IsCancellationRequested)
         {
             var line = await reader.ReadLineAsync(ct);
-            if (line == null) break;
+            lineCount++;
+            if (line == null)
+            {
+                _logger.LogInformation("SendTurnAsync: ReadLineAsync returned null (stream ended) after {LineCount} lines for userId={UserId}", lineCount, userId);
+                break;
+            }
 
             // Skip empty lines and SSE comment lines
             if (string.IsNullOrWhiteSpace(line) || line.StartsWith(':'))
@@ -403,7 +429,10 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
 
             // Parse "data: {...}" SSE lines
             if (!line.StartsWith("data: "))
+            {
+                _logger.LogWarning("SendTurnAsync: unexpected SSE line (not 'data: '): {Line}", line);
                 continue;
+            }
 
             var json = line["data: ".Length..];
             HarnessEvent? evt = null;
@@ -420,14 +449,26 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
                 continue;
             }
 
-            if (evt == null) continue;
+            if (evt == null)
+            {
+                _logger.LogWarning("SendTurnAsync: deserialized null HarnessEvent from line: {Line}", line);
+                continue;
+            }
 
+            eventCount++;
+            _logger.LogInformation("SendTurnAsync: yielding event #{EventCount} type={Type} contentLen={ContentLen} error={Error} for userId={UserId}",
+                eventCount, evt.Type, evt.Content?.Length ?? 0, evt.ErrorMessage ?? "", userId);
             yield return evt;
 
             // Stop streaming on terminal events
             if (evt.Type is "done" or "error")
+            {
+                _logger.LogInformation("SendTurnAsync: terminal event '{Type}' received after {EventCount} events for userId={UserId}", evt.Type, eventCount, userId);
                 yield break;
+            }
         }
+        _logger.LogInformation("SendTurnAsync: SSE read loop exited — lineCount={LineCount}, eventCount={EventCount}, streamEnded={Ended}, ctCancelled={Cancelled} for userId={UserId}",
+            lineCount, eventCount, reader.EndOfStream, ct.IsCancellationRequested, userId);
     }
 
     // ─── DispatchToolCallAsync ────────────────────────────────────────────────
