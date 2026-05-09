@@ -6,10 +6,10 @@ const { mkdirSync } = require('fs');
 const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
 const { BedrockRuntimeClient, ConverseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { S3Client, GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { BedrockAgentRuntimeClient, RetrieveCommand } = require('@aws-sdk/client-bedrock-agent-runtime');
 
 const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
-const { BedrockAgentRuntimeClient, RetrieveCommand } = require('@aws-sdk/client-bedrock-agent-runtime');
 const bedrockAgentClient = new BedrockAgentRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
 const S3_BUCKET = process.env.WORKSPACE_S3_BUCKET || 'fortress-user-workspaces';
@@ -463,7 +463,7 @@ app.post('/turn', async (req, res) => {
                     console.log(`[harness] /turn: toolUse complete: name=${toolUseAccumulator.name}, input=${toolUseAccumulator.inputJson}`);
                     const toolInput = JSON.parse(toolUseAccumulator.inputJson || '{}');
                     const kbResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal');
-                    sendEvent({ type: 'token', content: `\n\n[KB Search Results]\n${kbResult}\n\n` });
+                    sendEvent({ type: 'text', content: `\n\n[KB Search Results]\n${kbResult}\n\n` });
                     toolUseAccumulator = null;
                 } else if (event.contentBlockDelta?.delta?.text) {
                     tokenCount++;
