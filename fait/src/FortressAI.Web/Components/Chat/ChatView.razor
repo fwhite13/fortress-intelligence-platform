@@ -47,6 +47,12 @@ else
                 <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" /> @conversation.Project.Name
             </div>
         }
+        @if (_taskModeActive)
+        {
+            <div class="chat-task-indicator">
+                <i class="fas fa-tasks"></i> Task Mode
+            </div>
+        }
     </div>
 
     <div class="chat-messages-wrapper">
@@ -225,6 +231,12 @@ else
                     Style="@GetMicButtonStyle()"
                     Size="Size.Medium" />
             }
+            <button class="btn-task-mode @(_taskMode ? "btn-task-mode--active" : "")"
+                    @onclick="() => _taskMode = !_taskMode"
+                    title="@(_taskMode ? "Task mode on — click to disable" : "Enable task mode")"
+                    disabled="@isStreaming">
+                <i class="fas fa-tasks"></i>
+            </button>
             <MudIconButton Icon="@Icons.Material.Filled.Send"
                 Disabled="@(isStreaming || (string.IsNullOrWhiteSpace(_userInput) && !_pendingAttachments.Any()))"
                 OnClick="HandleSendFromInput"
@@ -292,6 +304,10 @@ else
     private KbRetrievalResult? _lastKbResult;
     private static int _chatRenderCount = 0;
     private static int _afterRenderNoFirstCount = 0;
+
+    // Task mode state
+    private bool _taskMode = false;
+    private bool _taskModeActive = false; // set true on mode_switch event
 
     // Cold start UX — guard fields
     private bool _agentReady = false;
@@ -461,6 +477,7 @@ else
     {
         if (string.IsNullOrWhiteSpace(text) || isStreaming) return;
         _lastKbResult = null;  // Clear stale result before new send
+        _taskModeActive = false; // Reset — will be set by mode_switch event in this turn
 
         // Capture pending attachments before clearing
         var attachmentsSnapshot = _pendingAttachments.ToList();
@@ -761,7 +778,7 @@ else
                 UserId: Session.UserId.ToString(),
                 Message: text.Trim(),
                 History: chatHistory.Select(m => new ChatHistoryEntry(m.Role, m.Content)).ToList(),
-                TaskMode: false,
+                TaskMode: _taskMode,
                 SystemPrompt: string.IsNullOrEmpty(effectiveSystemPrompt) ? null : effectiveSystemPrompt
             );
 
@@ -785,6 +802,11 @@ else
                 {
                     fullResponse.Append($"\n\n⚠️ {evt.ErrorMessage ?? "An error occurred."}");
                     streamingMessage.Content = fullResponse.ToString();
+                    StateHasChanged();
+                }
+                else if (evt.Type == "mode_switch")
+                {
+                    _taskModeActive = true;
                     StateHasChanged();
                 }
                 // "log" events: swallow silently
@@ -816,6 +838,7 @@ else
         finally
         {
             isStreaming = false;
+            _taskMode = false; // reset toggle after send completes
             streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
             StateHasChanged();
         }
@@ -1219,3 +1242,36 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
         public string Base64 { get; set; } = "";
     }
 }
+
+<style>
+.btn-task-mode {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
+    font-size: var(--text-sm, 0.875rem);
+    transition: all 0.15s ease;
+}
+.btn-task-mode--active {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-text-on-accent, #fff);
+}
+.btn-task-mode:hover:not(:disabled):not(.btn-task-mode--active) {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+.chat-task-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1, 0.25rem);
+    color: var(--color-accent);
+    font-size: var(--text-sm, 0.875rem);
+    font-family: var(--font-primary);
+    padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
+    background: var(--color-accent-light, rgba(212, 175, 55, 0.1));
+    border-radius: var(--radius-sm);
+}
+</style>

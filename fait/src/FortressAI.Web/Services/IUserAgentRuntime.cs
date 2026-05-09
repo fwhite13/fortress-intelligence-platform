@@ -59,10 +59,11 @@ public record TurnRequest(
 public record ChatHistoryEntry(string Role, string Content);
 
 public record HarnessEvent(
-    string Type,         // "text" | "log" | "done" | "error"
+    string Type,         // "text" | "log" | "done" | "error" | "mode_switch"
     string? Content = null,
     int? ExitCode = null,
     string? ErrorMessage = null,
     int? InputTokens = null,
-    int? OutputTokens = null
+    int? OutputTokens = null,
+    string? Payload = null   // JSON payload for mode_switch and future event types
 );
