@@ -1390,6 +1390,7 @@ app.post('/turn', async (req, res) => {
             let toolUseAccumulator = null;
             let inputTokens = 0;
             let outputTokens = 0;
+            let messageStopSeen = false;
             for await (const event of response.stream) {
                 if (event.contentBlockStart?.start?.toolUse) {
                     toolUseAccumulator = {
@@ -1432,11 +1433,15 @@ app.post('/turn', async (req, res) => {
                     tokenCount++;
                     sendEvent({ type: 'text', content: event.contentBlockDelta.delta.text });
                 } else if (event.metadata?.usage) {
+                    // ADO#3151: metadata arrives after messageStop — must NOT break before capturing this
                     inputTokens = event.metadata.usage.inputTokens || 0;
                     outputTokens = event.metadata.usage.outputTokens || 0;
+                    console.log(`[harness] /turn: metadata captured — inputTokens=${inputTokens}, outputTokens=${outputTokens}`);
+                    if (messageStopSeen) break;
                 } else if (event.messageStop) {
                     console.log(`[harness] /turn: messageStop received after ${tokenCount} text events, stopReason=${event.messageStop.stopReason}`);
-                    break;
+                    messageStopSeen = true;
+                    // Do NOT break here — metadata event with usage arrives after messageStop
                 } else {
                     console.log(`[harness] /turn: stream event (non-text): ${JSON.stringify(Object.keys(event))}`);
                 }
