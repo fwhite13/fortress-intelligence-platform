@@ -1435,6 +1435,9 @@ app.get('/session', (req, res) => {
 
 // Bootstrap GCP credentials then start server
 (async () => {
+    if (!INTERNAL_API_TOKEN) {
+        console.warn('[harness] WARNING: INTERNAL_API_TOKEN not set — preference writes will fail with 401');
+    }
     await bootstrapGcpCredentials();
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`FAIT v2 agent harness listening on port ${PORT}`);
