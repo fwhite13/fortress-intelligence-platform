@@ -221,7 +221,7 @@ else
             <!-- Hidden file input -->
             <InputFile id="chat-file-input" OnChange="HandleFileSelected" multiple accept=".txt,.md,.csv,.json,.xml,.html,.py,.cs,.js,.ts,.yaml,.yml,.png,.jpg,.jpeg,.gif,.pdf" style="display:none;" />
             <MudIconButton Icon="@Icons.Material.Filled.AttachFile"
-                Disabled="@isStreaming"
+                Disabled="@(isStreaming || _isBriefStreaming)"
                 OnClick="TriggerFileInput"
                 Title="Attach file"
                 Style="background: transparent; color: var(--color-text-secondary); border-radius: var(--radius-md);"
@@ -232,12 +232,12 @@ else
                       @onkeydown="HandleInputKeyDown"
                       placeholder="Type a message..."
                       rows="1"
-                      disabled="@isStreaming"
+                      disabled="@(isStreaming || _isBriefStreaming)"
                       id="chat-input-field"></textarea>
             @if (_speechSupported)
             {
                 <MudIconButton Icon="@(_isDictating ? Icons.Material.Filled.MicNone : Icons.Material.Filled.Mic)"
-                    Disabled="@isStreaming"
+                    Disabled="@(isStreaming || _isBriefStreaming)"
                     OnClick="ToggleDictation"
                     Title="@(_isDictating ? "Stop recording" : "Dictate message")"
                     Style="@GetMicButtonStyle()"
@@ -246,11 +246,11 @@ else
             <button class="btn-task-mode @(_taskMode ? "btn-task-mode--active" : "")"
                     @onclick="() => _taskMode = !_taskMode"
                     title="@(_taskMode ? "Task mode on — click to disable" : "Enable task mode")"
-                    disabled="@isStreaming">
+                    disabled="@(isStreaming || _isBriefStreaming)">
                 <i class="fas fa-tasks"></i>
             </button>
             <MudIconButton Icon="@Icons.Material.Filled.Send"
-                Disabled="@(isStreaming || (string.IsNullOrWhiteSpace(_userInput) && !_pendingAttachments.Any()))"
+                Disabled="@(isStreaming || _isBriefStreaming || (string.IsNullOrWhiteSpace(_userInput) && !_pendingAttachments.Any()))"
                 OnClick="HandleSendFromInput"
                 Style="@GetSendButtonStyle()"
                 Size="Size.Medium" />
@@ -1023,7 +1023,7 @@ else
     }
 
     private string GetSendButtonStyle() =>
-        (isStreaming || (string.IsNullOrWhiteSpace(_userInput) && !_pendingAttachments.Any()))
+        (isStreaming || _isBriefStreaming || (string.IsNullOrWhiteSpace(_userInput) && !_pendingAttachments.Any()))
             ? "background: var(--color-border); color: var(--color-text-tertiary); cursor: not-allowed; border-radius: var(--radius-md); width: 36px; height: 36px;"
             : "background: var(--color-btn-primary-bg); color: white; cursor: pointer; border-radius: var(--radius-md); width: 36px; height: 36px;";
 
@@ -1352,14 +1352,14 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     margin: var(--space-3, 0.75rem) var(--space-4, 1rem);
     padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
     background: var(--color-accent-light, rgba(212, 175, 55, 0.08));
-    border-left: 3px solid var(--color-accent);
+    border-left: var(--border-width-accent, 3px) solid var(--color-accent);
     border-radius: var(--radius-md);
     font-family: var(--font-primary);
     font-size: var(--text-sm, 0.875rem);
     color: var(--color-text-secondary);
 }
 .resumption-brief-content {
-    line-height: 1.5;
+    line-height: var(--line-height-body, 1.5);
     white-space: pre-wrap;
 }
 .resumption-brief-loading {

@@ -1098,7 +1098,7 @@ app.post('/turn', async (req, res) => {
             // Get MEMORY.md last-modified timestamp from S3
             let memoryTimestamp = null;
             try {
-                const memKey = `${S3_PREFIX}users/${userId}/MEMORY.md`;
+                const memKey = `${S3_PREFIX}workspaces/${userId}/memory/MEMORY.md`;
                 const headCmd = new HeadObjectCommand({ Bucket: S3_BUCKET, Key: memKey });
                 const headResp = await s3Client.send(headCmd);
                 memoryTimestamp = headResp.LastModified ? new Date(headResp.LastModified).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
@@ -1118,9 +1118,9 @@ app.post('/turn', async (req, res) => {
 
             // Compose and stream brief
             const briefParts = ['__brief_start__\n\n'];
-            briefParts.push('**Picking up where we left off**\n\n');
+            briefParts.push('Picking up where we left off\n\n');
             if (lastTopic) {
-                briefParts.push(`Last time: *${lastTopic}*\n\n`);
+                briefParts.push(`Last time: ${lastTopic}\n\n`);
             }
             if (memoryTimestamp) {
                 briefParts.push(`Memory synced: ${memoryTimestamp}\n`);
