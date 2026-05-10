@@ -106,6 +106,7 @@ builder.Services.AddScoped<GraphCalendarService>();
 builder.Services.AddScoped<PreMeetingBriefService>();
 builder.Services.AddScoped<PostMeetingService>();
 builder.Services.AddScoped<IScheduledTaskService, ScheduledTaskService>();
+builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 
 // Knowledge Base
 builder.Services.AddSingleton<IAmazonBedrockAgentRuntime>(sp =>
