@@ -108,6 +108,7 @@ builder.Services.AddScoped<PostMeetingService>();
 builder.Services.AddScoped<IScheduledTaskService, ScheduledTaskService>();
 builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 builder.Services.AddScoped<ITaskNotificationService, TaskNotificationService>();
+builder.Services.AddScoped<IMemoryFileService, MemoryFileService>();
 
 // Knowledge Base
 builder.Services.AddSingleton<IAmazonBedrockAgentRuntime>(sp =>

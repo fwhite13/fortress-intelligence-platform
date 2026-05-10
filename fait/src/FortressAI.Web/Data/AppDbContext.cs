@@ -41,6 +41,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
+    public DbSet<MemoryTopic> MemoryTopics => Set<MemoryTopic>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -484,6 +485,20 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.HasOne(e => e.Task).WithMany(t => t.Runs).HasForeignKey(e => e.TaskId).OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => e.TaskId);
             entity.HasIndex(e => e.StartedAt);
+        });
+
+        modelBuilder.Entity<MemoryTopic>(entity =>
+        {
+            entity.ToTable("memory_topics");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnType("CHAR(36)");
+            entity.Property(e => e.UserId).HasColumnType("CHAR(36)");
+            entity.Property(e => e.Slug).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.CreatedAt).HasColumnType("DATETIME(6)");
+            entity.Property(e => e.UpdatedAt).HasColumnType("DATETIME(6)");
+            entity.HasIndex(e => new { e.UserId, e.Slug }).IsUnique();
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
     }
