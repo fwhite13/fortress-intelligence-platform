@@ -203,3 +203,147 @@ Tony needs to fix **two things** before this ships:
 ---
 
 *Review by Hawkeye (Clint Barton) — Cycle 1 of 2 — 2026-05-10*
+
+---
+
+## Review Report — ADO#3206 Cycle 2
+
+### Verdict: PASS
+
+---
+
+### CC Review Summary
+
+CC invoked with adversarial brief targeting all three Cycle 1 fixes. CC read AppDbContext.cs, WorkspaceUploadService.cs, and the new migration files directly. All fixes verified correct. No false positives.
+
+**CC invocation:**
+```bash
+cd /home/fredw/projects/fip/fait && cat /tmp/clint-review-3206-c2.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+
+---
+
+### Spec Compliance
+
+Cycle 2 verifies fixes for the three NEEDS-CHANGES items from Cycle 1. Not a full spec re-review.
+
+---
+
+### Fix 1 — FK Config in OnModelCreating: ✅ VERIFIED
+
+**AppDbContext.cs lines 534–538 (WorkspaceFolder self-ref):**
+```csharp
+entity.HasOne<WorkspaceFolder>()
+      .WithMany()
+      .HasForeignKey(f => f.ParentId)
+      .OnDelete(DeleteBehavior.Cascade)
+      .IsRequired(false);
+```
+
+**AppDbContext.cs lines 555–559 (WorkspaceUpload → WorkspaceFolder):**
+```csharp
+entity.HasOne<WorkspaceFolder>()
+      .WithMany()
+      .HasForeignKey(u => u.FolderId)
+      .OnDelete(DeleteBehavior.SetNull)
+      .IsRequired(false);
+```
+
+OnDelete behaviors are **correct and not swapped**:
+- Self-ref folder (ParentId) → Cascade ✅ (parent folder delete cascades to child folders)
+- Upload → Folder (FolderId) → SetNull ✅ (folder delete nulls the upload's FolderId; upload is preserved)
+
+---
+
+### Fix 2 — S3 Rollback on DB Failure: ✅ VERIFIED
+
+**WorkspaceUploadService.cs lines 111–146:**
+```csharp
+var s3Key = $"workspaces/{userId}/files/{folderId?.ToString() ?? "root"}/{safeFilename}";
+await _s3.PutObjectAsync(new PutObjectRequest { BucketName = _bucket, Key = s3Key, ... });
+// ...
+try
+{
+    await db.SaveChangesAsync();
+}
+catch
+{
+    try { await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = s3Key }); }
+    catch { /* best-effort cleanup */ }
+    throw;
+}
+```
+
+All sub-checks pass:
+- `try/catch` wraps `SaveChangesAsync` specifically — targets the orphan scenario (S3 success → DB failure) ✅
+- `DeleteObjectAsync` uses the same `s3Key` variable — no key mismatch ✅
+- Inner `try/catch` around S3 delete — rollback is best-effort, won't mask the original exception ✅
+- Bare `throw` re-throws the original exception ✅
+
+---
+
+### Fix 3 — Filename Sanitization: ✅ VERIFIED
+
+**WorkspaceUploadService.cs lines 110–129:**
+```csharp
+var safeFilename = Path.GetFileName(filename);
+var s3Key = $"workspaces/{userId}/files/{folderId?.ToString() ?? "root"}/{safeFilename}";
+// ...
+Filename = safeFilename,
+S3Key = s3Key,
+```
+
+- `Path.GetFileName()` applied before S3 key construction ✅
+- `safeFilename` used in S3 key ✅
+- `safeFilename` used in DB `Filename` field ✅ (original `filename` never used after line 110)
+
+**Low-risk gap noted (non-blocking):** `Path.GetFileName` on Linux only splits on `/`, not `\`. A client-supplied filename with backslashes (e.g. `..\..\..\etc\passwd`) would pass through unchanged. The fixed `workspaces/{userId}/files/` prefix on S3 keys limits real-world risk. Browser-native filenames don't contain backslashes. Not a blocking issue.
+
+---
+
+### Fix 4 — Migration File: ✅ VERIFIED
+
+Migration `20260510195935_AddWorkspaceUploadsForeignKeys.cs` present in Migrations directory.
+
+Key operations:
+```csharp
+migrationBuilder.AddForeignKey(
+    name: "FK_user_workspace_folders_user_workspace_folders_parent_id",
+    table: "user_workspace_folders",
+    column: "parent_id",
+    principalTable: "user_workspace_folders",
+    principalColumn: "id",
+    onDelete: ReferentialAction.Cascade);
+
+migrationBuilder.AddForeignKey(
+    name: "FK_user_workspace_uploads_user_workspace_folders_folder_id",
+    table: "user_workspace_uploads",
+    column: "folder_id",
+    principalTable: "user_workspace_folders",
+    principalColumn: "id",
+    onDelete: ReferentialAction.SetNull);
+```
+
+- Columns `parent_id` / `folder_id` match `HasColumnName` in AppDbContext ✅
+- Designer.cs and AppDbContextModelSnapshot.cs updated in same commit ✅
+- `Down()` correctly drops both FKs ✅
+
+---
+
+### Regression Check: ✅ CLEAN
+
+**Commit 8b9b4d3d** (3 files — all expected):
+- `pipeline/REVIEW-3206-REPORT.md` — docs
+- `Data/AppDbContext.cs` — FK config
+- `Services/WorkspaceUploadService.cs` — S3 rollback + sanitization
+
+**Commit 79692eb8** (3 files — all expected):
+- `*_AddWorkspaceUploadsForeignKeys.cs` — migration Up/Down
+- `*_AddWorkspaceUploadsForeignKeys.Designer.cs` — EF snapshot
+- `Migrations/AppDbContextModelSnapshot.cs` — snapshot update
+
+No unexpected files modified. No debug artifacts, hardcoded credentials, or TODOs found.
+
+---
+
+*Review by Hawkeye (Clint Barton) — Cycle 2 of 2 — 2026-05-10*

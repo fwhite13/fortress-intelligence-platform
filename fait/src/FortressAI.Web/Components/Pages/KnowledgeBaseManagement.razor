@@ -436,6 +436,14 @@
 </MudContainer>
 
 @code {
+    private static readonly DialogOptions DefaultDialogOptions = new DialogOptions
+    {
+        MaxWidth = MaxWidth.Medium,
+        FullWidth = true,
+        CloseOnEscapeKey = true,
+        CloseButton = true
+    };
+
     // ── State ─────────────────────────────────────────────────────────────────
 
     private bool _loading = true;
@@ -564,7 +572,7 @@
     private async Task OpenNewPersonalEntry()
     {
         var parameters = new DialogParameters<EntryDialog>();
-        var dialog = await DialogService.ShowAsync<EntryDialog>("New Entry", parameters);
+        var dialog = await DialogService.ShowAsync<EntryDialog>("New Entry", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (!result.Canceled && result.Data is EntryDialogResult r)
             await SaveEntry(KbTier.Personal, null, r.Title, r.Content, r.Tags);
@@ -579,7 +587,7 @@
             { x => x.Content, entry.Content },
             { x => x.Tags, entry.Tags ?? "" }
         };
-        var dialog = await DialogService.ShowAsync<EntryDialog>("Edit Entry", parameters);
+        var dialog = await DialogService.ShowAsync<EntryDialog>("Edit Entry", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (!result.Canceled && result.Data is EntryDialogResult r)
             await UpdateEntry(entry, r.Title, r.Content, r.Tags);
@@ -782,7 +790,7 @@
     private async Task OpenNewTeam()
     {
         var parameters = new DialogParameters<ProjectDialog>();
-        var dialog = await DialogService.ShowAsync<ProjectDialog>("New Project", parameters);
+        var dialog = await DialogService.ShowAsync<ProjectDialog>("New Project", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled && result.Data is ProjectDialogResult r)
             await CreateTeam(r.Name, r.Description);
@@ -844,7 +852,7 @@
     private async Task OpenNewTeamEntry()
     {
         var parameters = new DialogParameters<EntryDialog>();
-        var dialog = await DialogService.ShowAsync<EntryDialog>("Add Entry", parameters);
+        var dialog = await DialogService.ShowAsync<EntryDialog>("Add Entry", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (!result.Canceled && result.Data is EntryDialogResult r)
             await SaveEntry(KbTier.Team, _selectedTeam!.Id, r.Title, r.Content, r.Tags);
@@ -866,7 +874,7 @@
         {
             { x => x.AvailableUsers, availableUsers }
         };
-        var dialog = await DialogService.ShowAsync<AddMemberDialog>("Add Member", parameters);
+        var dialog = await DialogService.ShowAsync<AddMemberDialog>("Add Member", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (!result.Canceled && result.Data is Guid newMemberId)
             await AddMember(newMemberId);

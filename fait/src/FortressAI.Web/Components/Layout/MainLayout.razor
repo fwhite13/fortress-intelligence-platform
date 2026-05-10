@@ -77,6 +77,14 @@
 </MudLayout>
 
 @code {
+    private static readonly DialogOptions DefaultDialogOptions = new DialogOptions
+    {
+        MaxWidth = MaxWidth.Medium,
+        FullWidth = true,
+        CloseOnEscapeKey = true,
+        CloseButton = true
+    };
+
     private bool _drawerOpen = true;
     private HelpDrawer? _helpDrawer;
     private bool _nameNagShown = false;
@@ -154,7 +162,7 @@
             && string.IsNullOrWhiteSpace(Session.CurrentUser?.DisplayName))
         {
             _nameNagShown = true;
-            var dialog = await DialogService.ShowAsync<SetDisplayNameDialog>("Welcome to FAIT!");
+            var dialog = await DialogService.ShowAsync<SetDisplayNameDialog>("Welcome to FAIT!", DefaultDialogOptions);
             var result = await dialog.Result;
             if (result is not null && !result.Canceled && result.Data is string name && !string.IsNullOrWhiteSpace(name))
             {

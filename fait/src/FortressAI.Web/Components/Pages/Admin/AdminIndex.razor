@@ -403,6 +403,14 @@
 </MudContainer>
 
 @code {
+    private static readonly DialogOptions DefaultDialogOptions = new DialogOptions
+    {
+        MaxWidth = MaxWidth.Medium,
+        FullWidth = true,
+        CloseOnEscapeKey = true,
+        CloseButton = true
+    };
+
     // ── State ─────────────────────────────────────────────────────────────────
 
     private bool _loading = true;
@@ -478,7 +486,7 @@
     private async Task OpenNewCorporateEntry()
     {
         var parameters = new DialogParameters<EntryDialog>();
-        var dialog = await DialogService.ShowAsync<EntryDialog>("New Corporate Entry", parameters);
+        var dialog = await DialogService.ShowAsync<EntryDialog>("New Corporate Entry", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (!result.Canceled && result.Data is EntryDialogResult r)
         {
@@ -503,7 +511,7 @@
             { x => x.Content, entry.Content },
             { x => x.Tags, entry.Tags ?? "" }
         };
-        var dialog = await DialogService.ShowAsync<EntryDialog>("Edit Corporate Entry", parameters);
+        var dialog = await DialogService.ShowAsync<EntryDialog>("Edit Corporate Entry", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (!result.Canceled && result.Data is EntryDialogResult r)
         {
@@ -650,7 +658,7 @@
 
     private async Task OpenInviteDialog()
     {
-        var dialog = await DialogService.ShowAsync<InviteUserDialog>("Invite User");
+        var dialog = await DialogService.ShowAsync<InviteUserDialog>("Invite User", DefaultDialogOptions);
         var result = await dialog.Result;
         if (!result.Canceled)
         {
@@ -669,7 +677,7 @@
             { x => x.User, uwp.User },
             { x => x.UserId, uwp.User.Id }
         };
-        var dialog = await DialogService.ShowAsync<UserPermissionsDialog>("Edit Permissions", parameters);
+        var dialog = await DialogService.ShowAsync<UserPermissionsDialog>("Edit Permissions", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (!result.Canceled)
         {
@@ -726,7 +734,7 @@
         {
             { x => x.TargetUser, uwp }
         };
-        var dialog = await DialogService.ShowAsync<DeleteUserConfirmDialog>("Delete User", parameters);
+        var dialog = await DialogService.ShowAsync<DeleteUserConfirmDialog>("Delete User", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (!result.Canceled)
         {

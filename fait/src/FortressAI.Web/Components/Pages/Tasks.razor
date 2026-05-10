@@ -13,6 +13,7 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject ILogger<Tasks> Logger
+@inject ITaskNotificationService _notificationService
 @inject NavigationManager NavigationManager
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
@@ -270,6 +271,14 @@
 </MudContainer>
 
 @code {
+    private static readonly DialogOptions DefaultDialogOptions = new DialogOptions
+    {
+        MaxWidth = MaxWidth.Medium,
+        FullWidth = true,
+        CloseOnEscapeKey = true,
+        CloseButton = true
+    };
+
     private List<ScheduledTask>? _recurringTasks;
     private bool _loading = true;
 
@@ -421,7 +430,7 @@
             { x => x.ExistingTask, null },
             { x => x.IsOnDemand, true }
         };
-        var dialog = await DialogService.ShowAsync<TaskEditModal>("Save On-Demand Prompt", parameters);
+        var dialog = await DialogService.ShowAsync<TaskEditModal>("Save On-Demand Prompt", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled)
         {
@@ -437,7 +446,7 @@
             { x => x.ExistingTask, task },
             { x => x.IsOnDemand, true }
         };
-        var dialog = await DialogService.ShowAsync<TaskEditModal>("Edit On-Demand Prompt", parameters);
+        var dialog = await DialogService.ShowAsync<TaskEditModal>("Edit On-Demand Prompt", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled)
         {
@@ -489,24 +498,41 @@
         StateHasChanged();
         Snackbar.Add($"Task '{task.Name}' started — check History for results.", Severity.Info);
 
+        // Capture values for use inside background thread (avoid closure over task object)
+        var taskId = task.Id;
+        var taskName = task.Name;
+        var taskPrompt = task.Prompt;
+        var taskMode = task.TaskMode;
+        var alertOnCompletion = task.AlertOnCompletion;
+        var alertOnFailure = task.AlertOnFailure;
+        var userId = Session.UserId;
+
         // 3. Fire-and-forget dispatch (do NOT await — don't block UI)
         _ = Task.Run(async () =>
         {
+            string? resultSummary = null;
+            bool success = false;
+            string? errorMessage = null;
+
             try
             {
-                var userId = Session.UserId.ToString();
+                var userIdStr = userId.ToString();
                 var turnRequest = new FortressAI.Web.Services.TurnRequest(
-                    UserId: userId,
-                    Message: task.Prompt,
+                    UserId: userIdStr,
+                    Message: taskPrompt,
                     IsScheduledTask: true,
-                    TaskMode: task.TaskMode
+                    TaskMode: taskMode
                 );
                 var sb = new System.Text.StringBuilder();
-                await foreach (var evt in AgentRuntime.SendTurnAsync(userId, turnRequest))
+                await foreach (var evt in AgentRuntime.SendTurnAsync(userIdStr, turnRequest))
                 {
                     if (evt.Type == "text" && !string.IsNullOrEmpty(evt.Content))
                         sb.Append(evt.Content);
                 }
+
+                resultSummary = sb.Length > 500 ? sb.ToString(0, 500) : sb.ToString();
+                success = true;
+
                 // Update run row to success
                 await using var doneCtx = await DbFactory.CreateDbContextAsync();
                 var savedRun = await doneCtx.ScheduledTaskRuns.FindAsync(run.Id);
@@ -514,12 +540,26 @@
                 {
                     savedRun.Status = "success";
                     savedRun.CompletedAt = DateTime.UtcNow;
-                    savedRun.ResultSummary = sb.Length > 500 ? sb.ToString(0, 500) : sb.ToString();
+                    savedRun.ResultSummary = resultSummary;
                     await doneCtx.SaveChangesAsync();
+                }
+
+                // FIX 1: Update task.LastRunStatus in DB so the card reflects completion
+                await using var taskCtx = await DbFactory.CreateDbContextAsync();
+                var dbTask = await taskCtx.ScheduledTasks.FindAsync(taskId);
+                if (dbTask != null)
+                {
+                    dbTask.LastRunAt = DateTime.UtcNow;
+                    dbTask.LastRunStatus = "success";
+                    dbTask.UpdatedAt = DateTime.UtcNow;
+                    await taskCtx.SaveChangesAsync();
                 }
             }
             catch (Exception ex)
             {
+                errorMessage = ex.Message;
+                success = false;
+
                 try
                 {
                     await using var errCtx = await DbFactory.CreateDbContextAsync();
@@ -531,9 +571,44 @@
                         savedRun.Error = ex.Message;
                         await errCtx.SaveChangesAsync();
                     }
+
+                    // Update task.LastRunStatus to failed in DB
+                    await using var taskErrCtx = await DbFactory.CreateDbContextAsync();
+                    var dbTask = await taskErrCtx.ScheduledTasks.FindAsync(taskId);
+                    if (dbTask != null)
+                    {
+                        dbTask.LastRunAt = DateTime.UtcNow;
+                        dbTask.LastRunStatus = "failed";
+                        dbTask.UpdatedAt = DateTime.UtcNow;
+                        await taskErrCtx.SaveChangesAsync();
+                    }
                 }
                 catch { /* best effort */ }
             }
+
+            // FIX 2: Reload history tab and update task list on UI thread
+            await InvokeAsync(async () =>
+            {
+                // Reload the full on-demand task list to pick up new LastRunStatus
+                await LoadOnDemandTasksAsync();
+                // Reload history so the History tab shows the new run
+                await LoadHistoryAsync();
+                StateHasChanged();
+            });
+
+            // FIX 3: Fire notifications (SignalR toast + conditional email)
+            try
+            {
+                if (success && alertOnCompletion)
+                {
+                    await _notificationService.NotifyTaskCompletedAsync(userId, taskName, resultSummary);
+                }
+                else if (!success && alertOnFailure)
+                {
+                    await _notificationService.NotifyTaskPermanentlyFailedAsync(userId, taskName, errorMessage ?? "Unknown error");
+                }
+            }
+            catch { /* notification errors must never bubble */ }
         });
     }
 
@@ -543,7 +618,7 @@
         {
             { x => x.ExistingTask, null }
         };
-        var dialog = await DialogService.ShowAsync<TaskEditModal>("Create Recurring Task", parameters);
+        var dialog = await DialogService.ShowAsync<TaskEditModal>("Create Recurring Task", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled)
         {
@@ -558,7 +633,7 @@
         {
             { x => x.ExistingTask, task }
         };
-        var dialog = await DialogService.ShowAsync<TaskEditModal>("Edit Task", parameters);
+        var dialog = await DialogService.ShowAsync<TaskEditModal>("Edit Task", parameters, DefaultDialogOptions);
         var result = await dialog.Result;
         if (result is not null && !result.Canceled)
         {
