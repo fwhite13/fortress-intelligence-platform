@@ -118,7 +118,9 @@
         foreach (var group in grouped)
         {
             var conv = await ChatSvc.GetConversationAsync(group.Key, Session.UserId);
-            var title = conv?.Title ?? $"Conversation {group.Key.ToString()[..8]}";
+            var title = string.IsNullOrWhiteSpace(conv?.Title)
+                ? $"Conversation {group.Key.ToString()[..8]}"
+                : conv!.Title;
             result.Add(new ArtifactGroup(title, group.Key,
                 group.OrderByDescending(a => a.CreatedAt).ToList()));
         }
