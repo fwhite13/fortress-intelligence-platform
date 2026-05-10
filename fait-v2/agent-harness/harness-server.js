@@ -310,7 +310,7 @@ const MCP_TOOL_ALLOWLIST = {
 };
 
 const BUILTIN_TOOLS = new Set([
-    'list_workspace_files', 'search_memory', 'read_memory', 'write_memory'
+    'list_workspace_files', 'search_memory', 'read_memory', 'write_memory', 'create_document'
 ]);
 
 function isToolAllowed(toolName) {
@@ -765,6 +765,82 @@ app.post('/tools/write_memory', async (req, res) => {
     }
 });
 
+// ─── create_document tool handler (ADO#3201) ──────────────────────────────────
+app.post('/tools/create_document', async (req, res) => {
+    const { userId, conversationId, type, title, sections } = req.body;
+
+    if (type !== 'word') {
+        return res.status(400).json({ error: `Unsupported document type: "${type}". Only "word" is supported.` });
+    }
+    if (!userId || !conversationId) {
+        return res.status(400).json({ error: 'userId and conversationId are required' });
+    }
+
+    try {
+        // 1. Call Blazor API to generate the document bytes
+        const headers = { 'Content-Type': 'application/json' };
+        if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
+
+        const genRes = await fetch(`${FAIT_BASE_URL}/api/workspace/generate-document`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ type, title, sections })
+        });
+
+        if (!genRes.ok) {
+            const errText = await genRes.text();
+            return res.status(500).json({ error: `Document generation failed: ${errText}` });
+        }
+
+        const docBytes = Buffer.from(await genRes.arrayBuffer());
+        const sizeBytes = docBytes.length;
+
+        // 2. Sanitize filename and build S3 key
+        const sanitized = (title || 'document')
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '')
+            .substring(0, 100);
+        const timestamp = Date.now();
+        const filename = `${sanitized}-${timestamp}.docx`;
+        const s3Key = `workspaces/${userId}/artifacts/${conversationId}/${filename}`;
+
+        // 3. Upload to S3
+        await s3Client.send(new PutObjectCommand({
+            Bucket: S3_BUCKET,
+            Key: s3Key,
+            Body: docBytes,
+            ContentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        }));
+
+        // 4. Save artifact metadata via Blazor API
+        const saveRes = await fetch(`${FAIT_BASE_URL}/api/workspace/save-artifact`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                userId,
+                conversationId,
+                taskRunId: null,
+                filename,
+                s3Key,
+                mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                sizeBytes
+            })
+        });
+
+        if (!saveRes.ok) {
+            console.error(`[harness] create_document: save-artifact failed: ${await saveRes.text()}`);
+            // Non-fatal: file is in S3, metadata save failed — log and continue
+        }
+
+        res.json({ success: true, filename, s3Key, sizeBytes });
+    } catch (err) {
+        console.error('[harness] create_document error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ─── Stitch-specific route handlers (ADO#3099) ────────────────────────────
 app.post('/tools/stitch_generate_screen', async (req, res) => {
     const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -1106,6 +1182,7 @@ app.post('/turn', async (req, res) => {
     const userEmail       = rawBody.UserEmail       ?? rawBody.userEmail       ?? null;
     const isScheduledTask = rawBody.IsScheduledTask ?? rawBody.isScheduledTask ?? false;
     const kbWriteAllowed  = rawBody.KbWriteAllowed  ?? rawBody.kbWriteAllowed  ?? true;
+    const conversationId  = rawBody.ConversationId  ?? rawBody.conversationId  ?? '';
     const taskMode = forceTaskMode || classifyRequest(message, history);
 
     // §G7 — track scheduled task context so requireApproval uses async-safe path
@@ -1249,7 +1326,13 @@ app.post('/turn', async (req, res) => {
         contextParts.push(`You have access to read_memory(slug) and write_memory(slug, title, content) tools.
 - On cold start, MEMORY.md lists available topic slugs. Call read_memory to fetch any topic relevant to the current conversation.
 - When the user states a preference, personal detail, or decision worth remembering, call write_memory to persist it. Use judgment — not every message warrants a memory write.
-- For new information that does not fit an existing topic, create a new topic with an appropriate slug and title.`);
+- For new information that does not fit an existing topic, create a new topic with an appropriate slug and title.
+\nYou have access to create_document(type, title, sections[]) to produce file output.
+- Use type="word" for Word documents.
+- Call this when the user asks you to create a document, report, proposal, or similar deliverable.
+- You may also call this proactively when a document is clearly the best way to present your output (e.g. a structured report, a multi-section analysis).
+- sections is an array of { heading, content } objects.
+- After calling create_document, briefly confirm to the user that the document was created and is available in the chat.`);
         if (systemPrompt) contextParts.push(systemPrompt);
 
         // ADO#3089 — inject session context recap on cold-start CC turns with existing history
@@ -1386,7 +1469,13 @@ app.post('/turn', async (req, res) => {
             systemParts.push(`You have access to read_memory(slug) and write_memory(slug, title, content) tools.
 - On cold start, MEMORY.md lists available topic slugs. Call read_memory to fetch any topic relevant to the current conversation.
 - When the user states a preference, personal detail, or decision worth remembering, call write_memory to persist it. Use judgment — not every message warrants a memory write.
-- For new information that does not fit an existing topic, create a new topic with an appropriate slug and title.`);
+- For new information that does not fit an existing topic, create a new topic with an appropriate slug and title.
+\nYou have access to create_document(type, title, sections[]) to produce file output.
+- Use type="word" for Word documents.
+- Call this when the user asks you to create a document, report, proposal, or similar deliverable.
+- You may also call this proactively when a document is clearly the best way to present your output (e.g. a structured report, a multi-section analysis).
+- sections is an array of { heading, content } objects.
+- After calling create_document, briefly confirm to the user that the document was created and is available in the chat.`);
             if (systemPrompt) systemParts.push(systemPrompt);
             if (systemParts.length === 0) {
                 systemParts.push('You are a helpful AI assistant.');
@@ -1482,6 +1571,34 @@ app.post('/turn', async (req, res) => {
                                 }
                             }
                         }
+                    },
+                    {
+                        toolSpec: {
+                            name: 'create_document',
+                            description: 'Create a document file (Word .docx) from structured content. Returns a confirmation when the document is saved.',
+                            inputSchema: {
+                                json: {
+                                    type: 'object',
+                                    properties: {
+                                        type: { type: 'string', description: 'Document type — must be "word"' },
+                                        title: { type: 'string', description: 'Document title (used as filename base)' },
+                                        sections: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'object',
+                                                properties: {
+                                                    heading: { type: 'string' },
+                                                    content: { type: 'string' }
+                                                },
+                                                required: ['heading', 'content']
+                                            },
+                                            description: 'Document sections as an array of {heading, content} objects'
+                                        }
+                                    },
+                                    required: ['type', 'title', 'sections']
+                                }
+                            }
+                        }
                     }
                 ]
             };
@@ -1555,6 +1672,38 @@ app.post('/turn', async (req, res) => {
                             toolResultText = `\n\n[Memory Write]\n${JSON.stringify(wmData, null, 2)}\n\n`;
                         } catch (wmErr) {
                             toolResultText = `\n\n[Memory Write Error]\n${wmErr.message}\n\n`;
+                        }
+                    } else if (toolUseAccumulator.name === 'create_document') {
+                        try {
+                            const cdRes = await fetch(`http://localhost:${PORT}/tools/create_document`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    userId,
+                                    conversationId,
+                                    type: toolInput.type,
+                                    title: toolInput.title,
+                                    sections: toolInput.sections
+                                })
+                            });
+                            const cdData = await cdRes.json();
+                            if (cdData.error) {
+                                toolResultText = `\n\n[Document Error]\n${cdData.error}\n\n`;
+                            } else {
+                                // Emit artifact SSE event BEFORE the tool result text
+                                sendEvent({
+                                    type: 'artifact',
+                                    payload: JSON.stringify({
+                                        filename: cdData.filename,
+                                        s3Key: cdData.s3Key,
+                                        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                        sizeBytes: cdData.sizeBytes
+                                    })
+                                });
+                                toolResultText = `\n\nDocument created: ${cdData.filename}\n\n`;
+                            }
+                        } catch (cdErr) {
+                            toolResultText = `\n\n[Document Error]\n${cdErr.message}\n\n`;
                         }
                     } else {
                         // default: search_knowledge_base
