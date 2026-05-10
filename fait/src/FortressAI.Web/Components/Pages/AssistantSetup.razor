@@ -345,8 +345,8 @@
             {
                 if (!string.IsNullOrWhiteSpace(_preferredName))
                     user.DisplayName = _preferredName.Trim();
-                user.OnboardingCompletedAt = DateTime.UtcNow;
-                user.OnboardingStep = 0;
+                // OnboardingCompletedAt and OnboardingStep=0 set by ProvisionAsync after S3 writes succeed
+                // Setting them here would trigger the idempotency guard and skip S3 seeding
             }
 
             // Upsert UserAssistantConfig
