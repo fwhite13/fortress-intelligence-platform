@@ -26,6 +26,7 @@
 @using Amazon.S3.Model
 @inject IAmazonS3 S3
 @inject IConfiguration Config
+@inject Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage.ProtectedSessionStorage SessionStorage
 @implements IAsyncDisposable
 @using FortressAI.Web.Services
 @using FortressAI.Web.Services.Mcp
@@ -380,6 +381,7 @@ else
     private bool _wasColdStart = false;
     private bool _resumptionBriefSent = false;
     private bool _isBriefStreaming = false;
+    private string? _currentHarnessSessionId;
     private System.Text.StringBuilder _briefContent = new();
 
     // Failed-task banner state
@@ -1425,17 +1427,77 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
         }
         finally
         {
+            if (!string.IsNullOrEmpty(_currentHarnessSessionId))
+            {
+                try
+                {
+                    await SessionStorage.SetAsync("resumption_brief_session", _currentHarnessSessionId);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "[ChatView] Failed to write resumption brief session to storage — non-fatal");
+                }
+            }
             _isBriefStreaming = false;
             StateHasChanged();
         }
     }
 
-    private void HandleAgentReady()
+    private async Task HandleAgentReady()
     {
-        _wasColdStart = true;  // OnReady only fires from AssistantLoadingState (cold start path)
         _agentReady = true;
         StateHasChanged();
         _ = CheckFailedTasksAsync();
+
+        // Cross-navigation guard: only send resumption brief once per Fargate session
+        try
+        {
+            string? currentSessionId = null;
+            try
+            {
+                var session = await AgentRuntime.GetSessionAsync(Session.UserId.ToString());
+                currentSessionId = session?.SessionId;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "[ChatView] Could not get sessionId for resumption brief guard — will proceed");
+            }
+
+            if (!string.IsNullOrEmpty(currentSessionId))
+            {
+                string? storedSessionId = null;
+                try
+                {
+                    var result = await SessionStorage.GetAsync<string>("resumption_brief_session");
+                    if (result.Success) storedSessionId = result.Value;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "[ChatView] ProtectedSessionStorage read failed — treating as no stored value");
+                }
+
+                if (storedSessionId == currentSessionId)
+                {
+                    Logger.LogInformation("[ChatView] Resumption brief already sent for session {SessionId} — skipping", currentSessionId);
+                    _resumptionBriefSent = true;
+                    return;
+                }
+
+                _currentHarnessSessionId = currentSessionId;
+                _wasColdStart = true;
+            }
+            else
+            {
+                _wasColdStart = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[ChatView] Resumption brief session guard failed — proceeding with cold start");
+            _wasColdStart = true;
+        }
+
+        StateHasChanged();
     }
 
     private async Task CheckFailedTasksAsync()
