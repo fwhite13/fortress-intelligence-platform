@@ -442,10 +442,15 @@ else
                 _personalKbEnabled = conversation.EnablePersonalKb;
                 _conversationArtifacts = await WorkspaceFileSvc.GetConversationArtifactsAsync(conversation.Id);
             }
+            else
+            {
+                _conversationArtifacts = new();
+            }
         }
         else if (conversation == null)
         {
             // Lazy creation — conversation created on first message send, not on page load
+            _conversationArtifacts = new();
             messages = new List<ChatMessage>();
             wasSummarized = false;
             _selectedTeamIds = new HashSet<int>();
