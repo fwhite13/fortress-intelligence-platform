@@ -55,8 +55,15 @@ public class MemoryController : ControllerBase
 
         var title = string.IsNullOrWhiteSpace(request.Title) ? request.Slug : request.Title;
 
-        await _memoryFileService.WriteTopicAsync(userId, request.Slug, title, request.Content);
-        return Ok(new { success = true });
+        try
+        {
+            await _memoryFileService.WriteTopicAsync(userId, request.Slug, title, request.Content);
+            return Ok(new { success = true });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 }
 

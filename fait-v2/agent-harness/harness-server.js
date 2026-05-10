@@ -1242,6 +1242,7 @@ app.post('/turn', async (req, res) => {
             contextParts.push(`## Assistant Identity\n${soulMd}`);
         }
         if (userEmail) contextParts.push(`## User Identity\nEmail: ${userEmail}`);
+        contextParts.push(`## Session Identifiers\nuserId: ${userId}`);
         if (userMd) contextParts.push(`## About the User\n${userMd}`);
         if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
         // Memory tool guidance (ADO#3188)
@@ -1449,6 +1450,38 @@ app.post('/turn', async (req, res) => {
                                 }
                             }
                         }
+                    },
+                    {
+                        toolSpec: {
+                            name: 'read_memory',
+                            description: 'Read a memory topic by slug. Returns the stored content for that topic.',
+                            inputSchema: {
+                                json: {
+                                    type: 'object',
+                                    properties: {
+                                        slug: { type: 'string', description: 'The memory topic slug to read' }
+                                    },
+                                    required: ['slug']
+                                }
+                            }
+                        }
+                    },
+                    {
+                        toolSpec: {
+                            name: 'write_memory',
+                            description: 'Write or update a memory topic. Persists content under the given slug.',
+                            inputSchema: {
+                                json: {
+                                    type: 'object',
+                                    properties: {
+                                        slug: { type: 'string', description: 'Topic slug (identifier)' },
+                                        title: { type: 'string', description: 'Human-readable topic title (optional — defaults to slug)' },
+                                        content: { type: 'string', description: 'Full markdown content to persist' }
+                                    },
+                                    required: ['slug', 'content']
+                                }
+                            }
+                        }
                     }
                 ]
             };
@@ -1498,6 +1531,30 @@ app.post('/turn', async (req, res) => {
                             toolResultText = `\n\n[Workspace Files]\n${JSON.stringify(wsData, null, 2)}\n\n`;
                         } catch (wsErr) {
                             toolResultText = `\n\n[Workspace Files Error]\n${wsErr.message}\n\n`;
+                        }
+                    } else if (toolUseAccumulator.name === 'read_memory') {
+                        try {
+                            const rmRes = await fetch(`http://localhost:${PORT}/tools/read_memory`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ userId, slug: toolInput.slug })
+                            });
+                            const rmData = await rmRes.json();
+                            toolResultText = `\n\n[Memory Read]\n${JSON.stringify(rmData, null, 2)}\n\n`;
+                        } catch (rmErr) {
+                            toolResultText = `\n\n[Memory Read Error]\n${rmErr.message}\n\n`;
+                        }
+                    } else if (toolUseAccumulator.name === 'write_memory') {
+                        try {
+                            const wmRes = await fetch(`http://localhost:${PORT}/tools/write_memory`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ userId, slug: toolInput.slug, title: toolInput.title, content: toolInput.content })
+                            });
+                            const wmData = await wmRes.json();
+                            toolResultText = `\n\n[Memory Write]\n${JSON.stringify(wmData, null, 2)}\n\n`;
+                        } catch (wmErr) {
+                            toolResultText = `\n\n[Memory Write Error]\n${wmErr.message}\n\n`;
                         }
                     } else {
                         // default: search_knowledge_base
