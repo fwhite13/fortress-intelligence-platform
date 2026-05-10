@@ -83,3 +83,47 @@ No — deliverables are sequential (models → DbContext → migration → servi
 
 ### Commit
 `eba4a13b` — `feat(ADO#3206): workspace file manager — folders, upload, harness list_files/read_file tools`
+
+---
+
+## Review Cycle 2 — Targeted Fixes
+
+### What was fixed
+Three targeted fixes from Clint's Cycle 1 review: FK relationship configuration in `OnModelCreating`, S3 rollback on DB failure in `SaveUploadAsync`, and filename path-traversal sanitization.
+
+---
+
+### Files changed
+
+- `src/FortressAI.Web/Data/AppDbContext.cs` — Added FK config to `WorkspaceFolder` block (`HasOne<WorkspaceFolder>().WithMany().HasForeignKey(f => f.ParentId).OnDelete(Cascade).IsRequired(false)`) and `WorkspaceUpload` block (`HasOne<WorkspaceFolder>().WithMany().HasForeignKey(u => u.FolderId).OnDelete(SetNull).IsRequired(false)`)
+- `src/FortressAI.Web/Services/WorkspaceUploadService.cs` — `SaveUploadAsync`: added `Path.GetFileName(filename)` → `safeFilename` used in both S3 key and `Filename` property; wrapped `db.SaveChangesAsync()` in try/catch with S3 `DeleteObjectAsync` rollback (best-effort) on failure
+- `src/FortressAI.Web/Migrations/20260510195935_AddWorkspaceUploadsForeignKeys.cs` — New EF migration: adds `FK_user_workspace_folders_user_workspace_folders_parent_id` (CASCADE) and `FK_user_workspace_uploads_user_workspace_folders_folder_id` (SET NULL)
+
+---
+
+### Migration applied
+- Applied directly to `fait_dev` via mysql CLI (MySqlConnector connection string parser rejected `^` in password via `--connection` flag)
+- Migration recorded in `__EFMigrationsHistory` as `20260510195935_AddWorkspaceUploadsForeignKeys`
+- Verified: `SELECT MigrationId FROM __EFMigrationsHistory ORDER BY MigrationId DESC LIMIT 1` → confirmed entry present
+
+---
+
+### CC sessions run
+1 CC Sonnet run (all three fixes in a single invocation)
+
+---
+
+### Acceptance criteria verification
+- [x] `WorkspaceFolder` entity: self-referential FK on `parent_id` → `id`, `OnDelete(Cascade)`, `IsRequired(false)` ✓
+- [x] `WorkspaceUpload` entity: FK on `folder_id` → `user_workspace_folders.id`, `OnDelete(SetNull)`, `IsRequired(false)` ✓
+- [x] Migration `AddWorkspaceUploadsForeignKeys` generated and applied to `fait_dev` ✓
+- [x] `SaveUploadAsync`: `Path.GetFileName()` sanitization applied ✓
+- [x] `SaveUploadAsync`: S3 rollback on DB failure (try/catch wrapping `SaveChangesAsync`) ✓
+- [x] No scope creep — only 3 files touched ✓
+- [x] Build: 0 errors (CC confirmed) ✓
+
+---
+
+### Commits
+- `8b9b4d3d` — `fix(ADO#3206): FK constraints, S3 rollback on DB failure, filename sanitization`
+- `79692eb8` — `migration(ADO#3206): AddWorkspaceUploadsForeignKeys — self-ref FK on folders, folder FK on uploads`
