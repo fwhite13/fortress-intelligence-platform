@@ -45,3 +45,39 @@ Message: `feat(fait#3173): On-Demand tab, History tab, failed-task banner`
 - `RunNowAsync` fire-and-forget uses `Task.Run` to avoid blocking Blazor render thread
 - On-Demand task delete uses `TaskSvc.DeleteTaskAsync` (same service call as recurring tab delete)
 - `IsOnDemand` in `TaskEditModal` skips cron validation entirely and sets `CronExpression = null`
+
+---
+
+## Review Cycle 2 — Targeted Fixes
+
+### CC Invocation
+```
+cat /tmp/cc-brief-3173-c2.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+Working directory: `/home/fredw/projects/fip/fait`
+
+### Commit
+`e13a800b` — `fix(fait#3173): CronExpression null on on-demand edit; _hasMoreHistory pagination flag`
+
+### Changes Made
+
+**Fix 1 — TaskEditModal.razor (line ~141):**
+- Edit path (`ExistingTask != null`) now sets `CronExpression = IsOnDemand ? null : cron`
+- Prevents stale cron value being sent when editing an on-demand task
+- Create path was already correct; edit path now matches
+
+**Fix 2 — Tasks.razor:**
+- Added `private bool _hasMoreHistory = false;` field
+- `LoadHistoryAsync`: sets `_hasMoreHistory = items.Count == HistoryPageSize` after fetch
+- `LoadMoreHistoryAsync`: sets `_hasMoreHistory = more.Count == HistoryPageSize` after each page fetch
+- Markup: Load More button condition changed from `_runHistory.Count == HistoryPageSize` to `_hasMoreHistory`
+- Correctly handles all page sizes (disappears after last partial page, works correctly after N pages)
+
+### Build Check
+```
+dotnet build src/FortressAI.Web/FortressAI.Web.csproj --no-restore -c Release
+```
+Result: **0 errors, 37 warnings** (pre-existing MUD0002 warnings in Admin/Settings pages — unrelated to these changes)
+
+### Scope
+Two files changed. No other modifications. C1/C2/C3 ACs remain passing.

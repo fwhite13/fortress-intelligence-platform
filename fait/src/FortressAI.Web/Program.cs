@@ -107,7 +107,7 @@ builder.Services.AddScoped<PreMeetingBriefService>();
 builder.Services.AddScoped<PostMeetingService>();
 builder.Services.AddScoped<IScheduledTaskService, ScheduledTaskService>();
 builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
-builder.Services.AddScoped<ISlackNotificationService, SlackNotificationService>();
+builder.Services.AddScoped<ITaskNotificationService, TaskNotificationService>();
 
 // Knowledge Base
 builder.Services.AddSingleton<IAmazonBedrockAgentRuntime>(sp =>
@@ -310,12 +310,6 @@ builder.Services.AddHttpClient("graph", client =>
 builder.Services.AddHttpClient("HarnessClient", client =>
 {
     client.Timeout = TimeSpan.FromMinutes(10);
-});
-
-// Named HttpClient for Slack API calls
-builder.Services.AddHttpClient("slack", client =>
-{
-    client.Timeout = TimeSpan.FromSeconds(10);
 });
 
 // DataProtection: use SharedKeyRingDbContext (standard scoped DbContext) to persist/read keys.

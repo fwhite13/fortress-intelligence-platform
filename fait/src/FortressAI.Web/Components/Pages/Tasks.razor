@@ -3,6 +3,8 @@
 @using FortressAI.Web.Services
 @using FortressAI.Web.Components.Tasks
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
 <PageTitle>Tasks — FAIT</PageTitle>
 @inject UserSessionService Session
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
@@ -11,6 +13,7 @@
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
 @inject ILogger<Tasks> Logger
+@inject NavigationManager NavigationManager
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
     <MudText Typo="Typo.h4" Class="mb-4">Tasks</MudText>
@@ -616,4 +619,58 @@
         null or ""    => "—",
         _             => cron
     };
+
+    public record TaskNotificationPayload(string TaskName, string Status, string Message, string TasksUrl);
+
+    private HubConnection? _taskHubConnection;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Session.IsAuthenticated)
+        {
+            await InitTaskHubAsync();
+        }
+    }
+
+    private async Task InitTaskHubAsync()
+    {
+        try
+        {
+            _taskHubConnection = new HubConnectionBuilder()
+                .WithUrl(NavigationManager.ToAbsoluteUri("/hubs/dashboard"))
+                .WithAutomaticReconnect()
+                .Build();
+
+            _taskHubConnection.On<TaskNotificationPayload>("ReceiveTaskNotification", async (payload) =>
+            {
+                var severity = payload.Status == "success" ? Severity.Success : Severity.Error;
+                Snackbar.Add($"Task '{payload.TaskName}': {payload.Message}", severity,
+                    config =>
+                    {
+                        config.Action = "View";
+                        config.ActionColor = Color.Primary;
+                    });
+                await InvokeAsync(StateHasChanged);
+            });
+
+            await _taskHubConnection.StartAsync();
+
+            if (Session.UserId != Guid.Empty)
+            {
+                await _taskHubConnection.InvokeAsync("JoinUserGroup", Session.UserId.ToString());
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to connect to DashboardHub for task notifications");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_taskHubConnection is not null)
+        {
+            await _taskHubConnection.DisposeAsync();
+        }
+    }
 }

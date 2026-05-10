@@ -183,43 +183,27 @@ public class ScheduledTaskBackgroundService : BackgroundService
 
         await ctx.SaveChangesAsync(ct);
 
-        // Slack notifications — fire-and-forget, best-effort, fires AFTER DB write
-        try
+        // Dual-channel notifications (SignalR + MS365 email) — fire-and-forget, best-effort, fires AFTER DB write
+        _ = Task.Run(async () =>
         {
-            var slackSvc = services.GetRequiredService<ISlackNotificationService>();
-            var userEmail = await LoadUserEmailAsync(dbFactory, task.UserId, ct);
-
-            if (newStatus == "success" && task.AlertOnCompletion && userEmail != null)
+            try
             {
-                var summary = string.IsNullOrEmpty(resultSummary) ? "(no output)" :
-                    (resultSummary.Length > 200 ? resultSummary[..200] : resultSummary);
-                await slackSvc.SendDmAsync(userEmail,
-                    $"✅ Scheduled task *{task.Name}* completed successfully.\n{summary}");
+                using var scope = services.CreateScope();
+                var notifySvc = scope.ServiceProvider.GetRequiredService<ITaskNotificationService>();
+                if (newStatus == "success" && task.AlertOnCompletion)
+                {
+                    await notifySvc.NotifyTaskCompletedAsync(task.UserId, task.Name, resultSummary);
+                }
+                else if (newStatus == "failed" && taskToUpdate?.FailureCount >= 2 && task.AlertOnFailure)
+                {
+                    await notifySvc.NotifyTaskPermanentlyFailedAsync(task.UserId, task.Name, errorMessage ?? "Unknown error");
+                }
             }
-            else if (newStatus == "failed" && taskToUpdate?.FailureCount >= 2 && task.AlertOnFailure && userEmail != null)
+            catch (Exception ex)
             {
-                await slackSvc.SendDmAsync(userEmail,
-                    $"⚠️ Scheduled task *{task.Name}* has stopped retrying after 2 failures and requires your attention.\nError: {errorMessage}\nReview at: https://fait.fortressam.ai/tasks");
+                _logger.LogWarning(ex, "Task notification failed for task {TaskId} — task status unaffected", task.Id);
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Slack notification failed for task {TaskId} — task status unaffected", task.Id);
-        }
-    }
-
-    private async Task<string?> LoadUserEmailAsync(IDbContextFactory<AppDbContext> dbFactory, Guid userId, CancellationToken ct)
-    {
-        try
-        {
-            await using var ctx = await dbFactory.CreateDbContextAsync(ct);
-            var user = await ctx.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, ct);
-            return user?.Email;
-        }
-        catch
-        {
-            return null;
-        }
+        }, CancellationToken.None);
     }
 
     private static DateTime? CalculateNextRunAt(string? cronExpression)
