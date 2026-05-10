@@ -678,7 +678,7 @@ app.post('/tools/search_memory', async (req, res) => {
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!query) return res.status(400).json({ error: 'query required' });
 
-    const blazorBase = process.env.BLAZOR_BASE_URL || 'http://localhost:5000';
+    const blazorBase = FAIT_BASE_URL;
     const internalToken = process.env.INTERNAL_API_TOKEN || '';
 
     try {
@@ -708,7 +708,7 @@ app.post('/tools/read_memory', async (req, res) => {
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!slug) return res.status(400).json({ error: 'slug required' });
 
-    const blazorBase = process.env.BLAZOR_BASE_URL || 'http://localhost:5000';
+    const blazorBase = FAIT_BASE_URL;
     const internalToken = process.env.INTERNAL_API_TOKEN || '';
 
     try {
@@ -742,7 +742,7 @@ app.post('/tools/write_memory', async (req, res) => {
     if (!slug) return res.status(400).json({ error: 'slug required' });
     if (!content) return res.status(400).json({ error: 'content required' });
 
-    const blazorBase = process.env.BLAZOR_BASE_URL || 'http://localhost:5000';
+    const blazorBase = FAIT_BASE_URL;
     const internalToken = process.env.INTERNAL_API_TOKEN || '';
 
     try {
@@ -1766,155 +1766,216 @@ app.post('/turn', async (req, res) => {
                 ]
             };
 
-            const cmd = new ConverseStreamCommand({
-                modelId: MODEL_ID,
-                messages,
-                system: [{ text: fullSystemPrompt }],
-                inferenceConfig: { maxTokens: 4096, temperature: 0.7 },
-                toolConfig
-            });
-
             console.log(`[harness] /turn: calling bedrockClient.send for userId=${userId}, modelId=${MODEL_ID}`);
-            const response = await bedrockClient.send(cmd);
-            console.log(`[harness] /turn: Bedrock stream opened, beginning event iteration`);
             let tokenCount = 0;
-            let toolUseAccumulator = null;
             let inputTokens = 0;
             let outputTokens = 0;
-            let messageStopSeen = false;
-            for await (const event of response.stream) {
-                if (event.contentBlockStart?.start?.toolUse) {
-                    toolUseAccumulator = {
-                        toolUseId: event.contentBlockStart.start.toolUse.toolUseId,
-                        name: event.contentBlockStart.start.toolUse.name,
-                        inputJson: ''
-                    };
-                    console.log(`[harness] /turn: toolUse start: name=${toolUseAccumulator.name}, id=${toolUseAccumulator.toolUseId}`);
-                } else if (event.contentBlockDelta?.delta?.toolUse) {
-                    if (toolUseAccumulator) {
-                        toolUseAccumulator.inputJson += event.contentBlockDelta.delta.toolUse.input || '';
-                    }
-                } else if (event.contentBlockStop && toolUseAccumulator) {
-                    // Tool call complete — execute it
-                    console.log(`[harness] /turn: toolUse complete: name=${toolUseAccumulator.name}, input=${toolUseAccumulator.inputJson}`);
-                    const toolInput = JSON.parse(toolUseAccumulator.inputJson || '{}');
-                    let toolResultText = '';
+            const MAX_TOOL_ITERATIONS = 10;
+            let toolIterations = 0;
+            let continueLoop = true;
 
-                    if (toolUseAccumulator.name === 'list_workspace_files') {
-                        try {
-                            const wsRes = await fetch(`http://localhost:${PORT}/tools/list_workspace_files`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ userId, folder: toolInput.folder || '' })
-                            });
-                            const wsData = await wsRes.json();
-                            toolResultText = `\n\n[Workspace Files]\n${JSON.stringify(wsData, null, 2)}\n\n`;
-                        } catch (wsErr) {
-                            toolResultText = `\n\n[Workspace Files Error]\n${wsErr.message}\n\n`;
+            while (continueLoop && toolIterations < MAX_TOOL_ITERATIONS) {
+                toolIterations++;
+                let assistantTextAccumulator = '';
+                let assistantContent = [];
+                let toolUseAccumulator = null;
+                let messageStopSeen = false;
+                let stopReason = 'end_turn';
+                let pendingToolResult = null;
+
+                const cmd = new ConverseStreamCommand({
+                    modelId: MODEL_ID,
+                    messages,
+                    system: [{ text: fullSystemPrompt }],
+                    inferenceConfig: { maxTokens: 4096, temperature: 0.7 },
+                    toolConfig
+                });
+
+                console.log(`[harness] /turn: agentic loop iteration ${toolIterations}, messages.length=${messages.length}`);
+                const response = await bedrockClient.send(cmd);
+                console.log(`[harness] /turn: Bedrock stream opened, beginning event iteration`);
+
+                for await (const event of response.stream) {
+                    if (event.contentBlockStart?.start?.toolUse) {
+                        toolUseAccumulator = {
+                            toolUseId: event.contentBlockStart.start.toolUse.toolUseId,
+                            name: event.contentBlockStart.start.toolUse.name,
+                            inputJson: ''
+                        };
+                        console.log(`[harness] /turn: toolUse start: name=${toolUseAccumulator.name}, id=${toolUseAccumulator.toolUseId}`);
+                    } else if (event.contentBlockDelta?.delta?.toolUse) {
+                        if (toolUseAccumulator) {
+                            toolUseAccumulator.inputJson += event.contentBlockDelta.delta.toolUse.input || '';
                         }
-                    } else if (toolUseAccumulator.name === 'read_memory') {
-                        try {
-                            const rmRes = await fetch(`http://localhost:${PORT}/tools/read_memory`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ userId, slug: toolInput.slug })
-                            });
-                            const rmData = await rmRes.json();
-                            toolResultText = `\n\n[Memory Read]\n${JSON.stringify(rmData, null, 2)}\n\n`;
-                        } catch (rmErr) {
-                            toolResultText = `\n\n[Memory Read Error]\n${rmErr.message}\n\n`;
-                        }
-                    } else if (toolUseAccumulator.name === 'write_memory') {
-                        try {
-                            const wmRes = await fetch(`http://localhost:${PORT}/tools/write_memory`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ userId, slug: toolInput.slug, title: toolInput.title, content: toolInput.content })
-                            });
-                            const wmData = await wmRes.json();
-                            toolResultText = `\n\n[Memory Write]\n${JSON.stringify(wmData, null, 2)}\n\n`;
-                        } catch (wmErr) {
-                            toolResultText = `\n\n[Memory Write Error]\n${wmErr.message}\n\n`;
-                        }
-                    } else if (toolUseAccumulator.name === 'create_document') {
-                        try {
-                            const cdRes = await fetch(`http://localhost:${PORT}/tools/create_document`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    userId,
-                                    conversationId,
-                                    type: toolInput.type,
-                                    title: toolInput.title,
-                                    sections: toolInput.sections
-                                })
-                            });
-                            const cdData = await cdRes.json();
-                            if (cdData.error) {
-                                toolResultText = `\n\n[Document Error]\n${cdData.error}\n\n`;
-                            } else {
-                                // Emit artifact SSE event BEFORE the tool result text
-                                sendEvent({
-                                    type: 'artifact',
-                                    payload: JSON.stringify({
-                                        filename: cdData.filename,
-                                        s3Key: cdData.s3Key,
-                                        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                        sizeBytes: cdData.sizeBytes
+                    } else if (event.contentBlockStop && toolUseAccumulator) {
+                        // Tool call complete — execute it
+                        console.log(`[harness] /turn: toolUse complete: name=${toolUseAccumulator.name}, input=${toolUseAccumulator.inputJson}`);
+                        const toolInput = JSON.parse(toolUseAccumulator.inputJson || '{}');
+                        let toolResultText = '';
+
+                        if (toolUseAccumulator.name === 'list_workspace_files') {
+                            try {
+                                const wsRes = await fetch(`http://localhost:${PORT}/tools/list_workspace_files`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, folder: toolInput.folder || '' })
+                                });
+                                const wsData = await wsRes.json();
+                                toolResultText = `\n\n[Workspace Files]\n${JSON.stringify(wsData, null, 2)}\n\n`;
+                            } catch (wsErr) {
+                                toolResultText = `\n\n[Workspace Files Error]\n${wsErr.message}\n\n`;
+                            }
+                        } else if (toolUseAccumulator.name === 'read_memory') {
+                            try {
+                                const rmRes = await fetch(`http://localhost:${PORT}/tools/read_memory`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, slug: toolInput.slug })
+                                });
+                                const rmData = await rmRes.json();
+                                toolResultText = `\n\n[Memory Read]\n${JSON.stringify(rmData, null, 2)}\n\n`;
+                            } catch (rmErr) {
+                                toolResultText = `\n\n[Memory Read Error]\n${rmErr.message}\n\n`;
+                            }
+                        } else if (toolUseAccumulator.name === 'write_memory') {
+                            try {
+                                const wmRes = await fetch(`http://localhost:${PORT}/tools/write_memory`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, slug: toolInput.slug, title: toolInput.title, content: toolInput.content })
+                                });
+                                const wmData = await wmRes.json();
+                                toolResultText = `\n\n[Memory Write]\n${JSON.stringify(wmData, null, 2)}\n\n`;
+                            } catch (wmErr) {
+                                toolResultText = `\n\n[Memory Write Error]\n${wmErr.message}\n\n`;
+                            }
+                        } else if (toolUseAccumulator.name === 'create_document') {
+                            try {
+                                const cdRes = await fetch(`http://localhost:${PORT}/tools/create_document`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        userId,
+                                        conversationId,
+                                        type: toolInput.type,
+                                        title: toolInput.title,
+                                        sections: toolInput.sections
                                     })
                                 });
-                                toolResultText = `\n\nDocument created: ${cdData.filename}\n\n`;
+                                const cdData = await cdRes.json();
+                                if (cdData.error) {
+                                    toolResultText = `\n\n[Document Error]\n${cdData.error}\n\n`;
+                                } else {
+                                    // Emit artifact SSE event BEFORE the tool result text
+                                    sendEvent({
+                                        type: 'artifact',
+                                        payload: JSON.stringify({
+                                            filename: cdData.filename,
+                                            s3Key: cdData.s3Key,
+                                            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                            sizeBytes: cdData.sizeBytes
+                                        })
+                                    });
+                                    toolResultText = `\n\nDocument created: ${cdData.filename}\n\n`;
+                                }
+                            } catch (cdErr) {
+                                toolResultText = `\n\n[Document Error]\n${cdErr.message}\n\n`;
                             }
-                        } catch (cdErr) {
-                            toolResultText = `\n\n[Document Error]\n${cdErr.message}\n\n`;
+                        } else if (toolUseAccumulator.name === 'list_files') {
+                            try {
+                                const lfRes = await fetch(`http://localhost:${PORT}/tools/list_files`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, ...toolInput })
+                                });
+                                const lfData = await lfRes.json();
+                                toolResultText = JSON.stringify(lfData.items || []);
+                            } catch (lfErr) {
+                                toolResultText = `Error listing files: ${lfErr.message}`;
+                            }
+                        } else if (toolUseAccumulator.name === 'read_file') {
+                            try {
+                                const rfRes = await fetch(`http://localhost:${PORT}/tools/read_file`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, ...toolInput })
+                                });
+                                const rfData = await rfRes.json();
+                                toolResultText = rfData.content || rfData.error || 'No content returned.';
+                            } catch (rfErr) {
+                                toolResultText = `Error reading file: ${rfErr.message}`;
+                            }
+                        } else {
+                            // default: search_knowledge_base
+                            const kbResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal');
+                            toolResultText = `\n\n[KB Search Results]\n${kbResult}\n\n`;
                         }
-                    } else if (toolUseAccumulator.name === 'list_files') {
-                        try {
-                            const lfRes = await fetch(`http://localhost:${PORT}/tools/list_files`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ userId, ...toolInput })
-                            });
-                            const lfData = await lfRes.json();
-                            toolResultText = JSON.stringify(lfData.items || []);
-                        } catch (lfErr) {
-                            toolResultText = `Error listing files: ${lfErr.message}`;
-                        }
-                    } else if (toolUseAccumulator.name === 'read_file') {
-                        try {
-                            const rfRes = await fetch(`http://localhost:${PORT}/tools/read_file`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ userId, ...toolInput })
-                            });
-                            const rfData = await rfRes.json();
-                            toolResultText = rfData.content || rfData.error || 'No content returned.';
-                        } catch (rfErr) {
-                            toolResultText = `Error reading file: ${rfErr.message}`;
-                        }
-                    } else {
-                        // default: search_knowledge_base
-                        const kbResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal');
-                        toolResultText = `\n\n[KB Search Results]\n${kbResult}\n\n`;
-                    }
 
-                    sendEvent({ type: 'text', content: toolResultText });
-                    toolUseAccumulator = null;
-                } else if (event.contentBlockDelta?.delta?.text) {
-                    tokenCount++;
-                    sendEvent({ type: 'text', content: event.contentBlockDelta.delta.text });
-                } else if (event.metadata?.usage) {
-                    // ADO#3151: metadata arrives after messageStop — must NOT break before capturing this
-                    inputTokens = event.metadata.usage.inputTokens || 0;
-                    outputTokens = event.metadata.usage.outputTokens || 0;
-                    console.log(`[harness] /turn: metadata captured — inputTokens=${inputTokens}, outputTokens=${outputTokens}`);
-                    if (messageStopSeen) break;
-                } else if (event.messageStop) {
-                    console.log(`[harness] /turn: messageStop received after ${tokenCount} text events, stopReason=${event.messageStop.stopReason}`);
-                    messageStopSeen = true;
-                    // Do NOT break here — metadata event with usage arrives after messageStop
+                        // ADO#3215: accumulate assistant content (text so far + toolUse block)
+                        if (assistantTextAccumulator) {
+                            assistantContent.push({ text: assistantTextAccumulator });
+                            assistantTextAccumulator = '';
+                        }
+                        assistantContent.push({
+                            toolUse: {
+                                toolUseId: toolUseAccumulator.toolUseId,
+                                name: toolUseAccumulator.name,
+                                input: toolInput
+                            }
+                        });
+
+                        // Store pending tool result to append to messages after messageStop
+                        pendingToolResult = {
+                            toolUseId: toolUseAccumulator.toolUseId,
+                            toolResultText
+                        };
+                        toolUseAccumulator = null;
+                    } else if (event.contentBlockDelta?.delta?.text) {
+                        tokenCount++;
+                        assistantTextAccumulator += event.contentBlockDelta.delta.text;
+                        sendEvent({ type: 'text', content: event.contentBlockDelta.delta.text });
+                    } else if (event.metadata?.usage) {
+                        // ADO#3151: metadata arrives after messageStop — must NOT break before capturing this
+                        inputTokens += event.metadata.usage.inputTokens || 0;
+                        outputTokens += event.metadata.usage.outputTokens || 0;
+                        console.log(`[harness] /turn: metadata captured — inputTokens=${inputTokens}, outputTokens=${outputTokens}`);
+                        if (messageStopSeen) break;
+                    } else if (event.messageStop) {
+                        stopReason = event.messageStop.stopReason;
+                        console.log(`[harness] /turn: messageStop received after ${tokenCount} text events, stopReason=${stopReason}`);
+                        messageStopSeen = true;
+                        // Do NOT break here — metadata event with usage arrives after messageStop
+                    } else {
+                        console.log(`[harness] /turn: stream event (non-text): ${JSON.stringify(Object.keys(event))}`);
+                    }
+                }
+
+                // Flush any remaining text accumulator
+                if (assistantTextAccumulator) {
+                    assistantContent.push({ text: assistantTextAccumulator });
+                    assistantTextAccumulator = '';
+                }
+
+                // ADO#3215: if a tool was called, feed the result back to Bedrock and loop
+                if (pendingToolResult) {
+                    messages.push({ role: 'assistant', content: assistantContent });
+                    messages.push({
+                        role: 'user',
+                        content: [{
+                            toolResult: {
+                                toolUseId: pendingToolResult.toolUseId,
+                                content: [{ text: pendingToolResult.toolResultText }],
+                                status: 'success'
+                            }
+                        }]
+                    });
+                    pendingToolResult = null;
+                    continueLoop = true;
+                    console.log(`[harness] /turn: tool result fed back to Bedrock, looping (iteration ${toolIterations}/${MAX_TOOL_ITERATIONS})`);
                 } else {
-                    console.log(`[harness] /turn: stream event (non-text): ${JSON.stringify(Object.keys(event))}`);
+                    // end_turn with no tool call — done
+                    continueLoop = false;
+                    console.log(`[harness] /turn: end_turn with no tool call, exiting agentic loop after ${toolIterations} iteration(s)`);
                 }
             }
             console.log(`[harness] /turn: stream complete, sending done event for userId=${userId}`);
