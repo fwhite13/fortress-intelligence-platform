@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using FortressAI.Web.Services;
 
 [ApiController]
@@ -64,6 +65,22 @@ public class MemoryController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    [HttpGet("export")]
+    [Authorize]
+    public async Task<IActionResult> ExportZip()
+    {
+        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                     ?? User.FindFirst("oid")?.Value
+                     ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+        if (!Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized(new { error = "Unable to resolve user identity" });
+
+        var stream = await _memoryFileService.ExportZipAsync(userId);
+        var filename = $"memory-export-{DateTime.UtcNow:yyyy-MM-dd}.zip";
+        return File(stream, "application/zip", filename);
     }
 }
 

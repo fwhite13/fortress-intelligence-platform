@@ -21,12 +21,29 @@ else
             <MudPaper Elevation="1" Class="pa-3" Style="height: calc(100vh - 120px); display: flex; flex-direction: column; overflow: hidden;">
                 <MudText Typo="Typo.h6" Style="color: var(--color-gold);" Class="mb-2">Memory Topics</MudText>
 
-                <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                           StartIcon="@Icons.Material.Filled.Add"
-                           OnClick="() => { _showNewDialog = true; _newTitle = string.Empty; _newSlug = string.Empty; _slugManuallyEdited = false; }"
-                           FullWidth="true" Class="mb-2">
-                    New Topic
-                </MudButton>
+                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="() => { _showNewDialog = true; _newTitle = string.Empty; _newSlug = string.Empty; _slugManuallyEdited = false; }"
+                               FullWidth="true">
+                        New Topic
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Download"
+                               Disabled="@_exportLoading"
+                               OnClick="ExportAsync">
+                        @if (_exportLoading)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                            <span>Exporting...</span>
+                        }
+                        else
+                        {
+                            <span>Export</span>
+                        }
+                    </MudButton>
+                </div>
 
                 <MudTextField @bind-Value="_searchQuery"
                               Label="Search topics"
@@ -209,6 +226,7 @@ else
     private string _newTitle = string.Empty;
     private string _newSlug = string.Empty;
     private bool _slugManuallyEdited = false;
+    private bool _exportLoading = false;
     private IDisposable? _locationChangingHandler;
 
     protected override async Task OnInitializedAsync()
@@ -371,6 +389,23 @@ else
             await LoadTopicContentAsync(newTopic.Slug);
         }
         Snackbar.Add($"Topic '{title}' created.", Severity.Success);
+    }
+
+    private async Task ExportAsync()
+    {
+        _exportLoading = true;
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(50);
+            NavigationManager.NavigateTo($"/api/memory/export", forceLoad: true);
+        }
+        finally
+        {
+            await Task.Delay(1500);
+            _exportLoading = false;
+            StateHasChanged();
+        }
     }
 
     private static string TimeAgo(DateTime dt)

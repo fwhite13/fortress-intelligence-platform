@@ -83,3 +83,31 @@ dotnet run --project src/FortressAI.Web/FortressAI.Web.csproj
 
 *Commit: `027ce8c84d7f82b8fb3da0cb71c6bbb7716f4b81`*
 *Built by Tony Stark (software-engineer subagent)*
+
+---
+
+## Review Cycle 2 — Targeted Fix
+
+### CC invocation
+```bash
+cat /tmp/cc-brief-3189-c2.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+Working directory: `/home/fredw/projects/fip/fait`
+
+### Fix applied
+Reserved slug guard added in `CreateTopicAsync` (`Memory.razor` line 355–360):
+- `if (slug.Equals("memory", StringComparison.OrdinalIgnoreCase))` check before `WriteTopicAsync` call
+- Shows `Snackbar.Add("\"memory\" is a reserved slug. Choose a different title.", Severity.Error)`
+- Sets `_showNewDialog = true` to reopen dialog
+- Returns early without calling `WriteTopicAsync`
+
+### Commit SHA
+`975c2d39` — `fix(fait#3189): reserved slug guard in CreateTopicAsync on Memory page`
+
+### Fix confirmed ✅
+Guard is at `Memory.razor:355-360`, inserted before `WriteTopicAsync` call.
+
+### Build result
+```
+0 Error(s) — Time Elapsed 00:00:06.25
+```
