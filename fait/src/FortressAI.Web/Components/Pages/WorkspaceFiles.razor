@@ -1,0 +1,163 @@
+@page "/workspace"
+@using FortressAI.Shared.Models
+@using FortressAI.Web.Services
+@inject UserSessionService Session
+@inject IWorkspaceFileService WorkspaceFileSvc
+@inject ChatService ChatSvc
+@inject ChatLayoutState LayoutState
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@inject ISnackbar Snackbar
+@inject ILogger<WorkspaceFiles> Logger
+
+<PageTitle>Workspace — FAIT</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
+    <MudText Typo="Typo.h4" Class="mb-4">Workspace</MudText>
+
+    @if (!Session.IsAuthenticated)
+    {
+        <MudAlert Severity="Severity.Warning">Please log in to view your workspace.</MudAlert>
+    }
+    else
+    {
+        <MudTabs Elevation="0" ApplyEffectsToContainer="true" PanelClass="pt-4"
+                 @bind-ActivePanelIndex="_activeTab">
+            <MudTabPanel Text="Files">
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 0; gap: 16px; color: var(--color-text-secondary);">
+                    <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Large" />
+                    <MudText>File manager coming soon.</MudText>
+                </div>
+            </MudTabPanel>
+            <MudTabPanel Text="Generated">
+                @if (_loading)
+                {
+                    <MudProgressCircular Indeterminate="true" />
+                }
+                else if (_artifacts.Count == 0)
+                {
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 64px 0; gap: 16px; color: var(--color-text-secondary); text-align: center;">
+                        <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Large" />
+                        <MudText>No files yet. Ask your assistant to create a document to get started.</MudText>
+                    </div>
+                }
+                else
+                {
+                    <MudExpansionPanels MultiExpansion="true">
+                        @foreach (var group in _groupedArtifacts)
+                        {
+                            var localGroup = group;
+                            bool isFirst = localGroup == _groupedArtifacts.First();
+                            <MudExpansionPanel IsInitiallyExpanded="@isFirst"
+                                               Text="@localGroup.ConversationTitle"
+                                               SecondaryText="@($"{localGroup.Artifacts.Count} file{(localGroup.Artifacts.Count == 1 ? "" : "s")}")">
+                                <MudTable Items="@localGroup.Artifacts" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm">
+                                    <HeaderContent>
+                                        <MudTh>File</MudTh>
+                                        <MudTh>Size</MudTh>
+                                        <MudTh>Created</MudTh>
+                                        <MudTh>Actions</MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        @{
+                                            var artifact = context;
+                                            bool previewSupported = artifact.MimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                                        }
+                                        <MudTd>
+                                            <div style="display: flex; align-items: center; gap: 8px;">
+                                                <MudIcon Icon="@GetFileIcon(artifact.MimeType)" Size="Size.Small" />
+                                                <MudText Typo="Typo.body2">@artifact.Filename</MudText>
+                                            </div>
+                                        </MudTd>
+                                        <MudTd><MudText Typo="Typo.body2">@FormatSize(artifact.SizeBytes)</MudText></MudTd>
+                                        <MudTd><MudText Typo="Typo.body2">@artifact.CreatedAt.ToString("MMM d, yyyy")</MudText></MudTd>
+                                        <MudTd>
+                                            <MudTooltip Text="@(previewSupported ? "" : "Preview not yet supported for this file type")" Disabled="@previewSupported">
+                                                <MudButton Size="Size.Small" Variant="Variant.Text"
+                                                           StartIcon="@Icons.Material.Filled.Visibility"
+                                                           Disabled="@(!previewSupported)"
+                                                           OnClick="@(() => PreviewArtifact(artifact))">
+                                                    Preview
+                                                </MudButton>
+                                            </MudTooltip>
+                                            <MudButton Size="Size.Small" Variant="Variant.Text"
+                                                       StartIcon="@Icons.Material.Filled.Download"
+                                                       OnClick="@(() => DownloadArtifactAsync(artifact))">
+                                                Download
+                                            </MudButton>
+                                        </MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            </MudExpansionPanel>
+                        }
+                    </MudExpansionPanels>
+                }
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudContainer>
+
+@code {
+    private bool _loading = true;
+    private int _activeTab = 1;
+    private List<UserWorkspaceFile> _artifacts = new();
+    private List<ArtifactGroup> _groupedArtifacts = new();
+
+    private record ArtifactGroup(string ConversationTitle, Guid ConversationId, List<UserWorkspaceFile> Artifacts);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+        _artifacts = await WorkspaceFileSvc.GetUserArtifactsAsync(Session.UserId);
+
+        var grouped = _artifacts
+            .GroupBy(a => a.ConversationId)
+            .OrderByDescending(g => g.Max(a => a.CreatedAt));
+
+        var result = new List<ArtifactGroup>();
+        foreach (var group in grouped)
+        {
+            var conv = await ChatSvc.GetConversationAsync(group.Key, Session.UserId);
+            var title = conv?.Title ?? $"Conversation {group.Key.ToString()[..8]}";
+            result.Add(new ArtifactGroup(title, group.Key,
+                group.OrderByDescending(a => a.CreatedAt).ToList()));
+        }
+        _groupedArtifacts = result;
+        _loading = false;
+    }
+
+    private void PreviewArtifact(UserWorkspaceFile artifact)
+    {
+        NavigationManager.NavigateTo($"/chat/{artifact.ConversationId}?previewArtifact={artifact.Id}");
+    }
+
+    private async Task DownloadArtifactAsync(UserWorkspaceFile artifact)
+    {
+        try
+        {
+            var url = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(artifact.S3Key, expiryMinutes: 30);
+            await JSRuntime.InvokeVoidAsync("open", url, "_blank");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add("Download failed. Please try again.", Severity.Error);
+            Logger.LogWarning(ex, "[WorkspaceFiles] Download failed for {Filename}", artifact.Filename);
+        }
+    }
+
+    private static string GetFileIcon(string mimeType) => mimeType switch
+    {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => Icons.Material.Filled.Description,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => Icons.Material.Filled.TableChart,
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => Icons.Material.Filled.Slideshow,
+        "application/pdf" => Icons.Material.Filled.PictureAsPdf,
+        _ => Icons.Material.Filled.InsertDriveFile
+    };
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024):F1} MB";
+    }
+}

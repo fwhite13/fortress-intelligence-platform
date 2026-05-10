@@ -509,6 +509,26 @@ else
             _needsScroll = true;
         }
 
+        // Handle previewArtifact query param — deep-link from Workspace page
+        // Only runs after _conversationArtifacts is loaded (above)
+        if (_conversationArtifacts.Any())
+        {
+            var uri = new Uri(Nav.Uri);
+            var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+            if (query.TryGetValue("previewArtifact", out var previewIdValues))
+            {
+                var previewIdStr = previewIdValues.FirstOrDefault();
+                if (!string.IsNullOrEmpty(previewIdStr) && Guid.TryParse(previewIdStr, out var previewId))
+                {
+                    var artifact = _conversationArtifacts.FirstOrDefault(a => a.Id == previewId);
+                    if (artifact != null)
+                    {
+                        LayoutState.OpenArtifactPreview(new ArtifactRef(artifact.S3Key, artifact.Filename, artifact.MimeType));
+                    }
+                }
+            }
+        }
+
         Logger.LogInformation("[ChatView] OnParametersSetAsync END — cycle={Cycle} ConversationId={ConversationId} messageCount={MessageCount}",
             cycle, ConversationId, messages.Count);
     }
