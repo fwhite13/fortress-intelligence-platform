@@ -814,26 +814,6 @@ app.post('/tools/create_document', async (req, res) => {
             ContentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         }));
 
-        // 4. Save artifact metadata via Blazor API
-        const saveRes = await fetch(`${FAIT_BASE_URL}/api/workspace/save-artifact`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-                userId,
-                conversationId,
-                taskRunId: null,
-                filename,
-                s3Key,
-                mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                sizeBytes
-            })
-        });
-
-        if (!saveRes.ok) {
-            console.error(`[harness] create_document: save-artifact failed: ${await saveRes.text()}`);
-            // Non-fatal: file is in S3, metadata save failed — log and continue
-        }
-
         res.json({ success: true, filename, s3Key, sizeBytes });
     } catch (err) {
         console.error('[harness] create_document error:', err.message);

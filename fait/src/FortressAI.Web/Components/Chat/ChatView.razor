@@ -892,7 +892,8 @@ else
                 Message: text.Trim(),
                 History: chatHistory.Select(m => new ChatHistoryEntry(m.Role, m.Content)).ToList(),
                 TaskMode: _taskMode,
-                SystemPrompt: string.IsNullOrEmpty(effectiveSystemPrompt) ? null : effectiveSystemPrompt
+                SystemPrompt: string.IsNullOrEmpty(effectiveSystemPrompt) ? null : effectiveSystemPrompt,
+                ConversationId: conversation.Id.ToString()
             );
 
             await foreach (var evt in AgentRuntime.SendTurnAsync(Session.UserId.ToString(), turnRequest, streamingCts!.Token))
