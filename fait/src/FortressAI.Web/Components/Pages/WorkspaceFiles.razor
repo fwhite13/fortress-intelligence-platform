@@ -3,12 +3,14 @@
 @using FortressAI.Web.Services
 @inject UserSessionService Session
 @inject IWorkspaceFileService WorkspaceFileSvc
+@inject IWorkspaceUploadService UploadSvc
 @inject ChatService ChatSvc
 @inject ChatLayoutState LayoutState
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JSRuntime
 @inject ISnackbar Snackbar
 @inject ILogger<WorkspaceFiles> Logger
+@inject HttpClient Http
 
 <PageTitle>Workspace — FAIT</PageTitle>
 
@@ -24,10 +26,196 @@
         <MudTabs Elevation="0" ApplyEffectsToContainer="true" PanelClass="pt-4"
                  @bind-ActivePanelIndex="_activeTab">
             <MudTabPanel Text="Files">
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 0; gap: 16px; color: var(--color-text-secondary);">
-                    <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Large" />
-                    <MudText>File manager coming soon.</MudText>
+                @* ── Toolbar ── *@
+                <div class="workspace-toolbar">
+                    <MudButton StartIcon="@Icons.Material.Filled.CreateNewFolder"
+                               Variant="Variant.Outlined"
+                               Size="Size.Small"
+                               OnClick="@ShowNewFolderInput"
+                               Class="workspace-toolbar-btn">
+                        New Folder
+                    </MudButton>
+                    <MudButton StartIcon="@Icons.Material.Filled.Upload"
+                               Variant="Variant.Outlined"
+                               Size="Size.Small"
+                               OnClick="@TriggerFileUpload"
+                               Disabled="@_uploading"
+                               Class="workspace-toolbar-btn">
+                        @if (_uploading)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                            <span>Uploading...</span>
+                        }
+                        else
+                        {
+                            <span>Upload</span>
+                        }
+                    </MudButton>
+                    <InputFile id="fileUploadInput" multiple OnChange="HandleFilesSelected"
+                               style="display:none" />
                 </div>
+
+                @* ── Breadcrumb ── *@
+                @if (_breadcrumb.Count > 0)
+                {
+                    <div class="workspace-breadcrumb">
+                        <MudLink OnClick="@(() => NavigateToFolder(null, null))"
+                                 Class="workspace-breadcrumb-link">
+                            Root
+                        </MudLink>
+                        @foreach (var (id, name) in _breadcrumb)
+                        {
+                            var localId = id;
+                            var localName = name;
+                            <MudText Class="workspace-breadcrumb-sep">/</MudText>
+                            @if (id == _currentFolderId)
+                            {
+                                <MudText Class="workspace-breadcrumb-current">@localName</MudText>
+                            }
+                            else
+                            {
+                                <MudLink OnClick="@(() => NavigateToBreadcrumb(localId))"
+                                         Class="workspace-breadcrumb-link">
+                                    @localName
+                                </MudLink>
+                            }
+                        }
+                    </div>
+                }
+
+                @* ── New folder inline input ── *@
+                @if (_showNewFolderInput)
+                {
+                    <div class="workspace-newfolder-row">
+                        <MudTextField @bind-Value="_newFolderName"
+                                      Placeholder="Folder name"
+                                      Variant="Variant.Outlined"
+                                      Margin="Margin.Dense"
+                                      @onkeydown="HandleNewFolderKeyDown"
+                                      @ref="_newFolderField"
+                                      Class="workspace-newfolder-input" />
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                   OnClick="CreateFolder" Class="workspace-newfolder-confirm">
+                            Create
+                        </MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text"
+                                   OnClick="@(() => _showNewFolderInput = false)">
+                            Cancel
+                        </MudButton>
+                    </div>
+                }
+
+                @* ── Per-file upload progress ── *@
+                @if (_uploadProgress.Count > 0)
+                {
+                    <div class="workspace-upload-progress">
+                        @foreach (var kv in _uploadProgress)
+                        {
+                            <div class="workspace-upload-item">
+                                <MudProgressLinear Value="@kv.Value" Color="Color.Primary" Class="workspace-upload-bar" />
+                                <MudText Typo="Typo.caption" Class="workspace-upload-name">@kv.Key</MudText>
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (_loadingFiles)
+                {
+                    <div class="workspace-loading">
+                        <MudProgressCircular Indeterminate="true" />
+                    </div>
+                }
+                else
+                {
+                    @* ── Folders ── *@
+                    @if (_folders.Count > 0)
+                    {
+                        <MudTable Items="@_folders" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm"
+                                  Class="workspace-folder-table">
+                            <HeaderContent>
+                                <MudTh>Name</MudTh>
+                                <MudTh>Created</MudTh>
+                                <MudTh Class="workspace-actions-col">Actions</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                @{
+                                    var folder = context;
+                                }
+                                <MudTd>
+                                    <MudLink OnClick="@(() => NavigateToFolder(folder.Id, folder.Name))"
+                                             Class="workspace-folder-link">
+                                        <MudIcon Icon="@Icons.Material.Filled.Folder"
+                                                 Size="Size.Small" Class="mr-1 workspace-folder-icon" />
+                                        @folder.Name
+                                    </MudLink>
+                                </MudTd>
+                                <MudTd>
+                                    <MudText Typo="Typo.body2">@folder.CreatedAt.ToString("MMM d, yyyy")</MudText>
+                                </MudTd>
+                                <MudTd>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                   Size="Size.Small"
+                                                   Title="Delete folder"
+                                                   OnClick="@(() => DeleteFolder(folder))" />
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+
+                    @* ── Files ── *@
+                    @if (_uploads.Count > 0)
+                    {
+                        <MudTable Items="@_uploads" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm"
+                                  Class="workspace-files-table">
+                            <HeaderContent>
+                                <MudTh>Name</MudTh>
+                                <MudTh>Size</MudTh>
+                                <MudTh>Created</MudTh>
+                                <MudTh Class="workspace-actions-col">Actions</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                @{
+                                    var upload = context;
+                                }
+                                <MudTd>
+                                    <div class="workspace-file-name-cell">
+                                        <MudIcon Icon="@GetFileIcon(upload.MimeType)"
+                                                 Size="Size.Small" Class="mr-1" />
+                                        <MudText Typo="Typo.body2">@upload.Filename</MudText>
+                                    </div>
+                                </MudTd>
+                                <MudTd>
+                                    <MudText Typo="Typo.body2">@FormatSize(upload.SizeBytes)</MudText>
+                                </MudTd>
+                                <MudTd>
+                                    <MudText Typo="Typo.body2">@upload.CreatedAt.ToString("MMM d, yyyy")</MudText>
+                                </MudTd>
+                                <MudTd>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Download"
+                                                   Size="Size.Small"
+                                                   Title="Download"
+                                                   OnClick="@(() => DownloadFile(upload))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                   Size="Size.Small"
+                                                   Title="Delete file"
+                                                   OnClick="@(() => DeleteFile(upload))" />
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+
+                    @* ── Empty state ── *@
+                    @if (_folders.Count == 0 && _uploads.Count == 0)
+                    {
+                        <div class="workspace-empty-state">
+                            <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Size="Size.Large"
+                                     Class="workspace-empty-icon" />
+                            <MudText Class="workspace-empty-text">
+                                No files here. Upload files or create a folder to get started.
+                            </MudText>
+                        </div>
+                    }
+                }
             </MudTabPanel>
             <MudTabPanel Text="Generated">
                 @if (_loading)
@@ -98,34 +286,233 @@
 </MudContainer>
 
 @code {
+    // ── Generated (existing) state ──────────────────────────────────────────
     private bool _loading = true;
-    private int _activeTab = 1;
+    private int _activeTab = 0;
     private List<UserWorkspaceFile> _artifacts = new();
     private List<ArtifactGroup> _groupedArtifacts = new();
-
     private record ArtifactGroup(string ConversationTitle, Guid ConversationId, List<UserWorkspaceFile> Artifacts);
+
+    // ── Files tab state ─────────────────────────────────────────────────────
+    private Guid? _currentFolderId = null;
+    private List<WorkspaceFolder> _folders = new();
+    private List<WorkspaceUpload> _uploads = new();
+    private List<(Guid Id, string Name)> _breadcrumb = new();
+    private bool _showNewFolderInput = false;
+    private string _newFolderName = "";
+    private bool _loadingFiles = true;
+    private bool _uploading = false;
+    private Dictionary<string, int> _uploadProgress = new();
+    private MudTextField<string>? _newFolderField;
 
     protected override async Task OnInitializedAsync()
     {
         if (!Session.IsAuthenticated) return;
-        _artifacts = await WorkspaceFileSvc.GetUserArtifactsAsync(Session.UserId);
 
-        var grouped = _artifacts
-            .GroupBy(a => a.ConversationId)
-            .OrderByDescending(g => g.Max(a => a.CreatedAt));
+        var filesTask = LoadFilesAsync();
+        var artifactsTask = LoadArtifactsAsync();
+        await Task.WhenAll(filesTask, artifactsTask);
+    }
 
-        var result = new List<ArtifactGroup>();
-        foreach (var group in grouped)
+    // ── Files tab ──────────────────────────────────────────────────────────
+
+    private async Task LoadFilesAsync()
+    {
+        _loadingFiles = true;
+        try
         {
-            var conv = await ChatSvc.GetConversationAsync(group.Key, Session.UserId);
-            var title = string.IsNullOrWhiteSpace(conv?.Title)
-                ? $"Conversation {group.Key.ToString()[..8]}"
-                : conv!.Title;
-            result.Add(new ArtifactGroup(title, group.Key,
-                group.OrderByDescending(a => a.CreatedAt).ToList()));
+            _folders = await UploadSvc.GetFoldersAsync(Session.UserId, _currentFolderId);
+            _uploads = await UploadSvc.GetFilesAsync(Session.UserId, _currentFolderId);
         }
-        _groupedArtifacts = result;
-        _loading = false;
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] LoadFilesAsync failed");
+            Snackbar.Add("Failed to load files.", Severity.Error);
+        }
+        finally
+        {
+            _loadingFiles = false;
+        }
+    }
+
+    private async Task NavigateToFolder(Guid? folderId, string? folderName)
+    {
+        if (folderId == null)
+        {
+            _currentFolderId = null;
+            _breadcrumb.Clear();
+        }
+        else
+        {
+            _currentFolderId = folderId;
+            if (folderName != null && !_breadcrumb.Any(b => b.Id == folderId))
+                _breadcrumb.Add((folderId.Value, folderName));
+        }
+        await LoadFilesAsync();
+    }
+
+    private async Task NavigateToBreadcrumb(Guid folderId)
+    {
+        var idx = _breadcrumb.FindIndex(b => b.Id == folderId);
+        if (idx >= 0)
+            _breadcrumb = _breadcrumb.Take(idx + 1).ToList();
+        _currentFolderId = folderId;
+        await LoadFilesAsync();
+    }
+
+    private void ShowNewFolderInput()
+    {
+        _newFolderName = "";
+        _showNewFolderInput = true;
+    }
+
+    private async Task HandleNewFolderKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await CreateFolder();
+        else if (e.Key == "Escape") _showNewFolderInput = false;
+    }
+
+    private async Task CreateFolder()
+    {
+        if (string.IsNullOrWhiteSpace(_newFolderName)) return;
+        try
+        {
+            await UploadSvc.CreateFolderAsync(Session.UserId, _newFolderName.Trim(), _currentFolderId);
+            _showNewFolderInput = false;
+            _newFolderName = "";
+            await LoadFilesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] CreateFolder failed");
+            Snackbar.Add("Failed to create folder.", Severity.Error);
+        }
+    }
+
+    private async Task DeleteFolder(WorkspaceFolder folder)
+    {
+        try
+        {
+            await UploadSvc.DeleteFolderAsync(Session.UserId, folder.Id);
+            await LoadFilesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] DeleteFolder failed");
+            Snackbar.Add("Failed to delete folder.", Severity.Error);
+        }
+    }
+
+    private async Task TriggerFileUpload()
+    {
+        await JSRuntime.InvokeVoidAsync("document.getElementById('fileUploadInput').click");
+    }
+
+    private async Task HandleFilesSelected(InputFileChangeEventArgs e)
+    {
+        _uploading = true;
+        _uploadProgress.Clear();
+        var files = e.GetMultipleFiles(100);
+
+        foreach (var file in files)
+        {
+            if (file.Size > 52428800)
+            {
+                Snackbar.Add($"{file.Name} exceeds 50MB limit — skipped.", Severity.Warning);
+                continue;
+            }
+            _uploadProgress[file.Name] = 0;
+            StateHasChanged();
+            try
+            {
+                using var content = new MultipartFormDataContent();
+                var streamContent = new StreamContent(file.OpenReadStream(maxAllowedSize: 52428800));
+                streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
+                    string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
+                content.Add(streamContent, "file", file.Name);
+                if (_currentFolderId.HasValue)
+                    content.Add(new StringContent(_currentFolderId.Value.ToString()), "folderId");
+
+                var response = await Http.PostAsync("/api/workspace/upload", content);
+                if (response.IsSuccessStatusCode)
+                    _uploadProgress[file.Name] = 100;
+                else
+                    Snackbar.Add($"Upload failed: {file.Name}", Severity.Error);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "[WorkspaceFiles] Upload failed for {Filename}", file.Name);
+                Snackbar.Add($"Upload failed: {file.Name}", Severity.Error);
+            }
+        }
+
+        _uploading = false;
+        _uploadProgress.Clear();
+        await LoadFilesAsync();
+    }
+
+    private async Task DownloadFile(WorkspaceUpload upload)
+    {
+        try
+        {
+            var response = await Http.GetFromJsonAsync<DownloadUrlResponse>($"/api/workspace/files/{upload.Id}/download");
+            if (response?.Url != null)
+                await JSRuntime.InvokeVoidAsync("open", response.Url, "_blank");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] Download failed for {Filename}", upload.Filename);
+            Snackbar.Add("Download failed.", Severity.Error);
+        }
+    }
+
+    private async Task DeleteFile(WorkspaceUpload upload)
+    {
+        try
+        {
+            await Http.DeleteAsync($"/api/workspace/files/{upload.Id}");
+            await LoadFilesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] DeleteFile failed for {Filename}", upload.Filename);
+            Snackbar.Add("Failed to delete file.", Severity.Error);
+        }
+    }
+
+    private record DownloadUrlResponse(string? Url);
+
+    // ── Artifacts tab (unchanged logic) ────────────────────────────────────
+
+    private async Task LoadArtifactsAsync()
+    {
+        _loading = true;
+        try
+        {
+            _artifacts = await WorkspaceFileSvc.GetUserArtifactsAsync(Session.UserId);
+            var grouped = _artifacts
+                .GroupBy(a => a.ConversationId)
+                .OrderByDescending(g => g.Max(a => a.CreatedAt));
+            var result = new List<ArtifactGroup>();
+            foreach (var group in grouped)
+            {
+                var conv = await ChatSvc.GetConversationAsync(group.Key, Session.UserId);
+                var title = string.IsNullOrWhiteSpace(conv?.Title)
+                    ? $"Conversation {group.Key.ToString()[..8]}"
+                    : conv!.Title;
+                result.Add(new ArtifactGroup(title, group.Key,
+                    group.OrderByDescending(a => a.CreatedAt).ToList()));
+            }
+            _groupedArtifacts = result;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] LoadArtifactsAsync failed");
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private void PreviewArtifact(UserWorkspaceFile artifact)
@@ -147,12 +534,16 @@
         }
     }
 
+    // ── Helpers ────────────────────────────────────────────────────────────
+
     private static string GetFileIcon(string mimeType) => mimeType switch
     {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => Icons.Material.Filled.Description,
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => Icons.Material.Filled.TableChart,
         "application/vnd.openxmlformats-officedocument.presentationml.presentation" => Icons.Material.Filled.Slideshow,
         "application/pdf" => Icons.Material.Filled.PictureAsPdf,
+        "text/plain" => Icons.Material.Filled.Article,
+        "application/json" => Icons.Material.Filled.DataObject,
         _ => Icons.Material.Filled.InsertDriveFile
     };
 

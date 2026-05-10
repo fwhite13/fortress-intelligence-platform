@@ -310,7 +310,8 @@ const MCP_TOOL_ALLOWLIST = {
 };
 
 const BUILTIN_TOOLS = new Set([
-    'list_workspace_files', 'search_memory', 'read_memory', 'write_memory', 'create_document'
+    'list_workspace_files', 'search_memory', 'read_memory', 'write_memory', 'create_document',
+    'list_files', 'read_file'
 ]);
 
 function isToolAllowed(toolName) {
@@ -821,6 +822,143 @@ app.post('/tools/create_document', async (req, res) => {
     }
 });
 
+// ─── list_files tool handler (ADO#3206) ──────────────────────────────────
+app.post('/tools/list_files', async (req, res) => {
+    const { userId, folder_path = '' } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+
+    let conn;
+    try {
+        conn = await getDbConnection();
+        const path = (folder_path || '').replace(/^\/+|\/+$/g, '');
+
+        // Resolve folder path to folder_id
+        let folderId = null;
+        if (path) {
+            const segments = path.split('/');
+            let parentId = null;
+            for (const segment of segments) {
+                const paramArr = parentId === null ? [userId, segment] : [userId, segment, parentId];
+                const sql = parentId === null
+                    ? 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id IS NULL'
+                    : 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id = ?';
+                const [rows] = await conn.execute(sql, paramArr);
+                if (rows.length === 0) {
+                    return res.json({ items: [], error: `Folder not found: ${segment}` });
+                }
+                parentId = rows[0].id;
+            }
+            folderId = parentId;
+        }
+
+        // Get child folders
+        const folderSql = folderId === null
+            ? 'SELECT id, name, created_at FROM user_workspace_folders WHERE user_id = ? AND parent_id IS NULL ORDER BY name'
+            : 'SELECT id, name, created_at FROM user_workspace_folders WHERE user_id = ? AND parent_id = ? ORDER BY name';
+        const folderParams = folderId === null ? [userId] : [userId, folderId];
+        const [folders] = await conn.execute(folderSql, folderParams);
+
+        // Get files in folder
+        const fileSql = folderId === null
+            ? 'SELECT id, filename, mime_type, size_bytes, created_at FROM user_workspace_uploads WHERE user_id = ? AND folder_id IS NULL ORDER BY filename'
+            : 'SELECT id, filename, mime_type, size_bytes, created_at FROM user_workspace_uploads WHERE user_id = ? AND folder_id = ? ORDER BY filename';
+        const fileParams = folderId === null ? [userId] : [userId, folderId];
+        const [files] = await conn.execute(fileSql, fileParams);
+
+        const items = [
+            ...folders.map(f => ({ name: f.name, type: 'folder' })),
+            ...files.map(f => ({ name: f.filename, type: 'file', size: f.size_bytes, mimeType: f.mime_type }))
+        ];
+
+        res.json({ items });
+    } catch (err) {
+        console.error('[harness] list_files error:', err.message);
+        res.status(500).json({ error: err.message });
+    } finally {
+        if (conn) await conn.end();
+    }
+});
+
+// ─── read_file tool handler (ADO#3206) ──────────────────────────────────
+app.post('/tools/read_file', async (req, res) => {
+    const { userId, file_path } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!file_path) return res.status(400).json({ error: 'file_path required' });
+
+    let conn;
+    try {
+        conn = await getDbConnection();
+        const parts = file_path.replace(/^\/+|\/+$/g, '').split('/');
+        const filename = parts.pop();
+        const folderPath = parts;
+
+        // Resolve folder
+        let folderId = null;
+        if (folderPath.length > 0) {
+            let parentId = null;
+            for (const segment of folderPath) {
+                const paramArr = parentId === null ? [userId, segment] : [userId, segment, parentId];
+                const sql = parentId === null
+                    ? 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id IS NULL'
+                    : 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id = ?';
+                const [rows] = await conn.execute(sql, paramArr);
+                if (rows.length === 0) {
+                    return res.json({ content: `File not found: ${file_path}` });
+                }
+                parentId = rows[0].id;
+            }
+            folderId = parentId;
+        }
+
+        // Find file
+        const fileSql = folderId === null
+            ? 'SELECT s3_key, mime_type, size_bytes FROM user_workspace_uploads WHERE user_id = ? AND filename = ? AND folder_id IS NULL LIMIT 1'
+            : 'SELECT s3_key, mime_type, size_bytes FROM user_workspace_uploads WHERE user_id = ? AND filename = ? AND folder_id = ? LIMIT 1';
+        const fileParams = folderId === null ? [userId, filename] : [userId, filename, folderId];
+        const [rows] = await conn.execute(fileSql, fileParams);
+
+        if (rows.length === 0) {
+            return res.json({ content: `File not found: ${file_path}` });
+        }
+
+        const { s3_key, mime_type } = rows[0];
+
+        // Check if text type
+        const textMimeTypes = ['text/', 'application/json', 'application/xml', 'application/javascript',
+                               'application/x-yaml', 'application/yaml', 'application/csv'];
+        const isText = textMimeTypes.some(t => mime_type.startsWith(t)) || mime_type === '';
+        if (!isText) {
+            return res.json({ content: 'Binary file — cannot read as text. Use download instead.' });
+        }
+
+        // Fetch from S3
+        const s3Resp = await s3Client.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3_key }));
+
+        const MAX_BYTES = 512000;
+        const chunks = [];
+        let totalBytes = 0;
+        let truncated = false;
+        for await (const chunk of s3Resp.Body) {
+            if (totalBytes + chunk.length > MAX_BYTES) {
+                chunks.push(chunk.slice(0, MAX_BYTES - totalBytes));
+                truncated = true;
+                break;
+            }
+            chunks.push(chunk);
+            totalBytes += chunk.length;
+        }
+        let content = Buffer.concat(chunks).toString('utf8');
+        if (truncated) content += '\n[Content truncated at 500KB]';
+
+        res.json({ content });
+    } catch (err) {
+        console.error('[harness] read_file error:', err.message);
+        res.status(500).json({ error: err.message });
+    } finally {
+        if (conn) await conn.end();
+    }
+});
+
 // ─── Stitch-specific route handlers (ADO#3099) ────────────────────────────
 app.post('/tools/stitch_generate_screen', async (req, res) => {
     const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -1312,7 +1450,12 @@ app.post('/turn', async (req, res) => {
 - Call this when the user asks you to create a document, report, proposal, or similar deliverable.
 - You may also call this proactively when a document is clearly the best way to present your output (e.g. a structured report, a multi-section analysis).
 - sections is an array of { heading, content } objects.
-- After calling create_document, briefly confirm to the user that the document was created and is available in the chat.`);
+- After calling create_document, briefly confirm to the user that the document was created and is available in the chat.
+\nYou have access to list_files(folder_path?) and read_file(file_path) to access files the user has uploaded to their workspace.
+- Use list_files() to see what is available at the root, or list_files("folder/path") for a subfolder.
+- Use read_file("path/to/file") to read file content directly.
+- Paths use forward slashes. Folder and file names are case-sensitive.
+- Prefer reading workspace files directly when the user references "my files", "the document I uploaded", or similar.`);
         if (systemPrompt) contextParts.push(systemPrompt);
 
         // ADO#3089 — inject session context recap on cold-start CC turns with existing history
@@ -1455,7 +1598,12 @@ app.post('/turn', async (req, res) => {
 - Call this when the user asks you to create a document, report, proposal, or similar deliverable.
 - You may also call this proactively when a document is clearly the best way to present your output (e.g. a structured report, a multi-section analysis).
 - sections is an array of { heading, content } objects.
-- After calling create_document, briefly confirm to the user that the document was created and is available in the chat.`);
+- After calling create_document, briefly confirm to the user that the document was created and is available in the chat.
+\nYou have access to list_files(folder_path?) and read_file(file_path) to access files the user has uploaded to their workspace.
+- Use list_files() to see what is available at the root, or list_files("folder/path") for a subfolder.
+- Use read_file("path/to/file") to read file content directly.
+- Paths use forward slashes. Folder and file names are case-sensitive.
+- Prefer reading workspace files directly when the user references "my files", "the document I uploaded", or similar.`);
             if (systemPrompt) systemParts.push(systemPrompt);
             if (systemParts.length === 0) {
                 systemParts.push('You are a helpful AI assistant.');
@@ -1579,6 +1727,41 @@ app.post('/turn', async (req, res) => {
                                 }
                             }
                         }
+                    },
+                    {
+                        toolSpec: {
+                            name: 'list_files',
+                            description: 'List folders and files in the user\'s workspace at a given folder path.',
+                            inputSchema: {
+                                json: {
+                                    type: 'object',
+                                    properties: {
+                                        folder_path: {
+                                            type: 'string',
+                                            description: 'Folder path (e.g. "reports/q1"). Empty or omit for root.'
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
+                        toolSpec: {
+                            name: 'read_file',
+                            description: 'Read the text content of a file from the user\'s workspace.',
+                            inputSchema: {
+                                json: {
+                                    type: 'object',
+                                    properties: {
+                                        file_path: {
+                                            type: 'string',
+                                            description: 'Full file path (e.g. "reports/q1/summary.txt")'
+                                        }
+                                    },
+                                    required: ['file_path']
+                                }
+                            }
+                        }
                     }
                 ]
             };
@@ -1684,6 +1867,30 @@ app.post('/turn', async (req, res) => {
                             }
                         } catch (cdErr) {
                             toolResultText = `\n\n[Document Error]\n${cdErr.message}\n\n`;
+                        }
+                    } else if (toolUseAccumulator.name === 'list_files') {
+                        try {
+                            const lfRes = await fetch(`http://localhost:${PORT}/tools/list_files`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ userId: currentUserId, ...toolInput })
+                            });
+                            const lfData = await lfRes.json();
+                            toolResultText = JSON.stringify(lfData.items || []);
+                        } catch (lfErr) {
+                            toolResultText = `Error listing files: ${lfErr.message}`;
+                        }
+                    } else if (toolUseAccumulator.name === 'read_file') {
+                        try {
+                            const rfRes = await fetch(`http://localhost:${PORT}/tools/read_file`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ userId: currentUserId, ...toolInput })
+                            });
+                            const rfData = await rfRes.json();
+                            toolResultText = rfData.content || rfData.error || 'No content returned.';
+                        } catch (rfErr) {
+                            toolResultText = `Error reading file: ${rfErr.message}`;
                         }
                     } else {
                         // default: search_knowledge_base

@@ -43,6 +43,8 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
     public DbSet<MemoryTopic> MemoryTopics => Set<MemoryTopic>();
     public DbSet<UserWorkspaceFile> UserWorkspaceFiles => Set<UserWorkspaceFile>();
+    public DbSet<WorkspaceFolder> WorkspaceFolders { get; set; }
+    public DbSet<WorkspaceUpload> WorkspaceUploads { get; set; }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -516,6 +518,35 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)");
             entity.HasIndex(e => e.UserId).HasDatabaseName("idx_uwf_user_id");
             entity.HasIndex(e => e.ConversationId).HasDatabaseName("idx_uwf_conversation_id");
+        });
+
+        modelBuilder.Entity<WorkspaceFolder>(entity =>
+        {
+            entity.ToTable("user_workspace_folders");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnType("CHAR(36)").ValueGeneratedNever();
+            entity.Property(e => e.UserId).HasColumnType("CHAR(36)").HasColumnName("user_id");
+            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(255).IsRequired();
+            entity.Property(e => e.ParentId).HasColumnType("CHAR(36)").HasColumnName("parent_id");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasIndex(e => e.UserId).HasDatabaseName("idx_uwfold_user_id");
+            entity.HasIndex(e => e.ParentId).HasDatabaseName("idx_uwfold_parent_id");
+        });
+
+        modelBuilder.Entity<WorkspaceUpload>(entity =>
+        {
+            entity.ToTable("user_workspace_uploads");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnType("CHAR(36)").ValueGeneratedNever();
+            entity.Property(e => e.UserId).HasColumnType("CHAR(36)").HasColumnName("user_id");
+            entity.Property(e => e.FolderId).HasColumnType("CHAR(36)").HasColumnName("folder_id");
+            entity.Property(e => e.Filename).HasColumnName("filename").HasMaxLength(500).IsRequired();
+            entity.Property(e => e.MimeType).HasColumnName("mime_type").HasMaxLength(200).IsRequired();
+            entity.Property(e => e.S3Key).HasColumnName("s3_key").HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.SizeBytes).HasColumnName("size_bytes");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasIndex(e => e.UserId).HasDatabaseName("idx_uwup_user_id");
+            entity.HasIndex(e => e.FolderId).HasDatabaseName("idx_uwup_folder_id");
         });
 
     }

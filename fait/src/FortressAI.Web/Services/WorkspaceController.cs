@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using FortressAI.Web.Data;
 using FortressAI.Web.Services;
+using FortressAI.Shared.Models;
 using System.Text.Json;
 
 namespace FortressAI.Web.Controllers;
@@ -11,17 +14,23 @@ public class WorkspaceController : ControllerBase
 {
     private readonly IWorkspaceFileService _workspaceFileService;
     private readonly IDocumentGeneratorService _documentGeneratorService;
+    private readonly IWorkspaceUploadService _uploadService;
+    private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<WorkspaceController> _logger;
 
     public WorkspaceController(
         IWorkspaceFileService workspaceFileService,
         IDocumentGeneratorService documentGeneratorService,
+        IWorkspaceUploadService uploadService,
+        IDbContextFactory<AppDbContext> dbFactory,
         IConfiguration config,
         ILogger<WorkspaceController> logger)
     {
         _workspaceFileService = workspaceFileService;
         _documentGeneratorService = documentGeneratorService;
+        _uploadService = uploadService;
+        _dbFactory = dbFactory;
         _config = config;
         _logger = logger;
     }
@@ -85,6 +94,111 @@ public class WorkspaceController : ControllerBase
         var bytes = await _documentGeneratorService.GenerateAsync(docRequest);
         return File(bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     }
+
+    // ─── Folder CRUD ──────────────────────────────────────────────────────────
+
+    [HttpGet("folders")]
+    [Authorize]
+    public async Task<IActionResult> GetFolders([FromQuery] Guid? parentId)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        var folders = await _uploadService.GetFoldersAsync(userId.Value, parentId);
+        return Ok(folders.Select(f => new { f.Id, f.Name, f.ParentId, f.CreatedAt }));
+    }
+
+    [HttpPost("folders")]
+    [Authorize]
+    public async Task<IActionResult> CreateFolder([FromBody] CreateFolderRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return BadRequest(new { error = "Name is required" });
+        var folder = await _uploadService.CreateFolderAsync(userId.Value, request.Name, request.ParentId);
+        return Ok(new { folder.Id, folder.Name, folder.ParentId, folder.CreatedAt });
+    }
+
+    [HttpDelete("folders/{folderId}")]
+    [Authorize]
+    public async Task<IActionResult> DeleteFolder(Guid folderId)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        await _uploadService.DeleteFolderAsync(userId.Value, folderId);
+        return Ok(new { success = true });
+    }
+
+    // ─── File CRUD ────────────────────────────────────────────────────────────
+
+    [HttpGet("files")]
+    [Authorize]
+    public async Task<IActionResult> GetFiles([FromQuery] Guid? folderId)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        var files = await _uploadService.GetFilesAsync(userId.Value, folderId);
+        return Ok(files.Select(f => new { f.Id, f.Filename, f.MimeType, f.SizeBytes, f.CreatedAt, f.FolderId }));
+    }
+
+    [HttpPost("upload")]
+    [Authorize]
+    [RequestSizeLimit(52428800)] // 50MB
+    public async Task<IActionResult> UploadFile([FromForm] IFormFile file, [FromForm] Guid? folderId)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file provided" });
+
+        if (file.Length > 52428800)
+            return StatusCode(413, new { error = "File exceeds 50MB limit" });
+
+        await using var stream = file.OpenReadStream();
+        var upload = await _uploadService.SaveUploadAsync(
+            userId.Value, folderId,
+            file.FileName,
+            file.ContentType ?? "application/octet-stream",
+            stream);
+
+        return Ok(new { upload.Id, upload.Filename, upload.MimeType, upload.SizeBytes, upload.CreatedAt });
+    }
+
+    [HttpDelete("files/{fileId}")]
+    [Authorize]
+    public async Task<IActionResult> DeleteFile(Guid fileId)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        await _uploadService.DeleteFileAsync(userId.Value, fileId);
+        return Ok(new { success = true });
+    }
+
+    [HttpGet("files/{fileId}/download")]
+    [Authorize]
+    public async Task<IActionResult> GetDownloadUrl(Guid fileId)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var file = await db.WorkspaceUploads.FirstOrDefaultAsync(f => f.Id == fileId && f.UserId == userId.Value);
+        if (file == null) return NotFound();
+
+        var url = await _uploadService.GetPresignedUrlAsync(file.S3Key);
+        return Ok(new { url });
+    }
+
+    private Guid? GetCurrentUserId()
+    {
+        var claim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("sub")
+            ?? User.FindFirst("userId");
+        if (claim == null) return null;
+        if (Guid.TryParse(claim.Value, out var id)) return id;
+        return null;
+    }
 }
 
 public record SaveArtifactRequest(
@@ -104,3 +218,5 @@ public record GenerateDocumentRequest(
 );
 
 public record GenerateDocumentSection(string Heading, string Content);
+
+public record CreateFolderRequest(string Name, Guid? ParentId);
