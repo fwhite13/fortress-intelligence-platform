@@ -20,9 +20,9 @@
         }
         else
         {
-            @if (!string.IsNullOrWhiteSpace(AssistantConfig?.AvatarUrl))
+            @if (!string.IsNullOrWhiteSpace(AvatarPreviewUrl))
             {
-                <img src="@AssistantConfig.AvatarUrl" alt="@(AssistantConfig.AssistantName ?? "Assistant")" class="assistant-avatar-img" />
+                <img src="@AvatarPreviewUrl" alt="@(AssistantConfig?.AssistantName ?? "Assistant")" class="assistant-avatar-img" />
             }
             else
             {
@@ -80,6 +80,7 @@
     [Parameter] public bool IsStreaming { get; set; } = false;
     [Parameter] public List<ChatAttachment> Attachments { get; set; } = new();
     [Parameter] public UserAssistantConfig? AssistantConfig { get; set; }
+    [Parameter] public string? AvatarPreviewUrl { get; set; }
     [Parameter] public string? UserInitial { get; set; }
 
     private static string GetAvatarIcon(string? avatarId) => avatarId switch

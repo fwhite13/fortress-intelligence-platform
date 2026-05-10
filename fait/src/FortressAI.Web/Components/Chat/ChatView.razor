@@ -20,6 +20,10 @@
 @inject ILogger<ChatView> Logger
 @inject MicrosoftTokenService M365TokenSvc
 @inject IUserAgentRuntime AgentRuntime
+@using Amazon.S3
+@using Amazon.S3.Model
+@inject IAmazonS3 S3
+@inject IConfiguration Config
 @implements IAsyncDisposable
 @using FortressAI.Web.Services
 @using FortressAI.Web.Services.Mcp
@@ -35,6 +39,22 @@ else
 {
 <div class="chat-container">
     <div class="chat-header">
+        <div class="chat-header-identity">
+            @if (!string.IsNullOrWhiteSpace(_avatarPreviewUrl))
+            {
+                <img src="@_avatarPreviewUrl" alt="@(_assistantConfig?.AssistantName ?? "Assistant")" class="chat-header-avatar" />
+            }
+            else if (_assistantConfig != null)
+            {
+                <MudIcon Icon="@GetAvatarIconForHeader(_assistantConfig.AvatarId)"
+                         Size="Size.Small"
+                         Style="@($"color: {_assistantConfig.ColorHex ?? "#6366f1"}")" />
+            }
+            @if (!string.IsNullOrWhiteSpace(_assistantConfig?.AssistantName))
+            {
+                <span class="chat-header-name">@_assistantConfig.AssistantName</span>
+            }
+        </div>
         @if (conversation?.Project != null)
         {
             <div class="chat-project-badge" @onclick="NavigateToProject">
@@ -78,7 +98,7 @@ else
 
                 @foreach (var msg in messages)
                 {
-                    <MessageBubble Message="msg" AssistantConfig="@_assistantConfig" UserInitial="@UserInitial" />
+                    <MessageBubble Message="msg" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
                 }
                 @if (messages.Any(m => m.Role == "assistant") && _lastKbResult != null)
                 {
@@ -107,7 +127,7 @@ else
             }
             @if (isStreaming)
             {
-                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" UserInitial="@UserInitial" />
+                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
             }
         </div>
 
@@ -289,6 +309,7 @@ else
     private string _interimTranscript = "";
     private string? _micError = null;
     private UserAssistantConfig? _assistantConfig;
+    private string? _avatarPreviewUrl;
     private string UserInitial =>
         (Session.CurrentUser?.DisplayName?.Trim().FirstOrDefault()
          ?? Session.CurrentUser?.Email?.Trim().FirstOrDefault()
@@ -407,6 +428,10 @@ else
         if (Session.IsAuthenticated && _assistantConfig == null)
         {
             _assistantConfig = await ConfigSvc.GetOrCreateConfigAsync(Session.UserId);
+            if (!string.IsNullOrWhiteSpace(_assistantConfig?.AvatarUrl))
+            {
+                _avatarPreviewUrl = GenerateAvatarPreviewUrl(_assistantConfig.AvatarUrl);
+            }
         }
 
         // Load user's team memberships for Team KB toggle
@@ -485,6 +510,41 @@ else
             await SendResumptionBrief();
         }
     }
+
+    private string? GenerateAvatarPreviewUrl(string? rawS3Url)
+    {
+        if (string.IsNullOrWhiteSpace(rawS3Url)) return null;
+        try
+        {
+            var bucket = Config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
+            var prefix = $"https://{bucket}.s3.amazonaws.com/";
+            if (!rawS3Url.StartsWith(prefix)) return rawS3Url;
+            var key = rawS3Url[prefix.Length..];
+            var req = new GetPreSignedUrlRequest
+            {
+                BucketName = bucket,
+                Key = key,
+                Expires = DateTime.UtcNow.AddHours(1),
+                Verb = HttpVerb.GET
+            };
+            return S3.GetPreSignedURL(req);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[Avatar] Pre-signed URL failed for {Url}", rawS3Url);
+            return null;
+        }
+    }
+
+    private static string GetAvatarIconForHeader(string? avatarId) => avatarId switch
+    {
+        "robot"   => Icons.Material.Filled.SmartToy,
+        "star"    => Icons.Material.Filled.Star,
+        "bolt"    => Icons.Material.Filled.Bolt,
+        "diamond" => Icons.Material.Filled.Diamond,
+        "rocket"  => Icons.Material.Filled.RocketLaunch,
+        _         => Icons.Material.Filled.Shield
+    };
 
     private void NavigateToProject()
     {
@@ -1364,5 +1424,22 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 .resumption-brief-loading {
     margin-top: var(--space-1, 0.25rem);
     color: var(--color-accent);
+}
+.chat-header-identity {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2, 8px);
+}
+.chat-header-avatar {
+    width: var(--avatar-size-sm, 28px);
+    height: var(--avatar-size-sm, 28px);
+    border-radius: var(--radius-full, 50%);
+    object-fit: cover;
+    flex-shrink: 0;
+}
+.chat-header-name {
+    font-size: var(--text-sm, 0.875rem);
+    font-weight: var(--font-medium, 500);
+    color: var(--color-text-primary);
 }
 </style>
