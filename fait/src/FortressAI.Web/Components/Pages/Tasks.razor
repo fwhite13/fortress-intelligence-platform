@@ -1,0 +1,234 @@
+@page "/tasks"
+@using FortressAI.Shared.Models
+@using FortressAI.Web.Services
+@using FortressAI.Web.Components.Tasks
+<PageTitle>Tasks — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject IScheduledTaskService TaskSvc
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject ILogger<Tasks> Logger
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
+    <MudText Typo="Typo.h4" Class="mb-4">Tasks</MudText>
+
+    @if (!Session.IsAuthenticated)
+    {
+        <MudAlert Severity="Severity.Warning">Please log in to view your tasks.</MudAlert>
+    }
+    else if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else
+    {
+        <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" PanelClass="pt-4">
+            <MudTabPanel Text="Recurring">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="OpenCreateModalAsync" Class="mb-3">
+                    Create Recurring Task
+                </MudButton>
+
+                @if (_recurringTasks == null || _recurringTasks.Count == 0)
+                {
+                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-4">
+                        No recurring tasks yet. Create one to get started.
+                    </MudText>
+                }
+                else
+                {
+                    <MudTable Items="@_recurringTasks" Hover="true" Dense="false" Breakpoint="Breakpoint.Sm">
+                        <HeaderContent>
+                            <MudTh>Name</MudTh>
+                            <MudTh>Schedule</MudTh>
+                            <MudTh>Last Run</MudTh>
+                            <MudTh>Next Run</MudTh>
+                            <MudTh>Status</MudTh>
+                            <MudTh>Last Result</MudTh>
+                            <MudTh>Actions</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            @{
+                                var localTask = context;
+                            }
+                            <MudTd DataLabel="Name">@localTask.Name</MudTd>
+                            <MudTd DataLabel="Schedule">@FormatCron(localTask.CronExpression)</MudTd>
+                            <MudTd DataLabel="Last Run">
+                                @(localTask.LastRunAt.HasValue ? localTask.LastRunAt.Value.ToLocalTime().ToString("g") : "—")
+                            </MudTd>
+                            <MudTd DataLabel="Next Run">
+                                @(localTask.NextRunAt.HasValue ? localTask.NextRunAt.Value.ToLocalTime().ToString("g") : "—")
+                            </MudTd>
+                            <MudTd DataLabel="Status">
+                                @if (localTask.FailureCount >= 2)
+                                {
+                                    <MudChip T="string" Color="Color.Error" Size="Size.Small">Failed</MudChip>
+                                }
+                                else if (localTask.IsActive)
+                                {
+                                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Active</MudChip>
+                                }
+                                else
+                                {
+                                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">Paused</MudChip>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Last Result">
+                                @if (localTask.LastRunStatus == "success")
+                                {
+                                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Success</MudChip>
+                                }
+                                else if (localTask.LastRunStatus == "failed")
+                                {
+                                    <MudChip T="string" Color="Color.Error" Size="Size.Small">Failed</MudChip>
+                                }
+                                else
+                                {
+                                    <MudChip T="string" Color="Color.Default" Size="Size.Small">Never run</MudChip>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Actions">
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                               Title="Edit"
+                                               OnClick="@(() => OpenEditModalAsync(localTask))"
+                                               Size="Size.Small" />
+                                <MudIconButton Icon="@(localTask.IsActive ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                                               Title="@(localTask.IsActive ? "Pause" : "Resume")"
+                                               OnClick="@(() => TogglePauseAsync(localTask))"
+                                               Size="Size.Small" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Title="Delete"
+                                               Color="Color.Error"
+                                               OnClick="@(() => ConfirmDeleteAsync(localTask))"
+                                               Size="Size.Small" />
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudTabPanel>
+
+            <MudTabPanel Text="On-Demand">
+                <MudText Typo="Typo.body1" Color="Color.Secondary">On-Demand tasks — coming soon.</MudText>
+            </MudTabPanel>
+
+            <MudTabPanel Text="History">
+                <MudText Typo="Typo.body1" Color="Color.Secondary">Task run history — coming soon.</MudText>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudContainer>
+
+@code {
+    private List<ScheduledTask>? _recurringTasks;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Session.IsAuthenticated)
+        {
+            _loading = false;
+            return;
+        }
+        await LoadRecurringTasksAsync();
+        _loading = false;
+    }
+
+    private async Task LoadRecurringTasksAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+        try
+        {
+            var all = await TaskSvc.GetTasksAsync(Session.UserId);
+            _recurringTasks = all.Where(t => t.ScheduleType == "recurring").ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Tasks] Failed to load recurring tasks for user {UserId}", Session.UserId);
+            _recurringTasks = new List<ScheduledTask>();
+        }
+    }
+
+    private async Task OpenCreateModalAsync()
+    {
+        var parameters = new DialogParameters<TaskEditModal>
+        {
+            { x => x.ExistingTask, null }
+        };
+        var dialog = await DialogService.ShowAsync<TaskEditModal>("Create Recurring Task", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await LoadRecurringTasksAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenEditModalAsync(ScheduledTask task)
+    {
+        var parameters = new DialogParameters<TaskEditModal>
+        {
+            { x => x.ExistingTask, task }
+        };
+        var dialog = await DialogService.ShowAsync<TaskEditModal>("Edit Task", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await LoadRecurringTasksAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task TogglePauseAsync(ScheduledTask task)
+    {
+        bool success;
+        if (task.IsActive)
+            success = await TaskSvc.PauseAsync(task.Id, Session.UserId);
+        else
+            success = await TaskSvc.ResumeAsync(task.Id, Session.UserId);
+
+        if (success)
+        {
+            task.IsActive = !task.IsActive;
+            StateHasChanged();
+        }
+        else
+        {
+            Snackbar.Add("Failed to update task status", Severity.Error);
+        }
+    }
+
+    private async Task ConfirmDeleteAsync(ScheduledTask task)
+    {
+        bool? confirmed = await DialogService.ShowMessageBox(
+            "Delete Task",
+            $"Delete '{task.Name}'? This cannot be undone.",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            var success = await TaskSvc.DeleteTaskAsync(task.Id, Session.UserId);
+            if (success)
+            {
+                _recurringTasks?.Remove(task);
+                StateHasChanged();
+                Snackbar.Add("Task deleted", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("Failed to delete task", Severity.Error);
+            }
+        }
+    }
+
+    private static string FormatCron(string? cron) => cron switch
+    {
+        "0 * * * *"   => "Hourly",
+        "0 9 * * *"   => "Daily at 9am",
+        "0 9 * * 1"   => "Weekly (Mondays at 9am)",
+        "0 9 * * 1-5" => "Weekdays at 9am",
+        null or ""    => "—",
+        _             => cron
+    };
+}
