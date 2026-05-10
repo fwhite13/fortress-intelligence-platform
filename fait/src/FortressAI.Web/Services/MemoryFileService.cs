@@ -60,6 +60,9 @@ public class MemoryFileService : IMemoryFileService
 
     public async Task WriteTopicAsync(Guid userId, string slug, string title, string content, CancellationToken ct = default)
     {
+        if (slug.Equals("MEMORY", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("The slug 'MEMORY' is reserved.", nameof(slug));
+
         // 1. Write content to S3
         await _s3.PutObjectAsync(new PutObjectRequest
         {
@@ -70,28 +73,30 @@ public class MemoryFileService : IMemoryFileService
         _logger.LogDebug("[MemoryFile] Wrote s3://{Bucket}/{Key}", BucketName, TopicKey(userId, slug));
 
         // 2. Upsert memory_topics row
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var existing = await db.MemoryTopics
-            .FirstOrDefaultAsync(t => t.UserId == userId && t.Slug == slug, ct);
+        await using (var db = await _dbFactory.CreateDbContextAsync(ct))
+        {
+            var existing = await db.MemoryTopics
+                .FirstOrDefaultAsync(t => t.UserId == userId && t.Slug == slug, ct);
 
-        if (existing != null)
-        {
-            existing.Title = title;
-            existing.UpdatedAt = DateTime.UtcNow;
-        }
-        else
-        {
-            db.MemoryTopics.Add(new MemoryTopic
+            if (existing != null)
             {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                Slug = slug,
-                Title = title,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            });
-        }
-        await db.SaveChangesAsync(ct);
+                existing.Title = title;
+                existing.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                db.MemoryTopics.Add(new MemoryTopic
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    Slug = slug,
+                    Title = title,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+            await db.SaveChangesAsync(ct);
+        } // db disposed here
 
         // 3. Rebuild MEMORY.md index
         await RebuildMemoryIndexAsync(userId, ct);
@@ -111,15 +116,17 @@ public class MemoryFileService : IMemoryFileService
         }
 
         // 2. Remove DB row
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var existing = await db.MemoryTopics
-            .FirstOrDefaultAsync(t => t.UserId == userId && t.Slug == slug, ct);
-
-        if (existing != null)
+        await using (var db = await _dbFactory.CreateDbContextAsync(ct))
         {
-            db.MemoryTopics.Remove(existing);
-            await db.SaveChangesAsync(ct);
-        }
+            var topic = await db.MemoryTopics
+                .FirstOrDefaultAsync(t => t.UserId == userId && t.Slug == slug, ct);
+
+            if (topic != null)
+            {
+                db.MemoryTopics.Remove(topic);
+                await db.SaveChangesAsync(ct);
+            }
+        } // disposed before Rebuild
 
         // 3. Rebuild index
         await RebuildMemoryIndexAsync(userId, ct);
