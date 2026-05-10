@@ -1116,17 +1116,21 @@ app.post('/turn', async (req, res) => {
                 }
             }
 
+            // Skip brief entirely if nothing real to show (ADO#3155 Bug 1 fix)
+            if (!lastTopic && !memoryTimestamp) {
+                console.log(`[harness] resumption brief: no history and no MEMORY.md for userId=${userId} — skipping brief`);
+                sendEvent({ type: 'done', exitCode: 0 });
+                res.end();
+                return;
+            }
+
             // Compose and stream brief
-            const briefParts = ['__brief_start__\n\n'];
-            briefParts.push('Picking up where we left off\n\n');
+            const briefParts = [];
             if (lastTopic) {
-                briefParts.push(`Last time: ${lastTopic}\n\n`);
+                briefParts.push(`Last time: ${lastTopic}\n`);
             }
             if (memoryTimestamp) {
                 briefParts.push(`Memory synced: ${memoryTimestamp}\n`);
-            }
-            if (!lastTopic && !memoryTimestamp) {
-                briefParts.push('Ready when you are.\n');
             }
 
             for (const part of briefParts) {
