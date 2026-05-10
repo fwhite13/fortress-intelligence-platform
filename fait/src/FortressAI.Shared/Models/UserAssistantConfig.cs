@@ -18,6 +18,8 @@ public class UserAssistantConfig
     public string? UseCasesJson { get; set; }
     public string? AdditionalContext { get; set; }
     public string? PreferredName { get; set; }
+    [System.ComponentModel.DataAnnotations.MaxLength(512)]
+    public string? AvatarUrl { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public AppUser? User { get; set; }

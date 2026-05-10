@@ -62,6 +62,14 @@ namespace FortressAI.Web.Migrations
                     b.Property<DateTime?>("LastLogin")
                         .HasColumnType("datetime(6)");
 
+                    b.Property<DateTime?>("OnboardingCompletedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("onboarding_completed_at");
+
+                    b.Property<int?>("OnboardingStep")
+                        .HasColumnType("int")
+                        .HasColumnName("onboarding_step");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("longtext");
@@ -989,6 +997,10 @@ namespace FortressAI.Web.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AdditionalContext")
+                        .HasColumnType("longtext")
+                        .HasColumnName("additional_context");
+
                     b.Property<string>("AssistantName")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -999,10 +1011,19 @@ namespace FortressAI.Web.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)");
 
+                    b.Property<string>("AvatarUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("varchar(512)");
+
                     b.Property<string>("ColorHex")
                         .IsRequired()
                         .HasMaxLength(10)
                         .HasColumnType("varchar(10)");
+
+                    b.Property<string>("CommunicationStyle")
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("communication_style");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -1026,10 +1047,37 @@ namespace FortressAI.Web.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("varchar(20)");
 
+                    b.Property<string>("PreferredName")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("preferred_name");
+
+                    b.Property<string>("ResponseFormat")
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)")
+                        .HasColumnName("response_format");
+
+                    b.Property<string>("Responsibilities")
+                        .HasColumnType("longtext")
+                        .HasColumnName("responsibilities");
+
+                    b.Property<string>("Role")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("role");
+
+                    b.Property<bool?>("ShowCitations")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("show_citations");
+
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetime(6)")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+
+                    b.Property<string>("UseCasesJson")
+                        .HasColumnType("longtext")
+                        .HasColumnName("use_cases_json");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("char(36)");
@@ -1237,6 +1285,73 @@ namespace FortressAI.Web.Migrations
                         .IsUnique();
 
                     b.ToTable("user_module_permissions", (string)null);
+                });
+
+            modelBuilder.Entity("FortressAI.Web.Data.Models.UserSession", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("ended_at");
+
+                    b.Property<string>("FargateSessionId")
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)")
+                        .HasColumnName("fargate_session_id");
+
+                    b.Property<string>("FargateStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("fargate_status");
+
+                    b.Property<DateTime>("LastActiveAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("last_active_at");
+
+                    b.Property<string>("PrivateIp")
+                        .HasMaxLength(45)
+                        .HasColumnType("varchar(45)")
+                        .HasColumnName("private_ip");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("TaskArn")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("task_arn");
+
+                    b.Property<string>("TaskDefinitionRevision")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("task_definition_revision");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(36)
+                        .HasColumnType("varchar(36)")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastActiveAt")
+                        .HasDatabaseName("ix_user_sessions_last_active_at");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_user_sessions_user_id");
+
+                    b.ToTable("user_sessions", (string)null);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
