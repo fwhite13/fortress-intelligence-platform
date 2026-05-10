@@ -310,7 +310,7 @@ const MCP_TOOL_ALLOWLIST = {
 };
 
 const BUILTIN_TOOLS = new Set([
-    'list_workspace_files', 'search_memory'
+    'list_workspace_files', 'search_memory', 'read_memory', 'write_memory'
 ]);
 
 function isToolAllowed(toolName) {
@@ -698,6 +698,70 @@ app.post('/tools/search_memory', async (req, res) => {
     } catch (err) {
         console.error('[harness] search_memory error:', err.message);
         res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── read_memory tool handler (ADO#3188) ─────────────────────────────────
+app.post('/tools/read_memory', async (req, res) => {
+    const { userId, slug } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!slug) return res.status(400).json({ error: 'slug required' });
+
+    const blazorBase = process.env.BLAZOR_BASE_URL || 'http://localhost:5000';
+    const internalToken = process.env.INTERNAL_API_TOKEN || '';
+
+    try {
+        const resp = await fetch(`${blazorBase}/api/memory/read`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(internalToken ? { 'X-Internal-Token': internalToken } : {}),
+            },
+            body: JSON.stringify({ userId, slug }),
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`memory/read failed (${resp.status}): ${text}`);
+        }
+        const result = await resp.json();
+        if (!result.found) {
+            return res.json({ content: `Topic '${slug}' not found in memory.` });
+        }
+        res.json({ content: result.content });
+    } catch (err) {
+        console.error('[harness] read_memory error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── write_memory tool handler (ADO#3188) ────────────────────────────────
+app.post('/tools/write_memory', async (req, res) => {
+    const { userId, slug, title, content } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!slug) return res.status(400).json({ error: 'slug required' });
+    if (!content) return res.status(400).json({ error: 'content required' });
+
+    const blazorBase = process.env.BLAZOR_BASE_URL || 'http://localhost:5000';
+    const internalToken = process.env.INTERNAL_API_TOKEN || '';
+
+    try {
+        const resp = await fetch(`${blazorBase}/api/memory/write`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(internalToken ? { 'X-Internal-Token': internalToken } : {}),
+            },
+            body: JSON.stringify({ userId, slug, title: title || slug, content }),
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`memory/write failed (${resp.status}): ${text}`);
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[harness] write_memory error:', err.message);
+        // Best-effort — return success:false on error, do not crash
+        res.json({ success: false, error: err.message });
     }
 });
 
@@ -1180,6 +1244,11 @@ app.post('/turn', async (req, res) => {
         if (userEmail) contextParts.push(`## User Identity\nEmail: ${userEmail}`);
         if (userMd) contextParts.push(`## About the User\n${userMd}`);
         if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
+        // Memory tool guidance (ADO#3188)
+        contextParts.push(`You have access to read_memory(slug) and write_memory(slug, title, content) tools.
+- On cold start, MEMORY.md lists available topic slugs. Call read_memory to fetch any topic relevant to the current conversation.
+- When the user states a preference, personal detail, or decision worth remembering, call write_memory to persist it. Use judgment — not every message warrants a memory write.
+- For new information that does not fit an existing topic, create a new topic with an appropriate slug and title.`);
         if (systemPrompt) contextParts.push(systemPrompt);
 
         // ADO#3089 — inject session context recap on cold-start CC turns with existing history
@@ -1312,6 +1381,11 @@ app.post('/turn', async (req, res) => {
             if (userEmail) systemParts.push(`## User Identity\nEmail: ${userEmail}`);
             if (userMd) systemParts.push(`## About the User\n${userMd}`);
             if (memoryMd) systemParts.push(`## Long-Term Memory\n${memoryMd}`);
+            // Memory tool guidance (ADO#3188)
+            systemParts.push(`You have access to read_memory(slug) and write_memory(slug, title, content) tools.
+- On cold start, MEMORY.md lists available topic slugs. Call read_memory to fetch any topic relevant to the current conversation.
+- When the user states a preference, personal detail, or decision worth remembering, call write_memory to persist it. Use judgment — not every message warrants a memory write.
+- For new information that does not fit an existing topic, create a new topic with an appropriate slug and title.`);
             if (systemPrompt) systemParts.push(systemPrompt);
             if (systemParts.length === 0) {
                 systemParts.push('You are a helpful AI assistant.');
