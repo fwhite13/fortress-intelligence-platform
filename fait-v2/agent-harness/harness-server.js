@@ -314,6 +314,79 @@ const BUILTIN_TOOLS = new Set([
     'list_files', 'read_file'
 ]);
 
+// ADO#3218 — MCP tool specs for dynamic toolConfig injection
+const MCP_TOOL_SPECS = {
+  m365: [
+    {
+      toolSpec: {
+        name: 'graph_list_emails',
+        description: 'List recent emails from Microsoft 365 inbox',
+        inputSchema: { json: { type: 'object', properties: { max_results: { type: 'number', description: 'Max emails to return (default 10)' } }, required: [] } }
+      }
+    },
+    {
+      toolSpec: {
+        name: 'graph_get_email',
+        description: 'Get full content of a specific email by ID',
+        inputSchema: { json: { type: 'object', properties: { message_id: { type: 'string', description: 'Email message ID' } }, required: ['message_id'] } }
+      }
+    },
+    {
+      toolSpec: {
+        name: 'graph_send_email',
+        description: 'Send an email via Microsoft 365',
+        inputSchema: { json: { type: 'object', properties: { to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' } }, required: ['to', 'subject', 'body'] } }
+      }
+    },
+    {
+      toolSpec: {
+        name: 'graph_list_calendar_events',
+        description: 'List upcoming calendar events from Microsoft 365',
+        inputSchema: { json: { type: 'object', properties: { days_ahead: { type: 'number', description: 'Days ahead to look (default 7)' } }, required: [] } }
+      }
+    }
+  ],
+  azdo: [
+    {
+      toolSpec: {
+        name: 'ado_list_work_items',
+        description: 'List work items from Azure DevOps',
+        inputSchema: { json: { type: 'object', properties: { project: { type: 'string' }, state: { type: 'string' }, assignee: { type: 'string' } }, required: [] } }
+      }
+    },
+    {
+      toolSpec: {
+        name: 'ado_get_work_item',
+        description: 'Get details of a specific Azure DevOps work item by ID',
+        inputSchema: { json: { type: 'object', properties: { id: { type: 'number', description: 'Work item ID' } }, required: ['id'] } }
+      }
+    },
+    {
+      toolSpec: {
+        name: 'ado_create_work_item',
+        description: 'Create a new work item in Azure DevOps',
+        inputSchema: { json: { type: 'object', properties: { project: { type: 'string' }, type: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' } }, required: ['project', 'type', 'title'] } }
+      }
+    },
+    {
+      toolSpec: {
+        name: 'ado_update_work_item',
+        description: 'Update an existing Azure DevOps work item',
+        inputSchema: { json: { type: 'object', properties: { id: { type: 'number' }, state: { type: 'string' }, title: { type: 'string' }, comment: { type: 'string' } }, required: ['id'] } }
+      }
+    },
+    {
+      toolSpec: {
+        name: 'ado_list_projects',
+        description: 'List all Azure DevOps projects',
+        inputSchema: { json: { type: 'object', properties: {}, required: [] } }
+      }
+    }
+  ]
+};
+// Support both slug variants for Azure DevOps
+MCP_TOOL_SPECS['ado'] = MCP_TOOL_SPECS['azdo'];
+
 function isToolAllowed(toolName) {
     // Check against each server's allowlist
     for (const [, tools] of Object.entries(MCP_TOOL_ALLOWLIST)) {
@@ -1301,6 +1374,7 @@ app.post('/turn', async (req, res) => {
     const isScheduledTask = rawBody.IsScheduledTask ?? rawBody.isScheduledTask ?? false;
     const kbWriteAllowed  = rawBody.KbWriteAllowed  ?? rawBody.kbWriteAllowed  ?? true;
     const conversationId  = rawBody.ConversationId  ?? rawBody.conversationId  ?? '';
+    const enabledMcpSlugs = rawBody.EnabledMcpSlugs ?? rawBody.enabledMcpSlugs ?? [];
     const taskMode = forceTaskMode || classifyRequest(message, history);
 
     // §G7 — track scheduled task context so requireApproval uses async-safe path
@@ -1626,8 +1700,8 @@ app.post('/turn', async (req, res) => {
             messages.push({ role: 'user', content: [{ text: message }] });
             console.log(`[harness] /turn: message array built, count=${messages.length} (including current user message)`);
 
-            const toolConfig = {
-                tools: [
+            // ADO#3218 — Dynamic toolConfig: built-ins always present + MCP tools for enabled slugs
+            const BUILTIN_TOOL_SPECS = [
                     {
                         toolSpec: {
                             name: 'search_knowledge_base',
@@ -1763,8 +1837,15 @@ app.post('/turn', async (req, res) => {
                             }
                         }
                     }
-                ]
-            };
+            ];
+
+            const allTools = [...BUILTIN_TOOL_SPECS];
+            for (const slug of enabledMcpSlugs) {
+                if (MCP_TOOL_SPECS[slug]) {
+                    allTools.push(...MCP_TOOL_SPECS[slug]);
+                }
+            }
+            const toolConfig = { tools: allTools, toolChoice: { auto: {} } };
 
             console.log(`[harness] /turn: calling bedrockClient.send for userId=${userId}, modelId=${MODEL_ID}`);
             let tokenCount = 0;

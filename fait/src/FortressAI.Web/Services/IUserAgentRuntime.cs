@@ -55,7 +55,8 @@ public record TurnRequest(
     string? UserEmail = null,
     bool IsScheduledTask = false,
     bool KbWriteAllowed = true,
-    string? ConversationId = null
+    string? ConversationId = null,
+    List<string>? EnabledMcpSlugs = null
 );
 
 public record ChatHistoryEntry(string Role, string Content);

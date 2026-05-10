@@ -923,6 +923,17 @@ else
                 Logger.LogError(ex, "[MCP] Failed to load tools for conversation {ConvId}", conversation.Id);
             }
 
+            // Extract distinct MCP server slugs from available tools
+            var enabledMcpSlugs = availableTools
+                .Select(t => {
+                    var sep = t.FullName.IndexOf("__", StringComparison.Ordinal);
+                    return sep > 0 ? t.FullName[..sep] : null;
+                })
+                .Where(s => s != null)
+                .Distinct()
+                .Select(s => s!)
+                .ToList();
+
             var fullResponse = new System.Text.StringBuilder();
             int inputTokens = 0, outputTokens = 0;
 
@@ -933,7 +944,8 @@ else
                 History: chatHistory.Select(m => new ChatHistoryEntry(m.Role, m.Content)).ToList(),
                 TaskMode: _taskMode,
                 SystemPrompt: string.IsNullOrEmpty(effectiveSystemPrompt) ? null : effectiveSystemPrompt,
-                ConversationId: conversation.Id.ToString()
+                ConversationId: conversation.Id.ToString(),
+                EnabledMcpSlugs: enabledMcpSlugs.Count > 0 ? enabledMcpSlugs : null
             );
 
             await foreach (var evt in AgentRuntime.SendTurnAsync(Session.UserId.ToString(), turnRequest, streamingCts!.Token))
