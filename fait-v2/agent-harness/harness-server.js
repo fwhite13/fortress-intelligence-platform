@@ -384,8 +384,9 @@ const MCP_TOOL_SPECS = {
     }
   ]
 };
-// Support both slug variants for Azure DevOps
-MCP_TOOL_SPECS['ado'] = MCP_TOOL_SPECS['azdo'];
+// Support all slug variants for Azure DevOps
+MCP_TOOL_SPECS['ado']    = MCP_TOOL_SPECS['azdo'];
+MCP_TOOL_SPECS['devops'] = MCP_TOOL_SPECS['azdo'];  // DB slug
 
 function isToolAllowed(toolName) {
     // Check against each server's allowlist
@@ -1987,6 +1988,22 @@ app.post('/turn', async (req, res) => {
                                 toolResultText = rfData.content || rfData.error || 'No content returned.';
                             } catch (rfErr) {
                                 toolResultText = `Error reading file: ${rfErr.message}`;
+                            }
+                        } else if (
+                            toolUseAccumulator.name.startsWith('graph_') ||
+                            toolUseAccumulator.name.startsWith('ado_')
+                        ) {
+                            try {
+                                const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, ...toolInput })
+                                });
+                                const mcpData = await mcpRes.json();
+                                toolResultText = JSON.stringify(mcpData, null, 2);
+                            } catch (mcpErr) {
+                                toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
+                                isError = true;
                             }
                         } else {
                             // default: search_knowledge_base
