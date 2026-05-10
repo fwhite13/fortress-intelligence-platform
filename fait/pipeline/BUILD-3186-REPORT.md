@@ -144,3 +144,37 @@ dotnet build src/FortressAI.Web/FortressAI.Web.csproj
 
 ## Action Required
 - **Rhodey:** Apply `pipeline/MIGRATION-3186-SQL.sql` to `fait_dev` before deploy verification
+
+---
+
+## Review Cycle 2 — Targeted Fixes
+
+### CC Invocation Command
+```bash
+cd /home/fredw/projects/fip/fait && cat /tmp/cc-brief-3186-c2.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+
+### Commit
+| SHA | Message |
+|-----|---------|
+| `3a93b4c4` | `fix(fait#3186): reserved slug guard + scoped DbContext disposal in MemoryFileService` |
+
+### Fixes Applied
+
+- ✅ **Fix 1 — Reserved slug guard (`WriteTopicAsync`):** Added `if (slug.Equals("MEMORY", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException(...)` at the top of `WriteTopicAsync`, before any S3 or DB operation. Prevents silent data loss where a topic with slug `"MEMORY"` would overwrite the index file built by `RebuildMemoryIndexAsync`.
+
+- ✅ **Fix 2 — Scoped DbContext disposal (`WriteTopicAsync`):** Changed `await using var db = ...` to explicit `await using (var db = ...) { ... }` block. DbContext is fully disposed before `RebuildMemoryIndexAsync` is called, eliminating the dual-open-context condition flagged by Clint.
+
+- ✅ **Fix 3 — Scoped DbContext disposal (`DeleteTopicAsync`):** Same explicit block pattern applied. Also renamed `existing` → `topic` per spec diff for clarity. DbContext disposed before `RebuildMemoryIndexAsync`.
+
+### Build Result
+```
+Build succeeded.
+0 Error(s)
+```
+
+### Files Changed
+- `src/FortressAI.Web/Services/MemoryFileService.cs` — 3 targeted fixes, no other changes
+
+### Scope
+Strictly limited to the 3 issues Clint flagged. No other changes made.
