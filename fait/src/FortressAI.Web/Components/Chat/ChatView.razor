@@ -68,18 +68,6 @@ else
             }
             else
             {
-                @if (_briefContent.Length > 0 || _isBriefStreaming)
-                {
-                    <div class="resumption-brief-card">
-                        <div class="resumption-brief-content">@_briefContent.ToString()</div>
-                        @if (_isBriefStreaming)
-                        {
-                            <div class="resumption-brief-loading">
-                                <span class="streaming-cursor">▊</span>
-                            </div>
-                        }
-                    </div>
-                }
                 @if (wasSummarized)
                 {
                     <div class="context-summary-indicator">
@@ -95,6 +83,19 @@ else
                 @if (messages.Any(m => m.Role == "assistant") && _lastKbResult != null)
                 {
                     <KbIndicator Result="_lastKbResult" />
+                }
+                @* Resumption brief renders AFTER message history — ADO#3155 Bug 2 fix *@
+                @if (_briefContent.Length > 0 || _isBriefStreaming)
+                {
+                    <div class="resumption-brief-card">
+                        <div class="resumption-brief-content">@_briefContent.ToString()</div>
+                        @if (_isBriefStreaming)
+                        {
+                            <div class="resumption-brief-loading">
+                                <span class="streaming-cursor">▊</span>
+                            </div>
+                        }
+                    </div>
                 }
             }
 
@@ -1254,9 +1255,6 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
                 if (evt.Type == "text")
                 {
                     var content = evt.Content ?? "";
-                    // Strip the __brief_start__ sentinel
-                    if (_briefContent.Length == 0 && content.Contains("__brief_start__"))
-                        content = content.Replace("__brief_start__", "").TrimStart('\n', '\r');
                     _briefContent.Append(content);
                     StateHasChanged();
                 }
