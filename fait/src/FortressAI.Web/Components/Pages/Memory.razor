@@ -352,6 +352,12 @@ else
         if (string.IsNullOrWhiteSpace(_newTitle) || string.IsNullOrWhiteSpace(_newSlug)) return;
         var slug = _newSlug.Trim();
         var title = _newTitle.Trim();
+        if (slug.Equals("memory", StringComparison.OrdinalIgnoreCase))
+        {
+            Snackbar.Add("\"memory\" is a reserved slug. Choose a different title.", Severity.Error);
+            _showNewDialog = true;
+            return;
+        }
         _showNewDialog = false;
         await MemoryService.WriteTopicAsync(Session.UserId, slug, title, string.Empty);
         await LoadTopicsAsync();
