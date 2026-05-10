@@ -256,7 +256,7 @@
                         </ChildRowContent>
                     </MudTable>
 
-                    @if (_runHistory.Count == HistoryPageSize)
+                    @if (_hasMoreHistory)
                     {
                         <MudButton Variant="Variant.Text" OnClick="LoadMoreHistoryAsync" Class="mt-2">Load more</MudButton>
                     }
@@ -288,6 +288,7 @@
 
     private List<TaskRunHistoryItem>? _runHistory;
     private int _historyPage = 0;
+    private bool _hasMoreHistory = false;
     private const int HistoryPageSize = 50;
     private HashSet<Guid> _expandedRunIds = new();
 
@@ -359,6 +360,7 @@
                 Error = r.Error,
                 ResultSummary = r.ResultSummary
             }).ToList();
+            _hasMoreHistory = items.Count == HistoryPageSize;
         }
         catch (Exception ex)
         {
@@ -394,6 +396,7 @@
             });
             _runHistory ??= new List<TaskRunHistoryItem>();
             _runHistory.AddRange(mapped);
+            _hasMoreHistory = more.Count == HistoryPageSize;
             StateHasChanged();
         }
         catch (Exception ex)
