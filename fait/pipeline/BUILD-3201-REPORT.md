@@ -73,3 +73,36 @@ No — sequential: Blazor first (ConversationId in TurnRequest needed by harness
 4. Harness should call `create_document`, generate .docx, upload to S3, emit `artifact` SSE event
 5. Verify artifact event received in Blazor SSE handler
 6. Verify `user_workspace_files` row inserted in DB
+
+---
+
+## Review Cycle 2 — Targeted Fixes
+
+**Date:** 2026-05-10
+**Commit:** `1a648a4a`
+**CC invocation:** `cat /tmp/cc-brief-3201-c2.md | claude --model sonnet --print --dangerously-skip-permissions`
+
+### Fixes Applied
+
+**Fix 1 — ChatView.razor: Pass `ConversationId` in `TurnRequest`** ✅
+- File: `src/FortressAI.Web/Components/Chat/ChatView.razor` (line 895–896)
+- Added `ConversationId: conversation.Id.ToString()` as the last parameter to the `TurnRequest` constructor in the SSE streaming path
+- Root cause: Harness `/tools/create_document` validates `conversationId` as required; empty string caused 400 → tool completely broken
+- `conversation` variable was already in scope at the call site
+
+**Fix 2 — harness-server.js: Remove duplicate `save-artifact` call** ✅
+- File: `fait-v2/agent-harness/harness-server.js` (removed lines 817–835)
+- Removed the entire "Step 4 — Save artifact metadata" fetch block from `/tools/create_document` handler
+- Root cause: ChatView SSE `artifact` event handler already calls `SaveArtifactAsync` — harness was creating a duplicate DB row on every document creation
+- Handler now: generate-document → S3 upload → return `{success, filename, s3Key, sizeBytes}`
+
+### Build Results
+
+| Check | Result |
+|-------|--------|
+| `dotnet build FortressAI.Web.csproj --no-restore -c Release` | **0 errors**, 38 warnings (pre-existing) |
+| `node --check harness-server.js` | **SYNTAX OK** |
+
+### Files Changed
+- `fait/src/FortressAI.Web/Components/Chat/ChatView.razor` — +2 lines (ConversationId param)
+- `fait-v2/agent-harness/harness-server.js` — -20 lines (save-artifact block removed)

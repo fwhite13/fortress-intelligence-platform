@@ -21,6 +21,7 @@
 @inject MicrosoftTokenService M365TokenSvc
 @inject IUserAgentRuntime AgentRuntime
 @inject IWorkspaceFileService WorkspaceFileSvc
+@inject ChatLayoutState LayoutState
 @using Amazon.S3
 @using Amazon.S3.Model
 @inject IAmazonS3 S3
@@ -38,7 +39,10 @@
 }
 else
 {
-<div class="chat-container">
+<div style="display: flex; height: 100%; overflow: hidden; transition: all 0.2s ease;">
+
+    <div style="flex: 1; min-width: 0; overflow: hidden; display: flex; flex-direction: column; transition: all 0.2s ease;">
+        <div class="chat-container">
     <div class="chat-header">
         <div class="chat-header-identity">
             @if (!string.IsNullOrWhiteSpace(_avatarPreviewUrl))
@@ -303,6 +307,16 @@ else
             </div>
         }
     </div>
+        </div>
+    </div>
+
+    @if (LayoutState.ArtifactPanelOpen)
+    {
+        <div style="width: 40%; min-width: 320px; max-width: 600px; flex-shrink: 0; overflow: hidden; transition: all 0.2s ease;">
+            <ArtifactPreviewPanel />
+        </div>
+    }
+
 </div>
 }
 
@@ -323,6 +337,7 @@ else
     private bool _needsScroll = false;
     private bool _scrollListenerInitialized = false;
     private DotNetObjectReference<ChatView>? _dotNetRef;
+    private Action? _layoutStateChangeHandler;
     private string _userInput = "";
     private bool _isDictating = false;
     private bool _speechSupported = false;
@@ -378,6 +393,9 @@ else
             Nav.NavigateTo("/auth/redirect-to-login", forceLoad: true);
             return;
         }
+
+        _layoutStateChangeHandler = () => InvokeAsync(StateHasChanged);
+        LayoutState.OnChange += _layoutStateChangeHandler;
 
         // Onboarding gate — redirect new users to setup
         try
@@ -1341,6 +1359,8 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
             try { await JS.InvokeVoidAsync("fortressChat.removeScrollListener"); }
             catch { }
         }
+        if (_layoutStateChangeHandler != null)
+            LayoutState.OnChange -= _layoutStateChangeHandler;
         _dotNetRef?.Dispose();
     }
 

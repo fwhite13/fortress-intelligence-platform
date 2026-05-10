@@ -110,6 +110,7 @@ builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 builder.Services.AddScoped<ITaskNotificationService, TaskNotificationService>();
 builder.Services.AddScoped<IMemoryFileService, MemoryFileService>();
 builder.Services.AddScoped<IWorkspaceFileService, WorkspaceFileService>();
+builder.Services.AddScoped<ChatLayoutState>();
 builder.Services.AddSingleton<IDocumentGeneratorService, WordDocumentGenerator>();
 
 // Knowledge Base

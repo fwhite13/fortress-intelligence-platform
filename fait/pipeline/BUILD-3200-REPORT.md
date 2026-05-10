@@ -81,3 +81,38 @@ CREATE INDEX `idx_uwf_user_id` ON `user_workspace_files` (`user_id`);
 3. Simulate an `artifact` SSE event from the harness with payload `{"filename":"test.pdf","s3Key":"workspaces/.../test.pdf","mimeType":"application/pdf","sizeBytes":12345}`
 4. Verify `ArtifactCard` appears in ChatView with filename, size, disabled Preview, and Download button
 5. Click Download — should open presigned URL in new tab (not expose raw S3 key)
+
+---
+
+## Review Cycle 2 — Targeted Fix
+
+### CC Invocation
+```bash
+cat /tmp/cc-brief-3200-c2.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+
+### Commit
+`aca376f2` — fix(chat): reset _conversationArtifacts on conversation switch (#3200)
+
+### Fixes Applied ✅
+
+**Fix 1** — `else` block after `if (conversation != null)` in `ConversationId.HasValue` branch:
+```csharp
+else
+{
+    _conversationArtifacts = new();
+}
+```
+Resets artifacts when `GetConversationAsync` returns null for a valid `ConversationId`.
+
+**Fix 2** — `_conversationArtifacts = new();` added at top of `else if (conversation == null)` block:
+Resets artifacts when navigating to a new/null conversation (no ConversationId).
+
+### Build Result
+```
+0 Error(s) | 38 Warning(s) (pre-existing MUD0002 warnings, unrelated)
+Time Elapsed 00:00:08.45
+```
+
+### File Changed
+- `src/FortressAI.Web/Components/Chat/ChatView.razor` — 5 insertions

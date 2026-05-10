@@ -2,6 +2,8 @@
 @inject IWorkspaceFileService WorkspaceFileSvc
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
+@inject ChatLayoutState LayoutState
+@using FortressAI.Web.Services
 
 <MudCard Elevation="1" Class="mt-2" Style="max-width: 400px;">
     <MudCardContent Class="py-2 px-3">
@@ -18,10 +20,15 @@
         </div>
     </MudCardContent>
     <MudCardActions Class="pt-0 px-2 pb-2">
-        <MudTooltip Text="Preview coming soon">
+        @{
+            bool previewSupported = Artifact.MimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            string previewTooltip = previewSupported ? "" : "Preview not yet supported for this file type";
+        }
+        <MudTooltip Text="@previewTooltip" Disabled="@previewSupported">
             <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.Visibility"
-                       Disabled="true">
+                       Disabled="@(!previewSupported)"
+                       OnClick="PreviewArtifact">
                 Preview
             </MudButton>
         </MudTooltip>
@@ -71,6 +78,12 @@
         "text/plain" or "text/markdown" => Icons.Material.Filled.Article,
         _ => Icons.Material.Filled.InsertDriveFile
     };
+
+    private void PreviewArtifact()
+    {
+        var artifactRef = new ArtifactRef(Artifact.S3Key, Artifact.Filename, Artifact.MimeType);
+        LayoutState.OpenArtifactPreview(artifactRef);
+    }
 
     private static string FormatSize(long bytes)
     {
