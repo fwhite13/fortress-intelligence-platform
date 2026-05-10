@@ -1,0 +1,190 @@
+@page "/assistant-settings"
+@using Microsoft.EntityFrameworkCore
+<PageTitle>Assistant Settings — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject AssistantConfigService ConfigSvc
+@inject ISnackbar Snackbar
+@inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
+@inject ILogger<AssistantSettings> Logger
+@inject NavigationManager Nav
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="py-4">
+    <MudText Typo="Typo.h4" Class="mb-4">Assistant Settings</MudText>
+
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else
+    {
+        <!-- Assistant Identity -->
+        <MudCard Class="mb-4" Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.SmartToy" Class="mr-2" Style="vertical-align: middle;" />
+                        Assistant Identity
+                    </MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                        Customize what your assistant is called.
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudTextField @bind-Value="_assistantName" Label="Assistant Name" Variant="Variant.Outlined"
+                              MaxLength="30" Class="mb-3"
+                              HelperText="The name your assistant goes by" />
+                <MudTextField @bind-Value="_preferredName" Label="Your Preferred Name" Variant="Variant.Outlined"
+                              MaxLength="50" Class="mb-3"
+                              HelperText="What the assistant calls you" />
+            </MudCardContent>
+        </MudCard>
+
+        <!-- Communication Preferences -->
+        <MudCard Class="mb-4" Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.Tune" Class="mr-2" Style="vertical-align: middle;" />
+                        Communication Preferences
+                    </MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                        How your assistant communicates with you.
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <MudSelect @bind-Value="_communicationStyle" Label="Communication Style" Variant="Variant.Outlined" Class="mb-3">
+                    <MudSelectItem Value="@("concise")">Concise — Brief and to the point</MudSelectItem>
+                    <MudSelectItem Value="@("balanced")">Balanced — Clear with adequate detail</MudSelectItem>
+                    <MudSelectItem Value="@("detailed")">Detailed — Thorough and comprehensive</MudSelectItem>
+                </MudSelect>
+
+                <MudSelect @bind-Value="_responseFormat" Label="Response Format" Variant="Variant.Outlined" Class="mb-3">
+                    <MudSelectItem Value="@("mixed")">Mixed — Best format for context</MudSelectItem>
+                    <MudSelectItem Value="@("bullets")">Bullets — Structured lists</MudSelectItem>
+                    <MudSelectItem Value="@("prose")">Prose — Full paragraphs</MudSelectItem>
+                    <MudSelectItem Value="@("technical")">Technical — Code-friendly output</MudSelectItem>
+                </MudSelect>
+            </MudCardContent>
+        </MudCard>
+
+        <!-- Accent Color -->
+        <MudCard Class="mb-4" Elevation="2">
+            <MudCardHeader>
+                <CardHeaderContent>
+                    <MudText Typo="Typo.h6">
+                        <MudIcon Icon="@Icons.Material.Filled.Palette" Class="mr-2" Style="vertical-align: middle;" />
+                        Accent Color
+                    </MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                        Your assistant's signature color.
+                    </MudText>
+                </CardHeaderContent>
+            </MudCardHeader>
+            <MudCardContent>
+                <div style="display: flex; gap: var(--spacing-2, 12px); flex-wrap: wrap; align-items: center;">
+                    @foreach (var (hex, label) in _colorPresets)
+                    {
+                        var isSelected = string.Equals(_colorHex, hex, StringComparison.OrdinalIgnoreCase);
+                        <div title="@label"
+                             style="@($"width: 36px; height: 36px; border-radius: 50%; background-color: {hex}; cursor: pointer; display: flex; align-items: center; justify-content: center; border: {(isSelected ? "3px solid var(--color-text-primary, #e8edf2)" : "3px solid transparent")}; box-shadow: {(isSelected ? "0 0 0 2px " + hex : "none")}; transition: transform 0.1s;")"
+                             @onclick="() => _colorHex = hex">
+                            @if (isSelected)
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Check" Style="color: white; font-size: 1.1rem;" />
+                            }
+                        </div>
+                    }
+                </div>
+            </MudCardContent>
+        </MudCard>
+
+        <!-- Save -->
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSettings" Disabled="_saving"
+                   StartIcon="@Icons.Material.Filled.Save" Size="Size.Large">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            Save Settings
+        </MudButton>
+    }
+</MudContainer>
+
+@code {
+    private bool _loading = true;
+    private bool _saving = false;
+
+    private string _assistantName = "Assistant";
+    private string _preferredName = string.Empty;
+    private string _communicationStyle = "balanced";
+    private string _responseFormat = "mixed";
+    private string _colorHex = "#d4af37";
+
+    private readonly (string hex, string label)[] _colorPresets = new[]
+    {
+        ("#d4af37", "Gold"),
+        ("#4fc3f7", "Blue"),
+        ("#81c784", "Green"),
+        ("#ff8a65", "Orange"),
+        ("#ce93d8", "Purple"),
+        ("#ef9a9a", "Rose"),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Session.IsAuthenticated)
+        {
+            return;
+        }
+
+        var config = await ConfigSvc.GetOrCreateConfigAsync(Session.UserId);
+        _assistantName = config.AssistantName;
+        _preferredName = config.PreferredName ?? string.Empty;
+        _communicationStyle = !string.IsNullOrWhiteSpace(config.CommunicationStyle) ? config.CommunicationStyle : "balanced";
+        _responseFormat = !string.IsNullOrWhiteSpace(config.ResponseFormat) ? config.ResponseFormat : "mixed";
+        _colorHex = config.ColorHex;
+
+        _loading = false;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender && !Session.IsAuthenticated)
+        {
+            Nav.NavigateTo("/chat");
+        }
+    }
+
+    private async Task SaveSettings()
+    {
+        _saving = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var config = await db.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == Session.UserId);
+            if (config == null)
+            {
+                config = new FortressAI.Shared.Models.UserAssistantConfig { UserId = Session.UserId };
+                db.UserAssistantConfigs.Add(config);
+            }
+            config.AssistantName = _assistantName;
+            config.PreferredName = string.IsNullOrWhiteSpace(_preferredName) ? null : _preferredName.Trim();
+            config.CommunicationStyle = _communicationStyle;
+            config.ResponseFormat = _responseFormat;
+            config.ColorHex = _colorHex;
+            config.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+
+            Logger.LogInformation("Saved assistant settings for user {UserId}", Session.UserId);
+            Snackbar.Add("Settings saved", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving assistant settings for user {UserId}", Session.UserId);
+            Snackbar.Add($"Error saving: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}
