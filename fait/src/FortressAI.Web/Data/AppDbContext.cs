@@ -453,10 +453,9 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
             entity.Property(e => e.Prompt).HasColumnType("TEXT").IsRequired();
-            entity.Property(e => e.ScheduleType).HasMaxLength(20).IsRequired()
-                  .HasConversion<string>();
+            entity.Property(e => e.ScheduleType).HasColumnType("ENUM('recurring','on_demand')").IsRequired();
             entity.Property(e => e.CronExpression).HasMaxLength(100);
-            entity.Property(e => e.LastRunStatus).HasMaxLength(20);
+            entity.Property(e => e.LastRunStatus).HasColumnType("ENUM('success','failed','cancelled')");
             entity.Property(e => e.FailureCount).HasDefaultValue(0);
             entity.Property(e => e.AlertOnCompletion).HasDefaultValue(false);
             entity.Property(e => e.AlertOnFailure).HasDefaultValue(true);
@@ -477,7 +476,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.ToTable("scheduled_task_runs");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.Status).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.Status).HasColumnType("ENUM('success','failed','cancelled')").IsRequired();
             entity.Property(e => e.ResultSummary).HasMaxLength(500);
             entity.Property(e => e.ArtifactBlobPath).HasMaxLength(500);
             entity.Property(e => e.SandboxId).HasMaxLength(200);
