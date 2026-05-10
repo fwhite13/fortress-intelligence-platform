@@ -531,6 +531,11 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.HasIndex(e => e.UserId).HasDatabaseName("idx_uwfold_user_id");
             entity.HasIndex(e => e.ParentId).HasDatabaseName("idx_uwfold_parent_id");
+            entity.HasOne<WorkspaceFolder>()
+                  .WithMany()
+                  .HasForeignKey(f => f.ParentId)
+                  .OnDelete(DeleteBehavior.Cascade)
+                  .IsRequired(false);
         });
 
         modelBuilder.Entity<WorkspaceUpload>(entity =>
@@ -547,6 +552,11 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.HasIndex(e => e.UserId).HasDatabaseName("idx_uwup_user_id");
             entity.HasIndex(e => e.FolderId).HasDatabaseName("idx_uwup_folder_id");
+            entity.HasOne<WorkspaceFolder>()
+                  .WithMany()
+                  .HasForeignKey(u => u.FolderId)
+                  .OnDelete(DeleteBehavior.SetNull)
+                  .IsRequired(false);
         });
 
     }

@@ -107,7 +107,8 @@ public class WorkspaceUploadService : IWorkspaceUploadService
     public async Task<WorkspaceUpload> SaveUploadAsync(Guid userId, Guid? folderId, string filename, string mimeType, Stream content)
     {
         var id = Guid.NewGuid();
-        var s3Key = $"workspaces/{userId}/files/{folderId?.ToString() ?? "root"}/{filename}";
+        var safeFilename = Path.GetFileName(filename);
+        var s3Key = $"workspaces/{userId}/files/{folderId?.ToString() ?? "root"}/{safeFilename}";
 
         await _s3.PutObjectAsync(new PutObjectRequest
         {
@@ -125,14 +126,24 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             Id = id,
             UserId = userId,
             FolderId = folderId,
-            Filename = filename,
+            Filename = safeFilename,
             MimeType = mimeType,
             S3Key = s3Key,
             SizeBytes = sizeBytes,
             CreatedAt = DateTime.UtcNow
         };
         db.WorkspaceUploads.Add(upload);
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch
+        {
+            // Rollback: delete the S3 object we just uploaded
+            try { await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = s3Key }); }
+            catch { /* best-effort cleanup */ }
+            throw;
+        }
         return upload;
     }
 
