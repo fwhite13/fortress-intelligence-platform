@@ -1873,7 +1873,7 @@ app.post('/turn', async (req, res) => {
                             const lfRes = await fetch(`http://localhost:${PORT}/tools/list_files`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ userId: currentUserId, ...toolInput })
+                                body: JSON.stringify({ userId, ...toolInput })
                             });
                             const lfData = await lfRes.json();
                             toolResultText = JSON.stringify(lfData.items || []);
@@ -1885,7 +1885,7 @@ app.post('/turn', async (req, res) => {
                             const rfRes = await fetch(`http://localhost:${PORT}/tools/read_file`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ userId: currentUserId, ...toolInput })
+                                body: JSON.stringify({ userId, ...toolInput })
                             });
                             const rfData = await rfRes.json();
                             toolResultText = rfData.content || rfData.error || 'No content returned.';
