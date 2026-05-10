@@ -294,7 +294,7 @@ async function invokeStitchTool(toolName, args, timeoutMs = 30000) {
 // are inherently allowed by virtue of being registered; this catches the catch-all.
 const MCP_TOOL_ALLOWLIST = {
     'graph': new Set([
-        'graph_list_emails', 'graph_list_calendar', 'graph_get_email',
+        'graph_list_emails', 'graph_get_email',
         'graph_send_email', 'graph_list_files', 'graph_get_file_content',
         'graph_list_calendar_events'
     ]),
@@ -380,6 +380,21 @@ const MCP_TOOL_SPECS = {
         name: 'ado_list_projects',
         description: 'List all Azure DevOps projects',
         inputSchema: { json: { type: 'object', properties: {}, required: [] } }
+      }
+    },
+    {
+      toolSpec: {
+        name: 'ado_wiql_query',
+        description: 'Query Azure DevOps work items using WIQL (Work Item Query Language)',
+        inputSchema: {
+          json: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'WIQL query string' }
+            },
+            required: ['query']
+          }
+        }
       }
     }
   ]
