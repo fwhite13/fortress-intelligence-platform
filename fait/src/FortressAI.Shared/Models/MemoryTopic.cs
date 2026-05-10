@@ -1,5 +1,3 @@
-using FortressAI.Shared.Models;
-
 namespace FortressAI.Shared.Models;
 
 public class MemoryTopic
