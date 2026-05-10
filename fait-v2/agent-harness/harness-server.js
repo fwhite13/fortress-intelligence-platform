@@ -1781,7 +1781,8 @@ app.post('/turn', async (req, res) => {
                 let toolUseAccumulator = null;
                 let messageStopSeen = false;
                 let stopReason = 'end_turn';
-                let pendingToolResult = null;
+                // pendingToolResults replaces the scalar — handles multiple toolUse blocks per turn
+                const pendingToolResults = [];
 
                 const cmd = new ConverseStreamCommand({
                     modelId: MODEL_ID,
@@ -1812,6 +1813,7 @@ app.post('/turn', async (req, res) => {
                         console.log(`[harness] /turn: toolUse complete: name=${toolUseAccumulator.name}, input=${toolUseAccumulator.inputJson}`);
                         const toolInput = JSON.parse(toolUseAccumulator.inputJson || '{}');
                         let toolResultText = '';
+                        let isError = false;
 
                         if (toolUseAccumulator.name === 'list_workspace_files') {
                             try {
@@ -1907,8 +1909,13 @@ app.post('/turn', async (req, res) => {
                             }
                         } else {
                             // default: search_knowledge_base
-                            const kbResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal');
-                            toolResultText = `\n\n[KB Search Results]\n${kbResult}\n\n`;
+                            try {
+                                const kbResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal');
+                                toolResultText = `\n\n[KB Search Results]\n${kbResult}\n\n`;
+                            } catch (kbErr) {
+                                toolResultText = `\n\n[KB Search Error]\n${kbErr.message}\n\n`;
+                                isError = true;
+                            }
                         }
 
                         // ADO#3215: accumulate assistant content (text so far + toolUse block)
@@ -1925,10 +1932,11 @@ app.post('/turn', async (req, res) => {
                         });
 
                         // Store pending tool result to append to messages after messageStop
-                        pendingToolResult = {
+                        pendingToolResults.push({
                             toolUseId: toolUseAccumulator.toolUseId,
-                            toolResultText
-                        };
+                            toolResultText,
+                            isError
+                        });
                         toolUseAccumulator = null;
                     } else if (event.contentBlockDelta?.delta?.text) {
                         tokenCount++;
@@ -1957,26 +1965,29 @@ app.post('/turn', async (req, res) => {
                 }
 
                 // ADO#3215: if a tool was called, feed the result back to Bedrock and loop
-                if (pendingToolResult) {
+                if (pendingToolResults.length > 0) {
                     messages.push({ role: 'assistant', content: assistantContent });
                     messages.push({
                         role: 'user',
-                        content: [{
+                        content: pendingToolResults.map(r => ({
                             toolResult: {
-                                toolUseId: pendingToolResult.toolUseId,
-                                content: [{ text: pendingToolResult.toolResultText }],
-                                status: 'success'
+                                toolUseId: r.toolUseId,
+                                content: [{ text: r.toolResultText }],
+                                status: r.isError ? 'error' : 'success'
                             }
-                        }]
+                        }))
                     });
-                    pendingToolResult = null;
+                    pendingToolResults.length = 0;
                     continueLoop = true;
-                    console.log(`[harness] /turn: tool result fed back to Bedrock, looping (iteration ${toolIterations}/${MAX_TOOL_ITERATIONS})`);
+                    console.log(`[harness] /turn: tool result(s) fed back to Bedrock, looping (iteration ${toolIterations}/${MAX_TOOL_ITERATIONS})`);
                 } else {
                     // end_turn with no tool call — done
                     continueLoop = false;
                     console.log(`[harness] /turn: end_turn with no tool call, exiting agentic loop after ${toolIterations} iteration(s)`);
                 }
+            }
+            if (toolIterations >= MAX_TOOL_ITERATIONS) {
+                console.warn(`[harness] /turn: MAX_TOOL_ITERATIONS (${MAX_TOOL_ITERATIONS}) reached — agentic loop capped`);
             }
             console.log(`[harness] /turn: stream complete, sending done event for userId=${userId}`);
             // ADO#3093 — fire-and-forget preference detection write
