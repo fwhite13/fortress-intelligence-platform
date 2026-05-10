@@ -1,0 +1,385 @@
+@page "/memory"
+@using FortressAI.Shared.Models
+@using FortressAI.Web.Services
+@implements IAsyncDisposable
+<PageTitle>Memory — FAIT</PageTitle>
+@inject UserSessionService Session
+@inject IMemoryFileService MemoryService
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+@inject NavigationManager NavigationManager
+
+@if (!Session.IsAuthenticated)
+{
+    <MudAlert Severity="Severity.Warning">Please log in to view memory topics.</MudAlert>
+}
+else
+{
+    <MudGrid>
+        <!-- Left column: topic list -->
+        <MudItem xs="12" md="4">
+            <MudPaper Elevation="1" Class="pa-3" Style="height: calc(100vh - 120px); display: flex; flex-direction: column; overflow: hidden;">
+                <MudText Typo="Typo.h6" Style="color: var(--color-gold);" Class="mb-2">Memory Topics</MudText>
+
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="() => { _showNewDialog = true; _newTitle = string.Empty; _newSlug = string.Empty; _slugManuallyEdited = false; }"
+                           FullWidth="true" Class="mb-2">
+                    New Topic
+                </MudButton>
+
+                <MudTextField @bind-Value="_searchQuery"
+                              Label="Search topics"
+                              Variant="Variant.Outlined"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Immediate="true"
+                              Class="mb-2" />
+
+                <div style="flex: 1; overflow-y: auto;">
+                    @if (_loading)
+                    {
+                        <div style="display: flex; justify-content: center; padding: 16px;">
+                            <MudProgressCircular Indeterminate="true" />
+                        </div>
+                    }
+                    else if (_filteredTopics.Count == 0 && string.IsNullOrWhiteSpace(_searchQuery))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-2">
+                            No memory topics yet. Your assistant will create them automatically as it learns about you, or you can create one manually.
+                        </MudText>
+                    }
+                    else if (_filteredTopics.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-2">
+                            No topics match your search.
+                        </MudText>
+                    }
+                    else
+                    {
+                        <MudList T="MemoryTopic" Dense="true">
+                            @foreach (var topic in _filteredTopics)
+                            {
+                                var localTopic = topic;
+                                <MudListItem T="MemoryTopic"
+                                             OnClick="() => SelectTopicAsync(localTopic)"
+                                             Style="@(_selectedSlug == localTopic.Slug ? "background: var(--mud-palette-action-hover);" : "cursor: pointer;")">
+                                    <div>
+                                        <MudText Typo="Typo.body1" Style="font-weight: var(--font-bold);">@localTopic.Title</MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@TimeAgo(localTopic.UpdatedAt)</MudText>
+                                    </div>
+                                </MudListItem>
+                            }
+                        </MudList>
+                    }
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        <!-- Right column: viewer/editor -->
+        <MudItem xs="12" md="8">
+            <MudPaper Elevation="1" Class="pa-4" Style="height: calc(100vh - 120px); display: flex; flex-direction: column; overflow: hidden;">
+                @if (_selectedSlug == null)
+                {
+                    <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
+                        <MudText Color="Color.Secondary">Select a topic to view or edit.</MudText>
+                    </div>
+                }
+                else if (_contentLoading)
+                {
+                    <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
+                        <MudProgressCircular Indeterminate="true" />
+                    </div>
+                }
+                else
+                {
+                    <div style="display: flex; flex-direction: column; height: 100%;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                            <MudText Typo="Typo.h6" Style="color: var(--color-gold);">@_selectedTitle</MudText>
+                            <div style="display: flex; gap: 8px;">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                           StartIcon="@Icons.Material.Filled.Save"
+                                           OnClick="SaveTopicAsync">
+                                    Save
+                                </MudButton>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                                           StartIcon="@Icons.Material.Filled.Delete"
+                                           OnClick="ConfirmDeleteAsync">
+                                    Delete
+                                </MudButton>
+                            </div>
+                        </div>
+
+                        <div style="flex: 1; overflow: auto;">
+                            <MudTextField @bind-Value="_editorContent"
+                                          @oninput="OnEditorInput"
+                                          Label="@_selectedTitle"
+                                          Variant="Variant.Outlined"
+                                          Lines="24"
+                                          FullWidth="true"
+                                          AutoGrow="true" />
+                        </div>
+                    </div>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <!-- New Topic Dialog -->
+    @if (_showNewDialog)
+    {
+        <MudOverlay Visible="true" DarkBackground="true" ZIndex="1200">
+            <MudCard Style="min-width: 400px; padding: 16px;">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">New Memory Topic</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudTextField @bind-Value="_newTitle"
+                                  @oninput="OnNewTitleInput"
+                                  Label="Title"
+                                  Variant="Variant.Outlined"
+                                  Required="true"
+                                  Class="mb-3" />
+                    <MudTextField @bind-Value="_newSlug"
+                                  @oninput="OnNewSlugInput"
+                                  Label="Slug (auto-generated)"
+                                  Variant="Variant.Outlined"
+                                  Required="true"
+                                  HelperText="Lowercase, hyphens only (e.g. my-topic)" />
+                </MudCardContent>
+                <MudCardActions>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               OnClick="CreateTopicAsync"
+                               Disabled="@(string.IsNullOrWhiteSpace(_newTitle) || string.IsNullOrWhiteSpace(_newSlug))">
+                        Create
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined"
+                               OnClick="() => _showNewDialog = false">
+                        Cancel
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudOverlay>
+    }
+
+    <!-- Delete Confirmation Dialog -->
+    @if (_showDeleteConfirm)
+    {
+        <MudOverlay Visible="true" DarkBackground="true" ZIndex="1200">
+            <MudCard Style="min-width: 400px; padding: 16px;">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Delete Topic</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudText>Delete topic '@_selectedTitle'? This cannot be undone.</MudText>
+                </MudCardContent>
+                <MudCardActions>
+                    <MudButton Variant="Variant.Filled" Color="Color.Error"
+                               OnClick="DeleteTopicAsync">
+                        Delete
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined"
+                               OnClick="() => _showDeleteConfirm = false">
+                        Cancel
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudOverlay>
+    }
+}
+
+@code {
+    private List<MemoryTopic> _topics = new();
+    private List<MemoryTopic> _filteredTopics => string.IsNullOrWhiteSpace(_searchQuery)
+        ? _topics
+        : _topics.Where(t => t.Title.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)).ToList();
+    private string _searchQuery = string.Empty;
+    private bool _loading = true;
+    private bool _contentLoading = false;
+    private string? _selectedSlug;
+    private string? _selectedTitle;
+    private string _editorContent = string.Empty;
+    private bool _isDirty = false;
+    private bool _showNewDialog = false;
+    private bool _showDeleteConfirm = false;
+    private string _newTitle = string.Empty;
+    private string _newSlug = string.Empty;
+    private bool _slugManuallyEdited = false;
+    private IDisposable? _locationChangingHandler;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+
+        _locationChangingHandler = NavigationManager.RegisterLocationChangingHandler(OnLocationChanging);
+        await LoadTopicsAsync();
+    }
+
+    private async ValueTask OnLocationChanging(LocationChangingContext context)
+    {
+        if (_isDirty)
+        {
+            var confirmed = await DialogService.ShowMessageBox(
+                "Unsaved Changes",
+                $"You have unsaved changes to '{_selectedTitle}'. Leave without saving?",
+                yesText: "Leave",
+                cancelText: "Stay");
+            if (confirmed != true)
+            {
+                context.PreventNavigation();
+            }
+        }
+    }
+
+    private async Task LoadTopicsAsync()
+    {
+        _loading = true;
+        try
+        {
+            _topics = await MemoryService.GetTopicsAsync(Session.UserId);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SelectTopicAsync(MemoryTopic topic)
+    {
+        if (_isDirty && _selectedSlug != null)
+        {
+            var confirmed = await DialogService.ShowMessageBox(
+                "Unsaved Changes",
+                $"You have unsaved changes to '{_selectedTitle}'. Discard them?",
+                yesText: "Discard",
+                cancelText: "Keep editing");
+            if (confirmed != true) return;
+        }
+
+        _selectedSlug = topic.Slug;
+        _selectedTitle = topic.Title;
+        _isDirty = false;
+        await LoadTopicContentAsync(topic.Slug);
+    }
+
+    private async Task LoadTopicContentAsync(string slug)
+    {
+        _contentLoading = true;
+        _editorContent = string.Empty;
+        try
+        {
+            var content = await MemoryService.GetTopicContentAsync(Session.UserId, slug);
+            _editorContent = content ?? string.Empty;
+            _isDirty = false;
+        }
+        finally
+        {
+            _contentLoading = false;
+        }
+    }
+
+    private void OnEditorInput(ChangeEventArgs e)
+    {
+        _editorContent = e.Value?.ToString() ?? string.Empty;
+        _isDirty = true;
+    }
+
+    private async Task SaveTopicAsync()
+    {
+        if (_selectedSlug == null || _selectedTitle == null) return;
+        await MemoryService.WriteTopicAsync(Session.UserId, _selectedSlug, _selectedTitle, _editorContent);
+        _isDirty = false;
+        Snackbar.Add("Saved.", Severity.Success);
+        await LoadTopicsAsync();
+    }
+
+    private void ConfirmDeleteAsync()
+    {
+        _showDeleteConfirm = true;
+    }
+
+    private async Task DeleteTopicAsync()
+    {
+        if (_selectedSlug == null) return;
+        _showDeleteConfirm = false;
+        await MemoryService.DeleteTopicAsync(Session.UserId, _selectedSlug);
+        _selectedSlug = null;
+        _selectedTitle = null;
+        _editorContent = string.Empty;
+        _isDirty = false;
+        Snackbar.Add("Topic deleted.", Severity.Info);
+        await LoadTopicsAsync();
+    }
+
+    private void OnNewTitleInput(ChangeEventArgs e)
+    {
+        _newTitle = e.Value?.ToString() ?? string.Empty;
+        if (!_slugManuallyEdited)
+        {
+            _newSlug = GenerateSlug(_newTitle);
+        }
+    }
+
+    private void OnNewSlugInput(ChangeEventArgs e)
+    {
+        _newSlug = e.Value?.ToString() ?? string.Empty;
+        _slugManuallyEdited = true;
+    }
+
+    private static string GenerateSlug(string title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return string.Empty;
+        var slug = title.ToLowerInvariant()
+            .Replace(' ', '-');
+        // Strip non-alphanumeric except hyphens
+        var clean = new System.Text.StringBuilder();
+        foreach (var c in slug)
+        {
+            if (char.IsLetterOrDigit(c) || c == '-')
+                clean.Append(c);
+        }
+        // Collapse multiple hyphens
+        var result = System.Text.RegularExpressions.Regex.Replace(clean.ToString(), "-+", "-").Trim('-');
+        return result;
+    }
+
+    private async Task CreateTopicAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newTitle) || string.IsNullOrWhiteSpace(_newSlug)) return;
+        var slug = _newSlug.Trim();
+        var title = _newTitle.Trim();
+        _showNewDialog = false;
+        await MemoryService.WriteTopicAsync(Session.UserId, slug, title, string.Empty);
+        await LoadTopicsAsync();
+        // Select the new topic
+        var newTopic = _topics.FirstOrDefault(t => t.Slug == slug);
+        if (newTopic != null)
+        {
+            _selectedSlug = newTopic.Slug;
+            _selectedTitle = newTopic.Title;
+            _isDirty = false;
+            await LoadTopicContentAsync(newTopic.Slug);
+        }
+        Snackbar.Add($"Topic '{title}' created.", Severity.Success);
+    }
+
+    private static string TimeAgo(DateTime dt)
+    {
+        var diff = DateTime.UtcNow - dt.ToUniversalTime();
+        if (diff.TotalMinutes < 1) return "just now";
+        if (diff.TotalHours < 1) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff.TotalDays < 1) return $"{(int)diff.TotalHours}h ago";
+        if (diff.TotalDays < 7) return $"{(int)diff.TotalDays}d ago";
+        return dt.ToString("MMM d");
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _locationChangingHandler?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
