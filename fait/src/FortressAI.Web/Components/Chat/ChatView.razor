@@ -69,6 +69,16 @@ else
         }
     </div>
 
+    @if (_agentReady && _hasFailedTasks && !_failedTaskBannerDismissed)
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true"
+                  ShowCloseIcon="true" CloseIconClicked="@(() => _failedTaskBannerDismissed = true)"
+                  Class="mx-2 mt-2">
+            One or more scheduled tasks have failed.
+            <MudLink Href="/tasks">View tasks →</MudLink>
+        </MudAlert>
+    }
+
     <div class="chat-messages-wrapper">
         <div class="chat-messages" id="chat-messages">
             @if (conversation == null || !messages.Any())
@@ -345,6 +355,10 @@ else
     private bool _isBriefStreaming = false;
     private System.Text.StringBuilder _briefContent = new();
 
+    // Failed-task banner state
+    private bool _hasFailedTasks = false;
+    private bool _failedTaskBannerDismissed = false;
+
     protected override async Task OnInitializedAsync()
     {
         if (!Session.IsAuthenticated)
@@ -393,6 +407,8 @@ else
             _agentReady = true; // fail open: don't block chat on status check failure
         }
         _checkingAgent = false;
+        if (_agentReady)
+            _ = CheckFailedTasksAsync();
     }
 
     protected override async Task OnParametersSetAsync()
@@ -1340,6 +1356,25 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
         _wasColdStart = true;  // OnReady only fires from AssistantLoadingState (cold start path)
         _agentReady = true;
         StateHasChanged();
+        _ = CheckFailedTasksAsync();
+    }
+
+    private async Task CheckFailedTasksAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+        try
+        {
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            _hasFailedTasks = await ctx.ScheduledTasks
+                .AnyAsync(t => t.UserId == Session.UserId
+                            && t.IsActive
+                            && t.FailureCount > 0);
+        }
+        catch
+        {
+            _hasFailedTasks = false; // fail silently — banner is non-critical
+        }
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task HandleAgentRetry()

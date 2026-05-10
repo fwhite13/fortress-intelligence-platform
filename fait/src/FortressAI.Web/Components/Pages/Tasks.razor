@@ -2,8 +2,11 @@
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
 @using FortressAI.Web.Components.Tasks
+@using Microsoft.EntityFrameworkCore
 <PageTitle>Tasks — FAIT</PageTitle>
 @inject UserSessionService Session
+@inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
+@inject IUserAgentRuntime AgentRuntime
 @inject IScheduledTaskService TaskSvc
 @inject IDialogService DialogService
 @inject ISnackbar Snackbar
@@ -109,11 +112,155 @@
             </MudTabPanel>
 
             <MudTabPanel Text="On-Demand">
-                <MudText Typo="Typo.body1" Color="Color.Secondary">On-Demand tasks — coming soon.</MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="OpenCreateOnDemandModalAsync" Class="mb-3">
+                    Save On-Demand Prompt
+                </MudButton>
+
+                @if (_onDemandTasks == null || _onDemandTasks.Count == 0)
+                {
+                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-4">
+                        No saved prompts yet. Save a prompt to run it on demand.
+                    </MudText>
+                }
+                else
+                {
+                    <MudTable Items="@_onDemandTasks" Hover="true" Dense="false" Breakpoint="Breakpoint.Sm">
+                        <HeaderContent>
+                            <MudTh>Name</MudTh>
+                            <MudTh>Prompt Preview</MudTh>
+                            <MudTh>Last Run</MudTh>
+                            <MudTh>Last Result</MudTh>
+                            <MudTh>Actions</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            @{
+                                var localTask = context;
+                                var promptPreview = localTask.Prompt.Length > 100
+                                    ? localTask.Prompt.Substring(0, 100) + "…"
+                                    : localTask.Prompt;
+                            }
+                            <MudTd DataLabel="Name">@localTask.Name</MudTd>
+                            <MudTd DataLabel="Prompt Preview">
+                                <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">@promptPreview</MudText>
+                            </MudTd>
+                            <MudTd DataLabel="Last Run">
+                                @(localTask.LastRunAt.HasValue ? localTask.LastRunAt.Value.ToLocalTime().ToString("g") : "—")
+                            </MudTd>
+                            <MudTd DataLabel="Last Result">
+                                @if (localTask.LastRunStatus == "success")
+                                {
+                                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Success</MudChip>
+                                }
+                                else if (localTask.LastRunStatus == "failed")
+                                {
+                                    <MudChip T="string" Color="Color.Error" Size="Size.Small">Failed</MudChip>
+                                }
+                                else
+                                {
+                                    <MudChip T="string" Color="Color.Default" Size="Size.Small">Never run</MudChip>
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Actions">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                           OnClick="@(() => RunNowAsync(localTask))"
+                                           StartIcon="@Icons.Material.Filled.PlayArrow">
+                                    Run Now
+                                </MudButton>
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                               Title="Edit"
+                                               OnClick="@(() => OpenEditOnDemandModalAsync(localTask))"
+                                               Size="Size.Small" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Title="Delete"
+                                               Color="Color.Error"
+                                               OnClick="@(() => ConfirmDeleteOnDemandAsync(localTask))"
+                                               Size="Size.Small" />
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
             </MudTabPanel>
 
             <MudTabPanel Text="History">
-                <MudText Typo="Typo.body1" Color="Color.Secondary">Task run history — coming soon.</MudText>
+                @if (_runHistory == null || _runHistory.Count == 0)
+                {
+                    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-4">No task history yet.</MudText>
+                }
+                else
+                {
+                    <MudTable Items="@_runHistory" Hover="true" Dense="true" Breakpoint="Breakpoint.Sm">
+                        <HeaderContent>
+                            <MudTh></MudTh>
+                            <MudTh>Task</MudTh>
+                            <MudTh>Type</MudTh>
+                            <MudTh>Started</MudTh>
+                            <MudTh>Duration</MudTh>
+                            <MudTh>Status</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            @{
+                                var localRun = context;
+                                var duration = localRun.CompletedAt.HasValue
+                                    ? (localRun.CompletedAt.Value - localRun.StartedAt).TotalSeconds.ToString("F0") + "s"
+                                    : "—";
+                                var isExpanded = _expandedRunIds.Contains(localRun.RunId);
+                            }
+                            <MudTd>
+                                @if (!string.IsNullOrEmpty(localRun.Error) || !string.IsNullOrEmpty(localRun.ResultSummary))
+                                {
+                                    <MudIconButton Icon="@(isExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                                   Size="Size.Small" OnClick="@(() => ToggleExpand(localRun.RunId))" />
+                                }
+                            </MudTd>
+                            <MudTd DataLabel="Task">@localRun.TaskName</MudTd>
+                            <MudTd DataLabel="Type">
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@(localRun.ScheduleType == "recurring" ? Color.Info : Color.Default)">
+                                    @(localRun.ScheduleType == "recurring" ? "Recurring" : "On-Demand")
+                                </MudChip>
+                            </MudTd>
+                            <MudTd DataLabel="Started">@localRun.StartedAt.ToLocalTime().ToString("g")</MudTd>
+                            <MudTd DataLabel="Duration">@duration</MudTd>
+                            <MudTd DataLabel="Status">
+                                @if (localRun.Status == "success")
+                                {
+                                    <MudChip T="string" Color="Color.Success" Size="Size.Small">Success</MudChip>
+                                }
+                                else if (localRun.Status == "failed")
+                                {
+                                    <MudChip T="string" Color="Color.Error" Size="Size.Small">Failed</MudChip>
+                                }
+                                else
+                                {
+                                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">@localRun.Status</MudChip>
+                                }
+                            </MudTd>
+                        </RowTemplate>
+                        <ChildRowContent>
+                            @{
+                                var localRun = context;
+                                var isExpanded = _expandedRunIds.Contains(localRun.RunId);
+                            }
+                            @if (isExpanded)
+                            {
+                                <MudTr>
+                                    <MudTd colspan="6">
+                                        <MudText Typo="Typo.body2" Class="px-4 py-2" Style="white-space: pre-wrap;">
+                                            @(localRun.Status == "failed" ? localRun.Error : localRun.ResultSummary)
+                                        </MudText>
+                                    </MudTd>
+                                </MudTr>
+                            }
+                        </ChildRowContent>
+                    </MudTable>
+
+                    @if (_runHistory.Count == HistoryPageSize)
+                    {
+                        <MudButton Variant="Variant.Text" OnClick="LoadMoreHistoryAsync" Class="mt-2">Load more</MudButton>
+                    }
+                }
             </MudTabPanel>
         </MudTabs>
     }
@@ -123,6 +270,27 @@
     private List<ScheduledTask>? _recurringTasks;
     private bool _loading = true;
 
+    // On-Demand tab state
+    private List<ScheduledTask>? _onDemandTasks;
+
+    // History tab state
+    private class TaskRunHistoryItem
+    {
+        public Guid RunId { get; set; }
+        public string TaskName { get; set; } = "";
+        public string ScheduleType { get; set; } = "";
+        public DateTime StartedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
+        public string Status { get; set; } = "";
+        public string? Error { get; set; }
+        public string? ResultSummary { get; set; }
+    }
+
+    private List<TaskRunHistoryItem>? _runHistory;
+    private int _historyPage = 0;
+    private const int HistoryPageSize = 50;
+    private HashSet<Guid> _expandedRunIds = new();
+
     protected override async Task OnInitializedAsync()
     {
         if (!Session.IsAuthenticated)
@@ -131,6 +299,8 @@
             return;
         }
         await LoadRecurringTasksAsync();
+        await LoadOnDemandTasksAsync();
+        await LoadHistoryAsync();
         _loading = false;
     }
 
@@ -147,6 +317,218 @@
             Logger.LogError(ex, "[Tasks] Failed to load recurring tasks for user {UserId}", Session.UserId);
             _recurringTasks = new List<ScheduledTask>();
         }
+    }
+
+    private async Task LoadOnDemandTasksAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+        try
+        {
+            var all = await TaskSvc.GetTasksAsync(Session.UserId);
+            _onDemandTasks = all.Where(t => t.ScheduleType == "on_demand").ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Tasks] Failed to load on-demand tasks for user {UserId}", Session.UserId);
+            _onDemandTasks = new List<ScheduledTask>();
+        }
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+        try
+        {
+            _historyPage = 0;
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            var items = await ctx.ScheduledTaskRuns
+                .Include(r => r.Task)
+                .Where(r => r.Task != null && r.Task.UserId == Session.UserId)
+                .OrderByDescending(r => r.StartedAt)
+                .Skip(_historyPage * HistoryPageSize)
+                .Take(HistoryPageSize)
+                .ToListAsync();
+            _runHistory = items.Select(r => new TaskRunHistoryItem
+            {
+                RunId = r.Id,
+                TaskName = r.Task?.Name ?? "Unknown task",
+                ScheduleType = r.Task?.ScheduleType ?? "unknown",
+                StartedAt = r.StartedAt,
+                CompletedAt = r.CompletedAt,
+                Status = r.Status,
+                Error = r.Error,
+                ResultSummary = r.ResultSummary
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Tasks] Failed to load run history for user {UserId}", Session.UserId);
+            _runHistory = new List<TaskRunHistoryItem>();
+        }
+    }
+
+    private async Task LoadMoreHistoryAsync()
+    {
+        if (!Session.IsAuthenticated) return;
+        try
+        {
+            _historyPage++;
+            await using var ctx = await DbFactory.CreateDbContextAsync();
+            var more = await ctx.ScheduledTaskRuns
+                .Include(r => r.Task)
+                .Where(r => r.Task != null && r.Task.UserId == Session.UserId)
+                .OrderByDescending(r => r.StartedAt)
+                .Skip(_historyPage * HistoryPageSize)
+                .Take(HistoryPageSize)
+                .ToListAsync();
+            var mapped = more.Select(r => new TaskRunHistoryItem
+            {
+                RunId = r.Id,
+                TaskName = r.Task?.Name ?? "Unknown task",
+                ScheduleType = r.Task?.ScheduleType ?? "unknown",
+                StartedAt = r.StartedAt,
+                CompletedAt = r.CompletedAt,
+                Status = r.Status,
+                Error = r.Error,
+                ResultSummary = r.ResultSummary
+            });
+            _runHistory ??= new List<TaskRunHistoryItem>();
+            _runHistory.AddRange(mapped);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Tasks] Failed to load more history for user {UserId}", Session.UserId);
+        }
+    }
+
+    private void ToggleExpand(Guid runId)
+    {
+        if (!_expandedRunIds.Remove(runId))
+            _expandedRunIds.Add(runId);
+    }
+
+    private async Task OpenCreateOnDemandModalAsync()
+    {
+        var parameters = new DialogParameters<TaskEditModal>
+        {
+            { x => x.ExistingTask, null },
+            { x => x.IsOnDemand, true }
+        };
+        var dialog = await DialogService.ShowAsync<TaskEditModal>("Save On-Demand Prompt", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await LoadOnDemandTasksAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenEditOnDemandModalAsync(ScheduledTask task)
+    {
+        var parameters = new DialogParameters<TaskEditModal>
+        {
+            { x => x.ExistingTask, task },
+            { x => x.IsOnDemand, true }
+        };
+        var dialog = await DialogService.ShowAsync<TaskEditModal>("Edit On-Demand Prompt", parameters);
+        var result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await LoadOnDemandTasksAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task ConfirmDeleteOnDemandAsync(ScheduledTask task)
+    {
+        bool? confirmed = await DialogService.ShowMessageBox(
+            "Delete Prompt",
+            $"Delete '{task.Name}'? This cannot be undone.",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            var success = await TaskSvc.DeleteTaskAsync(task.Id, Session.UserId);
+            if (success)
+            {
+                _onDemandTasks?.Remove(task);
+                StateHasChanged();
+                Snackbar.Add("Prompt deleted", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("Failed to delete prompt", Severity.Error);
+            }
+        }
+    }
+
+    private async Task RunNowAsync(ScheduledTask task)
+    {
+        // 1. Create run row with Status="running"
+        var run = new FortressAI.Shared.Models.ScheduledTaskRun
+        {
+            Id = Guid.NewGuid(),
+            TaskId = task.Id,
+            StartedAt = DateTime.UtcNow,
+            Status = "running"
+        };
+        await using var ctx = await DbFactory.CreateDbContextAsync();
+        ctx.ScheduledTaskRuns.Add(run);
+        await ctx.SaveChangesAsync();
+
+        // 2. Optimistic UI update
+        task.LastRunAt = DateTime.UtcNow;
+        StateHasChanged();
+        Snackbar.Add($"Task '{task.Name}' started — check History for results.", Severity.Info);
+
+        // 3. Fire-and-forget dispatch (do NOT await — don't block UI)
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var userId = Session.UserId.ToString();
+                var turnRequest = new FortressAI.Web.Services.TurnRequest(
+                    UserId: userId,
+                    Message: task.Prompt,
+                    IsScheduledTask: true,
+                    TaskMode: task.TaskMode
+                );
+                var sb = new System.Text.StringBuilder();
+                await foreach (var evt in AgentRuntime.SendTurnAsync(userId, turnRequest))
+                {
+                    if (evt.Type == "text" && !string.IsNullOrEmpty(evt.Content))
+                        sb.Append(evt.Content);
+                }
+                // Update run row to success
+                await using var doneCtx = await DbFactory.CreateDbContextAsync();
+                var savedRun = await doneCtx.ScheduledTaskRuns.FindAsync(run.Id);
+                if (savedRun != null)
+                {
+                    savedRun.Status = "success";
+                    savedRun.CompletedAt = DateTime.UtcNow;
+                    savedRun.ResultSummary = sb.Length > 500 ? sb.ToString(0, 500) : sb.ToString();
+                    await doneCtx.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    await using var errCtx = await DbFactory.CreateDbContextAsync();
+                    var savedRun = await errCtx.ScheduledTaskRuns.FindAsync(run.Id);
+                    if (savedRun != null)
+                    {
+                        savedRun.Status = "failed";
+                        savedRun.CompletedAt = DateTime.UtcNow;
+                        savedRun.Error = ex.Message;
+                        await errCtx.SaveChangesAsync();
+                    }
+                }
+                catch { /* best effort */ }
+            }
+        });
     }
 
     private async Task OpenCreateModalAsync()

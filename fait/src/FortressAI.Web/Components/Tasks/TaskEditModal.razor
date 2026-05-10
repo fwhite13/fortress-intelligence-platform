@@ -6,7 +6,7 @@
 <MudDialog>
     <TitleContent>
         <MudText Typo="Typo.h6">
-            @(ExistingTask == null ? "Create Recurring Task" : "Edit Task")
+            @(ExistingTask == null ? (IsOnDemand ? "Save On-Demand Prompt" : "Create Recurring Task") : "Edit Task")
         </MudText>
     </TitleContent>
     <DialogContent>
@@ -16,18 +16,21 @@
             <MudTextField @bind-Value="_prompt" Label="Prompt" Required="true" Lines="4"
                           Variant="Variant.Outlined" />
 
-            <MudSelect @bind-Value="_cronPreset" Label="Schedule" T="string" Variant="Variant.Outlined">
-                <MudSelectItem Value="@("0 * * * *")">Hourly</MudSelectItem>
-                <MudSelectItem Value="@("0 9 * * *")">Daily at 9am</MudSelectItem>
-                <MudSelectItem Value="@("0 9 * * 1")">Weekly (Mondays at 9am)</MudSelectItem>
-                <MudSelectItem Value="@("0 9 * * 1-5")">Weekdays at 9am</MudSelectItem>
-                <MudSelectItem Value="@("custom")">Custom</MudSelectItem>
-            </MudSelect>
-
-            @if (_cronPreset == "custom")
+            @if (!IsOnDemand)
             {
-                <MudTextField @bind-Value="_customCron" Label="Custom cron expression"
-                              Placeholder="0 9 * * *" Variant="Variant.Outlined" />
+                <MudSelect @bind-Value="_cronPreset" Label="Schedule" T="string" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@("0 * * * *")">Hourly</MudSelectItem>
+                    <MudSelectItem Value="@("0 9 * * *")">Daily at 9am</MudSelectItem>
+                    <MudSelectItem Value="@("0 9 * * 1")">Weekly (Mondays at 9am)</MudSelectItem>
+                    <MudSelectItem Value="@("0 9 * * 1-5")">Weekdays at 9am</MudSelectItem>
+                    <MudSelectItem Value="@("custom")">Custom</MudSelectItem>
+                </MudSelect>
+
+                @if (_cronPreset == "custom")
+                {
+                    <MudTextField @bind-Value="_customCron" Label="Custom cron expression"
+                                  Placeholder="0 9 * * *" Variant="Variant.Outlined" />
+                }
             }
 
             <MudSwitch @bind-Value="_taskMode" Label="Run as task (uses CC sandbox)" Color="Color.Primary" />
@@ -43,7 +46,7 @@
     <DialogActions>
         <MudButton OnClick="Cancel" Variant="Variant.Text">Cancel</MudButton>
         <MudButton OnClick="SaveAsync" Variant="Variant.Filled" Color="Color.Primary" Disabled="@_saving">
-            @(_saving ? "Saving..." : (ExistingTask == null ? "Create" : "Save"))
+            @(_saving ? "Saving..." : (ExistingTask == null ? (IsOnDemand ? "Save Prompt" : "Create") : "Save"))
         </MudButton>
     </DialogActions>
 </MudDialog>
@@ -51,6 +54,7 @@
 @code {
     [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public ScheduledTask? ExistingTask { get; set; }
+    [Parameter] public bool IsOnDemand { get; set; } = false;
 
     private string _name = string.Empty;
     private string _prompt = string.Empty;
@@ -102,13 +106,13 @@
             _validationError = "Prompt is required.";
             return;
         }
-        if (_cronPreset == "custom" && string.IsNullOrWhiteSpace(_customCron))
+        if (!IsOnDemand && _cronPreset == "custom" && string.IsNullOrWhiteSpace(_customCron))
         {
             _validationError = "Custom cron expression is required.";
             return;
         }
 
-        var cron = _cronPreset == "custom" ? _customCron : _cronPreset;
+        var cron = (!IsOnDemand && _cronPreset == "custom") ? _customCron : _cronPreset;
 
         _saving = true;
         try
@@ -119,8 +123,8 @@
                 {
                     Name = _name,
                     Prompt = _prompt,
-                    ScheduleType = "recurring",
-                    CronExpression = cron,
+                    ScheduleType = IsOnDemand ? "on_demand" : "recurring",
+                    CronExpression = IsOnDemand ? null : cron,
                     TaskMode = _taskMode,
                     AlertOnCompletion = _alertOnCompletion,
                     AlertOnFailure = _alertOnFailure
