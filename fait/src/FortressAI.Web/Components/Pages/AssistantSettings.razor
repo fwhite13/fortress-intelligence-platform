@@ -252,6 +252,9 @@
         {
             var bucket = AppConfig["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
             var s3Prefix = AppConfig["WORKSPACE_S3_PREFIX"] ?? "";
+            // Normalize prefix: ensure trailing slash so key is always prefix + workspaces/...
+            if (!string.IsNullOrEmpty(s3Prefix) && !s3Prefix.EndsWith('/'))
+                s3Prefix += '/';
             var fileName = $"{Guid.NewGuid()}{ext}";
             var key = $"{s3Prefix}workspaces/{Session.UserId}/avatar/{fileName}";
 
@@ -331,6 +334,6 @@
         height: var(--avatar-size-lg, 80px);
         border-radius: var(--radius-full, 50%);
         object-fit: cover;
-        border: 2px solid var(--color-accent, #d4af37);
+        border: var(--border-width-thin, 2px) solid var(--color-accent, #d4af37);
     }
 </style>
