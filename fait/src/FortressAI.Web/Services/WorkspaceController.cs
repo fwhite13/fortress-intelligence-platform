@@ -81,7 +81,8 @@ public class WorkspaceController : ControllerBase
         var sections = request.Sections?.Select(s => new DocumentSection(s.Heading, s.Content)).ToList()
             ?? new List<DocumentSection>();
 
-        var bytes = await _documentGeneratorService.GenerateAsync(request.Type, request.Title, sections);
+        var docRequest = new DocumentGenerationRequest(request.Type, request.Title, sections);
+        var bytes = await _documentGeneratorService.GenerateAsync(docRequest);
         return File(bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     }
 }

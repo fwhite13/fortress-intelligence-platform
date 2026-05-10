@@ -6,8 +6,7 @@ namespace FortressAI.Web.Services;
 
 public class StubDocumentGeneratorService : IDocumentGeneratorService
 {
-    public Task<byte[]> GenerateAsync(string type, string title, List<DocumentSection> sections,
-        CancellationToken ct = default)
+    public Task<byte[]> GenerateAsync(DocumentGenerationRequest request, CancellationToken ct = default)
     {
         using var ms = new MemoryStream();
         using (var wordDoc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
@@ -15,7 +14,7 @@ public class StubDocumentGeneratorService : IDocumentGeneratorService
             var mainPart = wordDoc.AddMainDocumentPart();
             mainPart.Document = new Document(
                 new Body(
-                    new Paragraph(new Run(new Text($"{title} — Document generation coming soon"))),
+                    new Paragraph(new Run(new Text($"{request.Title} — Document generation coming soon"))),
                     new SectionProperties()
                 )
             );
