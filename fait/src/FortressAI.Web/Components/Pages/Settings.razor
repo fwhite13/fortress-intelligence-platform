@@ -2,6 +2,8 @@
 @using FortressAI.Web.Services.Mcp
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.Extensions.Caching.Memory
+@using Amazon.S3
+@using Amazon.S3.Model
 <PageTitle>Settings — FAIT</PageTitle>
 @inject UserSessionService Session
 @inject AssistantConfigService ConfigSvc
@@ -14,6 +16,8 @@
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> ContextFactory
+@inject IAmazonS3 S3
+@inject ILogger<Settings> Logger
 
 <MudContainer MaxWidth="MaxWidth.Medium" Class="py-4">
     <MudText Typo="Typo.h4" Class="mb-4">Settings</MudText>
@@ -24,275 +28,359 @@
     }
     else
     {
-        <!-- Your Profile -->
-        <MudCard Class="mb-4" Elevation="2">
-            <MudCardHeader>
-                <CardHeaderContent>
-                    <MudText Typo="Typo.h6">
-                        <MudIcon Icon="@Icons.Material.Filled.Person" Class="mr-2" Style="vertical-align: middle;" />
-                        Your Profile
-                    </MudText>
-                </CardHeaderContent>
-            </MudCardHeader>
-            <MudCardContent>
-                <MudTextField @bind-Value="_displayName" Label="What should FAIT call you?"
-                              Variant="Variant.Outlined" MaxLength="50" Class="mb-2"
-                              HelperText="This name is used by FAIT in your conversations" />
-                <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
-                    @Session.CurrentUser?.Email
-                </MudText>
-            </MudCardContent>
-        </MudCard>
+        <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="_activeTab">
+            <MudTabPanel Text="Assistant" Icon="@Icons.Material.Filled.SmartToy">
 
-        <!-- Tool Connections (MCP) -->
-        <MudCard Class="mb-4" Elevation="2">
-            <MudCardHeader>
-                <CardHeaderContent>
-                    <MudText Typo="Typo.h6">
-                        <MudIcon Icon="@Icons.Material.Filled.Extension" Class="mr-2" Style="vertical-align: middle;" />
-                        Tool Connections
-                    </MudText>
-                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
-                        Connect external tools to use them in your conversations.
-                    </MudText>
-                </CardHeaderContent>
-            </MudCardHeader>
-            <MudCardContent>
-                @if (!_mcpConnections.Any(s => s.Server.Slug != "devops"))
-                {
-                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">No tool integrations configured.</MudText>
-                }
-                else
-                {
-                    @foreach (var status in _mcpConnections.Where(s => s.Server.Slug != "devops"))
-                    {
-                        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--color-border);">
-                            <MudText Style="flex: 1; font-weight: 500;">@status.Server.Name</MudText>
-                            @if (!status.Server.RequiresUserAuth)
+                <!-- Your Profile -->
+                <MudCard Class="mb-4 mt-4" Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">
+                                <MudIcon Icon="@Icons.Material.Filled.Person" Class="mr-2" Style="vertical-align: middle;" />
+                                Your Profile
+                            </MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudTextField @bind-Value="_displayName" Label="What should FAIT call you?"
+                                      Variant="Variant.Outlined" MaxLength="50" Class="mb-2"
+                                      HelperText="This name is used by FAIT in your conversations" />
+                        <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                            @Session.CurrentUser?.Email
+                        </MudText>
+                    </MudCardContent>
+                </MudCard>
+
+                <!-- Assistant Identity & Config -->
+                <MudCard Class="mb-4" Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">
+                                <MudIcon Icon="@Icons.Material.Filled.SmartToy" Class="mr-2" Style="vertical-align: middle;" />
+                                Assistant
+                            </MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudTextField @bind-Value="_assistantName" Label="Assistant Name" Variant="Variant.Outlined" MaxLength="30" Class="mb-3" />
+
+                        <MudText Typo="Typo.subtitle2" Class="mb-2">Avatar Icon</MudText>
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">
+                            @foreach (var (id, icon) in _avatarOptions)
                             {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Available automatically</MudChip>
-                            }
-                            else if (status.IsConnected)
-                            {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">
-                                    Connected as @(status.ConnectedAs ?? "unknown")
-                                </MudChip>
-                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error"
-                                           OnClick="@(() => DisconnectMcp(status.Server))">
-                                    Disconnect
-                                </MudButton>
-                            }
-                            else
-                            {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Not Connected</MudChip>
-                                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
-                                           OnClick="@(() => Nav.NavigateTo($"/mcp/oauth/connect/{status.Server.Slug}", forceLoad: true))">
-                                    Connect →
-                                </MudButton>
+                                <MudAvatar Style="@($"width: 44px; height: 44px; cursor: pointer; border: 2px solid {(_avatarId == id ? _colorHex : "transparent")}; background: {(_avatarId == id ? _colorHex + "22" : "#f3f4f6")}")"
+                                           @onclick="() => _avatarId = id">
+                                    <MudIcon Icon="@icon" Style="@($"color: {(_avatarId == id ? _colorHex : "#6b7280")}")" />
+                                </MudAvatar>
                             }
                         </div>
-                    }
-                }
-            </MudCardContent>
-        </MudCard>
 
-        <!-- Microsoft 365 Connection (Priority #1) -->
-        <MudCard Class="mb-4" Elevation="2">
-            <MudCardHeader>
-                <CardHeaderContent>
-                    <MudText Typo="Typo.h6">
-                        <MudIcon Icon="@Icons.Material.Filled.Cloud" Class="mr-2" Style="vertical-align: middle;" />
-                        Microsoft 365 Connection
-                    </MudText>
-                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
-                        Connect your Microsoft 365 account to enable email and calendar briefings.
-                    </MudText>
-                </CardHeaderContent>
-            </MudCardHeader>
-            <MudCardContent>
-                @if (_msConnected)
-                {
-                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-3">
-                        <strong>Connected</strong> as @(_msEmail ?? "Microsoft 365 user")
-                    </MudAlert>
-                    <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DisconnectMicrosoft"
-                               StartIcon="@Icons.Material.Filled.LinkOff" Size="Size.Small">
-                        Disconnect
-                    </MudButton>
-                }
-                else
-                {
-                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
-                        Not connected. Morning briefings require Microsoft 365 access.
-                    </MudAlert>
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConnectMicrosoft"
-                               StartIcon="@Icons.Material.Filled.Link" Size="Size.Large">
-                        Connect Microsoft 365
-                    </MudButton>
-                    <MudText Typo="Typo.caption" Class="mt-2" Style="color: var(--color-text-tertiary);">
-                        Grants read access to your email and calendar. No emails will be sent on your behalf.
-                    </MudText>
-                }
-            </MudCardContent>
-        </MudCard>
+                        <MudColorPicker @bind-Value="_accentColor" Label="Accent Color" Variant="Variant.Outlined"
+                                        Class="mb-3" Style="max-width: 300px;" />
 
-        <!-- Azure DevOps Connection -->
-        <MudCard Class="mb-4" Elevation="2">
-            <MudCardHeader>
-                <CardHeaderContent>
-                    <MudText Typo="Typo.h6">
-                        <MudIcon Icon="@Icons.Material.Filled.Code" Class="mr-2" Style="vertical-align: middle;" />
-                        Azure DevOps
-                    </MudText>
-                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
-                        Connect Azure DevOps to enable work item queries, pipeline triggers, and repo browsing.
-                        Generate a PAT at: <strong>Azure DevOps → User Settings → Personal Access Tokens</strong>.
-                    </MudText>
-                </CardHeaderContent>
-            </MudCardHeader>
-            <MudCardContent>
-                @if (_devOpsConnected)
-                {
-                    <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-3">
-                        <strong>Connected</strong> to @_devOpsOrgUrl
-                    </MudAlert>
-                    <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DisconnectDevOps"
-                               StartIcon="@Icons.Material.Filled.LinkOff" Size="Size.Small">
-                        Disconnect
-                    </MudButton>
-                }
-                else
-                {
-                    <MudTextField @bind-Value="_devOpsOrgUrl"
-                                  Label="Organization URL"
-                                  Placeholder="https://dev.azure.com/yourorg"
-                                  Variant="Variant.Outlined"
-                                  Class="mb-3" />
-                    <MudTextField @bind-Value="_devOpsPat"
-                                  Label="Personal Access Token"
-                                  InputType="InputType.Password"
-                                  Placeholder="Paste your PAT here"
-                                  Variant="Variant.Outlined"
-                                  Class="mb-3" />
-                    @if (!string.IsNullOrEmpty(_devOpsTestMessage))
-                    {
-                        <MudAlert Severity="@(_devOpsTestSuccess ? Severity.Success : Severity.Error)"
-                                  Variant="Variant.Outlined" Class="mb-3" Dense="true">
-                            @_devOpsTestMessage
-                        </MudAlert>
-                    }
-                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                        <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
-                                   OnClick="TestDevOpsConnection"
-                                   Disabled="@(_devOpsTesting || string.IsNullOrWhiteSpace(_devOpsOrgUrl) || string.IsNullOrWhiteSpace(_devOpsPat))">
-                            @if (_devOpsTesting)
+                        <MudSelect @bind-Value="_personalityPreset" Label="Personality" Variant="Variant.Outlined" Class="mb-3">
+                            <MudSelectItem Value="@("formal")">Formal — Professional, thorough, precise</MudSelectItem>
+                            <MudSelectItem Value="@("friendly")">Friendly — Warm, approachable, conversational</MudSelectItem>
+                            <MudSelectItem Value="@("concise")">Concise — Brief, efficient, no filler</MudSelectItem>
+                        </MudSelect>
+
+                        <MudDivider Class="my-3" />
+
+                        <MudText Typo="Typo.subtitle1" Class="mb-3">About You</MudText>
+
+                        <MudTextField @bind-Value="_preferredName" Label="Preferred Name"
+                                      HelperText="What the assistant calls you"
+                                      Variant="Variant.Outlined" MaxLength="100" Class="mb-3" />
+
+                        <MudTextField @bind-Value="_role" Label="Your Role"
+                                      Variant="Variant.Outlined" MaxLength="100" Class="mb-3" />
+
+                        <MudTextField @bind-Value="_responsibilities" Label="Key Responsibilities"
+                                      Variant="Variant.Outlined" Lines="3" MaxLength="500" Class="mb-3" />
+
+                        <MudSelect @bind-Value="_communicationStyle" Label="Communication Style" Variant="Variant.Outlined" Class="mb-3">
+                            <MudSelectItem Value="@("concise")">Concise — brief and to the point</MudSelectItem>
+                            <MudSelectItem Value="@("balanced")">Balanced — clear with adequate detail</MudSelectItem>
+                            <MudSelectItem Value="@("detailed")">Detailed — thorough and comprehensive</MudSelectItem>
+                        </MudSelect>
+
+                        <MudSelect @bind-Value="_responseFormat" Label="Response Format" Variant="Variant.Outlined" Class="mb-3">
+                            <MudSelectItem Value="@("mixed")">Mixed — best format for context</MudSelectItem>
+                            <MudSelectItem Value="@("bullets")">Bullets — structured lists</MudSelectItem>
+                            <MudSelectItem Value="@("prose")">Prose — full paragraphs</MudSelectItem>
+                            <MudSelectItem Value="@("technical")">Technical — code-friendly output</MudSelectItem>
+                        </MudSelect>
+
+                        <MudSwitch @bind-Value="_showCitations" Label="Show source citations" Color="Color.Primary" Class="mb-3" />
+
+                        <MudDivider Class="my-3" />
+
+                        <MudText Typo="Typo.subtitle2" Class="mt-3 mb-2">Profile Photo (optional)</MudText>
+                        @if (!string.IsNullOrWhiteSpace(_avatarPreviewUrl))
+                        {
+                            <div class="avatar-preview-wrapper">
+                                <img src="@_avatarPreviewUrl" alt="Profile photo" class="avatar-preview-img" />
+                            </div>
+                        }
+                        <MudFileUpload T="IBrowserFile" FilesChanged="HandleAvatarUpload" Accept=".jpg,.jpeg,.png" MaximumFileCount="1">
+                            <ActivatorContent>
+                                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Upload" Disabled="@_avatarUploading">
+                                    @(_avatarUploading ? "Uploading..." : (!string.IsNullOrWhiteSpace(_avatarUrl) ? "Change Photo" : "Upload Photo"))
+                                </MudButton>
+                            </ActivatorContent>
+                        </MudFileUpload>
+                        @if (_avatarError != null)
+                        {
+                            <MudText Color="Color.Error" Typo="Typo.caption">@_avatarError</MudText>
+                        }
+
+                    </MudCardContent>
+                </MudCard>
+
+            </MudTabPanel>
+
+            <MudTabPanel Text="Integrations" Icon="@Icons.Material.Filled.Extension">
+
+                <!-- Tool Connections (MCP) -->
+                <MudCard Class="mb-4 mt-4" Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">
+                                <MudIcon Icon="@Icons.Material.Filled.Extension" Class="mr-2" Style="vertical-align: middle;" />
+                                Tool Connections
+                            </MudText>
+                            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                                Connect external tools to use them in your conversations.
+                            </MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        @if (!_mcpConnections.Any(s => s.Server.Slug != "devops"))
+                        {
+                            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">No tool integrations configured.</MudText>
+                        }
+                        else
+                        {
+                            @foreach (var status in _mcpConnections.Where(s => s.Server.Slug != "devops"))
                             {
-                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--color-border);">
+                                    <MudText Style="flex: 1; font-weight: 500;">@status.Server.Name</MudText>
+                                    @if (!status.Server.RequiresUserAuth)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">Available automatically</MudChip>
+                                    }
+                                    else if (status.IsConnected)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">
+                                            Connected as @(status.ConnectedAs ?? "unknown")
+                                        </MudChip>
+                                        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Error"
+                                                   OnClick="@(() => DisconnectMcp(status.Server))">
+                                            Disconnect
+                                        </MudButton>
+                                    }
+                                    else
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">Not Connected</MudChip>
+                                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                                   OnClick="@(() => Nav.NavigateTo($"/mcp/oauth/connect/{status.Server.Slug}", forceLoad: true))">
+                                            Connect →
+                                        </MudButton>
+                                    }
+                                </div>
                             }
-                            Test Connection
-                        </MudButton>
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                                   OnClick="SaveDevOpsConnection"
-                                   Disabled="@(string.IsNullOrWhiteSpace(_devOpsOrgUrl) || string.IsNullOrWhiteSpace(_devOpsPat))">
-                            Save Connection
-                        </MudButton>
-                    </div>
-                }
-            </MudCardContent>
-        </MudCard>
+                        }
+                    </MudCardContent>
+                </MudCard>
 
-        <!-- Assistant Identity -->
-        <MudCard Class="mb-4" Elevation="2">
-            <MudCardHeader>
-                <CardHeaderContent>
-                    <MudText Typo="Typo.h6">
-                        <MudIcon Icon="@Icons.Material.Filled.SmartToy" Class="mr-2" Style="vertical-align: middle;" />
-                        Assistant Identity
-                    </MudText>
-                </CardHeaderContent>
-            </MudCardHeader>
-            <MudCardContent>
-                <MudTextField @bind-Value="_assistantName" Label="Assistant Name" Variant="Variant.Outlined" MaxLength="30" Class="mb-3" />
+                <!-- Microsoft 365 Connection -->
+                <MudCard Class="mb-4" Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">
+                                <MudIcon Icon="@Icons.Material.Filled.Cloud" Class="mr-2" Style="vertical-align: middle;" />
+                                Microsoft 365 Connection
+                            </MudText>
+                            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                                Connect your Microsoft 365 account to enable email and calendar briefings.
+                            </MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        @if (_msConnected)
+                        {
+                            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-3">
+                                <strong>Connected</strong> as @(_msEmail ?? "Microsoft 365 user")
+                            </MudAlert>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DisconnectMicrosoft"
+                                       StartIcon="@Icons.Material.Filled.LinkOff" Size="Size.Small">
+                                Disconnect
+                            </MudButton>
+                        }
+                        else
+                        {
+                            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
+                                Not connected. Morning briefings require Microsoft 365 access.
+                            </MudAlert>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConnectMicrosoft"
+                                       StartIcon="@Icons.Material.Filled.Link" Size="Size.Large">
+                                Connect Microsoft 365
+                            </MudButton>
+                            <MudText Typo="Typo.caption" Class="mt-2" Style="color: var(--color-text-tertiary);">
+                                Grants read access to your email and calendar. No emails will be sent on your behalf.
+                            </MudText>
+                        }
+                    </MudCardContent>
+                </MudCard>
 
-                <MudText Typo="Typo.subtitle2" Class="mb-2">Avatar</MudText>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">
-                    @foreach (var (id, icon) in _avatarOptions)
-                    {
-                        <MudAvatar Style="@($"width: 44px; height: 44px; cursor: pointer; border: 2px solid {(_avatarId == id ? _colorHex : "transparent")}; background: {(_avatarId == id ? _colorHex + "22" : "#f3f4f6")}")"
-                                   @onclick="() => _avatarId = id">
-                            <MudIcon Icon="@icon" Style="@($"color: {(_avatarId == id ? _colorHex : "#6b7280")}")" />
-                        </MudAvatar>
-                    }
-                </div>
+                <!-- Azure DevOps Connection -->
+                <MudCard Class="mb-4" Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">
+                                <MudIcon Icon="@Icons.Material.Filled.Code" Class="mr-2" Style="vertical-align: middle;" />
+                                Azure DevOps
+                            </MudText>
+                            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+                                Connect Azure DevOps to enable work item queries, pipeline triggers, and repo browsing.
+                                Generate a PAT at: <strong>Azure DevOps → User Settings → Personal Access Tokens</strong>.
+                            </MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        @if (_devOpsConnected)
+                        {
+                            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-3">
+                                <strong>Connected</strong> to @_devOpsOrgUrl
+                            </MudAlert>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="DisconnectDevOps"
+                                       StartIcon="@Icons.Material.Filled.LinkOff" Size="Size.Small">
+                                Disconnect
+                            </MudButton>
+                        }
+                        else
+                        {
+                            <MudTextField @bind-Value="_devOpsOrgUrl"
+                                          Label="Organization URL"
+                                          Placeholder="https://dev.azure.com/yourorg"
+                                          Variant="Variant.Outlined"
+                                          Class="mb-3" />
+                            <MudTextField @bind-Value="_devOpsPat"
+                                          Label="Personal Access Token"
+                                          InputType="InputType.Password"
+                                          Placeholder="Paste your PAT here"
+                                          Variant="Variant.Outlined"
+                                          Class="mb-3" />
+                            @if (!string.IsNullOrEmpty(_devOpsTestMessage))
+                            {
+                                <MudAlert Severity="@(_devOpsTestSuccess ? Severity.Success : Severity.Error)"
+                                          Variant="Variant.Outlined" Class="mb-3" Dense="true">
+                                    @_devOpsTestMessage
+                                </MudAlert>
+                            }
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+                                           OnClick="TestDevOpsConnection"
+                                           Disabled="@(_devOpsTesting || string.IsNullOrWhiteSpace(_devOpsOrgUrl) || string.IsNullOrWhiteSpace(_devOpsPat))">
+                                    @if (_devOpsTesting)
+                                    {
+                                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                                    }
+                                    Test Connection
+                                </MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                           OnClick="SaveDevOpsConnection"
+                                           Disabled="@(string.IsNullOrWhiteSpace(_devOpsOrgUrl) || string.IsNullOrWhiteSpace(_devOpsPat))">
+                                    Save Connection
+                                </MudButton>
+                            </div>
+                        }
+                    </MudCardContent>
+                </MudCard>
 
-                <MudColorPicker @bind-Value="_accentColor" Label="Accent Color" Variant="Variant.Outlined"
-                                Class="mb-3" Style="max-width: 300px;" />
+            </MudTabPanel>
 
-                <MudSelect @bind-Value="_personalityPreset" Label="Personality" Variant="Variant.Outlined" Class="mb-3">
-                    <MudSelectItem Value="@("formal")">Formal — Professional, thorough, precise</MudSelectItem>
-                    <MudSelectItem Value="@("friendly")">Friendly — Warm, approachable, conversational</MudSelectItem>
-                    <MudSelectItem Value="@("concise")">Concise — Brief, efficient, no filler</MudSelectItem>
-                </MudSelect>
-            </MudCardContent>
-        </MudCard>
+            <MudTabPanel Text="Briefing" Icon="@Icons.Material.Filled.WbSunny">
 
-        <!-- Morning Briefing -->
-        <MudCard Class="mb-4" Elevation="2">
-            <MudCardHeader>
-                <CardHeaderContent>
-                    <MudText Typo="Typo.h6">
-                        <MudIcon Icon="@Icons.Material.Filled.WbSunny" Class="mr-2" Style="vertical-align: middle;" />
-                        Morning Briefing
-                    </MudText>
-                </CardHeaderContent>
-            </MudCardHeader>
-            <MudCardContent>
-                <MudTimePicker @bind-Time="_deliveryTime" Label="Delivery Time (EST)" Variant="Variant.Outlined" Class="mb-3" Style="max-width: 300px;" />
+                <!-- Morning Briefing -->
+                <MudCard Class="mb-4 mt-4" Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">
+                                <MudIcon Icon="@Icons.Material.Filled.WbSunny" Class="mr-2" Style="vertical-align: middle;" />
+                                Morning Briefing
+                            </MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudTimePicker @bind-Time="_deliveryTime" Label="Delivery Time (EST)" Variant="Variant.Outlined" Class="mb-3" Style="max-width: 300px;" />
 
-                <MudTooltip Text="Email digest delivery is coming in Phase 2">
-                    <MudCheckBox @bind-Value="_emailDigestEnabled" Label="Send email digest (Phase 2)" Disabled="true" />
-                </MudTooltip>
+                        <MudTooltip Text="Email digest delivery is coming in Phase 2">
+                            <MudCheckBox @bind-Value="_emailDigestEnabled" Label="Send email digest (Phase 2)" Disabled="true" />
+                        </MudTooltip>
 
-                <MudAlert Severity="Severity.Info" Class="mt-3" Dense="true" Variant="Variant.Outlined">
-                    Your briefing includes email summary (last 24h) and today's calendar.
-                    @if (!_msConnected)
-                    {
-                        <br /><strong>Connect Microsoft 365 above to enable briefings.</strong>
-                    }
-                </MudAlert>
-            </MudCardContent>
-        </MudCard>
+                        <MudAlert Severity="Severity.Info" Class="mt-3" Dense="true" Variant="Variant.Outlined">
+                            Your briefing includes email summary (last 24h) and today's calendar.
+                            @if (!_msConnected)
+                            {
+                                <br /><strong>Connect Microsoft 365 in the Integrations tab to enable briefings.</strong>
+                            }
+                        </MudAlert>
+                    </MudCardContent>
+                </MudCard>
 
-        <!-- Meeting Intelligence (FIRM) -->
-        <MudCard Class="mb-4" Elevation="2">
-            <MudCardHeader>
-                <CardHeaderContent>
-                    <MudText Typo="Typo.h6">
-                        <MudIcon Icon="@Icons.Material.Filled.VideoCall" Class="mr-2" Style="vertical-align: middle;" />
-                        Meeting Intelligence (FIRM)
-                    </MudText>
-                </CardHeaderContent>
-            </MudCardHeader>
-            <MudCardContent>
-                <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-3">Meeting Intelligence (FIRM)</MudText>
-                <MudSwitch @bind-Value="_firmAutoTranscript" Label="Auto-add meeting transcripts to My KB"
-                           Color="Color.Warning" LabelStyle="color: #e8edf2;" />
-                <MudSwitch @bind-Value="_firmAutoSummary" Label="Auto-add meeting summaries to My KB"
-                           Color="Color.Warning" LabelStyle="color: #e8edf2;" Class="mt-2" />
-                <MudText Typo="Typo.body2" Style="color: #5a6a7a;" Class="mt-1">
-                    When enabled, completed meeting transcripts/summaries are automatically added to your personal knowledge base.
-                </MudText>
-            </MudCardContent>
-        </MudCard>
+            </MudTabPanel>
 
-        <!-- Save -->
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSettings" Disabled="_saving"
-                   StartIcon="@Icons.Material.Filled.Save" Size="Size.Large">
-            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
-            Save Settings
-        </MudButton>
+            <MudTabPanel Text="Meeting Intelligence" Icon="@Icons.Material.Filled.Mic">
+
+                <!-- Meeting Intelligence (FIRM) -->
+                <MudCard Class="mb-4 mt-4" Elevation="2">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">
+                                <MudIcon Icon="@Icons.Material.Filled.VideoCall" Class="mr-2" Style="vertical-align: middle;" />
+                                Meeting Intelligence (FIRM)
+                            </MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudText Typo="Typo.h6" Style="color: #d4af37;" Class="mb-3">Meeting Intelligence (FIRM)</MudText>
+                        <MudSwitch @bind-Value="_firmAutoTranscript" Label="Auto-add meeting transcripts to My KB"
+                                   Color="Color.Warning" LabelStyle="color: #e8edf2;" />
+                        <MudSwitch @bind-Value="_firmAutoSummary" Label="Auto-add meeting summaries to My KB"
+                                   Color="Color.Warning" LabelStyle="color: #e8edf2;" Class="mt-2" />
+                        <MudText Typo="Typo.body2" Style="color: #5a6a7a;" Class="mt-1">
+                            When enabled, completed meeting transcripts/summaries are automatically added to your personal knowledge base.
+                        </MudText>
+                    </MudCardContent>
+                </MudCard>
+
+            </MudTabPanel>
+        </MudTabs>
+
+        <div class="settings-save-row">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSettings" Disabled="@_saving">
+                @(_saving ? "Saving..." : "Save Settings")
+            </MudButton>
+        </div>
     }
 </MudContainer>
+
+<style>
+    .avatar-preview-wrapper { margin-bottom: var(--space-3, 0.75rem); }
+    .avatar-preview-img {
+        width: var(--avatar-size-xl, 96px);
+        height: var(--avatar-size-xl, 96px);
+        border-radius: var(--radius-full, 50%);
+        object-fit: cover;
+        border: var(--border-width-thin, 2px) solid var(--color-accent, #d4af37);
+    }
+    .settings-save-row {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: var(--space-4, 1rem);
+    }
+</style>
 
 @code {
     [Parameter, SupplyParameterFromQuery(Name = "mcp_connected")]
@@ -304,6 +392,7 @@
     private bool _loading = true;
     private bool _saving = false;
     private bool _feedbackShown = false;
+    private int _activeTab = 0;
 
     // Display name
     private string _displayName = string.Empty;
@@ -314,6 +403,18 @@
     private string _avatarId = "shield";
     private string _colorHex = "#d4af37";
     private MudColor _accentColor = new MudColor("#d4af37");
+
+    // Extended assistant fields
+    private string? _preferredName;
+    private string? _role;
+    private string? _responsibilities;
+    private string _communicationStyle = "balanced";
+    private string _responseFormat = "mixed";
+    private bool _showCitations = true;
+    private string? _avatarUrl;
+    private string? _avatarPreviewUrl;
+    private bool _avatarUploading = false;
+    private string? _avatarError;
 
     // Briefing schedule
     private TimeSpan? _deliveryTime = new TimeSpan(8, 0, 0);
@@ -363,6 +464,24 @@
         _firmAutoTranscript = config.FirmAutoTranscript;
         _firmAutoSummary = config.FirmAutoSummary;
 
+        // Load extended assistant fields from UserAssistantConfig
+        await using var db = await ContextFactory.CreateDbContextAsync();
+        var assistantCfg = await db.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == Session.UserId);
+        if (assistantCfg != null)
+        {
+            _preferredName = assistantCfg.PreferredName;
+            _role = assistantCfg.Role;
+            _responsibilities = assistantCfg.Responsibilities;
+            _communicationStyle = !string.IsNullOrWhiteSpace(assistantCfg.CommunicationStyle)
+                ? assistantCfg.CommunicationStyle.ToLowerInvariant() : "balanced";
+            _responseFormat = !string.IsNullOrWhiteSpace(assistantCfg.ResponseFormat)
+                ? assistantCfg.ResponseFormat.ToLowerInvariant() : "mixed";
+            _showCitations = assistantCfg.ShowCitations ?? true;
+            _avatarUrl = assistantCfg.AvatarUrl;
+            if (!string.IsNullOrWhiteSpace(_avatarUrl))
+                _avatarPreviewUrl = await GenerateAvatarPreviewUrlAsync(_avatarUrl);
+        }
+
         var schedule = await ConfigSvc.GetBriefingScheduleAsync(Session.UserId);
         if (schedule != null)
         {
@@ -409,16 +528,13 @@
                 Snackbar.Add($"Connection failed: {McpError}", Severity.Error);
                 _feedbackShown = true;
             }
-
         }
     }
 
     private void ConnectMicrosoft()
     {
-        // Build OAuth URL and redirect
         var state = $"{Session.UserId}:{Guid.NewGuid():N}";
         var baseUrl = Nav.BaseUri.TrimEnd('/');
-        // Use configured redirect URI — must match what's registered in Azure app registration
         var redirectUri = AppConfig["MicrosoftGraph:RedirectUri"]
             ?? $"{baseUrl}/auth/microsoft-callback";
         var authUrl = MsTokenSvc.GetAuthorizationUrl(redirectUri, state);
@@ -470,7 +586,7 @@
     {
         await DevOpsConnSvc.SaveAsync(Session.UserId, _devOpsOrgUrl, _devOpsPat);
         _devOpsConnected = true;
-        _devOpsPat = string.Empty;           // clear from memory
+        _devOpsPat = string.Empty;
         _devOpsTestMessage = string.Empty;
         Snackbar.Add("Azure DevOps connected.", Severity.Success);
         StateHasChanged();
@@ -506,16 +622,32 @@
             // Save display name
             if (Session.CurrentUser != null)
             {
-                using var db = await ContextFactory.CreateDbContextAsync();
+                await using var db = await ContextFactory.CreateDbContextAsync();
                 var user = await db.Users.FindAsync(Session.CurrentUser.Id);
                 if (user != null)
                 {
                     user.DisplayName = string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim();
                     await db.SaveChangesAsync();
-                    // Update session
                     Session.CurrentUser.DisplayName = user.DisplayName;
                 }
             }
+
+            // Save extended assistant fields
+            await using var extDb = await ContextFactory.CreateDbContextAsync();
+            var row = await extDb.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == Session.UserId);
+            if (row == null)
+            {
+                row = new FortressAI.Shared.Models.UserAssistantConfig { UserId = Session.UserId };
+                extDb.UserAssistantConfigs.Add(row);
+            }
+            row.PreferredName = string.IsNullOrWhiteSpace(_preferredName) ? null : _preferredName.Trim();
+            row.Role = string.IsNullOrWhiteSpace(_role) ? null : _role.Trim();
+            row.Responsibilities = string.IsNullOrWhiteSpace(_responsibilities) ? null : _responsibilities.Trim();
+            row.CommunicationStyle = _communicationStyle;
+            row.ResponseFormat = _responseFormat;
+            row.ShowCitations = _showCitations;
+            row.UpdatedAt = DateTime.UtcNow;
+            await extDb.SaveChangesAsync();
 
             Snackbar.Add($"{_assistantName}'s settings saved!", Severity.Success);
         }
@@ -527,5 +659,94 @@
         {
             _saving = false;
         }
+    }
+
+    private async Task<string?> GenerateAvatarPreviewUrlAsync(string? rawS3Url)
+    {
+        if (string.IsNullOrWhiteSpace(rawS3Url)) return null;
+        try
+        {
+            var bucket = AppConfig["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
+            var prefix = $"https://{bucket}.s3.amazonaws.com/";
+            if (!rawS3Url.StartsWith(prefix)) return rawS3Url;
+            var key = rawS3Url[prefix.Length..];
+            var req = new GetPreSignedUrlRequest
+            {
+                BucketName = bucket,
+                Key = key,
+                Expires = DateTime.UtcNow.AddHours(1),
+                Verb = HttpVerb.GET
+            };
+            return S3.GetPreSignedURL(req);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[Avatar] Pre-signed URL failed for {Url}", rawS3Url);
+            return null;
+        }
+    }
+
+    private async Task HandleAvatarUpload(IBrowserFile file)
+    {
+        _avatarError = null;
+        if (file.Size > 5 * 1024 * 1024) { _avatarError = "File too large — maximum 5MB."; return; }
+        var ext = Path.GetExtension(file.Name).ToLowerInvariant();
+        if (ext is not (".jpg" or ".jpeg" or ".png")) { _avatarError = "Use JPG or PNG only."; return; }
+
+        _avatarUploading = true;
+        StateHasChanged();
+        try
+        {
+            var bucket = AppConfig["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
+            var s3Prefix = AppConfig["WORKSPACE_S3_PREFIX"] ?? "";
+            if (!string.IsNullOrEmpty(s3Prefix) && !s3Prefix.EndsWith('/')) s3Prefix += '/';
+            var key = $"{s3Prefix}workspaces/{Session.UserId}/avatar/{Guid.NewGuid()}{ext}";
+
+            // Delete old avatar
+            if (!string.IsNullOrWhiteSpace(_avatarUrl))
+            {
+                try
+                {
+                    var oldPrefix = $"https://{bucket}.s3.amazonaws.com/";
+                    if (_avatarUrl.StartsWith(oldPrefix))
+                        await S3.DeleteObjectAsync(bucket, _avatarUrl[oldPrefix.Length..]);
+                }
+                catch (Exception ex) { Logger.LogWarning(ex, "[Avatar] Old avatar delete failed"); }
+            }
+
+            await using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+            await S3.PutObjectAsync(new PutObjectRequest
+            {
+                BucketName = bucket, Key = key,
+                InputStream = stream, ContentType = file.ContentType
+            });
+
+            var rawUrl = $"https://{bucket}.s3.amazonaws.com/{key}";
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            var cfg = await db.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == Session.UserId);
+            if (cfg == null)
+            {
+                cfg = new FortressAI.Shared.Models.UserAssistantConfig { UserId = Session.UserId };
+                db.UserAssistantConfigs.Add(cfg);
+            }
+            cfg.AvatarUrl = rawUrl;
+            cfg.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+
+            _avatarUrl = rawUrl;
+            _avatarPreviewUrl = await GenerateAvatarPreviewUrlAsync(rawUrl);
+            Snackbar.Add("Photo uploaded!", Severity.Success);
+        }
+        catch (Amazon.S3.AmazonS3Exception ex) when (ex.ErrorCode == "AccessDenied")
+        {
+            Logger.LogError(ex, "[Avatar] AccessDenied");
+            _avatarError = "Upload failed: access denied.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[Avatar] Upload failed");
+            _avatarError = "Upload failed. Please try again.";
+        }
+        finally { _avatarUploading = false; StateHasChanged(); }
     }
 }
