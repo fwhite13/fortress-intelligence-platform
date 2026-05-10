@@ -58,6 +58,7 @@
                     <MudSelectItem Value="@("concise")">Concise — Brief and to the point</MudSelectItem>
                     <MudSelectItem Value="@("balanced")">Balanced — Clear with adequate detail</MudSelectItem>
                     <MudSelectItem Value="@("detailed")">Detailed — Thorough and comprehensive</MudSelectItem>
+                    <MudSelectItem Value="@("structured")">Structured — Organized with headers and sections</MudSelectItem>
                 </MudSelect>
 
                 <MudSelect @bind-Value="_responseFormat" Label="Response Format" Variant="Variant.Outlined" Class="mb-3">
@@ -139,8 +140,9 @@
         var config = await ConfigSvc.GetOrCreateConfigAsync(Session.UserId);
         _assistantName = config.AssistantName;
         _preferredName = config.PreferredName ?? string.Empty;
-        _communicationStyle = !string.IsNullOrWhiteSpace(config.CommunicationStyle) ? config.CommunicationStyle : "balanced";
-        _responseFormat = !string.IsNullOrWhiteSpace(config.ResponseFormat) ? config.ResponseFormat : "mixed";
+        // Normalize to lowercase — onboarding wizard writes PascalCase ("Balanced"), dropdowns use lowercase
+        _communicationStyle = !string.IsNullOrWhiteSpace(config.CommunicationStyle) ? config.CommunicationStyle.ToLowerInvariant() : "balanced";
+        _responseFormat = !string.IsNullOrWhiteSpace(config.ResponseFormat) ? config.ResponseFormat.ToLowerInvariant() : "mixed";
         _colorHex = config.ColorHex;
 
         _loading = false;
