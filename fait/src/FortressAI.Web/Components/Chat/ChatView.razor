@@ -20,6 +20,7 @@
 @inject ILogger<ChatView> Logger
 @inject MicrosoftTokenService M365TokenSvc
 @inject IUserAgentRuntime AgentRuntime
+@inject IWorkspaceFileService WorkspaceFileSvc
 @using Amazon.S3
 @using Amazon.S3.Model
 @inject IAmazonS3 S3
@@ -113,6 +114,15 @@ else
                 @if (messages.Any(m => m.Role == "assistant") && _lastKbResult != null)
                 {
                     <KbIndicator Result="_lastKbResult" />
+                }
+                @if (_conversationArtifacts.Any())
+                {
+                    <div class="artifact-list">
+                        @foreach (var artifact in _conversationArtifacts)
+                        {
+                            <ArtifactCard Artifact="artifact" />
+                        }
+                    </div>
                 }
                 @* Resumption brief renders AFTER message history — ADO#3155 Bug 2 fix *@
                 @if (_briefContent.Length > 0 || _isBriefStreaming)
@@ -346,6 +356,8 @@ else
     // Task mode state
     private bool _taskMode = false;
     private bool _taskModeActive = false; // set true on mode_switch event
+    private List<UserWorkspaceFile> _conversationArtifacts = new();
+    private UserWorkspaceFile? _pendingArtifact = null;
 
     // Cold start UX — guard fields
     private bool _agentReady = false;
@@ -428,6 +440,7 @@ else
                 _selectedTeamIds = conversation.TeamKbs.Select(t => t.TeamId).ToHashSet();
                 _fortressKbEnabled = conversation.EnableFortressKb;
                 _personalKbEnabled = conversation.EnablePersonalKb;
+                _conversationArtifacts = await WorkspaceFileSvc.GetConversationArtifactsAsync(conversation.Id);
             }
         }
         else if (conversation == null)
@@ -903,6 +916,26 @@ else
                 {
                     _taskModeActive = true;
                     StateHasChanged();
+                }
+                else if (evt.Type == "artifact")
+                {
+                    try
+                    {
+                        var artifactPayload = System.Text.Json.JsonSerializer.Deserialize<ArtifactPayload>(
+                            evt.Payload ?? "{}", new System.Text.Json.JsonSerializerOptions
+                            { PropertyNameCaseInsensitive = true });
+                        if (artifactPayload != null)
+                        {
+                            _pendingArtifact = await WorkspaceFileSvc.SaveArtifactAsync(
+                                Session.UserId, conversation.Id, null, artifactPayload);
+                            _conversationArtifacts.Add(_pendingArtifact);
+                            StateHasChanged();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[ChatView] Failed to save artifact from SSE event");
+                    }
                 }
                 // "log" events: swallow silently
             }

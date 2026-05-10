@@ -60,7 +60,7 @@ public record TurnRequest(
 public record ChatHistoryEntry(string Role, string Content);
 
 public record HarnessEvent(
-    [property: JsonPropertyName("type")] string Type,         // "text" | "log" | "done" | "error" | "mode_switch"
+    [property: JsonPropertyName("type")] string Type,         // "text" | "log" | "done" | "error" | "mode_switch" | "artifact"
     [property: JsonPropertyName("content")] string? Content = null,
     [property: JsonPropertyName("exitCode")] int? ExitCode = null,
     [property: JsonPropertyName("errorMessage")] string? ErrorMessage = null,

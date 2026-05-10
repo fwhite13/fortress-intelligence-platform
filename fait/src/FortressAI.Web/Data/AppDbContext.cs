@@ -42,6 +42,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
     public DbSet<MemoryTopic> MemoryTopics => Set<MemoryTopic>();
+    public DbSet<UserWorkspaceFile> UserWorkspaceFiles => Set<UserWorkspaceFile>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -499,6 +500,22 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.UpdatedAt).HasColumnType("DATETIME(6)");
             entity.HasIndex(e => new { e.UserId, e.Slug }).IsUnique();
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserWorkspaceFile>(entity =>
+        {
+            entity.ToTable("user_workspace_files");
+            entity.Property(e => e.Id).HasColumnType("CHAR(36)").HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnType("CHAR(36)").HasColumnName("user_id");
+            entity.Property(e => e.ConversationId).HasColumnType("CHAR(36)").HasColumnName("conversation_id");
+            entity.Property(e => e.TaskRunId).HasColumnType("CHAR(36)").HasColumnName("task_run_id");
+            entity.Property(e => e.Filename).HasColumnName("filename").HasMaxLength(500);
+            entity.Property(e => e.MimeType).HasColumnName("mime_type").HasMaxLength(200);
+            entity.Property(e => e.S3Key).HasColumnName("s3_key").HasMaxLength(1000);
+            entity.Property(e => e.SizeBytes).HasColumnName("size_bytes");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)");
+            entity.HasIndex(e => e.UserId).HasDatabaseName("idx_uwf_user_id");
+            entity.HasIndex(e => e.ConversationId).HasDatabaseName("idx_uwf_conversation_id");
         });
 
     }
