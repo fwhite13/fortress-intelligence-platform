@@ -242,7 +242,7 @@ else
                     @onclick="() => _taskMode = !_taskMode"
                     title="@(_taskMode ? "Task mode on — click to disable" : "Enable task mode")"
                     disabled="@(isStreaming || _isBriefStreaming)">
-                <i class="fas fa-tasks"></i>
+                <i class="fas fa-bolt"></i> Task
             </button>
             <MudIconButton Icon="@Icons.Material.Filled.Send"
                 Disabled="@(isStreaming || _isBriefStreaming || (string.IsNullOrWhiteSpace(_userInput) && !_pendingAttachments.Any()))"
@@ -1312,18 +1312,25 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 <style>
 .btn-task-mode {
     background: transparent;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border: var(--border-width-thin, 1px) solid var(--color-border);
+    border-radius: var(--radius-pill, 9999px);
     color: var(--color-text-secondary);
     cursor: pointer;
-    padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
+    padding: var(--space-1, 0.375rem) var(--space-3, 0.75rem);
     font-size: var(--text-sm, 0.875rem);
+    font-family: var(--font-primary);
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1, 0.25rem);
     transition: all 0.15s ease;
+    white-space: nowrap;
 }
 .btn-task-mode--active {
     background: var(--color-accent);
     border-color: var(--color-accent);
     color: var(--color-text-on-accent, #fff);
+    font-weight: 600;
 }
 .btn-task-mode:hover:not(:disabled):not(.btn-task-mode--active) {
     border-color: var(--color-accent);
