@@ -39,6 +39,8 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<UserModulePermission> UserModulePermissions { get; set; } = null!;
     public DbSet<ChatAttachment> ChatAttachments => Set<ChatAttachment>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
+    public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
+    public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -442,6 +444,47 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
             entity.HasIndex(e => e.UserId).HasDatabaseName("ix_user_sessions_user_id");
             entity.HasIndex(e => e.LastActiveAt).HasDatabaseName("ix_user_sessions_last_active_at");
+        });
+
+        modelBuilder.Entity<ScheduledTask>(entity =>
+        {
+            entity.ToTable("scheduled_tasks");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Prompt).HasColumnType("TEXT").IsRequired();
+            entity.Property(e => e.ScheduleType).HasMaxLength(20).IsRequired()
+                  .HasConversion<string>();
+            entity.Property(e => e.CronExpression).HasMaxLength(100);
+            entity.Property(e => e.LastRunStatus).HasMaxLength(20);
+            entity.Property(e => e.FailureCount).HasDefaultValue(0);
+            entity.Property(e => e.AlertOnCompletion).HasDefaultValue(false);
+            entity.Property(e => e.AlertOnFailure).HasDefaultValue(true);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.TaskMode).HasDefaultValue(false);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Project).WithMany().HasForeignKey(e => e.ProjectId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+            entity.HasMany(e => e.Runs).WithOne(r => r.Task).HasForeignKey(r => r.TaskId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.NextRunAt);
+            entity.HasIndex(e => new { e.UserId, e.IsActive });
+        });
+
+        modelBuilder.Entity<ScheduledTaskRun>(entity =>
+        {
+            entity.ToTable("scheduled_task_runs");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.Status).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ResultSummary).HasMaxLength(500);
+            entity.Property(e => e.ArtifactBlobPath).HasMaxLength(500);
+            entity.Property(e => e.SandboxId).HasMaxLength(200);
+            entity.Property(e => e.Error).HasColumnType("TEXT");
+            entity.HasOne(e => e.Task).WithMany(t => t.Runs).HasForeignKey(e => e.TaskId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => e.TaskId);
+            entity.HasIndex(e => e.StartedAt);
         });
 
     }

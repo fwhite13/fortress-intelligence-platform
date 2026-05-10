@@ -4,6 +4,7 @@ using FortressAI.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace FortressAI.Web.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260510040449_AddScheduledTasksAndRuns")]
+    partial class AddScheduledTasksAndRuns
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -971,7 +974,7 @@ namespace FortressAI.Web.Migrations
 
                     b.Property<string>("LastRunStatus")
                         .HasMaxLength(20)
-                        .HasColumnType("ENUM('success','failed','cancelled')");
+                        .HasColumnType("varchar(20)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -991,7 +994,7 @@ namespace FortressAI.Web.Migrations
                     b.Property<string>("ScheduleType")
                         .IsRequired()
                         .HasMaxLength(20)
-                        .HasColumnType("ENUM('recurring','on_demand')");
+                        .HasColumnType("varchar(20)");
 
                     b.Property<bool>("TaskMode")
                         .ValueGeneratedOnAdd()
@@ -1049,7 +1052,7 @@ namespace FortressAI.Web.Migrations
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
-                        .HasColumnType("ENUM('success','failed','cancelled')");
+                        .HasColumnType("varchar(20)");
 
                     b.Property<Guid>("TaskId")
                         .HasColumnType("char(36)");
