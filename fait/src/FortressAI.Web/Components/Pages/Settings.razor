@@ -619,26 +619,22 @@
                 await ConfigSvc.SaveBriefingScheduleAsync(Session.UserId, deliveryTimeUtc, _emailDigestEnabled);
             }
 
-            // Save display name
+            // Save display name + extended assistant fields in a single DbContext (atomic)
+            await using var db = await ContextFactory.CreateDbContextAsync();
             if (Session.CurrentUser != null)
             {
-                await using var db = await ContextFactory.CreateDbContextAsync();
                 var user = await db.Users.FindAsync(Session.CurrentUser.Id);
                 if (user != null)
                 {
                     user.DisplayName = string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim();
-                    await db.SaveChangesAsync();
                     Session.CurrentUser.DisplayName = user.DisplayName;
                 }
             }
-
-            // Save extended assistant fields
-            await using var extDb = await ContextFactory.CreateDbContextAsync();
-            var row = await extDb.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == Session.UserId);
+            var row = await db.UserAssistantConfigs.FirstOrDefaultAsync(c => c.UserId == Session.UserId);
             if (row == null)
             {
                 row = new FortressAI.Shared.Models.UserAssistantConfig { UserId = Session.UserId };
-                extDb.UserAssistantConfigs.Add(row);
+                db.UserAssistantConfigs.Add(row);
             }
             row.PreferredName = string.IsNullOrWhiteSpace(_preferredName) ? null : _preferredName.Trim();
             row.Role = string.IsNullOrWhiteSpace(_role) ? null : _role.Trim();
@@ -647,7 +643,7 @@
             row.ResponseFormat = _responseFormat;
             row.ShowCitations = _showCitations;
             row.UpdatedAt = DateTime.UtcNow;
-            await extDb.SaveChangesAsync();
+            await db.SaveChangesAsync();
 
             Snackbar.Add($"{_assistantName}'s settings saved!", Severity.Success);
         }
@@ -661,14 +657,14 @@
         }
     }
 
-    private async Task<string?> GenerateAvatarPreviewUrlAsync(string? rawS3Url)
+    private Task<string?> GenerateAvatarPreviewUrlAsync(string? rawS3Url)
     {
-        if (string.IsNullOrWhiteSpace(rawS3Url)) return null;
+        if (string.IsNullOrWhiteSpace(rawS3Url)) return Task.FromResult<string?>(null);
         try
         {
             var bucket = AppConfig["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
             var prefix = $"https://{bucket}.s3.amazonaws.com/";
-            if (!rawS3Url.StartsWith(prefix)) return rawS3Url;
+            if (!rawS3Url.StartsWith(prefix)) return Task.FromResult<string?>(rawS3Url);
             var key = rawS3Url[prefix.Length..];
             var req = new GetPreSignedUrlRequest
             {
@@ -677,12 +673,12 @@
                 Expires = DateTime.UtcNow.AddHours(1),
                 Verb = HttpVerb.GET
             };
-            return S3.GetPreSignedURL(req);
+            return Task.FromResult<string?>(S3.GetPreSignedURL(req));
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "[Avatar] Pre-signed URL failed for {Url}", rawS3Url);
-            return null;
+            return Task.FromResult<string?>(null);
         }
     }
 
