@@ -54,7 +54,8 @@ public record TurnRequest(
     string? PluginAgentId = null,
     string? UserEmail = null,
     bool IsScheduledTask = false,
-    bool KbWriteAllowed = true
+    bool KbWriteAllowed = true,
+    string? ConversationId = null
 );
 
 public record ChatHistoryEntry(string Role, string Content);

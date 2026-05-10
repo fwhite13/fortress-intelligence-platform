@@ -110,6 +110,7 @@ builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 builder.Services.AddScoped<ITaskNotificationService, TaskNotificationService>();
 builder.Services.AddScoped<IMemoryFileService, MemoryFileService>();
 builder.Services.AddScoped<IWorkspaceFileService, WorkspaceFileService>();
+builder.Services.AddScoped<IDocumentGeneratorService, StubDocumentGeneratorService>();
 
 // Knowledge Base
 builder.Services.AddSingleton<IAmazonBedrockAgentRuntime>(sp =>
