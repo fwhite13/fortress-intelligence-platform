@@ -530,6 +530,7 @@ else
             // Reset resumption brief state for new conversation
             _briefContent = new System.Text.StringBuilder();
             _resumptionBriefSent = false;
+            _isBriefStreaming = false;
         }
 
         // Handle previewArtifact query param — deep-link from Workspace page
@@ -1421,6 +1422,7 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 
     private async Task SendResumptionBrief()
     {
+        var capturedConversationId = ConversationId; // capture before any await
         try
         {
             // Build history from last 3 messages if any
@@ -1464,7 +1466,7 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
             {
                 try
                 {
-                    var briefStorageKey = $"resumption_brief_{_currentHarnessSessionId}_{ConversationId}";
+                    var briefStorageKey = $"resumption_brief_{_currentHarnessSessionId}_{capturedConversationId}";
                     await SessionStorage.SetAsync(briefStorageKey, _currentHarnessSessionId);
                 }
                 catch (Exception ex)
