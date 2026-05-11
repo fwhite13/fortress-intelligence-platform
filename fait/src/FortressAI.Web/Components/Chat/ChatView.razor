@@ -527,6 +527,9 @@ else
                 _lastConversationId, ConversationId, cycle);
             _lastConversationId = ConversationId;
             _needsScroll = true;
+            // Reset resumption brief state for new conversation
+            _briefContent = new System.Text.StringBuilder();
+            _resumptionBriefSent = false;
         }
 
         // Handle previewArtifact query param — deep-link from Workspace page
@@ -1461,7 +1464,8 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
             {
                 try
                 {
-                    await SessionStorage.SetAsync("resumption_brief_session", _currentHarnessSessionId);
+                    var briefStorageKey = $"resumption_brief_{_currentHarnessSessionId}_{ConversationId}";
+                    await SessionStorage.SetAsync(briefStorageKey, _currentHarnessSessionId);
                 }
                 catch (Exception ex)
                 {
@@ -1495,10 +1499,11 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 
             if (!string.IsNullOrEmpty(currentSessionId))
             {
+                var briefStorageKey = $"resumption_brief_{currentSessionId}_{ConversationId}";
                 string? storedSessionId = null;
                 try
                 {
-                    var result = await SessionStorage.GetAsync<string>("resumption_brief_session");
+                    var result = await SessionStorage.GetAsync<string>(briefStorageKey);
                     if (result.Success) storedSessionId = result.Value;
                 }
                 catch (Exception ex)
@@ -1508,7 +1513,7 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 
                 if (storedSessionId == currentSessionId)
                 {
-                    Logger.LogInformation("[ChatView] Resumption brief already sent for session {SessionId} — skipping", currentSessionId);
+                    Logger.LogInformation("[ChatView] Resumption brief already sent for session {SessionId} convo {ConversationId} — skipping", currentSessionId, ConversationId);
                     _resumptionBriefSent = true;
                     return;
                 }

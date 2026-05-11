@@ -1501,36 +1501,62 @@ app.post('/turn', async (req, res) => {
                 console.warn(`[harness] resumption brief: could not get MEMORY.md timestamp: ${e.message}`);
             }
 
-            // Extract last topic from history
-            let lastTopic = null;
-            if (Array.isArray(history) && history.length > 0) {
-                const lastUserTurn = [...history].reverse().find(h => h.Role === 'user' || h.role === 'user');
-                if (lastUserTurn) {
-                    const content = lastUserTurn.Content ?? lastUserTurn.content ?? '';
-                    lastTopic = content.length > 80 ? content.substring(0, 80) + '...' : content;
-                }
-            }
-
-            // Skip brief entirely if nothing real to show (ADO#3155 Bug 1 fix)
-            if (!lastTopic && !memoryTimestamp) {
+            // Skip brief entirely if no history and no memory (ADO#3155 Bug 1 fix)
+            const hasHistory = Array.isArray(history) && history.length > 0;
+            if (!hasHistory && !memoryTimestamp) {
                 console.log(`[harness] resumption brief: no history and no MEMORY.md for userId=${userId} — skipping brief`);
                 sendEvent({ type: 'done', exitCode: 0 });
                 res.end();
                 return;
             }
 
-            // Compose and stream brief
-            const briefParts = [];
-            if (lastTopic) {
-                briefParts.push(`Last time: ${lastTopic}\n`);
-            }
-            if (memoryTimestamp) {
-                briefParts.push(`Memory synced: ${memoryTimestamp}\n`);
+            // Generate contextual summary via Bedrock if history is available
+            if (hasHistory) {
+                // Build formatted transcript of last 6 messages
+                const recentMsgs = history.slice(-6);
+                const transcript = recentMsgs.map(m => {
+                    const role = m.Role ?? m.role ?? 'unknown';
+                    const content = m.Content ?? m.content ?? '';
+                    const label = role === 'user' ? 'User' : 'Assistant';
+                    return `${label}: ${content.substring(0, 300)}`;
+                }).join('\n');
+
+                const summaryPrompt = `You are summarizing a past conversation to help the user remember context.\nBased on these recent messages:\n${transcript}\n\nWrite exactly one sentence starting with "Last time" that summarizes what we were working on. Be specific. Example: "Last time we were debugging the harness SSE pipeline and working on the KB retrieval refactor." Reply with only the sentence, no extra text.`;
+
+                try {
+                    const summaryCmd = new ConverseStreamCommand({
+                        modelId: MODEL_ID,
+                        messages: [{ role: 'user', content: [{ text: summaryPrompt }] }],
+                        inferenceConfig: { maxTokens: 80, temperature: 0.3 }
+                    });
+                    const summaryResp = await bedrockClient.send(summaryCmd);
+                    let summaryText = '';
+                    for await (const chunk of summaryResp.stream) {
+                        if (chunk.contentBlockDelta?.delta?.text) {
+                            summaryText += chunk.contentBlockDelta.delta.text;
+                        }
+                    }
+                    summaryText = summaryText.trim();
+                    if (summaryText) {
+                        sendEvent({ type: 'text', content: summaryText + '\n' });
+                    }
+                } catch (summaryErr) {
+                    console.warn(`[harness] resumption brief: Bedrock summary failed — ${summaryErr.message}`);
+                    // Fallback: echo last user message truncated
+                    const lastUserTurn = [...history].reverse().find(h => h.Role === 'user' || h.role === 'user');
+                    if (lastUserTurn) {
+                        const content = lastUserTurn.Content ?? lastUserTurn.content ?? '';
+                        const truncated = content.length > 80 ? content.substring(0, 80) + '...' : content;
+                        sendEvent({ type: 'text', content: `Last time: ${truncated}\n` });
+                    }
+                }
             }
 
-            for (const part of briefParts) {
-                sendEvent({ type: 'text', content: part });
+            // Append memory timestamp if available
+            if (memoryTimestamp) {
+                sendEvent({ type: 'text', content: `Memory synced: ${memoryTimestamp}\n` });
             }
+
             sendEvent({ type: 'done', exitCode: 0 });
         } catch (briefErr) {
             console.error(`[harness] resumption brief error: ${briefErr.message}`);
