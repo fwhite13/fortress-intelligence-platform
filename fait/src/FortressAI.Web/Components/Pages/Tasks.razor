@@ -15,6 +15,7 @@
 @inject ILogger<Tasks> Logger
 @inject ITaskNotificationService _notificationService
 @inject NavigationManager NavigationManager
+@inject IMcpToolService McpToolSvc
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="py-4">
     <MudText Typo="Typo.h4" Class="mb-4">Tasks</MudText>
@@ -517,11 +518,26 @@
             try
             {
                 var userIdStr = userId.ToString();
+                // ADO#3279 — resolve enabled MCP slugs so graph_* tools are available (mirrors background service)
+                List<string>? resolvedMcpSlugs = null;
+                try
+                {
+                    var activeServers = await McpToolSvc.GetActiveServersForUserAsync(userId);
+                    var slugs = activeServers
+                        .Select(s => s.Slug)
+                        .Where(s => !string.IsNullOrEmpty(s))
+                        .Distinct()
+                        .ToList();
+                    if (slugs.Count > 0) resolvedMcpSlugs = slugs;
+                }
+                catch { /* best effort — proceed without MCP tools if resolution fails */ }
+
                 var turnRequest = new FortressAI.Web.Services.TurnRequest(
                     UserId: userIdStr,
                     Message: taskPrompt,
                     IsScheduledTask: true,
-                    TaskMode: taskMode
+                    TaskMode: taskMode,
+                    EnabledMcpSlugs: resolvedMcpSlugs
                 );
                 var sb = new System.Text.StringBuilder();
                 await foreach (var evt in AgentRuntime.SendTurnAsync(userIdStr, turnRequest))

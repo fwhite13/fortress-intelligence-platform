@@ -844,7 +844,9 @@ app.post('/tools/read_memory', async (req, res) => {
         });
         if (!resp.ok) {
             const text = await resp.text();
-            throw new Error(`memory/read failed (${resp.status}): ${text}`);
+            const isHtml = text.trim().startsWith('<') || text.includes('<!DOCTYPE');
+            const safeText = isHtml ? `[non-JSON response, HTTP ${resp.status}]` : text.substring(0, 200);
+            throw new Error(`memory/read failed (${resp.status}): ${safeText}`);
         }
         const result = await resp.json();
         if (!result.found) {
@@ -912,7 +914,11 @@ app.post('/tools/create_document', async (req, res) => {
 
         if (!genRes.ok) {
             const errText = await genRes.text();
-            return res.status(500).json({ error: `Document generation failed: ${errText}` });
+            const isHtml = errText.trim().startsWith('<') || errText.includes('<!DOCTYPE');
+            const safeErr = isHtml
+                ? `Document generation failed (HTTP ${genRes.status}). The API returned an unexpected response.`
+                : `Document generation failed: ${errText.substring(0, 200)}`;
+            return res.status(500).json({ error: safeErr });
         }
 
         const docBytes = Buffer.from(await genRes.arrayBuffer());
@@ -1915,13 +1921,12 @@ app.post('/turn', async (req, res) => {
                     }
                     await Promise.all(kbPromises);
 
-                    // Emit kb_sources event
+                    // Emit kb_sources event (only when results exist — ADO#3278)
                     if (kbSources.length > 0) {
                         res.write(`event: kb_sources\ndata: ${JSON.stringify({ sources: kbSources })}\n\n`);
                         console.log(`[harness] /turn: emitted kb_sources — ${kbSources.length} KB(s) with results`);
                     } else {
-                        res.write(`event: kb_sources\ndata: ${JSON.stringify({ sources: [], wasSearched: true })}\n\n`);
-                        console.log(`[harness] /turn: emitted kb_sources — no results found`);
+                        console.log(`[harness] /turn: KB searched — no results found, skipping kb_sources event`);
                     }
 
                     // Rebuild system prompt after KB context injection

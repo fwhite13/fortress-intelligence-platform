@@ -1539,6 +1539,13 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
         StateHasChanged();
         _ = CheckFailedTasksAsync();
 
+        // ADO#3277 — guard: if brief already sent this render cycle, don't re-enter
+        if (_resumptionBriefSent)
+        {
+            Logger.LogDebug("[ChatView] HandleAgentReady: _resumptionBriefSent already true — skipping brief setup");
+            return;
+        }
+
         // Cross-navigation guard: only send resumption brief once per Fargate session
         try
         {
