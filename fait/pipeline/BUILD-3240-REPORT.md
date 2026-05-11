@@ -72,3 +72,57 @@ curl http://localhost:8080/api/internal/devops-pat/<userId> \
 
 ## Commit
 `7c276084` — `fix(fait#3240): brave web_search in toolConfig + MCP auth token lookup fix`
+
+---
+
+# Build Report — ADO#3240 — Cycle 3
+
+**Commit:** `3159ee3b`
+**Date:** 2026-05-10
+**Branch:** main
+
+## What was built
+
+Added `/internal/mcp/brave` minimal API endpoint to `Program.cs` — token-authenticated via `X-Internal-Token` / `INTERNAL_API_TOKEN`. This endpoint coexists with the existing `BraveSearchMcpAdapter` controller but takes precedence in ASP.NET 8's routing pipeline (minimal API registered before `MapControllers()`). The new endpoint is what the harness targets (X-Internal-Token auth, not loopback IP).
+
+Also added `bool IsInternalAuthorized(HttpContext, IConfiguration)` local function (consistent with other internal endpoints in the file).
+
+## Files changed
+
+### `src/FortressAI.Web/Program.cs`
+
+- **Added `using System.Text.Json;`** — was missing, required for `JsonDocument.Parse` in the new endpoint
+- **Added `app.MapPost("/internal/mcp/brave", ...)` block** — before `app.MapControllers()`. Validates `X-Internal-Token`, parses MCP JSON-RPC envelope, dispatches `web_search` to `BraveSearchClient.SearchAsync()`, returns `{ content: [{ type: "text", text: <formatted results> }] }`
+- **Added `bool IsInternalAuthorized(HttpContext, IConfiguration)` local function** — after `app.Run()`, consistent with local function pattern in Program.cs
+
+## Parallelization used
+
+No — single file, single CC run.
+
+## CC sessions run
+
+1 (Sonnet). Build passed first pass, 0 errors, 0 warnings.
+
+## Acceptance criteria verification
+
+- [x] `dotnet build` — **PASS, 0 errors, 0 warnings**
+- [x] `/internal/mcp/brave` MapPost endpoint added to Program.cs
+- [x] `IsInternalAuthorized` helper defined and used
+- [x] Response format: `{ content: [{ type: "text", text: <formatted> }] }` — matches harness `result.content[0].text` extraction
+- [x] Uses `BraveSearchClient` directly (correct — `IBraveSearchService` doesn't exist in this codebase)
+- [x] Commit message: `fix(fait#3240): add /internal/mcp/brave endpoint to Blazor (cycle 3)`
+
+## Known edge cases / things Clint should scrutinize
+
+- **Routing precedence:** The `BraveSearchMcpAdapter` controller also handles `POST /internal/mcp/brave` with loopback IP check. The new minimal API takes precedence (registered before `MapControllers()`). The controller is effectively shadowed for this route. Consider removing or disabling `BraveSearchMcpAdapter` to avoid confusion — but that's a cleanup task, not a blocker.
+- **`IsInternalAuthorized` placement:** Defined as a local function after `app.Run()`. C# top-level statement local functions defined after the "main" code are valid and visible throughout the file scope.
+
+## How to test locally
+
+1. Run FAIT locally with `INTERNAL_API_TOKEN` set
+2. `curl -X POST http://localhost:5000/internal/mcp/brave -H "X-Internal-Token: <token>" -H "Content-Type: application/json" -d '{"method":"tools/call","params":{"name":"web_search","arguments":{"query":"test","count":3}}}'`
+3. Expect: `{ "content": [{ "type": "text", "text": "1. ..." }] }`
+
+## Status
+
+🟡 **Awaiting Clint review — DO NOT CLOSE**
