@@ -30,8 +30,13 @@ public class FeedbackDispatcher
             return;
         }
 
-        // Fix I2: use config for base URL, not hardcoded domain
-        var baseUrl = _config["FIP:FaitBaseUrl"]?.TrimEnd('/') ?? "https://fait.fortressam.ai";
+        // Fix C3: remove hardcoded fallback — fail fast if config key is missing
+        var baseUrl = _config["FIP:FaitBaseUrl"]?.TrimEnd('/');
+        if (string.IsNullOrEmpty(baseUrl))
+        {
+            _logger.LogWarning("FIP:FaitBaseUrl not configured — cannot dispatch feedback to Jarvis");
+            return;
+        }
 
         var screenshotLine = submission.ScreenshotS3Key != null
             ? $"**Screenshot:** s3://{submission.ScreenshotS3Key}"
