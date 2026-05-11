@@ -110,11 +110,25 @@ public class ScheduledTaskBackgroundService : BackgroundService
         try
         {
             var userId = task.UserId.ToString();
+
+            // ADO#3237 — Resolve user-level enabled MCP server slugs.
+            // ScheduledTask has no ConversationId, so we query user-level active servers.
+            // Without this, enabledMcpSlugs is [] in the harness, graph_* tools are never
+            // added to toolConfig, and the model cannot call MS365/ADO tools.
+            var mcpToolSvc = services.GetRequiredService<IMcpToolService>();
+            var activeServers = await mcpToolSvc.GetActiveServersForUserAsync(task.UserId);
+            var enabledMcpSlugs = activeServers
+                .Select(s => s.Slug)
+                .Where(s => !string.IsNullOrEmpty(s))
+                .Distinct()
+                .ToList();
+
             var turnRequest = new TurnRequest(
                 UserId: userId,
                 Message: task.Prompt,
                 IsScheduledTask: true,
-                TaskMode: task.TaskMode
+                TaskMode: task.TaskMode,
+                EnabledMcpSlugs: enabledMcpSlugs.Count > 0 ? enabledMcpSlugs : null
             );
 
             var sb = new System.Text.StringBuilder();
