@@ -1445,14 +1445,21 @@ app.post('/turn', async (req, res) => {
     const message     = rawBody.Message     ?? rawBody.message;
     const systemPrompt= rawBody.SystemPrompt?? rawBody.systemPrompt;
     const history     = rawBody.History     ?? rawBody.history;
-    const forceTaskMode = rawBody.ForceTaskMode ?? rawBody.force_task_mode ?? false;
+    // ADO#3249 — read TaskMode from both field names (Blazor TurnRequest serializes as TaskMode)
+    const forceTaskMode = rawBody.ForceTaskMode ?? rawBody.force_task_mode ?? rawBody.TaskMode ?? rawBody.taskMode ?? false;
     const pluginAgentId = rawBody.PluginAgentId ?? rawBody.pluginAgentId ?? null;
     const userEmail       = rawBody.UserEmail       ?? rawBody.userEmail       ?? null;
     const isScheduledTask = rawBody.IsScheduledTask ?? rawBody.isScheduledTask ?? false;
     const kbWriteAllowed  = rawBody.KbWriteAllowed  ?? rawBody.kbWriteAllowed  ?? true;
     const conversationId  = rawBody.ConversationId  ?? rawBody.conversationId  ?? '';
     const enabledMcpSlugs = rawBody.EnabledMcpSlugs ?? rawBody.enabledMcpSlugs ?? [];
-    const taskMode = forceTaskMode || classifyRequest(message, history);
+    // ADO#3249 — scheduled tasks with MCP slugs must use Bedrock path so toolConfig is built.
+    // classifyRequest or TaskMode=true would otherwise route them to CC spawn path where
+    // toolConfig is never constructed and graph_* tools are invisible to the model.
+    const hasMcpTools = Array.isArray(enabledMcpSlugs) && enabledMcpSlugs.length > 0;
+    const taskMode = hasMcpTools && isScheduledTask
+        ? false  // force Bedrock path — MCP tools require toolConfig, not CC text context
+        : (forceTaskMode || classifyRequest(message, history));
 
     // §G7 — track scheduled task context so requireApproval uses async-safe path
     if (isScheduledTask === true && userId) {
@@ -1460,7 +1467,7 @@ app.post('/turn', async (req, res) => {
     } else if (userId) {
         scheduledTaskUsers.delete(userId);
     }
-    console.log(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, forceTaskMode=${forceTaskMode}, classifiedTaskMode=${taskMode}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
+    console.log(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, forceTaskMode=${forceTaskMode}, classifiedTaskMode=${taskMode}, isScheduledTask=${isScheduledTask}, enabledMcpSlugs=[${enabledMcpSlugs.join(',')}], hasMcpTools=${hasMcpTools}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
 
     if (!userId || !message) {
         console.warn(`[harness] /turn: 400 — userId=${userId}, message=${!!message} — 'userId and message required'`);
@@ -2016,9 +2023,14 @@ app.post('/turn', async (req, res) => {
             for (const slug of enabledMcpSlugs) {
                 if (MCP_TOOL_SPECS[slug]) {
                     allTools.push(...MCP_TOOL_SPECS[slug]);
+                    console.log(`[harness] /turn: toolConfig — added ${MCP_TOOL_SPECS[slug].length} tools for slug=${slug}`);
+                } else {
+                    // ADO#3249 — log unknown slugs so mismatches are caught early
+                    console.warn(`[harness] /turn: toolConfig — no MCP_TOOL_SPECS entry for slug=${slug} (known: ${Object.keys(MCP_TOOL_SPECS).join(',')})`);
                 }
             }
             const toolConfig = { tools: allTools, toolChoice: { auto: {} } };
+            console.log(`[harness] /turn: toolConfig built — totalTools=${allTools.length}, toolNames=[${allTools.map(t => t.toolSpec?.name).join(',')}]`);
 
             console.log(`[harness] /turn: calling bedrockClient.send for userId=${userId}, modelId=${MODEL_ID}`);
             let tokenCount = 0;
