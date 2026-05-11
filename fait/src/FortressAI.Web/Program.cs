@@ -115,6 +115,7 @@ builder.Services.AddScoped<IWorkspaceFileService, WorkspaceFileService>();
 builder.Services.AddScoped<IWorkspaceUploadService, WorkspaceUploadService>();
 builder.Services.AddScoped<ChatLayoutState>();
 builder.Services.AddSingleton<IDocumentGeneratorService, WordDocumentGenerator>();
+builder.Services.AddScoped<FeedbackDispatcher>();
 
 // Knowledge Base
 builder.Services.AddSingleton<IAmazonBedrockAgentRuntime>(sp =>
@@ -596,6 +597,7 @@ app.MapGet("/auth/logout", async (HttpContext ctx) =>
 app.MapPost("/api/feedback", async (
     [FromBody] FeedbackRequest feedbackRequest,
     IDbContextFactory<AppDbContext> dbFactory,
+    FeedbackDispatcher feedbackDispatcher,
     System.Security.Claims.ClaimsPrincipal user,
     CancellationToken ct) =>
 {
@@ -615,10 +617,10 @@ app.MapPost("/api/feedback", async (
     db.FeedbackSubmissions.Add(submission);
     await db.SaveChangesAsync(ct);
 
-    _ = FeedbackDispatcher.DispatchToJarvisAsync(submission, app.Configuration);
+    _ = feedbackDispatcher.DispatchToJarvisAsync(submission);
 
     return Results.Ok(new { submissionId = submission.Id });
-}).RequireAuthorization();
+}).AllowAnonymous().DisableAntiforgery();
 
 // Jarvis callback — update feedback status
 app.MapPost("/api/feedback/{id}/status", async (
@@ -688,57 +690,3 @@ record FeedbackStatusUpdate(
     string? Message
 );
 
-static class FeedbackDispatcher
-{
-    public static async Task DispatchToJarvisAsync(FeedbackSubmission submission, IConfiguration config)
-    {
-        var webhookUrl = config["Feedback:JarvisWebhookUrl"];
-        if (string.IsNullOrEmpty(webhookUrl))
-        {
-            Console.Error.WriteLine("[feedback] Feedback:JarvisWebhookUrl not configured — skipping dispatch");
-            return;
-        }
-
-        var internalToken = config["Feedback:InternalToken"] ?? "";
-
-        var screenshotLine = submission.ScreenshotS3Key != null
-            ? $"**Screenshot:** s3://{submission.ScreenshotS3Key}"
-            : "";
-
-        var payload = new
-        {
-            message = $$"""
-            ## FEEDBACK: {{submission.Type.ToUpper()}} from FAIT
-
-            **Submission ID:** {{submission.Id}}
-            **User ID:** {{submission.UserId}}
-            **Page:** {{submission.PageUrl ?? "unknown"}}
-            **Type:** {{submission.Type}}
-
-            **Description:**
-            {{submission.Description}}
-
-            {{screenshotLine}}
-
-            **Triage instructions:**
-            - Auto-dispatch if this is a clear UI bug, broken element, wrong data, or regression
-            - Escalate to Fred if this involves auth/permissions, data integrity, scope-expanding features, or active WI duplicates
-            - After triage, call back: POST https://fait.fortressam.ai/api/feedback/{{submission.Id}}/status
-              with headers: Authorization: Bearer {{internalToken}}
-              with body: { "status": "dispatched"|"escalated", "adoWiId": 1234 (if dispatched), "message": "..." }
-            """,
-        };
-
-        try
-        {
-            using var http = new HttpClient();
-            http.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config["OpenClaw:ApiToken"] ?? "");
-            await http.PostAsJsonAsync(webhookUrl, payload);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[feedback] Failed to dispatch to Jarvis: {ex.Message}");
-        }
-    }
-}

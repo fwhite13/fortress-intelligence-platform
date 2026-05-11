@@ -1,8 +1,13 @@
-@using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.EntityFrameworkCore
+@using FortressAI.Web.Data
+@using FortressAI.Web.Data.Models
+@using FortressAI.Web.Services
 @inject NavigationManager Nav
-@inject IHttpClientFactory HttpClientFactory
 @inject ISnackbar Snackbar
-@implements IAsyncDisposable
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FeedbackDispatcher FeedbackDispatcher
+@inject UserSessionService Session
+@inject ILogger<FeedbackModal> _logger
 
 <MudDialog @bind-Visible="_isOpen" Options="_dialogOptions">
     <TitleContent>
@@ -45,7 +50,6 @@
     private string _type = "bug";
     private string _description = string.Empty;
     private string _pageUrl = string.Empty;
-    private HubConnection? _hubConnection;
 
     private readonly DialogOptions _dialogOptions = new()
     {
@@ -69,41 +73,8 @@
         _isOpen = false;
     }
 
-    protected override async Task OnInitializedAsync()
-    {
-        _hubConnection = new HubConnectionBuilder()
-            .WithUrl(Nav.ToAbsoluteUri("/hubs/dashboard"))
-            .WithAutomaticReconnect()
-            .Build();
-
-        _hubConnection.On<System.Text.Json.JsonElement>("ReceiveFeedbackResult", result =>
-        {
-            InvokeAsync(() =>
-            {
-                var message = "Your feedback has been received.";
-                var severity = Severity.Success;
-
-                if (result.TryGetProperty("message", out var msg))
-                    message = msg.GetString() ?? message;
-
-                if (result.TryGetProperty("status", out var status) && status.GetString() == "escalated")
-                    severity = Severity.Info;
-
-                Snackbar.Add(message, severity);
-                StateHasChanged();
-            });
-        });
-
-        try
-        {
-            await _hubConnection.StartAsync();
-        }
-        catch (Exception ex)
-        {
-            // Hub connection is non-critical — feedback modal degrades gracefully if /hubs/dashboard is unavailable
-            _ = ex;
-        }
-    }
+    // v1: no real-time feedback notification in Chat. Callback will reach Dashboard/Tasks users
+    // (who are already in the hub group). Upgrade in v1.1 to join hub group here.
 
     private async Task Submit()
     {
@@ -113,30 +84,26 @@
 
         try
         {
-            var http = HttpClientFactory.CreateClient();
-            http.BaseAddress = new Uri(Nav.BaseUri);
-
-            var payload = new
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var submission = new FeedbackSubmission
             {
-                type = _type,
-                description = _description,
-                pageUrl = _pageUrl,
-                screenshotBase64 = (string?)null,
+                Id = Guid.NewGuid().ToString(),
+                UserId = Session.UserId.ToString(),
+                Type = _type,
+                Description = _description,
+                PageUrl = _pageUrl,
+                Status = "pending",
+                CreatedAt = DateTime.UtcNow
             };
-
-            var response = await http.PostAsJsonAsync("/api/feedback", payload);
-            if (response.IsSuccessStatusCode)
-            {
-                _isOpen = false;
-                Snackbar.Add("Feedback submitted! Jarvis is reviewing it now.", Severity.Success);
-            }
-            else
-            {
-                Snackbar.Add("Something went wrong. Please try again.", Severity.Error);
-            }
+            db.FeedbackSubmissions.Add(submission);
+            await db.SaveChangesAsync();
+            _ = FeedbackDispatcher.DispatchToJarvisAsync(submission);
+            _isOpen = false;
+            Snackbar.Add("Feedback submitted! Jarvis is reviewing it now.", Severity.Success);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Feedback submission failed");
             Snackbar.Add("Something went wrong. Please try again.", Severity.Error);
         }
         finally
@@ -144,11 +111,5 @@
             _isSubmitting = false;
             StateHasChanged();
         }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_hubConnection != null)
-            await _hubConnection.DisposeAsync();
     }
 }

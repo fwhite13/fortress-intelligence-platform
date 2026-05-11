@@ -560,5 +560,24 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
                   .IsRequired(false);
         });
 
+        modelBuilder.Entity<FeedbackSubmission>(entity =>
+        {
+            entity.ToTable("feedback_submissions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(36).HasColumnType("varchar(36)").HasColumnName("id");
+            entity.Property(e => e.UserId).HasMaxLength(255).HasColumnType("varchar(255)").HasColumnName("user_id").IsRequired();
+            entity.Property(e => e.Type).HasMaxLength(50).HasColumnType("varchar(50)").HasColumnName("type").IsRequired();
+            entity.Property(e => e.Description).HasColumnType("longtext").HasColumnName("description").IsRequired();
+            entity.Property(e => e.PageUrl).HasMaxLength(500).HasColumnType("varchar(500)").HasColumnName("page_url");
+            entity.Property(e => e.ScreenshotS3Key).HasMaxLength(500).HasColumnType("varchar(500)").HasColumnName("screenshot_s3_key");
+            entity.Property(e => e.Status).HasMaxLength(50).HasColumnType("varchar(50)").HasColumnName("status").HasDefaultValue("pending").IsRequired();
+            entity.Property(e => e.AdoWiId).HasColumnType("int").HasColumnName("ado_wi_id");
+            entity.Property(e => e.TriageResult).HasColumnType("longtext").HasColumnName("triage_result");
+            entity.Property(e => e.CreatedAt).HasColumnType("DATETIME(6)").HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.TriagedAt).HasColumnType("DATETIME(6)").HasColumnName("triaged_at");
+            entity.HasIndex(e => e.UserId).HasDatabaseName("idx_feedback_user_id");
+            entity.HasIndex(e => e.Status).HasDatabaseName("idx_feedback_status");
+        });
+
     }
 }
