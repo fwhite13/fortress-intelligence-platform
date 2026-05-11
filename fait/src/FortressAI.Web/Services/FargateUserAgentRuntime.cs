@@ -493,17 +493,33 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
             yield break;
         }
 
-        // Read SSE stream line by line
+        // Read SSE stream line by line — ADO#3241: support typed SSE events (event: + data:)
         using var stream = await response!.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
+
+        string? pendingEventType = null;
 
         while (!reader.EndOfStream && !ct.IsCancellationRequested)
         {
             var line = await reader.ReadLineAsync(ct);
             if (line == null) break;
 
-            if (string.IsNullOrWhiteSpace(line) || line.StartsWith(':'))
+            // Blank line = SSE event boundary
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                pendingEventType = null;
                 continue;
+            }
+
+            if (line.StartsWith(':'))
+                continue;
+
+            // Track named event type
+            if (line.StartsWith("event: "))
+            {
+                pendingEventType = line["event: ".Length..].Trim();
+                continue;
+            }
 
             if (!line.StartsWith("data: "))
             {
@@ -513,17 +529,28 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
 
             var json = line["data: ".Length..];
             HarnessEvent? evt = null;
-            try
+
+            if (pendingEventType is "kb_sources" or "tool_call")
             {
-                evt = JsonSerializer.Deserialize<HarnessEvent>(json, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                // Typed SSE events — wrap as HarnessEvent with type from event line and payload from data
+                evt = new HarnessEvent(pendingEventType, Payload: json);
+                pendingEventType = null;
             }
-            catch (JsonException ex)
+            else
             {
-                _logger.LogWarning(ex, "Failed to parse SSE data line: {Line}", line);
-                continue;
+                // Standard JSON-encoded HarnessEvent
+                try
+                {
+                    evt = JsonSerializer.Deserialize<HarnessEvent>(json, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to parse SSE data line: {Line}", line);
+                    continue;
+                }
             }
 
             if (evt == null) continue;

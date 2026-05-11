@@ -85,3 +85,39 @@ No — single CC session, two files.
 3. Switch between them — confirm brief fires independently for each (not suppressed after first)
 4. Confirm brief content reads like "Last time we were..." not a raw user message
 5. Navigate away and back — confirm brief fires again (new page load = new component = new `_resumptionBriefSent = false`)
+
+---
+
+## Build Report — ADO#3238 Cycle 2
+
+### What was built
+Two surgical fixes in `ChatView.razor` to address brief-streaming state leak on conversation switch and a ConversationId capture-before-await race condition.
+
+### Files changed
+- `src/FortressAI.Web/Components/Chat/ChatView.razor` — Two targeted edits:
+  1. Added `_isBriefStreaming = false;` to the `ConversationId != _lastConversationId` reset block in `OnParametersSetAsync` — prevents input controls from staying frozen when user switches conversations mid-stream.
+  2. Added `var capturedConversationId = ConversationId;` before the `try` in `SendResumptionBrief()` and replaced `ConversationId` in the `finally` storage key with `capturedConversationId` — prevents using a stale/changed `ConversationId` across async continuations.
+
+### Parallelization used
+No — single file, two edits in one CC pass.
+
+### CC sessions run
+1 CC Sonnet session.
+
+### Acceptance criteria verification
+- [x] `_isBriefStreaming = false` present in `ConversationId != _lastConversationId` block (line 533) — verified via grep
+- [x] `capturedConversationId` declared before `try` in `SendResumptionBrief()` (line 1425) — verified via sed
+- [x] `finally` storage key uses `capturedConversationId` (line 1469) — verified via grep
+- [x] `dotnet build` — 0 errors, 46 pre-existing warnings
+
+### Known edge cases / things Clint should scrutinize
+- `HandleAgentReady` (the duplicate-guard path) still reads `ConversationId` directly — that path has its own `currentSessionId` capture and runs entirely on the first render so timing is less critical, but worth a glance.
+- The `_isBriefStreaming = false` reset is unconditional on switch; if a brief happens to complete successfully just as the switch fires, the state would have already been false anyway — no double-clear risk.
+
+### How to test locally
+1. Start a resumption brief streaming on conversation A
+2. While streaming, switch to conversation B
+3. Input controls on conversation B should be enabled immediately (not frozen by stale `_isBriefStreaming = true`)
+
+### Commit
+`1f161cc7` — fix(fait#3238): add _isBriefStreaming reset on chat switch + capture ConversationId before await in SendResumptionBrief (cycle 2)

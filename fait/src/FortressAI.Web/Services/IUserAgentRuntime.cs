@@ -56,17 +56,51 @@ public record TurnRequest(
     bool IsScheduledTask = false,
     bool KbWriteAllowed = true,
     string? ConversationId = null,
-    List<string>? EnabledMcpSlugs = null
+    List<string>? EnabledMcpSlugs = null,
+    KbFlags? KbFlags = null
+);
+
+// ADO#3241 — KB flags passed to harness for harness-side KB retrieval
+public record KbFlags(
+    bool CorpKbEnabled = false,
+    bool PersonalKbEnabled = false,
+    bool TeamKbEnabled = false
 );
 
 public record ChatHistoryEntry(string Role, string Content);
 
 public record HarnessEvent(
-    [property: JsonPropertyName("type")] string Type,         // "text" | "log" | "done" | "error" | "mode_switch" | "artifact"
+    [property: JsonPropertyName("type")] string Type,         // "text" | "log" | "done" | "error" | "mode_switch" | "artifact" | "kb_sources" | "tool_call"
     [property: JsonPropertyName("content")] string? Content = null,
     [property: JsonPropertyName("exitCode")] int? ExitCode = null,
     [property: JsonPropertyName("errorMessage")] string? ErrorMessage = null,
     [property: JsonPropertyName("inputTokens")] int? InputTokens = null,
     [property: JsonPropertyName("outputTokens")] int? OutputTokens = null,
     [property: JsonPropertyName("payload")] string? Payload = null   // JSON payload for mode_switch and future event types
+);
+
+// ADO#3241 — KB sources SSE payload
+public record KbSourcesPayload(
+    [property: JsonPropertyName("sources")] List<KbSourceItem>? Sources,
+    [property: JsonPropertyName("wasSearched")] bool WasSearched = false
+);
+
+public record KbSourceItem(
+    [property: JsonPropertyName("kbId")] string? KbId,
+    [property: JsonPropertyName("kbName")] string? KbName,
+    [property: JsonPropertyName("sourceCount")] int SourceCount,
+    [property: JsonPropertyName("chunks")] List<KbChunkItem>? Chunks
+);
+
+public record KbChunkItem(
+    [property: JsonPropertyName("title")] string? Title,
+    [property: JsonPropertyName("excerpt")] string? Excerpt
+);
+
+// ADO#3241 — Tool call SSE payload
+public record ToolCallPayload(
+    [property: JsonPropertyName("server")] string? Server,
+    [property: JsonPropertyName("toolName")] string? ToolName,
+    [property: JsonPropertyName("status")] string? Status,    // "calling" | "done" | "error"
+    [property: JsonPropertyName("summary")] string? Summary
 );

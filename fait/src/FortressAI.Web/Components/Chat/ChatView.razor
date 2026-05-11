@@ -162,6 +162,29 @@ else
                     🔍 @(_currentToolName ?? "Calling tool")...
                 </MudAlert>
             }
+            @if (_activeToolCalls.Any())
+            {
+                <div class="tool-call-indicator-list">
+                    @foreach (var tc in _activeToolCalls)
+                    {
+                        <div class="tool-call-indicator @(tc.Status == "calling" ? "tool-call-active" : tc.Status == "error" ? "tool-call-error" : "tool-call-done")">
+                            @if (tc.Status == "calling")
+                            {
+                                <span class="tool-call-spinner">&#x23F3;</span>
+                            }
+                            else if (tc.Status == "done")
+                            {
+                                <span class="tool-call-check">&#x2713;</span>
+                            }
+                            else
+                            {
+                                <span class="tool-call-x">&#x26A0;&#xFE0F;</span>
+                            }
+                            <span class="tool-call-summary">@tc.Summary</span>
+                        </div>
+                    }
+                </div>
+            }
             @if (isStreaming)
             {
                 <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
@@ -370,9 +393,12 @@ else
     private bool _teamKbPopoverOpen = false;
     private bool _hasPendingMigration = false;
     private List<McpServer> _availableToolServers = new();
-    private List<ToolCallAccumulator> _activeToolCalls = new();
     private string? _currentToolName;
     private bool _toolCallInProgress = false;
+
+    // ADO#3241 — Tool call transparency events
+    private List<ToolCallEvent> _activeToolCalls = new();
+    private record ToolCallEvent(string Server, string ToolName, string Status, string Summary, DateTime Timestamp);
     // Attachment state
     private List<ChatAttachment> _pendingAttachments = new();
     private bool _isDragOver = false;
@@ -531,6 +557,7 @@ else
             _briefContent = new System.Text.StringBuilder();
             _resumptionBriefSent = false;
             _isBriefStreaming = false;
+            _activeToolCalls.Clear();  // ADO#3241
         }
 
         // Handle previewArtifact query param — deep-link from Workspace page
@@ -652,6 +679,7 @@ else
     {
         if (string.IsNullOrWhiteSpace(text) || isStreaming) return;
         _lastKbResult = null;  // Clear stale result before new send
+        _activeToolCalls.Clear();  // ADO#3241 — Reset tool call indicators
         _taskModeActive = false; // Reset — will be set by mode_switch event in this turn
 
         // Capture pending attachments before clearing
@@ -746,155 +774,16 @@ else
                 ? artifactPrompt
                 : systemPrompt + "\n\n" + artifactPrompt;
 
-            // ============================================================
-            // KB RETRIEVAL DECISION MATRIX
-            // ============================================================
-            // This block executes when ANY of these conditions is true:
-            //   - Fortress Corp KB toggle ON (_fortressKbEnabled)
-            //   - Personal KB toggle ON (_personalKbEnabled)
-            //   - Team KB(s) selected (_selectedTeamIds.Any())
-            //   - Conversation has an active project with KB docs (conversation.ProjectId.HasValue)
-            //
-            // Corp KB (KnowledgeBaseService.RetrieveCorpMultiQueryAsync):
-            //   Fires when: _fortressKbEnabled
-            //   Structural isolation — no filter needed (entire KB is Corp docs)
-            //
-            // Personal/Team/Project KB (ForgeQueryService.GetKbContextMultiQueryAsync):
-            //   Fires when: _personalKbEnabled OR _selectedTeamIds.Any() OR conversation.ProjectId.HasValue
-            //   Each type queries its own dedicated Bedrock KB — no compound filters
-            //
-            // Query Generation (KbQueryService):
-            //   Fires when: anyKbActive (before both layers)
-            //   Model: Claude Haiku 4.5 (us.anthropic.claude-haiku-4-5-20251001-v1:0)
-            //   Timeout: 5s, falls back to raw user text on any failure
-            //
-            // Query generation, deduplication, and score threshold unchanged.
-            // ============================================================
-            var kbResult = new KbRetrievalResult();
-            var effectiveSystemPrompt = systemPrompt;
-
-            // Determine what KB sources are active for this message
+            // ADO#3241 — KB retrieval now handled by harness
+            // Blazor passes KB flags; harness does retrieval and emits kb_sources SSE event
             bool hasCorpKb = _fortressKbEnabled;
             bool hasPersonalKb = _personalKbEnabled;
             bool hasTeamKb = _selectedTeamIds?.Any() == true;
             bool hasProjectKb = conversation?.ProjectId.HasValue == true;
             bool anyKbActive = hasCorpKb || hasPersonalKb || hasTeamKb || hasProjectKb;
-            Console.WriteLine($"[KB] Toggle state — Corp:{hasCorpKb} Personal:{hasPersonalKb} Team:{hasTeamKb} Project:{hasProjectKb} anyActive:{anyKbActive}");
+            Console.WriteLine($"[KB] Flags — Corp:{hasCorpKb} Personal:{hasPersonalKb} Team:{hasTeamKb} Project:{hasProjectKb}");
 
-            if (anyKbActive)
-            {
-                kbResult.WasSearched = true;
-
-                // Step 1: Generate optimized queries via Haiku (falls back to raw text on any failure)
-                var messagesToPass = messages.TakeLast(5).Select(m => new MessageDto { Role = m.Role, Content = m.Content }).ToList();
-                var searchQueries = await KbQuerySvc.GenerateSearchQueriesAsync(text.Trim(), messagesToPass);
-                kbResult.QueriesUsed = searchQueries;
-
-                // Step 2: Layer 1 — Corp KB only (parallel multi-query)
-                if (hasCorpKb)
-                {
-                    try
-                    {
-                        // Corp KB — structural isolation, no filter needed
-                        var corpChunks = await KbSvc.RetrieveCorpMultiQueryAsync(searchQueries, minScore: 0.35);
-
-                        if (corpChunks.Any())
-                        {
-                            kbResult.InjectedChunks.AddRange(corpChunks);
-                            foreach (var grp in corpChunks.GroupBy(c => c.KbType))
-                            {
-                                kbResult.SourceStats.Add(new KbSourceStat
-                                {
-                                    KbName = grp.Key switch
-                                    {
-                                        "Fortress" => "Fortress Corp KB",
-                                        "Personal" => "Personal KB (Layer 1)",
-                                        _ => grp.Key
-                                    },
-                                    ResultCount = grp.Count(),
-                                    SourceDocuments = grp
-                                        .Select(c => System.IO.Path.GetFileNameWithoutExtension(c.Source.Split('/').Last()))
-                                        .Distinct().ToList()
-                                });
-                            }
-                        }
-
-                        var kbContext = KbSvc.FormatKbContext(corpChunks);
-                        if (!string.IsNullOrEmpty(kbContext))
-                        {
-                            var kbInstruction = "## Knowledge Base Context\nThe following information was retrieved from the organization's knowledge base and is relevant to the user's query. Use this information to inform your response. If the information answers the user's question, reference it directly.\n\n";
-                            effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
-                                ? kbInstruction + kbContext
-                                : effectiveSystemPrompt + "\n\n" + kbInstruction + kbContext;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[KB] Smart retrieval failed silently: {ex.Message}");
-                    }
-                }
-
-                // Step 3: Layer 2 — FORGE v2 Personal/Team/Project KB (parallel multi-query)
-                // Only fires when the user has personal KB, team KBs selected, or an active project
-                if (hasPersonalKb || hasTeamKb || hasProjectKb)
-                {
-                    try
-                    {
-                        var (forgeContext, forgeChunks, forgeFiltered) = await ForgeQuery.GetKbContextMultiQueryAsync(
-                            Session.UserId,
-                            searchQueries,
-                            personalKbEnabled: hasPersonalKb,
-                            teamKbIds: _selectedTeamIds.Any() ? _selectedTeamIds.ToList() : null,
-                            projectId: conversation?.ProjectId,
-                            minScore: 0.35);
-
-                        kbResult.FilteredOutCount += forgeFiltered;
-
-                        if (forgeChunks.Any())
-                        {
-                            kbResult.InjectedChunks.AddRange(forgeChunks);
-                            // Group by KB type for source stats
-                            foreach (var grp in forgeChunks.GroupBy(c => c.KbType))
-                            {
-                                kbResult.SourceStats.Add(new KbSourceStat
-                                {
-                                    KbName = grp.Key switch
-                                    {
-                                        "Personal" => "Personal KB",
-                                        "Project"  => "Project KB",
-                                        var t when t.StartsWith("Team:") => "Team KB",
-                                        _          => grp.Key
-                                    },
-                                    ResultCount = grp.Count(),
-                                    SourceDocuments = grp
-                                        .Select(c => System.IO.Path.GetFileNameWithoutExtension(c.Source.Split('/').Last()))
-                                        .Distinct()
-                                        .ToList()
-                                });
-                            }
-                        }
-
-                        if (!string.IsNullOrEmpty(forgeContext))
-                        {
-                            var forgeInstruction = "## Personal/Team Knowledge Base Context\nThe following information was retrieved from the user's personal or team knowledge base. Use this information to inform your response.\n\n";
-                            effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
-                                ? forgeInstruction + forgeContext
-                                : effectiveSystemPrompt + "\n\n" + forgeInstruction + forgeContext;
-                            Console.WriteLine($"[FORGE] Injected {forgeContext.Length} chars of KB context into system prompt");
-                        }
-                        else
-                        {
-                            Console.WriteLine("[FORGE] No KB context retrieved");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[FORGE] Smart context injection failed silently: {ex.Message}");
-                    }
-                }
-
-                _lastKbResult = kbResult;
-            }
+            var effectiveSystemPrompt = systemPrompt;  // no longer pre-populated with KB context
 
             // Inject attachment content into context
             if (attachmentsSnapshot.Any())
@@ -967,7 +856,12 @@ else
                 TaskMode: _taskMode,
                 SystemPrompt: string.IsNullOrEmpty(effectiveSystemPrompt) ? null : effectiveSystemPrompt,
                 ConversationId: conversation.Id.ToString(),
-                EnabledMcpSlugs: enabledMcpSlugs.Count > 0 ? enabledMcpSlugs : null
+                EnabledMcpSlugs: enabledMcpSlugs.Count > 0 ? enabledMcpSlugs : null,
+                KbFlags: anyKbActive ? new KbFlags(
+                    CorpKbEnabled: hasCorpKb,
+                    PersonalKbEnabled: hasPersonalKb,
+                    TeamKbEnabled: hasTeamKb || hasProjectKb
+                ) : null
             );
 
             await foreach (var evt in AgentRuntime.SendTurnAsync(Session.UserId.ToString(), turnRequest, streamingCts!.Token))
@@ -1015,6 +909,55 @@ else
                     catch (Exception ex)
                     {
                         Logger.LogWarning(ex, "[ChatView] Failed to save artifact from SSE event");
+                    }
+                }
+                else if (evt.Type == "kb_sources")
+                {
+                    try
+                    {
+                        var kbSourcesPayload = System.Text.Json.JsonSerializer.Deserialize<KbSourcesPayload>(
+                            evt.Payload ?? "{}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (kbSourcesPayload?.Sources != null)
+                        {
+                            var result = new KbRetrievalResult { WasSearched = true };
+                            foreach (var src in kbSourcesPayload.Sources)
+                            {
+                                if (src.SourceCount > 0)
+                                {
+                                    result.SourceStats.Add(new KbSourceStat
+                                    {
+                                        KbName = src.KbName ?? "KB",
+                                        ResultCount = src.SourceCount,
+                                        SourceDocuments = src.Chunks?.Select(c => c.Title ?? "").Where(t => !string.IsNullOrEmpty(t)).Distinct().ToList() ?? new()
+                                    });
+                                    for (int i = 0; i < src.SourceCount; i++)
+                                        result.InjectedChunks.Add(new KbChunk { Source = src.KbId ?? "harness" });
+                                }
+                            }
+                            _lastKbResult = result;
+                            StateHasChanged();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[ChatView] Failed to parse kb_sources payload");
+                    }
+                }
+                else if (evt.Type == "tool_call")
+                {
+                    try
+                    {
+                        var toolCallPayload = System.Text.Json.JsonSerializer.Deserialize<ToolCallPayload>(
+                            evt.Payload ?? "{}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (toolCallPayload != null)
+                        {
+                            HandleToolCallEvent(toolCallPayload);
+                            StateHasChanged();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[ChatView] Failed to parse tool_call payload");
                     }
                 }
                 // "log" events: swallow silently
@@ -1226,6 +1169,28 @@ else
         var text = _userInput;
         _userInput = "";
         await HandleSend(string.IsNullOrWhiteSpace(text) ? "(see attached files)" : text);
+    }
+
+    // ADO#3241 — Handle tool_call SSE events
+    private void HandleToolCallEvent(ToolCallPayload payload)
+    {
+        var server = payload.Server ?? "";
+        var toolName = payload.ToolName ?? "";
+        var status = payload.Status ?? "";
+        var summary = payload.Summary ?? "";
+
+        if (status == "calling")
+        {
+            _activeToolCalls.Add(new ToolCallEvent(server, toolName, "calling", summary, DateTime.UtcNow));
+        }
+        else if (status is "done" or "error")
+        {
+            var idx = _activeToolCalls.FindLastIndex(t => t.ToolName == toolName && t.Status == "calling");
+            if (idx >= 0)
+            {
+                _activeToolCalls[idx] = new ToolCallEvent(server, toolName, status, summary, _activeToolCalls[idx].Timestamp);
+            }
+        }
     }
 
     private async Task ScrollToBottom()

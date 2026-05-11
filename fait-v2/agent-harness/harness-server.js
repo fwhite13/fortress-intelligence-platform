@@ -139,6 +139,24 @@ function scrubSecrets(text) {
   return result;
 }
 
+// ADO#3241 — Structured KB retrieval (returns raw results, not formatted text)
+async function retrieveFromKbFull(kbId, query, maxResults = 5) {
+    const cmd = new RetrieveCommand({
+        knowledgeBaseId: kbId,
+        retrievalQuery: { text: query },
+        retrievalConfiguration: {
+            vectorSearchConfiguration: { numberOfResults: maxResults }
+        }
+    });
+    const resp = await bedrockAgentClient.send(cmd);
+    return resp.retrievalResults || [];
+}
+
+// ADO#3241 — Emit tool_call SSE event
+function emitToolCall(res, server, toolName, status, summary) {
+    res.write(`event: tool_call\ndata: ${JSON.stringify({ server, toolName, status, summary })}\n\n`);
+}
+
 app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || 3000;
@@ -1770,8 +1788,75 @@ app.post('/turn', async (req, res) => {
             if (systemParts.length === 0) {
                 systemParts.push('You are a helpful AI assistant.');
             }
-            const fullSystemPrompt = systemParts.join('\n\n---\n\n');
+            let fullSystemPrompt = systemParts.join('\n\n---\n\n');
             console.log(`[harness] /turn: system prompt built, totalLen=${fullSystemPrompt.length}`);
+
+            // ADO#3241 — Harness-side KB retrieval
+            const kbFlags = rawBody.KbFlags ?? rawBody.kbFlags ?? null;
+            if (kbFlags) {
+                const kbEnabled = kbFlags.CorpKbEnabled || kbFlags.corpKbEnabled ||
+                                  kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled ||
+                                  kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled;
+
+                if (kbEnabled) {
+                    console.log(`[harness] /turn: KB retrieval — flags=${JSON.stringify(kbFlags)}`);
+                    const kbSources = [];
+
+                    async function doKbRetrieval(kbId, kbName, query) {
+                        if (!kbId) {
+                            console.warn(`[harness] KB retrieval: no KB ID for ${kbName}`);
+                            return;
+                        }
+                        try {
+                            const results = await retrieveFromKbFull(kbId, query, 5);
+                            if (results.length > 0) {
+                                const chunks = results.map(r => ({
+                                    title: (r.location?.s3Location?.uri || r.location?.confluenceLocation?.url || '').split('/').pop() || 'Document',
+                                    excerpt: (r.content?.text || '').substring(0, 200)
+                                }));
+                                kbSources.push({
+                                    kbId,
+                                    kbName,
+                                    sourceCount: results.length,
+                                    chunks
+                                });
+                                const contextText = results.map((r, i) => `[${i+1}] ${r.content?.text || ''}`).join('\n\n');
+                                const section = kbName === 'Corp KB'
+                                    ? `## Knowledge Base Context\nThe following information was retrieved from the organization's knowledge base:\n\n${contextText}`
+                                    : `## Personal/Team Knowledge Base Context\nThe following information was retrieved from the user's knowledge base:\n\n${contextText}`;
+                                systemParts.push(section);
+                            }
+                        } catch (err) {
+                            console.error(`[harness] KB retrieval error for ${kbName}:`, err.message);
+                        }
+                    }
+
+                    const kbPromises = [];
+                    if (kbFlags.CorpKbEnabled || kbFlags.corpKbEnabled) {
+                        kbPromises.push(doKbRetrieval(process.env.CORP_KB_ID, 'Corp KB', message));
+                    }
+                    if (kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled) {
+                        kbPromises.push(doKbRetrieval(process.env.PERSONAL_KB_ID, 'Personal KB', message));
+                    }
+                    if (kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled) {
+                        kbPromises.push(doKbRetrieval(process.env.TEAM_KB_ID, 'Team KB', message));
+                    }
+                    await Promise.all(kbPromises);
+
+                    // Emit kb_sources event
+                    if (kbSources.length > 0) {
+                        res.write(`event: kb_sources\ndata: ${JSON.stringify({ sources: kbSources })}\n\n`);
+                        console.log(`[harness] /turn: emitted kb_sources — ${kbSources.length} KB(s) with results`);
+                    } else {
+                        res.write(`event: kb_sources\ndata: ${JSON.stringify({ sources: [], wasSearched: true })}\n\n`);
+                        console.log(`[harness] /turn: emitted kb_sources — no results found`);
+                    }
+
+                    // Rebuild system prompt after KB context injection
+                    fullSystemPrompt = systemParts.join('\n\n---\n\n');
+                    console.log(`[harness] /turn: system prompt rebuilt after KB retrieval, totalLen=${fullSystemPrompt.length}`);
+                }
+            }
 
             // Build message history
             const messages = [];
@@ -2077,6 +2162,14 @@ app.post('/turn', async (req, res) => {
                                 toolResultText = `Error reading file: ${rfErr.message}`;
                             }
                         } else if (toolUseAccumulator.name.startsWith('graph_')) {
+                            // ADO#3241 — tool_call SSE events
+                            const graphSummaries = {
+                                graph_list_emails: 'Reading your inbox...',
+                                graph_get_email: 'Reading email...',
+                                graph_send_email: 'Sending email...',
+                                graph_list_calendar_events: 'Checking your calendar...'
+                            };
+                            emitToolCall(res, 'graph', toolUseAccumulator.name, 'calling', graphSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
                                     method: 'POST',
@@ -2085,11 +2178,22 @@ app.post('/turn', async (req, res) => {
                                 });
                                 const mcpData = await mcpRes.json();
                                 toolResultText = JSON.stringify(mcpData, null, 2);
+                                emitToolCall(res, 'graph', toolUseAccumulator.name, 'done', 'Done.');
                             } catch (mcpErr) {
                                 toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
                                 isError = true;
+                                emitToolCall(res, 'graph', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
                             }
                         } else if (toolUseAccumulator.name.startsWith('ado_')) {
+                            // ADO#3241 — tool_call SSE events
+                            const adoSummaries = {
+                                ado_list_work_items: 'Querying ADO work items...',
+                                ado_get_work_item: `Looking up work item ${toolInput.id ?? ''}...`,
+                                ado_create_work_item: `Creating work item: ${toolInput.title ?? ''}...`,
+                                ado_update_work_item: `Updating work item ${toolInput.id ?? ''}...`,
+                                ado_wiql_query: 'Running ADO query...'
+                            };
+                            emitToolCall(res, 'ado', toolUseAccumulator.name, 'calling', adoSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
                                     method: 'POST',
@@ -2098,11 +2202,14 @@ app.post('/turn', async (req, res) => {
                                 });
                                 const mcpData = await mcpRes.json();
                                 toolResultText = JSON.stringify(mcpData, null, 2);
+                                emitToolCall(res, 'ado', toolUseAccumulator.name, 'done', 'Done.');
                             } catch (mcpErr) {
                                 toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
                                 isError = true;
+                                emitToolCall(res, 'ado', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'web_search') {
+                            emitToolCall(res, 'brave', 'web_search', 'calling', `Searching the web for: ${toolInput.query ?? ''}`);
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/web_search`, {
                                     method: 'POST',
@@ -2111,9 +2218,11 @@ app.post('/turn', async (req, res) => {
                                 });
                                 const mcpData = await mcpRes.json();
                                 toolResultText = JSON.stringify(mcpData, null, 2);
+                                emitToolCall(res, 'brave', 'web_search', 'done', 'Web search complete.');
                             } catch (mcpErr) {
                                 toolResultText = `Web search error: ${mcpErr.message}`;
                                 isError = true;
+                                emitToolCall(res, 'brave', 'web_search', 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
                             }
                         } else {
                             // default: search_knowledge_base

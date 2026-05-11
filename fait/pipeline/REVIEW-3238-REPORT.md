@@ -167,3 +167,72 @@ These two changes together prevent input lockout and the false "already briefed"
 ---
 
 _Clint Barton — code review complete_
+
+---
+
+## Review Report — ADO#3238 — Cycle 2 Sign-off
+
+### Verdict: PASS
+
+---
+
+### CC Review Summary
+
+CC (Sonnet, targeted cycle 2 brief) read `ChatView.razor` and verified both fixes from cycle 1. Both are correctly implemented. No regressions introduced.
+
+---
+
+### Fix Verification
+
+**Fix 1 — `_isBriefStreaming = false` in reset block**
+
+✅ **CORRECT**
+
+```csharp
+if (ConversationId != _lastConversationId)
+{
+    // ...
+    _briefContent = new System.Text.StringBuilder();
+    _resumptionBriefSent = false;   // line 532
+    _isBriefStreaming = false;      // line 533 ← present, same block
+}
+```
+
+Both `_resumptionBriefSent` and `_isBriefStreaming` reset together in the `ConversationId != _lastConversationId` block. Fix is in the right place.
+
+---
+
+**Fix 2 — `capturedConversationId` in `SendResumptionBrief()`**
+
+✅ **CORRECT**
+
+```csharp
+var capturedConversationId = ConversationId; // first statement, before any await
+// ...
+// first await on line 1445 (AgentRuntime.SendTurnAsync)
+// ...
+finally
+{
+    var briefStorageKey = $"resumption_brief_{_currentHarnessSessionId}_{capturedConversationId}"; // ← captured value used
+}
+```
+
+Capture is the first statement in the method body, before any `await`. The `finally` block uses `capturedConversationId` exclusively. No remaining bare `ConversationId` references exist in `SendResumptionBrief` after the capture point.
+
+---
+
+### Advisory (pre-existing, not a cycle 2 block)
+
+`HandleAgentReady` (~line 1494) has the same race pattern that Fix 2 addressed — `ConversationId` is used uncaptured after an `await GetSessionAsync(...)` call when building a storage key. This was present before this commit, not introduced by cycle 2. Recommended follow-up: capture `ConversationId` before the `GetSessionAsync` await in `HandleAgentReady` to close that same window.
+
+**This does not block PASS for cycle 2.**
+
+---
+
+### Quick Scan
+
+No new issues introduced by commit `1f161cc7`. Change is surgical and correct.
+
+---
+
+_Clint Barton — cycle 2 sign-off complete_
