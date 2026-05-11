@@ -121,3 +121,36 @@ No — single file, two edits in one CC pass.
 
 ### Commit
 `1f161cc7` — fix(fait#3238): add _isBriefStreaming reset on chat switch + capture ConversationId before await in SendResumptionBrief (cycle 2)
+
+---
+
+## Build Report — ADO#3238 — Round 2 (Cycle 3)
+
+**Commit:** `9320e00a`
+**Date:** 2026-05-11
+**Branch:** main
+
+### What was built
+
+Moved brief card initialization (`_isBriefStreaming = true`, `_briefContent = new StringBuilder()`, `StateHasChanged()`) from inside `SendResumptionBrief()` to the `OnAfterRenderAsync` cold-start trigger block. Changed `await SendResumptionBrief()` to fire-and-forget (`_ = SendResumptionBrief()`). This ensures the brief card is visible on the UI immediately — before the async brief turn begins — eliminating the race where the first user message could appear before the brief card rendered.
+
+Also removed the 3 state-init lines from the `try` block in `SendResumptionBrief()` (they are now redundant — state is set before the call).
+
+### Files changed
+
+- `src/FortressAI.Web/Components/Chat/ChatView.razor`
+  - `OnAfterRenderAsync` cold-start block (~line 629): added `_isBriefStreaming = true`, `_briefContent = new System.Text.StringBuilder()`, `StateHasChanged()`, changed `await SendResumptionBrief()` → `_ = SendResumptionBrief()`
+  - `SendResumptionBrief()` (~line 1406): removed the 3 now-redundant state-init lines
+
+**Note:** Brief spec mentioned `_showBrief = true` — this field does not exist in ChatView.razor. Brief card visibility is driven by `_briefContent.Length > 0 || _isBriefStreaming` in the template. Correctly omitted.
+
+### Build verification
+
+- `dotnet build FortressAI.Web/FortressAI.Web.csproj` → **0 errors, 45 warnings**
+
+### Acceptance criteria
+
+- [x] `_isBriefStreaming = true` set before `_ = SendResumptionBrief()` fires
+- [x] `StateHasChanged()` called before fire-and-forget so UI renders brief card immediately
+- [x] 3 state-init lines removed from `SendResumptionBrief()` try block
+- [x] `dotnet build` — 0 errors

@@ -126,3 +126,35 @@ No — single file, single CC run.
 ## Status
 
 🟡 **Awaiting Clint review — DO NOT CLOSE**
+
+---
+
+## Build Report — ADO#3240 — Round 2 (Cycle 4)
+
+**Commit:** `0b36dcbe`
+**Date:** 2026-05-11
+**Branch:** main
+
+### What was built
+
+Added `GET /api/internal/user-tokens/{userId}` endpoint to `Program.cs`. This endpoint is what the harness (`harness-server.js:~38`) calls to fetch both ms365 and ADO tokens in a single request. Previously the endpoint returned 404, causing `getUserTokens()` to always return `{ ms365: null, ado: null }` and all graph_* / ado_* tool calls to fail with 401.
+
+### Files changed
+
+- `src/FortressAI.Web/Program.cs` — inserted new `app.MapGet("/api/internal/user-tokens/{userId}", ...)` endpoint before the existing `/api/internal/devops-pat/{userId}` endpoint.
+  - Validates `X-Internal-Token` header
+  - Calls `MicrosoftTokenService.GetValidAccessTokenAsync(userGuid)` for ms365 token (non-fatal on exception)
+  - Calls `DevOpsConnectionService.GetDecryptedPatAsync(userGuid)` for ADO PAT (non-fatal on exception)
+  - Returns `{ ms365AccessToken, adoPersonalAccessToken }`
+  - `.AllowAnonymous().DisableAntiforgery()`
+
+### Build verification
+
+- `dotnet build FortressAI.Web/FortressAI.Web.csproj` → **0 errors, 45 warnings**
+
+### Acceptance criteria
+
+- [x] `GET /api/internal/user-tokens/{userId}` endpoint added to Program.cs
+- [x] Returns both `ms365AccessToken` and `adoPersonalAccessToken`
+- [x] `X-Internal-Token` validation present
+- [x] `dotnet build` — 0 errors
