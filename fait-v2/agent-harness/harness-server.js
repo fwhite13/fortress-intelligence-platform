@@ -157,6 +157,21 @@ function emitToolCall(res, server, toolName, status, summary) {
     res.write(`event: tool_call\ndata: ${JSON.stringify({ server, toolName, status, summary })}\n\n`);
 }
 
+// ADO#3241 — Human-readable summaries for builtin tool_call events
+function getBuiltinSummary(toolName, toolInput) {
+    switch(toolName) {
+        case 'search_knowledge_base': return `Searching knowledge base: "${(toolInput.query||'').substring(0,50)}"`;
+        case 'search_memory': return 'Searching memory...';
+        case 'read_memory': return 'Reading memory...';
+        case 'write_memory': return 'Saving to memory...';
+        case 'list_workspace_files': return 'Listing workspace files...';
+        case 'create_document': return `Creating document: "${toolInput.filename||toolInput.title||'document'}"`;
+        case 'read_file': return `Reading file: ${toolInput.path||''}`;
+        case 'list_files': return 'Listing files...';
+        default: return `${toolName}...`;
+    }
+}
+
 app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || 3000;
@@ -1829,7 +1844,7 @@ app.post('/turn', async (req, res) => {
                                     sourceCount: results.length,
                                     chunks
                                 });
-                                const contextText = results.map((r, i) => `[${i+1}] ${r.content?.text || ''}`).join('\n\n');
+                                const contextText = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
                                 const section = kbName === 'Corp KB'
                                     ? `## Knowledge Base Context\nThe following information was retrieved from the organization's knowledge base:\n\n${contextText}`
                                     : `## Personal/Team Knowledge Base Context\nThe following information was retrieved from the user's knowledge base:\n\n${contextText}`;
@@ -2084,6 +2099,7 @@ app.post('/turn', async (req, res) => {
                         let isError = false;
 
                         if (toolUseAccumulator.name === 'list_workspace_files') {
+                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const wsRes = await fetch(`http://localhost:${PORT}/tools/list_workspace_files`, {
                                     method: 'POST',
@@ -2092,10 +2108,13 @@ app.post('/turn', async (req, res) => {
                                 });
                                 const wsData = await wsRes.json();
                                 toolResultText = `\n\n[Workspace Files]\n${JSON.stringify(wsData, null, 2)}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
                             } catch (wsErr) {
                                 toolResultText = `\n\n[Workspace Files Error]\n${wsErr.message}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${wsErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'read_memory') {
+                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const rmRes = await fetch(`http://localhost:${PORT}/tools/read_memory`, {
                                     method: 'POST',
@@ -2104,10 +2123,13 @@ app.post('/turn', async (req, res) => {
                                 });
                                 const rmData = await rmRes.json();
                                 toolResultText = `\n\n[Memory Read]\n${JSON.stringify(rmData, null, 2)}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
                             } catch (rmErr) {
                                 toolResultText = `\n\n[Memory Read Error]\n${rmErr.message}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${rmErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'write_memory') {
+                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const wmRes = await fetch(`http://localhost:${PORT}/tools/write_memory`, {
                                     method: 'POST',
@@ -2116,10 +2138,13 @@ app.post('/turn', async (req, res) => {
                                 });
                                 const wmData = await wmRes.json();
                                 toolResultText = `\n\n[Memory Write]\n${JSON.stringify(wmData, null, 2)}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
                             } catch (wmErr) {
                                 toolResultText = `\n\n[Memory Write Error]\n${wmErr.message}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${wmErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'create_document') {
+                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const cdRes = await fetch(`http://localhost:${PORT}/tools/create_document`, {
                                     method: 'POST',
@@ -2146,12 +2171,15 @@ app.post('/turn', async (req, res) => {
                                             sizeBytes: cdData.sizeBytes
                                         })
                                     });
+                                    emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
                                     toolResultText = `\n\nDocument created: ${cdData.filename}\n\n`;
                                 }
                             } catch (cdErr) {
                                 toolResultText = `\n\n[Document Error]\n${cdErr.message}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${cdErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'list_files') {
+                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const lfRes = await fetch(`http://localhost:${PORT}/tools/list_files`, {
                                     method: 'POST',
@@ -2160,10 +2188,13 @@ app.post('/turn', async (req, res) => {
                                 });
                                 const lfData = await lfRes.json();
                                 toolResultText = JSON.stringify(lfData.items || []);
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
                             } catch (lfErr) {
                                 toolResultText = `Error listing files: ${lfErr.message}`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${lfErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'read_file') {
+                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const rfRes = await fetch(`http://localhost:${PORT}/tools/read_file`, {
                                     method: 'POST',
@@ -2172,8 +2203,10 @@ app.post('/turn', async (req, res) => {
                                 });
                                 const rfData = await rfRes.json();
                                 toolResultText = rfData.content || rfData.error || 'No content returned.';
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
                             } catch (rfErr) {
                                 toolResultText = `Error reading file: ${rfErr.message}`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${rfErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name.startsWith('graph_')) {
                             // ADO#3241 — tool_call SSE events
@@ -2240,12 +2273,15 @@ app.post('/turn', async (req, res) => {
                             }
                         } else {
                             // default: search_knowledge_base
+                            emitToolCall(res, 'builtin', 'search_knowledge_base', 'calling', getBuiltinSummary('search_knowledge_base', toolInput));
                             try {
                                 const kbResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal');
                                 toolResultText = `\n\n[KB Search Results]\n${kbResult}\n\n`;
+                                emitToolCall(res, 'builtin', 'search_knowledge_base', 'done', 'Knowledge base search complete');
                             } catch (kbErr) {
                                 toolResultText = `\n\n[KB Search Error]\n${kbErr.message}\n\n`;
                                 isError = true;
+                                emitToolCall(res, 'builtin', 'search_knowledge_base', 'error', `Error: ${kbErr.message.substring(0,100)}`);
                             }
                         }
 
