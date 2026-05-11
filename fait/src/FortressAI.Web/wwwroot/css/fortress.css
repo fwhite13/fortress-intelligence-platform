@@ -1603,22 +1603,22 @@ a:hover {
     border-radius: var(--radius-sm, 4px);
     font-size: 0.75rem;
     color: var(--color-text-secondary, #6b7280);
-    background: var(--color-surface-subtle, rgba(0,0,0,0.03));
+    background: var(--color-surface-sunken, rgba(0,0,0,0.03));
 }
 
 .tool-call-active {
-    color: var(--color-text-accent, var(--color-primary, #3b82f6));
-    background: var(--color-accent-muted, rgba(59,130,246,0.08));
+    color: var(--color-info);
+    background: var(--color-info-bg);
 }
 
 .tool-call-done {
-    color: var(--color-text-success, var(--color-text-secondary, #6b7280));
+    color: var(--color-success);
     opacity: 0.7;
 }
 
 .tool-call-error {
-    color: var(--color-text-danger, #ef4444);
-    background: var(--color-danger-muted, rgba(239,68,68,0.08));
+    color: var(--color-error);
+    background: var(--color-error-bg);
 }
 
 .tool-call-summary {
