@@ -550,6 +550,37 @@ app.MapGet("/api/tokens/{userId}", async (HttpContext context, string userId, ID
     return Results.Ok(new { accessToken });
 }).RequireAuthorization();
 
+// Internal endpoint for harness — get both ms365 access token and ADO PAT for a user
+app.MapGet("/api/internal/user-tokens/{userId}", async (HttpContext context, string userId,
+    DevOpsConnectionService devopsConn, MicrosoftTokenService msTokenSvc,
+    IConfiguration config, IDbContextFactory<AppDbContext> dbFactory) =>
+{
+    // Validate X-Internal-Token
+    var expectedToken = config["INTERNAL_API_TOKEN"];
+    if (string.IsNullOrEmpty(expectedToken)) return Results.StatusCode(503);
+    if (!context.Request.Headers.TryGetValue("X-Internal-Token", out var header) || header.ToString() != expectedToken)
+        return Results.Unauthorized();
+
+    if (!Guid.TryParse(userId, out var userGuid))
+        return Results.BadRequest(new { error = "Invalid userId" });
+
+    // Get MS365 access token
+    string? ms365AccessToken = null;
+    try { ms365AccessToken = await msTokenSvc.GetValidAccessTokenAsync(userGuid); }
+    catch { /* non-fatal */ }
+
+    // Get ADO PAT
+    string? adoPat = null;
+    try { adoPat = await devopsConn.GetDecryptedPatAsync(userGuid); }
+    catch { /* non-fatal */ }
+
+    return Results.Ok(new
+    {
+        ms365AccessToken,
+        adoPersonalAccessToken = adoPat
+    });
+}).AllowAnonymous().DisableAntiforgery();
+
 // Internal endpoint for harness — get decrypted ADO PAT for a user
 app.MapGet("/api/internal/devops-pat/{userId}", async (HttpContext context, string userId, DevOpsConnectionService devopsConn, IConfiguration config) =>
 {
