@@ -25,54 +25,18 @@ async function getDbConnection() {
     });
 }
 
-async function getUserMs365Token(userId) {
-    let conn;
-    try {
-        conn = await getDbConnection();
-        // Blazor stores MS365 tokens in user_microsoft_tokens (UserId=CHAR(36), AccessToken TEXT)
-        const [rows] = await conn.execute(
-            `SELECT AccessToken FROM user_microsoft_tokens WHERE UserId = ? LIMIT 1`,
-            [userId]
-        );
-        return rows.length > 0 ? rows[0].AccessToken : null;
-    } catch (err) {
-        console.error('[harness] getUserMs365Token error:', err.message);
-        return null;
-    } finally {
-        if (conn) await conn.end();
-    }
-}
 
-async function getUserAdoToken(userId) {
-    try {
-        // ADO PAT is DataProtection-encrypted in user_devops_connections.pat_encrypted
-        // Cannot decrypt in Node — call Blazor internal endpoint instead
-        const headers = { 'Content-Type': 'application/json' };
-        if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
-        const resp = await fetch(`${FAIT_BASE_URL}/api/internal/devops-pat/${encodeURIComponent(userId)}`, {
-            method: 'GET',
-            headers
-        });
-        if (!resp.ok) {
-            if (resp.status === 404) return null; // user has no ADO connection
-            console.error(`[harness] getUserAdoToken: Blazor returned ${resp.status}`);
-            return null;
-        }
-        const data = await resp.json();
-        return data.pat || null;
-    } catch (err) {
-        console.error('[harness] getUserAdoToken error:', err.message);
-        return null;
-    }
-}
 
 // ADO#3240 — Fetch decrypted tokens from Blazor internal API (replaces direct DB queries)
 async function getUserTokens(userId) {
     try {
         const base = FAIT_BASE_URL;
         const secret = INTERNAL_API_TOKEN;
+        if (!secret) console.warn('[harness] INTERNAL_API_TOKEN not set — /api/internal/user-tokens will return 401');
+        const headers = { 'Content-Type': 'application/json' };
+        if (secret) headers['X-Internal-Token'] = secret;
         const res = await fetch(`${base}/api/internal/user-tokens/${encodeURIComponent(userId)}`, {
-            headers: { 'X-Internal-Token': secret }
+            headers
         });
         if (!res.ok) {
             console.warn(`[harness] getUserTokens: Blazor returned ${res.status} for userId=${userId}`);
@@ -482,8 +446,8 @@ async function graphRequest(accessToken, method, path, body) {
 app.post('/tools/graph_list_emails', async (req, res) => {
     const { userId, maxResults = 10, folder = 'inbox' } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
-    const token = req.body?.ms365Token || await getUserMs365Token(userId);
-    if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
+    const token = req.body?.ms365Token;
+    if (!token) return res.status(401).json({ error: 'MS365 token not available — ensure Microsoft 365 is connected in FAIT settings' });
     try {
         const data = await graphRequest(token, 'GET',
             `/me/mailFolders/${encodeURIComponent(folder)}/messages?$top=${maxResults}&$orderby=receivedDateTime desc&$select=id,subject,from,receivedDateTime,bodyPreview,isRead`
@@ -507,8 +471,8 @@ app.post('/tools/graph_get_email', async (req, res) => {
     const { userId, messageId } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!messageId) return res.status(400).json({ error: 'messageId required' });
-    const token = req.body?.ms365Token || await getUserMs365Token(userId);
-    if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
+    const token = req.body?.ms365Token;
+    if (!token) return res.status(401).json({ error: 'MS365 token not available — ensure Microsoft 365 is connected in FAIT settings' });
     try {
         const m = await graphRequest(token, 'GET',
             `/me/messages/${encodeURIComponent(messageId)}?$select=id,subject,from,body,receivedDateTime`
@@ -531,8 +495,8 @@ app.post('/tools/graph_get_email', async (req, res) => {
 app.post('/tools/graph_list_calendar_events', async (req, res) => {
     const { userId, days = 7 } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
-    const token = req.body?.ms365Token || await getUserMs365Token(userId);
-    if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
+    const token = req.body?.ms365Token;
+    if (!token) return res.status(401).json({ error: 'MS365 token not available — ensure Microsoft 365 is connected in FAIT settings' });
     try {
         const now = new Date().toISOString();
         const end = new Date(Date.now() + days * 86400000).toISOString();
@@ -558,8 +522,8 @@ app.post('/tools/graph_send_email', async (req, res) => {
     const { userId, to, subject, body, cc } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, and body required' });
-    const token = req.body?.ms365Token || await getUserMs365Token(userId);
-    if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
+    const token = req.body?.ms365Token;
+    if (!token) return res.status(401).json({ error: 'MS365 token not available — ensure Microsoft 365 is connected in FAIT settings' });
     try {
         const payload = {
             message: {
@@ -626,8 +590,8 @@ app.post('/tools/ado_list_work_items', async (req, res) => {
     const { userId, project, iteration, state, assignedTo, top = 20 } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!project) return res.status(400).json({ error: 'project required' });
-    const pat = req.body?.adoToken || await getUserAdoToken(userId);
-    if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
+    const pat = req.body?.adoToken;
+    if (!pat) return res.status(401).json({ error: 'ADO token not available — ensure MS/ADO is connected in FAIT settings' });
     try {
         // Sanitize WIQL string params to prevent injection
         const sanitize = (s) => String(s || '').replace(/'/g, "''");
@@ -665,8 +629,8 @@ app.post('/tools/ado_get_work_item', async (req, res) => {
     const { userId, id } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!id) return res.status(400).json({ error: 'id required' });
-    const pat = req.body?.adoToken || await getUserAdoToken(userId);
-    if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
+    const pat = req.body?.adoToken;
+    if (!pat) return res.status(401).json({ error: 'ADO token not available — ensure MS/ADO is connected in FAIT settings' });
     try {
         const url = `${ADO_BASE}/_apis/wit/workitems/${id}?api-version=7.1`;
         const w = await adoRequest(pat, 'GET', url, null);
@@ -691,8 +655,8 @@ app.post('/tools/ado_update_work_item', async (req, res) => {
     const { userId, id, state, title, comment } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!id) return res.status(400).json({ error: 'id required' });
-    const pat = req.body?.adoToken || await getUserAdoToken(userId);
-    if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
+    const pat = req.body?.adoToken;
+    if (!pat) return res.status(401).json({ error: 'ADO token not available — ensure MS/ADO is connected in FAIT settings' });
     try {
         const project = process.env.ADO_DEFAULT_PROJECT || 'FAIT';
         const url = `${ADO_BASE}/${encodeURIComponent(project)}/_apis/wit/workItems/${id}?api-version=7.1`;
@@ -744,8 +708,8 @@ app.post('/tools/ado_create_work_item', async (req, res) => {
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!project) return res.status(400).json({ error: 'project required' });
     if (!title) return res.status(400).json({ error: 'title required' });
-    const pat = req.body?.adoToken || await getUserAdoToken(userId);
-    if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
+    const pat = req.body?.adoToken;
+    if (!pat) return res.status(401).json({ error: 'ADO token not available — ensure MS/ADO is connected in FAIT settings' });
     try {
         const url = `${ADO_BASE}/${encodeURIComponent(project)}/_apis/wit/workItems/$${encodeURIComponent(type)}?api-version=7.1`;
         const ops = [
@@ -1200,23 +1164,34 @@ app.post('/tools/web_search', async (req, res) => {
     const internalToken = INTERNAL_API_TOKEN;
 
     try {
-        const resp = await fetch(`${blazorBase}/internal/mcp/brave/tools/call`, {
+        const resp = await fetch(`${blazorBase}/internal/mcp/brave`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 ...(internalToken ? { 'X-Internal-Token': internalToken } : {}),
             },
             body: JSON.stringify({
-                name: 'web_search',
-                arguments: { query, count: Math.min(parseInt(count, 10) || 5, 10) }
+                jsonrpc: '2.0',
+                id: '1',
+                method: 'tools/call',
+                params: {
+                    name: 'web_search',
+                    arguments: { query, count: Math.min(parseInt(count, 10) || 5, 10) }
+                }
             }),
         });
         if (!resp.ok) {
             const text = await resp.text();
             throw new Error(`Brave MCP call failed (${resp.status}): ${text}`);
         }
-        const result = await resp.json();
-        res.json({ result });
+        const mcpResponse = await resp.json();
+        // MCP response: { jsonrpc, id, result: { content: [{ type, text }], isError } }
+        const content = mcpResponse?.result?.content;
+        const text = Array.isArray(content) ? content.map(c => c.text || '').join('\n') : JSON.stringify(mcpResponse);
+        if (mcpResponse?.result?.isError) {
+            throw new Error(`Brave search error: ${text}`);
+        }
+        res.json({ result: text });
     } catch (err) {
         console.error('[harness] web_search error:', err.message);
         res.status(500).json({ error: err.message });
