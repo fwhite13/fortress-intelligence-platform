@@ -1178,11 +1178,13 @@ app.post('/tools/web_search', async (req, res) => {
     const { query, count = 5 } = req.body || {};
     if (!query) return res.status(400).json({ error: 'query required' });
 
-    const blazorBase = FAIT_BASE_URL;
+    // Use localhost to bypass Cloudflare (Brave endpoint is co-located in the Blazor container)
+    const blazorPort = process.env.BLAZOR_INTERNAL_PORT || '8080';
+    const braveLocalUrl = `http://localhost:${blazorPort}/internal/mcp/brave`;
     const internalToken = INTERNAL_API_TOKEN;
 
     try {
-        const resp = await fetch(`${blazorBase}/internal/mcp/brave`, {
+        const resp = await fetch(braveLocalUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
