@@ -702,17 +702,31 @@ app.MapPost("/internal/mcp/brave", async (HttpContext context, BraveSearchClient
     var methodProp = root.TryGetProperty("method", out var m) ? m.GetString() : null;
     if (methodProp != "tools/call") return Results.BadRequest("Only tools/call supported");
 
-    var paramsEl = root.GetProperty("params");
-    var toolName = paramsEl.GetProperty("name").GetString();
+    if (!root.TryGetProperty("params", out var paramsEl))
+        return Results.BadRequest("Missing 'params'");
+    if (!paramsEl.TryGetProperty("name", out var nameProp))
+        return Results.BadRequest("Missing 'params.name'");
+    var toolName = nameProp.GetString();
     if (toolName != "web_search") return Results.BadRequest($"Unknown tool: {toolName}");
 
-    var args = paramsEl.GetProperty("arguments");
+    if (!paramsEl.TryGetProperty("arguments", out var args))
+        return Results.BadRequest("Missing 'params.arguments'");
     var query = args.TryGetProperty("query", out var q) ? q.GetString() ?? "" : "";
     var count = args.TryGetProperty("count", out var c) ? c.GetInt32() : 5;
 
-    var results = await braveClient.SearchAsync(query, count);
-    var formatted = braveClient.FormatResults(results);
-    return Results.Ok(new { content = new[] { new { type = "text", text = formatted } } });
+    try
+    {
+        var results = await braveClient.SearchAsync(query, count);
+        var formatted = braveClient.FormatResults(results);
+        return Results.Ok(new { content = new[] { new { type = "text", text = formatted } } });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(
+            detail: ex.Message,
+            title: "Brave search failed",
+            statusCode: 500);
+    }
 }).AllowAnonymous().DisableAntiforgery();
 
 app.MapControllers();
