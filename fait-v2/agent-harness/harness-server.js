@@ -1793,13 +1793,13 @@ app.post('/turn', async (req, res) => {
                     {
                         toolSpec: {
                             name: 'create_document',
-                            description: 'Create a document file (Word .docx) from structured content. Returns a confirmation when the document is saved.',
+                            description: 'Use this tool to create a real Word document (.docx) artifact that will be saved and made available for download in the chat. When the user asks for a Word doc, report, proposal, or any other document file, ALWAYS use this tool — do not produce markdown as a substitute. This is the ONLY way to produce a downloadable file artifact. The document will appear as a clickable artifact card in the chat after generation.',
                             inputSchema: {
                                 json: {
                                     type: 'object',
                                     properties: {
-                                        type: { type: 'string', description: 'Document type — must be "word"' },
-                                        title: { type: 'string', description: 'Document title (used as filename base)' },
+                                        type: { type: 'string', description: 'Document format — must be "word" for .docx output' },
+                                        title: { type: 'string', description: 'Document title, used as the filename base (e.g. "Q1 Report" → Q1_Report.docx)' },
                                         sections: {
                                             type: 'array',
                                             items: {
@@ -1810,7 +1810,7 @@ app.post('/turn', async (req, res) => {
                                                 },
                                                 required: ['heading', 'content']
                                             },
-                                            description: 'Document sections as an array of {heading, content} objects'
+                                            description: 'Array of document sections. Each section has a heading (string) and content (string body text for that section).'
                                         }
                                     },
                                     required: ['type', 'title', 'sections']

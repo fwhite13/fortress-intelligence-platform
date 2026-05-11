@@ -87,3 +87,40 @@ cat /tmp/brief-3218-c2.md | claude --model sonnet --print --dangerously-skip-per
 
 ### Status
 Cycle 2 complete. Awaiting Clint review cycle 2.
+
+---
+
+## Build Report — ADO#3218 Cycle 3 (Final Cleanup)
+
+### What was built
+Three cleanup fixes: added missing `ado_wiql_query` tool spec so Bedrock can actually call it, removed phantom `graph_list_calendar` from the M365 allowlist, and dropped the unimplemented `create_calendar_event` entry from the DB seed.
+
+### Files changed
+- `fait-v2/agent-harness/harness-server.js` — Added `ado_wiql_query` entry to `MCP_TOOL_SPECS.azdo`; removed `'graph_list_calendar'` from `MCP_TOOL_ALLOWLIST['graph']` Set
+- `fait/src/FortressAI.Web/Services/DatabaseInitializationService.cs` — Removed `create_calendar_event` anonymous object from M365 manifest array; `graph_list_calendar_events` is now the terminal entry (trailing comma removed)
+
+### Parallelization used
+No — single CC session, two files, sequential edit
+
+### CC sessions run
+1 CC Sonnet session
+
+### Acceptance criteria verification
+- [x] `ado_wiql_query` present in `MCP_TOOL_SPECS.azdo` — `grep -n "ado_wiql_query" harness-server.js` shows lines 303 (allowlist) and 387 (spec)
+- [x] `create_calendar_event` gone from DB seed — grep returns nothing
+- [x] `graph_list_calendar` gone from `MCP_TOOL_ALLOWLIST` — grep returns nothing
+- [x] `node --check` passes — confirmed
+- [x] `dotnet build` 0 errors — confirmed (46 pre-existing warnings, unchanged)
+
+### Known edge cases / things Clint should scrutinize
+- The `ado_wiql_query` spec aligns with what's in the DB seed and allowlist — model can now invoke it through Bedrock
+- `graph_list_calendar_events` (the real endpoint, at `/tools/graph_list_calendar_events`) is untouched; only the duplicate/phantom `graph_list_calendar` slug was removed
+- No runtime changes — these are purely registration/spec/seed fixes
+
+### How to test locally
+1. Start harness: `node harness-server.js` — should load without errors
+2. In FAIT chat with ADO server enabled, prompt the model to query work items by WIQL — it should now be offered `ado_wiql_query` in the tool list
+3. Verify M365 seed on fresh DB init — `create_calendar_event` should not appear in the tools table
+
+### Commit
+`f1af77a8` — `fix(fait#3218): add ado_wiql_query spec + remove graph_list_calendar allowlist + drop create_calendar_event seed (cycle 3)`
