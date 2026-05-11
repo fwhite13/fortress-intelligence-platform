@@ -16,6 +16,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.SignalR;
 using FortressAI.Web.Auth;
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using FortressAI.Web.Data.Models;
@@ -687,6 +688,33 @@ app.MapPost("/api/feedback/{id}/status", async (
     return Results.Ok();
 }).AllowAnonymous().DisableAntiforgery();
 
+// Internal MCP endpoint for Brave Search — token-authenticated (used by harness)
+app.MapPost("/internal/mcp/brave", async (HttpContext context, BraveSearchClient braveClient, IConfiguration config) =>
+{
+    if (!IsInternalAuthorized(context, config)) return Results.Unauthorized();
+
+    using var reader = new StreamReader(context.Request.Body);
+    var raw = await reader.ReadToEndAsync();
+    using var doc = JsonDocument.Parse(raw);
+    var root = doc.RootElement;
+
+    // MCP JSON-RPC envelope: { method: "tools/call", params: { name, arguments } }
+    var methodProp = root.TryGetProperty("method", out var m) ? m.GetString() : null;
+    if (methodProp != "tools/call") return Results.BadRequest("Only tools/call supported");
+
+    var paramsEl = root.GetProperty("params");
+    var toolName = paramsEl.GetProperty("name").GetString();
+    if (toolName != "web_search") return Results.BadRequest($"Unknown tool: {toolName}");
+
+    var args = paramsEl.GetProperty("arguments");
+    var query = args.TryGetProperty("query", out var q) ? q.GetString() ?? "" : "";
+    var count = args.TryGetProperty("count", out var c) ? c.GetInt32() : 5;
+
+    var results = await braveClient.SearchAsync(query, count);
+    var formatted = braveClient.FormatResults(results);
+    return Results.Ok(new { content = new[] { new { type = "text", text = formatted } } });
+}).AllowAnonymous().DisableAntiforgery();
+
 app.MapControllers();
 
 app.MapRazorComponents<FortressAI.Web.Components.App>()
@@ -695,6 +723,13 @@ app.MapRazorComponents<FortressAI.Web.Components.App>()
 app.MapHub<DashboardHub>("/hubs/dashboard");
 
 app.Run();
+
+bool IsInternalAuthorized(HttpContext ctx, IConfiguration cfg)
+{
+    var token = cfg["INTERNAL_API_TOKEN"];
+    if (string.IsNullOrEmpty(token)) return false;
+    return ctx.Request.Headers.TryGetValue("X-Internal-Token", out var h) && h.ToString() == token;
+}
 
 record FeedbackRequest(
     string Type,
