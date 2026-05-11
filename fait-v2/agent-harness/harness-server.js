@@ -1611,6 +1611,8 @@ app.post('/turn', async (req, res) => {
 
     if (taskMode) {
         console.log(`[harness] /turn: taskMode=true — entering CC spawn path for userId=${userId}`);
+        sendEvent({ type: 'mode_switch', payload: JSON.stringify({ reason: 'task_mode' }) });
+        sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'start', status: 'starting', message: 'Starting Claude Code task...' }) });
         // ── CC spawn path (unchanged) ─────────────────────────────────────
         const userWorkspaceDir = `${WORKSPACE_DIR}/${userId}`;
         let ended = false;
@@ -1709,6 +1711,7 @@ app.post('/turn', async (req, res) => {
         const ccProcess = spawn('claude', [
             '--model', process.env.CC_MODEL || 'sonnet',
             '--print',
+            '--output-format', 'stream-json',
             '--dangerously-skip-permissions'
         ], {
             cwd: userWorkspaceDir,
@@ -1729,7 +1732,43 @@ app.post('/turn', async (req, res) => {
             ccProcess.kill('SIGTERM');
             endResponse({ type: 'error', errorMessage: 'Turn timed out after 5 minutes' });
         }, TURN_TIMEOUT_MS);
-        ccProcess.stdout.on('data', (chunk) => sendEvent({ type: 'text', content: scrubSecrets(chunk.toString()) }));
+        // NDJSON parser for --output-format stream-json (ADO#3244)
+        let ccStdoutBuffer = '';
+        let ccTextEmitted = false;
+        ccProcess.stdout.on('data', (chunk) => {
+            ccStdoutBuffer += chunk.toString();
+            const lines = ccStdoutBuffer.split('\n');
+            ccStdoutBuffer = lines.pop(); // keep incomplete last line
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                let parsed;
+                try { parsed = JSON.parse(line); } catch {
+                    // Non-JSON line — emit as raw text fallback
+                    sendEvent({ type: 'text', content: scrubSecrets(line) });
+                    continue;
+                }
+                const evtType = parsed.type;
+                if (evtType === 'assistant' && parsed.message?.content) {
+                    for (const block of parsed.message.content) {
+                        if (block.type === 'text' && block.text) {
+                            ccTextEmitted = true;
+                            sendEvent({ type: 'text', content: scrubSecrets(block.text) });
+                        } else if (block.type === 'tool_use') {
+                            sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: `Calling ${block.name}...` }) });
+                        }
+                    }
+                } else if (evtType === 'tool_result') {
+                    const toolName = parsed.tool_name || parsed.name || 'tool';
+                    sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_result', toolName, status: 'done', message: `${toolName} completed` }) });
+                } else if (evtType === 'result') {
+                    if (!ccTextEmitted && parsed.result) {
+                        sendEvent({ type: 'text', content: scrubSecrets(parsed.result) });
+                    }
+                    // result.is_error is handled by the close event exit code
+                }
+                // system, init, and other types: skip silently
+            }
+        });
         ccProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', content: scrubSecrets(chunk.toString()) }));
         ccProcess.on('close', async (code) => {
             clearTimeout(timeout);

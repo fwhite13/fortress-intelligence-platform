@@ -60,3 +60,65 @@ No — single CC Opus session (all changes are interdependent).
 ## Commit
 
 `036a8a8f` — `feat(fait#3241): harness SSE kb_sources + tool_call events + KB retrieval ownership`
+
+---
+
+## Cycle 2 Build Report
+
+**Commits:**
+- `29f2d89b` — harness: KB chunk cap + builtin tool_call events
+- `376f126a` — blazor: remove dead injects + CSS tokens
+
+### What was fixed
+
+**Fix 1 — KB chunk size cap** (`harness-server.js`)
+- `doKbRetrieval` now caps each chunk to 2000 chars: `(r.content?.text || '').substring(0, 2000)`
+- Prevents system prompt overflow with large KB results (15 chunks × 8KB each)
+
+**Fix 2 — Remove 3 orphaned @inject directives** (`ChatView.razor`)
+- Removed `@inject KnowledgeBaseService KbSvc`
+- Removed `@inject KbQueryService KbQuerySvc`
+- Removed `@inject ForgeQueryService ForgeQuery`
+- All three had zero call sites after KB retrieval moved to harness
+- `dotnet build` confirms 0 errors
+
+**Fix 3 — CSS tokens** (`fortress.css`)
+- `.tool-call-indicator`: `--color-surface-subtle` → `--color-surface-sunken` (defined in `:root`)
+- `.tool-call-active`: `--color-text-accent`/`--color-accent-muted` → `var(--color-info)` / `var(--color-info-bg)`
+- `.tool-call-done`: `--color-text-success` → `var(--color-success)`
+- `.tool-call-error`: `--color-text-danger`/`--color-danger-muted` → `var(--color-error)` / `var(--color-error-bg)`
+
+**Fix 4 — Builtin tool_call SSE events** (`harness-server.js`)
+- Added `getBuiltinSummary(toolName, toolInput)` helper with human-friendly summaries
+- All builtin dispatches wrapped with `emitToolCall` before/after each fetch:
+  `list_workspace_files`, `read_memory`, `write_memory`, `create_document`, `list_files`, `read_file`, `search_knowledge_base`
+- Consistent with existing `graph_*`, `ado_*`, and `web_search` events
+
+### Build checks
+- ✅ `node --check harness-server.js` — pass
+- ✅ `dotnet build FortressAI.Web.csproj` — 0 errors, 0 warnings
+
+### CC sessions
+1 CC session (killed on timeout after completing all changes); post-verified and committed directly.
+
+---
+
+## Cycle 3 — fix(fait#3241): add search_memory dispatch arm + create_document error tool_call
+**Commit:** c984fdb0
+**Files changed:** `fait-v2/agent-harness/harness-server.js` (+16 lines)
+
+### Fixes applied
+
+**Fix 1 — `search_memory` missing dispatch arm**
+- Added `else if (toolUseAccumulator.name === 'search_memory')` arm between `read_memory` and `write_memory` (line ~2131)
+- Calls `POST /tools/search_memory` with `{ userId, query }`
+- Emits `emitToolCall` before (calling) and after (done/error) — matching `read_memory` pattern exactly
+- Previously fell through to `search_knowledge_base` default (wrong endpoint, wrong events)
+
+**Fix 2 — `create_document` error path missing tool_call event**
+- Found `if (cdData.error)` block in `create_document` arm
+- Added `emitToolCall(res, 'builtin', 'create_document', 'error', ...)` before setting `toolResultText`
+- UI no longer stays stuck in "calling" state when document creation returns `{ error: "..." }` with HTTP 200
+
+### Checks
+- `node --check` — PASS

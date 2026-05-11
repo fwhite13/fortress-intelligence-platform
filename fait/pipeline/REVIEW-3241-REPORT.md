@@ -210,3 +210,188 @@ Either add the 5 missing variables to `:root` mapping to existing tokens, or rew
 - The `HandleToolCallEvent` `FindLastIndex` logic correctly handles duplicate in-flight tool names (second `done` matches the second `calling`). ✅
 - `_activeToolCalls` clear on `HandleSend` and chat switch covers all stale-indicator scenarios. ✅
 - The `toolInput` availability before the `adoSummaries` dict is correct — parsed at line ~2080 before any branch. ✅
+
+---
+
+## Cycle 2 Review — 2026-05-11
+
+### Verdict: NEEDS-CHANGES
+
+---
+
+### Cycle 2 Focus: Verify 4 NEEDS-CHANGES fixes from Cycle 1
+
+Commits reviewed: `29f2d89b` + `376f126a`
+
+---
+
+### Fix 1: KB Chunk Cap — ✅ PASS
+
+`.substring(0, 2000)` correctly applied to `r.content?.text` in `doKbRetrieval`:
+
+```js
+// harness-server.js ~line 1847
+const contextText = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
+```
+
+Chunk count is implicitly capped by the `5` argument in `retrieveFromKbFull(kbId, query, 5)`. Worst case: 3 KBs × 5 chunks × 2000 chars = 30,000 chars — bounded and acceptable.
+
+---
+
+### Fix 2: Dead Inject Removal — ✅ PASS
+
+All three `@inject` lines removed from `ChatView.razor`:
+```diff
+-@inject KnowledgeBaseService KbSvc
+-@inject KbQueryService KbQuerySvc
+-@inject ForgeQueryService ForgeQuery
+```
+
+No residual references to `KbSvc`, `KbQuerySvc`, or `ForgeQuery` anywhere in the file.
+
+---
+
+### Fix 3: CSS Tokens — ✅ PASS
+
+All 6 required variables now defined in `:root`:
+
+| Variable | Value | Semantic |
+|---|---|---|
+| `--color-surface-sunken` | `#f3f4f6` | Sunken surface ✓ |
+| `--color-success` | `#10B981` | Green ✓ |
+| `--color-error` | `#EF4444` | Red ✓ |
+| `--color-info` | `#3B82F6` | Blue ✓ |
+| `--color-error-bg` | `rgba(239,68,68,0.10)` | Light red ✓ |
+| `--color-info-bg` | `rgba(59,130,246,0.10)` | Light blue ✓ |
+
+Tool-call CSS classes consume the tokens correctly.
+
+---
+
+### Fix 4: Builtin tool_call Events — ❌ PARTIAL (2 gaps)
+
+`getBuiltinSummary()` helper added ✅. `emitToolCall` wrapper added ✅. Coverage of 6 branches correct ✅. Two gaps:
+
+---
+
+### Issues Found
+
+| Severity | File | Issue |
+|---|---|---|
+| **Important** | `harness-server.js` | `search_memory` has no `else if` dispatch arm — falls to `else` → executes as `search_knowledge_base`. Calls to `search_memory` are misdirected, emit wrong event name, and call the wrong endpoint. `search_memory` is BUILTIN_TOOLS member #2 in the set definition; cycle 2 explicitly promised to cover all 7 BUILTIN_TOOLS with `emitToolCall`. |
+| **Low-Medium** | `harness-server.js` | `create_document` `if (cdData.error)` branch emits no `emitToolCall` — UI stays in "calling" spinner forever when the document API returns a logical error (HTTP 200 + `{error: "..."}`). The network `catch` path is correctly handled. |
+
+---
+
+### Required Cycle 3 Fixes
+
+**Fix A — `search_memory` dispatch arm** (`harness-server.js`, before the `else` clause ~line 2275):
+
+```js
+} else if (toolUseAccumulator.name === 'search_memory') {
+    emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
+    try {
+        const smRes = await fetch(`http://localhost:${PORT}/tools/search_memory`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, ...toolInput })
+        });
+        const smData = await smRes.json();
+        toolResultText = JSON.stringify(smData, null, 2);
+        emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', 'Memory search complete');
+    } catch (smErr) {
+        toolResultText = `Memory search error: ${smErr.message}`;
+        isError = true;
+        emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${smErr.message.substring(0, 100)}`);
+    }
+```
+
+**Fix B — `create_document` API error path** (`harness-server.js`, inside the `if (cdData.error)` block ~line 2161):
+
+```diff
+  if (cdData.error) {
+      toolResultText = `\n\n[Document Error]\n${cdData.error}\n\n`;
++     emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', cdData.error.substring(0, 100));
+  }
+```
+
+---
+
+### Positive Observations
+
+- KB chunk cap implementation is clean and correct.
+- Dead inject removal is complete — no residual references found.
+- CSS token values are semantically correct and the `:root` definition is authoritative.
+- `getBuiltinSummary()` is a clean helper with good defaults.
+- 6 of 7 BUILTIN_TOOLS branches have full `calling`/`done`/`error` coverage.
+
+---
+
+_Reviewed by Hawkeye (Clint Barton) — Cycle 2 — 2026-05-11_
+
+---
+
+## Cycle 3 Review — 2026-05-11
+
+### Verdict: PASS ✅
+
+---
+
+### Cycle 3 Focus: Verify 2 NEEDS-CHANGES gaps from Cycle 2
+
+Commit reviewed: `c984fdb0` (`harness-server.js` only, +16 lines)
+
+---
+
+### Fix A: `search_memory` dispatch arm — ✅ PASS
+
+New `else if` block inserted at line 2131, precisely between `read_memory` (ends ~2130) and `write_memory` (~2146):
+
+```
+2116: } else if (toolUseAccumulator.name === 'read_memory') {
+  ...
+2131: } else if (toolUseAccumulator.name === 'search_memory') {
+  ...
+2146: } else if (toolUseAccumulator.name === 'write_memory') {
+```
+
+- Correctly positioned — does NOT fall through to `search_knowledge_base` ✅
+- `calling` emitted before `fetch` (line 2132) ✅
+- `done` emitted on success (line 2141) ✅
+- `error` emitted in catch (line 2144) ✅
+- POST URL `http://localhost:${PORT}/tools/search_memory` matches registered route at line 798 ✅
+- `await` present on fetch (line 2134) ✅
+- Entire fetch block wrapped in `try/catch` — no unhandled rejections ✅
+- Tool name `'search_memory'` used consistently — no camelCase or hyphen variants ✅
+
+Structurally identical to the `read_memory` arm — pattern match confirmed.
+
+---
+
+### Fix B: `create_document` error path — ✅ PASS
+
+```js
+2175:     const cdData = await cdRes.json();
+2176:     if (cdData.error) {
+2177:         emitToolCall(res, 'builtin', 'create_document', 'error', `Document creation failed: ${cdData.error}`);
+2178:         toolResultText = `\n\n[Document Error]\n${cdData.error}\n\n`;
+2179:     } else {
+```
+
+`emitToolCall(..., 'error', ...)` fires at line 2177 before the block exits. UI will correctly exit the "calling" spinner on document API logical errors. Network-level catch path (line ~2194) also correctly emits error. ✅
+
+---
+
+### General Scan — ✅ PASS
+
+No logic errors, typos, missing awaits, or unhandled rejections in the 16 new lines.
+
+---
+
+### Summary
+
+All cycle 2 required fixes are correctly implemented. Commit `c984fdb0` resolves both reported gaps cleanly and introduces no new issues.
+
+---
+
+_Reviewed by Hawkeye (Clint Barton) — Cycle 3 — 2026-05-11_

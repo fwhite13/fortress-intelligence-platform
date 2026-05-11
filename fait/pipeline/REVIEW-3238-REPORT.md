@@ -236,3 +236,86 @@ No new issues introduced by commit `1f161cc7`. Change is surgical and correct.
 ---
 
 _Clint Barton — cycle 2 sign-off complete_
+
+---
+
+## Review Report — ADO#3238 — Round 2 (Commit `9320e00a`)
+
+**Date:** 2026-05-11
+**Reviewer:** Hawkeye (Clint Barton)
+
+### Verdict: ✅ PASS
+
+---
+
+### CC Review Summary
+
+CC (Sonnet, targeted 3-question adversarial brief) read `ChatView.razor` and traced the fire-and-forget refactor in detail. All three questions resolved clean or low-risk. No regressions from the move of state-init to the caller.
+
+---
+
+### Spec Compliance Check
+
+**What changed:**
+- `_isBriefStreaming = true` + `_briefContent = new StringBuilder()` + `StateHasChanged()` moved from `SendResumptionBrief()` try block → `OnAfterRenderAsync` cold-start trigger block
+- `await SendResumptionBrief()` → `_ = SendResumptionBrief()` (fire-and-forget)
+- 3 now-redundant init lines removed from `SendResumptionBrief()`
+
+**Files changed:**
+- `src/FortressAI.Web/Components/Chat/ChatView.razor` — ✅ confirmed as the only changed file
+
+**Acceptance criteria:**
+- [x] `_isBriefStreaming = true` set before fire-and-forget fires — ✅ line 633
+- [x] `StateHasChanged()` called before `_ = SendResumptionBrief()` so UI renders brief card immediately — ✅ line 635
+- [x] 3 state-init lines removed from `SendResumptionBrief()` try block — ✅ CC confirmed absent
+- [x] `dotnet build` — 0 errors per build report
+
+**Spec compliance verdict:** ✅ COMPLIANT
+
+---
+
+### Q1: Fire-and-forget exception handling
+
+`capturedConversationId = ConversationId` is the only statement before `try` in `SendResumptionBrief()`. It's a simple component parameter read — cannot throw. The `catch (Exception ex)` covers the entire try body including `SendTurnAsync` and the `await foreach`. No code path exists that can escape the catch under normal conditions.
+
+**Verdict: ✅ Clean.** No harmful propagation path from fire-and-forget.
+
+---
+
+### Q2: Duplicate state initialization
+
+CC confirmed: after the refactor, `SendResumptionBrief()` try block begins directly with building `recentHistory` and `briefRequest`. Zero remaining calls to `_isBriefStreaming = true`, `_briefContent = new StringBuilder()`, or `StateHasChanged()` inside the try. The 3 lines were cleanly moved and removed.
+
+**Verdict: ✅ Clean.** No duplicate initialization.
+
+---
+
+### Q3: StateHasChanged() in fire-and-forget — Advisory
+
+`StateHasChanged()` is called **bare** (not wrapped in `InvokeAsync`) at two locations:
+- Inside `await foreach` loop body (line ~1414) — called on each SSE text event
+- In `finally` block (line ~1441)
+
+The fire-and-forget task is dispatched from `OnAfterRenderAsync`, which captures Blazor's circuit `SynchronizationContext`. All `await` continuations should resume on that context — including continuations from `await foreach` over `AgentRuntime.SendTurnAsync`.
+
+**Risk:** If `SendTurnAsync` internally switches context via `ConfigureAwait(false)` or `Task.Run`, bare `StateHasChanged()` calls would execute off the circuit sync context, racing with other lifecycle methods. Additionally, `_briefContent.Append()` inside the loop would also be off-thread — `StringBuilder` is not thread-safe.
+
+**Probability in practice:** Low. Blazor's sync context is typically preserved through await chains, and the SSE stream delivery should stay on the circuit thread.
+
+**This does NOT block PASS.** It's a latent threading risk that exists in similar patterns throughout the codebase. Recommended future hardening: wrap `_briefContent.Append(...)` + `StateHasChanged()` in `await InvokeAsync(() => { _briefContent.Append(content); StateHasChanged(); })`.
+
+---
+
+### Findings Summary
+
+| Severity | Issue | Status |
+|----------|-------|--------|
+| Advisory | Bare `StateHasChanged()` in fire-and-forget — latent threading risk if sync context switches | Non-blocking; future hardening |
+| — | Q1: exception handling | ✅ Clean |
+| — | Q2: no duplicate state init | ✅ Clean |
+
+No blocking issues. No regressions.
+
+---
+
+_Hawkeye (Clint Barton) — Round 2 sign-off. Ready to ship._

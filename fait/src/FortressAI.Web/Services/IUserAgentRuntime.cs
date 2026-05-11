@@ -70,7 +70,7 @@ public record KbFlags(
 public record ChatHistoryEntry(string Role, string Content);
 
 public record HarnessEvent(
-    [property: JsonPropertyName("type")] string Type,         // "text" | "log" | "done" | "error" | "mode_switch" | "artifact" | "kb_sources" | "tool_call"
+    [property: JsonPropertyName("type")] string Type,         // "text" | "log" | "done" | "error" | "mode_switch" | "artifact" | "kb_sources" | "tool_call" | "task_progress"
     [property: JsonPropertyName("content")] string? Content = null,
     [property: JsonPropertyName("exitCode")] int? ExitCode = null,
     [property: JsonPropertyName("errorMessage")] string? ErrorMessage = null,
@@ -95,6 +95,14 @@ public record KbSourceItem(
 public record KbChunkItem(
     [property: JsonPropertyName("title")] string? Title,
     [property: JsonPropertyName("excerpt")] string? Excerpt
+);
+
+// ADO#3244 — Task Progress SSE payload (Feature 2.4)
+public record TaskProgressPayload(
+    [property: JsonPropertyName("step")] string? Step,            // "start" | "tool_use" | "tool_result" | "done" | "error"
+    [property: JsonPropertyName("toolName")] string? ToolName,    // null for non-tool steps
+    [property: JsonPropertyName("status")] string? Status,        // "starting" | "calling" | "done" | "error"
+    [property: JsonPropertyName("message")] string? Message       // human-readable summary
 );
 
 // ADO#3241 — Tool call SSE payload

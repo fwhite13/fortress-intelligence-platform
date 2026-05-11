@@ -772,6 +772,7 @@ app.MapRazorComponents<FortressAI.Web.Components.App>()
     .AddInteractiveServerRenderMode()
     .AddAdditionalAssemblies(typeof(FipShared.Components.FipNavBar).Assembly);
 app.MapHub<DashboardHub>("/hubs/dashboard");
+app.MapHub<CCProgressHub>("/hubs/cc-progress");
 
 app.Run();
 

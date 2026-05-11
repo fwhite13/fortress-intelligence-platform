@@ -611,3 +611,92 @@ CC read Program.cs and confirmed all three targeted fixes from cycle 4 landed co
 Both targeted changes (security: remove `ex.Message` leak; correctness: `JsonException` guard + `.Clone()`) are correctly implemented.
 
 **Ready to ship. Maria deploys on this PASS.**
+
+---
+
+## Review Report — ADO#3240 — Round 2 (Commit `0b36dcbe`)
+
+**Date:** 2026-05-11
+**Reviewer:** Hawkeye (Clint Barton)
+
+### Verdict: ✅ PASS
+
+---
+
+### CC Review Summary
+
+CC (Sonnet, targeted 3-question adversarial brief) read `Program.cs` and verified the new `GET /api/internal/user-tokens/{userId}` endpoint. All three questions resolved clean. One cosmetic dead-injection note, no blockers.
+
+---
+
+### Spec Compliance Check
+
+**What changed:**
+- Added `GET /api/internal/user-tokens/{userId}` endpoint to Program.cs
+- `X-Internal-Token` validated, calls `MicrosoftTokenService.GetValidAccessTokenAsync` + `DevOpsConnectionService.GetDecryptedPatAsync`
+- Returns `{ ms365AccessToken, adoPersonalAccessToken }`
+
+**Files changed:**
+- `src/FortressAI.Web/Program.cs` — ✅ confirmed as the only changed file
+
+**Acceptance criteria:**
+- [x] `GET /api/internal/user-tokens/{userId}` endpoint added — ✅
+- [x] Returns both `ms365AccessToken` and `adoPersonalAccessToken` — ✅
+- [x] `X-Internal-Token` validation present — ✅
+- [x] `dotnet build` — 0 errors per build report
+
+**Spec compliance verdict:** ✅ COMPLIANT
+
+---
+
+### Q4: `GetDecryptedPatAsync` existence and DI registration
+
+- `DevOpsConnectionService.GetDecryptedPatAsync(Guid userId)` exists at `Services/DevOpsConnectionService.cs:58` — signature matches exactly
+- `DevOpsConnectionService` is registered: `builder.Services.AddScoped<DevOpsConnectionService>()` — confirmed in Program.cs
+- `MicrosoftTokenService` is registered: `builder.Services.AddScoped<MicrosoftTokenService>()` — confirmed
+
+**Minor note:** The endpoint parameter list includes `IDbContextFactory<AppDbContext> dbFactory` but this parameter is **never used** in the handler body — both services are injected directly. This causes unnecessary DI resolution overhead on every request. Not a runtime bug, but dead injection.
+
+**Verdict: ✅ Clean** (dead `dbFactory` param is cosmetic)
+
+---
+
+### Q5: Auth before business logic
+
+Auth check is sequential with no bypass:
+1. `config["INTERNAL_API_TOKEN"]` — if null/empty → 503
+2. `X-Internal-Token` header validation — if missing or wrong → 401
+3. `Guid.TryParse` — if invalid → 400
+4. Business logic only reached after all guards pass
+
+No path exists to reach `GetValidAccessTokenAsync` or `GetDecryptedPatAsync` without passing auth.
+
+**Verdict: ✅ Clean.**
+
+---
+
+### Q6: Null handling
+
+- `ms365AccessToken = null` when MS365 not connected (exception swallowed) — serializes to JSON `null` cleanly
+- `adoPat = null` when ADO not connected (null return) — serializes to JSON `null` cleanly
+- `Results.Ok(new { ms365AccessToken, adoPersonalAccessToken = adoPat })` — no null-ref risk
+- Harness consumer: `res.ms365AccessToken || null` handles JSON null correctly
+
+**Verdict: ✅ Clean.**
+
+---
+
+### Findings Summary
+
+| Severity | Issue | Status |
+|----------|-------|--------|
+| Nitpick | `IDbContextFactory<AppDbContext> dbFactory` injected but unused in handler | Non-blocking; cleanup separately |
+| — | Auth before business logic | ✅ Clean |
+| — | Null handling on missing tokens | ✅ Clean |
+| — | DI registration for both services | ✅ Verified |
+
+No blocking issues.
+
+---
+
+_Hawkeye (Clint Barton) — Round 2 sign-off. Ready to ship._
