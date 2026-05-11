@@ -695,8 +695,17 @@ app.MapPost("/internal/mcp/brave", async (HttpContext context, BraveSearchClient
 
     using var reader = new StreamReader(context.Request.Body);
     var raw = await reader.ReadToEndAsync();
-    using var doc = JsonDocument.Parse(raw);
-    var root = doc.RootElement;
+
+    JsonElement root;
+    try
+    {
+        using var doc = JsonDocument.Parse(raw);
+        root = doc.RootElement.Clone();
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest("Invalid JSON body");
+    }
 
     // MCP JSON-RPC envelope: { method: "tools/call", params: { name, arguments } }
     var methodProp = root.TryGetProperty("method", out var m) ? m.GetString() : null;
@@ -720,12 +729,9 @@ app.MapPost("/internal/mcp/brave", async (HttpContext context, BraveSearchClient
         var formatted = braveClient.FormatResults(results);
         return Results.Ok(new { content = new[] { new { type = "text", text = formatted } } });
     }
-    catch (Exception ex)
+    catch (Exception)
     {
-        return Results.Problem(
-            detail: ex.Message,
-            title: "Brave search failed",
-            statusCode: 500);
+        return Results.Problem("Brave search failed", statusCode: 500);
     }
 }).AllowAnonymous().DisableAntiforgery();
 
