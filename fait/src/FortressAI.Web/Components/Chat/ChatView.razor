@@ -911,7 +911,9 @@ else
                 KbFlags: anyKbActive ? new KbFlags(
                     CorpKbEnabled: hasCorpKb,
                     PersonalKbEnabled: hasPersonalKb,
-                    TeamKbEnabled: hasTeamKb || hasProjectKb
+                    TeamKbEnabled: hasTeamKb || hasProjectKb,
+                    PersonalKbUserId: hasPersonalKb ? Session.UserId.ToString() : null,
+                    TeamIds: hasTeamKb && _selectedTeamIds?.Any() == true ? _selectedTeamIds.ToList() : null
                 ) : null
             );
 

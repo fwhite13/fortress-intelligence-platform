@@ -61,10 +61,13 @@ public record TurnRequest(
 );
 
 // ADO#3241 — KB flags passed to harness for harness-side KB retrieval
+// ADO#3278 — Added PersonalKbUserId and TeamIds for data isolation (Issue B)
 public record KbFlags(
     bool CorpKbEnabled = false,
     bool PersonalKbEnabled = false,
-    bool TeamKbEnabled = false
+    bool TeamKbEnabled = false,
+    string? PersonalKbUserId = null,   // user's GUID — used as ownerId metadata filter in harness
+    List<int>? TeamIds = null          // list of team IDs the user has enabled — used as teamId metadata filter
 );
 
 public record ChatHistoryEntry(string Role, string Content);

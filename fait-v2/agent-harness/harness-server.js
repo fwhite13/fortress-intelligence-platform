@@ -152,6 +152,33 @@ async function retrieveFromKbFull(kbId, query, maxResults = 5) {
     return resp.retrievalResults || [];
 }
 
+// ADO#3278 — KB retrieval with metadata filter for data isolation
+async function retrieveFromKbFiltered(kbId, query, filterKey, filterValue, maxResults = 5) {
+    const retrievalConfig = {
+        vectorSearchConfiguration: {
+            numberOfResults: maxResults
+        }
+    };
+
+    // Apply metadata filter when provided (ownerId for personal, teamId for team)
+    if (filterKey && filterValue !== undefined && filterValue !== null) {
+        retrievalConfig.vectorSearchConfiguration.filter = {
+            equals: {
+                key: filterKey,
+                value: filterValue.toString()
+            }
+        };
+    }
+
+    const cmd = new RetrieveCommand({
+        knowledgeBaseId: kbId,
+        retrievalQuery: { text: query },
+        retrievalConfiguration: retrievalConfig
+    });
+    const resp = await bedrockAgentClient.send(cmd);
+    return resp.retrievalResults || [];
+}
+
 // ADO#3241 — Emit tool_call SSE event
 function emitToolCall(res, server, toolName, status, summary) {
     res.write(`event: tool_call\ndata: ${JSON.stringify({ server, toolName, status, summary })}\n\n`);
@@ -1880,13 +1907,17 @@ app.post('/turn', async (req, res) => {
                     console.log(`[harness] /turn: KB retrieval — flags=${JSON.stringify(kbFlags)}`);
                     const kbSources = [];
 
-                    async function doKbRetrieval(kbId, kbName, query) {
+                    // ADO#3278 — KB retrieval with data isolation filters
+                    const personalKbUserId = kbFlags.PersonalKbUserId ?? kbFlags.personalKbUserId ?? null;
+                    const teamIds = kbFlags.TeamIds ?? kbFlags.teamIds ?? null;
+
+                    async function doKbRetrieval(kbId, kbName, query, filterKey, filterValue) {
                         if (!kbId) {
                             console.warn(`[harness] KB retrieval: no KB ID for ${kbName}`);
                             return;
                         }
                         try {
-                            const results = await retrieveFromKbFull(kbId, query, 5);
+                            const results = await retrieveFromKbFiltered(kbId, query, filterKey, filterValue, 5);
                             if (results.length > 0) {
                                 const chunks = results.map(r => ({
                                     title: (r.location?.s3Location?.uri || r.location?.confluenceLocation?.url || '').split('/').pop() || 'Document',
@@ -1911,13 +1942,27 @@ app.post('/turn', async (req, res) => {
 
                     const kbPromises = [];
                     if (kbFlags.CorpKbEnabled || kbFlags.corpKbEnabled) {
-                        kbPromises.push(doKbRetrieval(process.env.CORP_KB_ID, 'Corp KB', message));
+                        // Corp KB: no per-user filter — entire KB is team-scoped structurally
+                        kbPromises.push(doKbRetrieval(process.env.CORP_KB_ID, 'Corp KB', message, null, null));
                     }
                     if (kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled) {
-                        kbPromises.push(doKbRetrieval(process.env.PERSONAL_KB_ID, 'Personal KB', message));
+                        // Personal KB: filter by ownerId = user's GUID
+                        if (!personalKbUserId) {
+                            console.warn(`[harness] /turn: Personal KB requested but no PersonalKbUserId in kbFlags — skipping for security`);
+                        } else {
+                            kbPromises.push(doKbRetrieval(process.env.PERSONAL_KB_ID, 'Personal KB', message, 'ownerId', personalKbUserId));
+                        }
                     }
                     if (kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled) {
-                        kbPromises.push(doKbRetrieval(process.env.TEAM_KB_ID, 'Team KB', message));
+                        // Team KB: one retrieval per team ID, each filtered by teamId
+                        const effectiveTeamIds = teamIds && teamIds.length > 0 ? teamIds : null;
+                        if (!effectiveTeamIds) {
+                            console.warn(`[harness] /turn: Team KB requested but no TeamIds in kbFlags — skipping for security`);
+                        } else {
+                            for (const teamId of effectiveTeamIds) {
+                                kbPromises.push(doKbRetrieval(process.env.TEAM_KB_ID, `Team KB (${teamId})`, message, 'teamId', teamId));
+                            }
+                        }
                     }
                     await Promise.all(kbPromises);
 
