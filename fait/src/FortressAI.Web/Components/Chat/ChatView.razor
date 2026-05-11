@@ -630,7 +630,10 @@ else
         {
             _resumptionBriefSent = true;
             _wasColdStart = false;
-            await SendResumptionBrief();
+            _isBriefStreaming = true;
+            _briefContent = new System.Text.StringBuilder();
+            StateHasChanged();
+            _ = SendResumptionBrief();
         }
     }
 
@@ -1402,10 +1405,6 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
                 History: recentHistory.Any() ? recentHistory : null,
                 TaskMode: false
             );
-
-            _isBriefStreaming = true;
-            _briefContent = new System.Text.StringBuilder();
-            StateHasChanged();
 
             await foreach (var evt in AgentRuntime.SendTurnAsync(Session.UserId.ToString(), briefRequest, CancellationToken.None))
             {
