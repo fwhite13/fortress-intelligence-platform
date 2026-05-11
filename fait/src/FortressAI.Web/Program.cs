@@ -549,6 +549,25 @@ app.MapGet("/api/tokens/{userId}", async (HttpContext context, string userId, ID
     return Results.Ok(new { accessToken });
 }).RequireAuthorization();
 
+// Internal endpoint for harness — get decrypted ADO PAT for a user
+app.MapGet("/api/internal/devops-pat/{userId}", async (HttpContext context, string userId, DevOpsConnectionService devopsConn, IConfiguration config) =>
+{
+    // Validate X-Internal-Token
+    var expectedToken = config["INTERNAL_API_TOKEN"];
+    if (string.IsNullOrEmpty(expectedToken)) return Results.StatusCode(503);
+    if (!context.Request.Headers.TryGetValue("X-Internal-Token", out var header) || header.ToString() != expectedToken)
+        return Results.Unauthorized();
+
+    if (!Guid.TryParse(userId, out var userGuid))
+        return Results.BadRequest(new { error = "Invalid userId" });
+
+    var pat = await devopsConn.GetDecryptedPatAsync(userGuid);
+    if (pat == null)
+        return Results.NotFound(new { error = "No ADO connection found for user" });
+
+    return Results.Ok(new { pat });
+}).AllowAnonymous().DisableAntiforgery();
+
 // Manual briefing generation trigger — invokes briefing-builder Lambda
 app.MapPost("/api/briefing/generate", async (HttpContext ctx, BriefingGenerationService briefingGen, IHubContext<DashboardHub> hubContext) =>
 {

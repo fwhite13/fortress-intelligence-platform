@@ -29,18 +29,12 @@ async function getUserMs365Token(userId) {
     let conn;
     try {
         conn = await getDbConnection();
-        // Try mcp_user_tokens table first (provider='graph'), then user_ms365_tokens
+        // Blazor stores MS365 tokens in user_microsoft_tokens (UserId=CHAR(36), AccessToken TEXT)
         const [rows] = await conn.execute(
-            `SELECT access_token FROM mcp_user_tokens WHERE user_id = ? AND provider = 'graph' LIMIT 1`,
+            `SELECT AccessToken FROM user_microsoft_tokens WHERE UserId = ? LIMIT 1`,
             [userId]
         );
-        if (rows.length > 0) return rows[0].access_token;
-        // Fallback: user_ms365_tokens table
-        const [rows2] = await conn.execute(
-            `SELECT access_token FROM user_ms365_tokens WHERE user_id = ? LIMIT 1`,
-            [userId]
-        );
-        return rows2.length > 0 ? rows2[0].access_token : null;
+        return rows.length > 0 ? rows[0].AccessToken : null;
     } catch (err) {
         console.error('[harness] getUserMs365Token error:', err.message);
         return null;
@@ -50,25 +44,25 @@ async function getUserMs365Token(userId) {
 }
 
 async function getUserAdoToken(userId) {
-    let conn;
     try {
-        conn = await getDbConnection();
-        // Try user_ado_connections first, then user_dev_ops_connections
-        const [rows] = await conn.execute(
-            `SELECT personal_access_token, access_token FROM user_ado_connections WHERE user_id = ? LIMIT 1`,
-            [userId]
-        );
-        if (rows.length > 0) return rows[0].personal_access_token || rows[0].access_token;
-        const [rows2] = await conn.execute(
-            `SELECT personal_access_token, access_token FROM user_dev_ops_connections WHERE user_id = ? LIMIT 1`,
-            [userId]
-        );
-        return rows2.length > 0 ? (rows2[0].personal_access_token || rows2[0].access_token) : null;
+        // ADO PAT is DataProtection-encrypted in user_devops_connections.pat_encrypted
+        // Cannot decrypt in Node — call Blazor internal endpoint instead
+        const headers = { 'Content-Type': 'application/json' };
+        if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
+        const resp = await fetch(`${FAIT_BASE_URL}/api/internal/devops-pat/${encodeURIComponent(userId)}`, {
+            method: 'GET',
+            headers
+        });
+        if (!resp.ok) {
+            if (resp.status === 404) return null; // user has no ADO connection
+            console.error(`[harness] getUserAdoToken: Blazor returned ${resp.status}`);
+            return null;
+        }
+        const data = await resp.json();
+        return data.pat || null;
     } catch (err) {
         console.error('[harness] getUserAdoToken error:', err.message);
         return null;
-    } finally {
-        if (conn) await conn.end();
     }
 }
 
@@ -307,6 +301,7 @@ const MCP_TOOL_ALLOWLIST = {
         'generate_screen_from_text', 'extract_design_context', 'fetch_screen_code',
         'fetch_screen_image', 'list_projects', 'list_screens', 'refine_screen'
     ]),
+    'brave': new Set(['web_search']),
 };
 
 const BUILTIN_TOOLS = new Set([
@@ -391,6 +386,24 @@ const MCP_TOOL_SPECS = {
             type: 'object',
             properties: {
               query: { type: 'string', description: 'WIQL query string' }
+            },
+            required: ['query']
+          }
+        }
+      }
+    }
+  ],
+  brave: [
+    {
+      toolSpec: {
+        name: 'web_search',
+        description: 'Search the web using Brave Search. Use this when the user asks about current events, recent news, facts, or anything requiring up-to-date information from the internet.',
+        inputSchema: {
+          json: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'The search query' },
+              count: { type: 'number', description: 'Number of results to return (1-10, default 5)' }
             },
             required: ['query']
           }
@@ -1151,6 +1164,38 @@ app.post('/tools/list_workspace_files', async (req, res) => {
         res.json({ files, prefix, truncated: resp.IsTruncated ?? false });
     } catch (err) {
         console.error('[harness] list_workspace_files error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/tools/web_search', async (req, res) => {
+    const { userId, query, count = 5 } = req.body || {};
+    if (!query) {
+        return res.status(400).json({ error: 'query is required' });
+    }
+    try {
+        const braveRes = await fetch(`${FAIT_BASE_URL}/internal/mcp/brave`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'tools/call',
+                params: {
+                    name: 'web_search',
+                    arguments: { query, count: Number(count) || 5 }
+                }
+            })
+        });
+        const braveData = await braveRes.json();
+        // Extract text from MCP response content array
+        const content = braveData?.result?.content;
+        const text = Array.isArray(content)
+            ? content.filter(b => b.type === 'text').map(b => b.text).join('\n')
+            : JSON.stringify(braveData);
+        res.json({ result: text, raw: braveData });
+    } catch (err) {
+        console.error('[harness] web_search error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2006,7 +2051,8 @@ app.post('/turn', async (req, res) => {
                             }
                         } else if (
                             toolUseAccumulator.name.startsWith('graph_') ||
-                            toolUseAccumulator.name.startsWith('ado_')
+                            toolUseAccumulator.name.startsWith('ado_') ||
+                            toolUseAccumulator.name === 'web_search'
                         ) {
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {

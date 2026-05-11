@@ -147,3 +147,26 @@ No — all fixes are interrelated (FeedbackDispatcher DI touches Program.cs, Fee
 5. Check `[feedback]` log lines for Jarvis dispatch attempt
 
 *Build by Tony (software-engineer) — Cycle 2 — 2026-05-10*
+
+---
+
+## Build Report — Review Cycle 3 (ADO#3236)
+
+**Commit:** `d2f10857`
+**Date:** 2026-05-10
+
+### What was built
+One-liner targeted fix: removed the hardcoded `?? "https://fait.fortressam.ai"` fallback from `FeedbackDispatcher.cs`. Config key is now required; missing key logs a warning and returns early — matching the existing `webhookUrl` guard pattern above it.
+
+### Files changed
+- `src/FortressAI.Web/Services/FeedbackDispatcher.cs` — Replaced `var baseUrl = config["FIP:FaitBaseUrl"]?.TrimEnd('/') ?? "https://fait.fortressam.ai"` with a two-line guard: null-check → LogWarning + return
+
+### Acceptance criteria verification
+- [x] Hardcoded fallback `?? "https://fait.fortressam.ai"` is removed
+- [x] Missing `FIP:FaitBaseUrl` config key logs warning and returns early (no silent prod URL leak)
+- [x] `dotnet build` passes: **0 errors**
+
+### CC sessions run
+1 CC session (Sonnet)
+
+*Build by Tony (software-engineer) — Cycle 3 — 2026-05-10*
