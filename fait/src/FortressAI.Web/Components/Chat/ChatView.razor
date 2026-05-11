@@ -444,12 +444,10 @@ else
     private DateTime? _taskStartTime;
     private string _taskElapsed = "00:00";
     private System.Threading.Timer? _elapsedTimer;
-    private bool _taskCancelled = false;
     private record TaskProgressStep(string Status, string? ToolName, string Message, DateTime At);
 
     private void CancelTask()
     {
-        _taskCancelled = true;
         streamingCts?.Cancel();
         _elapsedTimer?.Dispose();
         _elapsedTimer = null;
@@ -734,7 +732,6 @@ else
         _taskProgressSteps.Clear();
         _elapsedTimer?.Dispose();
         _elapsedTimer = null;
-        _taskCancelled = false;
 
         // Capture pending attachments before clearing
         var attachmentsSnapshot = _pendingAttachments.ToList();
@@ -1026,7 +1023,6 @@ else
                             {
                                 _taskStartTime = DateTime.UtcNow;
                                 _taskProgressSteps.Clear();
-                                _taskCancelled = false;
                                 _elapsedTimer?.Dispose();
                                 _elapsedTimer = new System.Threading.Timer(_ =>
                                 {
@@ -1660,7 +1656,7 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 .btn-task-mode--active {
     background: var(--color-accent);
     border-color: var(--color-accent);
-    color: var(--color-text-on-accent, #fff);
+    color: var(--color-text-on-accent, var(--color-text-inverted));
     font-weight: 600;
 }
 .btn-task-mode:hover:not(:disabled):not(.btn-task-mode--active) {
@@ -1675,7 +1671,7 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     font-size: var(--text-sm, 0.875rem);
     font-family: var(--font-primary);
     padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
-    background: var(--color-accent-light, rgba(212, 175, 55, 0.1));
+    background: var(--color-accent-light, var(--color-background-subtle));
     border-radius: var(--radius-sm);
 }
 /* ADO#3244 — Task Progress Timeline */
@@ -1745,7 +1741,7 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 .resumption-brief-card {
     margin: var(--space-3, 0.75rem) var(--space-4, 1rem);
     padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
-    background: var(--color-accent-light, rgba(212, 175, 55, 0.08));
+    background: var(--color-accent-light, var(--color-background-subtle));
     border-left: var(--border-width-accent, 3px) solid var(--color-accent);
     border-radius: var(--radius-md);
     font-family: var(--font-primary);

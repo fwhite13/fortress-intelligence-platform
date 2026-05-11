@@ -1735,6 +1735,7 @@ app.post('/turn', async (req, res) => {
         // NDJSON parser for --output-format stream-json (ADO#3244)
         let ccStdoutBuffer = '';
         let ccTextEmitted = false;
+        const toolUseMap = new Map(); // track tool_use id → name for tool_result correlation
         ccProcess.stdout.on('data', (chunk) => {
             ccStdoutBuffer += chunk.toString();
             const lines = ccStdoutBuffer.split('\n');
@@ -1754,12 +1755,19 @@ app.post('/turn', async (req, res) => {
                             ccTextEmitted = true;
                             sendEvent({ type: 'text', content: scrubSecrets(block.text) });
                         } else if (block.type === 'tool_use') {
+                            toolUseMap.set(block.id, block.name || 'tool');
                             sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: `Calling ${block.name}...` }) });
                         }
                     }
-                } else if (evtType === 'tool_result') {
-                    const toolName = parsed.tool_name || parsed.name || 'tool';
-                    sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_result', toolName, status: 'done', message: `${toolName} completed` }) });
+                } else if (evtType === 'user' && Array.isArray(parsed.message?.content)) {
+                    for (const block of parsed.message.content) {
+                        if (block.type === 'tool_result') {
+                            const toolName = toolUseMap.get(block.tool_use_id) || block.tool_use_id || 'tool';
+                            sendEvent({ type: 'task_progress', payload: JSON.stringify({
+                                step: 'tool_result', toolName, status: 'done', message: `${toolName} completed`
+                            }) });
+                        }
+                    }
                 } else if (evtType === 'result') {
                     if (!ccTextEmitted && parsed.result) {
                         sendEvent({ type: 'text', content: scrubSecrets(parsed.result) });
@@ -1772,6 +1780,7 @@ app.post('/turn', async (req, res) => {
         ccProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', content: scrubSecrets(chunk.toString()) }));
         ccProcess.on('close', async (code) => {
             clearTimeout(timeout);
+            toolUseMap.clear();
             // §G7 — clean up scheduled task context
             if (userId) scheduledTaskUsers.delete(userId);
             let artifact = null;

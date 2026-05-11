@@ -35,6 +35,8 @@
   --color-text-muted: #9ca3af;
   --color-text-on-primary: #ffffff;
   --color-text-on-accent: #1a2332;
+  --color-text-inverted: #ffffff;
+  --color-background-subtle: rgba(0, 0, 0, 0.04);
 
   /* --- Borders --- */
   --color-border: #e5e7eb;

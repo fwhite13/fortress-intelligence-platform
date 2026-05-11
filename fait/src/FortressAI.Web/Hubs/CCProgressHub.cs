@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using System.Security.Claims;
 
 namespace FortressAI.Web.Hubs;
 
@@ -11,11 +12,17 @@ public class CCProgressHub : Hub
 {
     public async Task JoinUserGroup(string userId)
     {
+        var callerId = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (callerId != userId)
+            throw new HubException("Cannot join another user's group.");
         await Groups.AddToGroupAsync(Context.ConnectionId, $"cc-user-{userId}");
     }
 
     public async Task LeaveUserGroup(string userId)
     {
+        var callerId = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (callerId != userId)
+            throw new HubException("Cannot leave another user's group.");
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"cc-user-{userId}");
     }
 }

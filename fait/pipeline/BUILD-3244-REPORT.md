@@ -55,7 +55,7 @@ Implemented Feature 2.4: Task Progress Timeline for CC task mode. Harness now em
 - [x] No regressions on Bedrock path (taskMode=false path unchanged)
 
 ## Commit Hash
-[pending]
+eac6da83
 
 ## Self-Review Checklist
 - [x] Blazor project builds successfully (`dotnet build`) — 0 errors, 46 warnings (pre-existing)
