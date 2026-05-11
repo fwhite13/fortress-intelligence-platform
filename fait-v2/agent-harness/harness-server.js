@@ -66,6 +66,29 @@ async function getUserAdoToken(userId) {
     }
 }
 
+// ADO#3240 — Fetch decrypted tokens from Blazor internal API (replaces direct DB queries)
+async function getUserTokens(userId) {
+    try {
+        const base = FAIT_BASE_URL;
+        const secret = INTERNAL_API_TOKEN;
+        const res = await fetch(`${base}/api/internal/user-tokens/${encodeURIComponent(userId)}`, {
+            headers: { 'X-Internal-Token': secret }
+        });
+        if (!res.ok) {
+            console.warn(`[harness] getUserTokens: Blazor returned ${res.status} for userId=${userId}`);
+            return { ms365: null, ado: null };
+        }
+        const data = await res.json();
+        return {
+            ms365: data.ms365AccessToken ?? null,
+            ado: data.adoPersonalAccessToken ?? null
+        };
+    } catch (err) {
+        console.error('[harness] getUserTokens error:', err.message);
+        return { ms365: null, ado: null };
+    }
+}
+
 const MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
 const FAIT_BASE_URL = process.env.FAIT_BASE_URL || 'http://localhost:8080';
 const HARNESS_INTERNAL_SECRET = process.env.HARNESS_INTERNAL_SECRET || ''; // legacy — unused
@@ -459,7 +482,7 @@ async function graphRequest(accessToken, method, path, body) {
 app.post('/tools/graph_list_emails', async (req, res) => {
     const { userId, maxResults = 10, folder = 'inbox' } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
-    const token = await getUserMs365Token(userId);
+    const token = req.body?.ms365Token || await getUserMs365Token(userId);
     if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
     try {
         const data = await graphRequest(token, 'GET',
@@ -484,7 +507,7 @@ app.post('/tools/graph_get_email', async (req, res) => {
     const { userId, messageId } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!messageId) return res.status(400).json({ error: 'messageId required' });
-    const token = await getUserMs365Token(userId);
+    const token = req.body?.ms365Token || await getUserMs365Token(userId);
     if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
     try {
         const m = await graphRequest(token, 'GET',
@@ -508,7 +531,7 @@ app.post('/tools/graph_get_email', async (req, res) => {
 app.post('/tools/graph_list_calendar_events', async (req, res) => {
     const { userId, days = 7 } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
-    const token = await getUserMs365Token(userId);
+    const token = req.body?.ms365Token || await getUserMs365Token(userId);
     if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
     try {
         const now = new Date().toISOString();
@@ -535,7 +558,7 @@ app.post('/tools/graph_send_email', async (req, res) => {
     const { userId, to, subject, body, cc } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, and body required' });
-    const token = await getUserMs365Token(userId);
+    const token = req.body?.ms365Token || await getUserMs365Token(userId);
     if (!token) return res.status(401).json({ error: 'No MS365 token available for this user' });
     try {
         const payload = {
@@ -603,7 +626,7 @@ app.post('/tools/ado_list_work_items', async (req, res) => {
     const { userId, project, iteration, state, assignedTo, top = 20 } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!project) return res.status(400).json({ error: 'project required' });
-    const pat = await getUserAdoToken(userId);
+    const pat = req.body?.adoToken || await getUserAdoToken(userId);
     if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
     try {
         // Sanitize WIQL string params to prevent injection
@@ -642,7 +665,7 @@ app.post('/tools/ado_get_work_item', async (req, res) => {
     const { userId, id } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!id) return res.status(400).json({ error: 'id required' });
-    const pat = await getUserAdoToken(userId);
+    const pat = req.body?.adoToken || await getUserAdoToken(userId);
     if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
     try {
         const url = `${ADO_BASE}/_apis/wit/workitems/${id}?api-version=7.1`;
@@ -668,7 +691,7 @@ app.post('/tools/ado_update_work_item', async (req, res) => {
     const { userId, id, state, title, comment } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!id) return res.status(400).json({ error: 'id required' });
-    const pat = await getUserAdoToken(userId);
+    const pat = req.body?.adoToken || await getUserAdoToken(userId);
     if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
     try {
         const project = process.env.ADO_DEFAULT_PROJECT || 'FAIT';
@@ -721,7 +744,7 @@ app.post('/tools/ado_create_work_item', async (req, res) => {
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!project) return res.status(400).json({ error: 'project required' });
     if (!title) return res.status(400).json({ error: 'title required' });
-    const pat = await getUserAdoToken(userId);
+    const pat = req.body?.adoToken || await getUserAdoToken(userId);
     if (!pat) return res.status(401).json({ error: 'No ADO token configured for this user' });
     try {
         const url = `${ADO_BASE}/${encodeURIComponent(project)}/_apis/wit/workItems/$${encodeURIComponent(type)}?api-version=7.1`;
@@ -1168,32 +1191,32 @@ app.post('/tools/list_workspace_files', async (req, res) => {
     }
 });
 
+// ─── Brave web_search tool handler (ADO#3240) ─────────────────────────────
 app.post('/tools/web_search', async (req, res) => {
-    const { userId, query, count = 5 } = req.body || {};
-    if (!query) {
-        return res.status(400).json({ error: 'query is required' });
-    }
+    const { query, count = 5 } = req.body || {};
+    if (!query) return res.status(400).json({ error: 'query required' });
+
+    const blazorBase = FAIT_BASE_URL;
+    const internalToken = INTERNAL_API_TOKEN;
+
     try {
-        const braveRes = await fetch(`${FAIT_BASE_URL}/internal/mcp/brave`, {
+        const resp = await fetch(`${blazorBase}/internal/mcp/brave/tools/call`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                ...(internalToken ? { 'X-Internal-Token': internalToken } : {}),
+            },
             body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: 1,
-                method: 'tools/call',
-                params: {
-                    name: 'web_search',
-                    arguments: { query, count: Number(count) || 5 }
-                }
-            })
+                name: 'web_search',
+                arguments: { query, count: Math.min(parseInt(count, 10) || 5, 10) }
+            }),
         });
-        const braveData = await braveRes.json();
-        // Extract text from MCP response content array
-        const content = braveData?.result?.content;
-        const text = Array.isArray(content)
-            ? content.filter(b => b.type === 'text').map(b => b.text).join('\n')
-            : JSON.stringify(braveData);
-        res.json({ result: text, raw: braveData });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`Brave MCP call failed (${resp.status}): ${text}`);
+        }
+        const result = await resp.json();
+        res.json({ result });
     } catch (err) {
         console.error('[harness] web_search error:', err.message);
         res.status(500).json({ error: err.message });
@@ -1456,6 +1479,9 @@ app.post('/turn', async (req, res) => {
         console.warn(`[harness] /turn: 400 — userId failed validation: '${userId}'`);
         return res.status(400).json({ error: 'Invalid userId' });
     }
+
+    // ADO#3240 — Pre-fetch user tokens from Blazor (decrypted MS365 + ADO) for this turn
+    const userTokens = await getUserTokens(userId);
 
     console.log(`[harness] /turn: validation passed for userId=${userId}, starting SSE response`);
     res.setHeader('Content-Type', 'text/event-stream');
@@ -2049,13 +2075,35 @@ app.post('/turn', async (req, res) => {
                             } catch (rfErr) {
                                 toolResultText = `Error reading file: ${rfErr.message}`;
                             }
-                        } else if (
-                            toolUseAccumulator.name.startsWith('graph_') ||
-                            toolUseAccumulator.name.startsWith('ado_') ||
-                            toolUseAccumulator.name === 'web_search'
-                        ) {
+                        } else if (toolUseAccumulator.name.startsWith('graph_')) {
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, ms365Token: userTokens.ms365, ...toolInput })
+                                });
+                                const mcpData = await mcpRes.json();
+                                toolResultText = JSON.stringify(mcpData, null, 2);
+                            } catch (mcpErr) {
+                                toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
+                                isError = true;
+                            }
+                        } else if (toolUseAccumulator.name.startsWith('ado_')) {
+                            try {
+                                const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, adoToken: userTokens.ado, ...toolInput })
+                                });
+                                const mcpData = await mcpRes.json();
+                                toolResultText = JSON.stringify(mcpData, null, 2);
+                            } catch (mcpErr) {
+                                toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
+                                isError = true;
+                            }
+                        } else if (toolUseAccumulator.name === 'web_search') {
+                            try {
+                                const mcpRes = await fetch(`http://localhost:${PORT}/tools/web_search`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ userId, ...toolInput })
@@ -2063,7 +2111,7 @@ app.post('/turn', async (req, res) => {
                                 const mcpData = await mcpRes.json();
                                 toolResultText = JSON.stringify(mcpData, null, 2);
                             } catch (mcpErr) {
-                                toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
+                                toolResultText = `Web search error: ${mcpErr.message}`;
                                 isError = true;
                             }
                         } else {

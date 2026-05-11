@@ -902,6 +902,60 @@ app.MapGet("/api/agents/{pluginAgentId}/soul", async (
     return Results.Ok(new { content });
 }).AllowAnonymous(); // guarded by X-Internal-Token or cookie auth
 
+// §ADO#3240 — Internal token endpoint for harness (decrypted MS365 + ADO tokens)
+app.MapGet("/api/internal/user-tokens/{userId}", async (
+    string userId,
+    HttpContext httpContext,
+    IConfiguration config,
+    IDevOpsConnectionService devOpsService,
+    IMicrosoftTokenService microsoftTokenService,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    // Internal-only: validate X-Internal-Token (same pattern as memory search, soul endpoint, etc.)
+    var internalToken = config["Feedback:InternalToken"] ?? "fait-v2-internal-feedback-token";
+    var providedToken = httpContext.Request.Headers["X-Internal-Token"].FirstOrDefault();
+    if (string.IsNullOrEmpty(providedToken) || providedToken != internalToken)
+    {
+        logger.LogWarning("InternalUserTokens: rejected — missing or invalid X-Internal-Token for userId={UserId}", userId);
+        return Results.Unauthorized();
+    }
+
+    if (string.IsNullOrEmpty(userId))
+        return Results.BadRequest(new { error = "userId required" });
+
+    // MS365 access token (decrypted by MicrosoftTokenService, auto-refreshes if needed)
+    string? ms365Token = null;
+    try
+    {
+        ms365Token = await microsoftTokenService.GetValidAccessTokenAsync(userId);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "InternalUserTokens: failed to get MS365 token for userId={UserId}", userId);
+    }
+
+    // ADO PAT (decrypted by DevOpsConnectionService)
+    string? adoToken = null;
+    try
+    {
+        adoToken = await devOpsService.GetDecryptedPatAsync(userId);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "InternalUserTokens: failed to get ADO token for userId={UserId}", userId);
+    }
+
+    logger.LogDebug("InternalUserTokens: served tokens for userId={UserId} — ms365={HasMs365}, ado={HasAdo}",
+        userId, ms365Token != null, adoToken != null);
+
+    return Results.Ok(new
+    {
+        ms365AccessToken = ms365Token,
+        adoPersonalAccessToken = adoToken
+    });
+}).AllowAnonymous(); // guarded by X-Internal-Token header check above
+
 // Workspace file upload endpoint (ADO#3094 — chat file upload destination)
 app.MapPost("/api/workspace/upload", async (
     HttpContext httpContext,
