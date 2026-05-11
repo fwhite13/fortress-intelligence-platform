@@ -2128,6 +2128,21 @@ app.post('/turn', async (req, res) => {
                                 toolResultText = `\n\n[Memory Read Error]\n${rmErr.message}\n\n`;
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${rmErr.message.substring(0,100)}`);
                             }
+                        } else if (toolUseAccumulator.name === 'search_memory') {
+                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
+                            try {
+                                const smRes = await fetch(`http://localhost:${PORT}/tools/search_memory`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, query: toolInput.query })
+                                });
+                                const smData = await smRes.json();
+                                toolResultText = `\n\n[Memory Search]\n${JSON.stringify(smData, null, 2)}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
+                            } catch (smErr) {
+                                toolResultText = `\n\n[Memory Search Error]\n${smErr.message}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${smErr.message.substring(0,100)}`);
+                            }
                         } else if (toolUseAccumulator.name === 'write_memory') {
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
@@ -2159,6 +2174,7 @@ app.post('/turn', async (req, res) => {
                                 });
                                 const cdData = await cdRes.json();
                                 if (cdData.error) {
+                                    emitToolCall(res, 'builtin', 'create_document', 'error', `Document creation failed: ${cdData.error}`);
                                     toolResultText = `\n\n[Document Error]\n${cdData.error}\n\n`;
                                 } else {
                                     // Emit artifact SSE event BEFORE the tool result text
