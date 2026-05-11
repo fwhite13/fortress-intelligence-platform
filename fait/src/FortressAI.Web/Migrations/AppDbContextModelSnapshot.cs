@@ -484,6 +484,77 @@ namespace FortressAI.Web.Migrations
                     b.ToTable("email_log", (string)null);
                 });
 
+            modelBuilder.Entity("FortressAI.Web.Data.Models.FeedbackSubmission", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(36)
+                        .HasColumnType("varchar(36)")
+                        .HasColumnName("id");
+
+                    b.Property<int?>("AdoWiId")
+                        .HasColumnType("int")
+                        .HasColumnName("ado_wi_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("DATETIME(6)")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("longtext")
+                        .HasColumnName("description");
+
+                    b.Property<string>("PageUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("page_url");
+
+                    b.Property<string>("ScreenshotS3Key")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("screenshot_s3_key");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasDefaultValue("pending")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime?>("TriagedAt")
+                        .HasColumnType("DATETIME(6)")
+                        .HasColumnName("triaged_at");
+
+                    b.Property<string>("TriageResult")
+                        .HasColumnType("longtext")
+                        .HasColumnName("triage_result");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("type");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("idx_feedback_status");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("idx_feedback_user_id");
+
+                    b.ToTable("feedback_submissions");
+                });
+
             modelBuilder.Entity("FortressAI.Shared.Models.GraphSubscription", b =>
                 {
                     b.Property<int>("Id")

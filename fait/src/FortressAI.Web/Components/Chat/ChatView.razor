@@ -44,35 +44,47 @@ else
 
     <div style="flex: 1; min-width: 0; overflow: hidden; display: flex; flex-direction: column; transition: all 0.2s ease;">
         <div class="chat-container">
+    <FeedbackModal @ref="_feedbackModal" />
     <div class="chat-header">
-        <div class="chat-header-identity">
-            @if (!string.IsNullOrWhiteSpace(_avatarPreviewUrl))
+        <div class="chat-header-left">
+            <div class="chat-header-identity">
+                @if (!string.IsNullOrWhiteSpace(_avatarPreviewUrl))
+                {
+                    <img src="@_avatarPreviewUrl" alt="@(_assistantConfig?.AssistantName ?? "Assistant")" class="chat-header-avatar" />
+                }
+                else if (_assistantConfig != null)
+                {
+                    <MudIcon Icon="@GetAvatarIconForHeader(_assistantConfig.AvatarId)"
+                             Size="Size.Small"
+                             Style="@($"color: {_assistantConfig.ColorHex ?? "#6366f1"}")" />
+                }
+                @if (!string.IsNullOrWhiteSpace(_assistantConfig?.AssistantName))
+                {
+                    <span class="chat-header-name">@_assistantConfig.AssistantName</span>
+                }
+            </div>
+            @if (conversation?.Project != null)
             {
-                <img src="@_avatarPreviewUrl" alt="@(_assistantConfig?.AssistantName ?? "Assistant")" class="chat-header-avatar" />
+                <div class="chat-project-badge" @onclick="NavigateToProject">
+                    <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" /> @conversation.Project.Name
+                </div>
             }
-            else if (_assistantConfig != null)
+            @if (_taskModeActive)
             {
-                <MudIcon Icon="@GetAvatarIconForHeader(_assistantConfig.AvatarId)"
-                         Size="Size.Small"
-                         Style="@($"color: {_assistantConfig.ColorHex ?? "#6366f1"}")" />
-            }
-            @if (!string.IsNullOrWhiteSpace(_assistantConfig?.AssistantName))
-            {
-                <span class="chat-header-name">@_assistantConfig.AssistantName</span>
+                <div class="chat-task-indicator">
+                    <i class="fas fa-tasks"></i> Task Mode
+                </div>
             }
         </div>
-        @if (conversation?.Project != null)
-        {
-            <div class="chat-project-badge" @onclick="NavigateToProject">
-                <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" /> @conversation.Project.Name
-            </div>
-        }
-        @if (_taskModeActive)
-        {
-            <div class="chat-task-indicator">
-                <i class="fas fa-tasks"></i> Task Mode
-            </div>
-        }
+        <div class="chat-header-actions">
+            <button class="chat-feedback-btn chat-feedback-btn--desktop" @onclick="OpenFeedbackModal" title="Report a Bug or Suggest a Feature">
+                <i class="fas fa-bug"></i>
+                <span class="chat-feedback-btn__label">Report a Bug</span>
+            </button>
+            <button class="chat-feedback-btn chat-feedback-btn--mobile" @onclick="OpenFeedbackModal" title="Report a Bug or Suggest a Feature">
+                <i class="fas fa-bug"></i>
+            </button>
+        </div>
     </div>
 
     @if (_agentReady && _hasFailedTasks && !_failedTaskBannerDismissed)
@@ -372,6 +384,12 @@ else
     // Task mode state
     private bool _taskMode = false;
     private bool _taskModeActive = false; // set true on mode_switch event
+    private FeedbackModal? _feedbackModal;
+
+    private void OpenFeedbackModal()
+    {
+        _feedbackModal?.Open();
+    }
     private List<UserWorkspaceFile> _conversationArtifacts = new();
     private UserWorkspaceFile? _pendingArtifact = null;
 
@@ -1612,6 +1630,53 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 .resumption-brief-loading {
     margin-top: var(--space-1, 0.25rem);
     color: var(--color-accent);
+}
+.chat-header-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2, 8px);
+    flex: 1;
+    min-width: 0;
+}
+.chat-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1, 4px);
+    flex-shrink: 0;
+}
+.chat-feedback-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1, 4px);
+    padding: var(--space-1, 4px) var(--space-2, 8px);
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full, 9999px);
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs, 0.75rem);
+    font-family: var(--font-primary);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.chat-feedback-btn:hover {
+    background: var(--color-surface-hover, var(--color-border));
+    color: var(--color-text-primary);
+    border-color: var(--color-text-secondary);
+}
+.chat-feedback-btn--mobile {
+    display: none;
+}
+@@media (max-width: 640px) {
+    .chat-feedback-btn--desktop {
+        display: none;
+    }
+    .chat-feedback-btn--mobile {
+        display: flex;
+        padding: var(--space-1, 4px) var(--space-2, 8px);
+    }
+    .chat-feedback-btn__label {
+        display: none;
+    }
 }
 .chat-header-identity {
     display: flex;

@@ -17,6 +17,8 @@ using Microsoft.AspNetCore.SignalR;
 using FortressAI.Web.Auth;
 using System.Security.Claims;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Mvc;
+using FortressAI.Web.Data.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -590,6 +592,80 @@ app.MapGet("/auth/logout", async (HttpContext ctx) =>
     return Results.Redirect("/");
 }).AllowAnonymous().DisableAntiforgery();
 
+// Submit feedback (authenticated user)
+app.MapPost("/api/feedback", async (
+    [FromBody] FeedbackRequest feedbackRequest,
+    IDbContextFactory<AppDbContext> dbFactory,
+    System.Security.Claims.ClaimsPrincipal user,
+    CancellationToken ct) =>
+{
+    var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    var submission = new FeedbackSubmission
+    {
+        UserId = userId,
+        Type = feedbackRequest.Type,
+        Description = feedbackRequest.Description,
+        PageUrl = feedbackRequest.PageUrl,
+        Status = "pending",
+    };
+
+    await using var db = await dbFactory.CreateDbContextAsync(ct);
+    db.FeedbackSubmissions.Add(submission);
+    await db.SaveChangesAsync(ct);
+
+    _ = FeedbackDispatcher.DispatchToJarvisAsync(submission, app.Configuration);
+
+    return Results.Ok(new { submissionId = submission.Id });
+}).RequireAuthorization();
+
+// Jarvis callback — update feedback status
+app.MapPost("/api/feedback/{id}/status", async (
+    string id,
+    [FromBody] FeedbackStatusUpdate statusUpdate,
+    IDbContextFactory<AppDbContext> dbFactory,
+    IHubContext<DashboardHub> hub,
+    IConfiguration config,
+    HttpContext httpContext,
+    CancellationToken ct) =>
+{
+    var expectedToken = config["Feedback:InternalToken"];
+    if (string.IsNullOrEmpty(expectedToken))
+        return Results.Unauthorized();
+
+    var providedToken = httpContext.Request.Headers["Authorization"].FirstOrDefault()
+        ?.Replace("Bearer ", "", StringComparison.OrdinalIgnoreCase);
+    if (providedToken != expectedToken) return Results.Unauthorized();
+
+    await using var db = await dbFactory.CreateDbContextAsync(ct);
+    var submission = await db.FeedbackSubmissions.FindAsync(new object[] { id }, ct);
+    if (submission == null) return Results.NotFound();
+
+    submission.Status = statusUpdate.Status;
+    submission.AdoWiId = statusUpdate.AdoWiId;
+    submission.TriageResult = statusUpdate.Message;
+    submission.TriagedAt = DateTime.UtcNow;
+    await db.SaveChangesAsync(ct);
+
+    var userMessage = statusUpdate.Status switch
+    {
+        "dispatched" => $"Got it — this looks like a bug. It's been filed as ADO#{statusUpdate.AdoWiId} and is already being worked on.",
+        "escalated" => "Thanks — this one needs a closer look. Fred will review it shortly.",
+        _ => statusUpdate.Message ?? "Your feedback has been received.",
+    };
+
+    await hub.Clients.Group($"user-{submission.UserId}").SendAsync("ReceiveFeedbackResult", new
+    {
+        submissionId = id,
+        status = statusUpdate.Status,
+        message = userMessage,
+        adoWiId = statusUpdate.AdoWiId,
+    }, ct);
+
+    return Results.Ok();
+}).AllowAnonymous().DisableAntiforgery();
+
 app.MapControllers();
 
 app.MapRazorComponents<FortressAI.Web.Components.App>()
@@ -598,3 +674,71 @@ app.MapRazorComponents<FortressAI.Web.Components.App>()
 app.MapHub<DashboardHub>("/hubs/dashboard");
 
 app.Run();
+
+record FeedbackRequest(
+    string Type,
+    string Description,
+    string? PageUrl,
+    string? ScreenshotBase64
+);
+
+record FeedbackStatusUpdate(
+    string Status,
+    int? AdoWiId,
+    string? Message
+);
+
+static class FeedbackDispatcher
+{
+    public static async Task DispatchToJarvisAsync(FeedbackSubmission submission, IConfiguration config)
+    {
+        var webhookUrl = config["Feedback:JarvisWebhookUrl"];
+        if (string.IsNullOrEmpty(webhookUrl))
+        {
+            Console.Error.WriteLine("[feedback] Feedback:JarvisWebhookUrl not configured — skipping dispatch");
+            return;
+        }
+
+        var internalToken = config["Feedback:InternalToken"] ?? "";
+
+        var screenshotLine = submission.ScreenshotS3Key != null
+            ? $"**Screenshot:** s3://{submission.ScreenshotS3Key}"
+            : "";
+
+        var payload = new
+        {
+            message = $$"""
+            ## FEEDBACK: {{submission.Type.ToUpper()}} from FAIT
+
+            **Submission ID:** {{submission.Id}}
+            **User ID:** {{submission.UserId}}
+            **Page:** {{submission.PageUrl ?? "unknown"}}
+            **Type:** {{submission.Type}}
+
+            **Description:**
+            {{submission.Description}}
+
+            {{screenshotLine}}
+
+            **Triage instructions:**
+            - Auto-dispatch if this is a clear UI bug, broken element, wrong data, or regression
+            - Escalate to Fred if this involves auth/permissions, data integrity, scope-expanding features, or active WI duplicates
+            - After triage, call back: POST https://fait.fortressam.ai/api/feedback/{{submission.Id}}/status
+              with headers: Authorization: Bearer {{internalToken}}
+              with body: { "status": "dispatched"|"escalated", "adoWiId": 1234 (if dispatched), "message": "..." }
+            """,
+        };
+
+        try
+        {
+            using var http = new HttpClient();
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config["OpenClaw:ApiToken"] ?? "");
+            await http.PostAsJsonAsync(webhookUrl, payload);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[feedback] Failed to dispatch to Jarvis: {ex.Message}");
+        }
+    }
+}

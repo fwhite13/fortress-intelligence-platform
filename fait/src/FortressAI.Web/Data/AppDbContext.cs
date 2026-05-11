@@ -45,6 +45,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<UserWorkspaceFile> UserWorkspaceFiles => Set<UserWorkspaceFile>();
     public DbSet<WorkspaceFolder> WorkspaceFolders { get; set; }
     public DbSet<WorkspaceUpload> WorkspaceUploads { get; set; }
+    public DbSet<FeedbackSubmission> FeedbackSubmissions => Set<FeedbackSubmission>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

@@ -1,0 +1,154 @@
+@using Microsoft.AspNetCore.SignalR.Client
+@inject NavigationManager Nav
+@inject IHttpClientFactory HttpClientFactory
+@inject ISnackbar Snackbar
+@implements IAsyncDisposable
+
+<MudDialog @bind-Visible="_isOpen" Options="_dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            @(_type == "bug" ? "Report a Bug" : "Suggest a Feature")
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudToggleGroup T="string" @bind-Value="_type" SelectionMode="SelectionMode.SingleSelection" Class="feedback-modal__toggle">
+            <MudToggleItem Value="@("bug")" Class="feedback-modal__toggle-item">Bug</MudToggleItem>
+            <MudToggleItem Value="@("feature")" Class="feedback-modal__toggle-item">Feature</MudToggleItem>
+        </MudToggleGroup>
+
+        <MudTextField @bind-Value="_description"
+                      Label="Describe the issue or idea"
+                      Lines="4"
+                      Required="true"
+                      Class="feedback-modal__description mt-3"
+                      Placeholder="What happened? What did you expect?" />
+
+        <MudText Typo="Typo.caption" Class="feedback-modal__page-url mt-2" Color="Color.Secondary">
+            Current page: @_pageUrl
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close" Class="feedback-modal__cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   OnClick="Submit"
+                   Disabled="@(string.IsNullOrWhiteSpace(_description) || _isSubmitting)"
+                   Class="feedback-modal__submit">
+            @(_isSubmitting ? "Sending..." : "Submit")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private bool _isOpen;
+    private bool _isSubmitting;
+    private string _type = "bug";
+    private string _description = string.Empty;
+    private string _pageUrl = string.Empty;
+    private HubConnection? _hubConnection;
+
+    private readonly DialogOptions _dialogOptions = new()
+    {
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+        CloseOnEscapeKey = true,
+    };
+
+    public void Open()
+    {
+        _pageUrl = Nav.Uri;
+        _description = string.Empty;
+        _type = "bug";
+        _isSubmitting = false;
+        _isOpen = true;
+        StateHasChanged();
+    }
+
+    private void Close()
+    {
+        _isOpen = false;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(Nav.ToAbsoluteUri("/hubs/dashboard"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<System.Text.Json.JsonElement>("ReceiveFeedbackResult", result =>
+        {
+            InvokeAsync(() =>
+            {
+                var message = "Your feedback has been received.";
+                var severity = Severity.Success;
+
+                if (result.TryGetProperty("message", out var msg))
+                    message = msg.GetString() ?? message;
+
+                if (result.TryGetProperty("status", out var status) && status.GetString() == "escalated")
+                    severity = Severity.Info;
+
+                Snackbar.Add(message, severity);
+                StateHasChanged();
+            });
+        });
+
+        try
+        {
+            await _hubConnection.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            // Hub connection is non-critical — feedback modal degrades gracefully if /hubs/dashboard is unavailable
+            _ = ex;
+        }
+    }
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_description)) return;
+        _isSubmitting = true;
+        StateHasChanged();
+
+        try
+        {
+            var http = HttpClientFactory.CreateClient();
+            http.BaseAddress = new Uri(Nav.BaseUri);
+
+            var payload = new
+            {
+                type = _type,
+                description = _description,
+                pageUrl = _pageUrl,
+                screenshotBase64 = (string?)null,
+            };
+
+            var response = await http.PostAsJsonAsync("/api/feedback", payload);
+            if (response.IsSuccessStatusCode)
+            {
+                _isOpen = false;
+                Snackbar.Add("Feedback submitted! Jarvis is reviewing it now.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("Something went wrong. Please try again.", Severity.Error);
+            }
+        }
+        catch
+        {
+            Snackbar.Add("Something went wrong. Please try again.", Severity.Error);
+        }
+        finally
+        {
+            _isSubmitting = false;
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection != null)
+            await _hubConnection.DisposeAsync();
+    }
+}
