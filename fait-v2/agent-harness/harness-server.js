@@ -65,6 +65,28 @@ async function getUserTokens(userId) {
     }
 }
 
+// ADO#3309 — Fetch authoritative KB access entitlements for a user
+async function fetchKbAccess(userId) {
+    const blazorBase = process.env.BLAZOR_BASE_URL || FAIT_BASE_URL;
+    const internalToken = INTERNAL_API_TOKEN;
+    try {
+        const res = await fetch(`${blazorBase}/api/workspace/internal/kb-access?userId=${encodeURIComponent(userId)}`, {
+            headers: {
+                'X-Internal-Token': internalToken,
+                'Accept': 'application/json'
+            }
+        });
+        if (!res.ok) {
+            console.warn(`[harness] fetchKbAccess: HTTP ${res.status} for userId=${userId}`);
+            return null;
+        }
+        return await res.json(); // { corpEnabled, personalUserId, authorizedTeamIds }
+    } catch (err) {
+        console.error(`[harness] fetchKbAccess error:`, err.message);
+        return null;
+    }
+}
+
 const MODEL_ID = 'us.anthropic.claude-sonnet-4-6';
 const FAIT_BASE_URL = process.env.FAIT_BASE_URL || 'http://localhost:8080';
 const HARNESS_INTERNAL_SECRET = process.env.HARNESS_INTERNAL_SECRET || ''; // legacy — unused
@@ -1338,14 +1360,85 @@ app.post('/tools/:toolName', async (req, res) => {
     }
 });
 
-async function executeKbSearch(query, kbType) {
+async function executeKbSearch(query, kbType, userId, kbAccess) {
+    // ADO#3309 — Access enforcement: verify user is entitled to the requested kbType
+    if (kbAccess) {
+        if (kbType === 'corp' && !kbAccess.corpEnabled) {
+            console.warn(`[harness] executeKbSearch: corp KB not authorized for userId=${userId}`);
+            return { text: 'Knowledge base access not authorized.', sources: [] };
+        }
+        if (kbType === 'personal' && (!kbAccess.personalUserId || kbAccess.personalUserId !== userId)) {
+            console.warn(`[harness] executeKbSearch: personal KB userId mismatch for userId=${userId}`);
+            return { text: 'Knowledge base access not authorized.', sources: [] };
+        }
+        if (kbType === 'team') {
+            if (!kbAccess.authorizedTeamIds || kbAccess.authorizedTeamIds.length === 0) {
+                console.warn(`[harness] executeKbSearch: no authorized teams for userId=${userId}`);
+                return { text: 'Knowledge base access not authorized.', sources: [] };
+            }
+        }
+    } else {
+        // kbAccess unavailable (internal API unreachable) — fail open, log warning
+        console.warn(`[harness] executeKbSearch: kbAccess unavailable for userId=${userId} kbType=${kbType} — proceeding without enforcement (fail-open)`);
+    }
+
+    // For team KB: use authorizedTeamIds from kbAccess (not model input)
+    // For personal KB: use personalUserId from kbAccess (not model input)
+    if (kbType === 'team' && kbAccess?.authorizedTeamIds?.length > 0) {
+        // Retrieve from each authorized team and merge results
+        const kbId = process.env.TEAM_KB_ID;
+        if (!kbId) {
+            console.warn(`[harness] KB search: no TEAM_KB_ID configured`);
+            return { text: 'No knowledge base configured for type: team', sources: [] };
+        }
+        try {
+            const allResults = [];
+            for (const teamId of kbAccess.authorizedTeamIds) {
+                const results = await retrieveFromKbFiltered(kbId, query, 'teamId', teamId, 5);
+                allResults.push(...results);
+            }
+            if (allResults.length === 0) return { text: 'No results found.', sources: [] };
+            const text = allResults.map((r, i) => `[${i+1}] ${r.content?.text || ''}`).join('\n\n');
+            const sources = allResults.map(r => ({
+                title: (r.location?.s3Location?.uri || r.location?.confluenceLocation?.url || '').split('/').pop() || 'Document',
+                excerpt: (r.content?.text || '').substring(0, 200)
+            }));
+            return { text, sources };
+        } catch (err) {
+            console.error(`[harness] KB search error (team):`, err.message);
+            return { text: `KB search failed: ${err.message}`, sources: [] };
+        }
+    }
+
+    if (kbType === 'personal' && kbAccess?.personalUserId) {
+        const kbId = process.env.PERSONAL_KB_ID;
+        if (!kbId) {
+            console.warn(`[harness] KB search: no PERSONAL_KB_ID configured`);
+            return { text: 'No knowledge base configured for type: personal', sources: [] };
+        }
+        try {
+            const results = await retrieveFromKbFiltered(kbId, query, 'ownerId', kbAccess.personalUserId, 5);
+            if (results.length === 0) return { text: 'No results found.', sources: [] };
+            const text = results.map((r, i) => `[${i+1}] ${r.content?.text || ''}`).join('\n\n');
+            const sources = results.map(r => ({
+                title: (r.location?.s3Location?.uri || r.location?.confluenceLocation?.url || '').split('/').pop() || 'Document',
+                excerpt: (r.content?.text || '').substring(0, 200)
+            }));
+            return { text, sources };
+        } catch (err) {
+            console.error(`[harness] KB search error (personal):`, err.message);
+            return { text: `KB search failed: ${err.message}`, sources: [] };
+        }
+    }
+
+    // Corp KB or fail-open fallback (no kbAccess): use original RetrieveCommand (no filter)
     const kbId = kbType === 'corp' ? process.env.CORP_KB_ID
                : kbType === 'team' ? process.env.TEAM_KB_ID
                : process.env.PERSONAL_KB_ID;
 
     if (!kbId) {
         console.warn(`[harness] KB search: no KB ID configured for type ${kbType}`);
-        return `No knowledge base configured for type: ${kbType}`;
+        return { text: `No knowledge base configured for type: ${kbType}`, sources: [] };
     }
 
     try {
@@ -1357,13 +1450,17 @@ async function executeKbSearch(query, kbType) {
             }
         });
         const resp = await bedrockAgentClient.send(cmd);
-        const results = (resp.retrievalResults || [])
-            .map((r, i) => `[${i+1}] ${r.content?.text || ''}`)
-            .join('\n\n');
-        return results || 'No results found.';
+        const results = resp.retrievalResults || [];
+        if (results.length === 0) return { text: 'No results found.', sources: [] };
+        const text = results.map((r, i) => `[${i+1}] ${r.content?.text || ''}`).join('\n\n');
+        const sources = results.map(r => ({
+            title: (r.location?.s3Location?.uri || r.location?.confluenceLocation?.url || '').split('/').pop() || 'Document',
+            excerpt: (r.content?.text || '').substring(0, 200)
+        }));
+        return { text, sources };
     } catch (err) {
         console.error(`[harness] KB search error:`, err.message);
-        return `KB search failed: ${err.message}`;
+        return { text: `KB search failed: ${err.message}`, sources: [] };
     }
 }
 
@@ -2180,6 +2277,7 @@ app.post('/turn', async (req, res) => {
                 let stopReason = 'end_turn';
                 // pendingToolResults replaces the scalar — handles multiple toolUse blocks per turn
                 const pendingToolResults = [];
+                let kbAccessForTurn = null; // ADO#3309 — cached per-turn KB access entitlements for Path B enforcement
 
                 const cmd = new ConverseStreamCommand({
                     modelId: MODEL_ID,
@@ -2405,8 +2503,24 @@ app.post('/turn', async (req, res) => {
                             // default: search_knowledge_base
                             emitToolCall(res, 'builtin', 'search_knowledge_base', 'calling', getBuiltinSummary('search_knowledge_base', toolInput));
                             try {
-                                const kbResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal');
-                                toolResultText = `\n\n[KB Search Results]\n${kbResult}\n\n`;
+                                // ADO#3309 — Fetch authoritative KB access (fetch once per turn, reuse on retry)
+                                if (!kbAccessForTurn) {
+                                    kbAccessForTurn = await fetchKbAccess(userId);
+                                }
+                                const kbSearchResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal', userId, kbAccessForTurn);
+                                toolResultText = `\n\n[KB Search Results]\n${kbSearchResult.text}\n\n`;
+                                // ADO#3309 — Emit kb_sources SSE event (matching Path A behavior)
+                                if (kbSearchResult.sources && kbSearchResult.sources.length > 0) {
+                                    const kbSourcesEvent = {
+                                        sources: [{
+                                            kbId: toolInput.kb_type || 'personal',
+                                            kbName: (toolInput.kb_type || 'personal') === 'corp' ? 'Corp KB' : (toolInput.kb_type === 'team' ? 'Team KB' : 'Personal KB'),
+                                            sourceCount: kbSearchResult.sources.length,
+                                            chunks: kbSearchResult.sources
+                                        }]
+                                    };
+                                    res.write(`event: kb_sources\ndata: ${JSON.stringify(kbSourcesEvent)}\n\n`);
+                                }
                                 emitToolCall(res, 'builtin', 'search_knowledge_base', 'done', 'Knowledge base search complete');
                             } catch (kbErr) {
                                 toolResultText = `\n\n[KB Search Error]\n${kbErr.message}\n\n`;
