@@ -121,7 +121,7 @@ else
                     </div>
                 }
 
-                @foreach (var msg in messages)
+                @foreach (var msg in messages.Where(m => !m.IsResumptionBrief))
                 {
                     <MessageBubble Message="msg" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
                 }
@@ -139,10 +139,10 @@ else
                     </div>
                 }
                 @* Resumption brief renders AFTER message history — ADO#3155 Bug 2 fix *@
-                @if (_briefContent.Length > 0 || _isBriefStreaming)
+                @if (_isBriefStreaming || messages.Any(m => m.IsResumptionBrief) || _briefContent.Length > 0)
                 {
                     <div class="resumption-brief-card">
-                        <div class="resumption-brief-content">@_briefContent.ToString()</div>
+                        <div class="resumption-brief-content">@(_isBriefStreaming ? _briefContent.ToString() : messages.FirstOrDefault(m => m.IsResumptionBrief)?.Content ?? (_briefContent.Length > 0 ? _briefContent.ToString() : ""))</div>
                         @if (_isBriefStreaming)
                         {
                             <div class="resumption-brief-loading">
@@ -604,6 +604,23 @@ else
             _wasColdStart = _agentReady; // ADO#3285 — treat cross-chat navigation as cold start if agent is ready
             _isBriefStreaming = false;
             _activeToolCalls.Clear();  // ADO#3241
+
+            // ADO#3308 — refresh harness session ID for warm cross-chat navigation
+            // HandleAgentReady won't fire again if agent is already warm, so we need
+            // the session ID here to allow SendResumptionBrief to write its guard key
+            if (_agentReady)
+            {
+                try
+                {
+                    var session = await AgentRuntime.GetSessionAsync(Session.UserId.ToString());
+                    if (session?.SessionId != null)
+                        _currentHarnessSessionId = session.SessionId;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "[ChatView] OnParametersSetAsync: could not refresh harness session ID — non-fatal");
+                }
+            }
         }
 
         // Handle previewArtifact query param — deep-link from Workspace page
@@ -654,7 +671,6 @@ else
             try
             {
                 _speechSupported = await JS.InvokeAsync<bool>("fortressChat.isSpeechRecognitionSupported");
-                StateHasChanged();
             }
             catch { /* Speech API check can fail during prerender */ }
 
@@ -733,6 +749,9 @@ else
         _taskProgressSteps.Clear();
         _elapsedTimer?.Dispose();
         _elapsedTimer = null;
+        // ADO#3308 — Clear in-memory resumption brief when user sends their first message
+        messages.RemoveAll(m => m.IsResumptionBrief);
+        _briefContent.Clear();
 
         // Capture pending attachments before clearing
         var attachmentsSnapshot = _pendingAttachments.ToList();
@@ -1536,6 +1555,24 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
                 }
             }
             _isBriefStreaming = false;
+
+            // ADO#3308 — Add brief to messages list so it survives in-session navigation
+            if (_briefContent.Length > 0)
+            {
+                messages.RemoveAll(m => m.IsResumptionBrief);
+                messages.Add(new ChatMessage
+                {
+                    Id = Guid.NewGuid(),
+                    ConversationId = capturedConversationId ?? Guid.Empty,
+                    Role = "assistant",
+                    Content = _briefContent.ToString(),
+                    CreatedAt = DateTime.UtcNow,
+                    IsResumptionBrief = true
+                });
+            }
+
+            // ADO#3308 Bug 4 — trigger scroll after brief finishes
+            _needsScroll = true;
             StateHasChanged();
         }
     }

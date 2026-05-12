@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace FortressAI.Shared.Models;
 
 public class ChatMessage
@@ -10,6 +12,10 @@ public class ChatMessage
     public int? TokensIn { get; set; }
     public int? TokensOut { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Synthetic in-memory flag — not persisted to DB. True for resumption brief messages.</summary>
+    [NotMapped]
+    public bool IsResumptionBrief { get; set; } = false;
 
     // Navigation
     public Conversation? Conversation { get; set; }
