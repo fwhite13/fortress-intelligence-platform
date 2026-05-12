@@ -1378,8 +1378,13 @@ async function executeKbSearch(query, kbType, userId, kbAccess) {
             }
         }
     } else {
-        // kbAccess unavailable (internal API unreachable) — fail open, log warning
-        console.warn(`[harness] executeKbSearch: kbAccess unavailable for userId=${userId} kbType=${kbType} — proceeding without enforcement (fail-open)`);
+        // fail-open is ONLY safe for corp (no per-user filter needed)
+        // personal/team require verified entitlements — deny if unavailable
+        if (kbType === 'personal' || kbType === 'team') {
+            console.warn(`[harness] executeKbSearch: kbAccess unavailable — denying ${kbType} KB access for userId=${userId}`);
+            return { text: 'Knowledge base access verification unavailable. Please try again.', sources: [] };
+        }
+        // corp falls through to unfiltered retrieve (corp KB is org-wide, no per-user filter needed)
     }
 
     // For team KB: use authorizedTeamIds from kbAccess (not model input)
@@ -2268,6 +2273,15 @@ app.post('/turn', async (req, res) => {
             let toolIterations = 0;
             let continueLoop = true;
 
+            // ADO#3309 — Fetch KB access once per turn (before tool call loop)
+            let kbAccessForTurn = null;
+            if (userId) {
+                kbAccessForTurn = await fetchKbAccess(userId);
+                if (!kbAccessForTurn) {
+                    console.warn(`[harness] /turn: fetchKbAccess returned null for userId=${userId} — personal/team KB will be denied`);
+                }
+            }
+
             while (continueLoop && toolIterations < MAX_TOOL_ITERATIONS) {
                 toolIterations++;
                 let assistantTextAccumulator = '';
@@ -2277,7 +2291,6 @@ app.post('/turn', async (req, res) => {
                 let stopReason = 'end_turn';
                 // pendingToolResults replaces the scalar — handles multiple toolUse blocks per turn
                 const pendingToolResults = [];
-                let kbAccessForTurn = null; // ADO#3309 — cached per-turn KB access entitlements for Path B enforcement
 
                 const cmd = new ConverseStreamCommand({
                     modelId: MODEL_ID,
@@ -2503,10 +2516,7 @@ app.post('/turn', async (req, res) => {
                             // default: search_knowledge_base
                             emitToolCall(res, 'builtin', 'search_knowledge_base', 'calling', getBuiltinSummary('search_knowledge_base', toolInput));
                             try {
-                                // ADO#3309 — Fetch authoritative KB access (fetch once per turn, reuse on retry)
-                                if (!kbAccessForTurn) {
-                                    kbAccessForTurn = await fetchKbAccess(userId);
-                                }
+                                // ADO#3309 — kbAccessForTurn fetched once before the loop, reused across iterations
                                 const kbSearchResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal', userId, kbAccessForTurn);
                                 toolResultText = `\n\n[KB Search Results]\n${kbSearchResult.text}\n\n`;
                                 // ADO#3309 — Emit kb_sources SSE event (matching Path A behavior)
