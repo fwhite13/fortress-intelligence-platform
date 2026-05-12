@@ -125,7 +125,7 @@ else
                 {
                     <MessageBubble Message="msg" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
                 }
-                @if (messages.Any(m => m.Role == "assistant") && _lastKbResult != null)
+                @if ((messages.Any(m => m.Role == "assistant") || isStreaming) && _lastKbResult != null)
                 {
                     <KbIndicator Result="_lastKbResult" />
                 }
@@ -913,7 +913,9 @@ else
                     PersonalKbEnabled: hasPersonalKb,
                     TeamKbEnabled: hasTeamKb || hasProjectKb,
                     PersonalKbUserId: hasPersonalKb ? Session.UserId.ToString() : null,
-                    TeamIds: hasTeamKb && _selectedTeamIds?.Any() == true ? _selectedTeamIds.ToList() : null
+                    TeamIds: hasTeamKb && _selectedTeamIds?.Any() == true
+                        ? _selectedTeamIds.Intersect(_userTeams.Select(t => t.Id)).ToList()
+                        : null
                 ) : null
             );
 
