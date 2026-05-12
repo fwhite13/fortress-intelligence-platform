@@ -1360,7 +1360,35 @@ app.post('/tools/:toolName', async (req, res) => {
     }
 });
 
-async function executeKbSearch(query, kbType, userId, kbAccess) {
+async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
+    // ADO#3316 — Preference gate: check KbFlags BEFORE entitlement check
+    if (kbFlags !== null && kbFlags !== undefined) {
+        if (kbType === 'corp') {
+            const corpEnabled = kbFlags.CorpKbEnabled ?? kbFlags.corpKbEnabled ?? null;
+            if (corpEnabled === false) {
+                console.warn(`[harness] executeKbSearch: corp KB disabled in user preferences for userId=${userId}`);
+                return { text: 'Knowledge base access not authorized.', sources: [] };
+            }
+        }
+        if (kbType === 'personal') {
+            const personalEnabled = kbFlags.PersonalKbEnabled ?? kbFlags.personalKbEnabled ?? null;
+            if (personalEnabled === false) {
+                console.warn(`[harness] executeKbSearch: personal KB disabled in user preferences for userId=${userId}`);
+                return { text: 'Knowledge base access not authorized.', sources: [] };
+            }
+        }
+        if (kbType === 'team') {
+            const teamEnabled = kbFlags.TeamKbEnabled ?? kbFlags.teamKbEnabled ?? null;
+            if (teamEnabled === false) {
+                console.warn(`[harness] executeKbSearch: team KB disabled in user preferences for userId=${userId}`);
+                return { text: 'Knowledge base access not authorized.', sources: [] };
+            }
+        }
+    } else {
+        // kbFlags is null/undefined — fail-open, proceed to entitlement check only (no regression for callers that don't send KbFlags)
+        console.debug(`[harness] executeKbSearch: kbFlags not provided for userId=${userId}, skipping preference gate`);
+    }
+
     // ADO#3309 — Access enforcement: verify user is entitled to the requested kbType
     if (kbAccess) {
         if (kbType === 'corp' && !kbAccess.corpEnabled) {
@@ -2517,7 +2545,7 @@ app.post('/turn', async (req, res) => {
                             emitToolCall(res, 'builtin', 'search_knowledge_base', 'calling', getBuiltinSummary('search_knowledge_base', toolInput));
                             try {
                                 // ADO#3309 — kbAccessForTurn fetched once before the loop, reused across iterations
-                                const kbSearchResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal', userId, kbAccessForTurn);
+                                const kbSearchResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal', userId, kbAccessForTurn, kbFlags);
                                 toolResultText = `\n\n[KB Search Results]\n${kbSearchResult.text}\n\n`;
                                 // ADO#3309 — Emit kb_sources SSE event (matching Path A behavior)
                                 if (kbSearchResult.sources && kbSearchResult.sources.length > 0) {
