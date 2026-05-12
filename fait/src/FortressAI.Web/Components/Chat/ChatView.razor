@@ -941,6 +941,7 @@ else
                 ) : null
             );
 
+            _lastKbResult = null; // ADO#3315 — belt-and-suspenders clear at SSE stream open
             await foreach (var evt in AgentRuntime.SendTurnAsync(Session.UserId.ToString(), turnRequest, streamingCts!.Token))
             {
                 if (streamingCts.IsCancellationRequested) break;
