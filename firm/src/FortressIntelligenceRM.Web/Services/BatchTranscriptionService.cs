@@ -68,7 +68,7 @@ public class BatchTranscriptionService : IBatchTranscriptionService
         };
 
         if (wikiJson != null)
-            envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "WIKI_JSON", Value = wikiJson });
+            envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "ORG_WIKI_JSON", Value = wikiJson });
 
         var request = new SubmitJobRequest
         {
