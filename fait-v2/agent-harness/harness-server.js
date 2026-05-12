@@ -163,6 +163,8 @@ async function retrieveFromKbFiltered(kbId, query, filterKey, filterValue, maxRe
     // Apply metadata filter when provided (ownerId for personal, teamId for team)
     if (filterKey && filterValue !== undefined && filterValue !== null) {
         retrievalConfig.vectorSearchConfiguration.filter = {
+            // ADO#3283: teamId is indexed as string (see KbDocumentService.cs teamId!.Value.ToString())
+            // ownerId is also indexed as string (userId.ToString()). .toString() coercion is correct.
             equals: {
                 key: filterKey,
                 value: filterValue.toString()
@@ -907,7 +909,9 @@ app.post('/tools/write_memory', async (req, res) => {
         });
         if (!resp.ok) {
             const text = await resp.text();
-            throw new Error(`memory/write failed (${resp.status}): ${text}`);
+            const isHtml = text.trim().startsWith('<') || text.includes('<!DOCTYPE');
+            const safeText = isHtml ? `[non-JSON response, HTTP ${resp.status}]` : text.substring(0, 200);
+            throw new Error(`memory/write failed (${resp.status}): ${safeText}`);
         }
         res.json({ success: true });
     } catch (err) {
