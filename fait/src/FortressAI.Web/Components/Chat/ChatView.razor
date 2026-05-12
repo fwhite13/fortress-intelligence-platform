@@ -833,7 +833,7 @@ else
             bool hasTeamKb = _selectedTeamIds?.Any() == true;
             bool hasProjectKb = conversation?.ProjectId.HasValue == true;
             bool anyKbActive = hasCorpKb || hasPersonalKb || hasTeamKb || hasProjectKb;
-            Console.WriteLine($"[KB] Flags — Corp:{hasCorpKb} Personal:{hasPersonalKb} Team:{hasTeamKb} Project:{hasProjectKb}");
+            Console.WriteLine($"[KB] Flags — Corp:{hasCorpKb} Personal:{hasPersonalKb} Team:{hasTeamKb} Project:{hasProjectKb} UserId:{Session.UserId}");
 
             var effectiveSystemPrompt = systemPrompt;  // no longer pre-populated with KB context
 
@@ -912,8 +912,10 @@ else
                 KbFlags: anyKbActive ? new KbFlags(
                     CorpKbEnabled: hasCorpKb,
                     PersonalKbEnabled: hasPersonalKb,
-                    TeamKbEnabled: hasTeamKb || hasProjectKb,
-                    PersonalKbUserId: hasPersonalKb ? Session.UserId.ToString() : null,
+                    TeamKbEnabled: hasTeamKb,
+                    PersonalKbUserId: hasPersonalKb && Session.UserId != Guid.Empty
+                        ? Session.UserId.ToString()
+                        : null,
                     TeamIds: hasTeamKb && _selectedTeamIds?.Any() == true
                         ? _selectedTeamIds.Intersect(_userTeams.Select(t => t.Id)).ToList()
                         : null
