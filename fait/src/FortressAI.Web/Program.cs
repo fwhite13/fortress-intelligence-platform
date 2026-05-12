@@ -553,16 +553,34 @@ app.MapGet("/api/tokens/{userId}", async (HttpContext context, string userId, ID
 // Internal endpoint for harness — get both ms365 access token and ADO PAT for a user
 app.MapGet("/api/internal/user-tokens/{userId}", async (HttpContext context, string userId,
     DevOpsConnectionService devopsConn, MicrosoftTokenService msTokenSvc,
-    IConfiguration config, IDbContextFactory<AppDbContext> dbFactory) =>
+    IConfiguration config, IDbContextFactory<AppDbContext> dbFactory, ILogger<Program> logger) =>
 {
     // Validate X-Internal-Token
     var expectedToken = config["INTERNAL_API_TOKEN"];
-    if (string.IsNullOrEmpty(expectedToken)) return Results.StatusCode(503);
-    if (!context.Request.Headers.TryGetValue("X-Internal-Token", out var header) || header.ToString() != expectedToken)
+    if (string.IsNullOrEmpty(expectedToken))
+    {
+        logger.LogWarning("InternalToken validation: FAIL userId={UserId} — INTERNAL_API_TOKEN not configured (503)", userId);
+        return Results.StatusCode(503);
+    }
+
+    var incomingToken = context.Request.Headers.TryGetValue("X-Internal-Token", out var header) ? header.ToString() : string.Empty;
+    var maskedIncoming = incomingToken.Length >= 8 ? incomingToken[..8] + "..." : (incomingToken.Length > 0 ? "***" : "(empty)");
+
+    if (incomingToken != expectedToken)
+    {
+        logger.LogWarning("InternalToken validation: FAIL userId={UserId} — token mismatch, incoming={MaskedToken}", userId, maskedIncoming);
         return Results.Unauthorized();
+    }
+
+    logger.LogInformation("InternalToken validation: PASS userId={UserId} token={MaskedToken}", userId, maskedIncoming);
 
     if (!Guid.TryParse(userId, out var userGuid))
+    {
+        logger.LogWarning("InternalToken user-tokens: invalid userId format userId={UserId}", userId);
         return Results.BadRequest(new { error = "Invalid userId" });
+    }
+
+    logger.LogInformation("InternalToken user-tokens: looking up tokens for userId={UserId}", userId);
 
     // Get MS365 access token
     string? ms365AccessToken = null;
