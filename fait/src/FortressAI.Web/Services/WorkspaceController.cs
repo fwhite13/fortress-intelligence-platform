@@ -18,6 +18,7 @@ public class WorkspaceController : ControllerBase
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<WorkspaceController> _logger;
+    private readonly ForgeService _forgeService;
 
     public WorkspaceController(
         IWorkspaceFileService workspaceFileService,
@@ -25,7 +26,8 @@ public class WorkspaceController : ControllerBase
         IWorkspaceUploadService uploadService,
         IDbContextFactory<AppDbContext> dbFactory,
         IConfiguration config,
-        ILogger<WorkspaceController> logger)
+        ILogger<WorkspaceController> logger,
+        ForgeService forgeService)
     {
         _workspaceFileService = workspaceFileService;
         _documentGeneratorService = documentGeneratorService;
@@ -33,6 +35,7 @@ public class WorkspaceController : ControllerBase
         _dbFactory = dbFactory;
         _config = config;
         _logger = logger;
+        _forgeService = forgeService;
     }
 
     private bool IsInternalAuthorized()
@@ -158,6 +161,42 @@ public class WorkspaceController : ControllerBase
             .ToList();
 
         return Ok(new { items });
+    }
+
+    /// <summary>
+    /// Called by harness to get authoritative KB access entitlements for a user.
+    /// ADO#3309 — prevents Path B KB access bypass via model tool input.
+    /// </summary>
+    [HttpGet("internal/kb-access")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetKbAccess([FromQuery] string userId)
+    {
+        if (!IsInternalAuthorized())
+            return Unauthorized(new { error = "Unauthorized" });
+
+        if (!Guid.TryParse(userId, out var userGuid))
+            return BadRequest(new { error = "Invalid userId" });
+
+        try
+        {
+            var corpKbId = _config["KnowledgeBase:CorpKbId"] ?? "";
+            var corpEnabled = !string.IsNullOrEmpty(corpKbId);
+
+            var teams = await _forgeService.GetUserTeamsAsync(userGuid);
+            var authorizedTeamIds = teams.Select(t => t.Id).ToList();
+
+            return Ok(new
+            {
+                corpEnabled,
+                personalUserId = userId,
+                authorizedTeamIds
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[WorkspaceController] GetKbAccess failed for userId={UserId}", userId);
+            return StatusCode(500, new { error = "Internal error" });
+        }
     }
 
     // ─── File CRUD ────────────────────────────────────────────────────────────
