@@ -1547,9 +1547,12 @@ app.post('/turn', async (req, res) => {
     }
 
     // ADO#3240 — Pre-fetch user tokens from Blazor (decrypted MS365 + ADO) for this turn
-    const userTokens = await getUserTokens(userId);
+    // ADO#3299 — getUserTokens must be called unconditionally on every /turn
+    const normalizedUserId = (userId || '').trim().toLowerCase();
+    const userTokens = await getUserTokens(normalizedUserId);
+    console.log(`[harness] /turn: getUserTokens success for userId=${normalizedUserId}, ms365=${!!userTokens?.ms365}, ado=${!!userTokens?.ado}`);
 
-    console.log(`[harness] /turn: validation passed for userId=${userId}, starting SSE response`);
+    console.log(`[harness] /turn: validation passed for userId=${normalizedUserId}, starting SSE response`);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');

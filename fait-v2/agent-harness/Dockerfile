@@ -44,6 +44,12 @@ RUN npm install --production
 RUN npm install -g stitch-mcp
 COPY harness-server.js ./
 
+# Create non-root user for Claude Code CLI compatibility (refuses to run as root)
+RUN groupadd -r harness && useradd -r -g harness -m -d /home/harness harness
+# Ensure npm global binaries (claude, stitch-mcp) are accessible to the new user
+ENV PATH="/usr/local/bin:/usr/local/lib/node_modules/.bin:${PATH}"
+RUN chown -R harness:harness /app
+
 # Create workspace mount point (EFS will mount here)
 RUN mkdir -p /workspace
 
@@ -54,4 +60,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
+USER harness
 CMD ["node", "harness-server.js"]
