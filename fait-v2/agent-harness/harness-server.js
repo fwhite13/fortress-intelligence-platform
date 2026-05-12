@@ -33,13 +33,19 @@ async function getUserTokens(userId) {
         const base = FAIT_BASE_URL;
         const secret = INTERNAL_API_TOKEN;
         if (!secret) console.warn('[harness] INTERNAL_API_TOKEN not set — /api/internal/user-tokens will return 401');
+        // ADO#3286 — normalize userId to lowercase guid format for consistent Blazor endpoint lookup
+        const normalizedUserId = (userId || '').trim().toLowerCase();
+        if (!normalizedUserId) {
+            console.warn('[harness] getUserTokens: empty userId — skipping token lookup');
+            return { ms365: null, ado: null };
+        }
         const headers = { 'Content-Type': 'application/json' };
         if (secret) headers['X-Internal-Token'] = secret;
-        const res = await fetch(`${base}/api/internal/user-tokens/${encodeURIComponent(userId)}`, {
+        const res = await fetch(`${base}/api/internal/user-tokens/${encodeURIComponent(normalizedUserId)}`, {
             headers
         });
         if (!res.ok) {
-            console.warn(`[harness] getUserTokens: Blazor returned ${res.status} for userId=${userId}`);
+            console.warn(`[harness] getUserTokens: Blazor returned ${res.status} for userId=${normalizedUserId}`);
             return { ms365: null, ado: null };
         }
         const data = await res.json();
@@ -1230,9 +1236,9 @@ app.post('/tools/web_search', async (req, res) => {
     const { query, count = 5 } = req.body || {};
     if (!query) return res.status(400).json({ error: 'query required' });
 
-    // Use localhost to bypass Cloudflare (Brave endpoint is co-located in the Blazor container)
-    const blazorPort = process.env.BLAZOR_INTERNAL_PORT || '8080';
-    const braveLocalUrl = `http://localhost:${blazorPort}/internal/mcp/brave`;
+    // ADO#3286 — use FAIT_BASE_URL (internal service discovery) instead of localhost
+    // Harness and Blazor are separate Fargate tasks — localhost does not route to Blazor
+    const braveLocalUrl = `${FAIT_BASE_URL}/internal/mcp/brave`;
     const internalToken = INTERNAL_API_TOKEN;
 
     try {
