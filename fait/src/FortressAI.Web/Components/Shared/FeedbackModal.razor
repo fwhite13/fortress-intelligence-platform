@@ -2,12 +2,16 @@
 @using FortressAI.Web.Data
 @using FortressAI.Web.Data.Models
 @using FortressAI.Web.Services
+@using Amazon.S3
+@using Amazon.S3.Model
+@using Microsoft.AspNetCore.Components.Forms
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject FeedbackDispatcher FeedbackDispatcher
 @inject UserSessionService Session
 @inject ILogger<FeedbackModal> _logger
+@inject IAmazonS3 _s3
 
 <MudDialog @bind-Visible="_isOpen" Options="_dialogOptions">
     <TitleContent>
@@ -27,6 +31,29 @@
                       Required="true"
                       Class="feedback-modal__description mt-3"
                       Placeholder="What happened? What did you expect?" />
+
+        <div class="feedback-modal__screenshot mt-3">
+            <InputFile id="feedback-screenshot-input"
+                       OnChange="HandleScreenshotSelected"
+                       accept="image/*"
+                       style="display:none" />
+            @if (_screenshotFile == null)
+            {
+                <label for="feedback-screenshot-input" class="feedback-modal__screenshot-btn-label">
+                    📷 Attach Screenshot
+                </label>
+            }
+            else
+            {
+                <div class="feedback-modal__screenshot-preview">
+                    <img src="@_previewDataUrl" class="feedback-modal__screenshot-img" alt="Screenshot preview" />
+                    <div class="feedback-modal__screenshot-meta">
+                        <span class="feedback-modal__screenshot-name">@_screenshotFile.Name</span>
+                        <MudLink Class="feedback-modal__screenshot-remove" OnClick="ClearScreenshot">✕ remove</MudLink>
+                    </div>
+                </div>
+            }
+        </div>
 
         <MudText Typo="Typo.caption" Class="feedback-modal__page-url mt-2" Color="Color.Secondary">
             Current page: @_pageUrl
@@ -50,6 +77,10 @@
     private string _type = "bug";
     private string _description = string.Empty;
     private string _pageUrl = string.Empty;
+    private IBrowserFile? _screenshotFile;
+    private string? _previewDataUrl;
+    private const long MaxScreenshotBytes = 5 * 1024 * 1024; // 5MB
+    private const string BucketName = "fortress-tools";
 
     private readonly DialogOptions _dialogOptions = new()
     {
@@ -64,6 +95,8 @@
         _description = string.Empty;
         _type = "bug";
         _isSubmitting = false;
+        _screenshotFile = null;
+        _previewDataUrl = null;
         _isOpen = true;
         StateHasChanged();
     }
@@ -95,6 +128,13 @@
                 Status = "pending",
                 CreatedAt = DateTime.UtcNow
             };
+
+            // Upload screenshot if one was attached
+            if (_screenshotFile != null)
+            {
+                submission.ScreenshotS3Key = await UploadScreenshotAsync(_screenshotFile, submission.Id);
+            }
+
             db.FeedbackSubmissions.Add(submission);
             await db.SaveChangesAsync();
             _ = FeedbackDispatcher.DispatchToJarvisAsync(submission);
@@ -112,4 +152,136 @@
             StateHasChanged();
         }
     }
+
+    private async Task HandleScreenshotSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file == null) return;
+
+        if (file.Size > MaxScreenshotBytes)
+        {
+            Snackbar.Add("Screenshot must be under 5MB.", Severity.Warning);
+            return;
+        }
+
+        _screenshotFile = file;
+
+        // Generate preview data URL
+        try
+        {
+            using var stream = file.OpenReadStream(MaxScreenshotBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            _previewDataUrl = $"data:{file.ContentType};base64,{Convert.ToBase64String(bytes)}";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to generate screenshot preview");
+            _previewDataUrl = null;
+        }
+
+        StateHasChanged();
+    }
+
+    private void ClearScreenshot()
+    {
+        _screenshotFile = null;
+        _previewDataUrl = null;
+        StateHasChanged();
+    }
+
+    private async Task<string?> UploadScreenshotAsync(IBrowserFile file, string submissionId)
+    {
+        try
+        {
+            var ext = Path.GetExtension(file.Name);
+            if (string.IsNullOrEmpty(ext))
+            {
+                // Derive extension from content type
+                ext = file.ContentType switch
+                {
+                    "image/jpeg" => ".jpg",
+                    "image/png" => ".png",
+                    "image/gif" => ".gif",
+                    "image/webp" => ".webp",
+                    _ => ".png"
+                };
+            }
+            var key = $"feedback-screenshots/{Session.UserId}/{submissionId}{ext}";
+
+            using var stream = file.OpenReadStream(MaxScreenshotBytes);
+            var putReq = new PutObjectRequest
+            {
+                BucketName = BucketName,
+                Key = key,
+                InputStream = stream,
+                ContentType = file.ContentType
+            };
+            await _s3.PutObjectAsync(putReq);
+            _logger.LogInformation("Uploaded feedback screenshot to s3://{Bucket}/{Key}", BucketName, key);
+            return key;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to upload feedback screenshot — submission will proceed without screenshot");
+            return null;
+        }
+    }
 }
+
+<style>
+    .feedback-modal__screenshot-btn-label {
+        display: inline-flex;
+        align-items: center;
+        padding: var(--spacing-xs, 4px) var(--spacing-md, 12px);
+        border: 1px solid var(--color-border, #ccc);
+        border-radius: var(--border-radius-sm, 4px);
+        font-size: var(--font-size-sm, 0.875rem);
+        cursor: pointer;
+        color: var(--color-text-secondary, inherit);
+        transition: background-color 0.2s;
+    }
+
+    .feedback-modal__screenshot-btn-label:hover {
+        background-color: var(--color-surface-hover, rgba(0,0,0,0.04));
+    }
+
+    .feedback-modal__screenshot-preview {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--spacing-sm, 8px);
+        padding: var(--spacing-sm, 8px);
+        border: 1px solid var(--color-border, #e0e0e0);
+        border-radius: var(--border-radius-sm, 4px);
+        background-color: var(--color-surface, #fafafa);
+    }
+
+    .feedback-modal__screenshot-img {
+        max-width: 80px;
+        max-height: 60px;
+        object-fit: cover;
+        border-radius: var(--border-radius-xs, 2px);
+        border: 1px solid var(--color-border, #e0e0e0);
+    }
+
+    .feedback-modal__screenshot-meta {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs, 4px);
+        justify-content: center;
+    }
+
+    .feedback-modal__screenshot-name {
+        font-size: var(--font-size-sm, 0.75rem);
+        color: var(--color-text-secondary, #666);
+        word-break: break-all;
+        max-width: 200px;
+    }
+
+    .feedback-modal__screenshot-remove {
+        font-size: var(--font-size-sm, 0.75rem);
+        cursor: pointer;
+        color: var(--color-error, #d32f2f);
+    }
+</style>
