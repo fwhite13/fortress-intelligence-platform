@@ -129,6 +129,37 @@ public class WorkspaceController : ControllerBase
         return Ok(new { success = true });
     }
 
+    // ─── Internal API for harness ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by harness to list workspace files/folders for a user.
+    /// ADO#3301 — replaces direct DB connection in harness list_files tool.
+    /// </summary>
+    [HttpPost("internal/list-files")]
+    [AllowAnonymous]
+    public async Task<IActionResult> InternalListFiles([FromBody] InternalListFilesRequest request)
+    {
+        if (!IsInternalAuthorized())
+            return Unauthorized(new { error = "Unauthorized" });
+
+        if (!Guid.TryParse(request.UserId, out var userId))
+            return BadRequest(new { error = "Invalid userId" });
+
+        Guid? folderId = null;
+        if (!string.IsNullOrEmpty(request.FolderId) && Guid.TryParse(request.FolderId, out var parsedFolderId))
+            folderId = parsedFolderId;
+
+        var folders = await _uploadService.GetFoldersAsync(userId, folderId);
+        var files = await _uploadService.GetFilesAsync(userId, folderId);
+
+        var items = folders
+            .Select(f => new { name = f.Name, type = "folder" })
+            .Concat<object>(files.Select(f => new { name = f.Filename, type = "file", size = f.SizeBytes, mimeType = f.MimeType }))
+            .ToList();
+
+        return Ok(new { items });
+    }
+
     // ─── File CRUD ────────────────────────────────────────────────────────────
 
     [HttpGet("files")]
@@ -220,3 +251,5 @@ public record GenerateDocumentRequest(
 public record GenerateDocumentSection(string Heading, string Content);
 
 public record CreateFolderRequest(string Name, Guid? ParentId);
+
+public record InternalListFilesRequest(string UserId, string? FolderId = null);

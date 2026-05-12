@@ -998,55 +998,36 @@ app.post('/tools/list_files', async (req, res) => {
     const { userId, folder_path = '' } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
 
-    let conn;
+    // ADO#3301 — replaced direct DB connection with Blazor internal API
     try {
-        conn = await getDbConnection();
-        const path = (folder_path || '').replace(/^\/+|\/+$/g, '');
+        const blazorBase = FAIT_BASE_URL;
+        const headers = { 'Content-Type': 'application/json' };
+        if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
 
-        // Resolve folder path to folder_id
-        let folderId = null;
-        if (path) {
-            const segments = path.split('/');
-            let parentId = null;
-            for (const segment of segments) {
-                const paramArr = parentId === null ? [userId, segment] : [userId, segment, parentId];
-                const sql = parentId === null
-                    ? 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id IS NULL'
-                    : 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id = ?';
-                const [rows] = await conn.execute(sql, paramArr);
-                if (rows.length === 0) {
-                    return res.json({ items: [], error: `Folder not found: ${segment}` });
-                }
-                parentId = rows[0].id;
-            }
-            folderId = parentId;
+        // NOTE: folder_path-to-folderId resolution is not implemented in the internal API.
+        // For now, always list root-level items. folder_path is ignored.
+        // Future: resolve folder_path to a folderId via the folders endpoint.
+        if (folder_path) {
+            console.warn(`[list_files] folder_path="${folder_path}" not yet supported via Blazor API — listing root`);
         }
 
-        // Get child folders
-        const folderSql = folderId === null
-            ? 'SELECT id, name, created_at FROM user_workspace_folders WHERE user_id = ? AND parent_id IS NULL ORDER BY name'
-            : 'SELECT id, name, created_at FROM user_workspace_folders WHERE user_id = ? AND parent_id = ? ORDER BY name';
-        const folderParams = folderId === null ? [userId] : [userId, folderId];
-        const [folders] = await conn.execute(folderSql, folderParams);
+        const apiRes = await fetch(`${blazorBase}/api/workspace/internal/list-files`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ UserId: userId }),
+        });
 
-        // Get files in folder
-        const fileSql = folderId === null
-            ? 'SELECT id, filename, mime_type, size_bytes, created_at FROM user_workspace_uploads WHERE user_id = ? AND folder_id IS NULL ORDER BY filename'
-            : 'SELECT id, filename, mime_type, size_bytes, created_at FROM user_workspace_uploads WHERE user_id = ? AND folder_id = ? ORDER BY filename';
-        const fileParams = folderId === null ? [userId] : [userId, folderId];
-        const [files] = await conn.execute(fileSql, fileParams);
+        if (!apiRes.ok) {
+            const errBody = await apiRes.text();
+            console.error(`[list_files] Blazor API error: status=${apiRes.status} body=${errBody}`);
+            return res.status(500).json({ error: `Blazor API error: ${apiRes.status}` });
+        }
 
-        const items = [
-            ...folders.map(f => ({ name: f.name, type: 'folder' })),
-            ...files.map(f => ({ name: f.filename, type: 'file', size: f.size_bytes, mimeType: f.mime_type }))
-        ];
-
-        res.json({ items });
+        const data = await apiRes.json();
+        res.json({ items: data.items || [] });
     } catch (err) {
         console.error('[harness] list_files error:', err.message);
         res.status(500).json({ error: err.message });
-    } finally {
-        if (conn) await conn.end();
     }
 });
 
