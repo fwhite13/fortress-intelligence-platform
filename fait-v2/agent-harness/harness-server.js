@@ -44,11 +44,17 @@ async function getUserTokens(userId) {
         const res = await fetch(`${base}/api/internal/user-tokens/${encodeURIComponent(normalizedUserId)}`, {
             headers
         });
+        let responseBody;
+        try { responseBody = await res.text(); } catch { responseBody = '(unreadable)'; }
         if (!res.ok) {
-            console.warn(`[harness] getUserTokens: Blazor returned ${res.status} for userId=${normalizedUserId}`);
+            console.warn(`[getUserTokens] status=${res.status} userId=${normalizedUserId} body=${responseBody}`);
             return { ms365: null, ado: null };
         }
-        const data = await res.json();
+        let data;
+        try { data = JSON.parse(responseBody); } catch (parseErr) {
+            console.error(`[getUserTokens] JSON parse failed status=${res.status} userId=${normalizedUserId} body=${responseBody}`);
+            return { ms365: null, ado: null };
+        }
         return {
             ms365: data.ms365AccessToken ?? null,
             ado: data.adoPersonalAccessToken ?? null
@@ -1751,12 +1757,15 @@ app.post('/turn', async (req, res) => {
             // Never block — continue with whatever is already local
         }
 
-        const ccProcess = spawn('claude', [
+        // ADO#3289 — log the exact command being spawned
+        const ccArgs = [
             '--model', process.env.CC_MODEL || 'sonnet',
             '--print',
             '--output-format', 'stream-json',
             '--dangerously-skip-permissions'
-        ], {
+        ];
+        console.log(`[CC spawn] command=claude ${ccArgs.join(' ')} cwd=${userWorkspaceDir} userId=${userId} briefLen=${briefContent?.length ?? 0}`);
+        const ccProcess = spawn('claude', ccArgs, {
             cwd: userWorkspaceDir,
             env: {
                 ...process.env,
@@ -1780,6 +1789,7 @@ app.post('/turn', async (req, res) => {
         let ccTextEmitted = false;
         const toolUseMap = new Map(); // track tool_use id → name for tool_result correlation
         ccProcess.stdout.on('data', (chunk) => {
+            console.log(`[CC spawn] stdout chunk bytes=${chunk.length} userId=${userId}`);
             ccStdoutBuffer += chunk.toString();
             const lines = ccStdoutBuffer.split('\n');
             ccStdoutBuffer = lines.pop(); // keep incomplete last line
@@ -1820,10 +1830,22 @@ app.post('/turn', async (req, res) => {
                 // system, init, and other types: skip silently
             }
         });
-        ccProcess.stderr.on('data', (chunk) => sendEvent({ type: 'log', content: scrubSecrets(chunk.toString()) }));
+        ccProcess.stderr.on('data', (chunk) => {
+            const stderrText = chunk.toString();
+            console.log(`[CC spawn] stderr bytes=${chunk.length} userId=${userId} text=${stderrText.trim().slice(0, 500)}`);
+            sendEvent({ type: 'log', content: scrubSecrets(stderrText) });
+        });
         ccProcess.on('close', async (code) => {
             clearTimeout(timeout);
             toolUseMap.clear();
+            // ADO#3289 — log exit code and silent-exit warning
+            console.log(`[CC spawn] process exited code=${code} userId=${userId} ccTextEmitted=${ccTextEmitted}`);
+            if (code === 0 && !ccTextEmitted) {
+                console.warn(`[CC spawn] Process exited 0 but produced no output — possible silent failure userId=${userId}`);
+            }
+            if (code !== 0) {
+                console.warn(`[CC spawn] Process exited with non-zero code=${code} userId=${userId}`);
+            }
             // §G7 — clean up scheduled task context
             if (userId) scheduledTaskUsers.delete(userId);
             let artifact = null;
@@ -2528,6 +2550,14 @@ app.get('/session', (req, res) => {
 (async () => {
     if (!INTERNAL_API_TOKEN) {
         console.warn('[harness] WARNING: INTERNAL_API_TOKEN not set — preference writes will fail with 401');
+    }
+    // ADO#3289 — startup check: verify claude CLI is available
+    try {
+        const { execSync } = require('child_process');
+        const claudeVersion = execSync('claude --version', { timeout: 10000, encoding: 'utf8' }).trim();
+        console.log(`[harness] startup: claude CLI found — ${claudeVersion}`);
+    } catch (claudeErr) {
+        console.error(`[harness] startup: claude CLI NOT found or failed — task mode will fail. Error: ${claudeErr.message}`);
     }
     await bootstrapGcpCredentials();
     app.listen(PORT, '0.0.0.0', () => {
