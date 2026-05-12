@@ -50,8 +50,8 @@ RUN groupadd -r harness && useradd -r -g harness -m -d /home/harness harness
 ENV PATH="/usr/local/bin:/usr/local/lib/node_modules/.bin:${PATH}"
 RUN chown -R harness:harness /app
 
-# Create workspace mount point (EFS will mount here)
-RUN mkdir -p /workspace
+# Create workspace mount point and ensure harness user can write to it
+RUN mkdir -p /workspace && chown harness:harness /workspace
 
 # Expose HTTP shim port
 EXPOSE 3000
