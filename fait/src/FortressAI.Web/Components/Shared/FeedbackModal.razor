@@ -79,6 +79,7 @@
     private string _pageUrl = string.Empty;
     private IBrowserFile? _screenshotFile;
     private string? _previewDataUrl;
+    private byte[]? _screenshotBytes;
     private const long MaxScreenshotBytes = 5 * 1024 * 1024; // 5MB
     private const string BucketName = "fortress-tools";
 
@@ -139,6 +140,7 @@
             await db.SaveChangesAsync();
             _ = FeedbackDispatcher.DispatchToJarvisAsync(submission);
             _isOpen = false;
+            _screenshotBytes = null;
             Snackbar.Add("Feedback submitted! Jarvis is reviewing it now.", Severity.Success);
         }
         catch (Exception ex)
@@ -166,14 +168,14 @@
 
         _screenshotFile = file;
 
-        // Generate preview data URL
+        // Generate preview data URL and cache bytes to avoid re-reading stream on upload
         try
         {
             using var stream = file.OpenReadStream(MaxScreenshotBytes);
             using var ms = new MemoryStream();
             await stream.CopyToAsync(ms);
-            var bytes = ms.ToArray();
-            _previewDataUrl = $"data:{file.ContentType};base64,{Convert.ToBase64String(bytes)}";
+            _screenshotBytes = ms.ToArray();
+            _previewDataUrl = $"data:{file.ContentType};base64,{Convert.ToBase64String(_screenshotBytes)}";
         }
         catch (Exception ex)
         {
@@ -188,6 +190,7 @@
     {
         _screenshotFile = null;
         _previewDataUrl = null;
+        _screenshotBytes = null;
         StateHasChanged();
     }
 
@@ -195,22 +198,24 @@
     {
         try
         {
-            var ext = Path.GetExtension(file.Name);
-            if (string.IsNullOrEmpty(ext))
+            var ext = Path.GetExtension(file.Name).ToLowerInvariant();
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
+            if (!allowedExtensions.Contains(ext))
             {
-                // Derive extension from content type
                 ext = file.ContentType switch
                 {
                     "image/jpeg" => ".jpg",
-                    "image/png" => ".png",
-                    "image/gif" => ".gif",
+                    "image/png"  => ".png",
+                    "image/gif"  => ".gif",
                     "image/webp" => ".webp",
-                    _ => ".png"
+                    _            => ".png"
                 };
             }
             var key = $"feedback-screenshots/{Session.UserId}/{submissionId}{ext}";
 
-            using var stream = file.OpenReadStream(MaxScreenshotBytes);
+            using var stream = _screenshotBytes != null
+                ? new MemoryStream(_screenshotBytes)
+                : file.OpenReadStream(MaxScreenshotBytes);
             var putReq = new PutObjectRequest
             {
                 BucketName = BucketName,
@@ -221,6 +226,10 @@
             await _s3.PutObjectAsync(putReq);
             _logger.LogInformation("Uploaded feedback screenshot to s3://{Bucket}/{Key}", BucketName, key);
             return key;
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // let cancellation propagate
         }
         catch (Exception ex)
         {
@@ -240,7 +249,7 @@
         font-size: var(--font-size-sm, 0.875rem);
         cursor: pointer;
         color: var(--color-text-secondary, inherit);
-        transition: background-color 0.2s;
+        transition: background-color var(--transition-duration-fast, 0.2s);
     }
 
     .feedback-modal__screenshot-btn-label:hover {
@@ -258,8 +267,8 @@
     }
 
     .feedback-modal__screenshot-img {
-        max-width: 80px;
-        max-height: 60px;
+        max-width: var(--feedback-modal-thumb-width, 80px);
+        max-height: var(--feedback-modal-thumb-height, 60px);
         object-fit: cover;
         border-radius: var(--border-radius-xs, 2px);
         border: 1px solid var(--color-border, #e0e0e0);
@@ -273,14 +282,14 @@
     }
 
     .feedback-modal__screenshot-name {
-        font-size: var(--font-size-sm, 0.75rem);
+        font-size: var(--font-size-xs, 0.75rem);
         color: var(--color-text-secondary, #666);
         word-break: break-all;
-        max-width: 200px;
+        max-width: var(--feedback-modal-preview-max-width, 200px);
     }
 
     .feedback-modal__screenshot-remove {
-        font-size: var(--font-size-sm, 0.75rem);
+        font-size: var(--font-size-xs, 0.75rem);
         cursor: pointer;
         color: var(--color-error, #d32f2f);
     }
