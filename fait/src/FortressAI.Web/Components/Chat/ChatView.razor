@@ -601,6 +601,7 @@ else
             // Reset resumption brief state for new conversation
             _briefContent = new System.Text.StringBuilder();
             _resumptionBriefSent = false;
+            _wasColdStart = _agentReady; // ADO#3285 — treat cross-chat navigation as cold start if agent is ready
             _isBriefStreaming = false;
             _activeToolCalls.Clear();  // ADO#3241
         }
