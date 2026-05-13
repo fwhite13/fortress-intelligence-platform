@@ -928,7 +928,8 @@ else
                 SystemPrompt: string.IsNullOrEmpty(effectiveSystemPrompt) ? null : effectiveSystemPrompt,
                 ConversationId: conversation.Id.ToString(),
                 EnabledMcpSlugs: enabledMcpSlugs.Count > 0 ? enabledMcpSlugs : null,
-                KbFlags: anyKbActive ? new KbFlags(
+                // ADO#3316-fix: always send KbFlags (never null) so harness preference gate fires even when all KBs are off
+                KbFlags: new KbFlags(
                     CorpKbEnabled: hasCorpKb,
                     PersonalKbEnabled: hasPersonalKb,
                     TeamKbEnabled: hasTeamKb,
@@ -938,7 +939,7 @@ else
                     TeamIds: hasTeamKb && _selectedTeamIds?.Any() == true
                         ? _selectedTeamIds.Intersect(_userTeams.Select(t => t.Id)).ToList()
                         : null
-                ) : null
+                )
             );
 
             _lastKbResult = null; // ADO#3315 — belt-and-suspenders clear at SSE stream open
