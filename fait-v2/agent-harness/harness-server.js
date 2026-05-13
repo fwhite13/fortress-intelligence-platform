@@ -2044,6 +2044,7 @@ app.post('/turn', async (req, res) => {
 
             // ADO#3241 — Harness-side KB retrieval
             const kbFlags = rawBody.KbFlags ?? rawBody.kbFlags ?? null;
+            console.log(`[harness] /turn: kbFlags extracted — value=${JSON.stringify(kbFlags)} userId=${rawBody.UserId ?? rawBody.userId}`);
             if (kbFlags) {
                 const kbEnabled = kbFlags.CorpKbEnabled || kbFlags.corpKbEnabled ||
                                   kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled ||
