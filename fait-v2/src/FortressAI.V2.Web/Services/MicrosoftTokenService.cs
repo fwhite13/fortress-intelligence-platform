@@ -10,7 +10,6 @@ public interface IMicrosoftTokenService
     bool IsConfigured { get; }
     string GetAuthorizationUrl(string redirectUri, string state);
     Task<string?> GetValidAccessTokenAsync(string entraOid);
-    Task<(string? Token, string TokenStatus)> GetTokenWithStatusAsync(string entraOid);
     Task<(bool Connected, string? Email, DateTime? ExpiresAt)> GetConnectionStatusAsync(string entraOid);
     Task DisconnectAsync(string entraOid);
 }
@@ -74,34 +73,21 @@ public class MicrosoftTokenService : IMicrosoftTokenService
 
     public async Task<string?> GetValidAccessTokenAsync(string entraOid)
     {
-        var (token, _) = await GetTokenWithStatusAsync(entraOid);
-        return token;
-    }
-
-    public async Task<(string? Token, string TokenStatus)> GetTokenWithStatusAsync(string entraOid)
-    {
         await using var db = await _fipPortalDbFactory.CreateDbContextAsync();
         var token = await db.UserMicrosoftTokens.FindAsync(entraOid);
         if (token == null)
         {
-            _logger.LogWarning("M365 token status: missing — no token record in database for {UserId}. User must re-authorize.", entraOid);
-            return (null, "missing");
+            _logger.LogWarning("No Microsoft token found for entraOid={EntraOid}", entraOid);
+            return null;
         }
 
         if (token.ExpiresAt > DateTime.UtcNow.AddMinutes(5))
-            return (token.AccessToken, "ok");
+            return token.AccessToken;
 
         if (!IsConfigured || string.IsNullOrEmpty(token.RefreshToken))
         {
-            if (!IsConfigured)
-            {
-                _logger.LogWarning("M365 token status: expired — Azure client not configured, cannot refresh for {UserId}", entraOid);
-            }
-            else
-            {
-                _logger.LogWarning("M365 token status: expired — no refresh token available for {UserId}. User must re-authorize at Settings → Integrations", entraOid);
-            }
-            return (null, "expired");
+            _logger.LogWarning("Cannot refresh token for {EntraOid} — missing config or refresh token", entraOid);
+            return null;
         }
 
         try
@@ -122,8 +108,8 @@ public class MicrosoftTokenService : IMicrosoftTokenService
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogError("M365 token status: fetch-failure — refresh HTTP {StatusCode} for {UserId}: {Body}", response.StatusCode, entraOid, body);
-                return (null, "fetch-failure");
+                _logger.LogError("Token refresh failed: {Status} {Body}", response.StatusCode, body);
+                return null;
             }
 
             var tokenResponse = JsonSerializer.Deserialize<JsonElement>(body);
@@ -135,12 +121,12 @@ public class MicrosoftTokenService : IMicrosoftTokenService
 
             await db.SaveChangesAsync();
             _logger.LogInformation("Token refreshed for entraOid={EntraOid}, new expiry: {Expiry}", entraOid, token.ExpiresAt);
-            return (token.AccessToken, "ok");
+            return token.AccessToken;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "M365 token status: fetch-failure — exception refreshing token for {UserId}", entraOid);
-            return (null, "fetch-failure");
+            _logger.LogError(ex, "Failed to refresh token for entraOid={EntraOid}", entraOid);
+            return null;
         }
     }
 

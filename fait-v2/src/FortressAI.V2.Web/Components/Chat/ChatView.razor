@@ -922,12 +922,7 @@
                 History: contextHistory,
                 PluginAgentId: _activePluginAgentId,   // §6.1
                 UserEmail: _userEmail,                  // §G1 — Entra UPN
-                KbWriteAllowed: activePlugin?.AllowKbWrite ?? true,  // §G3
-                KbFlags: new TurnKbFlags(               // ADO#3350 — always non-null
-                    PersonalKbEnabled: _personalKbEnabled,
-                    TeamKbEnabled: false,               // team KB UI not yet implemented
-                    CorpKbEnabled: _fortressKbEnabled
-                )
+                KbWriteAllowed: activePlugin?.AllowKbWrite ?? true  // §G3
             );
             _forceTaskMode = false; // reset after send
             _logger.LogInformation("RunStreamingTurnAsync: calling SendTurnAsync for userId={UserId}, requestMessageLen={Len}, historyCount={HistCount}",
@@ -942,17 +937,6 @@
                 {
                     assistantContent.Append(evt.Content);
                     _streamingContent = assistantContent.ToString();
-                    StateHasChanged();
-                }
-                else if (evt.Type == "reauth_required")
-                {
-                    var provider = evt.Provider ?? "ms365";
-                    var providerLabel = provider == "ado" ? "Azure DevOps" : "Microsoft 365";
-                    var reAuthMessage = evt.Message ?? $"Your {providerLabel} authorization has expired. Please re-authorize at Settings \u2192 Integrations to continue.";
-                    _messages.Add(new ChatMessage(
-                        Role: "assistant",
-                        Content: $"**{providerLabel} Re-authorization Required**\n\n{reAuthMessage}\n\n[Go to Settings \u2192 Integrations](/connectors)"
-                    ));
                     StateHasChanged();
                 }
                 else if (evt.Type == "done" || evt.Type == "error")

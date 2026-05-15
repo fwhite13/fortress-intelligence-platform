@@ -42,13 +42,6 @@ public enum RuntimeSessionStatus
     Unknown
 }
 
-/// <summary>ADO#3350 — KB toggle flags sent to harness on every turn. Never null — use all-false when user has no KB preferences.</summary>
-public record TurnKbFlags(
-    bool PersonalKbEnabled = false,
-    bool TeamKbEnabled = false,
-    bool CorpKbEnabled = false
-);
-
 public record TurnRequest(
     string UserId,
     string Message,
@@ -60,19 +53,16 @@ public record TurnRequest(
     string? PluginAgentId = null,        // §6.1 — active specialist agent
     string? UserEmail = null,            // §G1 — Entra UPN for CC identity context
     bool IsScheduledTask = false,        // §G7 — signals harness to use async-safe approval path
-    bool KbWriteAllowed = true,          // §G3 — KB write permission for plugin agents
-    TurnKbFlags? KbFlags = null          // ADO#3350 — KB toggle flags; never null in practice
+    bool KbWriteAllowed = true           // §G3 — KB write permission for plugin agents
 );
 
 public record ChatHistoryEntry(string Role, string Content);
 
 public record HarnessEvent(
-    string Type,         // "text" | "log" | "done" | "error" | "reauth_required"
+    string Type,         // "text" | "log" | "done" | "error"
     string? Content = null,
     int? ExitCode = null,
     string? ErrorMessage = null,
     int? InputTokens = null,    // for Bedrock done event
-    int? OutputTokens = null,   // for Bedrock done event
-    string? Provider = null,    // for reauth_required events: "ms365" | "ado"
-    string? Message = null      // for reauth_required events: user-facing message
+    int? OutputTokens = null    // for Bedrock done event
 );
