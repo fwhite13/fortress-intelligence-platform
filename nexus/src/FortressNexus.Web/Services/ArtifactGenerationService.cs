@@ -46,21 +46,31 @@ public class ArtifactGenerationService : IArtifactGenerationService
             return new List<AdoWorkItemDto>();
         }
 
-        var systemPrompt = _config["Nexus:Prompts:ArtifactGenSystem"]
-            ?? "Decompose the following software specification into Azure DevOps User Stories. Return ONLY a valid JSON array.";
-
         var resolvedModelId = _config["FortressAI:ModelId"] ?? "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
         var specContent = specDoc.EditedContent ?? specDoc.Content;
 
         try
         {
-            // Call 1 — Decomposition (64000 max tokens to avoid truncation on large specs)
-            var (call1Text, pt1, ct1) = await _bedrock.InvokeAsync(systemPrompt, specContent, 64000, resolvedModelId);
+            // Call 1A — Skeleton (enumerate ALL work item titles and structure only, no content)
+            var skeletonSystemPrompt = _config["Nexus:Prompts:ArtifactGenSkeletonSystem"]
+                ?? "You are a technical project manager. Generate a skeleton JSON array of all work items (type, parentTitle, title, specReference, wiTemplate, tags, priority only). No descriptions or AC.";
 
-            _logger.LogInformation("[WI_GEN] Call 1 (decomposition) completed for SpecDocument {SpecDocumentId}: {Pt1} + {Ct1} tokens",
-                specDocumentId, pt1, ct1);
+            var (call1AText, pt1A, ct1A) = await _bedrock.InvokeAsync(skeletonSystemPrompt, specContent, 32000, resolvedModelId);
 
-            var items = ParseWorkItems(call1Text, specDocumentId);
+            _logger.LogInformation("[WI_GEN] Call 1A (skeleton) completed for SpecDocument {SpecDocumentId}: {Pt1A} + {Ct1A} tokens, {Count} skeleton items",
+                specDocumentId, pt1A, ct1A, ParseWorkItems(call1AText, specDocumentId).Count);
+
+            // Call 1B — Detail enrichment (fill in descriptions, AC, developer briefs for every skeleton item)
+            var enrichSystemPrompt = _config["Nexus:Prompts:ArtifactGenEnrichSystem"]
+                ?? "You are a technical project manager. Enrich the provided skeleton JSON array with descriptions, acceptanceCriteria, developerBrief, and activity fields. Do not add or remove items. Do not change titles.";
+
+            var call1BUserMessage = $"SKELETON:\n{call1AText}\n\nORIGINAL SPEC:\n{specContent}";
+            var (call1BText, pt1B, ct1B) = await _bedrock.InvokeAsync(enrichSystemPrompt, call1BUserMessage, 64000, resolvedModelId);
+
+            _logger.LogInformation("[WI_GEN] Call 1B (enrichment) completed for SpecDocument {SpecDocumentId}: {Pt1B} + {Ct1B} tokens",
+                specDocumentId, pt1B, ct1B);
+
+            var items = ParseWorkItems(call1BText, specDocumentId);
 
             // Sanitize person names out of titles/descriptions before classifying
             SanitizePersonNames(items);
