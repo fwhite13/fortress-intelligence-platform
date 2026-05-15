@@ -60,17 +60,35 @@ public class ArtifactGenerationService : IArtifactGenerationService
             _logger.LogInformation("[WI_GEN] Call 1A (skeleton) completed for SpecDocument {SpecDocumentId}: {Pt1A} + {Ct1A} tokens, {Count} skeleton items",
                 specDocumentId, pt1A, ct1A, ParseWorkItems(call1AText, specDocumentId).Count);
 
-            // Call 1B — Detail enrichment (fill in descriptions, AC, developer briefs for every skeleton item)
+            // Call 1B — Detail enrichment in batches of 25 to stay within SigV4 5-min signature window
             var enrichSystemPrompt = _config["Nexus:Prompts:ArtifactGenEnrichSystem"]
                 ?? "You are a technical project manager. Enrich the provided skeleton JSON array with descriptions, acceptanceCriteria, developerBrief, and activity fields. Do not add or remove items. Do not change titles.";
 
-            var call1BUserMessage = $"SKELETON:\n{call1AText}\n\nORIGINAL SPEC:\n{specContent}";
-            var (call1BText, pt1B, ct1B) = await _bedrock.InvokeAsync(enrichSystemPrompt, call1BUserMessage, 64000, resolvedModelId);
+            const int EnrichBatchSize = 25;
+            var skeletonItems = ParseWorkItems(call1AText, specDocumentId);
+            var enrichedItems = new List<AdoWorkItemDto>();
+            var totalPt1B = 0;
+            var totalCt1B = 0;
+            var batchCount = (int)Math.Ceiling((double)skeletonItems.Count / EnrichBatchSize);
 
-            _logger.LogInformation("[WI_GEN] Call 1B (enrichment) completed for SpecDocument {SpecDocumentId}: {Pt1B} + {Ct1B} tokens",
-                specDocumentId, pt1B, ct1B);
+            for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
+            {
+                var batch = skeletonItems.Skip(batchIndex * EnrichBatchSize).Take(EnrichBatchSize).ToList();
+                var batchJson = JsonSerializer.Serialize(batch);
+                var call1BUserMessage = $"SKELETON BATCH {batchIndex + 1} of {batchCount}:\n{batchJson}\n\nORIGINAL SPEC:\n{specContent}";
+                var (call1BText, pt1B, ct1B) = await _bedrock.InvokeAsync(enrichSystemPrompt, call1BUserMessage, 32768, resolvedModelId);
+                totalPt1B += pt1B;
+                totalCt1B += ct1B;
+                var batchEnriched = ParseWorkItems(call1BText, specDocumentId);
+                enrichedItems.AddRange(batchEnriched);
+                _logger.LogInformation("[WI_GEN] Call 1B batch {Batch}/{Total} completed for SpecDocument {SpecDocumentId}: {Pt1B} + {Ct1B} tokens, {Count} items enriched",
+                    batchIndex + 1, batchCount, specDocumentId, pt1B, ct1B, batchEnriched.Count);
+            }
 
-            var items = ParseWorkItems(call1BText, specDocumentId);
+            _logger.LogInformation("[WI_GEN] Call 1B (enrichment) completed for SpecDocument {SpecDocumentId}: {Pt1B} + {Ct1B} total tokens, {Count} items across {Batches} batches",
+                specDocumentId, totalPt1B, totalCt1B, enrichedItems.Count, batchCount);
+
+            var items = enrichedItems;
 
             // Sanitize person names out of titles/descriptions before classifying
             SanitizePersonNames(items);
