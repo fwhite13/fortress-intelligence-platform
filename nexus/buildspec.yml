@@ -25,7 +25,6 @@ phases:
       - TASK_DEF=$(aws ecs describe-task-definition --task-definition nexus-web --region $AWS_DEFAULT_REGION --query 'taskDefinition' --output json)
       - NEW_TASK_DEF=$(echo "$TASK_DEF" | jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .enableFaultInjection, .deregisteredAt)' | jq '(.containerDefinitions[] | select(.name == "nexus-web") | .image) |= "'$AWS_ACCOUNT_ID'.dkr.ecr.'$AWS_DEFAULT_REGION'.amazonaws.com/nexus-web:'$IMAGE_TAG'"')
       - NEW_TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json "$NEW_TASK_DEF" --region $AWS_DEFAULT_REGION --query 'taskDefinition.taskDefinitionArn' --output text)
-      - echo "New task def registered: $NEW_TASK_DEF_ARN"
       - echo Updating ECS service with new task definition...
       - aws ecs update-service --cluster fortress-tools-cluster --service nexus-web --task-definition $NEW_TASK_DEF_ARN --region $AWS_DEFAULT_REGION
       - echo Waiting for service stability...
