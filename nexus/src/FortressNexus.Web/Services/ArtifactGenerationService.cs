@@ -53,9 +53,9 @@ public class ArtifactGenerationService : IArtifactGenerationService
         {
             // Call 1A — Skeleton (enumerate ALL work item titles and structure only, no content)
             var skeletonSystemPrompt = _config["Nexus:Prompts:ArtifactGenSkeletonSystem"]
-                ?? "You are a technical project manager. Generate a skeleton JSON array of all work items (type, parentTitle, title, specReference, wiTemplate, tags, priority only). No descriptions or AC.";
+                ?? "You are a technical project manager. Output a JSON array of work items. Each item has exactly three fields: type (Epic/Feature/User Story/Task), parentTitle (null for Epics, exact parent title otherwise), and title. No other fields. No descriptions. No AC. Cover every functional area in the spec.";
 
-            var (call1AText, pt1A, ct1A) = await _bedrock.InvokeAsync(skeletonSystemPrompt, specContent, 32000, resolvedModelId);
+            var (call1AText, pt1A, ct1A) = await _bedrock.InvokeAsync(skeletonSystemPrompt, specContent, 64000, resolvedModelId);
 
             _logger.LogInformation("[WI_GEN] Call 1A (skeleton) completed for SpecDocument {SpecDocumentId}: {Pt1A} + {Ct1A} tokens, {Count} skeleton items",
                 specDocumentId, pt1A, ct1A, ParseWorkItems(call1AText, specDocumentId).Count);
