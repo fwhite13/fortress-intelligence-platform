@@ -926,33 +926,42 @@ app.MapGet("/api/internal/user-tokens/{userId}", async (
 
     // MS365 access token (decrypted by MicrosoftTokenService, auto-refreshes if needed)
     string? ms365Token = null;
+    string ms365TokenStatus = "ok";
     try
     {
-        ms365Token = await microsoftTokenService.GetValidAccessTokenAsync(userId);
+        var (t, status) = await microsoftTokenService.GetTokenWithStatusAsync(userId);
+        ms365Token = t;
+        ms365TokenStatus = status;
     }
     catch (Exception ex)
     {
         logger.LogWarning(ex, "InternalUserTokens: failed to get MS365 token for userId={UserId}", userId);
+        ms365TokenStatus = "fetch-failure";
     }
 
     // ADO PAT (decrypted by DevOpsConnectionService)
     string? adoToken = null;
+    string adoTokenStatus = "ok";
     try
     {
         adoToken = await devOpsService.GetDecryptedPatAsync(userId);
+        adoTokenStatus = adoToken != null ? "ok" : "missing";
     }
     catch (Exception ex)
     {
         logger.LogWarning(ex, "InternalUserTokens: failed to get ADO token for userId={UserId}", userId);
+        adoTokenStatus = "fetch-failure";
     }
 
-    logger.LogDebug("InternalUserTokens: served tokens for userId={UserId} — ms365={HasMs365}, ado={HasAdo}",
-        userId, ms365Token != null, adoToken != null);
+    logger.LogDebug("InternalUserTokens: served tokens for userId={UserId} — ms365={HasMs365} ({Ms365Status}), ado={HasAdo} ({AdoStatus})",
+        userId, ms365Token != null, ms365TokenStatus, adoToken != null, adoTokenStatus);
 
     return Results.Ok(new
     {
         ms365AccessToken = ms365Token,
-        adoPersonalAccessToken = adoToken
+        ms365TokenStatus = ms365TokenStatus,
+        adoPersonalAccessToken = adoToken,
+        adoTokenStatus = adoTokenStatus
     });
 }).AllowAnonymous(); // guarded by X-Internal-Token header check above
 

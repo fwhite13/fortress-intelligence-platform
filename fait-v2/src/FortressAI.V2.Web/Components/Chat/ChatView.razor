@@ -944,6 +944,17 @@
                     _streamingContent = assistantContent.ToString();
                     StateHasChanged();
                 }
+                else if (evt.Type == "reauth_required")
+                {
+                    var provider = evt.Provider ?? "ms365";
+                    var providerLabel = provider == "ado" ? "Azure DevOps" : "Microsoft 365";
+                    var reAuthMessage = evt.Message ?? $"Your {providerLabel} authorization has expired. Please re-authorize at Settings \u2192 Integrations to continue.";
+                    _messages.Add(new ChatMessage(
+                        Role: "assistant",
+                        Content: $"**{providerLabel} Re-authorization Required**\n\n{reAuthMessage}\n\n[Go to Settings \u2192 Integrations](/connectors)"
+                    ));
+                    StateHasChanged();
+                }
                 else if (evt.Type == "done" || evt.Type == "error")
                 {
                     if (evt.Type == "error" && !string.IsNullOrEmpty(evt.ErrorMessage))

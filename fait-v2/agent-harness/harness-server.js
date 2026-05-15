@@ -37,7 +37,7 @@ async function getUserTokens(userId) {
         const normalizedUserId = (userId || '').trim().toLowerCase();
         if (!normalizedUserId) {
             console.warn('[harness] getUserTokens: empty userId — skipping token lookup');
-            return { ms365: null, ado: null };
+            return { ms365: null, ms365Status: 'unknown', ado: null, adoStatus: 'unknown' };
         }
         const headers = { 'Content-Type': 'application/json' };
         if (secret) headers['X-Internal-Token'] = secret;
@@ -48,20 +48,22 @@ async function getUserTokens(userId) {
         try { responseBody = await res.text(); } catch { responseBody = '(unreadable)'; }
         if (!res.ok) {
             console.warn(`[getUserTokens] status=${res.status} userId=${normalizedUserId} body=${responseBody}`);
-            return { ms365: null, ado: null };
+            return { ms365: null, ms365Status: 'unknown', ado: null, adoStatus: 'unknown' };
         }
         let data;
         try { data = JSON.parse(responseBody); } catch (parseErr) {
             console.error(`[getUserTokens] JSON parse failed status=${res.status} userId=${normalizedUserId} body=${responseBody}`);
-            return { ms365: null, ado: null };
+            return { ms365: null, ms365Status: 'unknown', ado: null, adoStatus: 'unknown' };
         }
         return {
             ms365: data.ms365AccessToken ?? null,
-            ado: data.adoPersonalAccessToken ?? null
+            ms365Status: data.ms365TokenStatus ?? 'ok',
+            ado: data.adoPersonalAccessToken ?? null,
+            adoStatus: data.adoTokenStatus ?? 'ok'
         };
     } catch (err) {
         console.error('[harness] getUserTokens error:', err.message);
-        return { ms365: null, ado: null };
+        return { ms365: null, ms365Status: 'unknown', ado: null, adoStatus: 'unknown' };
     }
 }
 
@@ -2495,6 +2497,17 @@ app.post('/turn', async (req, res) => {
                                 graph_send_email: 'Sending email...',
                                 graph_list_calendar_events: 'Checking your calendar...'
                             };
+                            // ADO#3351 — pre-dispatch token check: return re-auth error if MS365 token unavailable
+                            if (!userTokens.ms365) {
+                                const isExpired = userTokens.ms365Status === 'expired' || userTokens.ms365Status === 'fetch-failure';
+                                const statusMsg = isExpired
+                                    ? 'Your Microsoft 365 authorization has expired. Please re-authorize at Settings → Integrations to continue using M365 tools.'
+                                    : 'Microsoft 365 is not connected. Please connect your account at Settings → Integrations.';
+                                toolResultText = statusMsg;
+                                isError = true;
+                                emitToolCall(res, 'graph', toolUseAccumulator.name, 'error', 'M365 token unavailable');
+                                sendEvent({ type: 'reauth_required', provider: 'ms365', message: statusMsg });
+                            } else {
                             emitToolCall(res, 'graph', toolUseAccumulator.name, 'calling', graphSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
@@ -2510,6 +2523,7 @@ app.post('/turn', async (req, res) => {
                                 isError = true;
                                 emitToolCall(res, 'graph', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
                             }
+                            }
                         } else if (toolUseAccumulator.name.startsWith('ado_')) {
                             // ADO#3241 — tool_call SSE events
                             const adoSummaries = {
@@ -2519,6 +2533,17 @@ app.post('/turn', async (req, res) => {
                                 ado_update_work_item: `Updating work item ${toolInput.id ?? ''}...`,
                                 ado_wiql_query: 'Running ADO query...'
                             };
+                            // ADO#3351 — pre-dispatch token check: return re-auth error if ADO token unavailable
+                            if (!userTokens.ado) {
+                                const isExpired = userTokens.adoStatus === 'expired' || userTokens.adoStatus === 'fetch-failure';
+                                const statusMsg = isExpired
+                                    ? 'Your Azure DevOps authorization has expired. Please re-connect your PAT at Settings → Integrations.'
+                                    : 'Azure DevOps is not connected. Please connect your PAT at Settings → Integrations.';
+                                toolResultText = statusMsg;
+                                isError = true;
+                                emitToolCall(res, 'ado', toolUseAccumulator.name, 'error', 'ADO token unavailable');
+                                sendEvent({ type: 'reauth_required', provider: 'ado', message: statusMsg });
+                            } else {
                             emitToolCall(res, 'ado', toolUseAccumulator.name, 'calling', adoSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
@@ -2533,6 +2558,7 @@ app.post('/turn', async (req, res) => {
                                 toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
                                 isError = true;
                                 emitToolCall(res, 'ado', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
+                            }
                             }
                         } else if (toolUseAccumulator.name === 'web_search') {
                             emitToolCall(res, 'brave', 'web_search', 'calling', `Searching the web for: ${toolInput.query ?? ''}`);
