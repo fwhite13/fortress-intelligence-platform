@@ -1385,8 +1385,17 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
             }
         }
     } else {
-        // kbFlags is null/undefined — fail-open, proceed to entitlement check only (no regression for callers that don't send KbFlags)
-        console.debug(`[harness] executeKbSearch: kbFlags not provided for userId=${userId}, skipping preference gate`);
+        // kbFlags is null/undefined — ADO#3350: fail-CLOSED for personal/team, fail-open for corp
+        if (kbType === 'personal') {
+            console.warn(`[harness] executeKbSearch: kbFlags null — blocking personal KB for userId=${userId}`);
+            return { text: 'Knowledge base access not authorized.', sources: [] };
+        }
+        if (kbType === 'team') {
+            console.warn(`[harness] executeKbSearch: kbFlags null — blocking team KB for userId=${userId}`);
+            return { text: 'Knowledge base access not authorized.', sources: [] };
+        }
+        // corp: fail-open acceptable — shared resource, no per-user filter
+        console.debug(`[harness] executeKbSearch: kbFlags null — allowing corp KB for userId=${userId}`);
     }
 
     // ADO#3309 — Access enforcement: verify user is entitled to the requested kbType
