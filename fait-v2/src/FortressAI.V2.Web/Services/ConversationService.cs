@@ -24,7 +24,7 @@ public class ConversationService : IConversationService
 
         var existing = await db.Conversations
             .Where(c => c.UserId == userId)
-            .OrderByDescending(c => c.LastActiveAt)
+            .OrderByDescending(c => c.LastActiveAt ?? c.CreatedAt)
             .FirstOrDefaultAsync(cts.Token);
 
         if (existing != null)

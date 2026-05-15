@@ -24,7 +24,7 @@ public class Conversation
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     [Column("last_active_at")]
-    public DateTime LastActiveAt { get; set; } = DateTime.UtcNow;
+    public DateTime? LastActiveAt { get; set; }
 
     [Column("estimated_token_count")]
     public int EstimatedTokenCount { get; set; } = 0;
