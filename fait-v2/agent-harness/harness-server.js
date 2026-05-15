@@ -2507,22 +2507,25 @@ app.post('/turn', async (req, res) => {
                                 isError = true;
                                 emitToolCall(res, 'graph', toolUseAccumulator.name, 'error', 'M365 token unavailable');
                                 sendEvent({ type: 'reauth_required', provider: 'ms365', message: statusMsg });
+                                sendEvent({ type: 'done' });
+                                res.end();
+                                return;
                             } else {
-                            emitToolCall(res, 'graph', toolUseAccumulator.name, 'calling', graphSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
-                            try {
-                                const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ userId, ms365Token: userTokens.ms365, ...toolInput })
-                                });
-                                const mcpData = await mcpRes.json();
-                                toolResultText = JSON.stringify(mcpData, null, 2);
-                                emitToolCall(res, 'graph', toolUseAccumulator.name, 'done', 'Done.');
-                            } catch (mcpErr) {
-                                toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
-                                isError = true;
-                                emitToolCall(res, 'graph', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
-                            }
+                                emitToolCall(res, 'graph', toolUseAccumulator.name, 'calling', graphSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
+                                try {
+                                    const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ userId, ms365Token: userTokens.ms365, ...toolInput })
+                                    });
+                                    const mcpData = await mcpRes.json();
+                                    toolResultText = JSON.stringify(mcpData, null, 2);
+                                    emitToolCall(res, 'graph', toolUseAccumulator.name, 'done', 'Done.');
+                                } catch (mcpErr) {
+                                    toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
+                                    isError = true;
+                                    emitToolCall(res, 'graph', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
+                                }
                             }
                         } else if (toolUseAccumulator.name.startsWith('ado_')) {
                             // ADO#3241 — tool_call SSE events
@@ -2543,22 +2546,25 @@ app.post('/turn', async (req, res) => {
                                 isError = true;
                                 emitToolCall(res, 'ado', toolUseAccumulator.name, 'error', 'ADO token unavailable');
                                 sendEvent({ type: 'reauth_required', provider: 'ado', message: statusMsg });
+                                sendEvent({ type: 'done' });
+                                res.end();
+                                return;
                             } else {
-                            emitToolCall(res, 'ado', toolUseAccumulator.name, 'calling', adoSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
-                            try {
-                                const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ userId, adoToken: userTokens.ado, ...toolInput })
-                                });
-                                const mcpData = await mcpRes.json();
-                                toolResultText = JSON.stringify(mcpData, null, 2);
-                                emitToolCall(res, 'ado', toolUseAccumulator.name, 'done', 'Done.');
-                            } catch (mcpErr) {
-                                toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
-                                isError = true;
-                                emitToolCall(res, 'ado', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
-                            }
+                                emitToolCall(res, 'ado', toolUseAccumulator.name, 'calling', adoSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
+                                try {
+                                    const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ userId, adoToken: userTokens.ado, ...toolInput })
+                                    });
+                                    const mcpData = await mcpRes.json();
+                                    toolResultText = JSON.stringify(mcpData, null, 2);
+                                    emitToolCall(res, 'ado', toolUseAccumulator.name, 'done', 'Done.');
+                                } catch (mcpErr) {
+                                    toolResultText = `MCP tool error (${toolUseAccumulator.name}): ${mcpErr.message}`;
+                                    isError = true;
+                                    emitToolCall(res, 'ado', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
+                                }
                             }
                         } else if (toolUseAccumulator.name === 'web_search') {
                             emitToolCall(res, 'brave', 'web_search', 'calling', `Searching the web for: ${toolInput.query ?? ''}`);
