@@ -432,19 +432,10 @@
             StateHasChanged();
             try
             {
-                using var content = new MultipartFormDataContent();
-                var streamContent = new StreamContent(file.OpenReadStream(maxAllowedSize: 52428800));
-                streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
-                    string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType);
-                content.Add(streamContent, "file", file.Name);
-                if (_currentFolderId.HasValue)
-                    content.Add(new StringContent(_currentFolderId.Value.ToString()), "folderId");
-
-                var response = await Http.PostAsync($"{BaseUrl}/api/workspace/upload", content);
-                if (response.IsSuccessStatusCode)
-                    _uploadProgress[file.Name] = 100;
-                else
-                    Snackbar.Add($"Upload failed: {file.Name}", Severity.Error);
+                var mimeType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType;
+                await using var stream = file.OpenReadStream(maxAllowedSize: 52428800);
+                await UploadSvc.SaveUploadAsync(Session.UserId, _currentFolderId, file.Name, mimeType, stream);
+                _uploadProgress[file.Name] = 100;
             }
             catch (Exception ex)
             {
