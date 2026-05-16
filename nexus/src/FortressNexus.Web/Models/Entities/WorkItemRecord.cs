@@ -29,6 +29,9 @@ public class WorkItemRecord
     // Parent story title (for Test Cases linked to a User Story)
     public string? ParentTitle { get; set; }
 
+    // Incremental decomp: true once this item has been enriched by a 1B batch
+    public bool IsEnriched { get; set; } = false;
+
     // WI template classification
     public WiTemplateType WiTemplate { get; set; } = WiTemplateType.Standard;
 

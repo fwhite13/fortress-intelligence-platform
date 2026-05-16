@@ -35,9 +35,13 @@ public class ArtifactGenerationService : IArtifactGenerationService
         _wiClassifier = wiClassifier;
     }
 
+    /// <summary>
+    /// Thin wrapper kept for interface/test compatibility. Runs the full pipeline and returns the final DTO list.
+    /// For production use, prefer <see cref="DecomposeAndPersistAsync"/> which persists incrementally.
+    /// </summary>
     public async Task<List<AdoWorkItemDto>> GenerateWorkItemsAsync(int specDocumentId)
     {
-        _logger.LogInformation("[WI_GEN] Starting work item generation for SpecDocument {SpecDocumentId}", specDocumentId);
+        _logger.LogInformation("[WI_GEN] GenerateWorkItemsAsync called for SpecDocument {SpecDocumentId} (thin wrapper)", specDocumentId);
 
         var specDoc = await _db.SpecDocuments.FirstOrDefaultAsync(s => s.Id == specDocumentId);
         if (specDoc is null)
@@ -51,93 +55,8 @@ public class ArtifactGenerationService : IArtifactGenerationService
 
         try
         {
-            // Call 1A — Skeleton (enumerate ALL work item titles and structure only, no content)
-            var skeletonSystemPrompt = _config["Nexus:Prompts:ArtifactGenSkeletonSystem"]
-                ?? "You are a technical project manager. Output a JSON array of work items. Each item has exactly three fields: type (Epic/Feature/User Story/Task), parentTitle (null for Epics, exact parent title otherwise), and title. No other fields. No descriptions. No AC. Cover every functional area in the spec.";
-
-            var (call1AText, pt1A, ct1A) = await _bedrock.InvokeAsync(skeletonSystemPrompt, specContent, 64000, resolvedModelId);
-
-            _logger.LogInformation("[WI_GEN] Call 1A (skeleton) completed for SpecDocument {SpecDocumentId}: {Pt1A} + {Ct1A} tokens, {Count} skeleton items",
-                specDocumentId, pt1A, ct1A, ParseWorkItems(call1AText, specDocumentId).Count);
-
-            // Call 1B — Detail enrichment in batches of 25 to stay within SigV4 5-min signature window
-            var enrichSystemPrompt = _config["Nexus:Prompts:ArtifactGenEnrichSystem"]
-                ?? "You are a technical project manager. Enrich the provided skeleton JSON array with descriptions, acceptanceCriteria, developerBrief, and activity fields. Do not add or remove items. Do not change titles.";
-
-            const int EnrichBatchSize = 25;
-            var skeletonItems = ParseWorkItems(call1AText, specDocumentId);
-            var enrichedItems = new List<AdoWorkItemDto>();
-            var totalPt1B = 0;
-            var totalCt1B = 0;
-            var batchCount = (int)Math.Ceiling((double)skeletonItems.Count / EnrichBatchSize);
-
-            for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
-            {
-                var batch = skeletonItems.Skip(batchIndex * EnrichBatchSize).Take(EnrichBatchSize).ToList();
-                var batchJson = JsonSerializer.Serialize(batch);
-                var call1BUserMessage = $"SKELETON BATCH {batchIndex + 1} of {batchCount}:\n{batchJson}\n\nORIGINAL SPEC:\n{specContent}";
-                var (call1BText, pt1B, ct1B) = await _bedrock.InvokeAsync(enrichSystemPrompt, call1BUserMessage, 32768, resolvedModelId);
-                totalPt1B += pt1B;
-                totalCt1B += ct1B;
-                var batchEnriched = ParseWorkItems(call1BText, specDocumentId);
-                enrichedItems.AddRange(batchEnriched);
-                _logger.LogInformation("[WI_GEN] Call 1B batch {Batch}/{Total} completed for SpecDocument {SpecDocumentId}: {Pt1B} + {Ct1B} tokens, {Count} items enriched",
-                    batchIndex + 1, batchCount, specDocumentId, pt1B, ct1B, batchEnriched.Count);
-            }
-
-            _logger.LogInformation("[WI_GEN] Call 1B (enrichment) completed for SpecDocument {SpecDocumentId}: {Pt1B} + {Ct1B} total tokens, {Count} items across {Batches} batches",
-                specDocumentId, totalPt1B, totalCt1B, enrichedItems.Count, batchCount);
-
-            var items = enrichedItems;
-
-            // Sanitize person names out of titles/descriptions before classifying
-            SanitizePersonNames(items);
-
-            // Classify each WI candidate
-            foreach (var item in items)
-            {
-                item.WiTemplate = _wiClassifier.ClassifyStory(item);
-                item.IsExternalDependency = _wiClassifier.IsExternalDependency(item);
-                item.ExternalOwner = _wiClassifier.ExtractExternalOwner(item);
-            }
-
-            // Call 2 — TC Compliance Scan
-            var tcCount = 0;
-            var tcScanPrompt = _config["Nexus:Prompts:TcScanSystem"];
-            if (!string.IsNullOrEmpty(tcScanPrompt))
-            {
-                var call2UserMessage = $"WORK ITEM ARRAY:\n{JsonSerializer.Serialize(items)}\n\nORIGINAL SPEC:\n{specContent}";
-                try
-                {
-                    var (call2Text, pt2, ct2) = await _bedrock.InvokeAsync(tcScanPrompt, call2UserMessage, 32768, resolvedModelId);
-                    _logger.LogInformation("[WI_GEN] Call 2 (TC scan) completed for SpecDocument {SpecDocumentId}: {Pt2} + {Ct2} tokens",
-                        specDocumentId, pt2, ct2);
-
-                    var tcResult = ParseTcScanResult(call2Text);
-                    SanitizePersonNames(tcResult.TestCases);
-                    items.AddRange(tcResult.TestCases);
-                    tcCount = tcResult.TestCases.Count;
-
-                    var titleMap = items
-                        .GroupBy(w => w.Title ?? "", StringComparer.OrdinalIgnoreCase)
-                        .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
-                    foreach (var update in tcResult.ParentUpdates)
-                    {
-                        if (titleMap.TryGetValue(update.StoryTitle ?? "", out var parent))
-                            parent.TestedByTitles = update.TestedByTitles;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "[WI_GEN] TC scan failed for SpecDocument {SpecDocumentId} — returning decomposition result without TCs",
-                        specDocumentId);
-                }
-            }
-
-            _logger.LogInformation("[WI_GEN] Completed work item generation for SpecDocument {SpecDocumentId}: {ItemCount} items produced ({TestCaseCount} test cases)",
-                specDocumentId, items.Count, tcCount);
-
-            return items;
+            return await RunPipelineAsync(specDocumentId, specContent, resolvedModelId,
+                artifactSetId: null, batchRecordIds: null);
         }
         catch (Exception ex)
         {
@@ -148,54 +67,375 @@ public class ArtifactGenerationService : IArtifactGenerationService
 
     public async Task<ArtifactSet> DecomposeAndPersistAsync(int submissionId, int specDocumentId, string callerUpn, string adoProjectName)
     {
-        // 1. Generate work item DTOs via Bedrock
-        var dtos = await GenerateWorkItemsAsync(specDocumentId);
-        if (dtos.Count == 0)
-            throw new InvalidOperationException("Bedrock returned 0 work items — decomposition may have failed silently. Check CloudWatch logs.");
+        var specDoc = await _db.SpecDocuments.FirstOrDefaultAsync(s => s.Id == specDocumentId)
+            ?? throw new InvalidOperationException($"SpecDocument {specDocumentId} not found");
 
-        // 2. Create and persist ArtifactSet
+        var specContent = specDoc.EditedContent ?? specDoc.Content;
+        var resolvedModelId = _config["FortressAI:ModelId"] ?? "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+
+        // Load submission for status updates
+        var submission = await _db.Submissions.FindAsync(submissionId)
+            ?? throw new InvalidOperationException($"Submission {submissionId} not found");
+
+        // Create ArtifactSet (Status=InProgress) and persist immediately
         var artifactSet = new ArtifactSet
         {
             SpecDocumentId = specDocumentId,
             AdoOrganization = "FortressAffinityGroup",
             AdoProjectName = adoProjectName,
             ProcessTemplateTypeId = "6b724908-ef14-45cf-84f8-768b5384da45",
-            ExternalDependencyCount = dtos.Count(d => d.IsExternalDependency),
+            ExternalDependencyCount = 0,
             CreatedAt = DateTime.UtcNow,
-            CreatedBy = callerUpn
+            CreatedBy = callerUpn,
+            Status = ArtifactSetStatus.InProgress
         };
         _db.ArtifactSets.Add(artifactSet);
+        await _db.SaveChangesAsync(); // get artifactSet.Id
+
+        // Flip submission → Decomposing immediately (before any Bedrock calls)
+        submission.Status = SubmissionStatus.Decomposing;
         await _db.SaveChangesAsync();
 
-        // 3. Map DTOs to WorkItemRecords and save
-        var records = dtos.Select(dto => new WorkItemRecord
+        _logger.LogInformation("[DECOMP_PERSIST] Submission {SubmissionId}: ArtifactSet {ArtifactSetId} created. Status → Decomposing.",
+            submissionId, artifactSet.Id);
+
+        // --- Call 1A (skeleton) ---
+        var skeletonSystemPrompt = _config["Nexus:Prompts:ArtifactGenSkeletonSystem"]
+            ?? "You are a technical project manager. Output a JSON array of work items. Each item has exactly three fields: type (Epic/Feature/User Story/Task), parentTitle (null for Epics, exact parent title otherwise), and title. No other fields. No descriptions. No AC. Cover every functional area in the spec.";
+
+        List<AdoWorkItemDto> skeletonItems;
+        try
+        {
+            var (call1AText, pt1A, ct1A) = await _bedrock.InvokeAsync(skeletonSystemPrompt, specContent, 64000, resolvedModelId);
+            skeletonItems = ParseWorkItems(call1AText, specDocumentId);
+            _logger.LogInformation("[DECOMP_PERSIST] Call 1A (skeleton) done for SpecDocument {SpecDocumentId}: {Pt1A}+{Ct1A} tokens, {Count} skeleton items",
+                specDocumentId, pt1A, ct1A, skeletonItems.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DECOMP_PERSIST] Call 1A failed for SpecDocument {SpecDocumentId} — rolling back to Approved", specDocumentId);
+            submission.Status = SubmissionStatus.Approved;
+            artifactSet.Status = ArtifactSetStatus.Failed;
+            artifactSet.ErrorDetail = ex.Message;
+            await _db.SaveChangesAsync();
+            throw;
+        }
+
+        if (skeletonItems.Count == 0)
+        {
+            submission.Status = SubmissionStatus.Approved;
+            artifactSet.Status = ArtifactSetStatus.Failed;
+            artifactSet.ErrorDetail = "Call 1A returned 0 work items";
+            await _db.SaveChangesAsync();
+            throw new InvalidOperationException("Bedrock returned 0 skeleton work items — decomposition failed. Check CloudWatch logs.");
+        }
+
+        // Persist skeleton as stub WorkItemRecords (IsEnriched=false)
+        var skeletonRecords = skeletonItems.Select(dto => new WorkItemRecord
         {
             ArtifactSetId = artifactSet.Id,
             WorkItemType = dto.WorkItemType,
             Title = dto.Title,
-            Description = dto.Description,
-            AcceptanceCriteria = dto.AcceptanceCriteria,
-            Status = "Pending",
-            WiTemplate = dto.WiTemplate,
-            IsExternalDependency = dto.IsExternalDependency,
-            ExternalOwner = dto.ExternalOwner,
-            TestedByTitles = dto.TestedByTitles,
             ParentTitle = dto.ParentTitle,
-            PredecessorTitles = dto.PredecessorTitles
+            PredecessorTitles = dto.PredecessorTitles,
+            Status = "Pending",
+            IsEnriched = false
         }).ToList();
-        _db.WorkItemRecords.AddRange(records);
+        _db.WorkItemRecords.AddRange(skeletonRecords);
         await _db.SaveChangesAsync();
 
-        // 4. Update submission status to ArtifactsCreated
-        var submission = await _db.Submissions.FindAsync(submissionId)
-            ?? throw new InvalidOperationException($"Submission {submissionId} not found");
+        // Build a lookup from skeleton index → WorkItemRecord.Id for fast 1B matching
+        var skeletonRecordIds = skeletonRecords.Select(r => r.Id).ToList();
+
+        // Flip ArtifactSet → Enriching (skeleton persisted, enrichment about to start)
+        artifactSet.Status = ArtifactSetStatus.Enriching;
+        await _db.SaveChangesAsync();
+
+        _logger.LogInformation("[DECOMP_PERSIST] Skeleton persisted ({Count} stubs). ArtifactSet → Enriching.", skeletonRecords.Count);
+
+        // --- Call 1B (enrichment batches) ---
+        var enrichSystemPrompt = _config["Nexus:Prompts:ArtifactGenEnrichSystem"]
+            ?? "You are a technical project manager. Enrich the provided skeleton JSON array with descriptions, acceptanceCriteria, developerBrief, and activity fields. Do not add or remove items. Do not change titles.";
+
+        const int EnrichBatchSize = 25;
+        var totalPt1B = 0;
+        var totalCt1B = 0;
+        var batchCount = (int)Math.Ceiling((double)skeletonItems.Count / EnrichBatchSize);
+        var anyBatchSucceeded = false;
+
+        for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
+        {
+            var batchStartIdx = batchIndex * EnrichBatchSize;
+            var batch = skeletonItems.Skip(batchStartIdx).Take(EnrichBatchSize).ToList();
+            // IDs for this batch — used to zip response back without a DB round-trip
+            var batchIds = skeletonRecordIds.Skip(batchStartIdx).Take(EnrichBatchSize).ToList();
+
+            var batchJson = JsonSerializer.Serialize(batch);
+            var call1BUserMessage = $"SKELETON BATCH {batchIndex + 1} of {batchCount}:\n{batchJson}\n\nORIGINAL SPEC:\n{specContent}";
+
+            try
+            {
+                var (call1BText, pt1B, ct1B) = await _bedrock.InvokeAsync(enrichSystemPrompt, call1BUserMessage, 32768, resolvedModelId);
+                totalPt1B += pt1B;
+                totalCt1B += ct1B;
+
+                var batchEnriched = ParseWorkItems(call1BText, specDocumentId);
+
+                // Update matching WorkItemRecords in-place (by index, fallback title)
+                for (var i = 0; i < batchEnriched.Count; i++)
+                {
+                    int recordId;
+                    if (i < batchIds.Count)
+                        recordId = batchIds[i];
+                    else
+                    {
+                        // Fallback: match by title
+                        var matchTitle = batchEnriched[i].Title;
+                        var fallback = skeletonRecords.FirstOrDefault(r =>
+                            string.Equals(r.Title, matchTitle, StringComparison.OrdinalIgnoreCase)
+                            && !r.IsEnriched);
+                        if (fallback is null) continue;
+                        recordId = fallback.Id;
+                    }
+
+                    var record = await _db.WorkItemRecords.FindAsync(recordId);
+                    if (record is null) continue;
+
+                    var enriched = batchEnriched[i];
+                    record.Description = enriched.Description;
+                    record.AcceptanceCriteria = enriched.AcceptanceCriteria;
+                    // WiTemplate + IsExternalDependency classified after all 1B — set placeholder
+                    record.WiTemplate = WiTemplateType.Standard;
+                    record.IsExternalDependency = false;
+                    record.ExternalOwner = enriched.ExternalOwner;
+                    record.IsEnriched = true;
+                }
+
+                await _db.SaveChangesAsync();
+                anyBatchSucceeded = true;
+
+                _logger.LogInformation("[DECOMP_PERSIST] Call 1B batch {Batch}/{Total} done for SpecDocument {SpecDocumentId}: {Pt1B}+{Ct1B} tokens, {Count} items enriched",
+                    batchIndex + 1, batchCount, specDocumentId, pt1B, ct1B, batchEnriched.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[DECOMP_PERSIST] Call 1B batch {Batch}/{Total} failed for SpecDocument {SpecDocumentId} — continuing with remaining batches",
+                    batchIndex + 1, batchCount, specDocumentId);
+                // Partial failure is acceptable — stubs remain with IsEnriched=false
+            }
+        }
+
+        _logger.LogInformation("[DECOMP_PERSIST] Call 1B complete for SpecDocument {SpecDocumentId}: {Pt1B}+{Ct1B} total tokens, {Batches} batches",
+            specDocumentId, totalPt1B, totalCt1B, batchCount);
+
+        // If every batch failed and we have zero enriched items, treat as partial failure
+        if (!anyBatchSucceeded && batchCount > 0)
+        {
+            artifactSet.Status = ArtifactSetStatus.PartialFailure;
+            // Submission still advances so user can see stubs
+            submission.Status = SubmissionStatus.ArtifactsCreated;
+            await _db.SaveChangesAsync();
+
+            _logger.LogWarning("[DECOMP_PERSIST] All 1B batches failed for Submission {SubmissionId} — skeleton-only artifact set created.", submissionId);
+            return artifactSet;
+        }
+
+        // Reload all records for this artifact set (for sanitize + classify pass)
+        var allRecords = await _db.WorkItemRecords
+            .Where(r => r.ArtifactSetId == artifactSet.Id)
+            .ToListAsync();
+
+        // Build DTO list from persisted records for post-processing
+        var enrichedDtos = allRecords.Select(r => new AdoWorkItemDto
+        {
+            WorkItemType = r.WorkItemType,
+            Title = r.Title,
+            Description = r.Description,
+            AcceptanceCriteria = r.AcceptanceCriteria,
+            ParentTitle = r.ParentTitle,
+            PredecessorTitles = r.PredecessorTitles,
+            IsExternalDependency = r.IsExternalDependency,
+            ExternalOwner = r.ExternalOwner,
+            WiTemplate = r.WiTemplate,
+        }).ToList();
+
+        // Sanitize person names across all records
+        SanitizePersonNames(enrichedDtos);
+
+        // Classify WiTemplate + IsExternalDependency and apply back
+        for (var i = 0; i < allRecords.Count; i++)
+        {
+            var dto = enrichedDtos[i];
+            dto.WiTemplate = _wiClassifier.ClassifyStory(dto);
+            dto.IsExternalDependency = _wiClassifier.IsExternalDependency(dto);
+            dto.ExternalOwner = _wiClassifier.ExtractExternalOwner(dto);
+
+            allRecords[i].Title = dto.Title;
+            allRecords[i].Description = dto.Description;
+            allRecords[i].AcceptanceCriteria = dto.AcceptanceCriteria;
+            allRecords[i].WiTemplate = dto.WiTemplate;
+            allRecords[i].IsExternalDependency = dto.IsExternalDependency;
+            allRecords[i].ExternalOwner = dto.ExternalOwner;
+        }
+        await _db.SaveChangesAsync();
+
+        // --- Call 2 (TC scan) ---
+        var tcCount = 0;
+        var tcScanPrompt = _config["Nexus:Prompts:TcScanSystem"];
+        if (!string.IsNullOrEmpty(tcScanPrompt))
+        {
+            var call2UserMessage = $"WORK ITEM ARRAY:\n{JsonSerializer.Serialize(enrichedDtos)}\n\nORIGINAL SPEC:\n{specContent}";
+            try
+            {
+                var (call2Text, pt2, ct2) = await _bedrock.InvokeAsync(tcScanPrompt, call2UserMessage, 32768, resolvedModelId);
+                _logger.LogInformation("[DECOMP_PERSIST] Call 2 (TC scan) done for SpecDocument {SpecDocumentId}: {Pt2}+{Ct2} tokens",
+                    specDocumentId, pt2, ct2);
+
+                var tcResult = ParseTcScanResult(call2Text);
+                SanitizePersonNames(tcResult.TestCases);
+                tcCount = tcResult.TestCases.Count;
+
+                // Persist TC records (IsEnriched=true — TCs are generated fully enriched)
+                var tcRecords = tcResult.TestCases.Select(dto => new WorkItemRecord
+                {
+                    ArtifactSetId = artifactSet.Id,
+                    WorkItemType = dto.WorkItemType,
+                    Title = dto.Title,
+                    Description = dto.Description,
+                    ParentTitle = dto.ParentTitle,
+                    WiTemplate = WiTemplateType.TestCase,
+                    IsExternalDependency = dto.IsExternalDependency,
+                    Status = "Pending",
+                    IsEnriched = true
+                }).ToList();
+                _db.WorkItemRecords.AddRange(tcRecords);
+
+                // Apply TestedBy updates back to parent story records
+                var titleToRecord = allRecords
+                    .GroupBy(r => r.Title ?? "", StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
+                foreach (var update in tcResult.ParentUpdates)
+                {
+                    if (titleToRecord.TryGetValue(update.StoryTitle ?? "", out var parent))
+                        parent.TestedByTitles = update.TestedByTitles;
+                }
+
+                await _db.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[DECOMP_PERSIST] TC scan failed for SpecDocument {SpecDocumentId} — continuing without TCs", specDocumentId);
+            }
+        }
+
+        // Update ArtifactSet final state
+        var externalDependencyCount = await _db.WorkItemRecords
+            .CountAsync(r => r.ArtifactSetId == artifactSet.Id && r.IsExternalDependency);
+        artifactSet.ExternalDependencyCount = externalDependencyCount;
+        artifactSet.Status = ArtifactSetStatus.Success;
         submission.Status = SubmissionStatus.ArtifactsCreated;
         await _db.SaveChangesAsync();
 
-        _logger.LogInformation("[DECOMP_PERSIST] Submission {SubmissionId}: ArtifactSet {ArtifactSetId} created with {Count} WorkItemRecords. Status → ArtifactsCreated.",
-            submissionId, artifactSet.Id, records.Count);
+        var totalCount = await _db.WorkItemRecords.CountAsync(r => r.ArtifactSetId == artifactSet.Id);
+        _logger.LogInformation("[DECOMP_PERSIST] Submission {SubmissionId}: ArtifactSet {ArtifactSetId} complete with {Count} WorkItemRecords ({TcCount} TCs). Status → ArtifactsCreated.",
+            submissionId, artifactSet.Id, totalCount, tcCount);
 
         return artifactSet;
+    }
+
+    /// <summary>
+    /// Internal pipeline used by the thin GenerateWorkItemsAsync wrapper.
+    /// Runs 1A + 1B + classification + TC scan and returns a flat DTO list without any DB persistence.
+    /// </summary>
+    private async Task<List<AdoWorkItemDto>> RunPipelineAsync(
+        int specDocumentId,
+        string specContent,
+        string resolvedModelId,
+        int? artifactSetId,
+        List<int>? batchRecordIds)
+    {
+        // Call 1A
+        var skeletonSystemPrompt = _config["Nexus:Prompts:ArtifactGenSkeletonSystem"]
+            ?? "You are a technical project manager. Output a JSON array of work items. Each item has exactly three fields: type (Epic/Feature/User Story/Task), parentTitle (null for Epics, exact parent title otherwise), and title. No other fields. No descriptions. No AC. Cover every functional area in the spec.";
+
+        var (call1AText, pt1A, ct1A) = await _bedrock.InvokeAsync(skeletonSystemPrompt, specContent, 64000, resolvedModelId);
+        var skeletonItems = ParseWorkItems(call1AText, specDocumentId);
+        _logger.LogInformation("[WI_GEN] Call 1A (skeleton) done for SpecDocument {SpecDocumentId}: {Pt1A}+{Ct1A} tokens, {Count} items",
+            specDocumentId, pt1A, ct1A, skeletonItems.Count);
+
+        // Call 1B
+        var enrichSystemPrompt = _config["Nexus:Prompts:ArtifactGenEnrichSystem"]
+            ?? "You are a technical project manager. Enrich the provided skeleton JSON array with descriptions, acceptanceCriteria, developerBrief, and activity fields. Do not add or remove items. Do not change titles.";
+
+        const int EnrichBatchSize = 25;
+        var enrichedItems = new List<AdoWorkItemDto>();
+        var totalPt1B = 0;
+        var totalCt1B = 0;
+        var batchCount = (int)Math.Ceiling((double)skeletonItems.Count / EnrichBatchSize);
+
+        for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
+        {
+            var batch = skeletonItems.Skip(batchIndex * EnrichBatchSize).Take(EnrichBatchSize).ToList();
+            var batchJson = JsonSerializer.Serialize(batch);
+            var call1BUserMessage = $"SKELETON BATCH {batchIndex + 1} of {batchCount}:\n{batchJson}\n\nORIGINAL SPEC:\n{specContent}";
+            var (call1BText, pt1B, ct1B) = await _bedrock.InvokeAsync(enrichSystemPrompt, call1BUserMessage, 32768, resolvedModelId);
+            totalPt1B += pt1B;
+            totalCt1B += ct1B;
+            var batchEnriched = ParseWorkItems(call1BText, specDocumentId);
+            enrichedItems.AddRange(batchEnriched);
+            _logger.LogInformation("[WI_GEN] Call 1B batch {Batch}/{Total} done for SpecDocument {SpecDocumentId}: {Pt1B}+{Ct1B} tokens, {Count} items",
+                batchIndex + 1, batchCount, specDocumentId, pt1B, ct1B, batchEnriched.Count);
+        }
+
+        _logger.LogInformation("[WI_GEN] Call 1B complete for SpecDocument {SpecDocumentId}: {Pt1B}+{Ct1B} total, {Count} items across {Batches} batches",
+            specDocumentId, totalPt1B, totalCt1B, enrichedItems.Count, batchCount);
+
+        var items = enrichedItems;
+        SanitizePersonNames(items);
+
+        foreach (var item in items)
+        {
+            item.WiTemplate = _wiClassifier.ClassifyStory(item);
+            item.IsExternalDependency = _wiClassifier.IsExternalDependency(item);
+            item.ExternalOwner = _wiClassifier.ExtractExternalOwner(item);
+        }
+
+        // Call 2 — TC scan
+        var tcCount = 0;
+        var tcScanPrompt = _config["Nexus:Prompts:TcScanSystem"];
+        if (!string.IsNullOrEmpty(tcScanPrompt))
+        {
+            var call2UserMessage = $"WORK ITEM ARRAY:\n{JsonSerializer.Serialize(items)}\n\nORIGINAL SPEC:\n{specContent}";
+            try
+            {
+                var (call2Text, pt2, ct2) = await _bedrock.InvokeAsync(tcScanPrompt, call2UserMessage, 32768, resolvedModelId);
+                _logger.LogInformation("[WI_GEN] Call 2 (TC scan) done for SpecDocument {SpecDocumentId}: {Pt2}+{Ct2} tokens",
+                    specDocumentId, pt2, ct2);
+
+                var tcResult = ParseTcScanResult(call2Text);
+                SanitizePersonNames(tcResult.TestCases);
+                items.AddRange(tcResult.TestCases);
+                tcCount = tcResult.TestCases.Count;
+
+                var titleMap = items
+                    .GroupBy(w => w.Title ?? "", StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
+                foreach (var update in tcResult.ParentUpdates)
+                {
+                    if (titleMap.TryGetValue(update.StoryTitle ?? "", out var parent))
+                        parent.TestedByTitles = update.TestedByTitles;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[WI_GEN] TC scan failed for SpecDocument {SpecDocumentId} — returning result without TCs", specDocumentId);
+            }
+        }
+
+        _logger.LogInformation("[WI_GEN] Completed for SpecDocument {SpecDocumentId}: {ItemCount} items ({TcCount} TCs)",
+            specDocumentId, items.Count, tcCount);
+
+        return items;
     }
 
     private List<AdoWorkItemDto> ParseWorkItems(string json, int specDocumentId)

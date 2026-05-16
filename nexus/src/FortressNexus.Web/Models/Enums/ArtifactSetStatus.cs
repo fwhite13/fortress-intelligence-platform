@@ -6,5 +6,6 @@ public enum ArtifactSetStatus
     InProgress,
     Success,
     PartialFailure,
-    Failed
+    Failed,
+    Enriching = 5
 }

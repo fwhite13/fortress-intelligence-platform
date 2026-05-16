@@ -8,5 +8,6 @@ public enum SubmissionStatus
     AwaitingReview,
     Approved,
     Failed,
-    ArtifactsCreated
+    ArtifactsCreated,
+    Decomposing = 7
 }

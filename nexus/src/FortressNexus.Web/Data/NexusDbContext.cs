@@ -168,6 +168,7 @@ public class NexusDbContext : DbContext
             entity.Property(e => e.Description).HasColumnName("description").HasColumnType("text");
             entity.Property(e => e.AcceptanceCriteria).HasColumnName("acceptance_criteria").HasColumnType("text");
             entity.Property(e => e.ParentTitle).HasColumnName("parent_title").HasMaxLength(500);
+            entity.Property(e => e.IsEnriched).HasColumnName("is_enriched").IsRequired().HasDefaultValue(false);
             entity.Property(e => e.IsExternalDependency).HasColumnName("is_external_dependency").IsRequired();
             entity.Property(e => e.ExternalOwner).HasColumnName("external_owner").HasMaxLength(100);
             entity.Property(e => e.WiTemplate).HasColumnName("wi_template")

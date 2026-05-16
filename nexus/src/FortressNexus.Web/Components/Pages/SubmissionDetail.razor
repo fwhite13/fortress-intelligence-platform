@@ -203,18 +203,22 @@ else if (_submission is not null)
                 </MudButton>
             }
 
-            @if (_submission.Status == SubmissionStatus.Approved && _isAdmin)
+            @if ((_submission.Status == SubmissionStatus.Approved || _submission.Status == SubmissionStatus.Decomposing) && _isAdmin)
             {
-                <AdoProjectSelector UserUpn="@(_currentUserUpn ?? "")"
-                                    IsAdmin="@_isAdmin"
-                                    IsDecomposing="@_isGeneratingWorkItems"
-                                    OnProjectSelected="@OnAdoProjectSelected"
-                                    OnDecomposeClicked="@HandleGenerateWorkItems" />
-
-                @if (_isGeneratingWorkItems && _generatingStatusText is not null)
+                @if (_submission.Status == SubmissionStatus.Approved)
                 {
+                    <AdoProjectSelector UserUpn="@(_currentUserUpn ?? "")"
+                                        IsAdmin="@_isAdmin"
+                                        IsDecomposing="@_isGeneratingWorkItems"
+                                        OnProjectSelected="@OnAdoProjectSelected"
+                                        OnDecomposeClicked="@HandleGenerateWorkItems" />
+                }
+
+                @if (_submission.Status == SubmissionStatus.Decomposing || _isGeneratingWorkItems)
+                {
+                    <MudProgressCircular Indeterminate="true" Color="Color.Warning" Size="Size.Small" Class="nexus-detail-generating-spinner" />
                     <MudText Typo="Typo.caption" Color="Color.Secondary" Class="nexus-detail-decomp-status">
-                        @_generatingStatusText
+                        @(_generatingStatusText ?? "Decomposing work items...")
                     </MudText>
                 }
             }
@@ -468,14 +472,62 @@ else if (_submission is not null)
 
         _selectedAdoProject = projectName;
         _isGeneratingWorkItems = true;
-        _generatingStatusText = "Running decomposition (this may take some time)...";
+        _generatingStatusText = "Running decomposition — building skeleton...";
         StateHasChanged();
+
+        // Start a progress-polling timer (5s intervals) to show enrichment progress
+        var decompositionSubmissionId = _submission.Id;
+        _pollTimer?.Dispose();
+        _pollTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                try
+                {
+                    var fresh = await SubmissionService.GetByIdAsync(decompositionSubmissionId);
+                    if (fresh is null) return;
+
+                    if (fresh.Status == SubmissionStatus.Decomposing)
+                    {
+                        // Count enriched vs total via latest artifact set
+                        var latestSet = fresh.SpecDocuments
+                            .SelectMany(sd => sd.ArtifactSets)
+                            .OrderByDescending(a => a.Id)
+                            .FirstOrDefault();
+                        if (latestSet is not null)
+                        {
+                            var enriched = latestSet.WorkItemRecords.Count(r => r.IsEnriched);
+                            var total = latestSet.WorkItemRecords.Count;
+                            _generatingStatusText = total > 0
+                                ? $"Decomposing: {enriched} of {total} items enriched..."
+                                : "Decomposing: building skeleton...";
+                        }
+                        else
+                        {
+                            _generatingStatusText = "Decomposing: building skeleton...";
+                        }
+                    }
+                    else if (fresh.Status != SubmissionStatus.Decomposing && !_isGeneratingWorkItems)
+                    {
+                        // Background completion race — stop polling
+                        _submission = fresh;
+                        _pollTimer?.Dispose();
+                        _pollTimer = null;
+                    }
+                    StateHasChanged();
+                }
+                catch { /* non-fatal — polling will retry */ }
+            });
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
 
         try
         {
             var callerUpn = await UserContextService.GetUpnAsync();
             var artifactSet = await ArtifactGenerationService.DecomposeAndPersistAsync(
                 _submission.Id, _activeSpec.Id, callerUpn, projectName);
+
+            _pollTimer?.Dispose();
+            _pollTimer = null;
 
             // Reload submission to reflect ArtifactsCreated status
             _submission = await SubmissionService.GetByIdAsync(_submission.Id);
@@ -484,6 +536,8 @@ else if (_submission is not null)
         }
         catch (Exception ex)
         {
+            _pollTimer?.Dispose();
+            _pollTimer = null;
             _generatingStatusText = null;
             Snackbar.Add($"Decomposition failed: {ex.Message}", Severity.Error);
         }
@@ -538,6 +592,7 @@ else if (_submission is not null)
         SubmissionStatus.Generating => Color.Warning,
         SubmissionStatus.AwaitingReview => Color.Primary,
         SubmissionStatus.Approved => Color.Success,
+        SubmissionStatus.Decomposing => Color.Warning,
         SubmissionStatus.ArtifactsCreated => Color.Success,
         SubmissionStatus.Failed => Color.Error,
         _ => Color.Default
