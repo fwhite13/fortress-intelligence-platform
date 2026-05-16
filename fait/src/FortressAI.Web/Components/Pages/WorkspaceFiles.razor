@@ -11,6 +11,7 @@
 @inject ISnackbar Snackbar
 @inject ILogger<WorkspaceFiles> Logger
 @inject HttpClient Http
+@implements IDisposable
 
 <PageTitle>Workspace — FAIT</PageTitle>
 
@@ -35,22 +36,24 @@
                                Class="workspace-toolbar-btn">
                         New Folder
                     </MudButton>
-                    <MudButton StartIcon="@Icons.Material.Filled.Upload"
-                               Variant="Variant.Outlined"
-                               Size="Size.Small"
-                               OnClick="@TriggerFileUpload"
-                               Disabled="@_uploading"
-                               Class="workspace-toolbar-btn">
-                        @if (_uploading)
-                        {
-                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
-                            <span>Uploading...</span>
-                        }
-                        else
-                        {
-                            <span>Upload</span>
-                        }
-                    </MudButton>
+                    <label for="fileUploadInput" class="workspace-toolbar-upload-label">
+                        <MudButton StartIcon="@Icons.Material.Filled.Upload"
+                                   Variant="Variant.Outlined"
+                                   Size="Size.Small"
+                                   Disabled="@_uploading"
+                                   Class="workspace-toolbar-btn"
+                                   HtmlTag="span">
+                            @if (_uploading)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                                <span>Uploading...</span>
+                            }
+                            else
+                            {
+                                <span>Upload</span>
+                            }
+                        </MudButton>
+                    </label>
                     <InputFile id="fileUploadInput" multiple OnChange="HandleFilesSelected"
                                style="display:none" />
                 </div>
@@ -307,11 +310,18 @@
 
     protected override async Task OnInitializedAsync()
     {
+        Session.OnAuthStateChanged += StateHasChanged;
+
         if (!Session.IsAuthenticated) return;
 
         var filesTask = LoadFilesAsync();
         var artifactsTask = LoadArtifactsAsync();
         await Task.WhenAll(filesTask, artifactsTask);
+    }
+
+    public void Dispose()
+    {
+        Session.OnAuthStateChanged -= StateHasChanged;
     }
 
     // ── Files tab ──────────────────────────────────────────────────────────
@@ -401,11 +411,6 @@
             Logger.LogError(ex, "[WorkspaceFiles] DeleteFolder failed");
             Snackbar.Add("Failed to delete folder.", Severity.Error);
         }
-    }
-
-    private async Task TriggerFileUpload()
-    {
-        await JSRuntime.InvokeVoidAsync("document.getElementById('fileUploadInput').click");
     }
 
     private async Task HandleFilesSelected(InputFileChangeEventArgs e)
