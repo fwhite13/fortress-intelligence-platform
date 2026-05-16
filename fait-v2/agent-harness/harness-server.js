@@ -1885,6 +1885,7 @@ app.post('/turn', async (req, res) => {
             '--model', process.env.CC_MODEL || 'sonnet',
             '--print',
             '--output-format', 'stream-json',
+            '--verbose',
             '--dangerously-skip-permissions'
         ];
         console.log(`[CC spawn] command=claude ${ccArgs.join(' ')} cwd=${userWorkspaceDir} userId=${userId} briefLen=${briefContent?.length ?? 0}`);
