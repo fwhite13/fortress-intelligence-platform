@@ -289,6 +289,8 @@
 </MudContainer>
 
 @code {
+    private string BaseUrl => NavigationManager.BaseUri.TrimEnd('/');
+
     // ── Generated (existing) state ──────────────────────────────────────────
     private bool _loading = true;
     private int _activeTab = 0;
@@ -438,7 +440,7 @@
                 if (_currentFolderId.HasValue)
                     content.Add(new StringContent(_currentFolderId.Value.ToString()), "folderId");
 
-                var response = await Http.PostAsync("/api/workspace/upload", content);
+                var response = await Http.PostAsync($"{BaseUrl}/api/workspace/upload", content);
                 if (response.IsSuccessStatusCode)
                     _uploadProgress[file.Name] = 100;
                 else
@@ -460,7 +462,7 @@
     {
         try
         {
-            var response = await Http.GetFromJsonAsync<DownloadUrlResponse>($"/api/workspace/files/{upload.Id}/download");
+            var response = await Http.GetFromJsonAsync<DownloadUrlResponse>($"{BaseUrl}/api/workspace/files/{upload.Id}/download");
             if (response?.Url != null)
                 await JSRuntime.InvokeVoidAsync("open", response.Url, "_blank");
         }
@@ -475,7 +477,7 @@
     {
         try
         {
-            await Http.DeleteAsync($"/api/workspace/files/{upload.Id}");
+            await Http.DeleteAsync($"{BaseUrl}/api/workspace/files/{upload.Id}");
             await LoadFilesAsync();
         }
         catch (Exception ex)
