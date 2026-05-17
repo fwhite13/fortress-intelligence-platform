@@ -79,6 +79,13 @@ public class WorkspaceUploadService : IWorkspaceUploadService
                 .Where(v => uploadIds.Contains(v.FileId))
                 .ToListAsync();
             db.WorkspaceFileVersions.RemoveRange(versionRowsToDelete);
+
+            // C3 fix: EF SetNull behavior does NOT cascade-delete upload rows when folder is deleted.
+            // Explicitly delete them here to prevent orphaned rows accumulating in DB.
+            var uploadsToDelete = await db.WorkspaceUploads
+                .Where(u => uploadIds.Contains(u.Id))
+                .ToListAsync();
+            db.WorkspaceUploads.RemoveRange(uploadsToDelete);
         }
 
         var folder = await db.WorkspaceFolders.FirstOrDefaultAsync(f => f.Id == folderId && f.UserId == userId);
