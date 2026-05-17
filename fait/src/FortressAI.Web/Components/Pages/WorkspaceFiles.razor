@@ -288,8 +288,6 @@
 </MudContainer>
 
 @code {
-    private string BaseUrl => NavigationManager.BaseUri.TrimEnd('/');
-
     // ── Generated (existing) state ──────────────────────────────────────────
     private bool _loading = true;
     private int _activeTab = 0;
@@ -452,9 +450,9 @@
     {
         try
         {
-            var response = await Http.GetFromJsonAsync<DownloadUrlResponse>($"{BaseUrl}/api/workspace/files/{upload.Id}/download");
-            if (response?.Url != null)
-                await JSRuntime.InvokeVoidAsync("open", response.Url, "_blank");
+            var url = await UploadSvc.GetPresignedUrlAsync(upload.S3Key, 30);
+            if (!string.IsNullOrEmpty(url))
+                await JSRuntime.InvokeVoidAsync("open", url, "_blank");
         }
         catch (Exception ex)
         {
@@ -467,7 +465,7 @@
     {
         try
         {
-            await Http.DeleteAsync($"{BaseUrl}/api/workspace/files/{upload.Id}");
+            await UploadSvc.DeleteFileAsync(Session.UserId, upload.Id);
             await LoadFilesAsync();
         }
         catch (Exception ex)
@@ -476,8 +474,6 @@
             Snackbar.Add("Failed to delete file.", Severity.Error);
         }
     }
-
-    private record DownloadUrlResponse(string? Url);
 
     // ── Artifacts tab (unchanged logic) ────────────────────────────────────
 
