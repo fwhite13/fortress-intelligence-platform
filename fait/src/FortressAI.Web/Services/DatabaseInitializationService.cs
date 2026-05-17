@@ -398,7 +398,13 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE user_assistant_config ADD COLUMN show_citations TINYINT(1) NULL DEFAULT 1",
                 "ALTER TABLE user_assistant_config ADD COLUMN use_cases_json TEXT NULL",
                 "ALTER TABLE user_assistant_config ADD COLUMN additional_context TEXT NULL",
-                "ALTER TABLE user_assistant_config ADD COLUMN preferred_name VARCHAR(100) NULL"
+                "ALTER TABLE user_assistant_config ADD COLUMN preferred_name VARCHAR(100) NULL",
+                // ADO#3436: harness_version for auto-upgrade on connect (1060 = duplicate column, idempotent)
+                "ALTER TABLE user_sessions ADD COLUMN harness_version VARCHAR(20) NULL",
+                // ADO#3398/Epic 7: scheduled_tasks AlertOnCompletion + AlertOnFailure — Aurora MySQL does not support
+                // ADD COLUMN IF NOT EXISTS; previous EF migration used banned syntax and silently failed
+                "ALTER TABLE scheduled_tasks ADD COLUMN AlertOnCompletion TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE scheduled_tasks ADD COLUMN AlertOnFailure TINYINT(1) NOT NULL DEFAULT 1"
             };
 
             foreach (var alterSql in alterStatements)
