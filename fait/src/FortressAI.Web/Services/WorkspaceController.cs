@@ -260,6 +260,63 @@ public class WorkspaceController : ControllerBase
         return Ok(new { url });
     }
 
+    [HttpGet("files/{fileId}/versions")]
+    [Authorize]
+    public async Task<IActionResult> GetFileVersions(Guid fileId)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        var versions = await _uploadService.GetFileVersionsAsync(userId.Value, fileId);
+        return Ok(versions.Select(v => new { v.Id, v.VersionNumber, v.S3Key, v.SizeBytes, v.CreatedAt, v.CreatedBy }));
+    }
+
+    [HttpPut("files/{fileId}/rollback/{versionNumber}")]
+    [Authorize]
+    public async Task<IActionResult> RollbackFile(Guid fileId, int versionNumber)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        var file = await _uploadService.RollbackFileAsync(userId.Value, fileId, versionNumber);
+        if (file == null) return NotFound();
+        return Ok(new { file.Id, file.Filename, file.CurrentVersion, file.S3Key, file.SizeBytes });
+    }
+
+    [HttpPut("files/{fileId}/rename")]
+    [Authorize]
+    public async Task<IActionResult> RenameFile(Guid fileId, [FromBody] RenameFileRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        if (string.IsNullOrWhiteSpace(request.NewFilename))
+            return BadRequest(new { error = "NewFilename is required" });
+        var file = await _uploadService.RenameFileAsync(userId.Value, fileId, request.NewFilename);
+        if (file == null) return NotFound();
+        return Ok(new { file.Id, file.Filename });
+    }
+
+    [HttpPut("files/{fileId}/move")]
+    [Authorize]
+    public async Task<IActionResult> MoveFile(Guid fileId, [FromBody] MoveFileRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        var file = await _uploadService.MoveFileAsync(userId.Value, fileId, request.NewFolderId);
+        if (file == null) return NotFound();
+        return Ok(new { file.Id, file.FolderId });
+    }
+
+    [HttpDelete("files/bulk")]
+    [Authorize]
+    public async Task<IActionResult> BulkDeleteFiles([FromBody] BulkDeleteRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        if (request.FileIds == null || request.FileIds.Count == 0)
+            return BadRequest(new { error = "FileIds is required" });
+        var count = await _uploadService.BulkDeleteFilesAsync(userId.Value, request.FileIds);
+        return Ok(new { deleted = count });
+    }
+
     private Guid? GetCurrentUserId()
     {
         var claim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
@@ -292,3 +349,9 @@ public record GenerateDocumentSection(string Heading, string Content);
 public record CreateFolderRequest(string Name, Guid? ParentId);
 
 public record InternalListFilesRequest(string UserId, string? FolderId = null);
+
+public record RenameFileRequest(string NewFilename);
+
+public record MoveFileRequest(Guid? NewFolderId);
+
+public record BulkDeleteRequest(List<Guid> FileIds);

@@ -264,4 +264,66 @@ public class WorkspaceUploadService : IWorkspaceUploadService
 
         return (currentParentId, upload.S3Key);
     }
+
+    public async Task<List<WorkspaceFileVersion>> GetFileVersionsAsync(Guid userId, Guid fileId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var file = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == fileId && u.UserId == userId);
+        if (file == null) return new List<WorkspaceFileVersion>();
+
+        return await db.WorkspaceFileVersions
+            .Where(v => v.FileId == fileId)
+            .OrderByDescending(v => v.VersionNumber)
+            .ToListAsync();
+    }
+
+    public async Task<WorkspaceUpload?> RollbackFileAsync(Guid userId, Guid fileId, int versionNumber)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var file = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == fileId && u.UserId == userId);
+        if (file == null) return null;
+
+        var version = await db.WorkspaceFileVersions
+            .FirstOrDefaultAsync(v => v.FileId == fileId && v.VersionNumber == versionNumber);
+        if (version == null) return null;
+
+        file.S3Key = version.S3Key;
+        file.CurrentVersion = versionNumber;
+        file.SizeBytes = version.SizeBytes;
+        await db.SaveChangesAsync();
+        return file;
+    }
+
+    public async Task<WorkspaceUpload?> RenameFileAsync(Guid userId, Guid fileId, string newFilename)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var file = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == fileId && u.UserId == userId);
+        if (file == null) return null;
+
+        file.Filename = Path.GetFileName(newFilename);
+        await db.SaveChangesAsync();
+        return file;
+    }
+
+    public async Task<WorkspaceUpload?> MoveFileAsync(Guid userId, Guid fileId, Guid? newFolderId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var file = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == fileId && u.UserId == userId);
+        if (file == null) return null;
+
+        file.FolderId = newFolderId;
+        await db.SaveChangesAsync();
+        return file;
+    }
+
+    public async Task<int> BulkDeleteFilesAsync(Guid userId, List<Guid> fileIds)
+    {
+        var count = 0;
+        foreach (var fileId in fileIds)
+        {
+            await DeleteFileAsync(userId, fileId);
+            count++;
+        }
+        return count;
+    }
 }
