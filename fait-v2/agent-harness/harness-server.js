@@ -501,6 +501,46 @@ const MCP_TOOL_SPECS = {
 MCP_TOOL_SPECS['ado']    = MCP_TOOL_SPECS['azdo'];
 MCP_TOOL_SPECS['devops'] = MCP_TOOL_SPECS['azdo'];  // DB slug
 
+// ADO#3398 7.7-C — tool manifest assembled at cold start based on active plugin set
+function buildToolManifestSection(enabledPlugins) {
+    const tools = [
+        { name: 'read_memory', use: 'Looking up prior context, preferences, or decisions about a topic' },
+        { name: 'write_memory', use: 'User states a preference, decision, or fact worth persisting' },
+        { name: 'search_memory', use: 'Searching across all memory topics by keyword' },
+        { name: 'create_document', use: 'User asks to create a Word document, report, or structured deliverable' },
+        { name: 'list_files', use: 'Listing files the user uploaded to their workspace' },
+        { name: 'read_file', use: 'Reading content of a user-uploaded file by path' },
+        { name: 'write_file', use: 'Saving text content as a file in the user\'s workspace' },
+        { name: 'list_workspace_files', use: 'Seeing assistant-generated artifacts from prior sessions' },
+        { name: 'read_workspace_file', use: 'Reading content of an assistant-generated artifact by ID' },
+    ];
+
+    if (Array.isArray(enabledPlugins)) {
+        if (enabledPlugins.includes('m365') || enabledPlugins.includes('graph')) {
+            tools.push(
+                { name: 'graph_list_emails', use: 'Listing recent emails from Microsoft 365 inbox' },
+                { name: 'graph_get_email', use: 'Getting full content of a specific email by ID' },
+                { name: 'graph_list_calendar_events', use: 'Listing upcoming calendar events' },
+                { name: 'graph_send_email', use: 'Sending an email via Microsoft 365' }
+            );
+        }
+        if (enabledPlugins.includes('ado') || enabledPlugins.includes('azdo') || enabledPlugins.includes('devops')) {
+            tools.push(
+                { name: 'ado_list_work_items', use: 'Listing Azure DevOps work items' },
+                { name: 'ado_get_work_item', use: 'Getting details of a specific Azure DevOps work item' },
+                { name: 'ado_update_work_item', use: 'Updating an Azure DevOps work item' },
+                { name: 'ado_create_work_item', use: 'Creating a new Azure DevOps work item' }
+            );
+        }
+        if (enabledPlugins.includes('brave')) {
+            tools.push({ name: 'web_search', use: 'Searching the internet for current information' });
+        }
+    }
+
+    const rows = tools.map(t => `| ${t.name} | ${t.use} |`).join('\n');
+    return `## Available Tools\n\n| Tool | Use when |\n|------|----------|\n${rows}`;
+}
+
 function isToolAllowed(toolName) {
     // Check against each server's allowlist
     for (const [, tools] of Object.entries(MCP_TOOL_ALLOWLIST)) {
@@ -2078,28 +2118,54 @@ app.post('/turn', async (req, res) => {
         contextParts.push(`## Session Identifiers\nuserId: ${userId}`);
         if (userMd) contextParts.push(`## About the User\n${userMd}`);
         if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
-        // Memory tool guidance (ADO#3188)
-        contextParts.push(`You have access to read_memory(slug) and write_memory(slug, title, content) tools.
-- On cold start, MEMORY.md lists available topic slugs. Call read_memory to fetch any topic relevant to the current conversation.
-- When the user states a preference, personal detail, or decision worth remembering, call write_memory to persist it. Use judgment — not every message warrants a memory write.
-- For new information that does not fit an existing topic, create a new topic with an appropriate slug and title.
-\nYou have access to create_document(type, title, sections[]) to produce file output.
-- Use type="word" for Word documents.
-- Call this when the user asks you to create a document, report, proposal, or similar deliverable.
-- You may also call this proactively when a document is clearly the best way to present your output (e.g. a structured report, a multi-section analysis).
-- sections is an array of { heading, content } objects.
-- After calling create_document, briefly confirm to the user that the document was created and is available in the chat.
-\nYou have access to list_files(folder_path?) and read_file(file_path) to access files the user has uploaded to their workspace.
-- Use list_files() to see what is available at the root, or list_files("folder/path") for a subfolder.
-- Use read_file("path/to/file") to read file content directly.
-- Paths use forward slashes. Folder and file names are case-sensitive.
-- Prefer reading workspace files directly when the user references "my files", "the document I uploaded", or similar.\
-\nYou have access to write_file(path, content, overwrite?) to save text files to the user's workspace. Files appear immediately in the workspace FILES tab.\
-- Use this when the user asks to save, export, or persist text content as a file.\
-- path is relative to the workspace root (e.g. "summary.md", "notes/q1.txt"). No absolute paths or traversal.\
-- overwrite defaults to false — omit it unless replacing an existing file.\
-\nUse list_workspace_files(type=generated) to see assistant-created artifacts from prior conversations. Use read_workspace_file(fileId) to read content of any workspace file by ID.`);
+        // ADO#3398 7.7-A — structured system prompt: memory guidance + tool catalog + context awareness
+        contextParts.push(`## Memory & Tool Guidance
+
+Before any substantive response about prior work, decisions, people, or preferences: call \`read_memory\` with the relevant slug.
+When the user states a preference, makes a decision, or shares a new fact worth keeping: call \`write_memory\`.
+When the user asks to save something to workspace: call \`write_file\`.
+When referencing prior artifacts: call \`list_workspace_files(type=generated)\` first to see what exists.`);
+        contextParts.push(buildToolManifestSection(enabledMcpSlugs));
+        contextParts.push(`## Context Awareness
+
+You have access to the user's workspace files and memory topics. When the user asks about something you may have worked on before, check workspace artifacts and memory before responding.`);
         if (systemPrompt) contextParts.push(systemPrompt);
+
+        // ADO#3398 7.7-B — per-turn workspace brief injection
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
+            const briefResp = await fetch(`${FAIT_BASE_URL}/api/workspace/files?type=generated&limit=3&userId=${encodeURIComponent(userId)}`, { headers });
+            if (briefResp.ok) {
+                const briefData = await briefResp.json();
+                const files = briefData?.files ?? briefData ?? [];
+                if (Array.isArray(files) && files.length > 0) {
+                    const fileList = files.map(f => `${f.filename || f.Filename} (${new Date(f.createdAt || f.CreatedAt).toLocaleDateString()})`).join(', ');
+                    contextParts.push(`## Recent Workspace Artifacts\nRecent assistant-created files: ${fileList}`);
+                    console.log(`[harness] workspace brief injected: ${files.length} files for userId=${userId}`);
+                }
+            }
+        } catch (briefErr) {
+            console.warn(`[harness] workspace brief injection failed (non-fatal): ${briefErr.message}`);
+        }
+
+        // ADO#3398 7.7-B — memory topic keyword pre-fetch stub
+        {
+            const KNOWN_MEMORY_SLUGS = ['preferences', 'projects', 'role', 'context', 'goals', 'history'];
+            const messageLower = (message || '').toLowerCase();
+            const matchedSlug = KNOWN_MEMORY_SLUGS.find(slug => messageLower.includes(slug));
+            if (matchedSlug) {
+                try {
+                    const topicContent = await fetchS3File(`${S3_PREFIX || `workspaces/${userId}/`}memory/${matchedSlug}.md`);
+                    if (topicContent) {
+                        contextParts.push(`## Pre-fetched Memory: ${matchedSlug}\n${topicContent}`);
+                        console.log(`[harness] pre-fetched memory topic '${matchedSlug}' for userId=${userId}`);
+                    }
+                } catch (prefetchErr) {
+                    console.warn(`[harness] memory pre-fetch failed for slug '${matchedSlug}': ${prefetchErr.message}`);
+                }
+            }
+        }
 
         // ADO#3089 — inject session context recap on cold-start CC turns with existing history
         const hasHistory = Array.isArray(history) && history.length > 0;
@@ -2358,28 +2424,56 @@ app.post('/turn', async (req, res) => {
             if (userEmail) systemParts.push(`## User Identity\nEmail: ${userEmail}`);
             if (userMd) systemParts.push(`## About the User\n${userMd}`);
             if (memoryMd) systemParts.push(`## Long-Term Memory\n${memoryMd}`);
-            // Memory tool guidance (ADO#3188)
-            systemParts.push(`You have access to read_memory(slug) and write_memory(slug, title, content) tools.
-- On cold start, MEMORY.md lists available topic slugs. Call read_memory to fetch any topic relevant to the current conversation.
-- When the user states a preference, personal detail, or decision worth remembering, call write_memory to persist it. Use judgment — not every message warrants a memory write.
-- For new information that does not fit an existing topic, create a new topic with an appropriate slug and title.
-\nYou have access to create_document(type, title, sections[]) to produce file output.
-- Use type="word" for Word documents.
-- Call this when the user asks you to create a document, report, proposal, or similar deliverable.
-- You may also call this proactively when a document is clearly the best way to present your output (e.g. a structured report, a multi-section analysis).
-- sections is an array of { heading, content } objects.
-- After calling create_document, briefly confirm to the user that the document was created and is available in the chat.
-\nYou have access to list_files(folder_path?) and read_file(file_path) to access files the user has uploaded to their workspace.
-- Use list_files() to see what is available at the root, or list_files("folder/path") for a subfolder.
-- Use read_file("path/to/file") to read file content directly.
-- Paths use forward slashes. Folder and file names are case-sensitive.
-- Prefer reading workspace files directly when the user references "my files", "the document I uploaded", or similar.\
-\nYou have access to write_file(path, content, overwrite?) to save text files to the user's workspace. Files appear immediately in the workspace FILES tab.\
-- Use this when the user asks to save, export, or persist text content as a file.\
-- path is relative to the workspace root (e.g. "summary.md", "notes/q1.txt"). No absolute paths or traversal.\
-- overwrite defaults to false — omit it unless replacing an existing file.\
-\nUse list_workspace_files(type=generated) to see assistant-created artifacts from prior conversations. Use read_workspace_file(fileId) to read content of any workspace file by ID.`);
+            // ADO#3398 7.7-A — structured system prompt: memory guidance + tool catalog + context awareness
+            systemParts.push(`## Memory & Tool Guidance
+
+Before any substantive response about prior work, decisions, people, or preferences: call \`read_memory\` with the relevant slug.
+When the user states a preference, makes a decision, or shares a new fact worth keeping: call \`write_memory\`.
+When the user asks to save something to workspace: call \`write_file\`.
+When referencing prior artifacts: call \`list_workspace_files(type=generated)\` first to see what exists.`);
+            systemParts.push(buildToolManifestSection(enabledMcpSlugs));
+            systemParts.push(`## Context Awareness
+
+You have access to the user's workspace files and memory topics. When the user asks about something you may have worked on before, check workspace artifacts and memory before responding.`);
             if (systemPrompt) systemParts.push(systemPrompt);
+
+            // ADO#3398 7.7-B — per-turn workspace brief injection
+            try {
+                const briefHeaders = { 'Content-Type': 'application/json' };
+                if (INTERNAL_API_TOKEN) briefHeaders['X-Internal-Token'] = INTERNAL_API_TOKEN;
+                const briefResp = await fetch(`${FAIT_BASE_URL}/api/workspace/files?type=generated&limit=3&userId=${encodeURIComponent(userId)}`, { headers: briefHeaders });
+                if (briefResp.ok) {
+                    const briefData = await briefResp.json();
+                    const files = briefData?.files ?? briefData ?? [];
+                    if (Array.isArray(files) && files.length > 0) {
+                        const fileList = files.map(f => `${f.filename || f.Filename} (${new Date(f.createdAt || f.CreatedAt).toLocaleDateString()})`).join(', ');
+                        systemParts.push(`## Recent Workspace Artifacts\nRecent assistant-created files: ${fileList}`);
+                        console.log(`[harness] workspace brief injected: ${files.length} files for userId=${userId}`);
+                    }
+                }
+            } catch (briefErr) {
+                console.warn(`[harness] workspace brief injection failed (non-fatal): ${briefErr.message}`);
+            }
+
+            // ADO#3398 7.7-B — memory topic keyword pre-fetch stub
+            {
+                const KNOWN_MEMORY_SLUGS = ['preferences', 'projects', 'role', 'context', 'goals', 'history'];
+                const messageLower = (message || '').toLowerCase();
+                const matchedSlug = KNOWN_MEMORY_SLUGS.find(slug => messageLower.includes(slug));
+                if (matchedSlug) {
+                    try {
+                        const prefix = S3_PREFIX || `workspaces/${userId}/`;
+                        const topicContent = await fetchS3File(`${prefix}memory/${matchedSlug}.md`);
+                        if (topicContent) {
+                            systemParts.push(`## Pre-fetched Memory: ${matchedSlug}\n${topicContent}`);
+                            console.log(`[harness] pre-fetched memory topic '${matchedSlug}' for userId=${userId}`);
+                        }
+                    } catch (prefetchErr) {
+                        console.warn(`[harness] memory pre-fetch failed for slug '${matchedSlug}': ${prefetchErr.message}`);
+                    }
+                }
+            }
+
             if (systemParts.length === 0) {
                 systemParts.push('You are a helpful AI assistant.');
             }
