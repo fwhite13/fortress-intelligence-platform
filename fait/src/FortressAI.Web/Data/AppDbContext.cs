@@ -45,6 +45,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<UserWorkspaceFile> UserWorkspaceFiles => Set<UserWorkspaceFile>();
     public DbSet<WorkspaceFolder> WorkspaceFolders { get; set; }
     public DbSet<WorkspaceUpload> WorkspaceUploads { get; set; }
+    public DbSet<WorkspaceFileVersion> WorkspaceFileVersions { get; set; }
     public DbSet<FeedbackSubmission> FeedbackSubmissions => Set<FeedbackSubmission>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -551,6 +552,8 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.S3Key).HasColumnName("s3_key").HasMaxLength(1000).IsRequired();
             entity.Property(e => e.SizeBytes).HasColumnName("size_bytes");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
+            entity.Property(e => e.CurrentVersion).HasColumnName("current_version").HasDefaultValue(1);
+            entity.Property(e => e.Source).HasColumnName("source").HasMaxLength(20).IsRequired(false);
             entity.HasIndex(e => e.UserId).HasDatabaseName("idx_uwup_user_id");
             entity.HasIndex(e => e.FolderId).HasDatabaseName("idx_uwup_folder_id");
             entity.HasOne<WorkspaceFolder>()
@@ -558,6 +561,20 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
                   .HasForeignKey(u => u.FolderId)
                   .OnDelete(DeleteBehavior.SetNull)
                   .IsRequired(false);
+        });
+
+        modelBuilder.Entity<WorkspaceFileVersion>(entity =>
+        {
+            entity.ToTable("workspace_file_versions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnType("CHAR(36)");
+            entity.Property(e => e.FileId).HasColumnType("CHAR(36)");
+            entity.Property(e => e.VersionNumber).HasColumnName("version_number").HasDefaultValue(1);
+            entity.Property(e => e.S3Key).HasColumnName("s3_key").HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.SizeBytes).HasColumnName("size_bytes");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)");
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by").HasMaxLength(20).HasDefaultValue("user");
+            entity.HasIndex(e => e.FileId).HasDatabaseName("idx_wfv_file_id");
         });
 
         modelBuilder.Entity<FeedbackSubmission>(entity =>

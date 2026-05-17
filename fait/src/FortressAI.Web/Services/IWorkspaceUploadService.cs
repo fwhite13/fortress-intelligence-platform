@@ -13,4 +13,9 @@ public interface IWorkspaceUploadService
     Task<string> GetPresignedUrlAsync(string s3Key, int expiryMinutes = 30);
     Task<string> ReadFileContentAsync(string s3Key);
     Task<(Guid? folderId, string? s3Key)?> ResolvePathAsync(Guid userId, string virtualPath);
+    Task<List<WorkspaceFileVersion>> GetFileVersionsAsync(Guid userId, Guid fileId);
+    Task<WorkspaceUpload?> RollbackFileAsync(Guid userId, Guid fileId, int versionNumber);
+    Task<WorkspaceUpload?> RenameFileAsync(Guid userId, Guid fileId, string newFilename);
+    Task<WorkspaceUpload?> MoveFileAsync(Guid userId, Guid fileId, Guid? newFolderId);
+    Task<int> BulkDeleteFilesAsync(Guid userId, List<Guid> fileIds);
 }

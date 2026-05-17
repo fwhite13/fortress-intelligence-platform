@@ -33,4 +33,11 @@ public class WorkspaceUpload
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
+
+    [Column("current_version")]
+    public int CurrentVersion { get; set; } = 1;
+
+    [Column("source")]
+    [MaxLength(20)]
+    public string? Source { get; set; }
 }

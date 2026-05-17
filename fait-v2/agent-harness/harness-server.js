@@ -390,7 +390,7 @@ const MCP_TOOL_ALLOWLIST = {
 };
 
 const BUILTIN_TOOLS = new Set([
-    'list_workspace_files', 'search_memory', 'read_memory', 'write_memory', 'create_document',
+    'list_workspace_files', 'read_workspace_file', 'search_memory', 'read_memory', 'write_memory', 'create_document',
     'list_files', 'read_file', 'write_file'
 ]);
 
@@ -1215,6 +1215,12 @@ app.post('/tools/write_file', async (req, res) => {
                 'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)',
                 [fileId, userId, filename, mimeType, s3Key, sizeBytes, now]
             );
+            // Insert version row
+            const versionId = crypto.randomUUID();
+            await conn.execute(
+                'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by) VALUES (?, ?, 1, ?, ?, ?, ?)',
+                [versionId, fileId, s3Key, sizeBytes, now, 'assistant']
+            );
         } finally {
             await conn.end();
         }
@@ -1224,6 +1230,101 @@ app.post('/tools/write_file', async (req, res) => {
 
     } catch (err) {
         console.error('[harness] write_file error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── read_workspace_file tool handler (ADO#3396) ──────────────────────────
+app.post('/tools/read_workspace_file', async (req, res) => {
+    const { userId, fileId, path: filePath } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!fileId && !filePath) return res.status(400).json({ error: 'fileId or path required' });
+
+    try {
+        let s3Key = null;
+        let filename = null;
+        let mimeType = null;
+        let fileRecord = null;
+
+        const conn = await getDbConnection();
+        try {
+            if (fileId) {
+                // Look up in user_workspace_uploads first
+                const [uploadRows] = await conn.execute(
+                    'SELECT id, filename, mime_type, s3_key, size_bytes FROM user_workspace_uploads WHERE id = ? AND user_id = ? LIMIT 1',
+                    [fileId, userId]
+                );
+                if (uploadRows.length > 0) {
+                    fileRecord = uploadRows[0];
+                    s3Key = fileRecord.s3_key;
+                    filename = fileRecord.filename;
+                    mimeType = fileRecord.mime_type;
+                } else {
+                    // Try user_workspace_files (artifacts)
+                    const [artifactRows] = await conn.execute(
+                        'SELECT id, filename, mime_type, s3_key, size_bytes FROM user_workspace_files WHERE id = ? AND user_id = ? LIMIT 1',
+                        [fileId, userId]
+                    );
+                    if (artifactRows.length > 0) {
+                        fileRecord = artifactRows[0];
+                        s3Key = fileRecord.s3_key;
+                        filename = fileRecord.filename;
+                        mimeType = fileRecord.mime_type;
+                    }
+                }
+            } else if (filePath) {
+                // Path-based: look up in user_workspace_uploads by filename
+                const safeFilename = filePath.split('/').pop();
+                const [uploadRows] = await conn.execute(
+                    'SELECT id, filename, mime_type, s3_key, size_bytes FROM user_workspace_uploads WHERE user_id = ? AND filename = ? ORDER BY created_at DESC LIMIT 1',
+                    [userId, safeFilename]
+                );
+                if (uploadRows.length > 0) {
+                    fileRecord = uploadRows[0];
+                    s3Key = fileRecord.s3_key;
+                    filename = fileRecord.filename;
+                    mimeType = fileRecord.mime_type;
+                }
+            }
+        } finally {
+            await conn.end();
+        }
+
+        if (!s3Key) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+
+        // Binary check — only return content for text files
+        const textMimeTypes = ['text/', 'application/json', 'application/xml', 'application/javascript'];
+        const isText = textMimeTypes.some(t => mimeType?.startsWith(t));
+
+        if (!isText) {
+            return res.json({
+                filename,
+                mimeType,
+                s3Key,
+                sizeBytes: fileRecord?.size_bytes ? Number(fileRecord.size_bytes) : 0,
+                content: null,
+                note: 'Binary file — content not returned. Metadata only.'
+            });
+        }
+
+        // Fetch content from S3
+        const s3Resp = await s3Client.send(new GetObjectCommand({
+            Bucket: S3_BUCKET,
+            Key: s3Key
+        }));
+
+        const chunks = [];
+        for await (const chunk of s3Resp.Body) {
+            chunks.push(chunk);
+        }
+        const content = Buffer.concat(chunks).toString('utf8');
+
+        res.json({ filename, mimeType, s3Key, content, sizeBytes: content.length });
+
+    } catch (err) {
+        console.error('[harness] read_workspace_file error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1306,29 +1407,59 @@ app.post('/tools/stitch_extract_design_dna', async (req, res) => {
 });
 
 app.post('/tools/list_workspace_files', async (req, res) => {
-    const { userId, folder = '' } = req.body || {};
+    const { userId, folder = '', type = 'all' } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
 
-    const prefix = `workspaces/${userId}/${folder ? folder.replace(/^\/+|\/+$/g, '') + '/' : ''}`;
-
     try {
-        const { S3Client: S3ClientLocal, ListObjectsV2Command } = require('@aws-sdk/client-s3');
-        const s3 = new S3ClientLocal({ region: process.env.AWS_REGION || 'us-east-1' });
+        const conn = await getDbConnection();
+        let files = [];
 
-        const cmd = new ListObjectsV2Command({
-            Bucket: S3_BUCKET,
-            Prefix: prefix,
-            MaxKeys: 200,
-        });
-        const resp = await s3.send(cmd);
+        try {
+            // type='files' or 'all': query user_workspace_uploads
+            if (type === 'files' || type === 'all') {
+                const [uploadRows] = await conn.execute(
+                    'SELECT id, filename, mime_type, s3_key, size_bytes, created_at, folder_id, source, current_version FROM user_workspace_uploads WHERE user_id = ? ORDER BY created_at DESC',
+                    [userId]
+                );
+                const uploads = uploadRows.map(r => ({
+                    id: r.id,
+                    filename: r.filename,
+                    mimeType: r.mime_type,
+                    s3Key: r.s3_key,
+                    sizeBytes: Number(r.size_bytes),
+                    createdAt: r.created_at,
+                    folderId: r.folder_id,
+                    source: r.source || 'user',
+                    currentVersion: r.current_version || 1,
+                    fileType: 'upload'
+                }));
+                files.push(...uploads);
+            }
 
-        const files = (resp.Contents || []).map(obj => ({
-            name: obj.Key.replace(prefix, ''),
-            size: obj.Size,
-            modified: obj.LastModified,
-        })).filter(f => f.name && !f.name.endsWith('/'));
+            // type='generated' or 'all': query user_workspace_files (artifacts)
+            if (type === 'generated' || type === 'all') {
+                const [artifactRows] = await conn.execute(
+                    'SELECT id, filename, mime_type, s3_key, size_bytes, created_at, conversation_id FROM user_workspace_files WHERE user_id = ? ORDER BY created_at DESC',
+                    [userId]
+                );
+                const artifacts = artifactRows.map(r => ({
+                    id: r.id,
+                    filename: r.filename,
+                    mimeType: r.mime_type,
+                    s3Key: r.s3_key,
+                    sizeBytes: Number(r.size_bytes),
+                    createdAt: r.created_at,
+                    conversationId: r.conversation_id,
+                    source: 'assistant',
+                    fileType: 'generated'
+                }));
+                files.push(...artifacts);
+            }
+        } finally {
+            await conn.end();
+        }
 
-        res.json({ files, prefix, truncated: resp.IsTruncated ?? false });
+        res.json({ files, count: files.length, type });
     } catch (err) {
         console.error('[harness] list_workspace_files error:', err.message);
         res.status(500).json({ error: err.message });
@@ -1934,7 +2065,8 @@ app.post('/turn', async (req, res) => {
 \nYou have access to write_file(path, content, overwrite?) to save text files to the user's workspace. Files appear immediately in the workspace FILES tab.\
 - Use this when the user asks to save, export, or persist text content as a file.\
 - path is relative to the workspace root (e.g. "summary.md", "notes/q1.txt"). No absolute paths or traversal.\
-- overwrite defaults to false — omit it unless replacing an existing file.`);
+- overwrite defaults to false — omit it unless replacing an existing file.\
+\nUse list_workspace_files(type=generated) to see assistant-created artifacts from prior conversations. Use read_workspace_file(fileId) to read content of any workspace file by ID.`);
         if (systemPrompt) contextParts.push(systemPrompt);
 
         // ADO#3089 — inject session context recap on cold-start CC turns with existing history
@@ -2150,7 +2282,8 @@ app.post('/turn', async (req, res) => {
 \nYou have access to write_file(path, content, overwrite?) to save text files to the user's workspace. Files appear immediately in the workspace FILES tab.\
 - Use this when the user asks to save, export, or persist text content as a file.\
 - path is relative to the workspace root (e.g. "summary.md", "notes/q1.txt"). No absolute paths or traversal.\
-- overwrite defaults to false — omit it unless replacing an existing file.`);
+- overwrite defaults to false — omit it unless replacing an existing file.\
+\nUse list_workspace_files(type=generated) to see assistant-created artifacts from prior conversations. Use read_workspace_file(fileId) to read content of any workspace file by ID.`);
             if (systemPrompt) systemParts.push(systemPrompt);
             if (systemParts.length === 0) {
                 systemParts.push('You are a helpful AI assistant.');
@@ -2286,14 +2419,40 @@ app.post('/turn', async (req, res) => {
                     {
                         toolSpec: {
                             name: 'list_workspace_files',
-                            description: 'List files in the user workspace. Returns filename, size, and last modified date.',
+                            description: 'List files in the user workspace. Use type=files for uploaded files, type=generated for AI-created artifacts, type=all for everything (default).',
                             inputSchema: {
                                 json: {
                                     type: 'object',
                                     properties: {
+                                        type: {
+                                            type: 'string',
+                                            enum: ['files', 'generated', 'all'],
+                                            description: 'Which files to list: "files" = user uploads, "generated" = assistant-created artifacts, "all" = both (default)'
+                                        },
                                         folder: {
                                             type: 'string',
-                                            description: 'Optional subfolder path within the workspace (e.g. "memory" or "artifacts"). Omit for root workspace listing.'
+                                            description: 'Optional subfolder path filter (for user uploads only)'
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
+                        toolSpec: {
+                            name: 'read_workspace_file',
+                            description: 'Read the content of a workspace file by ID or path. Returns text content for text/markdown/html/json files. Returns metadata only for binary files.',
+                            inputSchema: {
+                                json: {
+                                    type: 'object',
+                                    properties: {
+                                        fileId: {
+                                            type: 'string',
+                                            description: 'The UUID of the file (from list_workspace_files results)'
+                                        },
+                                        path: {
+                                            type: 'string',
+                                            description: 'Filename or path of the file (alternative to fileId)'
                                         }
                                     }
                                 }
@@ -2500,7 +2659,7 @@ app.post('/turn', async (req, res) => {
                                 const wsRes = await fetch(`http://localhost:${PORT}/tools/list_workspace_files`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ userId, folder: toolInput.folder || '' })
+                                    body: JSON.stringify({ userId, folder: toolInput.folder || '', type: toolInput.type || 'all' })
                                 });
                                 const wsData = await wsRes.json();
                                 toolResultText = `\n\n[Workspace Files]\n${JSON.stringify(wsData, null, 2)}\n\n`;
@@ -2508,6 +2667,21 @@ app.post('/turn', async (req, res) => {
                             } catch (wsErr) {
                                 toolResultText = `\n\n[Workspace Files Error]\n${wsErr.message}\n\n`;
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${wsErr.message.substring(0,100)}`);
+                            }
+                        } else if (toolUseAccumulator.name === 'read_workspace_file') {
+                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
+                            try {
+                                const rwfRes = await fetch(`http://localhost:${PORT}/tools/read_workspace_file`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, ...toolInput })
+                                });
+                                toolResult = await rwfRes.json();
+                                toolResultText = toolResult.content ?? (toolResult.note || JSON.stringify(toolResult));
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
+                            } catch (rwfErr) {
+                                toolResultText = `\n\n[Read Workspace File Error]\n${rwfErr.message}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${rwfErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'read_memory') {
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));

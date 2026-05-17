@@ -106,9 +106,16 @@ public class WorkspaceUploadService : IWorkspaceUploadService
 
     public async Task<WorkspaceUpload> SaveUploadAsync(Guid userId, Guid? folderId, string filename, string mimeType, Stream content)
     {
-        var id = Guid.NewGuid();
         var safeFilename = Path.GetFileName(filename);
-        var s3Key = $"workspaces/{userId}/files/{folderId?.ToString() ?? "root"}/{safeFilename}";
+        var sizeBytes = content.CanSeek ? content.Length : 0;
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var existingFile = await db.WorkspaceUploads
+            .FirstOrDefaultAsync(u => u.UserId == userId && u.Filename == safeFilename && u.FolderId == folderId);
+
+        var versionNumber = (existingFile?.CurrentVersion ?? 0) + 1;
+        var s3Key = $"workspaces/{userId}/files/{folderId?.ToString() ?? "root"}/v{versionNumber}/{safeFilename}";
 
         await _s3.PutObjectAsync(new PutObjectRequest
         {
@@ -118,28 +125,53 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             ContentType = mimeType
         });
 
-        var sizeBytes = content.CanSeek ? content.Length : 0;
-
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var upload = new WorkspaceUpload
+        var versionRow = new WorkspaceFileVersion
         {
-            Id = id,
-            UserId = userId,
-            FolderId = folderId,
-            Filename = safeFilename,
-            MimeType = mimeType,
+            Id = Guid.NewGuid(),
+            FileId = existingFile?.Id ?? Guid.NewGuid(),
+            VersionNumber = versionNumber,
             S3Key = s3Key,
             SizeBytes = sizeBytes,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "user"
         };
-        db.WorkspaceUploads.Add(upload);
+
+        WorkspaceUpload upload;
+        if (existingFile != null)
+        {
+            existingFile.S3Key = s3Key;
+            existingFile.SizeBytes = sizeBytes;
+            existingFile.CurrentVersion = versionNumber;
+            existingFile.Source = "user";
+            versionRow.FileId = existingFile.Id;
+            upload = existingFile;
+        }
+        else
+        {
+            upload = new WorkspaceUpload
+            {
+                Id = versionRow.FileId,
+                UserId = userId,
+                FolderId = folderId,
+                Filename = safeFilename,
+                MimeType = mimeType,
+                S3Key = s3Key,
+                SizeBytes = sizeBytes,
+                CreatedAt = DateTime.UtcNow,
+                CurrentVersion = 1,
+                Source = "user"
+            };
+            db.WorkspaceUploads.Add(upload);
+        }
+
+        db.WorkspaceFileVersions.Add(versionRow);
+
         try
         {
             await db.SaveChangesAsync();
         }
         catch
         {
-            // Rollback: delete the S3 object we just uploaded
             try { await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = s3Key }); }
             catch { /* best-effort cleanup */ }
             throw;
