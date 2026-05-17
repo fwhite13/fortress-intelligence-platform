@@ -50,6 +50,7 @@ public class ScheduledTaskBackgroundService : BackgroundService
 
         var now = DateTime.UtcNow;
         var dueTasks = await ctx.ScheduledTasks
+            .Include(t => t.Project)
             .Where(t => t.IsActive && t.NextRunAt != null && t.NextRunAt <= now)
             .ToListAsync(ct);
 
@@ -123,12 +124,41 @@ public class ScheduledTaskBackgroundService : BackgroundService
                 .Distinct()
                 .ToList();
 
+            // ADO#3394 — Build KbFlags from project settings (or all-false if no project).
+            // Sending null triggers fail-CLOSED in harness (ADO#3350): always send explicit flags.
+            // Project.TeamKbs is a Conversation-level concept; scheduled tasks never have team KB context.
+            KbFlags scheduledTaskKbFlags;
+            if (task.ProjectId.HasValue && task.Project != null)
+            {
+                var proj = task.Project;
+                var personalEnabled = proj.EnablePersonalKb;
+                scheduledTaskKbFlags = new KbFlags(
+                    CorpKbEnabled: proj.EnableFortressKb,
+                    PersonalKbEnabled: personalEnabled,
+                    TeamKbEnabled: false,   // Projects have no TeamKbs nav — team KB not applicable for scheduled tasks
+                    PersonalKbUserId: personalEnabled ? userId : null,
+                    TeamIds: null
+                );
+            }
+            else
+            {
+                // No project — all KBs off. Explicit flags prevent harness fail-CLOSED ambiguity.
+                scheduledTaskKbFlags = new KbFlags(
+                    CorpKbEnabled: false,
+                    PersonalKbEnabled: false,
+                    TeamKbEnabled: false,
+                    PersonalKbUserId: null,
+                    TeamIds: null
+                );
+            }
+
             var turnRequest = new TurnRequest(
                 UserId: userId,
                 Message: task.Prompt,
                 IsScheduledTask: true,
                 TaskMode: task.TaskMode,
-                EnabledMcpSlugs: enabledMcpSlugs.Count > 0 ? enabledMcpSlugs : null
+                EnabledMcpSlugs: enabledMcpSlugs.Count > 0 ? enabledMcpSlugs : null,
+                KbFlags: scheduledTaskKbFlags
             );
 
             var sb = new System.Text.StringBuilder();
