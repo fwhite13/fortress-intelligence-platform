@@ -273,8 +273,14 @@ async function getSecret(secretArn) {
 // ─── pgvector Memory Service (ADO#3397 Feature 7.3) ─────────────────────
 
 async function initPgVector() {
+    const secretArn = process.env.PGVECTOR_SECRET_ARN;
+    if (!secretArn) {
+        console.warn('[pgvector] PGVECTOR_SECRET_ARN not set — pgvector disabled');
+        pgPool = null;
+        return;
+    }
     try {
-        const secretJson = await getSecret('arn:aws:secretsmanager:us-east-1:742932328420:secret:fortress-tools/pgvector-connection-wx0f9F');
+        const secretJson = await getSecret(secretArn);
         const { username, password, host, port, dbname } = JSON.parse(secretJson);
         pgPool = new Pool({
             user: username,
@@ -2263,7 +2269,7 @@ app.post('/turn', async (req, res) => {
         contextParts.push(`## Session Identifiers\nuserId: ${userId}`);
         if (userMd) contextParts.push(`## About the User\n${userMd}`);
         // ADO#3397 — semantic memory injection (replaces MEMORY.md for vectorized users)
-        if (pgPool && memoryMd) {
+        if (pgPool) {
             const semanticChunks = await searchMemoryChunks(userId, message, 5, 0.7);
             if (semanticChunks && semanticChunks.length > 0) {
                 const semanticContext = semanticChunks
@@ -2583,7 +2589,7 @@ You have access to the user's workspace files and memory topics. When the user a
             if (userEmail) systemParts.push(`## User Identity\nEmail: ${userEmail}`);
             if (userMd) systemParts.push(`## About the User\n${userMd}`);
             // ADO#3397 — semantic memory injection (replaces MEMORY.md for vectorized users)
-            if (pgPool && memoryMd) {
+            if (pgPool) {
                 const semanticChunks = await searchMemoryChunks(userId, message, 5, 0.7);
                 if (semanticChunks && semanticChunks.length > 0) {
                     const semanticContext = semanticChunks
