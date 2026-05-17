@@ -57,7 +57,8 @@ public record TurnRequest(
     bool KbWriteAllowed = true,
     string? ConversationId = null,
     List<string>? EnabledMcpSlugs = null,
-    KbFlags? KbFlags = null
+    KbFlags? KbFlags = null,
+    string? Model = null   // ADO#3395 — per-turn model override; null = use harness default
 );
 
 // ADO#3241 — KB flags passed to harness for harness-side KB retrieval

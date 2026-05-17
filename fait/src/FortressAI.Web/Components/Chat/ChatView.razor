@@ -928,6 +928,7 @@ else
                 SystemPrompt: string.IsNullOrEmpty(effectiveSystemPrompt) ? null : effectiveSystemPrompt,
                 ConversationId: conversation.Id.ToString(),
                 EnabledMcpSlugs: enabledMcpSlugs.Count > 0 ? enabledMcpSlugs : null,
+                Model: currentModel,
                 // ADO#3316-fix: always send KbFlags (never null) so harness preference gate fires even when all KBs are off
                 KbFlags: new KbFlags(
                     CorpKbEnabled: hasCorpKb,
@@ -1521,7 +1522,8 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
                 UserId: Session.UserId.ToString(),
                 Message: "__resumption_brief__",
                 History: recentHistory.Any() ? recentHistory : null,
-                TaskMode: false
+                TaskMode: false,
+                Model: currentModel
             );
 
             await foreach (var evt in AgentRuntime.SendTurnAsync(Session.UserId.ToString(), briefRequest, CancellationToken.None))

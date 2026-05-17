@@ -1637,6 +1637,8 @@ app.post('/turn', async (req, res) => {
     const userEmail       = rawBody.UserEmail       ?? rawBody.userEmail       ?? null;
     const isScheduledTask = rawBody.IsScheduledTask ?? rawBody.isScheduledTask ?? false;
     const kbWriteAllowed  = rawBody.KbWriteAllowed  ?? rawBody.kbWriteAllowed  ?? true;
+    // ADO#3395 — per-turn model override; null falls back to MODEL_ID env constant
+    const modelId = rawBody.Model ?? rawBody.model ?? process.env.MODEL_ID ?? MODEL_ID;
     const conversationId  = rawBody.ConversationId  ?? rawBody.conversationId  ?? '';
     const enabledMcpSlugs = rawBody.EnabledMcpSlugs ?? rawBody.enabledMcpSlugs ?? [];
     // ADO#3249 — scheduled tasks with MCP slugs must use Bedrock path so toolConfig is built.
@@ -1739,7 +1741,7 @@ app.post('/turn', async (req, res) => {
 
                 try {
                     const summaryCmd = new ConverseStreamCommand({
-                        modelId: MODEL_ID,
+                        modelId: modelId,
                         messages: [{ role: 'user', content: [{ text: summaryPrompt }] }],
                         inferenceConfig: { maxTokens: 80, temperature: 0.3 }
                     });
@@ -2305,7 +2307,7 @@ app.post('/turn', async (req, res) => {
             const toolConfig = { tools: allTools, toolChoice: { auto: {} } };
             console.log(`[harness] /turn: toolConfig built — totalTools=${allTools.length}, toolNames=[${allTools.map(t => t.toolSpec?.name).join(',')}]`);
 
-            console.log(`[harness] /turn: calling bedrockClient.send for userId=${userId}, modelId=${MODEL_ID}`);
+            console.log(`[harness] /turn: calling bedrockClient.send for userId=${userId}, modelId=${modelId}`);
             let tokenCount = 0;
             let inputTokens = 0;
             let outputTokens = 0;
@@ -2333,7 +2335,7 @@ app.post('/turn', async (req, res) => {
                 const pendingToolResults = [];
 
                 const cmd = new ConverseStreamCommand({
-                    modelId: MODEL_ID,
+                    modelId: modelId,
                     messages,
                     system: [{ text: fullSystemPrompt }],
                     inferenceConfig: { maxTokens: 4096, temperature: 0.7 },
