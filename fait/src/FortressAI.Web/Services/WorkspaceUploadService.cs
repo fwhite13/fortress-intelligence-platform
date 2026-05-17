@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FortressAI.Web.Services;
 
+public record BulkDeleteResult(int Succeeded, List<Guid> FailedIds, List<string> Errors);
+
 public class WorkspaceUploadService : IWorkspaceUploadService
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
@@ -69,6 +71,16 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             }
         }
 
+        // C3: Delete all version rows for files in this folder tree
+        var uploadIds = await CollectUploadIdsRecursiveAsync(db, userId, folderId);
+        if (uploadIds.Count > 0)
+        {
+            var versionRowsToDelete = await db.WorkspaceFileVersions
+                .Where(v => uploadIds.Contains(v.FileId))
+                .ToListAsync();
+            db.WorkspaceFileVersions.RemoveRange(versionRowsToDelete);
+        }
+
         var folder = await db.WorkspaceFolders.FirstOrDefaultAsync(f => f.Id == folderId && f.UserId == userId);
         if (folder != null)
         {
@@ -81,9 +93,26 @@ public class WorkspaceUploadService : IWorkspaceUploadService
     {
         var uploads = await db.WorkspaceUploads
             .Where(u => u.UserId == userId && u.FolderId == folderId)
-            .Select(u => u.S3Key)
             .ToListAsync();
-        keys.AddRange(uploads);
+
+        foreach (var upload in uploads)
+        {
+            // C3: Collect all version S3 keys for each file in the folder
+            var versionKeys = await db.WorkspaceFileVersions
+                .Where(v => v.FileId == upload.Id)
+                .Select(v => v.S3Key)
+                .ToListAsync();
+
+            foreach (var key in versionKeys)
+            {
+                if (!keys.Contains(key))
+                    keys.Add(key);
+            }
+
+            // Also include the current S3Key (may not be in version rows if versions are missing)
+            if (!keys.Contains(upload.S3Key))
+                keys.Add(upload.S3Key);
+        }
 
         var childFolders = await db.WorkspaceFolders
             .Where(f => f.UserId == userId && f.ParentId == folderId)
@@ -93,6 +122,28 @@ public class WorkspaceUploadService : IWorkspaceUploadService
         {
             await CollectS3KeysRecursiveAsync(db, userId, childId, keys);
         }
+    }
+
+    // C3: New helper — collect all upload IDs in a folder tree for version row cleanup
+    private async Task<List<Guid>> CollectUploadIdsRecursiveAsync(AppDbContext db, Guid userId, Guid folderId)
+    {
+        var ids = new List<Guid>();
+        var uploads = await db.WorkspaceUploads
+            .Where(u => u.UserId == userId && u.FolderId == folderId)
+            .Select(u => u.Id)
+            .ToListAsync();
+        ids.AddRange(uploads);
+
+        var childFolders = await db.WorkspaceFolders
+            .Where(f => f.UserId == userId && f.ParentId == folderId)
+            .Select(f => f.Id)
+            .ToListAsync();
+        foreach (var childId in childFolders)
+        {
+            var childIds = await CollectUploadIdsRecursiveAsync(db, userId, childId);
+            ids.AddRange(childIds);
+        }
+        return ids;
     }
 
     public async Task<List<WorkspaceUpload>> GetFilesAsync(Guid userId, Guid? folderId = null)
@@ -107,7 +158,15 @@ public class WorkspaceUploadService : IWorkspaceUploadService
     public async Task<WorkspaceUpload> SaveUploadAsync(Guid userId, Guid? folderId, string filename, string mimeType, Stream content)
     {
         var safeFilename = Path.GetFileName(filename);
-        var sizeBytes = content.CanSeek ? content.Length : 0;
+
+        // I7: Buffer stream upfront — stream.Length throws on non-seekable streams (e.g., HTTP multipart)
+        byte[] fileBytes;
+        using (var ms = new MemoryStream())
+        {
+            await content.CopyToAsync(ms);
+            fileBytes = ms.ToArray();
+        }
+        var sizeBytes = (long)fileBytes.Length;
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -121,7 +180,7 @@ public class WorkspaceUploadService : IWorkspaceUploadService
         {
             BucketName = _bucket,
             Key = s3Key,
-            InputStream = content,
+            InputStream = new MemoryStream(fileBytes),
             ContentType = mimeType
         });
 
@@ -185,7 +244,31 @@ public class WorkspaceUploadService : IWorkspaceUploadService
         var upload = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == fileId && u.UserId == userId);
         if (upload == null) return;
 
-        await _s3.DeleteObjectAsync(_bucket, upload.S3Key);
+        // C3: Delete all version S3 objects before removing DB rows
+        var versions = await db.WorkspaceFileVersions
+            .Where(v => v.FileId == fileId)
+            .ToListAsync();
+
+        // Delete all version S3 keys (deduplicate)
+        var allS3Keys = versions.Select(v => v.S3Key).Distinct().ToList();
+        // Also include the current S3Key in case it differs
+        if (!allS3Keys.Contains(upload.S3Key))
+            allS3Keys.Add(upload.S3Key);
+
+        foreach (var key in allS3Keys)
+        {
+            try
+            {
+                await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = key });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[WorkspaceUploadService] DeleteFileAsync: failed to delete S3 key {Key}", key);
+            }
+        }
+
+        // Remove version rows and upload row
+        db.WorkspaceFileVersions.RemoveRange(versions);
         db.WorkspaceUploads.Remove(upload);
         await db.SaveChangesAsync();
     }
@@ -287,9 +370,30 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             .FirstOrDefaultAsync(v => v.FileId == fileId && v.VersionNumber == versionNumber);
         if (version == null) return null;
 
+        // I4: Rollback = create a NEW version pointing to the old S3 key (preserves audit trail)
+        // Do NOT reset CurrentVersion to versionNumber — that causes collisions with existing version rows
+        var maxVersion = await db.WorkspaceFileVersions
+            .Where(v => v.FileId == fileId)
+            .MaxAsync(v => (int?)v.VersionNumber) ?? file.CurrentVersion;
+
+        var newVersionNumber = maxVersion + 1;
+
+        var newVersionRow = new WorkspaceFileVersion
+        {
+            Id = Guid.NewGuid(),
+            FileId = fileId,
+            VersionNumber = newVersionNumber,
+            S3Key = version.S3Key,
+            SizeBytes = version.SizeBytes,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "rollback"
+        };
+        db.WorkspaceFileVersions.Add(newVersionRow);
+
         file.S3Key = version.S3Key;
-        file.CurrentVersion = versionNumber;
+        file.CurrentVersion = newVersionNumber;
         file.SizeBytes = version.SizeBytes;
+
         await db.SaveChangesAsync();
         return file;
     }
@@ -316,14 +420,27 @@ public class WorkspaceUploadService : IWorkspaceUploadService
         return file;
     }
 
-    public async Task<int> BulkDeleteFilesAsync(Guid userId, List<Guid> fileIds)
+    public async Task<BulkDeleteResult> BulkDeleteFilesAsync(Guid userId, List<Guid> fileIds)
     {
-        var count = 0;
+        var succeeded = 0;
+        var failedIds = new List<Guid>();
+        var errors = new List<string>();
+
         foreach (var fileId in fileIds)
         {
-            await DeleteFileAsync(userId, fileId);
-            count++;
+            try
+            {
+                await DeleteFileAsync(userId, fileId);
+                succeeded++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[WorkspaceUploadService] BulkDeleteFilesAsync: failed to delete fileId={FileId}", fileId);
+                failedIds.Add(fileId);
+                errors.Add(ex.Message);
+            }
         }
-        return count;
+
+        return new BulkDeleteResult(succeeded, failedIds, errors);
     }
 }

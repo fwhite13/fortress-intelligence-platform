@@ -307,7 +307,7 @@
                 }
                 else if (_artifacts.Count == 0)
                 {
-                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 64px 0; gap: 16px; color: var(--color-text-secondary); text-align: center;">
+                    <div class="workspace-generated-empty">
                         <MudIcon Icon="@Icons.Material.Filled.Description" Size="Size.Large" />
                         <MudText>No files yet. Ask your assistant to create a document to get started.</MudText>
                     </div>
@@ -335,7 +335,7 @@
                                             bool previewSupported = artifact.MimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
                                         }
                                         <MudTd>
-                                            <div style="display: flex; align-items: center; gap: 8px;">
+                                            <div class="workspace-artifact-name-cell">
                                                 <MudIcon Icon="@GetFileIcon(artifact.MimeType)" Size="Size.Small" />
                                                 <MudText Typo="Typo.body2">@artifact.Filename</MudText>
                                             </div>
@@ -608,6 +608,21 @@
     }
     .workspace-move-item:hover {
         background: rgba(0,0,0,0.06);
+    }
+    .workspace-generated-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: var(--nav-height, 64px) 0;
+        gap: var(--space-4, 16px);
+        color: var(--color-text-secondary);
+        text-align: center;
+    }
+    .workspace-artifact-name-cell {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2, 8px);
     }
 </style>
 
@@ -950,8 +965,11 @@
         if (_selectedFileIds.Count == 0) return;
         try
         {
-            await UploadSvc.BulkDeleteFilesAsync(Session.UserId, _selectedFileIds.ToList());
-            Snackbar.Add($"Deleted {_selectedFileIds.Count} file(s).", Severity.Success);
+            var result = await UploadSvc.BulkDeleteFilesAsync(Session.UserId, _selectedFileIds.ToList());
+            if (result.FailedIds.Count > 0)
+                Snackbar.Add($"Deleted {result.Succeeded} file(s). {result.FailedIds.Count} failed.", Severity.Warning);
+            else
+                Snackbar.Add($"Deleted {result.Succeeded} file(s).", Severity.Success);
             await LoadFilesAsync();
         }
         catch (Exception ex)

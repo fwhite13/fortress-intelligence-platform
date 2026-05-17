@@ -329,8 +329,16 @@ public class WorkspaceController : ControllerBase
         if (userId == null) return Unauthorized();
         if (request.FileIds == null || request.FileIds.Count == 0)
             return BadRequest(new { error = "FileIds is required" });
-        var count = await _uploadService.BulkDeleteFilesAsync(userId.Value, request.FileIds);
-        return Ok(new { deleted = count });
+        var result = await _uploadService.BulkDeleteFilesAsync(userId.Value, request.FileIds);
+        if (result.FailedIds.Count > 0)
+        {
+            return StatusCode(207, new {
+                succeeded = result.Succeeded,
+                failed = result.FailedIds,
+                errors = result.Errors
+            });
+        }
+        return Ok(new { deleted = result.Succeeded });
     }
 
     private Guid? GetCurrentUserId()

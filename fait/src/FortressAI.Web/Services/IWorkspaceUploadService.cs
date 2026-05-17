@@ -17,5 +17,5 @@ public interface IWorkspaceUploadService
     Task<WorkspaceUpload?> RollbackFileAsync(Guid userId, Guid fileId, int versionNumber);
     Task<WorkspaceUpload?> RenameFileAsync(Guid userId, Guid fileId, string newFilename);
     Task<WorkspaceUpload?> MoveFileAsync(Guid userId, Guid fileId, Guid? newFolderId);
-    Task<int> BulkDeleteFilesAsync(Guid userId, List<Guid> fileIds);
+    Task<BulkDeleteResult> BulkDeleteFilesAsync(Guid userId, List<Guid> fileIds);
 }
