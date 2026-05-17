@@ -8,6 +8,7 @@ const { BedrockRuntimeClient, ConverseStreamCommand } = require('@aws-sdk/client
 const { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const { BedrockAgentRuntimeClient, RetrieveCommand } = require('@aws-sdk/client-bedrock-agent-runtime');
 const mysql = require('mysql2/promise');
+const crypto = require('crypto');
 
 const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
@@ -1139,7 +1140,7 @@ app.post('/tools/write_file', async (req, res) => {
     const { userId, conversationId, path: filePath, content, overwrite } = req.body;
 
     // 1. Validate required inputs
-    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!filePath) return res.status(400).json({ error: 'path is required' });
     if (content === undefined || content === null) return res.status(400).json({ error: 'content is required' });
 
@@ -1157,7 +1158,7 @@ app.post('/tools/write_file', async (req, res) => {
     try {
         // 4. Sanitize filename from path — use the basename
         const filename = filePath.split('/').pop() || filePath;
-        const s3Key = `workspaces/${userId}/files/${filePath}`;
+        const s3Key = `workspaces/${userId}/files/root/${filename}`;
 
         // 5. Detect MIME type from extension
         const ext = filename.split('.').pop()?.toLowerCase() || '';
@@ -1204,16 +1205,15 @@ app.post('/tools/write_file', async (req, res) => {
 
         const sizeBytes = contentBuffer.length;
 
-        // 8. Insert row into user_workspace_files
+        // 8. Insert row into user_workspace_uploads
         // UUID storage: CHAR(36) plain string — no BIN conversion
         const conn = await getDbConnection();
         try {
-            const fileId = require('crypto').randomUUID();
-            const convId = conversationId || '00000000-0000-0000-0000-000000000000';
+            const fileId = crypto.randomUUID();
             const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
             await conn.execute(
-                'INSERT INTO user_workspace_files (id, user_id, conversation_id, task_run_id, filename, mime_type, s3_key, size_bytes, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)',
-                [fileId, userId, convId, filename, mimeType, s3Key, sizeBytes, now]
+                'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)',
+                [fileId, userId, filename, mimeType, s3Key, sizeBytes, now]
             );
         } finally {
             await conn.end();
