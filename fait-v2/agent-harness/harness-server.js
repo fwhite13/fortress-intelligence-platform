@@ -1894,6 +1894,7 @@ app.post('/turn', async (req, res) => {
             env: {
                 ...process.env,
                 CLAUDE_CODE_ENTRYPOINT: 'fargate-harness',
+                CLAUDE_CODE_USE_BEDROCK: '1',
                 CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
                 CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1',
                 HARNESS_KB_WRITE_ALLOWED: String(kbWriteAllowed),
