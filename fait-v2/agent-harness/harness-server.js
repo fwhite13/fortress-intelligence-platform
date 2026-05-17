@@ -2140,6 +2140,7 @@ app.post('/turn', async (req, res) => {
                 // Double-retrieval guard: if systemPrompt already contains KB context injected by Blazor, skip
                 const alreadyHasCorpKb = systemPrompt && systemPrompt.includes('## Knowledge Base Context');
                 const alreadyHasPersonalKb = systemPrompt && systemPrompt.includes('## Personal/Team Knowledge Base Context');
+                const alreadyHasTeamKb = systemPrompt && systemPrompt.includes('## Personal/Team Knowledge Base Context (Team ');
 
                 const personalKbUserId = kbFlags.PersonalKbUserId ?? kbFlags.personalKbUserId ?? null;
                 const teamIds = kbFlags.TeamIds ?? kbFlags.teamIds ?? null;
@@ -2166,8 +2167,10 @@ app.post('/turn', async (req, res) => {
                                 }
                             }).catch(err => console.error('[harness] CC KB personal retrieval error:', err.message))
                     );
+                } else if ((kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled) && !alreadyHasPersonalKb && !personalKbUserId) {
+                    console.warn('[harness] CC KB: PersonalKbEnabled but no personalKbUserId — skipping for security');
                 }
-                if ((kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled) && !alreadyHasPersonalKb && teamIds && teamIds.length > 0 && process.env.TEAM_KB_ID) {
+                if ((kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled) && !alreadyHasTeamKb && teamIds && teamIds.length > 0 && process.env.TEAM_KB_ID) {
                     for (const teamId of teamIds) {
                         kbPromises.push(
                             retrieveFromKbFiltered(process.env.TEAM_KB_ID, message, 'teamId', teamId, 5)
