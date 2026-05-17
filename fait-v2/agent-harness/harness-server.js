@@ -2128,6 +2128,66 @@ app.post('/turn', async (req, res) => {
             console.log(`[harness] /turn: injected session recap (${recap.length} chars, ${recentMessages.length} messages) into CC context`);
         }
 
+        // ADO#3392 — KB retrieval for CC spawn path
+        // Must run before briefContent assembly so CC child receives KB context
+        const ccKbParts = [];
+        {
+            const kbFlags = rawBody.KbFlags ?? rawBody.kbFlags ?? null;
+            if (kbFlags && (kbFlags.CorpKbEnabled || kbFlags.corpKbEnabled ||
+                            kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled ||
+                            kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled)) {
+
+                // Double-retrieval guard: if systemPrompt already contains KB context injected by Blazor, skip
+                const alreadyHasCorpKb = systemPrompt && systemPrompt.includes('## Knowledge Base Context');
+                const alreadyHasPersonalKb = systemPrompt && systemPrompt.includes('## Personal/Team Knowledge Base Context');
+
+                const personalKbUserId = kbFlags.PersonalKbUserId ?? kbFlags.personalKbUserId ?? null;
+                const teamIds = kbFlags.TeamIds ?? kbFlags.teamIds ?? null;
+                const kbPromises = [];
+
+                if ((kbFlags.CorpKbEnabled || kbFlags.corpKbEnabled) && !alreadyHasCorpKb && process.env.CORP_KB_ID) {
+                    kbPromises.push(
+                        retrieveFromKbFiltered(process.env.CORP_KB_ID, message, null, null, 5)
+                            .then(results => {
+                                if (results.length > 0) {
+                                    const text = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
+                                    ccKbParts.push(`## Knowledge Base Context\nThe following information was retrieved from the organization's knowledge base:\n\n${text}`);
+                                }
+                            }).catch(err => console.error('[harness] CC KB corp retrieval error:', err.message))
+                    );
+                }
+                if ((kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled) && !alreadyHasPersonalKb && personalKbUserId && process.env.PERSONAL_KB_ID) {
+                    kbPromises.push(
+                        retrieveFromKbFiltered(process.env.PERSONAL_KB_ID, message, 'ownerId', personalKbUserId, 5)
+                            .then(results => {
+                                if (results.length > 0) {
+                                    const text = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
+                                    ccKbParts.push(`## Personal/Team Knowledge Base Context\nThe following information was retrieved from the user's knowledge base:\n\n${text}`);
+                                }
+                            }).catch(err => console.error('[harness] CC KB personal retrieval error:', err.message))
+                    );
+                }
+                if ((kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled) && !alreadyHasPersonalKb && teamIds && teamIds.length > 0 && process.env.TEAM_KB_ID) {
+                    for (const teamId of teamIds) {
+                        kbPromises.push(
+                            retrieveFromKbFiltered(process.env.TEAM_KB_ID, message, 'teamId', teamId, 5)
+                                .then(results => {
+                                    if (results.length > 0) {
+                                        const text = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
+                                        ccKbParts.push(`## Personal/Team Knowledge Base Context (Team ${teamId})\nThe following information was retrieved from the team's knowledge base:\n\n${text}`);
+                                    }
+                                }).catch(err => console.error(`[harness] CC KB team ${teamId} retrieval error:`, err.message))
+                        );
+                    }
+                }
+                await Promise.all(kbPromises);
+            }
+        }
+        if (ccKbParts.length > 0) {
+            contextParts.push(...ccKbParts);
+            console.log(`[harness] CC spawn: injected ${ccKbParts.length} KB section(s) into contextParts for userId=${userId}`);
+        }
+
         const fullContext = contextParts.join('\n\n---\n\n');
         const briefContent = fullContext
             ? `${fullContext}\n\n---\n\nUser: ${message}`
