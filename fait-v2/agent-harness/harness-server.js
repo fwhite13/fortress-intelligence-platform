@@ -1205,28 +1205,60 @@ app.post('/tools/write_file', async (req, res) => {
 
         const sizeBytes = contentBuffer.length;
 
-        // 8. Insert row into user_workspace_uploads
-        // UUID storage: CHAR(36) plain string — no BIN conversion
+        // 8. Check DB for existing row (needed for overwrite path)
         const conn = await getDbConnection();
         try {
-            const fileId = crypto.randomUUID();
             const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-            await conn.execute(
-                'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)',
-                [fileId, userId, filename, mimeType, s3Key, sizeBytes, now]
+
+            // Check if a DB row already exists for this file
+            const [existingRows] = await conn.execute(
+                'SELECT id, current_version FROM user_workspace_uploads WHERE user_id = ? AND filename = ? AND folder_id IS NULL LIMIT 1',
+                [userId, filename]
             );
-            // Insert version row
-            const versionId = crypto.randomUUID();
-            await conn.execute(
-                'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by) VALUES (?, ?, 1, ?, ?, ?, ?)',
-                [versionId, fileId, s3Key, sizeBytes, now, 'assistant']
-            );
+
+            if (existingRows.length > 0 && overwrite) {
+                // File exists in DB and overwrite=true: UPDATE existing row, INSERT new version
+                const existingId = existingRows[0].id;
+                const newVersion = (existingRows[0].current_version || 1) + 1;
+
+                await conn.execute(
+                    'UPDATE user_workspace_uploads SET s3_key = ?, size_bytes = ?, current_version = ? WHERE id = ?',
+                    [s3Key, sizeBytes, newVersion, existingId]
+                );
+
+                const versionId = crypto.randomUUID();
+                await conn.execute(
+                    'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [versionId, existingId, newVersion, s3Key, sizeBytes, now, 'assistant']
+                );
+
+                console.log(`[harness] write_file: updated ${filename} to ${s3Key} (${sizeBytes} bytes, v${newVersion})`);
+                res.json({ success: true, filename, s3Key, sizeBytes, mimeType, updated: true });
+
+            } else if (existingRows.length === 0) {
+                // New file: INSERT both upload row and version row (original path)
+                const fileId = crypto.randomUUID();
+                await conn.execute(
+                    'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at, current_version) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 1)',
+                    [fileId, userId, filename, mimeType, s3Key, sizeBytes, now]
+                );
+                const versionId = crypto.randomUUID();
+                await conn.execute(
+                    'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by) VALUES (?, ?, 1, ?, ?, ?, ?)',
+                    [versionId, fileId, s3Key, sizeBytes, now, 'assistant']
+                );
+
+                console.log(`[harness] write_file: saved ${filename} to ${s3Key} (${sizeBytes} bytes)`);
+                res.json({ success: true, filename, s3Key, sizeBytes, mimeType });
+
+            } else {
+                // existingRows.length > 0 AND overwrite is false: 409 (shouldn't reach here normally
+                // because we check S3 above, but guard DB state inconsistency)
+                res.status(409).json({ error: `File already exists: ${filePath}. Set overwrite=true to replace it.` });
+            }
         } finally {
             await conn.end();
         }
-
-        console.log(`[harness] write_file: saved ${filename} to ${s3Key} (${sizeBytes} bytes)`);
-        res.json({ success: true, filename, s3Key, sizeBytes, mimeType });
 
     } catch (err) {
         console.error('[harness] write_file error:', err.message);
