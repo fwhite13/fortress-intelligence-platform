@@ -1,6 +1,7 @@
 @page "/workspace"
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
+@using Microsoft.EntityFrameworkCore
 @inject UserSessionService Session
 @inject IWorkspaceFileService WorkspaceFileSvc
 @inject IWorkspaceUploadService UploadSvc
@@ -10,6 +11,7 @@
 @inject IJSRuntime JSRuntime
 @inject ISnackbar Snackbar
 @inject ILogger<WorkspaceFiles> Logger
+@inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
 @implements IDisposable
 
 <PageTitle>Workspace — FAIT</PageTitle>
@@ -121,6 +123,26 @@
                     </div>
                 }
 
+                @* ── Bulk actions toolbar ── *@
+                @if (_selectedFileIds.Count > 0)
+                {
+                    <div class="workspace-bulk-actions">
+                        <MudText Typo="Typo.body2">@_selectedFileIds.Count selected</MudText>
+                        <MudButton StartIcon="@Icons.Material.Filled.Delete"
+                                   Variant="Variant.Filled"
+                                   Color="Color.Error"
+                                   Size="Size.Small"
+                                   OnClick="BulkDeleteSelected">
+                            Delete Selected (@_selectedFileIds.Count)
+                        </MudButton>
+                        <MudButton Variant="Variant.Text"
+                                   Size="Size.Small"
+                                   OnClick="@(() => _selectedFileIds.Clear())">
+                            Clear Selection
+                        </MudButton>
+                    </div>
+                }
+
                 @if (_loadingFiles)
                 {
                     <div class="workspace-loading">
@@ -144,12 +166,38 @@
                                     var folder = context;
                                 }
                                 <MudTd>
-                                    <MudLink OnClick="@(() => NavigateToFolder(folder.Id, folder.Name))"
-                                             Class="workspace-folder-link">
-                                        <MudIcon Icon="@Icons.Material.Filled.Folder"
-                                                 Size="Size.Small" Class="mr-1 workspace-folder-icon" />
-                                        @folder.Name
-                                    </MudLink>
+                                    <div @oncontextmenu="@(e => ShowFolderContextMenu(e, folder))"
+                                         @oncontextmenu:preventDefault="true"
+                                         @ondragover="@(e => OnDragOverFolder(e, folder))"
+                                         @ondragover:preventDefault="true"
+                                         @ondrop="@(e => OnDropOnFolder(folder))"
+                                         class="@(_dragOverFolderId == folder.Id ? "workspace-drag-over" : "")">
+                                        @if (_renamingFolderId == folder.Id)
+                                        {
+                                            <div class="workspace-file-name-cell">
+                                                <MudIcon Icon="@Icons.Material.Filled.Folder"
+                                                         Size="Size.Small" Class="mr-1 workspace-folder-icon" />
+                                                <MudTextField @bind-Value="_renameValue"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              @onkeydown="HandleRenameKeyDown"
+                                                              @onblur="CommitFolderRename"
+                                                              Immediate="true"
+                                                              Class="workspace-rename-input" />
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div @ondblclick="@(() => StartFolderRename(folder))">
+                                                <MudLink OnClick="@(() => NavigateToFolder(folder.Id, folder.Name))"
+                                                         Class="workspace-folder-link">
+                                                    <MudIcon Icon="@Icons.Material.Filled.Folder"
+                                                             Size="Size.Small" Class="mr-1 workspace-folder-icon" />
+                                                    @folder.Name
+                                                </MudLink>
+                                            </div>
+                                        }
+                                    </div>
                                 </MudTd>
                                 <MudTd>
                                     <MudText Typo="Typo.body2">@folder.CreatedAt.ToString("MMM d, yyyy")</MudText>
@@ -170,6 +218,10 @@
                         <MudTable Items="@_uploads" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm"
                                   Class="workspace-files-table">
                             <HeaderContent>
+                                <MudTh>
+                                    <MudCheckBox T="bool" Value="@_allSelected"
+                                                 ValueChanged="ToggleSelectAll" />
+                                </MudTh>
                                 <MudTh>Name</MudTh>
                                 <MudTh>Size</MudTh>
                                 <MudTh>Created</MudTh>
@@ -178,12 +230,41 @@
                             <RowTemplate>
                                 @{
                                     var upload = context;
+                                    var isSelected = _selectedFileIds.Contains(upload.Id);
                                 }
                                 <MudTd>
-                                    <div class="workspace-file-name-cell">
-                                        <MudIcon Icon="@GetFileIcon(upload.MimeType)"
-                                                 Size="Size.Small" Class="mr-1" />
-                                        <MudText Typo="Typo.body2">@upload.Filename</MudText>
+                                    <MudCheckBox T="bool" Value="@isSelected"
+                                                 ValueChanged="@(val => ToggleFileSelection(upload.Id, val))" />
+                                </MudTd>
+                                <MudTd>
+                                    <div @oncontextmenu="@(e => ShowFileContextMenu(e, upload))"
+                                         @oncontextmenu:preventDefault="true"
+                                         draggable="true"
+                                         @ondragstart="@(() => OnDragStart(upload))"
+                                         @ondragend="OnDragEnd">
+                                        @if (_renamingFileId == upload.Id)
+                                        {
+                                            <div class="workspace-file-name-cell">
+                                                <MudIcon Icon="@GetFileIcon(upload.MimeType)"
+                                                         Size="Size.Small" Class="mr-1" />
+                                                <MudTextField @bind-Value="_renameValue"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense"
+                                                              @onkeydown="HandleRenameKeyDown"
+                                                              @onblur="CommitFileRename"
+                                                              Immediate="true"
+                                                              Class="workspace-rename-input" />
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="workspace-file-name-cell"
+                                                 @ondblclick="@(() => StartFileRename(upload))">
+                                                <MudIcon Icon="@GetFileIcon(upload.MimeType)"
+                                                         Size="Size.Small" Class="mr-1" />
+                                                <MudText Typo="Typo.body2">@upload.Filename</MudText>
+                                            </div>
+                                        }
                                     </div>
                                 </MudTd>
                                 <MudTd>
@@ -287,6 +368,249 @@
     }
 </MudContainer>
 
+@* ── Context menu ── *@
+@if (_contextMenuVisible)
+{
+    <div class="workspace-context-menu-backdrop" @onclick="CloseContextMenu"></div>
+    <div class="workspace-context-menu" style="left: @(_ctxX)px; top: @(_ctxY)px;">
+        @if (_ctxFile != null)
+        {
+            <div class="workspace-context-menu-item" @onclick="@(() => DownloadFile(_ctxFile))">
+                <MudIcon Icon="@Icons.Material.Filled.Download" Size="Size.Small" />
+                <span>Download</span>
+            </div>
+            <div class="workspace-context-menu-item" @onclick="@(() => { CloseContextMenu(); StartFileRename(_ctxFile); })">
+                <MudIcon Icon="@Icons.Material.Filled.Edit" Size="Size.Small" />
+                <span>Rename</span>
+            </div>
+            <div class="workspace-context-menu-item" @onclick="@(() => ShowMoveFilePicker(_ctxFile))">
+                <MudIcon Icon="@Icons.Material.Filled.DriveFileMove" Size="Size.Small" />
+                <span>Move</span>
+            </div>
+            <div class="workspace-context-menu-item" @onclick="@(() => ShowVersionHistory(_ctxFile))">
+                <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Small" />
+                <span>Version History</span>
+            </div>
+            <div class="workspace-context-menu-divider"></div>
+            <div class="workspace-context-menu-item workspace-context-menu-danger" @onclick="@(() => { var f = _ctxFile; CloseContextMenu(); DeleteFile(f); })">
+                <MudIcon Icon="@Icons.Material.Filled.Delete" Size="Size.Small" />
+                <span>Delete</span>
+            </div>
+        }
+        else if (_ctxFolder != null)
+        {
+            <div class="workspace-context-menu-item" @onclick="@(() => { CloseContextMenu(); StartFolderRename(_ctxFolder); })">
+                <MudIcon Icon="@Icons.Material.Filled.Edit" Size="Size.Small" />
+                <span>Rename</span>
+            </div>
+            <div class="workspace-context-menu-divider"></div>
+            <div class="workspace-context-menu-item workspace-context-menu-danger" @onclick="@(() => { var f = _ctxFolder; CloseContextMenu(); DeleteFolder(f); })">
+                <MudIcon Icon="@Icons.Material.Filled.Delete" Size="Size.Small" />
+                <span>Delete</span>
+            </div>
+        }
+    </div>
+}
+
+@* ── Version history panel ── *@
+@if (_versionPanelVisible && _versionPanelFile != null)
+{
+    <div class="workspace-version-panel">
+        <div class="workspace-version-panel-header">
+            <MudText Typo="Typo.h6">Version History: @_versionPanelFile.Filename</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="@CloseVersionPanel" />
+        </div>
+        @if (_versionsLoading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (_fileVersions != null)
+        {
+            <table class="workspace-version-table">
+                <thead>
+                    <tr>
+                        <th>Version</th>
+                        <th>Date</th>
+                        <th>Source</th>
+                        <th>Size</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var v in _fileVersions)
+                    {
+                        var localV = v;
+                        <tr class="workspace-version-row @(v.VersionNumber == _versionPanelFile.CurrentVersion ? "workspace-version-current" : "")">
+                            <td>v@(v.VersionNumber) @(v.VersionNumber == _versionPanelFile.CurrentVersion ? "(current)" : "")</td>
+                            <td>@v.CreatedAt.ToString("MMM d, yyyy h:mm tt")</td>
+                            <td>@v.CreatedBy</td>
+                            <td>@FormatSize(v.SizeBytes)</td>
+                            <td>
+                                @if (v.VersionNumber != _versionPanelFile.CurrentVersion)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                               OnClick="@(() => RestoreVersion(localV))">
+                                        Restore
+                                    </MudButton>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@* ── Move file picker panel ── *@
+@if (_movePickerVisible && _movePickerFile != null)
+{
+    <div class="workspace-version-panel">
+        <div class="workspace-version-panel-header">
+            <MudText Typo="Typo.h6">Move: @_movePickerFile.Filename</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="@CloseMoveFilePicker" />
+        </div>
+        @if (_movePickerLoading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else
+        {
+            <div class="workspace-move-list">
+                @if (_currentFolderId != null)
+                {
+                    <div class="workspace-move-item" @onclick="@(() => MoveFileToFolder(null))">
+                        <MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" />
+                        <span>Root</span>
+                    </div>
+                }
+                @if (_movePickerFolders != null)
+                {
+                    @foreach (var folder in _movePickerFolders)
+                    {
+                        var localFolder = folder;
+                        <div class="workspace-move-item" @onclick="@(() => MoveFileToFolder(localFolder.Id))">
+                            <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" />
+                            <span>@localFolder.Name</span>
+                        </div>
+                    }
+                }
+            </div>
+        }
+    </div>
+}
+
+<style>
+    .workspace-context-menu-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 999;
+    }
+    .workspace-context-menu {
+        position: fixed;
+        background: var(--color-surface, #fff);
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+        padding: var(--space-sm, 4px) 0;
+        z-index: 1000;
+        min-width: 160px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .workspace-context-menu-item {
+        padding: var(--space-sm, 6px) var(--space-md, 12px);
+        cursor: pointer;
+        font-family: var(--font-primary, inherit);
+        font-size: var(--font-size-sm, 0.875rem);
+        display: flex;
+        align-items: center;
+        gap: var(--space-sm, 6px);
+    }
+    .workspace-context-menu-item:hover {
+        background: rgba(0,0,0,0.06);
+    }
+    .workspace-context-menu-danger {
+        color: var(--color-error, #d32f2f);
+    }
+    .workspace-context-menu-divider {
+        border-top: 1px solid var(--color-border);
+        margin: 4px 0;
+    }
+    .workspace-version-panel {
+        position: fixed;
+        right: 0;
+        top: 0;
+        height: 100%;
+        width: 380px;
+        background: var(--color-surface, #fff);
+        border-left: 1px solid var(--color-border);
+        z-index: 900;
+        padding: var(--space-lg, 24px);
+        overflow-y: auto;
+        box-shadow: -2px 0 8px rgba(0,0,0,0.1);
+    }
+    .workspace-version-panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: var(--space-md, 16px);
+    }
+    .workspace-version-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--font-size-sm, 0.875rem);
+        font-family: var(--font-primary, inherit);
+    }
+    .workspace-version-table th,
+    .workspace-version-table td {
+        padding: var(--space-sm, 6px) var(--space-sm, 8px);
+        text-align: left;
+        border-bottom: 1px solid var(--color-border);
+    }
+    .workspace-version-current {
+        font-weight: 600;
+    }
+    .workspace-version-row:hover {
+        background: rgba(0,0,0,0.03);
+    }
+    .workspace-bulk-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-sm, 8px);
+        padding: var(--space-sm, 8px);
+        background: rgba(var(--color-primary-rgb, 25,118,210), 0.08);
+        border-radius: 4px;
+        margin-bottom: var(--space-sm, 8px);
+    }
+    .workspace-drag-over {
+        background: rgba(var(--color-primary-rgb, 25,118,210), 0.1);
+        outline: 2px dashed var(--color-primary);
+    }
+    .workspace-rename-input {
+        max-width: 300px;
+    }
+    .workspace-move-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .workspace-move-item {
+        padding: var(--space-sm, 8px) var(--space-md, 12px);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: var(--space-sm, 8px);
+        border-radius: 4px;
+        font-size: var(--font-size-sm, 0.875rem);
+        font-family: var(--font-primary, inherit);
+    }
+    .workspace-move-item:hover {
+        background: rgba(0,0,0,0.06);
+    }
+</style>
+
 @code {
     // ── Generated (existing) state ──────────────────────────────────────────
     private bool _loading = true;
@@ -306,6 +630,37 @@
     private bool _uploading = false;
     private Dictionary<string, int> _uploadProgress = new();
     private MudTextField<string>? _newFolderField;
+
+    // ── Context menu state ──────────────────────────────────────────────────
+    private bool _contextMenuVisible = false;
+    private double _ctxX, _ctxY;
+    private WorkspaceUpload? _ctxFile;
+    private WorkspaceFolder? _ctxFolder;
+
+    // ── Inline rename state ─────────────────────────────────────────────────
+    private Guid? _renamingFileId;
+    private Guid? _renamingFolderId;
+    private string _renameValue = "";
+
+    // ── Multi-select state ──────────────────────────────────────────────────
+    private HashSet<Guid> _selectedFileIds = new();
+    private bool _allSelected => _uploads.Count > 0 && _selectedFileIds.Count == _uploads.Count;
+
+    // ── Drag-and-drop state ─────────────────────────────────────────────────
+    private Guid? _draggingFileId;
+    private Guid? _dragOverFolderId;
+
+    // ── Version history state ───────────────────────────────────────────────
+    private bool _versionPanelVisible = false;
+    private WorkspaceUpload? _versionPanelFile;
+    private List<WorkspaceFileVersion>? _fileVersions;
+    private bool _versionsLoading = false;
+
+    // ── Move file picker state ──────────────────────────────────────────────
+    private bool _movePickerVisible = false;
+    private WorkspaceUpload? _movePickerFile;
+    private List<WorkspaceFolder>? _movePickerFolders;
+    private bool _movePickerLoading = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -332,6 +687,7 @@
         {
             _folders = await UploadSvc.GetFoldersAsync(Session.UserId, _currentFolderId);
             _uploads = await UploadSvc.GetFilesAsync(Session.UserId, _currentFolderId);
+            _selectedFileIds.Clear();
         }
         catch (Exception ex)
         {
@@ -448,6 +804,7 @@
 
     private async Task DownloadFile(WorkspaceUpload upload)
     {
+        CloseContextMenu();
         try
         {
             var url = await UploadSvc.GetPresignedUrlAsync(upload.S3Key, 30);
@@ -472,6 +829,271 @@
         {
             Logger.LogError(ex, "[WorkspaceFiles] DeleteFile failed for {Filename}", upload.Filename);
             Snackbar.Add("Failed to delete file.", Severity.Error);
+        }
+    }
+
+    // ── Context menu ────────────────────────────────────────────────────────
+
+    private void ShowFileContextMenu(MouseEventArgs e, WorkspaceUpload file)
+    {
+        _ctxX = e.ClientX;
+        _ctxY = e.ClientY;
+        _ctxFile = file;
+        _ctxFolder = null;
+        _contextMenuVisible = true;
+    }
+
+    private void ShowFolderContextMenu(MouseEventArgs e, WorkspaceFolder folder)
+    {
+        _ctxX = e.ClientX;
+        _ctxY = e.ClientY;
+        _ctxFile = null;
+        _ctxFolder = folder;
+        _contextMenuVisible = true;
+    }
+
+    private void CloseContextMenu()
+    {
+        _contextMenuVisible = false;
+        _ctxFile = null;
+        _ctxFolder = null;
+    }
+
+    // ── Inline rename ───────────────────────────────────────────────────────
+
+    private void StartFileRename(WorkspaceUpload file)
+    {
+        _renamingFileId = file.Id;
+        _renamingFolderId = null;
+        _renameValue = file.Filename;
+    }
+
+    private void StartFolderRename(WorkspaceFolder folder)
+    {
+        _renamingFolderId = folder.Id;
+        _renamingFileId = null;
+        _renameValue = folder.Name;
+    }
+
+    private async Task HandleRenameKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            if (_renamingFileId != null) await CommitFileRename();
+            else if (_renamingFolderId != null) await CommitFolderRename();
+        }
+        else if (e.Key == "Escape")
+        {
+            _renamingFileId = null;
+            _renamingFolderId = null;
+        }
+    }
+
+    private async Task CommitFileRename()
+    {
+        if (_renamingFileId == null || string.IsNullOrWhiteSpace(_renameValue)) { _renamingFileId = null; return; }
+        var fileId = _renamingFileId.Value;
+        _renamingFileId = null;
+        try
+        {
+            await UploadSvc.RenameFileAsync(Session.UserId, fileId, _renameValue.Trim());
+            await LoadFilesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] RenameFile failed");
+            Snackbar.Add("Rename failed.", Severity.Error);
+        }
+    }
+
+    private async Task CommitFolderRename()
+    {
+        if (_renamingFolderId == null || string.IsNullOrWhiteSpace(_renameValue)) { _renamingFolderId = null; return; }
+        var folderId = _renamingFolderId.Value;
+        _renamingFolderId = null;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var folder = await db.WorkspaceFolders.FirstOrDefaultAsync(f => f.Id == folderId && f.UserId == Session.UserId);
+            if (folder != null)
+            {
+                folder.Name = _renameValue.Trim();
+                await db.SaveChangesAsync();
+            }
+            await LoadFilesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] RenameFolder failed");
+            Snackbar.Add("Folder rename failed.", Severity.Error);
+        }
+    }
+
+    // ── Multi-select ────────────────────────────────────────────────────────
+
+    private void ToggleFileSelection(Guid fileId, bool selected)
+    {
+        if (selected) _selectedFileIds.Add(fileId);
+        else _selectedFileIds.Remove(fileId);
+    }
+
+    private void ToggleSelectAll(bool selectAll)
+    {
+        if (selectAll)
+            _selectedFileIds = _uploads.Select(u => u.Id).ToHashSet();
+        else
+            _selectedFileIds.Clear();
+    }
+
+    private async Task BulkDeleteSelected()
+    {
+        if (_selectedFileIds.Count == 0) return;
+        try
+        {
+            await UploadSvc.BulkDeleteFilesAsync(Session.UserId, _selectedFileIds.ToList());
+            Snackbar.Add($"Deleted {_selectedFileIds.Count} file(s).", Severity.Success);
+            await LoadFilesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] BulkDelete failed");
+            Snackbar.Add("Bulk delete failed.", Severity.Error);
+        }
+    }
+
+    // ── Drag-and-drop ───────────────────────────────────────────────────────
+
+    private void OnDragStart(WorkspaceUpload file)
+    {
+        _draggingFileId = file.Id;
+    }
+
+    private void OnDragEnd()
+    {
+        _draggingFileId = null;
+        _dragOverFolderId = null;
+    }
+
+    private void OnDragOverFolder(DragEventArgs e, WorkspaceFolder folder)
+    {
+        _dragOverFolderId = folder.Id;
+    }
+
+    private async Task OnDropOnFolder(WorkspaceFolder folder)
+    {
+        _dragOverFolderId = null;
+        if (_draggingFileId == null) return;
+        var fileId = _draggingFileId.Value;
+        _draggingFileId = null;
+        try
+        {
+            await UploadSvc.MoveFileAsync(Session.UserId, fileId, folder.Id);
+            Snackbar.Add($"Moved file to {folder.Name}.", Severity.Success);
+            await LoadFilesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] Drag-move failed");
+            Snackbar.Add("Move failed.", Severity.Error);
+        }
+    }
+
+    // ── Version history ─────────────────────────────────────────────────────
+
+    private async Task ShowVersionHistory(WorkspaceUpload file)
+    {
+        _versionPanelFile = file;
+        _versionPanelVisible = true;
+        _versionsLoading = true;
+        _contextMenuVisible = false;
+        _movePickerVisible = false;
+        StateHasChanged();
+        try
+        {
+            _fileVersions = await UploadSvc.GetFileVersionsAsync(Session.UserId, file.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] GetFileVersions failed");
+            Snackbar.Add("Failed to load versions.", Severity.Error);
+        }
+        _versionsLoading = false;
+        StateHasChanged();
+    }
+
+    private void CloseVersionPanel()
+    {
+        _versionPanelVisible = false;
+        _versionPanelFile = null;
+        _fileVersions = null;
+    }
+
+    private async Task RestoreVersion(WorkspaceFileVersion version)
+    {
+        try
+        {
+            await UploadSvc.RollbackFileAsync(Session.UserId, version.FileId, version.VersionNumber);
+            Snackbar.Add($"Restored to version {version.VersionNumber}", Severity.Success);
+            await LoadFilesAsync();
+            _versionPanelFile = _uploads.FirstOrDefault(f => f.Id == version.FileId);
+            if (_versionPanelFile != null)
+            {
+                _fileVersions = await UploadSvc.GetFileVersionsAsync(Session.UserId, _versionPanelFile.Id);
+            }
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] RestoreVersion failed");
+            Snackbar.Add("Restore failed.", Severity.Error);
+        }
+    }
+
+    // ── Move file picker ────────────────────────────────────────────────────
+
+    private async Task ShowMoveFilePicker(WorkspaceUpload file)
+    {
+        _movePickerFile = file;
+        _movePickerVisible = true;
+        _movePickerLoading = true;
+        _contextMenuVisible = false;
+        _versionPanelVisible = false;
+        StateHasChanged();
+        try
+        {
+            _movePickerFolders = await UploadSvc.GetFoldersAsync(Session.UserId, null);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] LoadFolders for move picker failed");
+            Snackbar.Add("Failed to load folders.", Severity.Error);
+        }
+        _movePickerLoading = false;
+        StateHasChanged();
+    }
+
+    private void CloseMoveFilePicker()
+    {
+        _movePickerVisible = false;
+        _movePickerFile = null;
+        _movePickerFolders = null;
+    }
+
+    private async Task MoveFileToFolder(Guid? folderId)
+    {
+        if (_movePickerFile == null) return;
+        var fileId = _movePickerFile.Id;
+        CloseMoveFilePicker();
+        try
+        {
+            await UploadSvc.MoveFileAsync(Session.UserId, fileId, folderId);
+            Snackbar.Add("File moved.", Severity.Success);
+            await LoadFilesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] MoveFile failed");
+            Snackbar.Add("Move failed.", Severity.Error);
         }
     }
 

@@ -132,6 +132,22 @@ public class WorkspaceController : ControllerBase
         return Ok(new { success = true });
     }
 
+    [HttpPut("folders/{folderId}/rename")]
+    [Authorize]
+    public async Task<IActionResult> RenameFolder(Guid folderId, [FromBody] RenameFolderRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        if (string.IsNullOrWhiteSpace(request.NewName))
+            return BadRequest(new { error = "NewName is required" });
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var folder = await db.WorkspaceFolders.FirstOrDefaultAsync(f => f.Id == folderId && f.UserId == userId.Value);
+        if (folder == null) return NotFound();
+        folder.Name = request.NewName.Trim();
+        await db.SaveChangesAsync();
+        return Ok(new { folder.Id, folder.Name });
+    }
+
     // ─── Internal API for harness ─────────────────────────────────────────────
 
     /// <summary>
@@ -355,3 +371,5 @@ public record RenameFileRequest(string NewFilename);
 public record MoveFileRequest(Guid? NewFolderId);
 
 public record BulkDeleteRequest(List<Guid> FileIds);
+
+public record RenameFolderRequest(string NewName);
