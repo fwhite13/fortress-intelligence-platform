@@ -17,6 +17,7 @@ public class UserSession
     public string? FargateStatus { get; set; }
     public string? FargateSessionId { get; set; }
     public string? TaskDefinitionRevision { get; set; }
+    public string? HarnessVersion { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

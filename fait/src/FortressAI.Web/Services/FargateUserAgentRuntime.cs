@@ -88,26 +88,46 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
 
                 if (harnessReachable)
                 {
-                    // Version check — stop and replace if task def revision changed
+                    // Version check — stop and replace if task def revision or harness version changed
                     var currentRevision = TaskDefinition;
+                    var currentHarnessVersion = Environment.GetEnvironmentVariable("FAIT_HARNESS_VERSION");
+
+                    bool needsReplacement = false;
+                    string replacementReason = string.Empty;
+
                     if (!string.IsNullOrEmpty(existing.TaskDefinitionRevision)
                         && existing.TaskDefinitionRevision != currentRevision)
                     {
+                        needsReplacement = true;
+                        replacementReason = $"Task def revision changed: {existing.TaskDefinitionRevision} → {currentRevision}";
                         _logger.LogInformation(
                             "EnsureRunningAsync: task def revision changed ({OldRev} → {NewRev}) for user {UserId} — replacing",
                             existing.TaskDefinitionRevision, currentRevision, userId);
+                    }
+                    else if (!string.IsNullOrEmpty(currentHarnessVersion)
+                             && existing.HarnessVersion != currentHarnessVersion)
+                    {
+                        needsReplacement = true;
+                        replacementReason = $"Harness version changed: {existing.HarnessVersion ?? "null"} → {currentHarnessVersion}";
+                        _logger.LogInformation(
+                            "[HarnessUpgrade] User {UserId} — old: {OldVersion} → new: {NewVersion} — stopping stale harness task",
+                            userId, existing.HarnessVersion ?? "(null)", currentHarnessVersion);
+                    }
+
+                    if (needsReplacement)
+                    {
                         try
                         {
                             await _ecs.StopTaskAsync(new StopTaskRequest
                             {
                                 Cluster = ClusterArn,
                                 Task = existing.TaskArn,
-                                Reason = $"Task def revision changed: {existing.TaskDefinitionRevision} → {currentRevision}"
+                                Reason = replacementReason
                             }, ct);
                         }
                         catch (Exception stopEx)
                         {
-                            _logger.LogWarning(stopEx, "EnsureRunningAsync: failed to stop stale revision task {TaskArn}", existing.TaskArn);
+                            _logger.LogWarning(stopEx, "EnsureRunningAsync: failed to stop stale task {TaskArn}", existing.TaskArn);
                         }
                         existing.FargateStatus = "Stopped";
                         existing.EndedAt = DateTime.UtcNow;
@@ -283,9 +303,11 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
                 if (polledTask.LastStatus == "RUNNING")
                 {
                     var privateIp = GetPrivateIpFromTask(polledTask);
+                    var harnessVersion = Environment.GetEnvironmentVariable("FAIT_HARNESS_VERSION");
 
                     session.PrivateIp = privateIp;
                     session.FargateStatus = "Running";
+                    session.HarnessVersion = string.IsNullOrEmpty(harnessVersion) ? null : harnessVersion;
                     session.UpdatedAt = DateTime.UtcNow;
                     await db.SaveChangesAsync(ct);
 
