@@ -4,11 +4,14 @@ const fs = require('fs');
 const path = require('path');
 const { mkdirSync } = require('fs');
 const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
-const { BedrockRuntimeClient, ConverseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
+const { BedrockRuntimeClient, ConverseStreamCommand, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const { BedrockAgentRuntimeClient, RetrieveCommand } = require('@aws-sdk/client-bedrock-agent-runtime');
 const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 const crypto = require('crypto');
+let pgPool = null;
+const pgProvisionedUsers = new Set();
 
 const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
@@ -256,6 +259,132 @@ async function fetchS3File(key) {
         return Buffer.concat(chunks).toString('utf-8');
     } catch (err) {
         console.warn(`[harness] Could not fetch ${key}: ${err.message}`);
+        return null;
+    }
+}
+
+// ─── Shared Secrets Manager helper ───────────────────────────────────────
+async function getSecret(secretArn) {
+    const client = new SecretsManagerClient({ region: process.env.AWS_REGION || 'us-east-1' });
+    const response = await client.send(new GetSecretValueCommand({ SecretId: secretArn }));
+    return response.SecretString;
+}
+
+// ─── pgvector Memory Service (ADO#3397 Feature 7.3) ─────────────────────
+
+async function initPgVector() {
+    try {
+        const secretJson = await getSecret('arn:aws:secretsmanager:us-east-1:742932328420:secret:fortress-tools/pgvector-connection-wx0f9F');
+        const { username, password, host, port, dbname } = JSON.parse(secretJson);
+        pgPool = new Pool({
+            user: username,
+            password,
+            host,
+            port: parseInt(port),
+            database: dbname,
+            ssl: { rejectUnauthorized: false },
+            max: 5
+        });
+        await pgPool.query('SELECT 1');
+        console.log('[pgvector] connected to fortress_ai PostgreSQL');
+    } catch (err) {
+        console.warn('[pgvector] connection failed — falling back to md-file memory:', err.message);
+        pgPool = null;
+    }
+}
+
+async function provisionUserSchema(userId) {
+    if (!pgPool) return;
+    const schemaName = `user_${userId.replace(/-/g, '_')}`;
+    await pgPool.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
+    await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS "${schemaName}".memory_chunks (
+            id SERIAL PRIMARY KEY,
+            source_file VARCHAR(500) NOT NULL,
+            chunk_index INT NOT NULL,
+            content TEXT NOT NULL,
+            embedding vector(1536) NOT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+    `);
+    await pgPool.query(`
+        CREATE INDEX IF NOT EXISTS memory_chunks_embedding_idx
+        ON "${schemaName}".memory_chunks
+        USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)
+    `);
+    // ADO#3428 — lazy migration: if no chunks yet, migrate existing memory files
+    try {
+        const countResult = await pgPool.query(`SELECT COUNT(*) FROM "${schemaName}".memory_chunks`);
+        const chunkCount = parseInt(countResult.rows[0].count);
+        if (chunkCount === 0) {
+            console.log(`[pgvector] no chunks for userId=${userId} — lazy migration will run on next write_memory call`);
+        }
+    } catch (countErr) {
+        console.warn(`[pgvector] chunk count check failed (non-fatal): ${countErr.message}`);
+    }
+    console.log(`[pgvector] schema provisioned for userId=${userId}`);
+}
+
+async function embedText(text) {
+    const payload = {
+        inputText: text.substring(0, 8000),
+        dimensions: 1536,
+        normalize: true
+    };
+    const cmd = new InvokeModelCommand({
+        modelId: 'amazon.titan-embed-text-v2:0',
+        body: JSON.stringify(payload),
+        contentType: 'application/json',
+        accept: 'application/json'
+    });
+    const resp = await bedrockClient.send(cmd);
+    const result = JSON.parse(Buffer.from(resp.body).toString());
+    return result.embedding;
+}
+
+async function upsertMemoryChunks(userId, sourceFile, content) {
+    if (!pgPool) return;
+    if (!pgProvisionedUsers.has(userId)) {
+        await provisionUserSchema(userId);
+        pgProvisionedUsers.add(userId);
+    }
+    const schemaName = `user_${userId.replace(/-/g, '_')}`;
+
+    const chunks = [];
+    const CHUNK_SIZE = 500, OVERLAP = 50;
+    for (let i = 0; i < content.length; i += CHUNK_SIZE - OVERLAP) {
+        chunks.push(content.slice(i, i + CHUNK_SIZE));
+        if (i + CHUNK_SIZE >= content.length) break;
+    }
+
+    await pgPool.query(`DELETE FROM "${schemaName}".memory_chunks WHERE source_file = $1`, [sourceFile]);
+
+    for (let i = 0; i < chunks.length; i++) {
+        const embedding = await embedText(chunks[i]);
+        await pgPool.query(
+            `INSERT INTO "${schemaName}".memory_chunks (source_file, chunk_index, content, embedding) VALUES ($1, $2, $3, $4)`,
+            [sourceFile, i, chunks[i], JSON.stringify(embedding)]
+        );
+    }
+    console.log(`[pgvector] upserted ${chunks.length} chunks for userId=${userId} sourceFile=${sourceFile}`);
+}
+
+async function searchMemoryChunks(userId, query, topK = 5, threshold = 0.7) {
+    if (!pgPool) return null;
+    const schemaName = `user_${userId.replace(/-/g, '_')}`;
+    try {
+        const embedding = await embedText(query);
+        const result = await pgPool.query(
+            `SELECT content, source_file, 1 - (embedding <=> $1::vector) AS score
+             FROM "${schemaName}".memory_chunks
+             WHERE 1 - (embedding <=> $1::vector) >= $2
+             ORDER BY score DESC
+             LIMIT $3`,
+            [JSON.stringify(embedding), threshold, topK]
+        );
+        return result.rows;
+    } catch (err) {
+        console.warn(`[pgvector] search failed for userId=${userId}:`, err.message);
         return null;
     }
 }
@@ -954,10 +1083,20 @@ app.post('/tools/read_memory', async (req, res) => {
             throw new Error(`memory/read failed (${resp.status}): ${safeText}`);
         }
         const result = await resp.json();
-        if (!result.found) {
-            return res.json({ content: `Topic '${slug}' not found in memory.` });
+        let mdContent = result.found ? result.content : `Topic '${slug}' not found in memory.`;
+        // ADO#3397 — augment read_memory with semantic search
+        if (pgPool && result.found) {
+            try {
+                const semanticChunks = await searchMemoryChunks(userId, slug + ' ' + (req.body.query || ''), 3, 0.6);
+                if (semanticChunks && semanticChunks.length > 0) {
+                    const semanticContext = semanticChunks.map(c => c.content).join('\n\n');
+                    mdContent = `[Semantically relevant]\n${semanticContext}\n\n---\n\n[Full topic]\n${mdContent}`;
+                }
+            } catch (augmentErr) {
+                console.warn(`[pgvector] read_memory augment failed: ${augmentErr.message}`);
+            }
         }
-        res.json({ content: result.content });
+        res.json({ content: mdContent });
     } catch (err) {
         console.error('[harness] read_memory error:', err.message);
         res.status(500).json({ error: err.message });
@@ -988,6 +1127,12 @@ app.post('/tools/write_memory', async (req, res) => {
             const isHtml = text.trim().startsWith('<') || text.includes('<!DOCTYPE');
             const safeText = isHtml ? `[non-JSON response, HTTP ${resp.status}]` : text.substring(0, 200);
             throw new Error(`memory/write failed (${resp.status}): ${safeText}`);
+        }
+        // ADO#3397 — embed on write (non-fatal)
+        try {
+            await upsertMemoryChunks(userId, `memory/${slug}.md`, content);
+        } catch (embedErr) {
+            console.warn(`[pgvector] embed on write failed (non-fatal): ${embedErr.message}`);
         }
         res.json({ success: true });
     } catch (err) {
@@ -2117,7 +2262,21 @@ app.post('/turn', async (req, res) => {
         if (userEmail) contextParts.push(`## User Identity\nEmail: ${userEmail}`);
         contextParts.push(`## Session Identifiers\nuserId: ${userId}`);
         if (userMd) contextParts.push(`## About the User\n${userMd}`);
-        if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
+        // ADO#3397 — semantic memory injection (replaces MEMORY.md for vectorized users)
+        if (pgPool && memoryMd) {
+            const semanticChunks = await searchMemoryChunks(userId, message, 5, 0.7);
+            if (semanticChunks && semanticChunks.length > 0) {
+                const semanticContext = semanticChunks
+                    .map(c => `[${c.source_file}] ${c.content}`)
+                    .join('\n\n');
+                contextParts.push(`## Relevant Memory\n${semanticContext}`);
+                console.log(`[pgvector] injected ${semanticChunks.length} semantic chunks for userId=${userId} (CC path)`);
+            } else {
+                if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
+            }
+        } else {
+            if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
+        }
         // ADO#3398 7.7-A — structured system prompt: memory guidance + tool catalog + context awareness
         contextParts.push(`## Memory & Tool Guidance
 
@@ -2423,7 +2582,21 @@ You have access to the user's workspace files and memory topics. When the user a
             }
             if (userEmail) systemParts.push(`## User Identity\nEmail: ${userEmail}`);
             if (userMd) systemParts.push(`## About the User\n${userMd}`);
-            if (memoryMd) systemParts.push(`## Long-Term Memory\n${memoryMd}`);
+            // ADO#3397 — semantic memory injection (replaces MEMORY.md for vectorized users)
+            if (pgPool && memoryMd) {
+                const semanticChunks = await searchMemoryChunks(userId, message, 5, 0.7);
+                if (semanticChunks && semanticChunks.length > 0) {
+                    const semanticContext = semanticChunks
+                        .map(c => `[${c.source_file}] ${c.content}`)
+                        .join('\n\n');
+                    systemParts.push(`## Relevant Memory\n${semanticContext}`);
+                    console.log(`[pgvector] injected ${semanticChunks.length} semantic chunks for userId=${userId} (Bedrock path)`);
+                } else {
+                    if (memoryMd) systemParts.push(`## Long-Term Memory\n${memoryMd}`);
+                }
+            } else {
+                if (memoryMd) systemParts.push(`## Long-Term Memory\n${memoryMd}`);
+            }
             // ADO#3398 7.7-A — structured system prompt: memory guidance + tool catalog + context awareness
             systemParts.push(`## Memory & Tool Guidance
 
@@ -3227,6 +3400,7 @@ app.get('/session', (req, res) => {
     } catch (claudeErr) {
         console.error(`[harness] startup: claude CLI NOT found or failed — task mode will fail. Error: ${claudeErr.message}`);
     }
+    await initPgVector();
     await bootstrapGcpCredentials();
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`FAIT v2 agent harness listening on port ${PORT}`);
