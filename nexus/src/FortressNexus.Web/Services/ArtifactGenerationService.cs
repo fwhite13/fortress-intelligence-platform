@@ -50,7 +50,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
             return new List<AdoWorkItemDto>();
         }
 
-        var resolvedModelId = _config["FortressAI:ModelId"] ?? "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+        var resolvedModelId = _config["FortressAI:ModelId"] ?? "us.anthropic.claude-sonnet-4-6";
         var specContent = specDoc.EditedContent ?? specDoc.Content;
 
         try
@@ -71,7 +71,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
             ?? throw new InvalidOperationException($"SpecDocument {specDocumentId} not found");
 
         var specContent = specDoc.EditedContent ?? specDoc.Content;
-        var resolvedModelId = _config["FortressAI:ModelId"] ?? "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+        var resolvedModelId = _config["FortressAI:ModelId"] ?? "us.anthropic.claude-sonnet-4-6";
 
         // Load submission for status updates
         var submission = await _db.Submissions.FindAsync(submissionId)
