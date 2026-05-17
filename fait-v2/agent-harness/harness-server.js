@@ -230,6 +230,7 @@ function getBuiltinSummary(toolName, toolInput) {
         case 'list_workspace_files': return 'Listing workspace files...';
         case 'create_document': return `Creating document: "${toolInput.filename||toolInput.title||'document'}"`;
         case 'read_file': return `Reading file: ${toolInput.path||''}`;
+        case 'write_file': return `Saving file: "${toolInput.path || 'file'}"`;
         case 'list_files': return 'Listing files...';
         default: return `${toolName}...`;
     }
@@ -389,7 +390,7 @@ const MCP_TOOL_ALLOWLIST = {
 
 const BUILTIN_TOOLS = new Set([
     'list_workspace_files', 'search_memory', 'read_memory', 'write_memory', 'create_document',
-    'list_files', 'read_file'
+    'list_files', 'read_file', 'write_file'
 ]);
 
 // ADO#3218 — MCP tool specs for dynamic toolConfig injection
@@ -1133,6 +1134,100 @@ app.post('/tools/read_file', async (req, res) => {
     }
 });
 
+// ─── write_file tool handler (ADO#3393) ──────────────────────────────────────
+app.post('/tools/write_file', async (req, res) => {
+    const { userId, conversationId, path: filePath, content, overwrite } = req.body;
+
+    // 1. Validate required inputs
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    if (!filePath) return res.status(400).json({ error: 'path is required' });
+    if (content === undefined || content === null) return res.status(400).json({ error: 'content is required' });
+
+    // 2. Path safety — reject traversal attempts
+    if (filePath.includes('../') || filePath.includes('./') || filePath.startsWith('/')) {
+        return res.status(400).json({ error: 'Invalid path: path traversal and absolute paths are not allowed' });
+    }
+
+    // 3. Size check — 1MB limit
+    const contentBuffer = Buffer.from(content, 'utf8');
+    if (contentBuffer.length > 1_048_576) {
+        return res.status(400).json({ error: 'Content exceeds 1MB size limit' });
+    }
+
+    try {
+        // 4. Sanitize filename from path — use the basename
+        const filename = filePath.split('/').pop() || filePath;
+        const s3Key = `workspaces/${userId}/files/${filePath}`;
+
+        // 5. Detect MIME type from extension
+        const ext = filename.split('.').pop()?.toLowerCase() || '';
+        const mimeMap = {
+            'md': 'text/markdown',
+            'txt': 'text/plain',
+            'html': 'text/html',
+            'htm': 'text/html',
+            'json': 'application/json',
+            'csv': 'text/csv',
+            'xml': 'application/xml',
+            'js': 'text/javascript',
+            'ts': 'text/typescript',
+            'py': 'text/x-python',
+            'css': 'text/css',
+        };
+        const mimeType = mimeMap[ext] || 'text/plain';
+
+        // 6. Check if file already exists when overwrite is not set
+        if (!overwrite) {
+            try {
+                await s3Client.send(new HeadObjectCommand({
+                    Bucket: S3_BUCKET,
+                    Key: s3Key
+                }));
+                // If we get here, file exists
+                return res.status(409).json({ error: `File already exists: ${filePath}. Set overwrite=true to replace it.` });
+            } catch (headErr) {
+                // 404 / NotFound = file does not exist — proceed
+                if (headErr.name !== 'NotFound' && headErr.$metadata?.httpStatusCode !== 404) {
+                    // Unexpected error during existence check
+                    throw headErr;
+                }
+            }
+        }
+
+        // 7. Write to S3
+        await s3Client.send(new PutObjectCommand({
+            Bucket: S3_BUCKET,
+            Key: s3Key,
+            Body: contentBuffer,
+            ContentType: mimeType
+        }));
+
+        const sizeBytes = contentBuffer.length;
+
+        // 8. Insert row into user_workspace_files
+        // UUID storage: CHAR(36) plain string — no BIN conversion
+        const conn = await getDbConnection();
+        try {
+            const fileId = require('crypto').randomUUID();
+            const convId = conversationId || '00000000-0000-0000-0000-000000000000';
+            const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            await conn.execute(
+                'INSERT INTO user_workspace_files (id, user_id, conversation_id, task_run_id, filename, mime_type, s3_key, size_bytes, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)',
+                [fileId, userId, convId, filename, mimeType, s3Key, sizeBytes, now]
+            );
+        } finally {
+            await conn.end();
+        }
+
+        console.log(`[harness] write_file: saved ${filename} to ${s3Key} (${sizeBytes} bytes)`);
+        res.json({ success: true, filename, s3Key, sizeBytes, mimeType });
+
+    } catch (err) {
+        console.error('[harness] write_file error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ─── Stitch-specific route handlers (ADO#3099) ────────────────────────────
 app.post('/tools/stitch_generate_screen', async (req, res) => {
     const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -1835,7 +1930,11 @@ app.post('/turn', async (req, res) => {
 - Use list_files() to see what is available at the root, or list_files("folder/path") for a subfolder.
 - Use read_file("path/to/file") to read file content directly.
 - Paths use forward slashes. Folder and file names are case-sensitive.
-- Prefer reading workspace files directly when the user references "my files", "the document I uploaded", or similar.`);
+- Prefer reading workspace files directly when the user references "my files", "the document I uploaded", or similar.\
+\nYou have access to write_file(path, content, overwrite?) to save text files to the user's workspace. Files appear immediately in the workspace FILES tab.\
+- Use this when the user asks to save, export, or persist text content as a file.\
+- path is relative to the workspace root (e.g. "summary.md", "notes/q1.txt"). No absolute paths or traversal.\
+- overwrite defaults to false — omit it unless replacing an existing file.`);
         if (systemPrompt) contextParts.push(systemPrompt);
 
         // ADO#3089 — inject session context recap on cold-start CC turns with existing history
@@ -2047,7 +2146,11 @@ app.post('/turn', async (req, res) => {
 - Use list_files() to see what is available at the root, or list_files("folder/path") for a subfolder.
 - Use read_file("path/to/file") to read file content directly.
 - Paths use forward slashes. Folder and file names are case-sensitive.
-- Prefer reading workspace files directly when the user references "my files", "the document I uploaded", or similar.`);
+- Prefer reading workspace files directly when the user references "my files", "the document I uploaded", or similar.\
+\nYou have access to write_file(path, content, overwrite?) to save text files to the user's workspace. Files appear immediately in the workspace FILES tab.\
+- Use this when the user asks to save, export, or persist text content as a file.\
+- path is relative to the workspace root (e.g. "summary.md", "notes/q1.txt"). No absolute paths or traversal.\
+- overwrite defaults to false — omit it unless replacing an existing file.`);
             if (systemPrompt) systemParts.push(systemPrompt);
             if (systemParts.length === 0) {
                 systemParts.push('You are a helpful AI assistant.');
@@ -2291,6 +2394,32 @@ app.post('/turn', async (req, res) => {
                                 }
                             }
                         }
+                    },
+                    {
+                        toolSpec: {
+                            name: 'write_file',
+                            description: 'Save text content as a file in the user\'s workspace. Use this when the user asks to save something to a file, export text as a document, or when you want to persist generated content (markdown summaries, reports, code) to the workspace. Files appear immediately in the workspace FILES tab.',
+                            inputSchema: {
+                                json: {
+                                    type: 'object',
+                                    properties: {
+                                        path: {
+                                            type: 'string',
+                                            description: 'File path relative to user workspace root (e.g. "summary.md", "reports/q1.txt"). No leading slashes or .. traversal.'
+                                        },
+                                        content: {
+                                            type: 'string',
+                                            description: 'Text content to write to the file (max 1MB)'
+                                        },
+                                        overwrite: {
+                                            type: 'boolean',
+                                            description: 'If true, replace an existing file. Default false — returns error if file already exists.'
+                                        }
+                                    },
+                                    required: ['path', 'content']
+                                }
+                            }
+                        }
                     }
             ];
 
@@ -2490,6 +2619,32 @@ app.post('/turn', async (req, res) => {
                             } catch (rfErr) {
                                 toolResultText = `Error reading file: ${rfErr.message}`;
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${rfErr.message.substring(0,100)}`);
+                            }
+                        } else if (toolUseAccumulator.name === 'write_file') {
+                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
+                            try {
+                                const wfRes = await fetch(`http://localhost:${PORT}/tools/write_file`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        userId,
+                                        conversationId,
+                                        path: toolInput.path,
+                                        content: toolInput.content,
+                                        overwrite: toolInput.overwrite || false
+                                    })
+                                });
+                                const wfData = await wfRes.json();
+                                if (wfData.error) {
+                                    toolResultText = `\n\n[Write File Error]\n${wfData.error}\n\n`;
+                                    emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${wfData.error.substring(0, 100)}`);
+                                } else {
+                                    emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `File saved: ${wfData.filename}`);
+                                    toolResultText = `\n\nFile saved to workspace: ${wfData.filename} (${wfData.sizeBytes} bytes). It will appear in the FILES tab.\n\n`;
+                                }
+                            } catch (wfErr) {
+                                toolResultText = `\n\n[Write File Error]\n${wfErr.message}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${wfErr.message.substring(0, 100)}`);
                             }
                         } else if (toolUseAccumulator.name.startsWith('graph_')) {
                             // ADO#3241 — tool_call SSE events
