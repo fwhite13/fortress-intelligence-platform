@@ -51,6 +51,8 @@
                     <MudSelect @bind-Value="_communicationStyle"
                                Label="How would you like your assistant to communicate?"
                                Variant="Variant.Outlined"
+                               AnchorOrigin="Origin.BottomLeft"
+                               TransformOrigin="Origin.TopLeft"
                                Class="fait-v2-onboarding__field">
                         <MudSelectItem Value="@("Concise")">Concise — Short, direct answers</MudSelectItem>
                         <MudSelectItem Value="@("Balanced")">Balanced — Clear and thorough</MudSelectItem>
@@ -59,6 +61,8 @@
                     <MudSelect @bind-Value="_responseFormat"
                                Label="Preferred response format?"
                                Variant="Variant.Outlined"
+                               AnchorOrigin="Origin.BottomLeft"
+                               TransformOrigin="Origin.TopLeft"
                                Class="fait-v2-onboarding__field">
                         <MudSelectItem Value="@("Bullet points")">Bullet points — Scannable lists</MudSelectItem>
                         <MudSelectItem Value="@("Prose")">Prose — Flowing paragraphs</MudSelectItem>
