@@ -165,7 +165,7 @@
                         </MudButton>
                         <MudButton Variant="Variant.Text"
                                    Size="Size.Small"
-                                   OnClick="@(() => _selectedFileIds.Clear())">
+                                   OnClick="@(() => { _selectedFileIds.Clear(); _selectedFiles = new HashSet<WorkspaceUpload>(); StateHasChanged(); })">
                             Clear Selection
                         </MudButton>
                     </div>
@@ -243,76 +243,67 @@
                     @* ── Files ── *@
                     @if (_uploads.Count > 0)
                     {
-                        <MudTable Items="@_uploads" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm"
-                                  Class="workspace-files-table">
-                            <HeaderContent>
-                                <MudTh>
-                                    <MudCheckBox T="bool" Value="@_allSelected"
-                                                 ValueChanged="ToggleSelectAll" />
-                                </MudTh>
-                                <MudTh>Name</MudTh>
-                                <MudTh>Size</MudTh>
-                                <MudTh>Created</MudTh>
-                                <MudTh Class="workspace-actions-col">Actions</MudTh>
-                            </HeaderContent>
-                            <RowTemplate>
-                                @{
-                                    var upload = context;
-                                    var isSelected = _selectedFileIds.Contains(upload.Id);
-                                }
-                                <MudTd>
-                                    <MudCheckBox T="bool" Value="@isSelected"
-                                                 ValueChanged="@(val => ToggleFileSelection(upload.Id, val))" />
-                                </MudTd>
-                                <MudTd>
-                                    <div @oncontextmenu="@(e => ShowFileContextMenu(e, upload))"
-                                         @oncontextmenu:preventDefault="true"
-                                         draggable="true"
-                                         @ondragstart="@(() => OnDragStart(upload))"
-                                         @ondragend="OnDragEnd">
-                                        @if (_renamingFileId == upload.Id)
+                        <MudDataGrid T="WorkspaceUpload"
+                                     Items="@_uploads"
+                                     MultiSelection="true"
+                                     SelectedItems="@_selectedFiles"
+                                     SelectedItemsChanged="@OnSelectedFilesChanged"
+                                     SortMode="SortMode.Multiple"
+                                     Hover="true"
+                                     Dense="true"
+                                     Class="workspace-file-grid">
+                            <Columns>
+                                <SelectColumn T="WorkspaceUpload" ShowInHeader="true" />
+                                <TemplateColumn T="WorkspaceUpload" Title="" HeaderStyle="width:32px" Sortable="false">
+                                    <CellTemplate>
+                                        @{ var localGridFile = context.Item; }
+                                        <MudIcon Icon="@GetFileIcon(localGridFile.MimeType)" Size="Size.Small" />
+                                    </CellTemplate>
+                                </TemplateColumn>
+                                <PropertyColumn Property="@(x => x.Filename)" Title="Name" Sortable="true">
+                                    <CellTemplate>
+                                        @{ var localFile = context.Item; }
+                                        @if (_renamingFileId == localFile.Id)
                                         {
-                                            <div class="workspace-file-name-cell">
-                                                <MudIcon Icon="@GetFileIcon(upload.MimeType)"
-                                                         Size="Size.Small" Class="mr-1" />
-                                                <MudTextField @bind-Value="_renameValue"
-                                                              Variant="Variant.Outlined"
-                                                              Margin="Margin.Dense"
-                                                              @onkeydown="HandleRenameKeyDown"
-                                                              @onblur="CommitFileRename"
-                                                              Immediate="true"
-                                                              Class="workspace-rename-input" />
-                                            </div>
+                                            <MudTextField @bind-Value="_renameValue"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense"
+                                                          @onkeydown="HandleRenameKeyDown"
+                                                          @onblur="CommitFileRename"
+                                                          Immediate="true"
+                                                          Class="workspace-rename-input" />
                                         }
                                         else
                                         {
-                                            <div class="workspace-file-name-cell"
-                                                 @ondblclick="@(() => StartFileRename(upload))">
-                                                <MudIcon Icon="@GetFileIcon(upload.MimeType)"
-                                                         Size="Size.Small" Class="mr-1" />
-                                                <MudText Typo="Typo.body2">@upload.Filename</MudText>
-                                            </div>
+                                            <span @ondblclick="@(() => StartFileRename(localFile))"
+                                                  @oncontextmenu="@(e => ShowFileContextMenu(e, localFile))"
+                                                  @oncontextmenu:preventDefault="true"
+                                                  class="workspace-file-name-cell">
+                                                @localFile.Filename
+                                            </span>
                                         }
-                                    </div>
-                                </MudTd>
-                                <MudTd>
-                                    <MudText Typo="Typo.body2">@FormatSize(upload.SizeBytes)</MudText>
-                                </MudTd>
-                                <MudTd>
-                                    <MudText Typo="Typo.body2">@upload.CreatedAt.ToString("MMM d, yyyy")</MudText>
-                                </MudTd>
-                                <MudTd>
-                                    <MudIconButton Icon="@Icons.Material.Filled.Download"
-                                                   Size="Size.Small"
-                                                   Title="Download"
-                                                   OnClick="@(() => DownloadFile(upload))" />
-                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                   Size="Size.Small"
-                                                   Title="Delete file"
-                                                   OnClick="@(() => DeleteFile(upload))" />
-                                </MudTd>
-                            </RowTemplate>
-                        </MudTable>
+                                    </CellTemplate>
+                                </PropertyColumn>
+                                <TemplateColumn T="WorkspaceUpload" Title="Size" Sortable="true">
+                                    <CellTemplate>
+                                        <MudText Typo="Typo.body2">@FormatSize(context.Item.SizeBytes)</MudText>
+                                    </CellTemplate>
+                                </TemplateColumn>
+                                <TemplateColumn T="WorkspaceUpload" Title="Modified" Sortable="true">
+                                    <CellTemplate>
+                                        <MudText Typo="Typo.body2">@context.Item.CreatedAt.ToString("MMM d, yyyy")</MudText>
+                                    </CellTemplate>
+                                </TemplateColumn>
+                                <TemplateColumn T="WorkspaceUpload" Title="" HeaderStyle="width:40px" Sortable="false">
+                                    <CellTemplate>
+                                        @{ var localF = context.Item; }
+                                        <MudIconButton Icon="@Icons.Material.Filled.MoreVert"
+                                                       Size="Size.Small"
+                                                       OnClick="@(e => ShowFileContextMenu(e, localF))" />
+                                    </CellTemplate>
+                                </TemplateColumn>
+                            </Columns>
+                        </MudDataGrid>
                     }
 
                     @* ── Empty state ── *@
@@ -493,41 +484,37 @@
     </div>
 }
 
-@* ── Move file picker panel ── *@
-@if (_movePickerVisible && _movePickerFile != null)
+@* ── Move dialog ── *@
+@if (_showMoveDialog && _moveTargetFile != null)
 {
-    <div class="workspace-version-panel">
-        <div class="workspace-version-panel-header">
-            <MudText Typo="Typo.h6">Move: @_movePickerFile.Filename</MudText>
-            <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="@CloseMoveFilePicker" />
-        </div>
-        @if (_movePickerLoading)
-        {
-            <MudProgressLinear Indeterminate="true" />
-        }
-        else
-        {
-            <div class="workspace-move-list">
-                @if (_currentFolderId != null)
+    <div class="workspace-overlay">
+        <MudPaper Class="workspace-move-dialog" Elevation="8">
+            <MudText Typo="Typo.h6" Class="mb-3">Move "@_moveTargetFile.Filename"</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">Select destination folder:</MudText>
+            <div class="workspace-move-folder-list">
+                @if (_moveDialogLoading)
                 {
-                    <div class="workspace-move-item" @onclick="@(() => MoveFileToFolder(null))">
-                        <MudIcon Icon="@Icons.Material.Filled.Home" Size="Size.Small" />
-                        <span>Root</span>
-                    </div>
+                    <MudProgressLinear Indeterminate="true" />
                 }
-                @if (_movePickerFolders != null)
+                else
                 {
-                    @foreach (var folder in _movePickerFolders)
-                    {
-                        var localFolder = folder;
-                        <div class="workspace-move-item" @onclick="@(() => MoveFileToFolder(localFolder.Id))">
-                            <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" />
-                            <span>@localFolder.Name</span>
-                        </div>
-                    }
+                    <MudRadioGroup T="Guid?" @bind-Value="_moveDest">
+                        <MudRadio T="Guid?" Value="@((Guid?)null)" Color="Color.Primary">Root</MudRadio>
+                        @foreach (var mf in _allFoldersFlat)
+                        {
+                            var localMF = mf;
+                            <MudRadio T="Guid?" Value="@((Guid?)localMF.Id)" Color="Color.Primary">@localMF.Name</MudRadio>
+                        }
+                    </MudRadioGroup>
                 }
             </div>
-        }
+            <div class="workspace-move-actions">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@(_moveDest == _moveTargetFile.FolderId)"
+                           OnClick="CommitMove">Move</MudButton>
+                <MudButton Variant="Variant.Text" OnClick="@(() => _showMoveDialog = false)">Cancel</MudButton>
+            </div>
+        </MudPaper>
     </div>
 }
 
@@ -678,6 +665,37 @@
         align-items: center;
         gap: var(--spacing-xs, 4px);
     }
+    .workspace-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.4);
+        z-index: 1100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .workspace-move-dialog {
+        padding: var(--spacing-lg, 24px);
+        min-width: 320px;
+        max-width: 480px;
+        width: 90%;
+    }
+    .workspace-move-folder-list {
+        max-height: 240px;
+        overflow-y: auto;
+        margin-bottom: var(--spacing-md, 16px);
+        border: 1px solid var(--color-border, #e0e0e0);
+        border-radius: 4px;
+        padding: var(--spacing-sm, 8px);
+    }
+    .workspace-move-actions {
+        display: flex;
+        gap: var(--spacing-sm, 8px);
+        justify-content: flex-end;
+    }
 </style>
 
 @code {
@@ -739,6 +757,16 @@
     private WorkspaceUpload? _movePickerFile;
     private List<WorkspaceFolder>? _movePickerFolders;
     private bool _movePickerLoading = false;
+
+    // ── Move dialog state (replaces side panel) ──────────────────────────────────────────
+    private bool _showMoveDialog = false;
+    private WorkspaceUpload? _moveTargetFile;
+    private Guid? _moveDest;
+    private List<WorkspaceFolder> _allFoldersFlat = new();
+    private bool _moveDialogLoading = false;
+
+    // ── MudDataGrid selection state ──────────────────────────────────────────────────────
+    private HashSet<WorkspaceUpload> _selectedFiles = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -834,18 +862,37 @@
         }
     }
 
+    private async Task<bool> ShowConfirmDialog(string title, string message)
+    {
+        var parameters = new DialogParameters
+        {
+            { "Title", title },
+            { "Message", message },
+            { "YesText", "Delete" },
+            { "NoText", "Cancel" }
+        };
+        var dialog = await DialogService.ShowAsync<MudMessageBox>(title, parameters);
+        var result = await dialog.Result;
+        return result != null && !result.Canceled;
+    }
+
     private async Task DeleteFolder(WorkspaceFolder folder)
     {
+        var confirmed = await ShowConfirmDialog(
+            "Delete Folder",
+            $"Delete folder \"{folder.Name}\"? The folder must be empty.");
+        if (!confirmed) return;
         try
         {
             await UploadSvc.DeleteFolderAsync(Session.UserId, folder.Id);
-            await LoadFilesAsync();
+            Snackbar.Add("Folder deleted.", Severity.Success);
             await LoadFolderTreeAsync();
+            await LoadFilesAsync();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "[WorkspaceFiles] DeleteFolder failed");
-            Snackbar.Add("Failed to delete folder.", Severity.Error);
+            Snackbar.Add("Folder must be empty before deleting.", Severity.Error);
         }
     }
 
@@ -901,9 +948,14 @@
 
     private async Task DeleteFile(WorkspaceUpload upload)
     {
+        var confirmed = await ShowConfirmDialog(
+            "Delete File",
+            $"Delete \"{upload.Filename}\"? This cannot be undone.");
+        if (!confirmed) return;
         try
         {
             await UploadSvc.DeleteFileAsync(Session.UserId, upload.Id);
+            Snackbar.Add("File deleted.", Severity.Success);
             await LoadFilesAsync();
         }
         catch (Exception ex)
@@ -1083,6 +1135,13 @@
     private async Task BulkDeleteSelected()
     {
         if (_selectedFileIds.Count == 0) return;
+        var names = _selectedFiles.Take(5).Select(f => f.Filename).ToList();
+        var extra = _selectedFiles.Count - 5;
+        var nameList = string.Join(", ", names) + (extra > 0 ? $" ...and {extra} more" : "");
+        var confirmed = await ShowConfirmDialog(
+            "Delete Files",
+            $"Delete {_selectedFiles.Count} file(s)? {nameList} This cannot be undone.");
+        if (!confirmed) return;
         try
         {
             var result = await UploadSvc.BulkDeleteFilesAsync(Session.UserId, _selectedFileIds.ToList());
@@ -1144,7 +1203,7 @@
         _versionPanelVisible = true;
         _versionsLoading = true;
         _contextMenuVisible = false;
-        _movePickerVisible = false;
+        _showMoveDialog = false;
         StateHasChanged();
         try
         {
@@ -1191,48 +1250,48 @@
 
     private async Task ShowMoveFilePicker(WorkspaceUpload file)
     {
-        _movePickerFile = file;
-        _movePickerVisible = true;
-        _movePickerLoading = true;
+        _moveTargetFile = file;
+        _moveDest = file.FolderId;
+        _showMoveDialog = true;
+        _moveDialogLoading = true;
         _contextMenuVisible = false;
         _versionPanelVisible = false;
         StateHasChanged();
         try
         {
-            _movePickerFolders = await UploadSvc.GetFoldersAsync(Session.UserId, null);
+            _allFoldersFlat = await UploadSvc.GetFoldersAsync(Session.UserId, null);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "[WorkspaceFiles] LoadFolders for move picker failed");
+            Logger.LogError(ex, "[WorkspaceFiles] LoadFolders for move dialog failed");
             Snackbar.Add("Failed to load folders.", Severity.Error);
         }
-        _movePickerLoading = false;
+        _moveDialogLoading = false;
         StateHasChanged();
     }
 
-    private void CloseMoveFilePicker()
+    private async Task CommitMove()
     {
-        _movePickerVisible = false;
-        _movePickerFile = null;
-        _movePickerFolders = null;
-    }
-
-    private async Task MoveFileToFolder(Guid? folderId)
-    {
-        if (_movePickerFile == null) return;
-        var fileId = _movePickerFile.Id;
-        CloseMoveFilePicker();
+        if (_moveTargetFile == null) return;
+        var fileId = _moveTargetFile.Id;
+        _showMoveDialog = false;
         try
         {
-            await UploadSvc.MoveFileAsync(Session.UserId, fileId, folderId);
+            await UploadSvc.MoveFileAsync(Session.UserId, fileId, _moveDest);
             Snackbar.Add("File moved.", Severity.Success);
             await LoadFilesAsync();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "[WorkspaceFiles] MoveFile failed");
+            Logger.LogError(ex, "[WorkspaceFiles] CommitMove failed");
             Snackbar.Add("Move failed.", Severity.Error);
         }
+    }
+
+    private void OnSelectedFilesChanged(HashSet<WorkspaceUpload> selection)
+    {
+        _selectedFiles = selection;
+        _selectedFileIds = selection.Select(f => f.Id).ToHashSet();
     }
 
     // ── Artifacts tab (unchanged logic) ────────────────────────────────────
