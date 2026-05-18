@@ -2088,6 +2088,16 @@ app.post('/turn', async (req, res) => {
     const kbWriteAllowed  = rawBody.KbWriteAllowed  ?? rawBody.kbWriteAllowed  ?? true;
     // ADO#3395 — per-turn model override; null falls back to MODEL_ID env constant
     const modelId = rawBody.Model ?? rawBody.model ?? process.env.MODEL_ID ?? MODEL_ID;
+
+    // ADO#3442/3443: Normalize short model IDs to Bedrock cross-region inference ARNs.
+    // ChatView sends ModelInfo.Id (e.g. "claude-sonnet-4-6"); Bedrock needs the full ARN.
+    const BEDROCK_MODEL_MAP = {
+        'claude-sonnet-4-6':  'us.anthropic.claude-sonnet-4-6',
+        'claude-opus-4-6':    'us.anthropic.claude-opus-4-6-v1',
+        'claude-haiku-4-5':   'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+    };
+    const resolvedModelId = BEDROCK_MODEL_MAP[modelId] ?? modelId;
+
     const conversationId  = rawBody.ConversationId  ?? rawBody.conversationId  ?? '';
     const enabledMcpSlugs = rawBody.EnabledMcpSlugs ?? rawBody.enabledMcpSlugs ?? [];
     // ADO#3249 — scheduled tasks with MCP slugs must use Bedrock path so toolConfig is built.
@@ -2190,7 +2200,7 @@ app.post('/turn', async (req, res) => {
 
                 try {
                     const summaryCmd = new ConverseStreamCommand({
-                        modelId: modelId,
+                        modelId: resolvedModelId,
                         messages: [{ role: 'user', content: [{ text: summaryPrompt }] }],
                         inferenceConfig: { maxTokens: 80, temperature: 0.3 }
                     });
@@ -2991,7 +3001,7 @@ You have access to the user's workspace files and memory topics. When the user a
                 const pendingToolResults = [];
 
                 const cmd = new ConverseStreamCommand({
-                    modelId: modelId,
+                    modelId: resolvedModelId,
                     messages,
                     system: [{ text: fullSystemPrompt }],
                     inferenceConfig: { maxTokens: 4096, temperature: 0.7 },
