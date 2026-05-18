@@ -448,6 +448,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.TaskDefinitionRevision).HasColumnName("task_definition_revision").HasMaxLength(100);
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(e => e.HarnessVersion).HasColumnName("harness_version").HasMaxLength(20);
             entity.HasIndex(e => e.UserId).HasDatabaseName("ix_user_sessions_user_id");
             entity.HasIndex(e => e.LastActiveAt).HasDatabaseName("ix_user_sessions_last_active_at");
         });

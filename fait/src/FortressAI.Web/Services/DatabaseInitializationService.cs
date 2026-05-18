@@ -332,6 +332,17 @@ public class DatabaseInitializationService : IHostedService
     INDEX ix_user_sessions_user_id (user_id),
     INDEX ix_user_sessions_last_active_at (last_active_at)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                ,("workspace_file_versions", @"CREATE TABLE IF NOT EXISTS workspace_file_versions (
+    id CHAR(36) NOT NULL,
+    file_id CHAR(36) NOT NULL,
+    version_number INT NOT NULL DEFAULT 1,
+    s3_key VARCHAR(1000) NOT NULL,
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    created_at DATETIME(6) NOT NULL,
+    created_by VARCHAR(20) NOT NULL DEFAULT 'user',
+    PRIMARY KEY (id),
+    INDEX idx_wfv_file_id (file_id)
+) CHARACTER SET utf8mb4")
             };
 
             foreach (var (name, sql) in extraTables)
@@ -404,7 +415,10 @@ public class DatabaseInitializationService : IHostedService
                 // ADO#3398/Epic 7: scheduled_tasks AlertOnCompletion + AlertOnFailure — Aurora MySQL does not support
                 // ADD COLUMN IF NOT EXISTS; previous EF migration used banned syntax and silently failed
                 "ALTER TABLE scheduled_tasks ADD COLUMN AlertOnCompletion TINYINT(1) NOT NULL DEFAULT 0",
-                "ALTER TABLE scheduled_tasks ADD COLUMN AlertOnFailure TINYINT(1) NOT NULL DEFAULT 1"
+                "ALTER TABLE scheduled_tasks ADD COLUMN AlertOnFailure TINYINT(1) NOT NULL DEFAULT 1",
+                // ADO#3438: workspace versioning columns (idempotent — 1060 catch handles duplicate)
+                "ALTER TABLE user_workspace_uploads ADD COLUMN current_version INT NOT NULL DEFAULT 1",
+                "ALTER TABLE user_workspace_uploads ADD COLUMN source VARCHAR(20) NULL"
             };
 
             foreach (var alterSql in alterStatements)
@@ -460,124 +474,160 @@ public class DatabaseInitializationService : IHostedService
                 _logger.LogWarning(ex, "Failed to add uq_project_documents_s3key unique constraint (non-fatal)");
             }
 
-            // Seed Brave Search MCP server
+            // Seed built-in MCP servers — runs once, guarded by applied_migrations
             try
             {
-                var braveId = "00000000-0000-0000-0000-000000000001";
-
-                var braveEndpointUrl = "http://localhost:8080/internal/mcp/brave";
-
-                var braveManifest = System.Text.Json.JsonSerializer.Serialize(new[]
+                var migConn = db.Database.GetDbConnection();
+                if (migConn.State != System.Data.ConnectionState.Open)
+                    await migConn.OpenAsync(cancellationToken);
+                int mcpSeedRan;
+                using (var cmd = migConn.CreateCommand())
                 {
-                    new
+                    cmd.CommandText = "SELECT COUNT(*) FROM applied_migrations WHERE name = @name";
+                    var p = cmd.CreateParameter(); p.ParameterName = "@name"; p.Value = "mcp-server-seed-v1";
+                    cmd.Parameters.Add(p);
+                    mcpSeedRan = Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken));
+                }
+                if (mcpSeedRan == 0)
+                {
+                    // Seed Brave Search MCP server
+                    try
                     {
-                        Name = "web_search",
-                        Description = "Search the web for current, relevant information",
-                        InputSchema = System.Text.Json.JsonDocument.Parse(@"{
-                          ""type"": ""object"",
-                          ""properties"": {
-                            ""query"": { ""type"": ""string"", ""description"": ""The search query"" },
-                            ""count"": { ""type"": ""integer"", ""description"": ""Number of results (1-10)"", ""default"": 5 }
-                          },
-                          ""required"": [""query""]
-                        }").RootElement
+                        var braveId = "00000000-0000-0000-0000-000000000001";
+
+                        var braveEndpointUrl = "http://localhost:8080/internal/mcp/brave";
+
+                        var braveManifest = System.Text.Json.JsonSerializer.Serialize(new[]
+                        {
+                            new
+                            {
+                                Name = "web_search",
+                                Description = "Search the web for current, relevant information",
+                                InputSchema = System.Text.Json.JsonDocument.Parse(@"{
+                                  ""type"": ""object"",
+                                  ""properties"": {
+                                    ""query"": { ""type"": ""string"", ""description"": ""The search query"" },
+                                    ""count"": { ""type"": ""integer"", ""description"": ""Number of results (1-10)"", ""default"": 5 }
+                                  },
+                                  ""required"": [""query""]
+                                }").RootElement
+                            }
+                        });
+                        await db.Database.ExecuteSqlRawAsync(
+                            """
+                            INSERT INTO mcp_servers (id, name, slug, description, transport_type, endpoint_url,
+                                auth_type, requires_user_auth, is_active, tool_manifest, created_at, updated_at)
+                            VALUES ({0}, 'Brave Web Search', 'brave', 'Search the web using Brave Search',
+                                'http', {1}, 'api_key', 0, 1, {2},
+                                NOW(6), NOW(6))
+                            ON DUPLICATE KEY UPDATE
+                                endpoint_url = VALUES(endpoint_url),
+                                updated_at = NOW(6)
+                            """,
+                            braveId, braveEndpointUrl, braveManifest);
+                        _logger.LogInformation("Seeded Brave Search MCP server (endpoint: {Url}).", braveEndpointUrl);
                     }
-                });
-                await db.Database.ExecuteSqlRawAsync(
-                    """
-                    INSERT INTO mcp_servers (id, name, slug, description, transport_type, endpoint_url,
-                        auth_type, requires_user_auth, is_active, tool_manifest, created_at, updated_at)
-                    VALUES ({0}, 'Brave Web Search', 'brave', 'Search the web using Brave Search',
-                        'http', {1}, 'api_key', 0, 1, {2},
-                        NOW(6), NOW(6))
-                    ON DUPLICATE KEY UPDATE
-                        endpoint_url = VALUES(endpoint_url),
-                        updated_at = NOW(6)
-                    """,
-                    braveId, braveEndpointUrl, braveManifest);
-                _logger.LogInformation("Seeded Brave Search MCP server (endpoint: {Url}).", braveEndpointUrl);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Brave Search seed (non-fatal): {Message}", ex.Message);
-            }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Brave Search seed (non-fatal): {Message}", ex.Message);
+                    }
 
-            // Seed Azure DevOps MCP server
-            // Auth type: "devops_pat" — McpToolService passes userId as X-API-Key;
-            // DevOpsMcpAdapter resolves the user's PAT from DevOpsConnectionService.
-            // requires_user_auth = 0 (auto-available) but GetConversationToolsAsync
-            // gates on DevOpsConnectionService.IsConnectedAsync so only connected users see it.
-            try
-            {
-                var devOpsId = "00000000-0000-0000-0000-000000000002";
-                var devOpsEndpointUrl = "http://localhost:8080/internal/mcp/devops";
-                var devOpsManifest = System.Text.Json.JsonSerializer.Serialize(new[]
-                {
-                    new { Name = "ado_list_projects",    Description = "List all Azure DevOps projects",                                                        InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{},""required"":[]}").RootElement },
-                    new { Name = "ado_get_work_item",    Description = "Get details of a specific Azure DevOps work item by ID",                               InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""id"":{""type"":""integer"",""description"":""Work item ID""}},""required"":[""id""]}").RootElement },
-                    new { Name = "ado_list_work_items",  Description = "List work items from Azure DevOps",                                                     InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""project"":{""type"":""string""},""state"":{""type"":""string""},""assignee"":{""type"":""string""}},""required"":[]}").RootElement },
-                    new { Name = "ado_create_work_item", Description = "Create a new work item in Azure DevOps",                                                InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""project"":{""type"":""string""},""type"":{""type"":""string"",""description"":""Work item type e.g. Task, Bug, User Story""},""title"":{""type"":""string""},""description"":{""type"":""string""}},""required"":[""project"",""type"",""title""]}").RootElement },
-                    new { Name = "ado_update_work_item", Description = "Update an existing Azure DevOps work item",                                             InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""id"":{""type"":""integer""},""state"":{""type"":""string""},""title"":{""type"":""string""},""comment"":{""type"":""string""}},""required"":[""id""]}").RootElement },
-                    new { Name = "ado_wiql_query",       Description = "Run a WIQL query against Azure DevOps",                                                 InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""wiql"":{""type"":""string"",""description"":""WIQL query string""},""project"":{""type"":""string""}},""required"":[""wiql""]}").RootElement }
-                });
-                await db.Database.ExecuteSqlRawAsync(
-                    """
-                    INSERT INTO mcp_servers (id, name, slug, description, transport_type, endpoint_url,
-                        auth_type, requires_user_auth, is_active, tool_manifest, created_at, updated_at)
-                    VALUES ({0}, 'Azure DevOps', 'devops', 'Work items, repos, and pipelines via Azure DevOps REST API',
-                        'http', {1}, 'devops_pat', 0, 1, {2},
-                        NOW(6), NOW(6))
-                    ON DUPLICATE KEY UPDATE
-                        endpoint_url = VALUES(endpoint_url),
-                        auth_type = VALUES(auth_type),
-                        requires_user_auth = VALUES(requires_user_auth),
-                        tool_manifest = VALUES(tool_manifest),
-                        updated_at = NOW(6)
-                    """,
-                    devOpsId, devOpsEndpointUrl, devOpsManifest);
-                _logger.LogInformation("Seeded Azure DevOps MCP server (endpoint: {Url}).", devOpsEndpointUrl);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Azure DevOps seed (non-fatal): {Message}", ex.Message);
-            }
+                    // Seed Azure DevOps MCP server
+                    // Auth type: "devops_pat" — McpToolService passes userId as X-API-Key;
+                    // DevOpsMcpAdapter resolves the user's PAT from DevOpsConnectionService.
+                    // requires_user_auth = 0 (auto-available) but GetConversationToolsAsync
+                    // gates on DevOpsConnectionService.IsConnectedAsync so only connected users see it.
+                    try
+                    {
+                        var devOpsId = "00000000-0000-0000-0000-000000000002";
+                        var devOpsEndpointUrl = "http://localhost:8080/internal/mcp/devops";
+                        var devOpsManifest = System.Text.Json.JsonSerializer.Serialize(new[]
+                        {
+                            new { Name = "ado_list_projects",    Description = "List all Azure DevOps projects",                                                        InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{},""required"":[]}").RootElement },
+                            new { Name = "ado_get_work_item",    Description = "Get details of a specific Azure DevOps work item by ID",                               InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""id"":{""type"":""integer"",""description"":""Work item ID""}},""required"":[""id""]}").RootElement },
+                            new { Name = "ado_list_work_items",  Description = "List work items from Azure DevOps",                                                     InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""project"":{""type"":""string""},""state"":{""type"":""string""},""assignee"":{""type"":""string""}},""required"":[]}").RootElement },
+                            new { Name = "ado_create_work_item", Description = "Create a new work item in Azure DevOps",                                                InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""project"":{""type"":""string""},""type"":{""type"":""string"",""description"":""Work item type e.g. Task, Bug, User Story""},""title"":{""type"":""string""},""description"":{""type"":""string""}},""required"":[""project"",""type"",""title""]}").RootElement },
+                            new { Name = "ado_update_work_item", Description = "Update an existing Azure DevOps work item",                                             InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""id"":{""type"":""integer""},""state"":{""type"":""string""},""title"":{""type"":""string""},""comment"":{""type"":""string""}},""required"":[""id""]}").RootElement },
+                            new { Name = "ado_wiql_query",       Description = "Run a WIQL query against Azure DevOps",                                                 InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""wiql"":{""type"":""string"",""description"":""WIQL query string""},""project"":{""type"":""string""}},""required"":[""wiql""]}").RootElement }
+                        });
+                        await db.Database.ExecuteSqlRawAsync(
+                            """
+                            INSERT INTO mcp_servers (id, name, slug, description, transport_type, endpoint_url,
+                                auth_type, requires_user_auth, is_active, tool_manifest, created_at, updated_at)
+                            VALUES ({0}, 'Azure DevOps', 'devops', 'Work items, repos, and pipelines via Azure DevOps REST API',
+                                'http', {1}, 'devops_pat', 0, 1, {2},
+                                NOW(6), NOW(6))
+                            ON DUPLICATE KEY UPDATE
+                                endpoint_url = VALUES(endpoint_url),
+                                auth_type = VALUES(auth_type),
+                                requires_user_auth = VALUES(requires_user_auth),
+                                tool_manifest = VALUES(tool_manifest),
+                                updated_at = NOW(6)
+                            """,
+                            devOpsId, devOpsEndpointUrl, devOpsManifest);
+                        _logger.LogInformation("Seeded Azure DevOps MCP server (endpoint: {Url}).", devOpsEndpointUrl);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Azure DevOps seed (non-fatal): {Message}", ex.Message);
+                    }
 
-            // Seed Microsoft 365 MCP server
-            // Auth type: "m365_token" — McpToolService passes userId as X-API-Key;
-            // M365McpAdapter resolves the user's Graph access token from MicrosoftTokenService.
-            // requires_user_auth = 0 (auto-available) but GetConversationToolsAsync
-            // gates on UserMicrosoftTokens token existence so only connected users see it.
-            try
-            {
-                var m365Id = "00000000-0000-0000-0000-000000000003";
-                var m365EndpointUrl = "http://localhost:8080/internal/mcp/m365";
-                var m365Manifest = System.Text.Json.JsonSerializer.Serialize(new[]
+                    // Seed Microsoft 365 MCP server
+                    // Auth type: "m365_token" — McpToolService passes userId as X-API-Key;
+                    // M365McpAdapter resolves the user's Graph access token from MicrosoftTokenService.
+                    // requires_user_auth = 0 (auto-available) but GetConversationToolsAsync
+                    // gates on UserMicrosoftTokens token existence so only connected users see it.
+                    try
+                    {
+                        var m365Id = "00000000-0000-0000-0000-000000000003";
+                        var m365EndpointUrl = "http://localhost:8080/internal/mcp/m365";
+                        var m365Manifest = System.Text.Json.JsonSerializer.Serialize(new[]
+                        {
+                            new { Name = "graph_list_emails",          Description = "List recent emails from Microsoft 365 inbox",                                     InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""max_results"":{""type"":""number"",""description"":""Max emails to return (default 10)""}},""required"":[]}").RootElement },
+                            new { Name = "graph_get_email",            Description = "Get full content of a specific email by ID",                                      InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""message_id"":{""type"":""string"",""description"":""Email message ID""}},""required"":[""message_id""]}").RootElement },
+                            new { Name = "graph_send_email",           Description = "Send an email via Microsoft 365",                                                 InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""to"":{""type"":""string""},""subject"":{""type"":""string""},""body"":{""type"":""string""}},""required"":[""to"",""subject"",""body""]}").RootElement },
+                            new { Name = "graph_list_calendar_events", Description = "List upcoming calendar events from Microsoft 365",                                InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""days_ahead"":{""type"":""number"",""description"":""Days ahead to look (default 7)""}},""required"":[]}").RootElement }
+                        });
+                        await db.Database.ExecuteSqlRawAsync(
+                            """
+                            INSERT INTO mcp_servers (id, name, slug, description, transport_type, endpoint_url,
+                                auth_type, requires_user_auth, is_active, tool_manifest, created_at, updated_at)
+                            VALUES ({0}, 'Microsoft 365', 'm365', 'Email and calendar access via Microsoft Graph',
+                                'http', {1}, 'm365_token', 0, 1, {2},
+                                NOW(6), NOW(6))
+                            ON DUPLICATE KEY UPDATE
+                                endpoint_url = VALUES(endpoint_url),
+                                auth_type = VALUES(auth_type),
+                                requires_user_auth = VALUES(requires_user_auth),
+                                tool_manifest = VALUES(tool_manifest),
+                                updated_at = NOW(6)
+                            """,
+                            m365Id, m365EndpointUrl, m365Manifest);
+                        _logger.LogInformation("Seeded Microsoft 365 MCP server (endpoint: {Url}).", m365EndpointUrl);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Microsoft 365 seed (non-fatal): {Message}", ex.Message);
+                    }
+
+                    // Record migration as applied
+                    using (var cmd = migConn.CreateCommand())
+                    {
+                        cmd.CommandText = "INSERT IGNORE INTO applied_migrations (name, applied_at) VALUES (@name, NOW())";
+                        var p = cmd.CreateParameter(); p.ParameterName = "@name"; p.Value = "mcp-server-seed-v1";
+                        cmd.Parameters.Add(p);
+                        await cmd.ExecuteNonQueryAsync(cancellationToken);
+                    }
+                    _logger.LogInformation("MCP server seed migration complete (mcp-server-seed-v1).");
+                }
+                else
                 {
-                    new { Name = "graph_list_emails",          Description = "List recent emails from Microsoft 365 inbox",                                     InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""max_results"":{""type"":""number"",""description"":""Max emails to return (default 10)""}},""required"":[]}").RootElement },
-                    new { Name = "graph_get_email",            Description = "Get full content of a specific email by ID",                                      InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""message_id"":{""type"":""string"",""description"":""Email message ID""}},""required"":[""message_id""]}").RootElement },
-                    new { Name = "graph_send_email",           Description = "Send an email via Microsoft 365",                                                 InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""to"":{""type"":""string""},""subject"":{""type"":""string""},""body"":{""type"":""string""}},""required"":[""to"",""subject"",""body""]}").RootElement },
-                    new { Name = "graph_list_calendar_events", Description = "List upcoming calendar events from Microsoft 365",                                InputSchema = System.Text.Json.JsonDocument.Parse(@"{""type"":""object"",""properties"":{""days_ahead"":{""type"":""number"",""description"":""Days ahead to look (default 7)""}},""required"":[]}").RootElement }
-                });
-                await db.Database.ExecuteSqlRawAsync(
-                    """
-                    INSERT INTO mcp_servers (id, name, slug, description, transport_type, endpoint_url,
-                        auth_type, requires_user_auth, is_active, tool_manifest, created_at, updated_at)
-                    VALUES ({0}, 'Microsoft 365', 'm365', 'Email and calendar access via Microsoft Graph',
-                        'http', {1}, 'm365_token', 0, 1, {2},
-                        NOW(6), NOW(6))
-                    ON DUPLICATE KEY UPDATE
-                        endpoint_url = VALUES(endpoint_url),
-                        auth_type = VALUES(auth_type),
-                        requires_user_auth = VALUES(requires_user_auth),
-                        tool_manifest = VALUES(tool_manifest),
-                        updated_at = NOW(6)
-                    """,
-                    m365Id, m365EndpointUrl, m365Manifest);
-                _logger.LogInformation("Seeded Microsoft 365 MCP server (endpoint: {Url}).", m365EndpointUrl);
+                    _logger.LogInformation("MCP server seed already applied — skipping (mcp-server-seed-v1)");
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Microsoft 365 seed (non-fatal): {Message}", ex.Message);
+                _logger.LogWarning(ex, "MCP server seed migration failed (non-fatal)");
             }
 
             // One-time cleanup: delete ghost conversations (created on page load with no messages)
