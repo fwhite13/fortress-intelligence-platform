@@ -223,6 +223,10 @@ else if (_artifactSet is not null)
                         {
                             <MudPaper Elevation="0" Class="ml-4 mb-2 pa-2" Style="border-left: 3px solid var(--mud-palette-primary);">
                                 <div class="d-flex align-center gap-2 mb-1 flex-wrap">
+                                    <MudIconButton Icon="@(_collapsedFeatures.Contains(feature.Id) ? Icons.Material.Filled.ChevronRight : Icons.Material.Filled.ExpandMore)"
+                                                   Size="Size.Small"
+                                                   OnClick="@(() => { if (_collapsedFeatures.Contains(feature.Id)) _collapsedFeatures.Remove(feature.Id); else _collapsedFeatures.Add(feature.Id); })"
+                                                   Class="mr-1" />
                                     @RenderTemplateBadge(feature)
                                     @if (_editMode)
                                     {
@@ -250,26 +254,29 @@ else if (_artifactSet is not null)
                                     }
                                     @RenderPredecessorBadges(feature)
                                 </div>
-                                @if (_editMode)
+                                @if (!_collapsedFeatures.Contains(feature.Id))
                                 {
-                                    <MudExpansionPanels Class="ml-2 mb-1">
-                                        <MudExpansionPanel Text="Description ▾">
-                                            <MudTextField @bind-Value="feature.Description"
-                                                          Variant="Variant.Outlined"
-                                                          Lines="3"
-                                                          Label="Feature Description"
-                                                          @onblur="@(() => SaveDescription(feature))" />
-                                        </MudExpansionPanel>
-                                    </MudExpansionPanels>
-                                }
+                                    @if (_editMode)
+                                    {
+                                        <MudExpansionPanels Class="ml-2 mb-1">
+                                            <MudExpansionPanel Text="Description ▾">
+                                                <MudTextField @bind-Value="feature.Description"
+                                                              Variant="Variant.Outlined"
+                                                              Lines="3"
+                                                              Label="Feature Description"
+                                                              @onblur="@(() => SaveDescription(feature))" />
+                                            </MudExpansionPanel>
+                                        </MudExpansionPanels>
+                                    }
 
-                                @{
-                                    var stories = GetChildren("User Story", feature.Title);
-                                }
-                                @foreach (var story in stories)
+                                    @foreach (var story in GetChildren("User Story", feature.Title))
                                 {
                                     <MudPaper Elevation="0" Class="ml-4 mb-2 pa-2" Style="border-left: 3px solid var(--mud-palette-secondary);">
                                         <div class="d-flex align-center flex-wrap gap-2 mb-1">
+                                            <MudIconButton Icon="@(_collapsedStories.Contains(story.Id) ? Icons.Material.Filled.ChevronRight : Icons.Material.Filled.ExpandMore)"
+                                                           Size="Size.Small"
+                                                           OnClick="@(() => { if (_collapsedStories.Contains(story.Id)) _collapsedStories.Remove(story.Id); else _collapsedStories.Add(story.Id); })"
+                                                           Class="mr-1" />
                                             @RenderTemplateBadge(story)
                                             @if (_editMode)
                                             {
@@ -297,6 +304,8 @@ else if (_artifactSet is not null)
                                             }
                                             @RenderPredecessorBadges(story)
                                         </div>
+                                        @if (!_collapsedStories.Contains(story.Id))
+                                        {
                                         @if (_editMode)
                                         {
                                             <MudExpansionPanels Class="ml-2 mb-1">
@@ -341,10 +350,7 @@ else if (_artifactSet is not null)
                                         }
 
                                         @* Tasks under this Story *@
-                                        @{
-                                            var tasks = GetChildren("Task", story.Title);
-                                        }
-                                        @foreach (var task in tasks)
+                                        @foreach (var task in GetChildren("Task", story.Title))
                                         {
                                             <div class="d-flex align-center flex-wrap gap-2 ml-4 mb-1">
                                                 @RenderTemplateBadge(task)
@@ -389,12 +395,7 @@ else if (_artifactSet is not null)
                                         }
 
                                         @* Test Cases collapsible subsection *@
-                                        @{
-                                            var testCases = _workItems
-                                                .Where(w => w.WorkItemType == "Test Case" && w.ParentTitle == story.Title)
-                                                .ToList();
-                                        }
-                                        @if (testCases.Any() || _editMode)
+                                        @if (_workItems.Where(w => w.WorkItemType == "Test Case" && w.ParentTitle == story.Title).ToList() is var testCases && (testCases.Any() || _editMode))
                                         {
                                             <MudExpansionPanels Class="mt-2 ml-4">
                                                 <MudExpansionPanel Expanded="false">
@@ -449,6 +450,7 @@ else if (_artifactSet is not null)
                                                 </MudExpansionPanel>
                                             </MudExpansionPanels>
                                         }
+                                        }
                                     </MudPaper>
                                 }
                                 @if (_editMode)
@@ -462,6 +464,7 @@ else if (_artifactSet is not null)
                                             + Add Story
                                         </MudButton>
                                     </div>
+                                }
                                 }
                             </MudPaper>
                         }
@@ -607,6 +610,9 @@ else if (_artifactSet is not null)
     private List<WorkItemRecord> _workItems = new();
     private List<WorkItemRecord> _externalDependencies = new();
     private List<WorkItemRecord> _epics = new();
+    // ADO#3449 — collapse state for Features and Stories
+    private HashSet<int> _collapsedFeatures = new();
+    private HashSet<int> _collapsedStories = new();
     private string _submissionTitle = "";
     private bool _loading = true;
     private string? _error;
@@ -691,6 +697,9 @@ else if (_artifactSet is not null)
 
             // Epics are top-level (no parent or parent is null)
             _epics = _workItems.Where(w => w.WorkItemType == "Epic").ToList();
+            // ADO#3449 — default all features and stories collapsed
+            _collapsedFeatures = _workItems.Where(w => w.WorkItemType == "Feature").Select(w => w.Id).ToHashSet();
+            _collapsedStories = _workItems.Where(w => w.WorkItemType == "User Story").Select(w => w.Id).ToHashSet();
 
             _isEditor = await UserContextService.IsNexusEditorAsync();
             _isAdmin = await UserContextService.IsAdminAsync();
