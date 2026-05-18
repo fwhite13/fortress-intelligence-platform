@@ -18,6 +18,8 @@
 @using FortressNexus.Web.Models.Enums
 @using FortressNexus.Web.Services
 @using Microsoft.EntityFrameworkCore
+@using System.Text.Json
+@using System.Text.RegularExpressions
 
 <PageTitle>Work Items — NEXUS</PageTitle>
 
@@ -81,6 +83,13 @@ else if (_artifactSet is not null)
                         </MudTooltip>
                     }
                 }
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Default"
+                           StartIcon="@Icons.Material.Filled.Download"
+                           Size="Size.Small"
+                           OnClick="@DownloadArtifactsMarkdownAsync">
+                    Download
+                </MudButton>
                 @if (_isEditor && !_editMode && !_alreadyPosted)
                 {
                     <MudButton Variant="Variant.Outlined"
@@ -1199,6 +1208,128 @@ else if (_artifactSet is not null)
         WiTemplate = record.WiTemplate,
         TestedByTitles = record.TestedByTitles
     };
+
+    private async Task DownloadArtifactsMarkdownAsync()
+    {
+        if (_artifactSet is null) return;
+
+        var sb = new System.Text.StringBuilder();
+        var title = _submissionTitle ?? "Artifacts";
+        var slug = Regex.Replace(title.ToLowerInvariant(), @"[^a-z0-9]+", "-").Trim('-');
+        var filename = $"{slug}-artifacts.md";
+
+        sb.AppendLine($"# {title} — Artifact Tree");
+        sb.AppendLine($"Generated: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC");
+        sb.AppendLine($"Artifact Set: {_artifactSet.Id} | Total Items: {_workItems.Count}");
+        sb.AppendLine();
+        sb.AppendLine("---");
+        sb.AppendLine();
+
+        foreach (var epic in _epics)
+        {
+            sb.AppendLine($"## Epic: {epic.Title}");
+            sb.AppendLine();
+            if (!string.IsNullOrWhiteSpace(epic.Description))
+            {
+                sb.AppendLine(epic.Description.Trim());
+                sb.AppendLine();
+            }
+
+            var features = _workItems
+                .Where(w => w.WorkItemType == "Feature" && w.ParentTitle == epic.Title)
+                .ToList();
+
+            foreach (var feature in features)
+            {
+                sb.AppendLine($"### Feature: {feature.Title}");
+                sb.AppendLine();
+                if (!string.IsNullOrWhiteSpace(feature.Description))
+                {
+                    sb.AppendLine(feature.Description.Trim());
+                    sb.AppendLine();
+                }
+
+                var stories = _workItems
+                    .Where(w => w.WorkItemType == "User Story" && w.ParentTitle == feature.Title)
+                    .ToList();
+
+                foreach (var story in stories)
+                {
+                    sb.AppendLine($"#### User Story: {story.Title}");
+                    sb.AppendLine();
+                    if (!string.IsNullOrWhiteSpace(story.Description))
+                    {
+                        sb.AppendLine(story.Description.Trim());
+                        sb.AppendLine();
+                    }
+                    if (!string.IsNullOrWhiteSpace(story.AcceptanceCriteria))
+                    {
+                        sb.AppendLine("**Acceptance Criteria:**");
+                        sb.AppendLine(story.AcceptanceCriteria.Trim());
+                        sb.AppendLine();
+                    }
+
+                    var tasks = _workItems
+                        .Where(w => w.WorkItemType == "Task" && w.ParentTitle == story.Title)
+                        .ToList();
+                    foreach (var task in tasks)
+                    {
+                        sb.AppendLine($"##### Task: {task.Title}");
+                        sb.AppendLine();
+                        if (!string.IsNullOrWhiteSpace(task.Description))
+                        {
+                            sb.AppendLine(task.Description.Trim());
+                            sb.AppendLine();
+                        }
+                    }
+
+                    var testCases = _workItems
+                        .Where(w => w.WorkItemType == "Test Case" && w.ParentTitle == story.Title)
+                        .ToList();
+                    foreach (var tc in testCases)
+                    {
+                        sb.AppendLine($"##### Test Case: {tc.Title}");
+                        sb.AppendLine();
+                        if (!string.IsNullOrWhiteSpace(tc.Description))
+                        {
+                            sb.AppendLine(tc.Description.Trim());
+                            sb.AppendLine();
+                        }
+                        if (!string.IsNullOrWhiteSpace(tc.AcceptanceCriteria))
+                        {
+                            sb.AppendLine("**Acceptance Criteria:**");
+                            sb.AppendLine(tc.AcceptanceCriteria.Trim());
+                            sb.AppendLine();
+                        }
+                    }
+                }
+            }
+        }
+
+        var externalItems = _workItems
+            .Where(w => w.WorkItemType == "External" || w.IsExternalDependency)
+            .ToList();
+        if (externalItems.Any())
+        {
+            sb.AppendLine("## External / Referenced Items");
+            sb.AppendLine();
+            foreach (var ext in externalItems)
+            {
+                sb.AppendLine($"- {ext.Title}");
+            }
+            sb.AppendLine();
+        }
+
+        var markdownContent = sb.ToString();
+        await JS.InvokeVoidAsync("eval", $@"
+    var a = document.createElement('a');
+    a.href = 'data:text/markdown;charset=utf-8,' + encodeURIComponent({JsonSerializer.Serialize(markdownContent)});
+    a.download = '{filename}';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+");
+    }
 
     private RenderFragment RenderPredecessorBadges(WorkItemRecord wi) => builder =>
     {
