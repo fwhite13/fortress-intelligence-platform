@@ -38,12 +38,11 @@
     {
         <MudPaper Elevation="2" Class="pa-5 mb-4 nexus-phase-transition">
             <MudText Typo="Typo.h6" Class="mb-3">✅ Phase 1 Complete</MudText>
-            <MudText Typo="Typo.body1" Class="mb-4">
-                Phase 1 complete. NEXUS has a good picture of the business need. Now for a few technical
-                questions — these help prevent architectural surprises in the spec.
-            </MudText>
             @if (_isAdmin)
             {
+                <MudText Typo="Typo.body1" Class="mb-4">
+                    Phase 1 complete. NEXUS has a solid picture of the business need. Next up: a few technical questions to help prevent architectural surprises in the spec.
+                </MudText>
                 <MudButton Variant="Variant.Filled"
                            Color="Color.Primary"
                            OnClick="HandleAdvanceToPhase2"
@@ -62,9 +61,9 @@
             }
             else
             {
-                <MudAlert Severity="Severity.Info">
-                    Waiting for an admin to advance to Phase 2.
-                </MudAlert>
+                <MudText Typo="Typo.body1" Class="mb-4">
+                    You're done! The BA team will take it from here and follow up with any technical questions before generating your spec.
+                </MudText>
             }
         </MudPaper>
     }
