@@ -125,10 +125,6 @@ else
                 {
                     <MessageBubble Message="msg" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
                 }
-                @if ((messages.Any(m => m.Role == "assistant") || isStreaming) && _lastKbResult != null)
-                {
-                    <KbIndicator Result="_lastKbResult" />
-                }
                 @if (_conversationArtifacts.Any())
                 {
                     <div class="artifact-list">
@@ -159,24 +155,14 @@ else
                     🔍 @(_currentToolName ?? "Calling tool")...
                 </MudAlert>
             }
-            @if (_activeToolCalls.Any())
+            @if (_activeToolCalls.Any() || _toolCallsFading)
             {
-                <div class="tool-call-indicator-list">
+                <div class="tool-call-indicator-list @(_toolCallsFading ? "tool-call-list-fading" : "")">
                     @foreach (var tc in _activeToolCalls)
                     {
                         <div class="tool-call-indicator @(tc.Status == "calling" ? "tool-call-active" : tc.Status == "error" ? "tool-call-error" : "tool-call-done")">
-                            @if (tc.Status == "calling")
-                            {
-                                <span class="tool-call-spinner">&#x23F3;</span>
-                            }
-                            else if (tc.Status == "done")
-                            {
-                                <span class="tool-call-check">&#x2713;</span>
-                            }
-                            else
-                            {
-                                <span class="tool-call-x">&#x26A0;&#xFE0F;</span>
-                            }
+                            <MudIcon Icon="@GetToolIcon(tc.ToolName, tc.Server)"
+                                     Style="@($"width: 14px; height: 14px; margin-right: 4px;{(tc.Status == "calling" ? " animation: spin 1s linear infinite;" : "")}")" />
                             <span class="tool-call-summary">@tc.Summary</span>
                         </div>
                     }
@@ -282,16 +268,6 @@ else
                             </div>
                         }
                     </div>
-                }
-                <!-- MCP tool availability indicator (muted, non-interactive) -->
-                @if (_availableToolServers.Any())
-                {
-                    <span style="display: inline-flex; align-items: center; gap: 4px; color: var(--color-text-tertiary); font-size: var(--text-xs); user-select: none; margin-left: var(--space-1);">
-                        @foreach (var server in _availableToolServers)
-                        {
-                            <span title="@server.Name tools available">🔍 @server.Name available</span>
-                        }
-                    </span>
                 }
             </div>
             <!-- Model selector -->
@@ -426,6 +402,7 @@ else
 
     // ADO#3241 — Tool call transparency events
     private List<ToolCallEvent> _activeToolCalls = new();
+    private bool _toolCallsFading = false;
     private record ToolCallEvent(string Server, string ToolName, string Status, string Summary, DateTime Timestamp);
     // Attachment state
     private List<ChatAttachment> _pendingAttachments = new();
@@ -950,6 +927,18 @@ else
 
                 if (evt.Type == "text")
                 {
+                    // Fade out tool call strip on first response token (ADO#3455)
+                    if (_activeToolCalls.Any() && !_toolCallsFading)
+                    {
+                        _toolCallsFading = true;
+                        _ = Task.Delay(200).ContinueWith(_ => InvokeAsync(() =>
+                        {
+                            _activeToolCalls.Clear();
+                            _toolCallsFading = false;
+                            StateHasChanged();
+                            return Task.CompletedTask;
+                        }));
+                    }
                     fullResponse.Append(evt.Content ?? "");
                     streamingMessage.Content = fullResponse.ToString();
                     StateHasChanged();
@@ -1111,6 +1100,8 @@ else
             _elapsedTimer?.Dispose();
             _elapsedTimer = null;
             _taskModeActive = false;
+            _activeToolCalls.Clear();    // ADO#3455 — ensure cleared on turn end
+            _toolCallsFading = false;    // ADO#3455
             streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
             StateHasChanged();
         }
@@ -1291,6 +1282,19 @@ else
         _userInput = "";
         await HandleSend(string.IsNullOrWhiteSpace(text) ? "(see attached files)" : text);
     }
+
+    private static string GetToolIcon(string toolName, string server) => toolName switch
+    {
+        var t when t.Contains("search") => Icons.Material.Outlined.Search,
+        var t when t.Contains("file") || t.Contains("write") || t.Contains("read") => Icons.Material.Outlined.InsertDriveFile,
+        var t when t.Contains("email") || t.Contains("mail") => Icons.Material.Outlined.Email,
+        var t when t.Contains("calendar") => Icons.Material.Outlined.CalendarMonth,
+        var t when t.Contains("devops") || t.Contains("work_item") || t.Contains("pipeline") => Icons.Material.Outlined.Engineering,
+        var t when t.Contains("kb") || t.Contains("knowledge") => Icons.Material.Outlined.LibraryBooks,
+        var t when t.Contains("web") || t.Contains("browse") || t.Contains("fetch") => Icons.Material.Outlined.Language,
+        var t when t.Contains("list_files") || t.Contains("workspace") => Icons.Material.Outlined.Folder,
+        _ => Icons.Material.Outlined.Build
+    };
 
     // ADO#3241 — Handle tool_call SSE events
     private void HandleToolCallEvent(ToolCallPayload payload)
@@ -1692,6 +1696,15 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 }
 
 <style>
+/* ADO#3455 — Tool call strip fade and spin */
+.tool-call-list-fading {
+    opacity: 0;
+    transition: opacity 200ms ease-out;
+}
+@@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
 .btn-task-mode {
     background: transparent;
     border: var(--border-width-thin, 1px) solid var(--color-border);
