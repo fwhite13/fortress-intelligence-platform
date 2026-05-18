@@ -157,7 +157,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
         var enrichSystemPrompt = _config["Nexus:Prompts:ArtifactGenEnrichSystem"]
             ?? "You are a technical project manager. Enrich the provided skeleton JSON array with descriptions, acceptanceCriteria, developerBrief, and activity fields. Do not add or remove items. Do not change titles.";
 
-        const int EnrichBatchSize = 25;
+        const int EnrichBatchSize = 15;
         var totalPt1B = 0;
         var totalCt1B = 0;
         var batchCount = (int)Math.Ceiling((double)skeletonItems.Count / EnrichBatchSize);
@@ -175,7 +175,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
 
             try
             {
-                var (call1BText, pt1B, ct1B) = await _bedrock.InvokeAsync(enrichSystemPrompt, call1BUserMessage, 32768, resolvedModelId);
+                var (call1BText, pt1B, ct1B) = await _bedrock.InvokeAsync(enrichSystemPrompt, call1BUserMessage, 64000, resolvedModelId);
                 totalPt1B += pt1B;
                 totalCt1B += ct1B;
 
@@ -284,10 +284,13 @@ public class ArtifactGenerationService : IArtifactGenerationService
         var tcScanPrompt = _config["Nexus:Prompts:TcScanSystem"];
         if (!string.IsNullOrEmpty(tcScanPrompt))
         {
-            var call2UserMessage = $"WORK ITEM ARRAY:\n{JsonSerializer.Serialize(enrichedDtos)}\n\nORIGINAL SPEC:\n{specContent}";
+            var enrichedForTcScan = enrichedDtos.Where(d =>
+                !string.IsNullOrWhiteSpace(d.AcceptanceCriteria) ||
+                !string.IsNullOrWhiteSpace(d.Description)).ToList();
+            var call2UserMessage = $"WORK ITEM ARRAY:\n{JsonSerializer.Serialize(enrichedForTcScan)}\n\nORIGINAL SPEC:\n{specContent}";
             try
             {
-                var (call2Text, pt2, ct2) = await _bedrock.InvokeAsync(tcScanPrompt, call2UserMessage, 32768, resolvedModelId);
+                var (call2Text, pt2, ct2) = await _bedrock.InvokeAsync(tcScanPrompt, call2UserMessage, 64000, resolvedModelId);
                 _logger.LogInformation("[DECOMP_PERSIST] Call 2 (TC scan) done for SpecDocument {SpecDocumentId}: {Pt2}+{Ct2} tokens",
                     specDocumentId, pt2, ct2);
 
@@ -367,7 +370,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
         var enrichSystemPrompt = _config["Nexus:Prompts:ArtifactGenEnrichSystem"]
             ?? "You are a technical project manager. Enrich the provided skeleton JSON array with descriptions, acceptanceCriteria, developerBrief, and activity fields. Do not add or remove items. Do not change titles.";
 
-        const int EnrichBatchSize = 25;
+        const int EnrichBatchSize = 15;
         var enrichedItems = new List<AdoWorkItemDto>();
         var totalPt1B = 0;
         var totalCt1B = 0;
@@ -378,7 +381,7 @@ public class ArtifactGenerationService : IArtifactGenerationService
             var batch = skeletonItems.Skip(batchIndex * EnrichBatchSize).Take(EnrichBatchSize).ToList();
             var batchJson = JsonSerializer.Serialize(batch);
             var call1BUserMessage = $"SKELETON BATCH {batchIndex + 1} of {batchCount}:\n{batchJson}\n\nORIGINAL SPEC:\n{specContent}";
-            var (call1BText, pt1B, ct1B) = await _bedrock.InvokeAsync(enrichSystemPrompt, call1BUserMessage, 32768, resolvedModelId);
+            var (call1BText, pt1B, ct1B) = await _bedrock.InvokeAsync(enrichSystemPrompt, call1BUserMessage, 64000, resolvedModelId);
             totalPt1B += pt1B;
             totalCt1B += ct1B;
             var batchEnriched = ParseWorkItems(call1BText, specDocumentId);
@@ -405,10 +408,13 @@ public class ArtifactGenerationService : IArtifactGenerationService
         var tcScanPrompt = _config["Nexus:Prompts:TcScanSystem"];
         if (!string.IsNullOrEmpty(tcScanPrompt))
         {
-            var call2UserMessage = $"WORK ITEM ARRAY:\n{JsonSerializer.Serialize(items)}\n\nORIGINAL SPEC:\n{specContent}";
+            var enrichedForTcScan = items.Where(d =>
+                !string.IsNullOrWhiteSpace(d.AcceptanceCriteria) ||
+                !string.IsNullOrWhiteSpace(d.Description)).ToList();
+            var call2UserMessage = $"WORK ITEM ARRAY:\n{JsonSerializer.Serialize(enrichedForTcScan)}\n\nORIGINAL SPEC:\n{specContent}";
             try
             {
-                var (call2Text, pt2, ct2) = await _bedrock.InvokeAsync(tcScanPrompt, call2UserMessage, 32768, resolvedModelId);
+                var (call2Text, pt2, ct2) = await _bedrock.InvokeAsync(tcScanPrompt, call2UserMessage, 64000, resolvedModelId);
                 _logger.LogInformation("[WI_GEN] Call 2 (TC scan) done for SpecDocument {SpecDocumentId}: {Pt2}+{Ct2} tokens",
                     specDocumentId, pt2, ct2);
 
