@@ -730,6 +730,8 @@
     // ── Context menu state ──────────────────────────────────────────────────
     private bool _contextMenuVisible = false;
     private double _ctxX, _ctxY;
+    private double _viewportWidth = 1280;
+    private double _viewportHeight = 800;
     private WorkspaceUpload? _ctxFile;
     private WorkspaceFolder? _ctxFolder;
 
@@ -774,6 +776,23 @@
         var artifactsTask = LoadArtifactsAsync();
         var treeTask = LoadFolderTreeAsync();
         await Task.WhenAll(filesTask, artifactsTask, treeTask);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var dims = await JSRuntime.InvokeAsync<double[]>("eval", "[window.innerWidth, window.innerHeight]");
+                if (dims?.Length == 2)
+                {
+                    _viewportWidth = dims[0];
+                    _viewportHeight = dims[1];
+                }
+            }
+            catch { /* keep defaults */ }
+        }
     }
 
     public void Dispose()
@@ -1019,8 +1038,10 @@
 
     private void ShowFileContextMenu(MouseEventArgs e, WorkspaceUpload file)
     {
-        _ctxX = e.ClientX;
-        _ctxY = e.ClientY;
+        const double menuWidth = 172;   // min-width 160 + 12 safety margin
+        const double menuHeight = 200;  // approx height for 5 file menu items
+        _ctxX = Math.Min(e.ClientX, Math.Max(0, _viewportWidth - menuWidth));
+        _ctxY = Math.Min(e.ClientY, Math.Max(0, _viewportHeight - menuHeight));
         _ctxFile = file;
         _ctxFolder = null;
         _contextMenuVisible = true;
@@ -1028,8 +1049,10 @@
 
     private void ShowFolderContextMenu(MouseEventArgs e, WorkspaceFolder folder)
     {
-        _ctxX = e.ClientX;
-        _ctxY = e.ClientY;
+        const double menuWidth = 172;   // min-width 160 + 12 safety margin
+        const double menuHeight = 90;   // approx height for 2 folder menu items
+        _ctxX = Math.Min(e.ClientX, Math.Max(0, _viewportWidth - menuWidth));
+        _ctxY = Math.Min(e.ClientY, Math.Max(0, _viewportHeight - menuHeight));
         _ctxFile = null;
         _ctxFolder = folder;
         _contextMenuVisible = true;

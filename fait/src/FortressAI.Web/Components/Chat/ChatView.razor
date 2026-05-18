@@ -263,7 +263,7 @@ else
                         </button>
                         @if (_teamKbPopoverOpen)
                         {
-                            <div style="position: absolute; top: 32px; left: 0; z-index: 1000; background: var(--color-surface-elevated, #1e1e2e); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 8px; min-width: 200px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);"
+                            <div class="team-kb-popover"
                                  @onclick:stopPropagation="true">
                                 <div style="font-size: var(--text-xs); color: var(--color-text-tertiary); padding: 4px 8px 8px 8px; font-weight: var(--font-medium); text-transform: uppercase; letter-spacing: 0.05em;">
                                     Team Knowledge Bases
@@ -1874,5 +1874,17 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     font-size: var(--text-sm, 0.875rem);
     font-weight: var(--font-medium, 500);
     color: var(--color-text-primary);
+}
+.team-kb-popover {
+    position: absolute;
+    bottom: 36px;
+    left: 0;
+    z-index: 1000;
+    background: var(--color-surface-elevated, #1e1e2e);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 8px;
+    min-width: 200px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 </style>
