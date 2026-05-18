@@ -250,6 +250,8 @@ public class DevOpsMcpAdapter : ControllerBase
         var toolName = request.Params?.Name ?? "";
         var args = request.Params?.Arguments ?? default;
 
+        _logger.LogInformation("[DevOps] Tool dispatch: userId={UserId} tool={Tool}", userId, toolName);
+
         try
         {
             string? result = toolName switch
@@ -281,13 +283,28 @@ public class DevOpsMcpAdapter : ControllerBase
                 _ => null
             };
 
+            _logger.LogInformation("[DevOps] Tool result: userId={UserId} tool={Tool} resultNull={IsNull}", userId, toolName, result is null);
+
             if (result is null && toolName is
                 "list_devops_projects" or "get_work_item" or "query_work_items" or
                 "list_repositories" or "list_pipelines" or "trigger_pipeline" or
                 "create_work_item" or "update_work_item" or "add_work_item_comment" or
                 "create_branch" or "create_pull_request" or "update_pull_request")
             {
-                result = "No result returned. The user may not have an Azure DevOps connection configured, or the request failed. Ask the user to check their Azure DevOps settings.";
+                _logger.LogWarning("[DevOps] Null result for userId={UserId} tool={Tool} — likely no connection or credential failure", userId, toolName);
+                return Ok(new McpCallResponse
+                {
+                    Jsonrpc = "2.0",
+                    Id = request.Id,
+                    Result = new McpToolResultContent
+                    {
+                        Content = new List<McpContentBlock>
+                        {
+                            new McpContentBlock { Type = "text", Text = $"Azure DevOps tool '{toolName}' returned no result. Your ADO connection may be missing or your PAT may have expired. Please reconnect in Settings → Integrations → Azure DevOps." }
+                        },
+                        IsError = true
+                    }
+                });
             }
 
             if (result is null)

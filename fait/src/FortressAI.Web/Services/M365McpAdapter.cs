@@ -79,6 +79,7 @@ public class M365McpAdapter : ControllerBase
 
         // Get access token — refresh if expired (MicrosoftTokenService handles refresh automatically)
         var accessToken = await _tokenService.GetValidAccessTokenAsync(userId);
+        _logger.LogInformation("[M365] Token lookup: userId={UserId} tokenPresent={Present}", userId, accessToken != null);
         if (accessToken == null)
         {
             return Ok(new McpCallResponse
