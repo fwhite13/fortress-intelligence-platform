@@ -225,6 +225,13 @@ public class McpToolService : IMcpToolService
             return new McpToolResult(false, null, $"Rate limit exceeded for {slug} (max {server.RateLimitPerMinute}/min)", 0);
         }
 
+        // Guard: userId must not be empty — a Guid.Empty means session context was lost
+        if (userId == Guid.Empty)
+        {
+            _logger.LogError("[McpTool] userId is Guid.Empty at dispatch — session context lost. slug={Slug} tool={Tool}", slug, actualToolName);
+            return new McpToolResult(false, null, "Internal error: user identity lost. Please refresh and try again.", 0);
+        }
+
         // Get access token.
         // For DevOps (devops_pat auth), pass the userId as the api_key — the internal
         // /internal/mcp/devops endpoint receives it via X-API-Key and resolves the user's
@@ -256,6 +263,7 @@ public class McpToolService : IMcpToolService
         {
             var endpointUrl = server.EndpointUrl ?? throw new InvalidOperationException("Server has no endpoint URL");
 
+            _logger.LogInformation("[McpTool] Dispatching: userId={UserId} slug={Slug} tool={Tool} authType={AuthType}", userId, slug, actualToolName, server.AuthType);
             JsonElement result;
             if ((server.AuthType == "api_key" || server.AuthType == DevOpsSlug.AuthType || server.AuthType == M365Slug.AuthType) && !string.IsNullOrEmpty(accessToken))
                 result = await _transport.CallToolAsync(endpointUrl, actualToolName, toolInput, apiKey: accessToken, ct: ct);

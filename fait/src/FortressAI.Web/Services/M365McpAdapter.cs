@@ -100,6 +100,8 @@ public class M365McpAdapter : ControllerBase
         var toolName = request.Params?.Name ?? "";
         var args = request.Params?.Arguments ?? default;
 
+        _logger.LogInformation("[M365] Tool dispatch: userId={UserId} tool={Tool}", userId, toolName);
+
         try
         {
             var result = toolName switch
