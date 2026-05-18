@@ -414,7 +414,7 @@
                 <span>Version History</span>
             </div>
             <div class="workspace-context-menu-divider"></div>
-            <div class="workspace-context-menu-item workspace-context-menu-danger" @onclick="@(() => { var f = _ctxFile; CloseContextMenu(); DeleteFile(f); })">
+            <div class="workspace-context-menu-item workspace-context-menu-danger" @onclick="@(async () => { var f = _ctxFile; CloseContextMenu(); await DeleteFile(f); })">
                 <MudIcon Icon="@Icons.Material.Filled.Delete" Size="Size.Small" />
                 <span>Delete</span>
             </div>
@@ -426,7 +426,7 @@
                 <span>Rename</span>
             </div>
             <div class="workspace-context-menu-divider"></div>
-            <div class="workspace-context-menu-item workspace-context-menu-danger" @onclick="@(() => { var f = _ctxFolder; CloseContextMenu(); DeleteFolder(f); })">
+            <div class="workspace-context-menu-item workspace-context-menu-danger" @onclick="@(async () => { var f = _ctxFolder; CloseContextMenu(); await DeleteFolder(f); })">
                 <MudIcon Icon="@Icons.Material.Filled.Delete" Size="Size.Small" />
                 <span>Delete</span>
             </div>
@@ -752,11 +752,7 @@
     private List<WorkspaceFileVersion>? _fileVersions;
     private bool _versionsLoading = false;
 
-    // ── Move file picker state ──────────────────────────────────────────────
-    private bool _movePickerVisible = false;
-    private WorkspaceUpload? _movePickerFile;
-    private List<WorkspaceFolder>? _movePickerFolders;
-    private bool _movePickerLoading = false;
+    // ── Move file picker state (superseded by Move dialog) ──────────────────
 
     // ── Move dialog state (replaces side panel) ──────────────────────────────────────────
     private bool _showMoveDialog = false;
