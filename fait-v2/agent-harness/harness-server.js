@@ -1208,38 +1208,56 @@ app.post('/tools/create_document', async (req, res) => {
     }
 });
 
-// ─── list_files tool handler (ADO#3206) ──────────────────────────────────
+// ─── list_files tool handler (ADO#3206, updated ADO#3450) ──────────────────
 app.post('/tools/list_files', async (req, res) => {
     const { userId, folder_path = '' } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
 
-    // ADO#3301 — replaced direct DB connection with Blazor internal API
     try {
-        const blazorBase = FAIT_BASE_URL;
-        const headers = { 'Content-Type': 'application/json' };
-        if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
+        const conn = await getDbConnection();
+        try {
+            // Resolve folder_path to folderId (same traversal as read_file)
+            let folderId = null;
+            if (folder_path) {
+                const parts = folder_path.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+                let parentId = null;
+                for (const segment of parts) {
+                    const paramArr = parentId === null ? [userId, segment] : [userId, segment, parentId];
+                    const sql = parentId === null
+                        ? 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id IS NULL'
+                        : 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id = ?';
+                    const [rows] = await conn.execute(sql, paramArr);
+                    if (rows.length === 0) {
+                        // folder not found — return empty list, not an error
+                        return res.json({ items: [] });
+                    }
+                    parentId = rows[0].id;
+                }
+                folderId = parentId;
+            }
 
-        // NOTE: folder_path-to-folderId resolution is not implemented in the internal API.
-        // For now, always list root-level items. folder_path is ignored.
-        // Future: resolve folder_path to a folderId via the folders endpoint.
-        if (folder_path) {
-            console.warn(`[list_files] folder_path="${folder_path}" not yet supported via Blazor API — listing root`);
+            // Query files in resolved folder (or root)
+            const fileSql = folderId === null
+                ? 'SELECT id, filename, mime_type, s3_key, size_bytes, created_at, folder_id, source, current_version FROM user_workspace_uploads WHERE user_id = ? AND folder_id IS NULL ORDER BY created_at DESC'
+                : 'SELECT id, filename, mime_type, s3_key, size_bytes, created_at, folder_id, source, current_version FROM user_workspace_uploads WHERE user_id = ? AND folder_id = ? ORDER BY created_at DESC';
+            const fileParams = folderId === null ? [userId] : [userId, folderId];
+            const [rows] = await conn.execute(fileSql, fileParams);
+
+            const items = rows.map(r => ({
+                id: r.id,
+                filename: r.filename,
+                mimeType: r.mime_type,
+                sizeBytes: r.size_bytes,
+                createdAt: r.created_at,
+                folderId: r.folder_id,
+                source: r.source || 'user',
+                currentVersion: r.current_version || 1,
+            }));
+
+            res.json({ items });
+        } finally {
+            await conn.end();
         }
-
-        const apiRes = await fetch(`${blazorBase}/api/workspace/internal/list-files`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ UserId: userId }),
-        });
-
-        if (!apiRes.ok) {
-            const errBody = await apiRes.text();
-            console.error(`[list_files] Blazor API error: status=${apiRes.status} body=${errBody}`);
-            return res.status(500).json({ error: `Blazor API error: ${apiRes.status}` });
-        }
-
-        const data = await apiRes.json();
-        res.json({ items: data.items || [] });
     } catch (err) {
         console.error('[harness] list_files error:', err.message);
         res.status(500).json({ error: err.message });
@@ -1326,9 +1344,9 @@ app.post('/tools/read_file', async (req, res) => {
     }
 });
 
-// ─── write_file tool handler (ADO#3393) ──────────────────────────────────────
+// ─── write_file tool handler (ADO#3393, updated ADO#3450) ────────────────────
 app.post('/tools/write_file', async (req, res) => {
-    const { userId, conversationId, path: filePath, content, overwrite } = req.body;
+    const { userId, conversationId, path: filePath, content } = req.body;
 
     // 1. Validate required inputs
     if (!userId) return res.status(400).json({ error: 'userId required' });
@@ -1346,106 +1364,133 @@ app.post('/tools/write_file', async (req, res) => {
         return res.status(400).json({ error: 'Content exceeds 1MB size limit' });
     }
 
+    // 4. Parse path into folder segments + filename
+    const parts = filePath.replace(/^\/+|\/+$/g, '').split('/');
+    const filename = parts.pop();
+    const folderSegments = parts;
+
+    // 5. Detect MIME type from extension
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    const mimeMap = {
+        'md': 'text/markdown',
+        'txt': 'text/plain',
+        'html': 'text/html',
+        'htm': 'text/html',
+        'json': 'application/json',
+        'csv': 'text/csv',
+        'xml': 'application/xml',
+        'js': 'text/javascript',
+        'ts': 'text/typescript',
+        'py': 'text/x-python',
+        'css': 'text/css',
+    };
+    const mimeType = mimeMap[ext] || 'text/plain';
+
     try {
-        // 4. Sanitize filename from path — use the basename
-        const filename = filePath.split('/').pop() || filePath;
-        const s3Key = `workspaces/${userId}/files/root/${filename}`;
-
-        // 5. Detect MIME type from extension
-        const ext = filename.split('.').pop()?.toLowerCase() || '';
-        const mimeMap = {
-            'md': 'text/markdown',
-            'txt': 'text/plain',
-            'html': 'text/html',
-            'htm': 'text/html',
-            'json': 'application/json',
-            'csv': 'text/csv',
-            'xml': 'application/xml',
-            'js': 'text/javascript',
-            'ts': 'text/typescript',
-            'py': 'text/x-python',
-            'css': 'text/css',
-        };
-        const mimeType = mimeMap[ext] || 'text/plain';
-
-        // 6. Check if file already exists when overwrite is not set
-        if (!overwrite) {
+        // 6. Resolve (and create if missing) folder hierarchy
+        let folderId = null;
+        if (folderSegments.length > 0) {
+            const conn2 = await getDbConnection();
             try {
-                await s3Client.send(new HeadObjectCommand({
-                    Bucket: S3_BUCKET,
-                    Key: s3Key
-                }));
-                // If we get here, file exists
-                return res.status(409).json({ error: `File already exists: ${filePath}. Set overwrite=true to replace it.` });
-            } catch (headErr) {
-                // 404 / NotFound = file does not exist — proceed
-                if (headErr.name !== 'NotFound' && headErr.$metadata?.httpStatusCode !== 404) {
-                    // Unexpected error during existence check
-                    throw headErr;
+                let parentId = null;
+                for (const segment of folderSegments) {
+                    const paramArr = parentId === null ? [userId, segment] : [userId, segment, parentId];
+                    const sql = parentId === null
+                        ? 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id IS NULL'
+                        : 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id = ?';
+                    const [rows] = await conn2.execute(sql, paramArr);
+                    if (rows.length > 0) {
+                        parentId = rows[0].id;
+                    } else {
+                        // Create missing folder
+                        const newFolderId = crypto.randomUUID();
+                        const now2 = new Date().toISOString().slice(0, 19).replace('T', ' ');
+                        const insertSql = parentId === null
+                            ? 'INSERT INTO user_workspace_folders (id, user_id, name, parent_id, created_at) VALUES (?, ?, ?, NULL, ?)'
+                            : 'INSERT INTO user_workspace_folders (id, user_id, name, parent_id, created_at) VALUES (?, ?, ?, ?, ?)';
+                        const insertParams = parentId === null
+                            ? [newFolderId, userId, segment, now2]
+                            : [newFolderId, userId, segment, parentId, now2];
+                        await conn2.execute(insertSql, insertParams);
+                        parentId = newFolderId;
+                    }
                 }
+                folderId = parentId;
+            } finally {
+                await conn2.end();
             }
         }
 
-        // 7. Write to S3
-        await s3Client.send(new PutObjectCommand({
-            Bucket: S3_BUCKET,
-            Key: s3Key,
-            Body: contentBuffer,
-            ContentType: mimeType
-        }));
-
-        const sizeBytes = contentBuffer.length;
-
-        // 8. Check DB for existing row (needed for overwrite path)
+        // 7. DB lookup FIRST — to know version number for S3 key
         const conn = await getDbConnection();
         try {
             const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            const sizeBytes = contentBuffer.length;
+            const s3FolderPart = folderId || 'root';
 
-            // Check if a DB row already exists for this file
-            const [existingRows] = await conn.execute(
-                'SELECT id, current_version FROM user_workspace_uploads WHERE user_id = ? AND filename = ? AND folder_id IS NULL LIMIT 1',
-                [userId, filename]
-            );
+            // Check for existing DB row (folder-aware)
+            const folderSql = folderId === null
+                ? 'SELECT id, current_version FROM user_workspace_uploads WHERE user_id = ? AND filename = ? AND folder_id IS NULL LIMIT 1'
+                : 'SELECT id, current_version FROM user_workspace_uploads WHERE user_id = ? AND filename = ? AND folder_id = ? LIMIT 1';
+            const folderParams = folderId === null ? [userId, filename] : [userId, filename, folderId];
+            const [existingRows] = await conn.execute(folderSql, folderParams);
 
-            if (existingRows.length > 0 && overwrite) {
-                // File exists in DB and overwrite=true: UPDATE existing row, INSERT new version
+            if (existingRows.length > 0) {
+                // File exists: bump version, use versioned S3 key
                 const existingId = existingRows[0].id;
                 const newVersion = (existingRows[0].current_version || 1) + 1;
+                const s3Key = `workspaces/${userId}/files/${s3FolderPart}/v${newVersion}/${filename}`;
 
+                // Write to S3
+                await s3Client.send(new PutObjectCommand({
+                    Bucket: S3_BUCKET,
+                    Key: s3Key,
+                    Body: contentBuffer,
+                    ContentType: mimeType
+                }));
+
+                // Update DB row + insert version record
                 await conn.execute(
-                    'UPDATE user_workspace_uploads SET s3_key = ?, size_bytes = ?, current_version = ? WHERE id = ?',
-                    [s3Key, sizeBytes, newVersion, existingId]
+                    'UPDATE user_workspace_uploads SET s3_key = ?, size_bytes = ?, current_version = ?, source = ? WHERE id = ?',
+                    [s3Key, sizeBytes, newVersion, 'assistant', existingId]
                 );
-
                 const versionId = crypto.randomUUID();
                 await conn.execute(
                     'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
                     [versionId, existingId, newVersion, s3Key, sizeBytes, now, 'assistant']
                 );
+                console.log(`[harness] write_file: versioned ${filename} → v${newVersion} in folderId=${folderId} (${sizeBytes} bytes)`);
+                res.json({ success: true, filename, s3Key, sizeBytes, mimeType, version: newVersion, updated: true });
 
-                console.log(`[harness] write_file: updated ${filename} to ${s3Key} (${sizeBytes} bytes, v${newVersion})`);
-                res.json({ success: true, filename, s3Key, sizeBytes, mimeType, updated: true });
+            } else {
+                // New file: v1 S3 key
+                const s3Key = `workspaces/${userId}/files/${s3FolderPart}/v1/${filename}`;
 
-            } else if (existingRows.length === 0) {
-                // New file: INSERT both upload row and version row (original path)
+                // Write to S3
+                await s3Client.send(new PutObjectCommand({
+                    Bucket: S3_BUCKET,
+                    Key: s3Key,
+                    Body: contentBuffer,
+                    ContentType: mimeType
+                }));
+
+                // Insert upload row + v1 version row
                 const fileId = crypto.randomUUID();
-                await conn.execute(
-                    'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at, current_version) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 1)',
-                    [fileId, userId, filename, mimeType, s3Key, sizeBytes, now]
-                );
+                const folderInsertSql = folderId === null
+                    ? 'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at, current_version, source) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 1, ?)'
+                    : 'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at, current_version, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)';
+                const folderInsertParams = folderId === null
+                    ? [fileId, userId, filename, mimeType, s3Key, sizeBytes, now, 'assistant']
+                    : [fileId, userId, folderId, filename, mimeType, s3Key, sizeBytes, now, 'assistant'];
+                await conn.execute(folderInsertSql, folderInsertParams);
+
                 const versionId = crypto.randomUUID();
                 await conn.execute(
                     'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by) VALUES (?, ?, 1, ?, ?, ?, ?)',
                     [versionId, fileId, s3Key, sizeBytes, now, 'assistant']
                 );
-
-                console.log(`[harness] write_file: saved ${filename} to ${s3Key} (${sizeBytes} bytes)`);
-                res.json({ success: true, filename, s3Key, sizeBytes, mimeType });
-
-            } else {
-                // existingRows.length > 0 AND overwrite is false: 409 (shouldn't reach here normally
-                // because we check S3 above, but guard DB state inconsistency)
-                res.status(409).json({ error: `File already exists: ${filePath}. Set overwrite=true to replace it.` });
+                console.log(`[harness] write_file: created ${filename} in folderId=${folderId} (${sizeBytes} bytes)`);
+                res.json({ success: true, filename, s3Key, sizeBytes, mimeType, version: 1 });
             }
         } finally {
             await conn.end();
@@ -2941,7 +2986,7 @@ You have access to the user's workspace files and memory topics. When the user a
                     {
                         toolSpec: {
                             name: 'write_file',
-                            description: 'Save text content as a file in the user\'s workspace. Use this when the user asks to save something to a file, export text as a document, or when you want to persist generated content (markdown summaries, reports, code) to the workspace. Files appear immediately in the workspace FILES tab.',
+                            description: 'Save text content as a file in the user\'s workspace. Supports folder paths (e.g. "reports/q1/summary.md") — missing folders are created automatically. If a file already exists at the path, a new version is created automatically. Files appear immediately in the workspace FILES tab.',
                             inputSchema: {
                                 json: {
                                     type: 'object',
@@ -2953,10 +2998,6 @@ You have access to the user's workspace files and memory topics. When the user a
                                         content: {
                                             type: 'string',
                                             description: 'Text content to write to the file (max 1MB)'
-                                        },
-                                        overwrite: {
-                                            type: 'boolean',
-                                            description: 'If true, replace an existing file. Default false — returns error if file already exists.'
                                         }
                                     },
                                     required: ['path', 'content']
@@ -3189,7 +3230,6 @@ You have access to the user's workspace files and memory topics. When the user a
                                         conversationId,
                                         path: toolInput.path,
                                         content: toolInput.content,
-                                        overwrite: toolInput.overwrite || false
                                     })
                                 });
                                 const wfData = await wfRes.json();
