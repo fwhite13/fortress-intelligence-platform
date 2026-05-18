@@ -161,8 +161,7 @@ else
                     @foreach (var tc in _activeToolCalls)
                     {
                         <div class="tool-call-indicator @(tc.Status == "calling" ? "tool-call-active" : tc.Status == "error" ? "tool-call-error" : "tool-call-done")">
-                            <MudIcon Icon="@GetToolIcon(tc.ToolName, tc.Server)"
-                                     Style="@($"width: 14px; height: 14px; margin-right: 4px;{(tc.Status == "calling" ? " animation: spin 1s linear infinite;" : "")}")" />
+                            <span class="tool-call-emoji @(tc.Status == "calling" ? "tool-call-emoji-spin" : "")">@GetToolEmoji(tc.ToolName, tc.Server)</span>
                             <span class="tool-call-summary">@tc.Summary</span>
                         </div>
                     }
@@ -1305,17 +1304,20 @@ else
         await HandleSend(string.IsNullOrWhiteSpace(text) ? "(see attached files)" : text);
     }
 
-    private static string GetToolIcon(string toolName, string server) => toolName switch
+    private static string GetToolEmoji(string toolName, string server) => toolName switch
     {
-        var t when t.Contains("search") => Icons.Material.Outlined.Search,
-        var t when t.Contains("file") || t.Contains("write") || t.Contains("read") => Icons.Material.Outlined.InsertDriveFile,
-        var t when t.Contains("email") || t.Contains("mail") => Icons.Material.Outlined.Email,
-        var t when t.Contains("calendar") => Icons.Material.Outlined.CalendarMonth,
-        var t when t.Contains("devops") || t.Contains("work_item") || t.Contains("pipeline") => Icons.Material.Outlined.Engineering,
-        var t when t.Contains("kb") || t.Contains("knowledge") => Icons.Material.Outlined.LibraryBooks,
-        var t when t.Contains("web") || t.Contains("browse") || t.Contains("fetch") => Icons.Material.Outlined.Language,
-        var t when t.Contains("list_files") || t.Contains("workspace") => Icons.Material.Outlined.Folder,
-        _ => Icons.Material.Outlined.Build
+        var t when t.Contains("memory") || t.Contains("remember") => "🧠",
+        var t when t.Contains("kb") || t.Contains("knowledge") || t.Contains("search_kb") => "📚",
+        var t when t.Contains("search") && !t.Contains("kb") => "🔍",
+        var t when t.Contains("web") || t.Contains("browse") || t.Contains("fetch") => "🌐",
+        var t when t.Contains("email") || t.Contains("mail") => "📧",
+        var t when t.Contains("calendar") => "📅",
+        var t when t.Contains("devops") || t.Contains("work_item") || t.Contains("pipeline") => "🛠️",
+        var t when t.Contains("exec") || t.Contains("shell") || t.Contains("run") => "⚙️",
+        var t when t.Contains("file") || t.Contains("write") || t.Contains("read") || t.Contains("list_files") => "📄",
+        var t when t.Contains("workspace") || t.Contains("folder") => "📁",
+        var t when t.Contains("subagent") || t.Contains("spawn") || t.Contains("claude") => "🧑‍🔬",
+        _ => "🔧"
     };
 
     // ADO#3241 — Handle tool_call SSE events
@@ -1726,6 +1728,35 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 @@keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
+}
+.tool-call-indicator-list {
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+    padding-left: calc(36px + 1rem);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-bottom: 4px;
+}
+.tool-call-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    background: var(--color-surface-sunken);
+    border-radius: var(--radius-pill, 9999px);
+    padding: 2px 8px;
+    white-space: nowrap;
+}
+.tool-call-emoji {
+    font-size: 0.875rem;
+    line-height: 1;
+}
+.tool-call-emoji-spin {
+    display: inline-block;
+    animation: spin 1.5s linear infinite;
 }
 .btn-task-mode {
     background: transparent;
