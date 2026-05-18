@@ -21,4 +21,24 @@ public class ChatLayoutState
         CurrentArtifact = null;
         OnChange?.Invoke();
     }
+
+    public bool ArtifactSidebarOpen { get; private set; }
+
+    public void OpenArtifactSidebar()
+    {
+        ArtifactSidebarOpen = true;
+        OnChange?.Invoke();
+    }
+
+    public void CloseArtifactSidebar()
+    {
+        ArtifactSidebarOpen = false;
+        OnChange?.Invoke();
+    }
+
+    public void ToggleArtifactSidebar()
+    {
+        ArtifactSidebarOpen = !ArtifactSidebarOpen;
+        OnChange?.Invoke();
+    }
 }

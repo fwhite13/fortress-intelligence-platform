@@ -1,0 +1,276 @@
+@inject ChatLayoutState LayoutState
+@inject IWorkspaceFileService WorkspaceFileSvc
+@inject IJSRuntime JSRuntime
+@inject ISnackbar Snackbar
+@using FortressAI.Shared.Models
+@using FortressAI.Web.Services
+
+<div class="artifact-sidebar">
+    <div class="artifact-sidebar__header">
+        @if (_selectedArtifact == null)
+        {
+            <MudText Typo="Typo.subtitle2" Class="artifact-sidebar__title">Artifacts (@Artifacts.Count)</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close"
+                           Size="Size.Small"
+                           OnClick="@(() => LayoutState.CloseArtifactSidebar())" />
+        }
+        else
+        {
+            <MudIconButton Icon="@Icons.Material.Filled.ArrowBack"
+                           Size="Size.Small"
+                           OnClick="@(() => _selectedArtifact = null)"
+                           Title="Back to list" />
+            <MudText Typo="Typo.subtitle2" Class="artifact-sidebar__title artifact-sidebar__title--detail">@_selectedArtifact.Filename</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.Close"
+                           Size="Size.Small"
+                           OnClick="@(() => LayoutState.CloseArtifactSidebar())" />
+        }
+    </div>
+
+    @if (_selectedArtifact == null)
+    {
+        <div class="artifact-sidebar__list">
+            @foreach (var artifact in Artifacts)
+            {
+                var a = artifact;
+                <div class="artifact-sidebar__item" @onclick="@(() => SelectArtifact(a))">
+                    <MudIcon Icon="@GetFileIcon(a.MimeType)" Size="Size.Small" Class="artifact-sidebar__item-icon" />
+                    <div class="artifact-sidebar__item-meta">
+                        <span class="artifact-sidebar__item-name">@a.Filename</span>
+                        <span class="artifact-sidebar__item-type">@GetTypeLabel(a.MimeType)</span>
+                    </div>
+                    <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Class="artifact-sidebar__item-chevron" />
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="artifact-sidebar__detail">
+            <div class="artifact-sidebar__preview">
+                @if (IsPreviewable(_selectedArtifact.MimeType))
+                {
+                    @if (_previewLoading)
+                    {
+                        <div class="artifact-sidebar__preview-loading">
+                            <MudProgressCircular Indeterminate="true" />
+                        </div>
+                    }
+                    else if (_previewUrl != null)
+                    {
+                        <iframe src="@_previewUrl" class="artifact-sidebar__iframe"
+                                sandbox="allow-scripts allow-same-origin allow-popups" />
+                    }
+                }
+                else
+                {
+                    <div class="artifact-sidebar__no-preview">
+                        <MudIcon Icon="@GetFileIcon(_selectedArtifact.MimeType)" Size="Size.Large" />
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">Preview not available for this file type</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Download the file to view it</MudText>
+                    </div>
+                }
+            </div>
+
+            <div class="artifact-sidebar__actions">
+                <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                           StartIcon="@Icons.Material.Outlined.Download"
+                           Disabled="@_downloadLoading"
+                           OnClick="DownloadAsync">
+                    @if (_downloadLoading)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                    }
+                    Download
+                </MudButton>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<UserWorkspaceFile> Artifacts { get; set; } = new();
+
+    private UserWorkspaceFile? _selectedArtifact;
+    private string? _previewUrl;
+    private bool _previewLoading;
+    private bool _downloadLoading;
+
+    private async Task SelectArtifact(UserWorkspaceFile artifact)
+    {
+        _selectedArtifact = artifact;
+        _previewUrl = null;
+
+        if (IsPreviewable(artifact.MimeType))
+        {
+            _previewLoading = true;
+            StateHasChanged();
+            try
+            {
+                _previewUrl = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(artifact.S3Key);
+            }
+            catch
+            {
+                // show no-preview fallback
+            }
+            finally
+            {
+                _previewLoading = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task DownloadAsync()
+    {
+        if (_selectedArtifact == null) return;
+        _downloadLoading = true;
+        StateHasChanged();
+        try
+        {
+            var url = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(_selectedArtifact.S3Key);
+            await JSRuntime.InvokeVoidAsync("open", url, "_blank");
+        }
+        catch
+        {
+            Snackbar.Add("Download failed.", Severity.Error);
+        }
+        finally
+        {
+            _downloadLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private static bool IsPreviewable(string mimeType) =>
+        mimeType is "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            or "application/pdf";
+
+    private static string GetFileIcon(string mimeType) => mimeType switch
+    {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => Icons.Material.Filled.Description,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => Icons.Material.Filled.TableChart,
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => Icons.Material.Filled.Slideshow,
+        "application/pdf" => Icons.Material.Filled.PictureAsPdf,
+        "text/markdown" or "text/plain" => Icons.Material.Filled.Article,
+        "text/html" => Icons.Material.Filled.Code,
+        _ => Icons.Material.Filled.InsertDriveFile
+    };
+
+    private static string GetTypeLabel(string mimeType) => mimeType switch
+    {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "Word Document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "Spreadsheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => "Presentation",
+        "application/pdf" => "PDF",
+        "text/markdown" => "Markdown",
+        "text/plain" => "Text",
+        "text/html" => "HTML",
+        "application/json" => "JSON",
+        _ => "File"
+    };
+}
+
+<style>
+.artifact-sidebar {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--color-surface);
+    border-left: 1px solid var(--color-border);
+}
+.artifact-sidebar__header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+    gap: 8px;
+}
+.artifact-sidebar__title {
+    font-weight: 600;
+}
+.artifact-sidebar__title--detail {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin: 0 8px;
+}
+.artifact-sidebar__list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+.artifact-sidebar__item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background 150ms ease;
+}
+.artifact-sidebar__item:hover {
+    background: var(--color-surface-elevated);
+}
+.artifact-sidebar__item-icon {
+    flex-shrink: 0;
+}
+.artifact-sidebar__item-meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.artifact-sidebar__item-name {
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.artifact-sidebar__item-type {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+}
+.artifact-sidebar__item-chevron {
+    flex-shrink: 0;
+    color: var(--color-text-tertiary);
+}
+.artifact-sidebar__detail {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+.artifact-sidebar__preview {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+.artifact-sidebar__iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+.artifact-sidebar__preview-loading,
+.artifact-sidebar__no-preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 16px;
+    padding: 24px;
+    text-align: center;
+    color: var(--color-text-secondary);
+}
+.artifact-sidebar__actions {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--color-border);
+    flex-shrink: 0;
+}
+</style>

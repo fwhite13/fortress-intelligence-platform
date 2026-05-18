@@ -74,6 +74,15 @@ else
             }
         </div>
         <div class="chat-header-actions">
+            @if (_conversationArtifacts.Any())
+            {
+                <button class="artifact-indicator-btn @(LayoutState.ArtifactSidebarOpen ? "artifact-indicator-btn--active" : "")"
+                        @onclick="LayoutState.ToggleArtifactSidebar"
+                        title="@(_conversationArtifacts.Count == 1 ? "1 artifact" : $"{_conversationArtifacts.Count} artifacts")">
+                    <MudIcon Icon="@Icons.Material.Outlined.Folder" Class="artifact-indicator-btn__icon" />
+                    <span>@_conversationArtifacts.Count</span>
+                </button>
+            }
             <button class="chat-feedback-btn chat-feedback-btn--desktop" @onclick="OpenFeedbackModal" title="Report a Bug or Suggest a Feature">
                 <i class="fas fa-bug"></i>
                 <span class="chat-feedback-btn__label">Report a Bug</span>
@@ -124,15 +133,6 @@ else
                 @foreach (var msg in messages.Where(m => !m.IsResumptionBrief))
                 {
                     <MessageBubble Message="msg" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
-                }
-                @if (_conversationArtifacts.Any())
-                {
-                    <div class="artifact-list">
-                        @foreach (var artifact in _conversationArtifacts)
-                        {
-                            <ArtifactCard Artifact="artifact" />
-                        }
-                    </div>
                 }
                 @* Resumption brief renders AFTER message history — ADO#3155 Bug 2 fix *@
                 @if (_isBriefStreaming || messages.Any(m => m.IsResumptionBrief) || _briefContent.Length > 0)
@@ -354,6 +354,13 @@ else
     {
         <div style="width: 40%; min-width: 320px; max-width: 600px; flex-shrink: 0; overflow: hidden; transition: all 0.2s ease;">
             <ArtifactPreviewPanel />
+        </div>
+    }
+
+    @if (LayoutState.ArtifactSidebarOpen)
+    {
+        <div style="width: 320px; min-width: 280px; max-width: 400px; flex-shrink: 0; overflow: hidden; transition: all 0.2s ease;">
+            <ArtifactSidebarPanel Artifacts="_conversationArtifacts" />
         </div>
     }
 
@@ -1836,6 +1843,29 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     align-items: center;
     gap: var(--space-1, 4px);
     flex-shrink: 0;
+}
+.artifact-indicator-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-elevated);
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease;
+}
+.artifact-indicator-btn:hover,
+.artifact-indicator-btn--active {
+    background: var(--color-gold-muted);
+    color: var(--color-gold);
+    border-color: var(--color-gold);
+}
+.artifact-indicator-btn__icon {
+    width: 16px;
+    height: 16px;
 }
 .chat-feedback-btn {
     display: flex;
