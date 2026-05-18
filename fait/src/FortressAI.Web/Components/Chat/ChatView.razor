@@ -77,7 +77,7 @@ else
             @if (_conversationArtifacts.Any())
             {
                 <button class="artifact-indicator-btn @(LayoutState.ArtifactSidebarOpen ? "artifact-indicator-btn--active" : "")"
-                        @onclick="LayoutState.ToggleArtifactSidebar"
+                        @onclick="ToggleArtifactSidebarWithExclusion"
                         title="@(_conversationArtifacts.Count == 1 ? "1 artifact" : $"{_conversationArtifacts.Count} artifacts")">
                     <MudIcon Icon="@Icons.Material.Outlined.Folder" Class="artifact-indicator-btn__icon" />
                     <span>@_conversationArtifacts.Count</span>
@@ -588,6 +588,7 @@ else
             _wasColdStart = _agentReady; // ADO#3285 — treat cross-chat navigation as cold start if agent is ready
             _isBriefStreaming = false;
             _activeToolCalls.Clear();  // ADO#3241
+            LayoutState.CloseArtifactSidebar(); // ADO#3456 — reset sidebar on conversation switch
 
             // ADO#3308 — refresh harness session ID for warm cross-chat navigation
             // HandleAgentReady won't fire again if agent is already warm, so we need
@@ -621,6 +622,9 @@ else
                     var artifact = _conversationArtifacts.FirstOrDefault(a => a.Id == previewId);
                     if (artifact != null)
                     {
+                        // Mutual exclusion: close sidebar before opening preview panel
+                        if (LayoutState.ArtifactSidebarOpen)
+                            LayoutState.CloseArtifactSidebar();
                         LayoutState.OpenArtifactPreview(new ArtifactRef(artifact.S3Key, artifact.Filename, artifact.MimeType));
                     }
                 }
@@ -717,6 +721,17 @@ else
         "rocket"  => Icons.Material.Filled.RocketLaunch,
         _         => Icons.Material.Filled.Shield
     };
+
+    private void ToggleArtifactSidebarWithExclusion()
+    {
+        if (!LayoutState.ArtifactSidebarOpen)
+        {
+            // Opening sidebar — close preview panel first (mutual exclusion)
+            if (LayoutState.ArtifactPanelOpen)
+                LayoutState.CloseArtifactPreview();
+        }
+        LayoutState.ToggleArtifactSidebar();
+    }
 
     private void NavigateToProject()
     {
