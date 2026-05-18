@@ -224,15 +224,14 @@ public class DiscoveryService : IDiscoveryService
             return;
         }
 
-        // Load questions for this phase (to check readyToAdvance flag stored on phase questions)
-        // The readyToAdvance flag is stored per-session rather than per-question; we infer it
-        // from session state. If this is round >= 3 we force phase completion.
-        bool forceComplete = round >= 3;
+        // Check IsFinalRound flag: if set, complete the phase now (answers just submitted).
+        // Otherwise generate the next round (unless round >= 3 as a safety fallback).
+        bool isFinalRound = session.IsFinalRound || round >= 3;
 
         session.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
 
-        // 2. In background: either advance the phase OR generate the next round
+        // 2. In background: either complete the phase OR generate the next round
         var sessionIdCapture = sessionId;
         var submissionIdCapture = session.SubmissionId;
         var roundCapture = round;
@@ -241,10 +240,10 @@ public class DiscoveryService : IDiscoveryService
         {
             try
             {
-                if (forceComplete)
+                if (isFinalRound)
                 {
-                    // Auto-close this phase after max rounds
-                    _logger.LogInformation("[DISCOVERY] Phase {Phase} auto-closing after max rounds for session {SessionId}",
+                    // Complete this phase now that the user has answered the final round
+                    _logger.LogInformation("[DISCOVERY] Phase {Phase} completing after final-round answer submission for session {SessionId}",
                         phase, sessionIdCapture);
                     await CompletePhaseInternalAsync(sessionIdCapture, phase, terminatedByUser: false, CancellationToken.None);
                 }
@@ -584,11 +583,13 @@ public class DiscoveryService : IDiscoveryService
 
             if (readyToAdvance)
             {
-                // Phase 1 complete inline (agent decided)
-                session.Phase1CompletedAt = DateTime.UtcNow;
-                session.Status = DiscoverySessionStatus.Phase1Complete;
-                submission.DiscoveryStatus = DiscoverySessionStatus.Phase1Complete;
-                _logger.LogInformation("[DISCOVERY_GEN] Phase1 complete (readyToAdvance) for session {SessionId}", sessionId);
+                // This is the final round — mark IsFinalRound so SaveRoundAnswersAsync
+                // completes the phase AFTER the user submits answers (not now).
+                session.IsFinalRound = true;
+                session.Status = DiscoverySessionStatus.Phase1Active;
+                submission.DiscoveryStatus = DiscoverySessionStatus.Phase1Active;
+                _logger.LogInformation("[DISCOVERY_GEN] Phase1 round {Round}: final round flagged (IsFinalRound=true) for session {SessionId}",
+                    round, sessionId);
             }
             else
             {
@@ -600,7 +601,8 @@ public class DiscoveryService : IDiscoveryService
         }
         else if (readyToAdvance)
         {
-            // Agent returned readyToAdvance=true with no new questions — phase complete
+            // Agent returned readyToAdvance=true with no new questions —
+            // treat as an immediate complete (no answers to wait for).
             session.Phase1CompletedAt = DateTime.UtcNow;
             session.Status = DiscoverySessionStatus.Phase1Complete;
             submission.DiscoveryStatus = DiscoverySessionStatus.Phase1Complete;
@@ -751,10 +753,12 @@ public class DiscoveryService : IDiscoveryService
 
             if (readyToAdvance)
             {
-                session.Phase2CompletedAt = DateTime.UtcNow;
-                session.Status = DiscoverySessionStatus.Phase2Complete;
-                submission.DiscoveryStatus = DiscoverySessionStatus.Phase2Complete;
-                _logger.LogInformation("[DISCOVERY_GEN] Phase2 complete (readyToAdvance) for session {SessionId}", sessionId);
+                // Final round — defer Phase2Complete until user submits answers.
+                session.IsFinalRound = true;
+                session.Status = DiscoverySessionStatus.Phase2Active;
+                submission.DiscoveryStatus = DiscoverySessionStatus.Phase2Active;
+                _logger.LogInformation("[DISCOVERY_GEN] Phase2 round {Round}: final round flagged (IsFinalRound=true) for session {SessionId}",
+                    round, sessionId);
             }
             else
             {
@@ -766,6 +770,7 @@ public class DiscoveryService : IDiscoveryService
         }
         else if (readyToAdvance)
         {
+            // No new questions — immediate complete.
             session.Phase2CompletedAt = DateTime.UtcNow;
             session.Status = DiscoverySessionStatus.Phase2Complete;
             submission.DiscoveryStatus = DiscoverySessionStatus.Phase2Complete;

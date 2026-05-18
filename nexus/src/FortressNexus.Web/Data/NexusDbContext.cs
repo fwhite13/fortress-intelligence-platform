@@ -212,6 +212,7 @@ public class NexusDbContext : DbContext
             entity.Property(e => e.Phase2CompletedAt).HasColumnName("phase2_completed_at");
             entity.Property(e => e.Phase1TerminatedByUser).HasColumnName("phase1_terminated_by_user");
             entity.Property(e => e.Phase2TerminatedByUser).HasColumnName("phase2_terminated_by_user");
+            entity.Property(e => e.IsFinalRound).HasColumnName("is_final_round").HasDefaultValue(false);
             entity.HasMany(e => e.Questions)
                   .WithOne(q => q.Session)
                   .HasForeignKey(q => q.DiscoverySessionId)

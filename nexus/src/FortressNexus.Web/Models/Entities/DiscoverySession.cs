@@ -21,6 +21,12 @@ public class DiscoverySession
     public bool Phase1TerminatedByUser { get; set; }
     public bool Phase2TerminatedByUser { get; set; }
 
+    /// <summary>
+    /// True when the current round is the final round (round >= 3 or readyToAdvance forced).
+    /// Phase completion is deferred until answers are submitted for this round.
+    /// </summary>
+    public bool IsFinalRound { get; set; }
+
     public Submission Submission { get; set; } = null!;
     public ICollection<DiscoveryQuestion> Questions { get; set; } = new List<DiscoveryQuestion>();
 }

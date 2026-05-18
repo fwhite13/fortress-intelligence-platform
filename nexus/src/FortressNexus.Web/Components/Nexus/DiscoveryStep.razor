@@ -345,9 +345,22 @@
 
                     if (updated == null) continue;
 
-                    // Phase or session complete — advance wizard
-                    if (updated.Status is DiscoverySessionStatus.Phase1Complete
-                                       or DiscoverySessionStatus.Phase2Complete)
+                    // Phase or session complete
+                    if (updated.Status == DiscoverySessionStatus.Phase1Complete)
+                    {
+                        // Show the Phase 1 → Phase 2 transition screen; do NOT advance wizard yet
+                        await InvokeAsync(async () =>
+                        {
+                            _loadingNextRound = false;
+                            _submitting = false;
+                            await OnSessionUpdated.InvokeAsync(updated);
+                            _showPhaseTransition = true;
+                            StateHasChanged();
+                        });
+                        return;
+                    }
+
+                    if (updated.Status == DiscoverySessionStatus.Phase2Complete)
                     {
                         await InvokeAsync(async () =>
                         {
