@@ -416,6 +416,15 @@ public class DatabaseInitializationService : IHostedService
                 // ADD COLUMN IF NOT EXISTS; previous EF migration used banned syntax and silently failed
                 "ALTER TABLE scheduled_tasks ADD COLUMN AlertOnCompletion TINYINT(1) NOT NULL DEFAULT 0",
                 "ALTER TABLE scheduled_tasks ADD COLUMN AlertOnFailure TINYINT(1) NOT NULL DEFAULT 1",
+                // ADO#3440: scheduled_tasks missing columns — CreatedAt/UpdatedAt caused crash loop
+                // TaskMode may also be missing from live DB (added in migration but not provisioned)
+                // Use '0001-01-01 00:00:00.000000' literal (not CURRENT_TIMESTAMP) to avoid Aurora strict mode issues
+                "ALTER TABLE scheduled_tasks ADD COLUMN TaskMode TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE scheduled_tasks ADD COLUMN CreatedAt DATETIME(6) NOT NULL DEFAULT '0001-01-01 00:00:00.000000'",
+                "ALTER TABLE scheduled_tasks ADD COLUMN UpdatedAt DATETIME(6) NOT NULL DEFAULT '0001-01-01 00:00:00.000000'",
+                // ADO#3440: scheduled_task_runs — add columns that may be missing from live DB
+                "ALTER TABLE scheduled_task_runs ADD COLUMN ArtifactBlobPath VARCHAR(500) NULL",
+                "ALTER TABLE scheduled_task_runs ADD COLUMN SandboxId VARCHAR(200) NULL",
                 // ADO#3438: workspace versioning columns (idempotent — 1060 catch handles duplicate)
                 "ALTER TABLE user_workspace_uploads ADD COLUMN current_version INT NOT NULL DEFAULT 1",
                 "ALTER TABLE user_workspace_uploads ADD COLUMN source VARCHAR(20) NULL"
