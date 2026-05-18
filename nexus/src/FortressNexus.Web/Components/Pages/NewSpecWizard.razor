@@ -158,9 +158,11 @@
     @if (_activeStep == 2)
     {
         <DiscoveryStep Session="_discoverySession"
+                       SubmissionId="@(_submissionId ?? 0)"
                        IsLoading="_discoveryLoading"
                        OnCompleted="HandleDiscoveryCompleted"
-                       OnSkipped="GoToStep3Confirm" />
+                       OnSkipped="GoToStep3Confirm"
+                       OnSessionUpdated="HandleDiscoverySessionUpdated" />
         <div class="nexus-wizard-nav mt-3">
             <MudButton Variant="Variant.Outlined" OnClick="BackToStep1Files">Back</MudButton>
         </div>
@@ -548,6 +550,12 @@
             }
         }
         _activeStep = 3;
+    }
+
+    private void HandleDiscoverySessionUpdated(DiscoverySession updated)
+    {
+        _discoverySession = updated;
+        StateHasChanged();
     }
 
     private void GoToStep3Confirm() => _activeStep = 3;

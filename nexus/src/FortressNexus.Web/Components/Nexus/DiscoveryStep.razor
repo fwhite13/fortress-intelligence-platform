@@ -2,6 +2,7 @@
 @using FortressNexus.Web.Models.Enums
 @using FortressNexus.Web.Services.Discovery
 @using FortressNexus.Web.Services
+@implements IDisposable
 
 @inject IDiscoveryService DiscoveryService
 @inject UserContextService UserContextService
@@ -125,7 +126,7 @@
             <MudButton Variant="Variant.Filled"
                        Color="Color.Primary"
                        OnClick="HandleContinue"
-                       Disabled="@(!CanContinue)"
+                       Disabled="@(!CanContinue || _submitting)"
                        Class="nexus-discovery-continue-btn">
                 Submit Answers →
             </MudButton>
@@ -167,15 +168,22 @@
 
 @code {
     [Parameter, EditorRequired] public DiscoverySession? Session { get; set; }
+    [Parameter, EditorRequired] public int SubmissionId { get; set; }
     [Parameter] public bool IsLoading { get; set; }
     [Parameter] public EventCallback OnCompleted { get; set; }
     [Parameter] public EventCallback OnSkipped { get; set; }
+    [Parameter] public EventCallback<DiscoverySession> OnSessionUpdated { get; set; }
 
     private Dictionary<Guid, string> _answers = new();
-    private bool _loading => IsLoading;
+    private bool _loading => IsLoading || _loadingNextRound;
     private bool _isAdmin = false;
     private bool _showPhaseTransition = false;
     private bool _advancing = false;
+    private bool _submitting = false;
+    private bool _loadingNextRound = false;
+    private int _submittedRound = 0;
+    private int _submittedPhase = 0;
+    private CancellationTokenSource? _pollCts;
 
     // ── Derived state ──────────────────────────────────────────────────────
 
@@ -196,15 +204,29 @@
         }
     }
 
-    private string LoadingText => CurrentPhase == 1
-        ? (CurrentRound <= 1 ? "Analyzing your submission…" : "Reviewing your answers…")
-        : "Shifting to technical review…";
+    private string LoadingText
+    {
+        get
+        {
+            if (_loadingNextRound)
+            {
+                // Phase/round-aware text while polling for next round
+                if (_submittedRound == 1)
+                    return "Reviewing your answers\u2026";
+                return "Checking for follow-up questions\u2026";
+            }
+            // Initial load text
+            return CurrentPhase == 1
+                ? (CurrentRound <= 1 ? "Analyzing your submission\u2026" : "Reviewing your answers\u2026")
+                : "Shifting to technical review\u2026";
+        }
+    }
 
     private string IntroText => CurrentPhase == 1
         ? "Before writing your spec, NEXUS wants to understand what you're trying to accomplish. These questions focus on your goals, users, and workflows — nothing technical."
         : "Based on your answers, NEXUS now has a few technical questions. These help resolve integration points and architectural decisions before the spec is written. If you're not sure, you can skip.";
 
-    private bool CanContinue => !CurrentQuestions
+    private bool CanContinue => !_submitting && !CurrentQuestions
         .Where(q => q.IsBlocking && (CurrentPhase != 2 || _isAdmin))
         .Any(q => string.IsNullOrWhiteSpace(_answers.GetValueOrDefault(q.Id)));
 
@@ -221,6 +243,12 @@
     protected override async Task OnInitializedAsync()
     {
         _isAdmin = await UserContextService.IsAdminAsync();
+    }
+
+    public void Dispose()
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
     }
 
     protected override void OnParametersSet()
@@ -247,7 +275,14 @@
 
     private async Task HandleContinue()
     {
+        if (_submitting) return; // double-submit guard
         if (Session == null) { await OnCompleted.InvokeAsync(); return; }
+
+        _submitting = true;
+        StateHasChanged();
+
+        var savedPhase = CurrentPhase;
+        var savedRound = CurrentRound;
 
         try
         {
@@ -255,18 +290,126 @@
             var pairs = _answers.Select(kv => (kv.Key, (string?)kv.Value)).ToList();
 
             await DiscoveryService.SaveRoundAnswersAsync(
-                Session.Id, CurrentPhase, CurrentRound, pairs, oid);
+                Session.Id, savedPhase, savedRound, pairs, oid);
 
-            // After saving, if Phase 2 is complete, fire OnCompleted
-            if (Session.Status == DiscoverySessionStatus.Phase2Complete)
-                await OnCompleted.InvokeAsync();
-            // Otherwise the background task will update status and the parent will re-render
+            // Enter the "waiting for next round" loading state and start polling
+            _loadingNextRound = true;
+            _submittedRound = savedRound;
+            _submittedPhase = savedPhase;
+            StateHasChanged();
+
+            _ = StartPostSubmitPollingAsync(Session.Id, savedPhase, savedRound);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[DISCOVERY] Failed to save round answers for session {Session.Id}: {ex.Message}");
             Snackbar.Add("Could not save your answers. Please try again.", Severity.Error);
+            _submitting = false;
+            _loadingNextRound = false;
+            StateHasChanged();
         }
+    }
+
+    /// <summary>
+    /// Polls GetSessionAsync every 2s after submitting a round.
+    /// Stops when new questions arrive (higher round) or the phase/session is complete.
+    /// Times out after 60 seconds.
+    /// </summary>
+    private Task StartPostSubmitPollingAsync(Guid sessionId, int submittedPhase, int submittedRound)
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        _pollCts = new CancellationTokenSource();
+        var token = _pollCts.Token;
+
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        var submissionId = SubmissionId;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (DateTime.UtcNow < deadline && !token.IsCancellationRequested)
+                {
+                    await Task.Delay(2000, token);
+
+                    DiscoverySession? updated;
+                    try
+                    {
+                        updated = await DiscoveryService.GetSessionAsync(submissionId, token);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (updated == null) continue;
+
+                    // Phase or session complete — advance wizard
+                    if (updated.Status is DiscoverySessionStatus.Phase1Complete
+                                       or DiscoverySessionStatus.Phase2Complete)
+                    {
+                        await InvokeAsync(async () =>
+                        {
+                            _loadingNextRound = false;
+                            _submitting = false;
+                            await OnSessionUpdated.InvokeAsync(updated);
+                            StateHasChanged();
+                            await OnCompleted.InvokeAsync();
+                        });
+                        return;
+                    }
+
+                    // New round of questions available for the same phase
+                    if (updated.Questions != null)
+                    {
+                        var phaseQs = updated.Questions.Where(q => q.Phase == submittedPhase).ToList();
+                        var latestRound = phaseQs.Any() ? phaseQs.Max(q => q.Round) : 0;
+                        if (latestRound > submittedRound)
+                        {
+                            await InvokeAsync(async () =>
+                            {
+                                _loadingNextRound = false;
+                                _submitting = false;
+                                // Clear answers for the new round (before parent re-renders)
+                                _answers.Clear();
+                                foreach (var q in phaseQs.Where(q => q.Round == latestRound))
+                                {
+                                    if (q.Answer != null && !string.IsNullOrEmpty(q.Answer.AnswerText))
+                                        _answers[q.Id] = q.Answer.AnswerText;
+                                }
+                                await OnSessionUpdated.InvokeAsync(updated);
+                                StateHasChanged();
+                            });
+                            return;
+                        }
+                    }
+                }
+
+                // Timeout — show error and re-enable submit
+                await InvokeAsync(() =>
+                {
+                    _loadingNextRound = false;
+                    _submitting = false;
+                    Snackbar.Add("Timed out waiting for the next round. Please try submitting again.", Severity.Warning);
+                    StateHasChanged();
+                });
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[DISCOVERY] Post-submit poll error: {ex.Message}");
+                await InvokeAsync(() =>
+                {
+                    _loadingNextRound = false;
+                    _submitting = false;
+                    Snackbar.Add("Error checking for next questions. Please try again.", Severity.Error);
+                    StateHasChanged();
+                });
+            }
+        }, token);
+
+        return Task.CompletedTask;
     }
 
     private async Task HandlePhase1UserTerminate()
