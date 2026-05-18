@@ -12,6 +12,7 @@
 @inject ISnackbar Snackbar
 @inject ILogger<WorkspaceFiles> Logger
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
+@inject IDialogService DialogService
 @implements IDisposable
 
 <PageTitle>Workspace — FAIT</PageTitle>
@@ -58,6 +59,33 @@
                     <InputFile id="fileUploadInput" multiple OnChange="HandleFilesSelected"
                                style="display:none" />
                 </div>
+
+                @* ── Split panel ── *@
+                <div class="workspace-split-layout">
+                    @* LEFT: Folder tree *@
+                    <div class="workspace-tree-panel">
+                        <MudTreeView T="WorkspaceTreeItem" Items="@_treeRoots"
+                                     SelectedValue="@_selectedTreeItem"
+                                     SelectedValueChanged="@((WorkspaceTreeItem? item) => OnTreeFolderSelected(item))"
+                                     Hover="true"
+                                     Dense="true">
+                            <ItemTemplate Context="treeCtx">
+                                <MudTreeViewItem @bind-Expanded="@treeCtx.Expanded"
+                                                 Items="@treeCtx.Children"
+                                                 Value="@treeCtx.Value"
+                                                 Icon="@(treeCtx.Expanded ? Icons.Material.Filled.FolderOpen : Icons.Material.Filled.Folder)">
+                                    <BodyContent>
+                                        <div class="workspace-tree-item-row">
+                                            <MudText>@treeCtx.Text</MudText>
+                                        </div>
+                                    </BodyContent>
+                                </MudTreeViewItem>
+                            </ItemTemplate>
+                        </MudTreeView>
+                    </div>
+
+                    @* RIGHT: Breadcrumb + content *@
+                    <div class="workspace-content-panel">
 
                 @* ── Breadcrumb ── *@
                 @if (_breadcrumb.Count > 0)
@@ -299,6 +327,9 @@
                         </div>
                     }
                 }
+
+                    </div>
+                </div>
             </MudTabPanel>
             <MudTabPanel Text="Generated">
                 @if (_loading)
@@ -624,9 +655,41 @@
         align-items: center;
         gap: var(--space-2, 8px);
     }
+    .workspace-split-layout {
+        display: flex;
+        gap: var(--spacing-md, 16px);
+        min-height: 500px;
+        margin-top: var(--spacing-sm, 8px);
+    }
+    .workspace-tree-panel {
+        width: 220px;
+        flex-shrink: 0;
+        border-right: 1px solid var(--color-border, #e0e0e0);
+        padding-right: var(--spacing-sm, 8px);
+        overflow-y: auto;
+    }
+    .workspace-content-panel {
+        flex: 1;
+        min-width: 0;
+        overflow-y: auto;
+    }
+    .workspace-tree-item-row {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-xs, 4px);
+    }
 </style>
 
 @code {
+    // ── Tree view state ─────────────────────────────────────────────────────
+    private class WorkspaceTreeItem
+    {
+        public Guid? FolderId { get; set; }  // null = root
+        public string Name { get; set; } = "";
+    }
+    private List<TreeItemData<WorkspaceTreeItem>> _treeRoots = new();
+    private WorkspaceTreeItem? _selectedTreeItem;
+
     // ── Generated (existing) state ──────────────────────────────────────────
     private bool _loading = true;
     private int _activeTab = 0;
@@ -685,7 +748,8 @@
 
         var filesTask = LoadFilesAsync();
         var artifactsTask = LoadArtifactsAsync();
-        await Task.WhenAll(filesTask, artifactsTask);
+        var treeTask = LoadFolderTreeAsync();
+        await Task.WhenAll(filesTask, artifactsTask, treeTask);
     }
 
     public void Dispose()
@@ -761,6 +825,7 @@
             _showNewFolderInput = false;
             _newFolderName = "";
             await LoadFilesAsync();
+            await LoadFolderTreeAsync();
         }
         catch (Exception ex)
         {
@@ -775,6 +840,7 @@
         {
             await UploadSvc.DeleteFolderAsync(Session.UserId, folder.Id);
             await LoadFilesAsync();
+            await LoadFolderTreeAsync();
         }
         catch (Exception ex)
         {
@@ -845,6 +911,60 @@
             Logger.LogError(ex, "[WorkspaceFiles] DeleteFile failed for {Filename}", upload.Filename);
             Snackbar.Add("Failed to delete file.", Severity.Error);
         }
+    }
+
+    private async Task LoadFolderTreeAsync()
+    {
+        try
+        {
+            var topFolders = await UploadSvc.GetFoldersAsync(Session.UserId, null);
+            var rootValue = new WorkspaceTreeItem { FolderId = null, Name = "Root" };
+            var rootItem = new TreeItemData<WorkspaceTreeItem>
+            {
+                Value = rootValue,
+                Text = "Root",
+                Icon = Icons.Material.Filled.FolderOpen,
+                Expanded = true,
+                Children = topFolders.Select(f => new TreeItemData<WorkspaceTreeItem>
+                {
+                    Value = new WorkspaceTreeItem { FolderId = f.Id, Name = f.Name },
+                    Text = f.Name,
+                    Icon = Icons.Material.Filled.Folder,
+                    Expanded = false
+                }).ToList()
+            };
+            _treeRoots = new List<TreeItemData<WorkspaceTreeItem>> { rootItem };
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[WorkspaceFiles] LoadFolderTreeAsync failed");
+        }
+    }
+
+    private async Task OnTreeFolderSelected(WorkspaceTreeItem? item)
+    {
+        _selectedTreeItem = item;
+        _currentFolderId = item?.FolderId;
+        // Update breadcrumb
+        if (item == null || item.FolderId == null)
+        {
+            _breadcrumb.Clear();
+        }
+        else
+        {
+            // Set breadcrumb to just this folder (single level; deep nesting not supported in this pass)
+            if (!_breadcrumb.Any(b => b.Id == item.FolderId))
+            {
+                _breadcrumb.Clear();
+                _breadcrumb.Add((item.FolderId.Value, item.Name));
+            }
+            else
+            {
+                var idx = _breadcrumb.FindIndex(b => b.Id == item.FolderId);
+                _breadcrumb = _breadcrumb.Take(idx + 1).ToList();
+            }
+        }
+        await LoadFilesAsync();
     }
 
     // ── Context menu ────────────────────────────────────────────────────────
