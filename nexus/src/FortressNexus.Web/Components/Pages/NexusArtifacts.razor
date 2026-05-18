@@ -619,7 +619,7 @@ else if (_artifactSet is not null)
     private bool _isAdmin = false;
     private bool _isPosting = false;
     private string _postingStatus = "";
-    private bool _alreadyPosted => _artifactSet?.Status is ArtifactSetStatus.Success or ArtifactSetStatus.PartialFailure;
+    private bool _alreadyPosted => _workItems?.Any(w => w.AdoWorkItemId != null) == true;
     private List<WorkItemRecord>? _postResults = null;
 
     // ADO confirmation dialog state
