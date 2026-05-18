@@ -1,0 +1,29 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+      - echo "Building harness commit:" && git log -1 --oneline
+      - echo "HARNESS_IMAGE_TAG=$IMAGE_TAG"
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building harness Docker image...
+      - docker build --no-cache -f fait/agent-harness/Dockerfile -t fait-v2-agent-harness:$IMAGE_TAG fait/agent-harness/
+      - docker tag fait-v2-agent-harness:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-v2-agent-harness:$IMAGE_TAG
+      - docker tag fait-v2-agent-harness:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-v2-agent-harness:harness-latest
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing harness Docker image...
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-v2-agent-harness:$IMAGE_TAG
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-v2-agent-harness:harness-latest
+      - echo Harness deploy complete
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_ACCOUNT_ID: 742932328420
