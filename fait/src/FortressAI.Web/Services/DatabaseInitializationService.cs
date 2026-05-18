@@ -425,6 +425,19 @@ public class DatabaseInitializationService : IHostedService
                 // ADO#3440: scheduled_task_runs — add columns that may be missing from live DB
                 "ALTER TABLE scheduled_task_runs ADD COLUMN ArtifactBlobPath VARCHAR(500) NULL",
                 "ALTER TABLE scheduled_task_runs ADD COLUMN SandboxId VARCHAR(200) NULL",
+                // ADO#3441: scheduled_tasks comprehensive column sweep — CronExpression crash + all migration columns
+                "ALTER TABLE scheduled_tasks ADD COLUMN ProjectId char(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL",
+                "ALTER TABLE scheduled_tasks ADD COLUMN ScheduleType ENUM('recurring','on_demand') NOT NULL DEFAULT 'on_demand'",
+                "ALTER TABLE scheduled_tasks ADD COLUMN CronExpression VARCHAR(100) NULL",
+                "ALTER TABLE scheduled_tasks ADD COLUMN NextRunAt DATETIME(6) NULL",
+                "ALTER TABLE scheduled_tasks ADD COLUMN LastRunAt DATETIME(6) NULL",
+                "ALTER TABLE scheduled_tasks ADD COLUMN LastRunStatus ENUM('success','failed','cancelled') NULL",
+                "ALTER TABLE scheduled_tasks ADD COLUMN FailureCount INT NOT NULL DEFAULT 0",
+                "ALTER TABLE scheduled_tasks ADD COLUMN IsActive TINYINT(1) NOT NULL DEFAULT 1",
+                // ADO#3441: scheduled_task_runs — ensure all migration columns exist
+                "ALTER TABLE scheduled_task_runs ADD COLUMN CompletedAt DATETIME(6) NULL",
+                "ALTER TABLE scheduled_task_runs ADD COLUMN Error TEXT NULL",
+                "ALTER TABLE scheduled_task_runs ADD COLUMN ResultSummary VARCHAR(500) NULL",
                 // ADO#3438: workspace versioning columns (idempotent — 1060 catch handles duplicate)
                 "ALTER TABLE user_workspace_uploads ADD COLUMN current_version INT NOT NULL DEFAULT 1",
                 "ALTER TABLE user_workspace_uploads ADD COLUMN source VARCHAR(20) NULL"
