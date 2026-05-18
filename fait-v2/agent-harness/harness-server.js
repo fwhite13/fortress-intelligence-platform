@@ -1876,6 +1876,12 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
     // For team KB: use authorizedTeamIds from kbAccess (not model input)
     // For personal KB: use personalUserId from kbAccess (not model input)
     if (kbType === 'team' && kbAccess?.authorizedTeamIds?.length > 0) {
+        // ADO#3446: intersect authorized teams with user-selected teams from kbFlags
+        const selectedTeamIds = (kbFlags?.TeamIds ?? kbFlags?.teamIds) ?? null;
+        const effectiveTeamIds = selectedTeamIds && selectedTeamIds.length > 0
+            ? kbAccess.authorizedTeamIds.filter(id => selectedTeamIds.includes(id))
+            : kbAccess.authorizedTeamIds; // fall back to all authorized if no selection (teamKbEnabled=true, teamIds=null)
+        console.log(`[harness] executeKbSearch: team KB effectiveTeamIds=${JSON.stringify(effectiveTeamIds)} (selected=${JSON.stringify(selectedTeamIds)}, authorized=${JSON.stringify(kbAccess.authorizedTeamIds)}) for userId=${userId}`);
         // Retrieve from each authorized team and merge results
         const kbId = process.env.TEAM_KB_ID;
         if (!kbId) {
@@ -1884,7 +1890,7 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
         }
         try {
             const allResults = [];
-            for (const teamId of kbAccess.authorizedTeamIds) {
+            for (const teamId of effectiveTeamIds) {
                 const results = await retrieveFromKbFiltered(kbId, query, 'teamId', teamId, 5);
                 allResults.push(...results);
             }
