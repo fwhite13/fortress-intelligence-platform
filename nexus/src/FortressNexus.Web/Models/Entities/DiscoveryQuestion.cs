@@ -11,6 +11,10 @@ public class DiscoveryQuestion
     public string? Rationale { get; set; }
     public DateTime CreatedAt { get; set; }
 
+    // Two-phase iterative discovery columns (ND-1)
+    public byte Phase { get; set; } = 1;
+    public byte Round { get; set; } = 1;
+
     public DiscoverySession Session { get; set; } = null!;
     public DiscoveryAnswer? Answer { get; set; }
 }

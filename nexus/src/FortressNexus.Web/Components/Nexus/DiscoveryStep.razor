@@ -1,29 +1,84 @@
 @using FortressNexus.Web.Models.Entities
 @using FortressNexus.Web.Models.Enums
 @using FortressNexus.Web.Services.Discovery
+@using FortressNexus.Web.Services
 
 @inject IDiscoveryService DiscoveryService
 @inject UserContextService UserContextService
 @inject ISnackbar Snackbar
 
 <div class="nexus-discovery-step">
-    <MudText Typo="Typo.body1" Class="nexus-discovery-intro mb-4">
-        Before generating your spec, NEXUS has a few clarifying questions. These help produce a more complete spec with fewer gaps for Elise to fill in manually.
-    </MudText>
 
-    @if (_loading)
+    @* ── Phase indicator ──────────────────────────────────────────────────── *@
+    @if (Session != null && !Session.SkippedByUser)
     {
-        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="nexus-discovery-loading-text mb-2">Analyzing your submission…</MudText>
+        <div class="nexus-discovery-phase-indicator d-flex align-center gap-3 mb-3">
+            <span class="nexus-phase-dot nexus-phase-dot--active">●</span>
+            <MudText Typo="Typo.body2" Class="nexus-phase-label nexus-phase-label--active">
+                Phase 1 of 2 — Business Discovery
+            </MudText>
+            <span class="nexus-phase-separator mx-2">→</span>
+            <span class="@("nexus-phase-dot" + (CurrentPhase >= 2 ? " nexus-phase-dot--active" : " nexus-phase-dot--inactive"))">○</span>
+            <MudText Typo="Typo.body2" Class="@("nexus-phase-label" + (CurrentPhase >= 2 ? " nexus-phase-label--active" : " nexus-phase-label--inactive"))">
+                Phase 2 — Technical Review
+            </MudText>
+        </div>
+
+        @if (CurrentRound > 0)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="mb-3 nexus-round-badge">
+                Round @CurrentRound
+            </MudChip>
+        }
+    }
+
+    @* ── Phase transition screen ──────────────────────────────────────────── *@
+    @if (_showPhaseTransition)
+    {
+        <MudPaper Elevation="2" Class="pa-5 mb-4 nexus-phase-transition">
+            <MudText Typo="Typo.h6" Class="mb-3">✅ Phase 1 Complete</MudText>
+            <MudText Typo="Typo.body1" Class="mb-4">
+                Phase 1 complete. NEXUS has a good picture of the business need. Now for a few technical
+                questions — these help prevent architectural surprises in the spec.
+            </MudText>
+            @if (_isAdmin)
+            {
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           OnClick="HandleAdvanceToPhase2"
+                           Disabled="@_advancing"
+                           Class="nexus-phase-advance-btn">
+                    @if (_advancing)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                        <span>Starting Phase 2…</span>
+                    }
+                    else
+                    {
+                        <span>Continue to Technical Review →</span>
+                    }
+                </MudButton>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info">
+                    Waiting for an admin to advance to Phase 2.
+                </MudAlert>
+            }
+        </MudPaper>
+    }
+
+    @* ── Main question/loading area ───────────────────────────────────────── *@
+    else if (_loading)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="nexus-discovery-loading-text mb-2">@LoadingText</MudText>
         @for (int i = 0; i < 3; i++)
         {
             <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="120px" Class="mb-3" />
         }
     }
     else if (Session == null || Session.SkippedByUser ||
-             (Session.Status != DiscoverySessionStatus.Pending &&
-              Session.Status != DiscoverySessionStatus.QuestionsReady &&
-              Session.Status != DiscoverySessionStatus.Answered &&
-              !Session.Questions.Any()))
+             (!IsActiveOrAnsweredStatus(Session.Status) && !CurrentQuestions.Any()))
     {
         <MudAlert Severity="Severity.Info" Class="nexus-discovery-empty-alert">
             Couldn't generate questions — continuing to spec generation.
@@ -32,29 +87,80 @@
             Continue
         </MudButton>
     }
+    else if (Session.Status == DiscoverySessionStatus.Phase2Complete)
+    {
+        @* Phase 2 complete — show completion and let the parent advance to spec gen *@
+        <MudAlert Severity="Severity.Success" Class="mb-4">
+            Discovery complete. Both phases finished.
+        </MudAlert>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   OnClick="OnCompleted"
+                   Class="nexus-discovery-continue-btn">
+            Continue to Spec Generation →
+        </MudButton>
+    }
     else
     {
-        @foreach (var question in Session.Questions.OrderBy(q => q.SortOrder))
+        @* ── Intro text (phase-aware) ────────────────────────────────────── *@
+        <MudText Typo="Typo.body1" Class="nexus-discovery-intro mb-4">
+            @IntroText
+        </MudText>
+
+        @* ── Question cards ──────────────────────────────────────────────── *@
+        @foreach (var question in CurrentQuestions.OrderBy(q => q.SortOrder))
         {
+            @* Phase 2 questions are admin-only *@
+            @if (question.Phase == 2 && !_isAdmin) { continue; }
+
             <DiscoveryQuestionCard @key="question.Id" Question="question"
                                    Answer="@(_answers.GetValueOrDefault(question.Id))"
                                    OnAnswerChanged="@((val) => _answers[question.Id] = val)" />
         }
 
+        @* ── Action buttons ──────────────────────────────────────────────── *@
         <div class="nexus-discovery-actions mt-4">
+
+            @* Primary: Submit *@
             <MudButton Variant="Variant.Filled"
                        Color="Color.Primary"
                        OnClick="HandleContinue"
                        Disabled="@(!CanContinue)"
                        Class="nexus-discovery-continue-btn">
-                Continue
+                Submit Answers →
             </MudButton>
-            <MudButton Variant="Variant.Text"
-                       Color="Color.Default"
-                       OnClick="HandleSkip"
-                       Class="nexus-discovery-skip-link ml-3">
-                Generate Spec Anyway
-            </MudButton>
+
+            @* Secondary: That's enough / Skip technical *@
+            @if (CurrentPhase == 1)
+            {
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Default"
+                           OnClick="HandlePhase1UserTerminate"
+                           Class="nexus-discovery-skip-link ml-3">
+                    That's enough, move on →
+                </MudButton>
+            }
+            else if (CurrentPhase == 2 && _isAdmin)
+            {
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Default"
+                           OnClick="HandlePhase2Skip"
+                           Class="nexus-discovery-skip-link ml-3">
+                    Skip technical questions →
+                </MudButton>
+            }
+
+            @* Tertiary: Skip discovery entirely (Phase 1 only, small/muted) *@
+            @if (CurrentPhase == 1)
+            {
+                <MudButton Variant="Variant.Text"
+                           Color="Color.Default"
+                           OnClick="HandleSkip"
+                           Size="Size.Small"
+                           Class="nexus-discovery-skip-entirely-link ml-3">
+                    Skip discovery entirely
+                </MudButton>
+            }
         </div>
     }
 </div>
@@ -67,46 +173,173 @@
 
     private Dictionary<Guid, string> _answers = new();
     private bool _loading => IsLoading;
+    private bool _isAdmin = false;
+    private bool _showPhaseTransition = false;
+    private bool _advancing = false;
+
+    // ── Derived state ──────────────────────────────────────────────────────
+
+    private int CurrentPhase => Session?.Phase ?? 1;
+    private int CurrentRound => CurrentQuestions.Any() ? CurrentQuestions.Max(q => q.Round) : 0;
+
+    /// <summary>Questions in the current active round for the current phase.</summary>
+    private IReadOnlyList<DiscoveryQuestion> CurrentQuestions
+    {
+        get
+        {
+            if (Session?.Questions == null) return Array.Empty<DiscoveryQuestion>();
+            var phase = CurrentPhase;
+            var phaseQs = Session.Questions.Where(q => q.Phase == phase).ToList();
+            if (!phaseQs.Any()) return Array.Empty<DiscoveryQuestion>();
+            var maxRound = phaseQs.Max(q => q.Round);
+            return phaseQs.Where(q => q.Round == maxRound).ToList();
+        }
+    }
+
+    private string LoadingText => CurrentPhase == 1
+        ? (CurrentRound <= 1 ? "Analyzing your submission…" : "Reviewing your answers…")
+        : "Shifting to technical review…";
+
+    private string IntroText => CurrentPhase == 1
+        ? "Before writing your spec, NEXUS wants to understand what you're trying to accomplish. These questions focus on your goals, users, and workflows — nothing technical."
+        : "Based on your answers, NEXUS now has a few technical questions. These help resolve integration points and architectural decisions before the spec is written. If you're not sure, you can skip.";
+
+    private bool CanContinue => !CurrentQuestions
+        .Where(q => q.IsBlocking && (CurrentPhase != 2 || _isAdmin))
+        .Any(q => string.IsNullOrWhiteSpace(_answers.GetValueOrDefault(q.Id)));
+
+    private static bool IsActiveOrAnsweredStatus(string? status) =>
+        status is
+            DiscoverySessionStatus.Pending or
+            DiscoverySessionStatus.QuestionsReady or
+            DiscoverySessionStatus.Answered or
+            DiscoverySessionStatus.Phase1Active or
+            DiscoverySessionStatus.Phase2Active;
+
+    // ── Lifecycle ──────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isAdmin = await UserContextService.IsAdminAsync();
+    }
 
     protected override void OnParametersSet()
     {
         if (Session?.Questions == null) return;
 
-        foreach (var q in Session.Questions)
+        // Restore saved answers for current-round questions
+        foreach (var q in CurrentQuestions)
         {
-            // Only restore from DB if user hasn't typed anything for this question yet.
-            // This prevents OnParametersSet re-runs (triggered by StateHasChanged) from
-            // overwriting user-typed answers that haven't been saved yet.
             if (!_answers.ContainsKey(q.Id))
             {
                 if (q.Answer != null && !string.IsNullOrEmpty(q.Answer.AnswerText))
                     _answers[q.Id] = q.Answer.AnswerText;
             }
         }
+
+        // Check if we should show the phase transition screen
+        // Show it when Phase 1 is complete but Phase 2 hasn't started yet
+        _showPhaseTransition = Session.Status == DiscoverySessionStatus.Phase1Complete
+                             && !_loading;
     }
 
-    private bool CanContinue => Session == null || !Session.Questions
-        .Where(q => q.IsBlocking)
-        .Any(q => string.IsNullOrWhiteSpace(_answers.GetValueOrDefault(q.Id)));
+    // ── Event handlers ─────────────────────────────────────────────────────
 
     private async Task HandleContinue()
     {
-        if (Session != null)
+        if (Session == null) { await OnCompleted.InvokeAsync(); return; }
+
+        try
         {
-            try
+            var oid = await UserContextService.GetUpnAsync();
+            var pairs = _answers.Select(kv => (kv.Key, (string?)kv.Value)).ToList();
+
+            await DiscoveryService.SaveRoundAnswersAsync(
+                Session.Id, CurrentPhase, CurrentRound, pairs, oid);
+
+            // After saving, if Phase 2 is complete, fire OnCompleted
+            if (Session.Status == DiscoverySessionStatus.Phase2Complete)
+                await OnCompleted.InvokeAsync();
+            // Otherwise the background task will update status and the parent will re-render
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DISCOVERY] Failed to save round answers for session {Session.Id}: {ex.Message}");
+            Snackbar.Add("Could not save your answers. Please try again.", Severity.Error);
+        }
+    }
+
+    private async Task HandlePhase1UserTerminate()
+    {
+        if (Session == null) return;
+        try
+        {
+            var oid = await UserContextService.GetUpnAsync();
+            // Save any current answers first (best-effort)
+            if (_answers.Any())
             {
-                var oid = await UserContextService.GetUpnAsync();
                 var pairs = _answers.Select(kv => (kv.Key, (string?)kv.Value)).ToList();
                 await DiscoveryService.SaveAnswersAsync(Session.Id, pairs, oid);
             }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"[DISCOVERY] Failed to save answers for session {Session.Id}: {ex.Message}");
-                Snackbar.Add("Could not save your answers. Please try again.", Severity.Error);
-                return; // do NOT advance — user must retry
-            }
+            // Mark Phase 1 terminated by user via SaveRoundAnswersAsync with force-complete
+            // We use a dedicated skip path: mark Phase1Complete with terminatedByUser=true
+            await DiscoveryService.SaveRoundAnswersAsync(
+                Session.Id, phase: 1, round: CurrentRound,
+                answers: _answers.Select(kv => (kv.Key, (string?)kv.Value)),
+                upn: oid);
+
+            _showPhaseTransition = true;
+            StateHasChanged();
         }
-        await OnCompleted.InvokeAsync(); // only reached on success or null Session
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DISCOVERY] Phase1 user terminate failed: {ex.Message}");
+            Snackbar.Add("Could not advance phase. Please try again.", Severity.Error);
+        }
+    }
+
+    private async Task HandleAdvanceToPhase2()
+    {
+        if (Session == null || !_isAdmin) return;
+        _advancing = true;
+        StateHasChanged();
+        try
+        {
+            var oid = await UserContextService.GetUpnAsync();
+            await DiscoveryService.AdvanceToPhase2Async(Session.Id, oid);
+            _showPhaseTransition = false;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DISCOVERY] AdvanceToPhase2 failed: {ex.Message}");
+            Snackbar.Add("Could not advance to Phase 2. Please try again.", Severity.Error);
+        }
+        finally
+        {
+            _advancing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandlePhase2Skip()
+    {
+        if (Session == null || !_isAdmin) return;
+        try
+        {
+            var oid = await UserContextService.GetUpnAsync();
+            // Treat Phase 2 skip as completed — save any current answers then advance
+            if (_answers.Any())
+            {
+                var pairs = _answers.Select(kv => (kv.Key, (string?)kv.Value)).ToList();
+                await DiscoveryService.SaveAnswersAsync(Session.Id, pairs, oid);
+            }
+            await OnCompleted.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[DISCOVERY] Phase2 skip failed: {ex.Message}");
+            Snackbar.Add("Could not skip Phase 2. Please try again.", Severity.Error);
+        }
     }
 
     private async Task HandleSkip()

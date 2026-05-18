@@ -206,6 +206,12 @@ public class NexusDbContext : DbContext
             entity.Property(e => e.AnsweredAt).HasColumnName("answered_at");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            // Two-phase columns (ND-1)
+            entity.Property(e => e.Phase).HasColumnName("phase").HasDefaultValue((byte)1);
+            entity.Property(e => e.Phase1CompletedAt).HasColumnName("phase1_completed_at");
+            entity.Property(e => e.Phase2CompletedAt).HasColumnName("phase2_completed_at");
+            entity.Property(e => e.Phase1TerminatedByUser).HasColumnName("phase1_terminated_by_user");
+            entity.Property(e => e.Phase2TerminatedByUser).HasColumnName("phase2_terminated_by_user");
             entity.HasMany(e => e.Questions)
                   .WithOne(q => q.Session)
                   .HasForeignKey(q => q.DiscoverySessionId)
@@ -225,6 +231,9 @@ public class NexusDbContext : DbContext
             entity.Property(e => e.IsBlocking).HasColumnName("is_blocking");
             entity.Property(e => e.Rationale).HasColumnName("rationale").HasMaxLength(500);
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            // Two-phase columns (ND-1)
+            entity.Property(e => e.Phase).HasColumnName("phase").HasDefaultValue((byte)1);
+            entity.Property(e => e.Round).HasColumnName("round").HasDefaultValue((byte)1);
             entity.HasOne(e => e.Answer)
                   .WithOne(a => a.Question)
                   .HasForeignKey<DiscoveryAnswer>(a => a.DiscoveryQuestionId)

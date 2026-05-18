@@ -14,6 +14,13 @@ public class DiscoverySession
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
+    // Two-phase iterative discovery columns (ND-1)
+    public byte Phase { get; set; } = 1;
+    public DateTime? Phase1CompletedAt { get; set; }
+    public DateTime? Phase2CompletedAt { get; set; }
+    public bool Phase1TerminatedByUser { get; set; }
+    public bool Phase2TerminatedByUser { get; set; }
+
     public Submission Submission { get; set; } = null!;
     public ICollection<DiscoveryQuestion> Questions { get; set; } = new List<DiscoveryQuestion>();
 }
