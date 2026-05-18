@@ -20,10 +20,11 @@ const bedrockAgentClient = new BedrockAgentRuntimeClient({ region: process.env.A
 // ─── DB helpers ───────────────────────────────────────────────────────────
 async function getDbConnection() {
     return mysql.createConnection({
-        host: process.env.DB_HOST || 'localhost',
+        host: process.env.FORTRESS_DB_HOST || 'localhost',
+        port: parseInt(process.env.FORTRESS_DB_PORT || '3306', 10),
         database: process.env.DB_NAME || 'fait',
-        user: process.env.DB_USER || 'fait',
-        password: process.env.DB_PASSWORD || '',
+        user: process.env.FORTRESS_DB_USER || 'fait',
+        password: process.env.FORTRESS_DB_PASS || '',
         ssl: process.env.DB_SSL !== 'false' ? { rejectUnauthorized: false } : false,
         connectTimeout: 10000,
     });
