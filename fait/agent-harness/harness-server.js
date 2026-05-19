@@ -2517,6 +2517,26 @@ You have access to the user's workspace files and memory topics. When the user a
             console.log(`[harness] CC spawn: injected ${ccKbParts.length} KB section(s) into contextParts for userId=${userId}`);
         }
 
+        // Artifact generation instructions — injected on every CC task turn (ADO#3563)
+        const workingPath = userWorkspaceDir; // will be folderLocalDir once ADO#3559 lands
+        contextParts.push(`## Artifact Generation Rules
+When the user asks for a file, generate a real file. Do not return text content and tell the user to paste it into another application.
+- Spreadsheet / Excel (.xlsx): use openpyxl. Write the file to the working folder.
+- PowerPoint / Presentation (.pptx): use python-pptx. Write the file to the working folder.
+- Word document (.docx): use python-docx. Write the file to the working folder.
+- PDF: use reportlab. Write the file to the working folder.
+- Chart / graph image (.png): use matplotlib or plotly+kaleido. Write the file to the working folder.
+- CSV: write as a plain text file with .csv extension. This is the only case where writing text is acceptable for a file request.
+
+After creating a file, confirm its name and location in your response. Do not print the file contents to the user.
+
+## Working Folder
+Your working directory is: ${workingPath}
+All output files must be written here.
+
+## Available Python Libraries
+Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, kaleido, reportlab, Pillow`);
+
         const fullContext = contextParts.join('\n\n---\n\n');
         const briefContent = fullContext
             ? `${fullContext}\n\n---\n\nUser: ${message}`
