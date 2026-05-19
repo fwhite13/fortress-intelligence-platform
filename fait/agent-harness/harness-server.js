@@ -6,6 +6,7 @@ const { mkdirSync } = require('fs');
 const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
 const { BedrockRuntimeClient, ConverseStreamCommand, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { BedrockAgentRuntimeClient, RetrieveCommand } = require('@aws-sdk/client-bedrock-agent-runtime');
 const mysql = require('mysql2/promise');
 const { Pool } = require('pg');
@@ -1485,13 +1486,13 @@ app.post('/tools/write_file', async (req, res) => {
 
                 // Update DB row + insert version record
                 await conn.execute(
-                    'UPDATE user_workspace_uploads SET s3_key = ?, size_bytes = ?, current_version = ?, source = ? WHERE id = ?',
-                    [s3Key, sizeBytes, newVersion, 'assistant', existingId]
+                    'UPDATE user_workspace_uploads SET s3_key = ?, size_bytes = ?, current_version = ?, source = ?, conversation_id = ? WHERE id = ?',
+                    [s3Key, sizeBytes, newVersion, 'assistant', conversationId ?? null, existingId]
                 );
                 const versionId = crypto.randomUUID();
                 await conn.execute(
-                    'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [versionId, existingId, newVersion, s3Key, sizeBytes, now, 'assistant']
+                    'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [versionId, existingId, newVersion, s3Key, sizeBytes, now, 'assistant', conversationId ?? null]
                 );
                 console.log(`[harness] write_file: versioned ${filename} → v${newVersion} in folderId=${folderId} (${sizeBytes} bytes)`);
                 res.json({ success: true, filename, s3Key, sizeBytes, mimeType, version: newVersion, updated: true });
@@ -1520,8 +1521,8 @@ app.post('/tools/write_file', async (req, res) => {
 
                 const versionId = crypto.randomUUID();
                 await conn.execute(
-                    'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by) VALUES (?, ?, 1, ?, ?, ?, ?)',
-                    [versionId, fileId, s3Key, sizeBytes, now, 'assistant']
+                    'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by, conversation_id) VALUES (?, ?, 1, ?, ?, ?, ?, ?)',
+                    [versionId, fileId, s3Key, sizeBytes, now, 'assistant', conversationId ?? null]
                 );
                 console.log(`[harness] write_file: created ${filename} in folderId=${folderId} (${sizeBytes} bytes)`);
                 res.json({ success: true, filename, s3Key, sizeBytes, mimeType, version: 1 });
@@ -2212,6 +2213,10 @@ function findDirtyFiles(before, after) {
     return dirty;
 }
 
+// ADO#3560 — in-memory map for pending folder confirmations (keyed by conversationId)
+// Entry: { resolve, reject, userId }
+const folderConfirmMap = new Map();
+
 async function resolveTaskFolder(userId, taskFolderId) {
     // 1. If taskFolderId provided → verify it exists for this user
     if (taskFolderId) {
@@ -2299,6 +2304,58 @@ async function getWorkspaceManifest(userId) {
     }
 }
 
+// ADO#3560 — Folder picker confirmation endpoint
+app.post('/turn/folder-confirm', async (req, res) => {
+    const { conversationId, folderId, newFolderName } = req.body || {};
+    console.log(`[harness] /turn/folder-confirm: conversationId=${conversationId}, folderId=${folderId}, newFolderName=${newFolderName}`);
+
+    if (!conversationId) {
+        return res.status(400).json({ error: 'conversationId required' });
+    }
+
+    const pending = folderConfirmMap.get(conversationId);
+    if (!pending) {
+        return res.status(404).json({ error: 'No pending folder selection for this conversation' });
+    }
+
+    const { resolve, reject, userId: pendingUserId } = pending;
+    let resolvedFolderId = folderId;
+
+    try {
+        if (newFolderName) {
+            if (!/^[a-zA-Z0-9_-]{1,64}$/.test(newFolderName)) {
+                return res.status(400).json({ error: 'Invalid folder name' });
+            }
+            const newId = crypto.randomUUID();
+            const s3Prefix = `workspaces/${pendingUserId}/${newId}/`;
+            const conn = await getDbConnection();
+            try {
+                await conn.execute(
+                    'INSERT INTO workspace_folders (id, user_id, name, s3_prefix, created_at) VALUES (?, ?, ?, ?, NOW(6))',
+                    [newId, pendingUserId, newFolderName, s3Prefix]
+                );
+            } finally {
+                conn.end();
+            }
+            resolvedFolderId = newId;
+            console.log(`[harness] /turn/folder-confirm: created new folder id=${newId} name=${newFolderName} for userId=${pendingUserId}`);
+        }
+
+        if (!resolvedFolderId) {
+            return res.status(400).json({ error: 'folderId or newFolderName required' });
+        }
+
+        folderConfirmMap.delete(conversationId);
+        resolve(resolvedFolderId);
+        res.json({ ok: true, folderId: resolvedFolderId });
+    } catch (err) {
+        console.error(`[harness] /turn/folder-confirm error: ${err.message}`);
+        folderConfirmMap.delete(conversationId);
+        reject(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post('/turn', async (req, res) => {
     console.log('[harness] /turn received: userId=%s, hasMessage=%s, taskMode=%s',
         req.body?.UserId ?? '(none)', !!req.body?.Message, req.body?.TaskMode ?? false);
@@ -2332,6 +2389,7 @@ app.post('/turn', async (req, res) => {
     const resolvedModelId = BEDROCK_MODEL_MAP[modelId] ?? modelId;
 
     const conversationId  = rawBody.ConversationId  ?? rawBody.conversationId  ?? '';
+    const turnIndex = Array.isArray(history) ? history.length : 0;
     const enabledMcpSlugs = rawBody.EnabledMcpSlugs ?? rawBody.enabledMcpSlugs ?? [];
     // ADO#3249 — scheduled tasks with MCP slugs must use Bedrock path so toolConfig is built.
     // classifyRequest or TaskMode=true would otherwise route them to CC spawn path where
@@ -2479,6 +2537,83 @@ app.post('/turn', async (req, res) => {
         console.log(`[harness] /turn: taskMode=true — entering CC spawn path for userId=${userId}`);
         sendEvent({ type: 'mode_switch', payload: JSON.stringify({ reason: 'task_mode' }) });
         sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'start', status: 'starting', message: 'Starting Claude Code task...' }) });
+        // ADO#3560 — Folder picker: fast-path or emit folder_required and hold
+        const isAutoClassified = !forceTaskMode;
+        let taskFolderIdResolved = taskFolderId;
+
+        {
+            let useFastPath = false;
+            if (isAutoClassified) {
+                // Fast path: auto-classified AND user has a last_task_folder_id — skip picker
+                try {
+                    const connFast = await getDbConnection();
+                    try {
+                        const [fastRows] = await connFast.execute(
+                            'SELECT last_task_folder_id FROM users WHERE id = ? LIMIT 1',
+                            [userId]
+                        );
+                        if (fastRows.length > 0 && fastRows[0].last_task_folder_id) {
+                            useFastPath = true;
+                            if (!taskFolderIdResolved) {
+                                taskFolderIdResolved = fastRows[0].last_task_folder_id;
+                            }
+                            console.log(`[harness] ADO#3560 fast-path: auto-classified + last_task_folder_id=${taskFolderIdResolved} — skipping folder picker userId=${userId}`);
+                        }
+                    } finally {
+                        connFast.end();
+                    }
+                } catch (fastErr) {
+                    console.warn(`[harness] ADO#3560 fast-path DB check failed (non-fatal): ${fastErr.message}`);
+                }
+            }
+
+            if (!useFastPath) {
+                // Emit folder_required and hold until /turn/folder-confirm
+                let folders = [];
+                let lastFolderId = null;
+                try {
+                    const connFolders = await getDbConnection();
+                    try {
+                        const [folderRows] = await connFolders.execute(
+                            'SELECT id, name, updated_at as lastUsedAt FROM workspace_folders WHERE user_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 50',
+                            [userId]
+                        );
+                        folders = folderRows.map(r => ({ id: r.id, name: r.name, lastUsedAt: r.lastUsedAt }));
+                        const [userRows] = await connFolders.execute(
+                            'SELECT last_task_folder_id FROM users WHERE id = ? LIMIT 1',
+                            [userId]
+                        );
+                        lastFolderId = userRows.length > 0 ? userRows[0].last_task_folder_id : null;
+                    } finally {
+                        connFolders.end();
+                    }
+                } catch (folderFetchErr) {
+                    console.warn(`[harness] ADO#3560 folder fetch failed (non-fatal): ${folderFetchErr.message}`);
+                }
+
+                sendEvent({ type: 'folder_required', folders, lastFolderId });
+                console.log(`[harness] ADO#3560 holding for folder-confirm: conversationId=${conversationId} userId=${userId}`);
+
+                try {
+                    taskFolderIdResolved = await new Promise((resolve, reject) => {
+                        folderConfirmMap.set(conversationId, { resolve, reject, userId });
+                        setTimeout(() => {
+                            if (folderConfirmMap.has(conversationId)) {
+                                folderConfirmMap.delete(conversationId);
+                                reject(new Error('Folder selection timed out (2 min)'));
+                            }
+                        }, 120000);
+                    });
+                    console.log(`[harness] ADO#3560 folder confirmed: folderId=${taskFolderIdResolved} conversationId=${conversationId}`);
+                } catch (timeoutErr) {
+                    console.warn(`[harness] ADO#3560 folder confirm error: ${timeoutErr.message}`);
+                    ended = true;
+                    sendEvent({ type: 'error', errorMessage: 'Folder selection timed out. Please try again.' });
+                    res.end();
+                    return;
+                }
+            }
+        }
         // ── CC spawn path (unchanged) ─────────────────────────────────────
         const userWorkspaceDir = `${WORKSPACE_DIR}/${userId}`;
         let folderLocalDir = userWorkspaceDir; // will be updated after folder resolution
@@ -2498,7 +2633,7 @@ app.post('/turn', async (req, res) => {
         }
         // ADO#3559 — resolve task folder early so folderLocalDir is available for context assembly
         try {
-            folder = await resolveTaskFolder(userId, taskFolderId);
+            folder = await resolveTaskFolder(userId, taskFolderIdResolved ?? taskFolderId);
             folderLocalDir = `${WORKSPACE_DIR}/${userId}/${folder.id}`;
             mkdirSync(folderLocalDir, { recursive: true });
         } catch (folderErr) {
@@ -2849,21 +2984,91 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
             }
 
             // ADO#3559 — dirty-only post-task sync (upload only new/changed files)
+            // ADO#3562 — adds version tracking + files_updated SSE event
             try {
                 if (folder) {
                     const postSyncSnapshot = buildLocalSnapshot(folderLocalDir);
                     const dirtyFiles = findDirtyFiles(preSyncSnapshot, postSyncSnapshot);
+                    const uploadedFiles = [];
                     for (const relPath of dirtyFiles) {
                         const localPath = path.join(folderLocalDir, relPath);
                         const s3Key = `${folder.s3_prefix}${relPath}`;
+                        const fileSize = (() => { try { return fs.statSync(localPath).size; } catch { return null; } })();
                         await s3Client.send(new PutObjectCommand({
                             Bucket: S3_BUCKET,
                             Key: s3Key,
                             Body: fs.createReadStream(localPath),
                         }));
                         console.log(`[harness] post-sync uploaded: ${relPath} → s3://${S3_BUCKET}/${s3Key} userId=${userId}`);
+
+                        // ADO#3562 — write provenance row
+                        const connProv = await getDbConnection();
+                        try {
+                            const [existRows] = await connProv.execute(
+                                'SELECT id, current_version FROM user_workspace_uploads WHERE user_id = ? AND s3_key = ? LIMIT 1',
+                                [userId, s3Key]
+                            );
+                            if (existRows.length === 0) {
+                                // New file
+                                const fileId = crypto.randomUUID();
+                                const filename = path.basename(relPath);
+                                await connProv.execute(
+                                    'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at, current_version, source, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)',
+                                    [fileId, userId, folder.id, filename, 'application/octet-stream', s3Key, fileSize ?? 0, new Date(), 'cc', conversationId ?? null]
+                                );
+                                await connProv.execute(
+                                    'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by, conversation_id, turn_index) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)',
+                                    [crypto.randomUUID(), fileId, s3Key, fileSize ?? null, new Date(), 'cc', conversationId ?? null, turnIndex ?? null]
+                                );
+                                uploadedFiles.push({ filename: path.basename(relPath), fileId, version: 1, action: 'created', s3Key });
+                            } else {
+                                // Updated file
+                                const nextVersion = (existRows[0].current_version || 1) + 1;
+                                await connProv.execute(
+                                    'UPDATE user_workspace_uploads SET current_version = ?, conversation_id = ? WHERE id = ?',
+                                    [nextVersion, conversationId ?? null, existRows[0].id]
+                                );
+                                await connProv.execute(
+                                    'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by, conversation_id, turn_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                                    [crypto.randomUUID(), existRows[0].id, nextVersion, s3Key, fileSize ?? null, new Date(), 'cc', conversationId ?? null, turnIndex ?? null]
+                                );
+                                uploadedFiles.push({ filename: path.basename(relPath), fileId: existRows[0].id, version: nextVersion, action: 'updated', s3Key });
+                            }
+                        } catch (provErr) {
+                            console.warn(`[harness] post-sync provenance error (non-fatal): ${provErr.message}`);
+                        } finally {
+                            connProv.end();
+                        }
                     }
                     console.log(`[harness] post-sync complete: ${dirtyFiles.length} file(s) uploaded userId=${userId}`);
+
+                    // ADO#3562 — emit files_updated SSE event with presigned URLs
+                    if (uploadedFiles.length > 0) {
+                        try {
+                            const presignedFiles = await Promise.all(uploadedFiles.map(async (f) => {
+                                const url = await getSignedUrl(s3Client, new GetObjectCommand({
+                                    Bucket: S3_BUCKET, Key: f.s3Key
+                                }), { expiresIn: 1800 });
+                                return { ...f, presignedUrl: url };
+                            }));
+                            sendEvent({
+                                type: 'files_updated',
+                                payload: JSON.stringify({
+                                    folderId: folder.id,
+                                    folderName: folder.name,
+                                    files: presignedFiles.map(f => ({
+                                        filename: f.filename,
+                                        action: f.action,
+                                        version: f.version,
+                                        presignedUrl: f.presignedUrl
+                                    }))
+                                })
+                            });
+                            console.log(`[harness] files_updated event emitted: ${uploadedFiles.length} file(s) userId=${userId}`);
+                        } catch (presignErr) {
+                            console.warn(`[harness] files_updated presign error (non-fatal): ${presignErr.message}`);
+                        }
+                    }
                 } else {
                     // fallback: no folder resolved, skip post-sync
                     console.warn(`[harness] post-sync skipped: no folder resolved for userId=${userId}`);

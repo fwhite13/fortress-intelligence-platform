@@ -1,0 +1,128 @@
+@* ADO#3560 — Inline folder picker for CC task turns *@
+@using FortressAI.Web.Services
+@inject IUserAgentRuntime AgentRuntime
+@inject UserSessionService Session
+@inject ILogger<FolderPicker> Logger
+
+<div class="folder-picker">
+    <div class="folder-picker__label">Select a working folder for this task:</div>
+
+    <select @bind="_selectedFolderId" @bind:after="OnSelectionChanged" class="folder-picker__select">
+        @foreach (var folder in Folders)
+        {
+            <option value="@folder.Id">@folder.Name</option>
+        }
+        <option value="__new__">+ New folder</option>
+    </select>
+
+    @if (_showNewFolderInput)
+    {
+        <input type="text"
+               @bind="_newFolderName"
+               placeholder="folder-name"
+               maxlength="64"
+               class="folder-picker__new-input"
+               @onkeydown="OnNewFolderKeyDown" />
+        @if (!string.IsNullOrEmpty(_validationError))
+        {
+            <div class="folder-picker__error">@_validationError</div>
+        }
+    }
+
+    <button class="folder-picker__btn" @onclick="OnStartTask" disabled="@_submitting">
+        @(_submitting ? "Starting..." : "Start task")
+    </button>
+</div>
+
+@code {
+    [Parameter] public List<FolderInfo> Folders { get; set; } = new();
+    [Parameter] public string? LastFolderId { get; set; }
+    [Parameter] public string ConversationId { get; set; } = "";
+    [Parameter] public EventCallback<FolderConfirmedArgs> OnFolderConfirmed { get; set; }
+
+    private string _selectedFolderId = "";
+    private bool _showNewFolderInput = false;
+    private string _newFolderName = "";
+    private string _validationError = "";
+    private bool _submitting = false;
+
+    protected override void OnInitialized()
+    {
+        _selectedFolderId = LastFolderId ?? Folders.FirstOrDefault()?.Id ?? "";
+    }
+
+    private void OnSelectionChanged()
+    {
+        _showNewFolderInput = _selectedFolderId == "__new__";
+        _validationError = "";
+    }
+
+    private void OnNewFolderKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") _ = OnStartTask();
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex FolderNameRegex =
+        new(@"^[a-zA-Z0-9_-]{1,64}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private async Task OnStartTask()
+    {
+        if (_selectedFolderId == "__new__")
+        {
+            if (!FolderNameRegex.IsMatch(_newFolderName))
+            {
+                _validationError = "Folder name: alphanumeric, hyphens, underscores only (max 64 chars).";
+                return;
+            }
+        }
+
+        _submitting = true;
+        _validationError = "";
+        StateHasChanged();
+
+        try
+        {
+            object payload;
+            string? resolvedFolderName;
+
+            if (_selectedFolderId == "__new__")
+            {
+                payload = new { conversationId = ConversationId, newFolderName = _newFolderName };
+                resolvedFolderName = _newFolderName;
+            }
+            else
+            {
+                payload = new { conversationId = ConversationId, folderId = _selectedFolderId };
+                resolvedFolderName = Folders.FirstOrDefault(f => f.Id == _selectedFolderId)?.Name;
+            }
+
+            var response = await AgentRuntime.PostToHarnessAsync(
+                Session.UserId.ToString(),
+                "/turn/folder-confirm",
+                payload);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _validationError = $"Could not confirm folder ({response.StatusCode}).";
+                Logger.LogWarning("[FolderPicker] /turn/folder-confirm returned {Status}: {Body}", response.StatusCode, body);
+                _submitting = false;
+                StateHasChanged();
+                return;
+            }
+
+            await OnFolderConfirmed.InvokeAsync(new FolderConfirmedArgs(
+                _selectedFolderId == "__new__" ? null : _selectedFolderId,
+                resolvedFolderName));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[FolderPicker] PostToHarnessAsync failed");
+            _validationError = "Error contacting harness. Please retry.";
+            _submitting = false;
+            StateHasChanged();
+        }
+    }
+
+    public record FolderConfirmedArgs(string? FolderId, string? FolderName);
+}

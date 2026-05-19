@@ -171,12 +171,20 @@ else
             {
                 <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
             }
+            @if (_folderPickerVisible && _folderPickerConversationId != null)
+            {
+                <FolderPicker
+                    Folders="_folderPickerFolders"
+                    LastFolderId="_folderPickerLastFolderId"
+                    ConversationId="@_folderPickerConversationId"
+                    OnFolderConfirmed="HandleFolderConfirmed" />
+            }
             @if (_taskModeActive && (_taskProgressSteps.Any() || _taskStartTime.HasValue))
             {
                 <div class="task-progress-timeline">
                     <div class="task-progress-timeline__header">
                         <i class="fas fa-tasks"></i>
-                        <span>Task in progress</span>
+                        <span>Task in progress@(string.IsNullOrEmpty(_activeTaskFolderName) ? "" : $" · /{_activeTaskFolderName}")</span>
                         <span class="task-progress-timeline__elapsed">@_taskElapsed</span>
                         <button class="task-progress-timeline__cancel" @onclick="CancelTask" title="Cancel task">
                             <i class="fas fa-times"></i>
@@ -200,6 +208,20 @@ else
                             </div>
                         }
                     </div>
+                </div>
+            }
+            @if (_currentFileSummary != null && _currentFileSummary.Files.Count > 0)
+            {
+                <div class="file-summary-block">
+                    <div class="file-summary-block__folder">📁 /@_currentFileSummary.FolderName</div>
+                    @foreach (var f in _currentFileSummary.Files)
+                    {
+                        <div class="file-summary-block__file">
+                            <span class="file-summary-block__icon">@(f.Action == "created" ? "✅" : "📝")</span>
+                            <a href="@f.PresignedUrl" target="_blank" class="file-summary-block__link">@f.Filename</a>
+                            <span class="file-summary-block__meta">(@f.Action@(f.Version > 1 ? $", v{f.Version}" : ""))</span>
+                        </div>
+                    }
                 </div>
             }
         </div>
@@ -421,6 +443,12 @@ else
     // Task mode state
     private bool _taskMode = false;
     private bool _taskModeActive = false; // set true on mode_switch event
+    // ADO#3560 — folder picker state
+    private bool _folderPickerVisible = false;
+    private List<FolderInfo> _folderPickerFolders = new();
+    private string? _folderPickerLastFolderId = null;
+    private string? _folderPickerConversationId = null;
+    private string? _activeTaskFolderName = null;
 
     // Task Progress Timeline state (ADO#3244)
     private List<TaskProgressStep> _taskProgressSteps = new();
@@ -446,6 +474,7 @@ else
     }
     private List<UserWorkspaceFile> _conversationArtifacts = new();
     private UserWorkspaceFile? _pendingArtifact = null;
+    private FilesUpdatedPayload? _currentFileSummary = null;
 
     // Cold start UX — guard fields
     private bool _agentReady = false;
@@ -742,6 +771,7 @@ else
     {
         if (string.IsNullOrWhiteSpace(text) || isStreaming) return;
         _lastKbResult = null;  // Clear stale result before new send
+        _currentFileSummary = null;
         _activeToolCalls.Clear();  // ADO#3241 — Reset tool call indicators
         _taskModeActive = false; // Reset — will be set by mode_switch event in this turn
         _taskProgressSteps.Clear();
@@ -1088,6 +1118,44 @@ else
                         Logger.LogWarning(ex, "[ChatView] Failed to parse task_progress payload");
                     }
                 }
+                else if (evt.Type == "folder_required")
+                {
+                    // ADO#3560 — folder picker: parse payload and show inline picker
+                    try
+                    {
+                        var folderPayload = System.Text.Json.JsonSerializer.Deserialize<FolderRequiredPayload>(
+                            evt.Payload ?? "{}",
+                            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        _folderPickerFolders = folderPayload?.Folders?
+                            .Select(f => new FolderInfo(f.Id, f.Name, f.LastUsedAt))
+                            .ToList() ?? new();
+                        _folderPickerLastFolderId = folderPayload?.LastFolderId;
+                        _folderPickerConversationId = conversation?.Id.ToString();
+                        _folderPickerVisible = true;
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[ChatView] Failed to parse folder_required payload");
+                    }
+                }
+                else if (evt.Type == "files_updated")
+                {
+                    try
+                    {
+                        var payload = System.Text.Json.JsonSerializer.Deserialize<FilesUpdatedPayload>(
+                            evt.Payload ?? "{}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (payload?.Files?.Count > 0)
+                        {
+                            _currentFileSummary = payload;
+                            StateHasChanged();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[ChatView] Failed to parse files_updated payload");
+                    }
+                }
                 // "log" events: swallow silently
             }
 
@@ -1121,6 +1189,7 @@ else
             _elapsedTimer?.Dispose();
             _elapsedTimer = null;
             _taskModeActive = false;
+            _activeTaskFolderName = null;  // ADO#3560
             _activeToolCalls.Clear();    // ADO#3455 — ensure cleared on turn end
             _toolCallsFading = false;    // ADO#3455
             streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
@@ -1319,6 +1388,14 @@ else
         var t when t.Contains("subagent") || t.Contains("spawn") || t.Contains("claude") => "🧑‍🔬",
         _ => "🔧"
     };
+
+    // ADO#3560 — called by FolderPicker when user confirms folder selection
+    private void HandleFolderConfirmed(FolderPicker.FolderConfirmedArgs args)
+    {
+        _folderPickerVisible = false;
+        _activeTaskFolderName = args.FolderName;
+        StateHasChanged();
+    }
 
     // ADO#3241 — Handle tool_call SSE events
     private void HandleToolCallEvent(ToolCallPayload payload)
@@ -1717,6 +1794,17 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
         public string ContentType { get; set; } = "";
         public string Base64 { get; set; } = "";
     }
+
+    public record FilesUpdatedPayload(
+        [property: System.Text.Json.Serialization.JsonPropertyName("folderId")] string FolderId,
+        [property: System.Text.Json.Serialization.JsonPropertyName("folderName")] string FolderName,
+        [property: System.Text.Json.Serialization.JsonPropertyName("files")] List<FileUpdateEntry> Files);
+
+    public record FileUpdateEntry(
+        [property: System.Text.Json.Serialization.JsonPropertyName("filename")] string Filename,
+        [property: System.Text.Json.Serialization.JsonPropertyName("action")] string Action,
+        [property: System.Text.Json.Serialization.JsonPropertyName("version")] int Version,
+        [property: System.Text.Json.Serialization.JsonPropertyName("presignedUrl")] string PresignedUrl);
 }
 
 <style>

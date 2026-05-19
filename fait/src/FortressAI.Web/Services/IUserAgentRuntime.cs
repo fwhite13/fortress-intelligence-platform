@@ -22,6 +22,9 @@ public interface IUserAgentRuntime
 
     /// <summary>Dispatch a named tool call to the user's Fargate harness (e.g. Stitch MCP tools).</summary>
     Task<string> DispatchToolCallAsync(string userId, string toolName, Dictionary<string, object> args, CancellationToken ct = default);
+
+    /// <summary>POST JSON payload to a harness endpoint for the given user. ADO#3560.</summary>
+    Task<HttpResponseMessage> PostToHarnessAsync(string userId, string path, object payload, CancellationToken ct = default);
 }
 
 public record RuntimeSession(
@@ -107,6 +110,18 @@ public record TaskProgressPayload(
     [property: JsonPropertyName("toolName")] string? ToolName,    // null for non-tool steps
     [property: JsonPropertyName("status")] string? Status,        // "starting" | "calling" | "done" | "error"
     [property: JsonPropertyName("message")] string? Message       // human-readable summary
+);
+
+// ADO#3560 — folder_required SSE payload
+public record FolderRequiredPayload(
+    [property: JsonPropertyName("folders")] List<FolderInfo>? Folders,
+    [property: JsonPropertyName("lastFolderId")] string? LastFolderId
+);
+
+public record FolderInfo(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("lastUsedAt")] DateTime? LastUsedAt
 );
 
 // ADO#3241 — Tool call SSE payload

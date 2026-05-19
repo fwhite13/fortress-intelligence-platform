@@ -567,6 +567,12 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
                     {
                         PropertyNameCaseInsensitive = true
                     });
+                    // ADO#3560 — for folder_required, the payload (folders/lastFolderId) isn't on HarnessEvent
+                    // so store the raw JSON in Payload so ChatView can deserialize it
+                    if (evt?.Type == "folder_required" && evt.Payload == null)
+                    {
+                        evt = evt with { Payload = json };
+                    }
                 }
                 catch (JsonException ex)
                 {
@@ -582,6 +588,15 @@ public class FargateUserAgentRuntime : IUserAgentRuntime
             if (evt.Type is "done" or "error")
                 yield break;
         }
+    }
+
+    // ─── PostToHarnessAsync (ADO#3560) ────────────────────────────────────────
+
+    public async Task<HttpResponseMessage> PostToHarnessAsync(string userId, string path, object payload, CancellationToken ct = default)
+    {
+        var harness = await EnsureRunningAsync(userId, ct);
+        var client = _httpClientFactory.CreateClient("HarnessClient");
+        return await client.PostAsJsonAsync($"http://{harness.PrivateIp}:{harness.Port}{path}", payload, ct);
     }
 
     // ─── DispatchToolCallAsync ────────────────────────────────────────────────
