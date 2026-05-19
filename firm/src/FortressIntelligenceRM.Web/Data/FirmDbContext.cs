@@ -17,6 +17,7 @@ public class FirmDbContext : DbContext
     public DbSet<FirmMeetingKbPush> FirmMeetingKbPushes => Set<FirmMeetingKbPush>();
     public DbSet<FirmOrgContext> OrgContexts => Set<FirmOrgContext>();
     public DbSet<FirmUserWiki> UserWikis => Set<FirmUserWiki>();
+    public DbSet<FirmMeetingMindmap> Mindmaps => Set<FirmMeetingMindmap>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -38,6 +39,7 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.LastLoginAt).HasColumnName("last_login_at");
             entity.Property(e => e.FaitUserId).HasColumnName("fait_user_id").HasMaxLength(36);
             entity.Property(e => e.IsAdmin).HasColumnName("is_admin").HasDefaultValue(false);
+            entity.Property(e => e.ExpoPushToken).HasColumnName("expo_push_token").HasMaxLength(200);
         });
 
         modelBuilder.Entity<FirmMeeting>(entity =>
@@ -65,6 +67,12 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.TranscriptKbPushed).HasColumnName("transcript_kb_pushed").HasDefaultValue(false);
             entity.Property(e => e.SummaryKbPushed).HasColumnName("summary_kb_pushed").HasDefaultValue(false);
+            entity.Property(e => e.Source).HasColumnName("source").HasMaxLength(20).HasDefaultValue("teams");
+            entity.HasOne(e => e.Mindmap)
+                .WithOne(mm => mm.Meeting)
+                .HasForeignKey<FirmMeetingMindmap>(mm => mm.MeetingId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_fmm_meeting");
             entity.Property(e => e.StartDatetime).HasColumnName("start_datetime");
             entity.Property(e => e.CalendarEventId).HasColumnName("calendar_event_id").HasMaxLength(500);
             entity.Property(e => e.Mode).HasColumnName("mode").HasMaxLength(2);
@@ -166,6 +174,18 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.WikiContent).HasColumnName("wiki_content");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedBy).HasColumnName("updated_by").HasMaxLength(256);
+        });
+
+        modelBuilder.Entity<FirmMeetingMindmap>(entity =>
+        {
+            entity.ToTable("firm_meeting_mindmaps");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.Property(e => e.MeetingId).HasColumnName("meeting_id");
+            entity.HasIndex(e => e.MeetingId).IsUnique().HasDatabaseName("uk_fmm_meeting");
+            entity.Property(e => e.MindmapJson).HasColumnName("mindmap_json").IsRequired();
+            entity.Property(e => e.ModelUsed).HasColumnName("model_used").HasMaxLength(100);
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
         });
 
         modelBuilder.Entity<FirmUserWiki>(entity =>

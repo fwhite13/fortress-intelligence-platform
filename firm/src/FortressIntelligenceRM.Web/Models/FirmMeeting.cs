@@ -39,4 +39,8 @@ public class FirmMeeting
     public FirmMeetingSummary? Summary { get; set; }
     public bool TranscriptKbPushed { get; set; }
     public bool SummaryKbPushed { get; set; }
+    /// <summary>Recording source: "teams", "mobile", "vpbot". Defaults to "teams" for legacy rows.</summary>
+    [MaxLength(20)]
+    public string Source { get; set; } = "teams";
+    public FirmMeetingMindmap? Mindmap { get; set; }
 }
