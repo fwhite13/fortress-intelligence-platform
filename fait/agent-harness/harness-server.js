@@ -2591,6 +2591,14 @@ app.post('/turn', async (req, res) => {
                     console.warn(`[harness] ADO#3560 folder fetch failed (non-fatal): ${folderFetchErr.message}`);
                 }
 
+                let ended = false;
+                const endResponse = (data) => {
+                    if (ended) return;
+                    ended = true;
+                    sendEvent(data);
+                    res.end();
+                };
+
                 sendEvent({ type: 'folder_required', folders, lastFolderId });
                 console.log(`[harness] ADO#3560 holding for folder-confirm: conversationId=${conversationId} userId=${userId}`);
 
@@ -2619,13 +2627,6 @@ app.post('/turn', async (req, res) => {
         let folderLocalDir = userWorkspaceDir; // will be updated after folder resolution
         let folder = null;
         let preSyncSnapshot = new Map();
-        let ended = false;
-        const endResponse = (data) => {
-            if (ended) return;
-            ended = true;
-            sendEvent(data);
-            res.end();
-        };
         try {
             mkdirSync(userWorkspaceDir, { recursive: true });
         } catch (mkErr) {
