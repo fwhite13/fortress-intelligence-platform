@@ -2057,6 +2057,33 @@ async function scanAndUploadArtifacts(userId, workspaceDir) {
  * Classify whether a request should use the CC task path vs Bedrock conversational path.
  * Returns true = CC, false = Bedrock.
  */
+
+// ADO#3531 — Prune toolResult content beyond last 10 turns
+function pruneToolResults(messages, windowSize = 10) {
+    const STUB = '[result from prior session — call tool again for fresh data]';
+    const pruneBeforeIndex = Math.max(0, messages.length - windowSize);
+    return messages.map((msg, idx) => {
+        if (idx >= pruneBeforeIndex) return msg; // within window — keep verbatim
+        // Check if this message has any toolResult content blocks
+        if (!Array.isArray(msg.content)) return msg;
+        const hasToolResult = msg.content.some(block => block.toolResult !== undefined);
+        if (!hasToolResult) return msg;
+        // Replace toolResult content with stub — preserve structure
+        return {
+            ...msg,
+            content: msg.content.map(block => {
+                if (block.toolResult === undefined) return block;
+                return {
+                    toolResult: {
+                        ...block.toolResult,
+                        content: [{ text: STUB }]
+                    }
+                };
+            })
+        };
+    });
+}
+
 function classifyRequest(message, history) {
     const msg = (message || '').toLowerCase();
 
@@ -2831,6 +2858,8 @@ You have access to the user's workspace files and memory topics. When the user a
                 }
             }
             messages.push({ role: 'user', content: [{ text: message }] });
+            // ADO#3531 — prune stale tool result content beyond last 10 turns
+            const prunedMessages = pruneToolResults(messages);
             console.log(`[harness] /turn: message array built, count=${messages.length} (including current user message)`);
 
             // ADO#3218 — Dynamic toolConfig: built-ins always present + MCP tools for enabled slugs
@@ -3062,7 +3091,7 @@ You have access to the user's workspace files and memory topics. When the user a
 
                 const cmd = new ConverseStreamCommand({
                     modelId: resolvedModelId,
-                    messages,
+                    messages: prunedMessages,
                     system: [{ text: fullSystemPrompt }],
                     inferenceConfig: { maxTokens: 4096, temperature: 0.7 },
                     toolConfig
