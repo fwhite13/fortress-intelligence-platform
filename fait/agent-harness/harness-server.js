@@ -2356,6 +2356,12 @@ When referencing prior artifacts: call \`list_workspace_files(type=generated)\` 
         contextParts.push(`## Context Awareness
 
 You have access to the user's workspace files and memory topics. When the user asks about something you may have worked on before, check workspace artifacts and memory before responding.`);
+        contextParts.push(`## Tool Call Policy
+- ALWAYS call tools live. Never use prior tool results from conversation history as a substitute for a fresh call.
+- If a tool errored in a previous turn, treat it as if it was never called. Retry on this turn.
+- Exception: if the user explicitly says "you already checked that" or similar, you may use context.
+- Memory reads (read_memory), file reads, email/calendar lookups — always live, every time.
+- Do not say you are going to call a tool and then not call it. If you say you will check something, check it.`);
         if (systemPrompt) contextParts.push(systemPrompt);
 
         // ADO#3398 7.7-B — per-turn workspace brief injection
@@ -2676,6 +2682,12 @@ When referencing prior artifacts: call \`list_workspace_files(type=generated)\` 
             systemParts.push(`## Context Awareness
 
 You have access to the user's workspace files and memory topics. When the user asks about something you may have worked on before, check workspace artifacts and memory before responding.`);
+            systemParts.push(`## Tool Call Policy
+- ALWAYS call tools live. Never use prior tool results from conversation history as a substitute for a fresh call.
+- If a tool errored in a previous turn, treat it as if it was never called. Retry on this turn.
+- Exception: if the user explicitly says "you already checked that" or similar, you may use context.
+- Memory reads (read_memory), file reads, email/calendar lookups — always live, every time.
+- Do not say you are going to call a tool and then not call it. If you say you will check something, check it.`);
             if (systemPrompt) systemParts.push(systemPrompt);
 
             // ADO#3398 7.7-B — per-turn workspace brief injection
