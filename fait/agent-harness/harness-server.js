@@ -178,6 +178,39 @@ function scrubSecrets(text) {
   return result;
 }
 
+// ADO#3564 — Haiku query rewrite for retrieval optimization
+const REWRITE_SKIP_WORDS = 8; // skip rewrite if message is under 8 words
+async function rewriteQueryForRetrieval(userMessage, userId) {
+    // Skip rewrite for short messages
+    const wordCount = (userMessage || '').trim().split(/\s+/).filter(Boolean).length;
+    if (wordCount < REWRITE_SKIP_WORDS) {
+        return userMessage;
+    }
+    try {
+        const prompt = `You are a search query optimizer. Given a user message from a chat conversation, produce a concise, keyword-rich search query that would retrieve the most relevant context for answering it. Strip conversational filler. Extract the core intent. Output only the rewritten query — no explanation, no preamble.\n\nUser message: ${userMessage}\n\nRewritten query:`;
+        const response = await bedrockClient.send(new InvokeModelCommand({
+            modelId: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+            contentType: 'application/json',
+            accept: 'application/json',
+            body: JSON.stringify({
+                anthropic_version: 'bedrock-2023-05-31',
+                max_tokens: 128,
+                messages: [{ role: 'user', content: prompt }]
+            })
+        }));
+        const parsed = JSON.parse(Buffer.from(response.body).toString('utf-8'));
+        const rewritten = parsed?.content?.[0]?.text?.trim();
+        if (rewritten) {
+            console.log(`[harness] query rewrite: original="${userMessage.slice(0, 100)}" rewritten="${rewritten}" userId=${userId}`);
+            return rewritten;
+        }
+        return userMessage;
+    } catch (err) {
+        console.warn(`[harness] query rewrite failed (non-fatal), using raw message: ${err.message} userId=${userId}`);
+        return userMessage;
+    }
+}
+
 // ADO#3241 — Structured KB retrieval (returns raw results, not formatted text)
 async function retrieveFromKbFull(kbId, query, maxResults = 5) {
     const cmd = new RetrieveCommand({
@@ -2489,9 +2522,11 @@ app.post('/turn', async (req, res) => {
         if (userEmail) contextParts.push(`## User Identity\nEmail: ${userEmail}`);
         contextParts.push(`## Session Identifiers\nuserId: ${userId}`);
         if (userMd) contextParts.push(`## About the User\n${userMd}`);
+        // ADO#3564 — rewrite user message for retrieval optimization
+        const retrievalQuery = await rewriteQueryForRetrieval(message, userId);
         // ADO#3397 — semantic memory injection (replaces MEMORY.md for vectorized users)
         if (pgPool) {
-            const semanticChunks = await searchMemoryChunks(userId, message, 5, 0.7);
+            const semanticChunks = await searchMemoryChunks(userId, retrievalQuery, 5, 0.7);
             if (semanticChunks && semanticChunks.length > 0) {
                 const semanticContext = semanticChunks
                     .map(c => `[${c.source_file}] ${c.content}`)
@@ -2606,7 +2641,7 @@ You have access to the user's workspace files and memory topics. When the user a
 
                 if ((kbFlags.CorpKbEnabled || kbFlags.corpKbEnabled) && !alreadyHasCorpKb && process.env.CORP_KB_ID) {
                     kbPromises.push(
-                        retrieveFromKbFiltered(process.env.CORP_KB_ID, message, null, null, 5)
+                        retrieveFromKbFiltered(process.env.CORP_KB_ID, retrievalQuery, null, null, 5)
                             .then(results => {
                                 if (results.length > 0) {
                                     const text = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
@@ -2617,7 +2652,7 @@ You have access to the user's workspace files and memory topics. When the user a
                 }
                 if ((kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled) && !alreadyHasPersonalKb && personalKbUserId && process.env.PERSONAL_KB_ID) {
                     kbPromises.push(
-                        retrieveFromKbFiltered(process.env.PERSONAL_KB_ID, message, 'ownerId', personalKbUserId, 5)
+                        retrieveFromKbFiltered(process.env.PERSONAL_KB_ID, retrievalQuery, 'ownerId', personalKbUserId, 5)
                             .then(results => {
                                 if (results.length > 0) {
                                     const text = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
@@ -2631,7 +2666,7 @@ You have access to the user's workspace files and memory topics. When the user a
                 if ((kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled) && !alreadyHasTeamKb && teamIds && teamIds.length > 0 && process.env.TEAM_KB_ID) {
                     for (const teamId of teamIds) {
                         kbPromises.push(
-                            retrieveFromKbFiltered(process.env.TEAM_KB_ID, message, 'teamId', teamId, 5)
+                            retrieveFromKbFiltered(process.env.TEAM_KB_ID, retrievalQuery, 'teamId', teamId, 5)
                                 .then(results => {
                                     if (results.length > 0) {
                                         const text = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
@@ -2874,9 +2909,11 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
             }
             if (userEmail) systemParts.push(`## User Identity\nEmail: ${userEmail}`);
             if (userMd) systemParts.push(`## About the User\n${userMd}`);
+            // ADO#3564 — rewrite user message for retrieval optimization
+            const retrievalQuery = await rewriteQueryForRetrieval(message, userId);
             // ADO#3397 — semantic memory injection (replaces MEMORY.md for vectorized users)
             if (pgPool) {
-                const semanticChunks = await searchMemoryChunks(userId, message, 5, 0.7);
+                const semanticChunks = await searchMemoryChunks(userId, retrievalQuery, 5, 0.7);
                 if (semanticChunks && semanticChunks.length > 0) {
                     const semanticContext = semanticChunks
                         .map(c => `[${c.source_file}] ${c.content}`)
@@ -2999,14 +3036,14 @@ You have access to the user's workspace files and memory topics. When the user a
                     const kbPromises = [];
                     if (kbFlags.CorpKbEnabled || kbFlags.corpKbEnabled) {
                         // Corp KB: no per-user filter — entire KB is team-scoped structurally
-                        kbPromises.push(doKbRetrieval(process.env.CORP_KB_ID, 'Corp KB', message, null, null));
+                        kbPromises.push(doKbRetrieval(process.env.CORP_KB_ID, 'Corp KB', retrievalQuery, null, null));
                     }
                     if (kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled) {
                         // Personal KB: filter by ownerId = user's GUID
                         if (!personalKbUserId) {
                             console.warn(`[harness] /turn: Personal KB requested but no PersonalKbUserId in kbFlags — skipping for security`);
                         } else {
-                            kbPromises.push(doKbRetrieval(process.env.PERSONAL_KB_ID, 'Personal KB', message, 'ownerId', personalKbUserId));
+                            kbPromises.push(doKbRetrieval(process.env.PERSONAL_KB_ID, 'Personal KB', retrievalQuery, 'ownerId', personalKbUserId));
                         }
                     }
                     if (kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled) {
@@ -3016,7 +3053,7 @@ You have access to the user's workspace files and memory topics. When the user a
                             console.warn(`[harness] /turn: Team KB requested but no TeamIds in kbFlags — skipping for security`);
                         } else {
                             for (const teamId of effectiveTeamIds) {
-                                kbPromises.push(doKbRetrieval(process.env.TEAM_KB_ID, `Team KB (${teamId})`, message, 'teamId', teamId));
+                                kbPromises.push(doKbRetrieval(process.env.TEAM_KB_ID, `Team KB (${teamId})`, retrievalQuery, 'teamId', teamId));
                             }
                         }
                     }
