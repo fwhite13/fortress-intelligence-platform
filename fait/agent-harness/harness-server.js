@@ -2858,8 +2858,6 @@ You have access to the user's workspace files and memory topics. When the user a
                 }
             }
             messages.push({ role: 'user', content: [{ text: message }] });
-            // ADO#3531 — prune stale tool result content beyond last 10 turns
-            const prunedMessages = pruneToolResults(messages);
             console.log(`[harness] /turn: message array built, count=${messages.length} (including current user message)`);
 
             // ADO#3218 — Dynamic toolConfig: built-ins always present + MCP tools for enabled slugs
@@ -3081,6 +3079,8 @@ You have access to the user's workspace files and memory topics. When the user a
 
             while (continueLoop && toolIterations < MAX_TOOL_ITERATIONS) {
                 toolIterations++;
+                // ADO#3531 — prune stale tool result content beyond last 10 turns
+                const prunedMessages = pruneToolResults(messages);
                 let assistantTextAccumulator = '';
                 let assistantContent = [];
                 let toolUseAccumulator = null;
