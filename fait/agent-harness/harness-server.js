@@ -2608,6 +2608,8 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                             sendEvent({ type: 'text', content: scrubSecrets(block.text) });
                         } else if (block.type === 'tool_use') {
                             toolUseMap.set(block.id, block.name || 'tool');
+                            const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
+                            console.log(`[CC spawn] tool_use: ${block.name}(${inputSummary}) userId=${userId}`);
                             sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: `Calling ${block.name}...` }) });
                         }
                     }
@@ -2623,6 +2625,10 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                 } else if (evtType === 'result') {
                     if (!ccTextEmitted && parsed.result) {
                         sendEvent({ type: 'text', content: scrubSecrets(parsed.result) });
+                    }
+                    const resultText = parsed.result || '';
+                    if (resultText) {
+                        console.log(`[CC spawn] result text (first 500 chars): ${resultText.slice(0, 500)} userId=${userId}`);
                     }
                     // result.is_error is handled by the close event exit code
                 }
