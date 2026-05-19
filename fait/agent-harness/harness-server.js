@@ -2146,6 +2146,126 @@ function firePreferenceWrite(userId, message) {
     }).catch(err => console.error('[harness] preference-write error:', err.message));
 }
 
+// ─── ADO#3559: Task folder model helpers ──────────────────────────────────
+
+function buildLocalSnapshot(dir) {
+    // Returns Map<relativePath, {size, mtime}> for all files in dir (recursive)
+    const result = new Map();
+    if (!fs.existsSync(dir)) return result;
+    function walk(current, base) {
+        for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+            const full = path.join(current, entry.name);
+            const rel = path.relative(base, full);
+            if (entry.isDirectory()) walk(full, base);
+            else {
+                const stat = fs.statSync(full);
+                result.set(rel, { size: stat.size, mtime: stat.mtimeMs });
+            }
+        }
+    }
+    walk(dir, dir);
+    return result;
+}
+
+function findDirtyFiles(before, after) {
+    // Returns array of relative paths that are new or changed
+    const dirty = [];
+    for (const [relPath, afterStat] of after) {
+        const beforeStat = before.get(relPath);
+        if (!beforeStat || beforeStat.size !== afterStat.size || beforeStat.mtime !== afterStat.mtime) {
+            dirty.push(relPath);
+        }
+    }
+    return dirty;
+}
+
+async function resolveTaskFolder(userId, taskFolderId) {
+    // 1. If taskFolderId provided → verify it exists for this user
+    if (taskFolderId) {
+        const conn = await getDbConnection();
+        try {
+            const [rows] = await conn.execute(
+                'SELECT id, name, s3_prefix FROM workspace_folders WHERE id = ? AND user_id = ? LIMIT 1',
+                [taskFolderId, userId]
+            );
+            if (rows.length > 0) {
+                console.log(`[harness] resolveTaskFolder: found folder id=${taskFolderId} name=${rows[0].name}`);
+                return rows[0];
+            }
+            console.warn(`[harness] resolveTaskFolder: taskFolderId=${taskFolderId} not found for userId=${userId}, falling back`);
+        } finally {
+            conn.end();
+        }
+    }
+    // 2. Try last_task_folder_id from users table
+    {
+        const conn = await getDbConnection();
+        try {
+            const [userRows] = await conn.execute(
+                'SELECT last_task_folder_id FROM users WHERE id = ? LIMIT 1',
+                [userId]
+            );
+            if (userRows.length > 0 && userRows[0].last_task_folder_id) {
+                const lastFolderId = userRows[0].last_task_folder_id;
+                const [folderRows] = await conn.execute(
+                    'SELECT id, name, s3_prefix FROM workspace_folders WHERE id = ? AND user_id = ? LIMIT 1',
+                    [lastFolderId, userId]
+                );
+                if (folderRows.length > 0) {
+                    console.log(`[harness] resolveTaskFolder: using last_task_folder_id=${lastFolderId} name=${folderRows[0].name}`);
+                    return folderRows[0];
+                }
+            }
+        } finally {
+            conn.end();
+        }
+    }
+    // 3. Look up or create /general/ folder
+    {
+        const conn = await getDbConnection();
+        try {
+            const [existing] = await conn.execute(
+                "SELECT id, name, s3_prefix FROM workspace_folders WHERE user_id = ? AND name = 'general' LIMIT 1",
+                [userId]
+            );
+            if (existing.length > 0) {
+                console.log(`[harness] resolveTaskFolder: using existing general folder id=${existing[0].id}`);
+                return existing[0];
+            }
+            // Create it
+            const newId = crypto.randomUUID();
+            const s3Prefix = `workspaces/${userId}/general/`;
+            await conn.execute(
+                'INSERT INTO workspace_folders (id, user_id, name, s3_prefix, created_at) VALUES (?, ?, ?, ?, NOW(6))',
+                [newId, userId, 'general', s3Prefix]
+            );
+            console.log(`[harness] resolveTaskFolder: created general folder id=${newId} for userId=${userId}`);
+            return { id: newId, name: 'general', s3_prefix: s3Prefix };
+        } finally {
+            conn.end();
+        }
+    }
+}
+
+async function getWorkspaceManifest(userId) {
+    try {
+        const conn = await getDbConnection();
+        try {
+            const [folders] = await conn.execute(
+                'SELECT wf.name, COUNT(wfi.id) as file_count FROM workspace_folders wf LEFT JOIN workspace_files wfi ON wfi.folder_id = wf.id WHERE wf.user_id = ? GROUP BY wf.id, wf.name ORDER BY wf.name',
+                [userId]
+            );
+            if (folders.length === 0) return null;
+            return folders.map(f => `- ${f.name} (${f.file_count} file${f.file_count !== 1 ? 's' : ''})`).join('\n');
+        } finally {
+            conn.end();
+        }
+    } catch (err) {
+        console.warn(`[harness] getWorkspaceManifest failed (non-fatal): ${err.message}`);
+        return null;
+    }
+}
+
 app.post('/turn', async (req, res) => {
     console.log('[harness] /turn received: userId=%s, hasMessage=%s, taskMode=%s',
         req.body?.UserId ?? '(none)', !!req.body?.Message, req.body?.TaskMode ?? false);
@@ -2165,6 +2285,7 @@ app.post('/turn', async (req, res) => {
     const userEmail       = rawBody.UserEmail       ?? rawBody.userEmail       ?? null;
     const isScheduledTask = rawBody.IsScheduledTask ?? rawBody.isScheduledTask ?? false;
     const kbWriteAllowed  = rawBody.KbWriteAllowed  ?? rawBody.kbWriteAllowed  ?? true;
+    const taskFolderId    = rawBody.TaskFolderId    ?? rawBody.taskFolderId    ?? null;
     // ADO#3395 — per-turn model override; null falls back to MODEL_ID env constant
     const modelId = rawBody.Model ?? rawBody.model ?? process.env.MODEL_ID ?? MODEL_ID;
 
@@ -2327,6 +2448,9 @@ app.post('/turn', async (req, res) => {
         sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'start', status: 'starting', message: 'Starting Claude Code task...' }) });
         // ── CC spawn path (unchanged) ─────────────────────────────────────
         const userWorkspaceDir = `${WORKSPACE_DIR}/${userId}`;
+        let folderLocalDir = userWorkspaceDir; // will be updated after folder resolution
+        let folder = null;
+        let preSyncSnapshot = new Map();
         let ended = false;
         const endResponse = (data) => {
             if (ended) return;
@@ -2518,7 +2642,7 @@ You have access to the user's workspace files and memory topics. When the user a
         }
 
         // Artifact generation instructions — injected on every CC task turn (ADO#3563)
-        const workingPath = userWorkspaceDir; // will be folderLocalDir once ADO#3559 lands
+        const workingPath = folderLocalDir;
         contextParts.push(`## Artifact Generation Rules
 When the user asks for a file, generate a real file. Do not return text content and tell the user to paste it into another application.
 - Spreadsheet / Excel (.xlsx): use openpyxl. Write the file to the working folder.
@@ -2537,20 +2661,45 @@ All output files must be written here.
 ## Available Python Libraries
 Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, kaleido, reportlab, Pillow`);
 
+        // ADO#3559 — inject working folder context and workspace manifest
+        if (folder) {
+            contextParts.push(`## Working Folder\nYour working directory is: ${folderLocalDir}\nFolder name: ${folder.name}\nAll files you create must be written here.`);
+            const manifest = await getWorkspaceManifest(userId);
+            if (manifest) {
+                contextParts.push(`## Workspace Manifest\nYour workspace folders:\n${manifest}`);
+            }
+        }
+
         const fullContext = contextParts.join('\n\n---\n\n');
         const briefContent = fullContext
             ? `${fullContext}\n\n---\n\nUser: ${message}`
             : message;
-        // Pre-stage: sync user workspace from S3 → local
+        // ADO#3559 — folder-scoped pre-task S3 sync
         try {
+            folder = await resolveTaskFolder(userId, taskFolderId);
+            folderLocalDir = `${WORKSPACE_DIR}/${userId}/${folder.id}`;
+            mkdirSync(folderLocalDir, { recursive: true });
+
+            // Record pre-sync snapshot for dirty detection
+            preSyncSnapshot = buildLocalSnapshot(folderLocalDir);
+
             const { execSync } = require('child_process');
             execSync(
-                `aws s3 sync s3://${S3_BUCKET}/workspaces/${userId}/ ${userWorkspaceDir}/ --quiet`,
+                `aws s3 sync s3://${S3_BUCKET}/${folder.s3_prefix} ${folderLocalDir}/ --quiet`,
                 { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
             );
-            console.log(`[harness] workspace synced from S3 for userId=${userId}`);
+            console.log(`[harness] folder-scoped S3 sync complete: folder=${folder.name} folderId=${folder.id} userId=${userId}`);
+
+            // Update last_task_folder_id
+            try {
+                const connUpdate = await getDbConnection();
+                await connUpdate.execute('UPDATE users SET last_task_folder_id = ? WHERE id = ?', [folder.id, userId]);
+                connUpdate.end();
+            } catch (updateErr) {
+                console.warn(`[harness] failed to update last_task_folder_id (non-fatal): ${updateErr.message}`);
+            }
         } catch (syncErr) {
-            console.warn(`[harness] pre-run S3 sync failed (non-fatal): ${syncErr.message}`);
+            console.warn(`[harness] pre-run folder sync failed (non-fatal): ${syncErr.message}`);
             // Never block — continue with whatever is already local
         }
 
@@ -2562,9 +2711,9 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
             '--verbose',
             '--dangerously-skip-permissions'
         ];
-        console.log(`[CC spawn] command=claude ${ccArgs.join(' ')} cwd=${userWorkspaceDir} userId=${userId} briefLen=${briefContent?.length ?? 0}`);
+        console.log(`[CC spawn] command=claude ${ccArgs.join(' ')} cwd=${folderLocalDir} userId=${userId} briefLen=${briefContent?.length ?? 0}`);
         const ccProcess = spawn('claude', ccArgs, {
-            cwd: userWorkspaceDir,
+            cwd: folderLocalDir,
             env: {
                 ...process.env,
                 CLAUDE_CODE_ENTRYPOINT: 'fargate-harness',
@@ -2655,19 +2804,31 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
             if (userId) scheduledTaskUsers.delete(userId);
             let artifact = null;
             try {
-                artifact = await scanAndUploadArtifacts(userId, userWorkspaceDir);
+                artifact = await scanAndUploadArtifacts(userId, folderLocalDir);
             } catch (err) {
                 console.error('[harness] artifact upload failed:', err.message);
             }
 
-            // Post-run: sync local workspace back to S3
+            // ADO#3559 — dirty-only post-task sync (upload only new/changed files)
             try {
-                const { execSync } = require('child_process');
-                execSync(
-                    `aws s3 sync ${userWorkspaceDir}/ s3://${S3_BUCKET}/workspaces/${userId}/ --quiet`,
-                    { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
-                );
-                console.log(`[harness] workspace synced to S3 for userId=${userId}`);
+                if (folder) {
+                    const postSyncSnapshot = buildLocalSnapshot(folderLocalDir);
+                    const dirtyFiles = findDirtyFiles(preSyncSnapshot, postSyncSnapshot);
+                    for (const relPath of dirtyFiles) {
+                        const localPath = path.join(folderLocalDir, relPath);
+                        const s3Key = `${folder.s3_prefix}${relPath}`;
+                        await s3Client.send(new PutObjectCommand({
+                            Bucket: S3_BUCKET,
+                            Key: s3Key,
+                            Body: fs.createReadStream(localPath),
+                        }));
+                        console.log(`[harness] post-sync uploaded: ${relPath} → s3://${S3_BUCKET}/${s3Key} userId=${userId}`);
+                    }
+                    console.log(`[harness] post-sync complete: ${dirtyFiles.length} file(s) uploaded userId=${userId}`);
+                } else {
+                    // fallback: no folder resolved, skip post-sync
+                    console.warn(`[harness] post-sync skipped: no folder resolved for userId=${userId}`);
+                }
             } catch (syncErr) {
                 console.warn(`[harness] post-run S3 sync failed (non-fatal): ${syncErr.message}`);
             }
