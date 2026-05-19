@@ -2252,7 +2252,7 @@ async function getWorkspaceManifest(userId) {
         const conn = await getDbConnection();
         try {
             const [folders] = await conn.execute(
-                'SELECT wf.name, COUNT(wfi.id) as file_count FROM workspace_folders wf LEFT JOIN workspace_files wfi ON wfi.folder_id = wf.id WHERE wf.user_id = ? GROUP BY wf.id, wf.name ORDER BY wf.name',
+                'SELECT wf.name, COUNT(wfi.id) as file_count FROM workspace_folders wf LEFT JOIN user_workspace_files wfi ON wfi.folder_id = wf.id WHERE wf.user_id = ? GROUP BY wf.id, wf.name ORDER BY wf.name',
                 [userId]
             );
             if (folders.length === 0) return null;
@@ -2462,6 +2462,14 @@ app.post('/turn', async (req, res) => {
             mkdirSync(userWorkspaceDir, { recursive: true });
         } catch (mkErr) {
             return endResponse({ type: 'error', errorMessage: `Cannot create workspace: ${mkErr.message}` });
+        }
+        // ADO#3559 — resolve task folder early so folderLocalDir is available for context assembly
+        try {
+            folder = await resolveTaskFolder(userId, taskFolderId);
+            folderLocalDir = `${WORKSPACE_DIR}/${userId}/${folder.id}`;
+            mkdirSync(folderLocalDir, { recursive: true });
+        } catch (folderErr) {
+            console.warn(`[harness] folder resolution failed (non-fatal), using userWorkspaceDir: ${folderErr.message}`);
         }
         // Always load S3 context for task mode
         const prefix = S3_PREFIX || `workspaces/${userId}/`;
@@ -2674,29 +2682,29 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         const briefContent = fullContext
             ? `${fullContext}\n\n---\n\nUser: ${message}`
             : message;
-        // ADO#3559 — folder-scoped pre-task S3 sync
+        // ADO#3559 — folder-scoped pre-task S3 sync (folder already resolved above)
         try {
-            folder = await resolveTaskFolder(userId, taskFolderId);
-            folderLocalDir = `${WORKSPACE_DIR}/${userId}/${folder.id}`;
-            mkdirSync(folderLocalDir, { recursive: true });
+            if (folder) {
+                // Record pre-sync snapshot for dirty detection
+                preSyncSnapshot = buildLocalSnapshot(folderLocalDir);
 
-            // Record pre-sync snapshot for dirty detection
-            preSyncSnapshot = buildLocalSnapshot(folderLocalDir);
+                const { execSync } = require('child_process');
+                execSync(
+                    `aws s3 sync s3://${S3_BUCKET}/${folder.s3_prefix} ${folderLocalDir}/ --quiet`,
+                    { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
+                );
+                console.log(`[harness] folder-scoped S3 sync complete: folder=${folder.name} folderId=${folder.id} userId=${userId}`);
 
-            const { execSync } = require('child_process');
-            execSync(
-                `aws s3 sync s3://${S3_BUCKET}/${folder.s3_prefix} ${folderLocalDir}/ --quiet`,
-                { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
-            );
-            console.log(`[harness] folder-scoped S3 sync complete: folder=${folder.name} folderId=${folder.id} userId=${userId}`);
-
-            // Update last_task_folder_id
-            try {
-                const connUpdate = await getDbConnection();
-                await connUpdate.execute('UPDATE users SET last_task_folder_id = ? WHERE id = ?', [folder.id, userId]);
-                connUpdate.end();
-            } catch (updateErr) {
-                console.warn(`[harness] failed to update last_task_folder_id (non-fatal): ${updateErr.message}`);
+                // Update last_task_folder_id
+                try {
+                    const connUpdate = await getDbConnection();
+                    await connUpdate.execute('UPDATE users SET last_task_folder_id = ? WHERE id = ?', [folder.id, userId]);
+                    connUpdate.end();
+                } catch (updateErr) {
+                    console.warn(`[harness] failed to update last_task_folder_id (non-fatal): ${updateErr.message}`);
+                }
+            } else {
+                console.warn(`[harness] no folder resolved — skipping folder-scoped S3 pre-sync userId=${userId}`);
             }
         } catch (syncErr) {
             console.warn(`[harness] pre-run folder sync failed (non-fatal): ${syncErr.message}`);
