@@ -1,4 +1,9 @@
 @inject BrandingConfig Branding
+@{
+    var _jsVer = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(App).Assembly)?.InformationalVersion
+        ?? typeof(App).Assembly.GetName().Version?.ToString()
+        ?? "1";
+}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -19,6 +24,6 @@
     <Routes @rendermode="RenderMode.InteractiveServer" />
     <script src="_framework/blazor.server.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
-    <script src="js/firm-utils.js"></script>
+    <script src="js/firm-utils.js?v=@_jsVer"></script>
 </body>
 </html>
