@@ -2541,6 +2541,14 @@ app.post('/turn', async (req, res) => {
         const isAutoClassified = !forceTaskMode;
         let taskFolderIdResolved = taskFolderId;
 
+        let ended = false;
+        const endResponse = (data) => {
+            if (ended) return;
+            ended = true;
+            sendEvent(data);
+            res.end();
+        };
+
         {
             let useFastPath = false;
             if (isAutoClassified) {
@@ -2591,14 +2599,6 @@ app.post('/turn', async (req, res) => {
                     console.warn(`[harness] ADO#3560 folder fetch failed (non-fatal): ${folderFetchErr.message}`);
                 }
 
-                let ended = false;
-                const endResponse = (data) => {
-                    if (ended) return;
-                    ended = true;
-                    sendEvent(data);
-                    res.end();
-                };
-
                 sendEvent({ type: 'folder_required', folders, lastFolderId });
                 console.log(`[harness] ADO#3560 holding for folder-confirm: conversationId=${conversationId} userId=${userId}`);
 
@@ -2615,9 +2615,7 @@ app.post('/turn', async (req, res) => {
                     console.log(`[harness] ADO#3560 folder confirmed: folderId=${taskFolderIdResolved} conversationId=${conversationId}`);
                 } catch (timeoutErr) {
                     console.warn(`[harness] ADO#3560 folder confirm error: ${timeoutErr.message}`);
-                    ended = true;
-                    sendEvent({ type: 'error', errorMessage: 'Folder selection timed out. Please try again.' });
-                    res.end();
+                    endResponse({ type: 'error', errorMessage: 'Folder selection timed out. Please try again.' });
                     return;
                 }
             }
