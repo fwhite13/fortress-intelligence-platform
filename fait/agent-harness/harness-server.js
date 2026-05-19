@@ -2662,10 +2662,6 @@ When the user asks for a file, generate a real file. Do not return text content 
 
 After creating a file, confirm its name and location in your response. Do not print the file contents to the user.
 
-## Working Folder
-Your working directory is: ${workingPath}
-All output files must be written here.
-
 ## Available Python Libraries
 Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, kaleido, reportlab, Pillow`);
 
@@ -2685,15 +2681,15 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         // ADO#3559 — folder-scoped pre-task S3 sync (folder already resolved above)
         try {
             if (folder) {
-                // Record pre-sync snapshot for dirty detection
-                preSyncSnapshot = buildLocalSnapshot(folderLocalDir);
-
                 const { execSync } = require('child_process');
                 execSync(
                     `aws s3 sync s3://${S3_BUCKET}/${folder.s3_prefix} ${folderLocalDir}/ --quiet`,
                     { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
                 );
                 console.log(`[harness] folder-scoped S3 sync complete: folder=${folder.name} folderId=${folder.id} userId=${userId}`);
+
+                // Record pre-sync snapshot for dirty detection (after S3 sync, so we capture S3 state)
+                preSyncSnapshot = buildLocalSnapshot(folderLocalDir);
 
                 // Update last_task_folder_id
                 try {
