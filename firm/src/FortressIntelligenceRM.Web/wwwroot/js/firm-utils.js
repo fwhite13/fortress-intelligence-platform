@@ -29,23 +29,21 @@ window.firmUtils = {
 
 // ── Mind Map (mind-elixir) ────────────────────────────────────────────────────
 // Loaded lazily when a mind map tab is first shown.
+// Uses ES module dynamic import (v4 has no UMD build).
 window.firmMindmap = {
     _instance: null,
+    _MindElixir: null,
 
     async render(containerId, mindmapJson) {
-        // Load mind-elixir from CDN if not already present
-        if (!window.MindElixir) {
-            await new Promise((resolve, reject) => {
-                const s = document.createElement('script');
-                s.src = 'https://cdn.jsdelivr.net/npm/mind-elixir@4/dist/MindElixir.umd.js';
-                s.onload = resolve;
-                s.onerror = reject;
-                document.head.appendChild(s);
-            });
+        // Load mind-elixir via ES module dynamic import if not already loaded
+        if (!window.firmMindmap._MindElixir) {
+            const mod = await import('https://cdn.jsdelivr.net/npm/mind-elixir@4/dist/MindElixir.js');
+            window.firmMindmap._MindElixir = mod.default;
         }
+        const MindElixir = window.firmMindmap._MindElixir;
 
         const container = document.getElementById(containerId);
-        if (!container) return;
+        if (!container) throw new Error('Mind map container not found: ' + containerId);
 
         // Destroy previous instance if any
         if (window.firmMindmap._instance) {
@@ -64,8 +62,6 @@ window.firmMindmap = {
             contextMenu: false,
             toolBar: true,
             keypress: false,
-            editable: false,
-            theme: MindElixir.theme.dark
         });
 
         me.init(data);
