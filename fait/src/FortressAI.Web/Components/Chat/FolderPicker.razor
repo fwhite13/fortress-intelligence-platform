@@ -29,6 +29,33 @@
         }
     }
 
+    @{
+        var otherFolders = Folders.Where(f => f.Id != _effectiveSelectedFolderId).ToList();
+    }
+    @if (otherFolders.Any())
+    {
+        <div class="folder-picker__readonly-section">
+            <div class="folder-picker__readonly-label">Also include (read-only):</div>
+            @foreach (var folder in otherFolders)
+            {
+                var folderId = folder.Id;
+                var isChecked = _readOnlyFolderIds.Contains(folderId);
+                var isReferenced = _referencedFolderIds.Contains(folderId);
+                <label class="folder-picker__readonly-item">
+                    <input type="checkbox"
+                           checked="@isChecked"
+                           @onchange="@(e => OnReadOnlyToggle(folderId, (bool)(e.Value ?? false)))"
+                           class="folder-picker__readonly-checkbox" />
+                    <span class="folder-picker__readonly-name">@folder.Name</span>
+                    @if (isReferenced)
+                    {
+                        <span class="folder-picker__readonly-hint">Referenced in your message</span>
+                    }
+                </label>
+            }
+        </div>
+    }
+
     <button class="folder-picker__btn" @onclick="OnStartTask" disabled="@_submitting">
         @(_submitting ? "Starting..." : "Start task")
     </button>
@@ -39,22 +66,63 @@
     [Parameter] public string? LastFolderId { get; set; }
     [Parameter] public string ConversationId { get; set; } = "";
     [Parameter] public EventCallback<FolderConfirmedArgs> OnFolderConfirmed { get; set; }
+    [Parameter] public string TaskMessage { get; set; } = "";
 
     private string _selectedFolderId = "";
     private bool _showNewFolderInput = false;
     private string _newFolderName = "";
     private string _validationError = "";
     private bool _submitting = false;
+    private HashSet<string> _readOnlyFolderIds = new();
+    private HashSet<string> _referencedFolderIds = new();
+
+    private string _effectiveSelectedFolderId =>
+        _selectedFolderId == "__new__" ? "" : _selectedFolderId;
 
     protected override void OnInitialized()
     {
         _selectedFolderId = LastFolderId ?? Folders.FirstOrDefault()?.Id ?? "";
+        ApplyHeuristics();
+    }
+
+    protected override void OnParametersSet()
+    {
+        ApplyHeuristics();
+    }
+
+    private void ApplyHeuristics()
+    {
+        if (string.IsNullOrWhiteSpace(TaskMessage)) return;
+        var msgLower = TaskMessage.ToLowerInvariant();
+        _referencedFolderIds = new HashSet<string>(
+            Folders
+                .Where(f => !string.IsNullOrEmpty(f.Name) && msgLower.Contains(f.Name.ToLowerInvariant()))
+                .Select(f => f.Id)
+        );
+        // Pre-check referenced folders that are NOT the working folder
+        var effectiveWorking = _effectiveSelectedFolderId;
+        foreach (var id in _referencedFolderIds)
+        {
+            if (id != effectiveWorking)
+                _readOnlyFolderIds.Add(id);
+        }
     }
 
     private void OnSelectionChanged()
     {
         _showNewFolderInput = _selectedFolderId == "__new__";
         _validationError = "";
+        // Remove newly-selected working folder from read-only set
+        _readOnlyFolderIds.Remove(_selectedFolderId);
+        ApplyHeuristics();
+    }
+
+    private void OnReadOnlyToggle(string folderId, bool isChecked)
+    {
+        if (isChecked)
+            _readOnlyFolderIds.Add(folderId);
+        else
+            _readOnlyFolderIds.Remove(folderId);
     }
 
     private void OnNewFolderKeyDown(KeyboardEventArgs e)
@@ -85,14 +153,18 @@
             object payload;
             string? resolvedFolderName;
 
+            var readOnlyIds = _readOnlyFolderIds
+                .Where(id => id != _selectedFolderId)
+                .ToArray();
+
             if (_selectedFolderId == "__new__")
             {
-                payload = new { conversationId = ConversationId, newFolderName = _newFolderName };
+                payload = new { conversationId = ConversationId, newFolderName = _newFolderName, readOnlyFolderIds = readOnlyIds };
                 resolvedFolderName = _newFolderName;
             }
             else
             {
-                payload = new { conversationId = ConversationId, folderId = _selectedFolderId };
+                payload = new { conversationId = ConversationId, folderId = _selectedFolderId, readOnlyFolderIds = readOnlyIds };
                 resolvedFolderName = Folders.FirstOrDefault(f => f.Id == _selectedFolderId)?.Name;
             }
 
@@ -113,7 +185,8 @@
 
             await OnFolderConfirmed.InvokeAsync(new FolderConfirmedArgs(
                 _selectedFolderId == "__new__" ? null : _selectedFolderId,
-                resolvedFolderName));
+                resolvedFolderName,
+                readOnlyIds));
         }
         catch (Exception ex)
         {
@@ -124,5 +197,5 @@
         }
     }
 
-    public record FolderConfirmedArgs(string? FolderId, string? FolderName);
+    public record FolderConfirmedArgs(string? FolderId, string? FolderName, string[] ReadOnlyFolderIds);
 }

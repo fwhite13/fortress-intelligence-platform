@@ -2306,8 +2306,9 @@ async function getWorkspaceManifest(userId) {
 
 // ADO#3560 — Folder picker confirmation endpoint
 app.post('/turn/folder-confirm', async (req, res) => {
-    const { conversationId, folderId, newFolderName } = req.body || {};
-    console.log(`[harness] /turn/folder-confirm: conversationId=${conversationId}, folderId=${folderId}, newFolderName=${newFolderName}`);
+    const { conversationId, folderId, newFolderName, readOnlyFolderIds } = req.body || {};
+    const roIds = Array.isArray(readOnlyFolderIds) ? readOnlyFolderIds : [];
+    console.log(`[harness] /turn/folder-confirm: conversationId=${conversationId}, folderId=${folderId}, newFolderName=${newFolderName}, readOnlyFolderIds=${JSON.stringify(roIds)}`);
 
     if (!conversationId) {
         return res.status(400).json({ error: 'conversationId required' });
@@ -2346,7 +2347,7 @@ app.post('/turn/folder-confirm', async (req, res) => {
         }
 
         folderConfirmMap.delete(conversationId);
-        resolve(resolvedFolderId);
+        resolve({ folderId: resolvedFolderId, readOnlyFolderIds: roIds });
         res.json({ ok: true, folderId: resolvedFolderId });
     } catch (err) {
         console.error(`[harness] /turn/folder-confirm error: ${err.message}`);
@@ -2549,6 +2550,8 @@ app.post('/turn', async (req, res) => {
             res.end();
         };
 
+        let readOnlyFolderIdsConfirmed = [];  // ADO#3561 — populated by folder confirm or empty on fast-path
+
         {
             let useFastPath = false;
             if (isAutoClassified) {
@@ -2603,7 +2606,7 @@ app.post('/turn', async (req, res) => {
                 console.log(`[harness] ADO#3560 holding for folder-confirm: conversationId=${conversationId} userId=${userId}`);
 
                 try {
-                    taskFolderIdResolved = await new Promise((resolve, reject) => {
+                    const folderConfirmResult = await new Promise((resolve, reject) => {
                         folderConfirmMap.set(conversationId, { resolve, reject, userId });
                         setTimeout(() => {
                             if (folderConfirmMap.has(conversationId)) {
@@ -2612,7 +2615,10 @@ app.post('/turn', async (req, res) => {
                             }
                         }, 120000);
                     });
-                    console.log(`[harness] ADO#3560 folder confirmed: folderId=${taskFolderIdResolved} conversationId=${conversationId}`);
+                    taskFolderIdResolved = folderConfirmResult.folderId;
+                    const readOnlyFolderIdsFromPicker = folderConfirmResult.readOnlyFolderIds || [];
+                    readOnlyFolderIdsConfirmed = readOnlyFolderIdsFromPicker;
+                    console.log(`[harness] ADO#3561 folder confirmed: folderId=${taskFolderIdResolved} readOnlyFolderIds=${JSON.stringify(readOnlyFolderIdsFromPicker)} conversationId=${conversationId}`);
                 } catch (timeoutErr) {
                     console.warn(`[harness] ADO#3560 folder confirm error: ${timeoutErr.message}`);
                     endResponse({ type: 'error', errorMessage: 'Folder selection timed out. Please try again.' });
@@ -2837,9 +2843,31 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         // ADO#3559 — inject working folder context and workspace manifest
         if (folder) {
             contextParts.push(`## Working Folder\nYour working directory is: ${folderLocalDir}\nFolder name: ${folder.name}\nAll files you create must be written here.`);
+
+            // ADO#3561 — inject read-only folder section
+            if (resolvedReadOnlyFolders.length > 0) {
+                const roLines = [];
+                for (const { folder: roFolder, localDir: roDir } of resolvedReadOnlyFolders) {
+                    let fileList = '';
+                    try {
+                        const entries = fs.readdirSync(roDir).filter(f => {
+                            try { return fs.statSync(path.join(roDir, f)).isFile(); } catch { return false; }
+                        }).slice(0, 10);
+                        fileList = entries.length > 0 ? `\n  Files: ${entries.join(', ')}` : '';
+                    } catch { /* non-fatal */ }
+                    roLines.push(`- ${roFolder.name} available at ./readonly/${roFolder.id}/   (folder name: ${roFolder.name})${fileList}`);
+                }
+                contextParts.push(`## Read-Only Reference Folders\nThe following folders are available for reading only. Do NOT write files to these paths.\n\n${roLines.join('\n')}\n\nFiles in read-only folders: READ ONLY. Any writes to ./readonly/... will be ignored and not synced back.`);
+            }
+
+            // ADO#3561 — updated workspace manifest includes all folders (working + read-only)
             const manifest = await getWorkspaceManifest(userId);
             if (manifest) {
-                contextParts.push(`## Workspace Manifest\nYour workspace folders:\n${manifest}`);
+                const roFolderNames = resolvedReadOnlyFolders.map(r => r.folder.name);
+                const manifestNote = roFolderNames.length > 0
+                    ? `\nRead-only folders available this task: ${roFolderNames.join(', ')}`
+                    : '';
+                contextParts.push(`## Workspace Manifest\nYour workspace folders:\n${manifest}${manifestNote}`);
             }
         }
 
@@ -2874,6 +2902,27 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         } catch (syncErr) {
             console.warn(`[harness] pre-run folder sync failed (non-fatal): ${syncErr.message}`);
             // Never block — continue with whatever is already local
+        }
+
+        // ADO#3561 — pre-task sync for read-only folders
+        const resolvedReadOnlyFolders = [];  // { folder, localDir } for later use in brief and post-task exclusion
+        if (readOnlyFolderIdsConfirmed.length > 0) {
+            const { execSync } = require('child_process');
+            for (const roFolderId of readOnlyFolderIdsConfirmed) {
+                try {
+                    const roFolder = await resolveTaskFolder(userId, roFolderId);
+                    const roLocalDir = `${WORKSPACE_DIR}/${userId}/readonly/${roFolder.id}`;
+                    mkdirSync(roLocalDir, { recursive: true });
+                    execSync(
+                        `aws s3 sync s3://${S3_BUCKET}/${roFolder.s3_prefix} ${roLocalDir}/ --delete --quiet`,
+                        { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
+                    );
+                    console.log(`[harness] ADO#3561 read-only sync complete: folder=${roFolder.name} folderId=${roFolder.id} localDir=${roLocalDir} userId=${userId}`);
+                    resolvedReadOnlyFolders.push({ folder: roFolder, localDir: roLocalDir });
+                } catch (roSyncErr) {
+                    console.warn(`[harness] ADO#3561 read-only folder sync failed for folderId=${roFolderId} (non-fatal): ${roSyncErr.message}`);
+                }
+            }
         }
 
         // ADO#3289 — log the exact command being spawned
@@ -2991,6 +3040,8 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                     const uploadedFiles = [];
                     for (const relPath of dirtyFiles) {
                         const localPath = path.join(folderLocalDir, relPath);
+                        // ADO#3561 — guard: never upload files from read-only folders
+                        if (localPath.startsWith(`${WORKSPACE_DIR}/${userId}/readonly/`)) continue;
                         const s3Key = `${folder.s3_prefix}${relPath}`;
                         const fileSize = (() => { try { return fs.statSync(localPath).size; } catch { return null; } })();
                         await s3Client.send(new PutObjectCommand({

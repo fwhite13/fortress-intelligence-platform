@@ -177,6 +177,7 @@ else
                     Folders="_folderPickerFolders"
                     LastFolderId="_folderPickerLastFolderId"
                     ConversationId="@_folderPickerConversationId"
+                    TaskMessage="@_folderPickerTaskMessage"
                     OnFolderConfirmed="HandleFolderConfirmed" />
             }
             @if (_taskModeActive && (_taskProgressSteps.Any() || _taskStartTime.HasValue))
@@ -449,6 +450,8 @@ else
     private string? _folderPickerLastFolderId = null;
     private string? _folderPickerConversationId = null;
     private string? _activeTaskFolderName = null;
+    private string _folderPickerTaskMessage = "";
+    private string _pendingTaskMessage = "";
 
     // Task Progress Timeline state (ADO#3244)
     private List<TaskProgressStep> _taskProgressSteps = new();
@@ -770,6 +773,7 @@ else
     private async Task HandleSend(string text)
     {
         if (string.IsNullOrWhiteSpace(text) || isStreaming) return;
+        _pendingTaskMessage = text;
         _lastKbResult = null;  // Clear stale result before new send
         _currentFileSummary = null;
         _activeToolCalls.Clear();  // ADO#3241 — Reset tool call indicators
@@ -1131,6 +1135,7 @@ else
                             .ToList() ?? new();
                         _folderPickerLastFolderId = folderPayload?.LastFolderId;
                         _folderPickerConversationId = conversation?.Id.ToString();
+                        _folderPickerTaskMessage = _pendingTaskMessage;
                         _folderPickerVisible = true;
                         StateHasChanged();
                     }
