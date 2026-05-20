@@ -31,9 +31,9 @@ public class WorkspaceFileService : IWorkspaceFileService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
-        // Find or create the default 'assistant-artifacts' folder for this user
+        // Find or create the default 'general' folder for this user
         var folder = await db.WorkspaceFolders
-            .FirstOrDefaultAsync(f => f.UserId == userId && f.Name == "assistant-artifacts", ct);
+            .FirstOrDefaultAsync(f => f.UserId == userId && f.Name == "general", ct);
 
         if (folder == null)
         {
@@ -42,7 +42,7 @@ public class WorkspaceFileService : IWorkspaceFileService
             {
                 Id = folderId,
                 UserId = userId,
-                Name = "assistant-artifacts",
+                Name = "general",
                 S3Prefix = $"files/{folderId}/",
                 CreatedAt = DateTime.UtcNow
             };

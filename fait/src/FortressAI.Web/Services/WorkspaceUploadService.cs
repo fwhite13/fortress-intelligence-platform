@@ -167,7 +167,30 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             .FirstOrDefaultAsync(u => u.UserId == userId && u.Filename == safeFilename && u.FolderId == folderId);
 
         var versionNumber = (existingFile?.CurrentVersion ?? 0) + 1;
-        var s3Key = $"workspaces/{userId}/files/{folderId?.ToString() ?? "root"}/{safeFilename}";
+
+        // N1: If folderId is null, auto-resolve (or create) the 'general' folder
+        if (folderId == null)
+        {
+            var generalFolder = await db.WorkspaceFolders
+                .FirstOrDefaultAsync(f => f.UserId == userId && f.Name == "general");
+            if (generalFolder == null)
+            {
+                var newFolderId = Guid.NewGuid();
+                generalFolder = new WorkspaceFolder
+                {
+                    Id = newFolderId,
+                    UserId = userId,
+                    Name = "general",
+                    S3Prefix = $"files/{newFolderId}/",
+                    CreatedAt = DateTime.UtcNow
+                };
+                db.WorkspaceFolders.Add(generalFolder);
+                await db.SaveChangesAsync();
+            }
+            folderId = generalFolder.Id;
+        }
+
+        var s3Key = $"workspaces/{userId}/files/{folderId}/{safeFilename}";
 
         await _s3.PutObjectAsync(new PutObjectRequest
         {

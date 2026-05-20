@@ -1226,7 +1226,31 @@ app.post('/tools/create_document', async (req, res) => {
             .substring(0, 100);
         const timestamp = Date.now();
         const filename = `${sanitized}-${timestamp}.docx`;
-        const s3Key = `workspaces/${userId}/files/assistant-docs/${filename}`;
+
+        // 2a. Resolve (or create) the user's 'general' folder
+        let folderGuid;
+        {
+            const conn2 = await getDbConnection();
+            try {
+                const [existing] = await conn2.execute(
+                    "SELECT id FROM workspace_folders WHERE user_id = ? AND name = 'general' LIMIT 1",
+                    [userId]
+                );
+                if (existing.length > 0) {
+                    folderGuid = existing[0].id;
+                } else {
+                    folderGuid = crypto.randomUUID();
+                    await conn2.execute(
+                        'INSERT INTO workspace_folders (id, user_id, name, s3_prefix, created_at) VALUES (?, ?, ?, ?, NOW(6))',
+                        [folderGuid, userId, 'general', `files/${folderGuid}/`]
+                    );
+                }
+            } finally {
+                await conn2.end();
+            }
+        }
+
+        const s3Key = `workspaces/${userId}/files/${folderGuid}/${filename}`;
 
         // 3. Upload to S3
         await s3Client.send(new PutObjectCommand({
@@ -1235,6 +1259,21 @@ app.post('/tools/create_document', async (req, res) => {
             Body: docBytes,
             ContentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         }));
+
+        // 4. Insert DB row so file appears in workspace explorer
+        {
+            const conn3 = await getDbConnection();
+            try {
+                const fileId = crypto.randomUUID();
+                const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+                await conn3.execute(
+                    'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at, current_version, source, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [fileId, userId, folderGuid, filename, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', s3Key, sizeBytes, now, 1, 'assistant', conversationId ?? null]
+                );
+            } finally {
+                await conn3.end();
+            }
+        }
 
         res.json({ success: true, filename, s3Key, sizeBytes });
     } catch (err) {
@@ -1551,6 +1590,7 @@ app.post('/tools/read_workspace_file', async (req, res) => {
                     s3Key = fileRecord.s3_key;
                     filename = fileRecord.filename;
                     mimeType = fileRecord.mime_type;
+                }
             } else if (filePath) {
                 // Path-based: look up in user_workspace_uploads by filename
                 const safeFilename = filePath.split('/').pop();
@@ -2020,7 +2060,7 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
 const ARTIFACT_EXTENSIONS = ['.docx', '.xlsx', '.pptx', '.html', '.pdf', '.zip'];
 const ARTIFACT_TYPES = { '.docx': 'word', '.xlsx': 'excel', '.pptx': 'powerpoint', '.html': 'html', '.pdf': 'pdf', '.zip': 'zip' };
 
-async function scanAndUploadArtifacts(userId, workspaceDir) {
+async function scanAndUploadArtifacts(userId, workspaceDir, conversationId) {
     const artifactsDir = path.join(workspaceDir, 'artifacts');
     if (!fs.existsSync(artifactsDir)) return null;
 
@@ -2034,8 +2074,6 @@ async function scanAndUploadArtifacts(userId, workspaceDir) {
         .sort((a, b) => b.mtime - a.mtime)[0];
 
     const filePath = path.join(artifactsDir, latestFile.name);
-    // Use files/ prefix per workspace canonical model. No DB insert here — handled by harness task completion flow.
-    const s3Key = `${S3_PREFIX}files/assistant-output/${latestFile.name}`;
     const fileBuffer = fs.readFileSync(filePath);
     const ext = path.extname(latestFile.name).toLowerCase();
 
@@ -2048,12 +2086,54 @@ async function scanAndUploadArtifacts(userId, workspaceDir) {
         '.zip': 'application/zip',
     };
 
+    // Resolve or create the user's 'general' folder
+    let folderGuid;
+    {
+        const conn = await getDbConnection();
+        try {
+            const [existing] = await conn.execute(
+                "SELECT id FROM workspace_folders WHERE user_id = ? AND name = 'general' LIMIT 1",
+                [userId]
+            );
+            if (existing.length > 0) {
+                folderGuid = existing[0].id;
+            } else {
+                folderGuid = crypto.randomUUID();
+                await conn.execute(
+                    'INSERT INTO workspace_folders (id, user_id, name, s3_prefix, created_at) VALUES (?, ?, ?, ?, NOW(6))',
+                    [folderGuid, userId, 'general', `files/${folderGuid}/`]
+                );
+            }
+        } finally {
+            conn.end();
+        }
+    }
+
+    const s3Key = `workspaces/${userId}/files/${folderGuid}/${latestFile.name}`;
+
     await s3Client.send(new PutObjectCommand({
         Bucket: S3_BUCKET,
         Key: s3Key,
         Body: fileBuffer,
         ContentType: contentTypes[ext] || 'application/octet-stream',
     }));
+
+    // Insert DB row so artifact appears in workspace explorer
+    try {
+        const conn = await getDbConnection();
+        try {
+            const fileId = crypto.randomUUID();
+            const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+            await conn.execute(
+                'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at, current_version, source, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [fileId, userId, folderGuid, latestFile.name, contentTypes[ext] || 'application/octet-stream', s3Key, fileBuffer.length, now, 1, 'assistant', conversationId ?? null]
+            );
+        } finally {
+            conn.end();
+        }
+    } catch (dbErr) {
+        console.error('[harness] scanAndUploadArtifacts DB insert failed (non-fatal):', dbErr.message);
+    }
 
     console.log(`[harness] Uploaded artifact ${latestFile.name} to s3://${S3_BUCKET}/${s3Key}`);
     return {
@@ -3068,7 +3148,7 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
             if (userId) scheduledTaskUsers.delete(userId);
             let artifact = null;
             try {
-                artifact = await scanAndUploadArtifacts(userId, folderLocalDir);
+                artifact = await scanAndUploadArtifacts(userId, folderLocalDir, conversationId);
             } catch (err) {
                 console.error('[harness] artifact upload failed:', err.message);
             }

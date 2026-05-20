@@ -1520,62 +1520,6 @@ namespace FortressAI.Web.Migrations
                     b.ToTable("user_module_permissions", (string)null);
                 });
 
-            modelBuilder.Entity("FortressAI.Shared.Models.UserWorkspaceFile", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("CHAR(36)")
-                        .HasColumnName("id");
-
-                    b.Property<Guid>("ConversationId")
-                        .HasColumnType("CHAR(36)")
-                        .HasColumnName("conversation_id");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("DATETIME(6)")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Filename")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("varchar(500)")
-                        .HasColumnName("filename");
-
-                    b.Property<string>("MimeType")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("varchar(200)")
-                        .HasColumnName("mime_type");
-
-                    b.Property<string>("S3Key")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("varchar(1000)")
-                        .HasColumnName("s3_key");
-
-                    b.Property<long>("SizeBytes")
-                        .HasColumnType("bigint")
-                        .HasColumnName("size_bytes");
-
-                    b.Property<Guid?>("TaskRunId")
-                        .HasColumnType("CHAR(36)")
-                        .HasColumnName("task_run_id");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("CHAR(36)")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConversationId")
-                        .HasDatabaseName("idx_uwf_conversation_id");
-
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("idx_uwf_user_id");
-
-                    b.ToTable("user_workspace_files", (string)null);
-                });
-
             modelBuilder.Entity("FortressAI.Shared.Models.WorkspaceFolder", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1588,15 +1532,21 @@ namespace FortressAI.Web.Migrations
                         .HasColumnName("created_at")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
 
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("DATETIME(6)")
+                        .HasColumnName("last_used_at");
+
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)")
                         .HasColumnName("name");
 
-                    b.Property<Guid?>("ParentId")
-                        .HasColumnType("CHAR(36)")
-                        .HasColumnName("parent_id");
+                    b.Property<string>("S3Prefix")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("s3_prefix");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("CHAR(36)")
@@ -1604,13 +1554,10 @@ namespace FortressAI.Web.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ParentId")
-                        .HasDatabaseName("idx_uwfold_parent_id");
-
                     b.HasIndex("UserId")
                         .HasDatabaseName("idx_uwfold_user_id");
 
-                    b.ToTable("user_workspace_folders", (string)null);
+                    b.ToTable("workspace_folders", (string)null);
                 });
 
             modelBuilder.Entity("FortressAI.Shared.Models.WorkspaceUpload", b =>
@@ -2135,14 +2082,6 @@ namespace FortressAI.Web.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("FortressAI.Shared.Models.WorkspaceFolder", b =>
-                {
-                    b.HasOne("FortressAI.Shared.Models.WorkspaceFolder", null)
-                        .WithMany()
-                        .HasForeignKey("ParentId")
-                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("FortressAI.Shared.Models.WorkspaceUpload", b =>
