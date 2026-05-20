@@ -333,15 +333,15 @@ public class DatabaseInitializationService : IHostedService
     INDEX ix_user_sessions_last_active_at (last_active_at)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
                 ,("workspace_folders", @"CREATE TABLE IF NOT EXISTS workspace_folders (
-    id CHAR(36) NOT NULL,
-    user_id CHAR(36) NOT NULL,
+    id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+    user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
     name VARCHAR(255) NOT NULL,
     s3_prefix VARCHAR(500) NOT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     last_used_at DATETIME(6) NULL,
     PRIMARY KEY (id),
     INDEX idx_workspace_folders_user_id (user_id)
-) CHARACTER SET utf8mb4")
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
                 ,("workspace_file_versions", @"CREATE TABLE IF NOT EXISTS workspace_file_versions (
     id CHAR(36) NOT NULL,
     file_id CHAR(36) NOT NULL,
@@ -460,7 +460,7 @@ public class DatabaseInitializationService : IHostedService
                 // Step 2: add new FK pointing to workspace_folders (1061 = duplicate key, handled by catch)
                 "ALTER TABLE user_workspace_uploads ADD CONSTRAINT FK_user_workspace_uploads_workspace_folders_folder_id FOREIGN KEY (folder_id) REFERENCES workspace_folders(id) ON DELETE SET NULL",
                 // ADO#3902: workspace subfolder support — add parent_id to workspace_folders
-                "ALTER TABLE workspace_folders ADD COLUMN parent_id CHAR(36) NULL",
+                "ALTER TABLE workspace_folders ADD COLUMN parent_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL",
                 "ALTER TABLE workspace_folders ADD CONSTRAINT FK_workspace_folders_workspace_folders_parent_id FOREIGN KEY (parent_id) REFERENCES workspace_folders(id) ON DELETE SET NULL"
             };
 
@@ -469,17 +469,17 @@ public class DatabaseInitializationService : IHostedService
                 try
                 {
                     await db.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
-                    _logger.LogInformation("Schema migration applied: {Sql}", alterSql);
+                    _logger.LogInformation("[DatabaseInit] Applied: {Sql}", alterSql[..Math.Min(80, alterSql.Length)]);
                 }
                 catch (MySqlConnector.MySqlException ex) when (ex.Number == 1025 || ex.Number == 1060 || ex.Number == 1061 || ex.Number == 1091)
                 {
-                    // 1025 = InnoDB FK rename error (some Aurora versions), 1060 = duplicate column, 1061 = duplicate index, 1091 = can't drop non-existent column/key — all idempotent
-                    _logger.LogInformation("Schema migration already applied (idempotent): {Sql}", alterSql);
+                    // Idempotent — already applied, skip
+                    _logger.LogDebug("[DatabaseInit] Skipped (already applied): {Sql}", alterSql[..Math.Min(80, alterSql.Length)]);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Schema migration failed: {Sql}", alterSql);
-                    throw;
+                    // Log and continue — do NOT abort the loop
+                    _logger.LogWarning(ex, "[DatabaseInit] alterStatement failed (continuing): {Sql}", alterSql[..Math.Min(80, alterSql.Length)]);
                 }
             }
 
