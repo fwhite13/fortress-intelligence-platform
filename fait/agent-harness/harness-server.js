@@ -2514,6 +2514,7 @@ app.post('/turn', async (req, res) => {
         'claude-sonnet-4-6':  'us.anthropic.claude-sonnet-4-6',
         'claude-opus-4-6':    'us.anthropic.claude-opus-4-6-v1',
         'claude-haiku-4-5':   'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+        'haiku':              'us.anthropic.claude-haiku-4-5-20251014-v1:0',
     };
     const resolvedModelId = BEDROCK_MODEL_MAP[modelId] ?? modelId;
 
@@ -2904,15 +2905,50 @@ You have access to the user's workspace files and memory topics. When the user a
             }
         }
 
-        // ADO#3575 — Feature 9.1: inject session context as AI-generated task brief (replaces ADO#3089 truncated recap)
+        // ADO#3575 — async helper: generate structured task brief via Haiku summarization
+        async function generateTaskBrief(hist, bClient, mId) {
+            if (!hist || hist.length <= 2) return null;
+            try {
+                const summarizationPrompt = `Produce a structured task brief for a coding agent about to execute a user's request. Based on the conversation history, include:
+- Objective: one sentence — what the agent should produce
+- Files involved: list each file with its role (e.g. "report.xlsx = source data")
+- Constraints and preferences: bullet list of anything the user specified
+- Expected output: file type, name if specified, destination folder
+
+Be concise and specific. Output only the brief, no preamble.`;
+
+                const response = await bClient.send(new ConverseCommand({
+                    modelId: mId,
+                    messages: [
+                        ...hist.slice(-20),
+                        { role: 'user', content: [{ text: summarizationPrompt }] }
+                    ],
+                    inferenceConfig: { maxTokens: 500, temperature: 0 }
+                }));
+
+                const brief = response.output?.message?.content?.[0]?.text?.trim();
+                if (brief && brief.length > 50) {
+                    console.log(`[CC spawn] task brief generated (len=${brief.length})`);
+                    return brief;
+                }
+                return null;
+            } catch (err) {
+                console.warn('[CC spawn] task brief generation failed, using fallback:', err.message);
+                return null;
+            }
+        }
+
+        // ADO#3089 / ADO#3575 — inject session context recap on cold-start CC turns with existing history
+        // ADO#3575: first try Haiku-generated task brief; fall back to truncated recap on failure
         const hasHistory = Array.isArray(history) && history.length > 0;
         if (hasHistory) {
-            // Attempt Haiku-generated structured brief for history.length > 2
-            const generatedBrief = await generateTaskBrief(history, userId);
+            const haiku3575ModelId = BEDROCK_MODEL_MAP['haiku'] || 'us.anthropic.claude-haiku-4-5-20251014-v1:0';
+            const generatedBrief = await generateTaskBrief(history, bedrockClient, haiku3575ModelId);
             if (generatedBrief) {
-                contextParts.push(`## Task Brief\n${generatedBrief}`);
+                contextParts.push(`## Task Brief (Generated)\n${generatedBrief}`);
+                console.log(`[harness] /turn: injected Haiku-generated task brief (len=${generatedBrief.length}) into CC context`);
             } else {
-                // Fallback: existing truncated recap (ADO#3089 — non-fatal, no user-visible error)
+                // Fallback: original truncated recap (ADO#3089)
                 const MAX_RECAP_CHARS = 2000;
                 const MAX_MESSAGES = 5;
                 const recentMessages = history.slice(-MAX_MESSAGES);
@@ -2934,7 +2970,7 @@ You have access to the user's workspace files and memory topics. When the user a
                     recap = recap.substring(0, MAX_RECAP_CHARS) + '\n[... recap truncated]';
                 }
                 contextParts.push(recap);
-                console.log(`[harness] /turn: injected session recap (fallback, ${recap.length} chars, ${recentMessages.length} messages) into CC context`);
+                console.log(`[harness] /turn: injected session recap fallback (${recap.length} chars, ${recentMessages.length} messages) into CC context`);
             }
         }
 
