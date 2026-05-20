@@ -4,28 +4,40 @@
 @inject UserSessionService Session
 @inject ILogger<FolderPicker> Logger
 
-<div class="folder-picker">
-    <div class="folder-picker__label">Select a working folder for this task:</div>
+<MudPaper Elevation="1" Class="folder-picker pa-3">
+    <MudText Typo="Typo.caption" Class="folder-picker__label mb-2">Select a working folder for this task:</MudText>
 
-    <select @bind="_selectedFolderId" @bind:after="OnSelectionChanged" class="folder-picker__select">
+    <MudSelect T="string" Value="@_selectedFolderId" ValueChanged="OnSelectChanged"
+               Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+               Class="folder-picker__select" AdornmentIcon="@Icons.Material.Filled.Folder"
+               Adornment="Adornment.Start">
         @foreach (var folder in Folders)
         {
-            <option value="@folder.Id">@folder.Name</option>
+            <MudSelectItem T="string" Value="@folder.Id">@folder.Name</MudSelectItem>
         }
-        <option value="__new__">+ New folder</option>
-    </select>
+        <MudSelectItem T="string" Value="@("__new__")">+ New folder</MudSelectItem>
+    </MudSelect>
 
     @if (_showNewFolderInput)
     {
-        <input type="text"
-               @bind="_newFolderName"
-               placeholder="folder-name"
-               maxlength="64"
-               class="folder-picker__new-input"
-               @onkeydown="OnNewFolderKeyDown" />
+        <div class="folder-picker__new-row d-flex align-center gap-2 mt-2">
+            <MudTextField @bind-Value="_newFolderName"
+                          Placeholder="folder-name"
+                          MaxLength="64"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Immediate="true"
+                          Class="folder-picker__new-input flex-grow-1"
+                          OnKeyDown="OnNewFolderKeyDown" />
+            <MudIconButton Icon="@Icons.Material.Filled.Check"
+                           Size="Size.Small"
+                           Color="Color.Primary"
+                           OnClick="@(() => _ = OnStartTask())"
+                           Title="Confirm folder name" />
+        </div>
         @if (!string.IsNullOrEmpty(_validationError))
         {
-            <div class="folder-picker__error">@_validationError</div>
+            <MudText Color="Color.Error" Typo="Typo.caption" Class="mt-1">@_validationError</MudText>
         }
     }
 
@@ -34,32 +46,75 @@
     }
     @if (otherFolders.Any())
     {
-        <div class="folder-picker__readonly-section">
-            <div class="folder-picker__readonly-label">Also include (read-only):</div>
+        <div class="folder-picker__readonly-section mt-3">
+            <MudText Typo="Typo.caption" Class="folder-picker__readonly-label mb-1">Also include (read-only):</MudText>
             @foreach (var folder in otherFolders)
             {
                 var folderId = folder.Id;
                 var isChecked = _readOnlyFolderIds.Contains(folderId);
                 var isReferenced = _referencedFolderIds.Contains(folderId);
-                <label class="folder-picker__readonly-item">
-                    <input type="checkbox"
-                           checked="@isChecked"
-                           @onchange="@(e => OnReadOnlyToggle(folderId, (bool)(e.Value ?? false)))"
-                           class="folder-picker__readonly-checkbox" />
-                    <span class="folder-picker__readonly-name">@folder.Name</span>
+                <div class="folder-picker__readonly-item d-flex align-center gap-1">
+                    <MudCheckBox T="bool" Value="@isChecked"
+                                 ValueChanged="@(v => OnReadOnlyToggle(folderId, v))"
+                                 Dense="true" Size="Size.Small"
+                                 Color="Color.Primary" />
+                    <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" Class="folder-picker__folder-icon" />
+                    <MudText Typo="Typo.body2" Class="folder-picker__readonly-name">@folder.Name</MudText>
                     @if (isReferenced)
                     {
-                        <span class="folder-picker__readonly-hint">Referenced in your message</span>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                 Color="Color.Info" Class="folder-picker__referenced-chip">Referenced in your message</MudChip>
                     }
-                </label>
+                </div>
             }
         </div>
     }
 
-    <button class="folder-picker__btn" @onclick="OnStartTask" disabled="@(_submitting || _confirming)">
-        @(_submitting ? "Starting..." : "Start task")
-    </button>
-</div>
+    <div class="folder-picker__action-row d-flex align-center gap-2 mt-3">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                   OnClick="OnStartTask"
+                   Disabled="@(_submitting || _confirming)"
+                   Class="folder-picker__start-btn">
+            @if (_submitting)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="me-2" />
+                <span>Starting...</span>
+            }
+            else
+            {
+                <span>Start task</span>
+            }
+        </MudButton>
+    </div>
+</MudPaper>
+
+<style>
+    .folder-picker {
+        max-width: 520px;
+        margin: 0.5rem 0 0.5rem 0.5rem;
+    }
+
+    .folder-picker__label {
+        color: var(--mud-palette-text-secondary);
+    }
+
+    .folder-picker__folder-icon {
+        color: var(--mud-palette-text-secondary);
+    }
+
+    .folder-picker__referenced-chip {
+        font-size: 0.7rem;
+        height: 20px;
+    }
+
+    .folder-picker__action-row {
+        flex-wrap: wrap;
+    }
+
+    .folder-picker__readonly-item {
+        flex-wrap: wrap;
+    }
+</style>
 
 @code {
     [Parameter] public List<FolderInfo> Folders { get; set; } = new();
@@ -115,6 +170,12 @@
             if (id != effectiveWorking)
                 _readOnlyFolderIds.Add(id);
         }
+    }
+
+    private void OnSelectChanged(string value)
+    {
+        _selectedFolderId = value;
+        OnSelectionChanged();
     }
 
     private void OnSelectionChanged()
