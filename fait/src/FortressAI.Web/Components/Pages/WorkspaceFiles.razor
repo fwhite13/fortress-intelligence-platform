@@ -987,7 +987,41 @@
     {
         try
         {
-            var topFolders = await UploadSvc.GetFoldersAsync(Session.UserId, null);
+            // Load ALL folders for this user to build the full tree in-memory.
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var allFolders = await db.WorkspaceFolders
+                .Where(f => f.UserId == Session.UserId)
+                .OrderBy(f => f.Name)
+                .ToListAsync();
+
+            // Build tree items indexed by id for fast lookup
+            var itemMap = allFolders.ToDictionary(
+                f => f.Id,
+                f => new TreeItemData<WorkspaceTreeItem>
+                {
+                    Value = new WorkspaceTreeItem { FolderId = f.Id, Name = f.Name },
+                    Text = f.Name,
+                    Icon = Icons.Material.Filled.Folder,
+                    Expanded = false,
+                    Children = new List<TreeItemData<WorkspaceTreeItem>>()
+                });
+
+            // Wire children to parents
+            foreach (var folder in allFolders)
+            {
+                if (folder.ParentId.HasValue && itemMap.TryGetValue(folder.ParentId.Value, out var parentItem))
+                {
+                    parentItem.Children ??= new List<TreeItemData<WorkspaceTreeItem>>();
+                    parentItem.Children.Add(itemMap[folder.Id]);
+                }
+            }
+
+            // Root folders = those with no parent
+            var rootFolderItems = allFolders
+                .Where(f => f.ParentId == null)
+                .Select(f => itemMap[f.Id])
+                .ToList();
+
             var rootValue = new WorkspaceTreeItem { FolderId = null, Name = "Root" };
             var rootItem = new TreeItemData<WorkspaceTreeItem>
             {
@@ -995,13 +1029,7 @@
                 Text = "Root",
                 Icon = Icons.Material.Filled.FolderOpen,
                 Expanded = true,
-                Children = topFolders.Select(f => new TreeItemData<WorkspaceTreeItem>
-                {
-                    Value = new WorkspaceTreeItem { FolderId = f.Id, Name = f.Name },
-                    Text = f.Name,
-                    Icon = Icons.Material.Filled.Folder,
-                    Expanded = false
-                }).ToList()
+                Children = rootFolderItems
             };
             _treeRoots = new List<TreeItemData<WorkspaceTreeItem>> { rootItem };
         }
@@ -1281,7 +1309,12 @@
         StateHasChanged();
         try
         {
-            _allFoldersFlat = await UploadSvc.GetFoldersAsync(Session.UserId, null);
+            // Load ALL folders for move dialog (not just root-level) — bypass parentId filter via DB
+            await using var moveDb = await DbFactory.CreateDbContextAsync();
+            _allFoldersFlat = await moveDb.WorkspaceFolders
+                .Where(f => f.UserId == Session.UserId)
+                .OrderBy(f => f.Name)
+                .ToListAsync();
         }
         catch (Exception ex)
         {

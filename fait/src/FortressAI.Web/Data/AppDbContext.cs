@@ -517,6 +517,12 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.S3Prefix).HasColumnName("s3_prefix").HasMaxLength(500).IsRequired();
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.Property(e => e.LastUsedAt).HasColumnName("last_used_at").HasColumnType("DATETIME(6)").IsRequired(false);
+            entity.Property(e => e.ParentId).HasColumnName("parent_id").HasColumnType("CHAR(36)").IsRequired(false);
+            entity.HasOne<WorkspaceFolder>()
+                  .WithMany()
+                  .HasForeignKey(e => e.ParentId)
+                  .OnDelete(DeleteBehavior.SetNull)
+                  .IsRequired(false);
             entity.HasIndex(e => e.UserId).HasDatabaseName("idx_wf_user_id");
         });
 

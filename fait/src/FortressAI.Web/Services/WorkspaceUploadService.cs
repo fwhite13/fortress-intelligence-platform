@@ -30,9 +30,8 @@ public class WorkspaceUploadService : IWorkspaceUploadService
     public async Task<List<WorkspaceFolder>> GetFoldersAsync(Guid userId, Guid? parentId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        // workspace_folders is flat (no parent_id) — parentId parameter ignored
         return await db.WorkspaceFolders
-            .Where(f => f.UserId == userId)
+            .Where(f => f.UserId == userId && f.ParentId == parentId)
             .OrderBy(f => f.Name)
             .ToListAsync();
     }
@@ -41,13 +40,28 @@ public class WorkspaceUploadService : IWorkspaceUploadService
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var id = Guid.NewGuid();
-        // workspace_folders is flat — parentId ignored; s3_prefix encodes folder identity
+
+        string s3Prefix;
+        if (parentId == null)
+        {
+            s3Prefix = $"files/{id}/";
+        }
+        else
+        {
+            var parentFolder = await db.WorkspaceFolders
+                .FirstOrDefaultAsync(f => f.Id == parentId && f.UserId == userId);
+            s3Prefix = parentFolder != null
+                ? $"{parentFolder.S3Prefix}{id}/"
+                : $"files/{id}/";
+        }
+
         var folder = new WorkspaceFolder
         {
             Id = id,
             UserId = userId,
             Name = name.Trim(),
-            S3Prefix = $"files/{id}/",
+            ParentId = parentId,
+            S3Prefix = s3Prefix,
             CreatedAt = DateTime.UtcNow
         };
         db.WorkspaceFolders.Add(folder);
