@@ -731,11 +731,27 @@
                 catch (Exception ex) { Logger.LogWarning(ex, "[Avatar] Old avatar delete failed"); }
             }
 
+            // Read into MemoryStream so we can use it for both moderation AND S3
             await using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+            var memStream = new MemoryStream();
+            await stream.CopyToAsync(memStream);
+            memStream.Position = 0;
+
+            // Content moderation check — fail-open (CheckImageAsync handles exceptions internally)
+            var moderationResult = await ContentModerationService.CheckImageAsync(memStream, file.ContentType);
+            if (!moderationResult.Passed)
+            {
+                _avatarError = "That image is not appropriate for a workplace app.";
+                StateHasChanged();
+                return;
+            }
+
+            // Reset stream position before S3 upload (critical — otherwise S3 gets 0 bytes)
+            memStream.Position = 0;
             await S3.PutObjectAsync(new PutObjectRequest
             {
                 BucketName = bucket, Key = key,
-                InputStream = stream, ContentType = file.ContentType
+                InputStream = memStream, ContentType = file.ContentType
             });
 
             var rawUrl = $"https://{bucket}.s3.amazonaws.com/{key}";
