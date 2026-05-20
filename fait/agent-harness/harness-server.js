@@ -2661,6 +2661,15 @@ app.post('/turn', async (req, res) => {
 
                 try {
                     const folderConfirmResult = await new Promise((resolve, reject) => {
+                        // ADO#3569: expire any stale entry for the same userId with a different conversationId
+                        for (const [existingConvId, existingEntry] of folderConfirmMap.entries()) {
+                            if (existingEntry.userId === userId && existingConvId !== conversationId) {
+                                console.warn(`[harness] /turn: expiring stale folderConfirmMap entry for userId=${userId} (old conversationId=${existingConvId})`);
+                                folderConfirmMap.delete(existingConvId);
+                                markConfirmResolved(existingConvId);
+                                if (existingEntry.reject) existingEntry.reject(new Error('Superseded by new turn'));
+                            }
+                        }
                         folderConfirmMap.set(conversationId, { resolve, reject, userId });
                         setTimeout(() => {
                             if (folderConfirmMap.has(conversationId)) {

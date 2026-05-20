@@ -124,6 +124,7 @@
     [Parameter] public string TaskMessage { get; set; } = "";
 
     private string _selectedFolderId = "";
+    private bool _initialized = false;
     private bool _showNewFolderInput = false;
     private string _newFolderName = "";
     private string _validationError = "";
@@ -139,7 +140,8 @@
     {
         if (Folders.Count > 0)
         {
-            _selectedFolderId = LastFolderId ?? Folders.FirstOrDefault()!.Id;
+            var hasLastFolder = LastFolderId != null && Folders.Any(f => f.Id == LastFolderId);
+            _selectedFolderId = hasLastFolder ? LastFolderId! : Folders.First().Id;
         }
         else
         {
@@ -147,10 +149,12 @@
             _showNewFolderInput = true;
         }
         ApplyHeuristics();
+        _initialized = true;
     }
 
     protected override void OnParametersSet()
     {
+        if (!_initialized) return;
         ApplyHeuristics();
     }
 

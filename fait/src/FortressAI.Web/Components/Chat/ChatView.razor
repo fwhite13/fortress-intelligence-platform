@@ -559,7 +559,11 @@ else
             conversation = await ChatSvc.GetConversationAsync(ConversationId.Value, Session.UserId);
             if (conversation != null)
             {
-                messages = conversation.Messages.OrderBy(m => m.CreatedAt).ToList();
+                var freshMessages = conversation.Messages.OrderBy(m => m.CreatedAt).ToList();
+                if (freshMessages.Count != messages.Count)
+                {
+                    messages = freshMessages;
+                }
                 currentModel = conversation.Model;
                 _selectedTeamIds = conversation.TeamKbs.Select(t => t.TeamId).ToHashSet();
                 _fortressKbEnabled = conversation.EnableFortressKb;
