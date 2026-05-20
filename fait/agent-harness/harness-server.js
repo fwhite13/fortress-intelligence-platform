@@ -2840,6 +2840,56 @@ After creating a file, confirm its name and location in your response. Do not pr
 ## Available Python Libraries
 Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, kaleido, reportlab, Pillow`);
 
+        // ADO#3559 — folder-scoped pre-task S3 sync (folder already resolved above)
+        try {
+            if (folder) {
+                const { execSync } = require('child_process');
+                execSync(
+                    `aws s3 sync s3://${S3_BUCKET}/${folder.s3_prefix} ${folderLocalDir}/ --quiet`,
+                    { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
+                );
+                console.log(`[harness] folder-scoped S3 sync complete: folder=${folder.name} folderId=${folder.id} userId=${userId}`);
+
+                // Record pre-sync snapshot for dirty detection (after S3 sync, so we capture S3 state)
+                preSyncSnapshot = buildLocalSnapshot(folderLocalDir);
+
+                // Update last_task_folder_id
+                try {
+                    const connUpdate = await getDbConnection();
+                    await connUpdate.execute('UPDATE users SET last_task_folder_id = ? WHERE id = ?', [folder.id, userId]);
+                    connUpdate.end();
+                } catch (updateErr) {
+                    console.warn(`[harness] failed to update last_task_folder_id (non-fatal): ${updateErr.message}`);
+                }
+            } else {
+                console.warn(`[harness] no folder resolved — skipping folder-scoped S3 pre-sync userId=${userId}`);
+            }
+        } catch (syncErr) {
+            console.warn(`[harness] pre-run folder sync failed (non-fatal): ${syncErr.message}`);
+            // Never block — continue with whatever is already local
+        }
+
+        // ADO#3561 — pre-task sync for read-only folders (must run before context assembly so brief can reference synced files)
+        const resolvedReadOnlyFolders = [];  // { folder, localDir } for later use in brief and post-task exclusion
+        if (readOnlyFolderIdsConfirmed.length > 0) {
+            const { execSync } = require('child_process');
+            for (const roFolderId of readOnlyFolderIdsConfirmed) {
+                try {
+                    const roFolder = await resolveTaskFolder(userId, roFolderId);
+                    const roLocalDir = `${WORKSPACE_DIR}/${userId}/readonly/${roFolder.id}`;
+                    mkdirSync(roLocalDir, { recursive: true });
+                    execSync(
+                        `aws s3 sync s3://${S3_BUCKET}/${roFolder.s3_prefix} ${roLocalDir}/ --delete --quiet`,
+                        { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
+                    );
+                    console.log(`[harness] ADO#3561 read-only sync complete: folder=${roFolder.name} folderId=${roFolder.id} localDir=${roLocalDir} userId=${userId}`);
+                    resolvedReadOnlyFolders.push({ folder: roFolder, localDir: roLocalDir });
+                } catch (roSyncErr) {
+                    console.warn(`[harness] ADO#3561 read-only folder sync failed for folderId=${roFolderId} (non-fatal): ${roSyncErr.message}`);
+                }
+            }
+        }
+
         // ADO#3559 — inject working folder context and workspace manifest
         if (folder) {
             contextParts.push(`## Working Folder\nYour working directory is: ${folderLocalDir}\nFolder name: ${folder.name}\nAll files you create must be written here.`);
@@ -2875,55 +2925,6 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         const briefContent = fullContext
             ? `${fullContext}\n\n---\n\nUser: ${message}`
             : message;
-        // ADO#3559 — folder-scoped pre-task S3 sync (folder already resolved above)
-        try {
-            if (folder) {
-                const { execSync } = require('child_process');
-                execSync(
-                    `aws s3 sync s3://${S3_BUCKET}/${folder.s3_prefix} ${folderLocalDir}/ --quiet`,
-                    { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
-                );
-                console.log(`[harness] folder-scoped S3 sync complete: folder=${folder.name} folderId=${folder.id} userId=${userId}`);
-
-                // Record pre-sync snapshot for dirty detection (after S3 sync, so we capture S3 state)
-                preSyncSnapshot = buildLocalSnapshot(folderLocalDir);
-
-                // Update last_task_folder_id
-                try {
-                    const connUpdate = await getDbConnection();
-                    await connUpdate.execute('UPDATE users SET last_task_folder_id = ? WHERE id = ?', [folder.id, userId]);
-                    connUpdate.end();
-                } catch (updateErr) {
-                    console.warn(`[harness] failed to update last_task_folder_id (non-fatal): ${updateErr.message}`);
-                }
-            } else {
-                console.warn(`[harness] no folder resolved — skipping folder-scoped S3 pre-sync userId=${userId}`);
-            }
-        } catch (syncErr) {
-            console.warn(`[harness] pre-run folder sync failed (non-fatal): ${syncErr.message}`);
-            // Never block — continue with whatever is already local
-        }
-
-        // ADO#3561 — pre-task sync for read-only folders
-        const resolvedReadOnlyFolders = [];  // { folder, localDir } for later use in brief and post-task exclusion
-        if (readOnlyFolderIdsConfirmed.length > 0) {
-            const { execSync } = require('child_process');
-            for (const roFolderId of readOnlyFolderIdsConfirmed) {
-                try {
-                    const roFolder = await resolveTaskFolder(userId, roFolderId);
-                    const roLocalDir = `${WORKSPACE_DIR}/${userId}/readonly/${roFolder.id}`;
-                    mkdirSync(roLocalDir, { recursive: true });
-                    execSync(
-                        `aws s3 sync s3://${S3_BUCKET}/${roFolder.s3_prefix} ${roLocalDir}/ --delete --quiet`,
-                        { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
-                    );
-                    console.log(`[harness] ADO#3561 read-only sync complete: folder=${roFolder.name} folderId=${roFolder.id} localDir=${roLocalDir} userId=${userId}`);
-                    resolvedReadOnlyFolders.push({ folder: roFolder, localDir: roLocalDir });
-                } catch (roSyncErr) {
-                    console.warn(`[harness] ADO#3561 read-only folder sync failed for folderId=${roFolderId} (non-fatal): ${roSyncErr.message}`);
-                }
-            }
-        }
 
         // ADO#3289 — log the exact command being spawned
         const ccArgs = [
