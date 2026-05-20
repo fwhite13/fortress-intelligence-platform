@@ -2687,7 +2687,8 @@ app.post('/turn', async (req, res) => {
                         if (fastRows.length > 0 && fastRows[0].last_task_folder_id) {
                             useFastPath = true;
                             if (!taskFolderIdResolved) {
-                                taskFolderIdResolved = fastRows[0].last_task_folder_id;
+                                const rawFast = fastRows[0].last_task_folder_id;
+                                taskFolderIdResolved = rawFast != null ? (rawFast?.toString?.() ?? String(rawFast)) : null;
                             }
                             console.log(`[harness] ADO#3560 fast-path: auto-classified + last_task_folder_id=${taskFolderIdResolved} — skipping folder picker userId=${userId}`);
                         }
@@ -2710,12 +2711,17 @@ app.post('/turn', async (req, res) => {
                             'SELECT id, name, last_used_at as lastUsedAt FROM workspace_folders WHERE user_id = ? ORDER BY COALESCE(last_used_at, created_at) DESC LIMIT 50',
                             [userId]
                         );
-                        folders = folderRows.map(r => ({ id: r.id, name: r.name, lastUsedAt: r.lastUsedAt }));
+                        folders = folderRows.map(r => ({
+                            id: r.id?.toString?.() ?? String(r.id),
+                            name: r.name?.toString?.() ?? String(r.name),
+                            lastUsedAt: r.lastUsedAt
+                        }));
                         const [userRows] = await connFolders.execute(
                             'SELECT last_task_folder_id FROM users WHERE id = ? LIMIT 1',
                             [userId]
                         );
-                        lastFolderId = userRows.length > 0 ? userRows[0].last_task_folder_id : null;
+                        const rawLastFolder = userRows.length > 0 ? userRows[0].last_task_folder_id : null;
+                        lastFolderId = rawLastFolder != null ? (rawLastFolder?.toString?.() ?? String(rawLastFolder)) : null;
                     } finally {
                         connFolders.end();
                     }
@@ -2734,8 +2740,9 @@ app.post('/turn', async (req, res) => {
                                 [userId]
                             );
                             if (existingCheck.length > 0) {
-                                folders = [{ id: existingCheck[0].id, name: existingCheck[0].name, lastUsedAt: null }];
-                                lastFolderId = existingCheck[0].id;
+                                const existingId = existingCheck[0].id?.toString?.() ?? String(existingCheck[0].id);
+                                folders = [{ id: existingId, name: existingCheck[0].name, lastUsedAt: null }];
+                                lastFolderId = existingId;
                             } else {
                                 const newGeneralId = crypto.randomUUID();
                                 const s3Prefix = `workspaces/${userId}/files/${newGeneralId}/`;
