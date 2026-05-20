@@ -259,6 +259,40 @@ function emitToolCall(res, server, toolName, status, summary) {
     res.write(`event: tool_call\ndata: ${JSON.stringify({ server, toolName, status, summary })}\n\n`);
 }
 
+// ADO#3577 — Human-readable CC progress labels
+function resolveProgressLabel(toolName, toolInput) {
+    const input = (typeof toolInput === 'string' ? toolInput : JSON.stringify(toolInput || '')).toLowerCase();
+
+    if (toolName === 'bash' || toolName === 'computer') {
+        if (input.includes('pip install') || input.includes('pip3 install')) return 'Installing dependencies...';
+        if (input.includes('openpyxl') || input.includes('.xlsx') || input.includes('xlrd') || input.includes('xlwt')) return 'Building spreadsheet...';
+        if (input.includes('pptx') || input.includes('python-pptx')) return 'Building presentation...';
+        if (input.includes('docx') || input.includes('python-docx')) return 'Building document...';
+        if (input.includes('python ') || input.includes('python3 ') || input.match(/\.py\b/)) return 'Running Python script...';
+        if (input.match(/\b(ls|find|cat|head|tail|grep)\b/)) return 'Reading files...';
+        if (input.includes('curl ') || input.includes('wget ') || input.includes('requests')) return 'Fetching data...';
+        return 'Running command...';
+    }
+    if (toolName === 'write_file') {
+        const filename = extractFilename(toolInput);
+        return filename ? `Saving ${filename}...` : 'Saving file...';
+    }
+    if (toolName === 'read_file') {
+        const filename = extractFilename(toolInput);
+        return filename ? `Reading ${filename}...` : 'Reading file...';
+    }
+    if (toolName === 'list_files') return 'Listing files...';
+    return 'Working...';
+}
+
+function extractFilename(toolInput) {
+    try {
+        const obj = typeof toolInput === 'string' ? JSON.parse(toolInput) : toolInput;
+        const path = obj?.path || obj?.filename || obj?.file_path || '';
+        return path ? path.split('/').pop() : null;
+    } catch { return null; }
+}
+
 // ADO#3241 — Human-readable summaries for builtin tool_call events
 function getBuiltinSummary(toolName, toolInput) {
     switch(toolName) {
@@ -3250,6 +3284,8 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         let ccStdoutBuffer = '';
         let ccTextEmitted = false;
         const toolUseMap = new Map(); // track tool_use id → name for tool_result correlation
+        let lastEmittedLabel = '';
+        let consecutiveLabelCount = 0;
         ccProcess.stdout.on('data', (chunk) => {
             console.log(`[CC spawn] stdout chunk bytes=${chunk.length} userId=${userId}`);
             ccStdoutBuffer += chunk.toString();
@@ -3273,7 +3309,16 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                             toolUseMap.set(block.id, block.name || 'tool');
                             const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
                             console.log(`[CC spawn] tool_use: ${block.name}(${inputSummary}) userId=${userId}`);
-                            sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: `Calling ${block.name}...` }) });
+                            const label = resolveProgressLabel(block.name, block.input);
+                            if (label === lastEmittedLabel) {
+                                consecutiveLabelCount++;
+                            } else {
+                                lastEmittedLabel = label;
+                                consecutiveLabelCount = 1;
+                            }
+                            if (consecutiveLabelCount <= 3) {
+                                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: label }) });
+                            }
                         }
                     }
                 } else if (evtType === 'user' && Array.isArray(parsed.message?.content)) {
