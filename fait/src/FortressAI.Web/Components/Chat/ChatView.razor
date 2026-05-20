@@ -174,11 +174,11 @@ else
             @if (_folderPickerVisible && _folderPickerConversationId != null)
             {
                 <FolderPicker
-                    Folders="_folderPickerFolders"
-                    LastFolderId="_folderPickerLastFolderId"
+                    Folders="@_folderPickerFolders"
+                    LastFolderId="@_folderPickerLastFolderId"
                     ConversationId="@_folderPickerConversationId"
                     TaskMessage="@_folderPickerTaskMessage"
-                    OnFolderConfirmed="HandleFolderConfirmed" />
+                    OnFolderConfirmed="@HandleFolderConfirmed" />
             }
             @if (_taskModeActive && (_taskProgressSteps.Any() || _taskStartTime.HasValue))
             {
