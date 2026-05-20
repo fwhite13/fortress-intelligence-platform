@@ -338,6 +338,7 @@ public class DatabaseInitializationService : IHostedService
     name VARCHAR(255) NOT NULL,
     s3_prefix VARCHAR(500) NOT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    last_used_at DATETIME(6) NULL,
     PRIMARY KEY (id),
     INDEX idx_workspace_folders_user_id (user_id)
 ) CHARACTER SET utf8mb4")
@@ -470,9 +471,9 @@ public class DatabaseInitializationService : IHostedService
                     await db.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
                     _logger.LogInformation("Schema migration applied: {Sql}", alterSql);
                 }
-                catch (MySqlConnector.MySqlException ex) when (ex.Number == 1060 || ex.Number == 1061 || ex.Number == 1091)
+                catch (MySqlConnector.MySqlException ex) when (ex.Number == 1025 || ex.Number == 1060 || ex.Number == 1061 || ex.Number == 1091)
                 {
-                    // 1060 = duplicate column, 1061 = duplicate index, 1091 = can't drop non-existent column — all idempotent
+                    // 1025 = InnoDB FK rename error (some Aurora versions), 1060 = duplicate column, 1061 = duplicate index, 1091 = can't drop non-existent column/key — all idempotent
                     _logger.LogInformation("Schema migration already applied (idempotent): {Sql}", alterSql);
                 }
                 catch (Exception ex)
