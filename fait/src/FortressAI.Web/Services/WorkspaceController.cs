@@ -169,7 +169,7 @@ public class WorkspaceController : ControllerBase
             folderId = parsedFolderId;
 
         var folders = await _uploadService.GetAllFoldersAsync(userId); // all folders regardless of depth
-        var files = await _uploadService.GetFilesAsync(userId, folderId); // still filtered
+        var files = await _uploadService.GetAllFilesAsync(userId);
 
         var items = folders
             .Select(f => new { name = f.Name, type = "folder" })

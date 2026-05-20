@@ -199,6 +199,15 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             .ToListAsync();
     }
 
+    public async Task<List<WorkspaceUpload>> GetAllFilesAsync(Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.WorkspaceUploads
+            .Where(u => u.UserId == userId)
+            .OrderBy(u => u.Filename)
+            .ToListAsync();
+    }
+
     public async Task<WorkspaceUpload> SaveUploadAsync(Guid userId, Guid? folderId, string filename, string mimeType, Stream content)
     {
         var safeFilename = Path.GetFileName(filename);

@@ -9,6 +9,7 @@ public interface IWorkspaceUploadService
     Task<WorkspaceFolder> CreateFolderAsync(Guid userId, string name, Guid? parentId = null);
     Task DeleteFolderAsync(Guid userId, Guid folderId);
     Task<List<WorkspaceUpload>> GetFilesAsync(Guid userId, Guid? folderId = null);
+    Task<List<WorkspaceUpload>> GetAllFilesAsync(Guid userId);
     Task<WorkspaceUpload> SaveUploadAsync(Guid userId, Guid? folderId, string filename, string mimeType, Stream content);
     Task DeleteFileAsync(Guid userId, Guid fileId);
     Task<string> GetPresignedUrlAsync(string s3Key, int expiryMinutes = 30);
