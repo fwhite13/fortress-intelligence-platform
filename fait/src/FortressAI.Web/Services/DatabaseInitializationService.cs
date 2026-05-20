@@ -460,6 +460,10 @@ public class DatabaseInitializationService : IHostedService
                 // ADO#3905: MODIFY folder_id collation to ascii_general_ci before re-adding FK
                 // Must run between DROP FK and ADD CONSTRAINT
                 "ALTER TABLE user_workspace_uploads MODIFY COLUMN folder_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL",
+                // ADO#3905 cycle 3: MODIFY existing workspace_folders columns to ascii_general_ci
+                // Must run before ADD CONSTRAINT statements that reference workspace_folders.id
+                "ALTER TABLE workspace_folders MODIFY COLUMN id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL",
+                "ALTER TABLE workspace_folders MODIFY COLUMN user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL",
                 // Step 2: add new FK pointing to workspace_folders (1061 = duplicate key, handled by catch)
                 "ALTER TABLE user_workspace_uploads ADD CONSTRAINT FK_user_workspace_uploads_workspace_folders_folder_id FOREIGN KEY (folder_id) REFERENCES workspace_folders(id) ON DELETE SET NULL",
                 // ADO#3902: workspace subfolder support — add parent_id to workspace_folders
