@@ -719,21 +719,9 @@
             if (!string.IsNullOrEmpty(s3Prefix) && !s3Prefix.EndsWith('/')) s3Prefix += '/';
             var key = $"{s3Prefix}workspaces/{Session.UserId}/avatar/{Guid.NewGuid()}{ext}";
 
-            // Delete old avatar
-            if (!string.IsNullOrWhiteSpace(_avatarUrl))
-            {
-                try
-                {
-                    var oldPrefix = $"https://{bucket}.s3.amazonaws.com/";
-                    if (_avatarUrl.StartsWith(oldPrefix))
-                        await S3.DeleteObjectAsync(bucket, _avatarUrl[oldPrefix.Length..]);
-                }
-                catch (Exception ex) { Logger.LogWarning(ex, "[Avatar] Old avatar delete failed"); }
-            }
-
             // Read into MemoryStream so we can use it for both moderation AND S3
             await using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
-            var memStream = new MemoryStream();
+            using var memStream = new MemoryStream();
             await stream.CopyToAsync(memStream);
             memStream.Position = 0;
 
@@ -753,6 +741,18 @@
                 BucketName = bucket, Key = key,
                 InputStream = memStream, ContentType = file.ContentType
             });
+
+            // Delete old avatar AFTER new upload succeeds — prevents orphaned state if moderation rejects
+            if (!string.IsNullOrWhiteSpace(_avatarUrl))
+            {
+                try
+                {
+                    var oldPrefix = $"https://{bucket}.s3.amazonaws.com/";
+                    if (_avatarUrl.StartsWith(oldPrefix))
+                        await S3.DeleteObjectAsync(bucket, _avatarUrl[oldPrefix.Length..]);
+                }
+                catch (Exception ex) { Logger.LogWarning(ex, "[Avatar] Old avatar delete failed"); }
+            }
 
             var rawUrl = $"https://{bucket}.s3.amazonaws.com/{key}";
             await using var db = await ContextFactory.CreateDbContextAsync();
