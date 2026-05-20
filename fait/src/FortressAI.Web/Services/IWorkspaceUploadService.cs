@@ -5,6 +5,7 @@ namespace FortressAI.Web.Services;
 public interface IWorkspaceUploadService
 {
     Task<List<WorkspaceFolder>> GetFoldersAsync(Guid userId, Guid? parentId = null);
+    Task<List<WorkspaceFolder>> GetAllFoldersAsync(Guid userId);
     Task<WorkspaceFolder> CreateFolderAsync(Guid userId, string name, Guid? parentId = null);
     Task DeleteFolderAsync(Guid userId, Guid folderId);
     Task<List<WorkspaceUpload>> GetFilesAsync(Guid userId, Guid? folderId = null);

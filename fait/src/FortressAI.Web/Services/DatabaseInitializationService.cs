@@ -461,7 +461,7 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE user_workspace_uploads ADD CONSTRAINT FK_user_workspace_uploads_workspace_folders_folder_id FOREIGN KEY (folder_id) REFERENCES workspace_folders(id) ON DELETE SET NULL",
                 // ADO#3902: workspace subfolder support — add parent_id to workspace_folders
                 "ALTER TABLE workspace_folders ADD COLUMN parent_id CHAR(36) NULL",
-                "ALTER TABLE workspace_folders ADD CONSTRAINT fk_workspace_folders_parent FOREIGN KEY (parent_id) REFERENCES workspace_folders(id) ON DELETE SET NULL"
+                "ALTER TABLE workspace_folders ADD CONSTRAINT FK_workspace_folders_workspace_folders_parent_id FOREIGN KEY (parent_id) REFERENCES workspace_folders(id) ON DELETE SET NULL"
             };
 
             foreach (var alterSql in alterStatements)

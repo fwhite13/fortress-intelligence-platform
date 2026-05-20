@@ -988,11 +988,7 @@
         try
         {
             // Load ALL folders for this user to build the full tree in-memory.
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var allFolders = await db.WorkspaceFolders
-                .Where(f => f.UserId == Session.UserId)
-                .OrderBy(f => f.Name)
-                .ToListAsync();
+            var allFolders = await UploadSvc.GetAllFoldersAsync(Session.UserId);
 
             // Build tree items indexed by id for fast lookup
             var itemMap = allFolders.ToDictionary(
@@ -1309,12 +1305,8 @@
         StateHasChanged();
         try
         {
-            // Load ALL folders for move dialog (not just root-level) — bypass parentId filter via DB
-            await using var moveDb = await DbFactory.CreateDbContextAsync();
-            _allFoldersFlat = await moveDb.WorkspaceFolders
-                .Where(f => f.UserId == Session.UserId)
-                .OrderBy(f => f.Name)
-                .ToListAsync();
+            // Load ALL folders for move dialog (not just root-level)
+            _allFoldersFlat = await UploadSvc.GetAllFoldersAsync(Session.UserId);
         }
         catch (Exception ex)
         {

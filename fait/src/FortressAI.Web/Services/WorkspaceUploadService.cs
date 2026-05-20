@@ -36,6 +36,15 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             .ToListAsync();
     }
 
+    public async Task<List<WorkspaceFolder>> GetAllFoldersAsync(Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.WorkspaceFolders
+            .Where(f => f.UserId == userId)
+            .OrderBy(f => f.Name)
+            .ToListAsync();
+    }
+
     public async Task<WorkspaceFolder> CreateFolderAsync(Guid userId, string name, Guid? parentId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -50,9 +59,9 @@ public class WorkspaceUploadService : IWorkspaceUploadService
         {
             var parentFolder = await db.WorkspaceFolders
                 .FirstOrDefaultAsync(f => f.Id == parentId && f.UserId == userId);
-            s3Prefix = parentFolder != null
-                ? $"{parentFolder.S3Prefix}{id}/"
-                : $"files/{id}/";
+            if (parentFolder == null)
+                throw new InvalidOperationException($"Parent folder {parentId} not found for user {userId}.");
+            s3Prefix = $"{parentFolder.S3Prefix}{id}/";
         }
 
         var folder = new WorkspaceFolder
@@ -105,12 +114,25 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             db.WorkspaceUploads.RemoveRange(uploadsToDelete);
         }
 
+        // Delete all descendant folder rows bottom-up, then the target folder itself
+        await DeleteFolderTreeAsync(db, userId, folderId);
+        await db.SaveChangesAsync();
+    }
+
+    private async Task DeleteFolderTreeAsync(AppDbContext db, Guid userId, Guid folderId)
+    {
+        // Recurse into children first (bottom-up delete to avoid FK violations)
+        var childFolders = await db.WorkspaceFolders
+            .Where(f => f.UserId == userId && f.ParentId == folderId)
+            .Select(f => f.Id)
+            .ToListAsync();
+        foreach (var childId in childFolders)
+            await DeleteFolderTreeAsync(db, userId, childId);
+
+        // Delete this folder row
         var folder = await db.WorkspaceFolders.FirstOrDefaultAsync(f => f.Id == folderId && f.UserId == userId);
         if (folder != null)
-        {
             db.WorkspaceFolders.Remove(folder);
-            await db.SaveChangesAsync();
-        }
     }
 
     private async Task CollectS3KeysRecursiveAsync(AppDbContext db, Guid userId, Guid folderId, List<string> keys)
@@ -138,6 +160,13 @@ public class WorkspaceUploadService : IWorkspaceUploadService
                 keys.Add(upload.S3Key);
         }
 
+        // Recurse into subfolders
+        var childFolders = await db.WorkspaceFolders
+            .Where(f => f.UserId == userId && f.ParentId == folderId)
+            .Select(f => f.Id)
+            .ToListAsync();
+        foreach (var childId in childFolders)
+            await CollectS3KeysRecursiveAsync(db, userId, childId, keys);
     }
 
     // C3: New helper — collect all upload IDs in a folder tree for version row cleanup
@@ -149,6 +178,14 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             .Select(u => u.Id)
             .ToListAsync();
         ids.AddRange(uploads);
+
+        // Recurse into subfolders
+        var childFolders = await db.WorkspaceFolders
+            .Where(f => f.UserId == userId && f.ParentId == folderId)
+            .Select(f => f.Id)
+            .ToListAsync();
+        foreach (var childId in childFolders)
+            ids.AddRange(await CollectUploadIdsRecursiveAsync(db, userId, childId));
 
         return ids;
     }
