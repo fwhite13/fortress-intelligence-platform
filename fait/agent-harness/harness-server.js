@@ -2217,6 +2217,20 @@ function findDirtyFiles(before, after) {
 // Entry: { resolve, reject, userId }
 const folderConfirmMap = new Map();
 
+// ADO#3566 — grace window for late confirms (keyed by conversationId → timestamp resolved)
+// If a confirm arrives within 5s of the entry being resolved/expired, accept gracefully
+const _recentlyResolvedConfirms = new Map();
+const FOLDER_CONFIRM_GRACE_MS = 5000;
+
+function markConfirmResolved(conversationId) {
+    _recentlyResolvedConfirms.set(conversationId, Date.now());
+    // Cleanup stale entries older than 10s
+    const cutoff = Date.now() - 10000;
+    for (const [key, ts] of _recentlyResolvedConfirms) {
+        if (ts < cutoff) _recentlyResolvedConfirms.delete(key);
+    }
+}
+
 async function resolveTaskFolder(userId, taskFolderId) {
     // 1. If taskFolderId provided → verify it exists for this user
     if (taskFolderId) {
@@ -2316,6 +2330,12 @@ app.post('/turn/folder-confirm', async (req, res) => {
 
     const pending = folderConfirmMap.get(conversationId);
     if (!pending) {
+        // ADO#3566 — grace window: if this was recently resolved (within 5s), accept as duplicate gracefully
+        const resolvedAt = _recentlyResolvedConfirms.get(conversationId);
+        if (resolvedAt && (Date.now() - resolvedAt) < FOLDER_CONFIRM_GRACE_MS) {
+            console.warn(`[harness] /turn/folder-confirm: late/duplicate confirm for conversationId=${conversationId} (resolved ${Date.now() - resolvedAt}ms ago) — returning already_resolved`);
+            return res.json({ ok: true, status: 'already_resolved' });
+        }
         return res.status(404).json({ error: 'No pending folder selection for this conversation' });
     }
 
@@ -2347,11 +2367,13 @@ app.post('/turn/folder-confirm', async (req, res) => {
         }
 
         folderConfirmMap.delete(conversationId);
+        markConfirmResolved(conversationId);  // ADO#3566: track for grace window
         resolve({ folderId: resolvedFolderId, readOnlyFolderIds: roIds });
         res.json({ ok: true, folderId: resolvedFolderId });
     } catch (err) {
         console.error(`[harness] /turn/folder-confirm error: ${err.message}`);
         folderConfirmMap.delete(conversationId);
+        markConfirmResolved(conversationId);  // ADO#3566: track for grace window even on error
         reject(err);
         res.status(500).json({ error: err.message });
     }
@@ -2643,6 +2665,7 @@ app.post('/turn', async (req, res) => {
                         setTimeout(() => {
                             if (folderConfirmMap.has(conversationId)) {
                                 folderConfirmMap.delete(conversationId);
+                                markConfirmResolved(conversationId);  // ADO#3566: track for grace window after timeout
                                 reject(new Error('Folder selection timed out (2 min)'));
                             }
                         }, 120000);

@@ -56,7 +56,7 @@
         </div>
     }
 
-    <button class="folder-picker__btn" @onclick="OnStartTask" disabled="@_submitting">
+    <button class="folder-picker__btn" @onclick="OnStartTask" disabled="@(_submitting || _confirming)">
         @(_submitting ? "Starting..." : "Start task")
     </button>
 </div>
@@ -73,6 +73,7 @@
     private string _newFolderName = "";
     private string _validationError = "";
     private bool _submitting = false;
+    private bool _confirming = false;  // ADO#3566: idempotency guard — set true on first click, prevents re-render double-fire
     private HashSet<string> _readOnlyFolderIds = new();
     private HashSet<string> _referencedFolderIds = new();
 
@@ -143,11 +144,15 @@
 
     private async Task OnStartTask()
     {
+        if (_confirming) return;  // idempotency guard — prevent double-fire on re-render (ADO#3566)
+        _confirming = true;
+
         if (_selectedFolderId == "__new__")
         {
             if (!FolderNameRegex.IsMatch(_newFolderName))
             {
                 _validationError = "Folder name: alphanumeric, hyphens, underscores only (max 64 chars).";
+                _confirming = false;  // allow retry after validation error
                 return;
             }
         }
@@ -187,6 +192,7 @@
                 _validationError = $"Could not confirm folder ({response.StatusCode}).";
                 Logger.LogWarning("[FolderPicker] /turn/folder-confirm returned {Status}: {Body}", response.StatusCode, body);
                 _submitting = false;
+                _confirming = false;  // allow retry (ADO#3566)
                 StateHasChanged();
                 return;
             }
@@ -201,6 +207,7 @@
             Logger.LogError(ex, "[FolderPicker] PostToHarnessAsync failed");
             _validationError = "Error contacting harness. Please retry.";
             _submitting = false;
+            _confirming = false;  // allow retry (ADO#3566)
             StateHasChanged();
         }
     }
