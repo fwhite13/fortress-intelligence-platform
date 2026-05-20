@@ -457,6 +457,9 @@ public class DatabaseInitializationService : IHostedService
                 // ADO#3903: workspace schema unify FK fix — live DB has old FK pointing to user_workspace_folders
                 // Step 1: drop old FK (1091 = can't drop non-existent, handled by catch)
                 "ALTER TABLE user_workspace_uploads DROP FOREIGN KEY FK_user_workspace_uploads_user_workspace_folders_folder_id",
+                // ADO#3905: MODIFY folder_id collation to ascii_general_ci before re-adding FK
+                // Must run between DROP FK and ADD CONSTRAINT
+                "ALTER TABLE user_workspace_uploads MODIFY COLUMN folder_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL",
                 // Step 2: add new FK pointing to workspace_folders (1061 = duplicate key, handled by catch)
                 "ALTER TABLE user_workspace_uploads ADD CONSTRAINT FK_user_workspace_uploads_workspace_folders_folder_id FOREIGN KEY (folder_id) REFERENCES workspace_folders(id) ON DELETE SET NULL",
                 // ADO#3902: workspace subfolder support — add parent_id to workspace_folders
@@ -471,10 +474,14 @@ public class DatabaseInitializationService : IHostedService
                     await db.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
                     _logger.LogInformation("[DatabaseInit] Applied: {Sql}", alterSql[..Math.Min(80, alterSql.Length)]);
                 }
-                catch (MySqlConnector.MySqlException ex) when (ex.Number == 1025 || ex.Number == 1060 || ex.Number == 1061 || ex.Number == 1091)
+                catch (MySqlConnector.MySqlException ex) when (ex.Number == 1025 || ex.Number == 1060 || ex.Number == 1061 || ex.Number == 1091 || ex.Number == 3780)
                 {
-                    // Idempotent — already applied, skip
-                    _logger.LogDebug("[DatabaseInit] Skipped (already applied): {Sql}", alterSql[..Math.Min(80, alterSql.Length)]);
+                    // 1025 = InnoDB FK rename (some Aurora), 1060 = dup column, 1061 = dup index,
+                    // 1091 = can't drop non-existent key, 3780 = FK collation incompatible — all idempotent/handled
+                    if (ex.Number == 3780)
+                        _logger.LogError(ex, "[DatabaseInit] FK collation mismatch (3780) — constraint not applied: {Sql}", alterSql[..Math.Min(80, alterSql.Length)]);
+                    else
+                        _logger.LogDebug("[DatabaseInit] Skipped (already applied): {Sql}", alterSql[..Math.Min(80, alterSql.Length)]);
                 }
                 catch (Exception ex)
                 {
