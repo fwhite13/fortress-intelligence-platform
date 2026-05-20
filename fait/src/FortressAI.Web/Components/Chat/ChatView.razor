@@ -1165,6 +1165,12 @@ else
                         Logger.LogWarning(ex, "[ChatView] Failed to parse files_updated payload");
                     }
                 }
+                else if (evt.Type == "task_hold")
+                {
+                    // ADO#3576 — 9.2: gate returned TASK_HOLD; deselect Task toggle
+                    _taskMode = false;
+                    StateHasChanged();
+                }
                 // "log" events: swallow silently
             }
 
