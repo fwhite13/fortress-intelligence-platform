@@ -192,13 +192,22 @@ public class WorkspaceUploadService : IWorkspaceUploadService
 
         var s3Key = $"workspaces/{userId}/files/{folderId}/{safeFilename}";
 
-        await _s3.PutObjectAsync(new PutObjectRequest
+        try
         {
-            BucketName = _bucket,
-            Key = s3Key,
-            InputStream = new MemoryStream(fileBytes),
-            ContentType = mimeType
-        });
+            await _s3.PutObjectAsync(new PutObjectRequest
+            {
+                BucketName = _bucket,
+                Key = s3Key,
+                InputStream = new MemoryStream(fileBytes),
+                ContentType = mimeType
+            });
+        }
+        catch (AmazonS3Exception s3Ex)
+        {
+            _logger.LogError(s3Ex, "[WorkspaceUploadService] S3 PutObject failed: bucket={Bucket} key={Key} errorCode={ErrorCode} statusCode={StatusCode}",
+                _bucket, s3Key, s3Ex.ErrorCode, (int)s3Ex.StatusCode);
+            throw;
+        }
 
         var versionRow = new WorkspaceFileVersion
         {
@@ -245,8 +254,9 @@ public class WorkspaceUploadService : IWorkspaceUploadService
         {
             await db.SaveChangesAsync();
         }
-        catch
+        catch (Exception dbEx)
         {
+            _logger.LogError(dbEx, "[WorkspaceUploadService] DB save failed after S3 upload: bucket={Bucket} key={Key} filename={Filename}", _bucket, s3Key, safeFilename);
             try { await _s3.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = s3Key }); }
             catch { /* best-effort cleanup */ }
             throw;

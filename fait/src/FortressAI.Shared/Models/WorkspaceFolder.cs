@@ -26,4 +26,7 @@ public class WorkspaceFolder
 
     [Column("last_used_at")]
     public DateTime? LastUsedAt { get; set; }
+
+    [Column("parent_id")]
+    public Guid? ParentId { get; set; }
 }

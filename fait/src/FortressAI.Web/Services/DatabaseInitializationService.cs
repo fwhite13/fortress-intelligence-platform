@@ -332,6 +332,15 @@ public class DatabaseInitializationService : IHostedService
     INDEX ix_user_sessions_user_id (user_id),
     INDEX ix_user_sessions_last_active_at (last_active_at)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                ,("workspace_folders", @"CREATE TABLE IF NOT EXISTS workspace_folders (
+    id CHAR(36) NOT NULL,
+    user_id CHAR(36) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    s3_prefix VARCHAR(500) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    INDEX idx_workspace_folders_user_id (user_id)
+) CHARACTER SET utf8mb4")
                 ,("workspace_file_versions", @"CREATE TABLE IF NOT EXISTS workspace_file_versions (
     id CHAR(36) NOT NULL,
     file_id CHAR(36) NOT NULL,
@@ -443,7 +452,12 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE user_workspace_uploads ADD COLUMN source VARCHAR(20) NULL",
                 // ADO#3573: workspace schema unify — add conversation_id and turn_index to user_workspace_uploads
                 "ALTER TABLE user_workspace_uploads ADD COLUMN conversation_id CHAR(36) NULL",
-                "ALTER TABLE user_workspace_uploads ADD COLUMN turn_index INT NULL"
+                "ALTER TABLE user_workspace_uploads ADD COLUMN turn_index INT NULL",
+                // ADO#3903: workspace schema unify FK fix — live DB has old FK pointing to user_workspace_folders
+                // Step 1: drop old FK (1091 = can't drop non-existent, handled by catch)
+                "ALTER TABLE user_workspace_uploads DROP FOREIGN KEY FK_user_workspace_uploads_user_workspace_folders_folder_id",
+                // Step 2: add new FK pointing to workspace_folders (1061 = duplicate key, handled by catch)
+                "ALTER TABLE user_workspace_uploads ADD CONSTRAINT FK_user_workspace_uploads_workspace_folders_folder_id FOREIGN KEY (folder_id) REFERENCES workspace_folders(id) ON DELETE SET NULL"
             };
 
             foreach (var alterSql in alterStatements)

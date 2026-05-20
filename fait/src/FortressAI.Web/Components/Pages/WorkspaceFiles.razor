@@ -936,7 +936,10 @@
             catch (Exception ex)
             {
                 Logger.LogError(ex, "[WorkspaceFiles] Upload failed for {Filename}", file.Name);
-                Snackbar.Add($"Upload failed: {file.Name}", Severity.Error);
+                var reason = ex.InnerException?.Message ?? ex.Message;
+                // Trim to ~120 chars for toast readability
+                if (reason.Length > 120) reason = reason[..120] + "…";
+                Snackbar.Add($"Upload failed: {file.Name} — {reason}", Severity.Error);
             }
         }
 
