@@ -212,55 +212,6 @@ async function rewriteQueryForRetrieval(userMessage, userId) {
     }
 }
 
-// ADO#3575 — Feature 9.1: Generate structured task brief via Haiku before CC spawn
-async function generateTaskBrief(history, userId) {
-    if (!history || history.length <= 2) return null;
-
-    try {
-        const HAIKU_MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
-        const summarizationPrompt = `Produce a structured task brief for a coding agent about to execute a user's request. Based on the conversation history provided, include:
-- Objective: one sentence — what the agent should produce
-- Files involved: list each file with its role (e.g. "style-guide.docx = style reference")
-- Constraints and preferences: bullet list of anything the user specified
-- Expected output: file type, name if specified, destination folder
-
-Be concise and specific. Output only the brief, no preamble.`;
-
-        // Build messages: full history (last 20) + summarization prompt
-        const historyMessages = history.slice(-20).map(h => {
-            const role = h.role ?? h.Role ?? 'user';
-            const rawContent = h.content ?? h.Content ?? '';
-            let text = '';
-            if (typeof rawContent === 'string') {
-                text = rawContent;
-            } else if (Array.isArray(rawContent)) {
-                text = rawContent.map(c => c.text ?? c.Text ?? '').filter(Boolean).join(' ');
-            }
-            return { role: (role === 'assistant' ? 'assistant' : 'user'), content: [{ text: text || '(empty)' }] };
-        });
-
-        // Ensure messages alternate roles as required by Bedrock Converse API;
-        // append the summarization prompt as a final user message
-        historyMessages.push({ role: 'user', content: [{ text: summarizationPrompt }] });
-
-        const response = await bedrockClient.send(new ConverseCommand({
-            modelId: HAIKU_MODEL_ID,
-            messages: historyMessages,
-            inferenceConfig: { maxTokens: 500, temperature: 0 }
-        }));
-
-        const brief = response.output?.message?.content?.[0]?.text?.trim();
-        if (brief && brief.length > 50) {
-            console.log(`[CC spawn] task brief generated (len=${brief.length}) userId=${userId}`);
-            return brief;
-        }
-        return null;
-    } catch (err) {
-        console.warn('[CC spawn] task brief generation failed, using fallback:', err.message);
-        return null;
-    }
-}
-
 // ADO#3241 — Structured KB retrieval (returns raw results, not formatted text)
 async function retrieveFromKbFull(kbId, query, maxResults = 5) {
     const cmd = new RetrieveCommand({
@@ -2919,10 +2870,26 @@ Be concise and specific. Output only the brief, no preamble.`;
 
                 const response = await bClient.send(new ConverseCommand({
                     modelId: mId,
-                    messages: [
-                        ...hist.slice(-20),
-                        { role: 'user', content: [{ text: summarizationPrompt }] }
-                    ],
+                    messages: (() => {
+                        const raw = hist.slice(-20);
+                        const coalesced = [];
+                        for (const msg of raw) {
+                            const last = coalesced[coalesced.length - 1];
+                            const rawContent = msg.content ?? msg.Content ?? '';
+                            const text = typeof rawContent === 'string' ? rawContent
+                                : Array.isArray(rawContent) ? rawContent.map(c => c.text ?? c.Text ?? '').join(' ')
+                                : '';
+                            const role = (msg.role ?? msg.Role ?? 'user') === 'assistant' ? 'assistant' : 'user';
+                            if (last && last.role === role) {
+                                // Merge consecutive same-role messages
+                                last.content[0].text = `${last.content[0].text} ${text}`.trim();
+                            } else {
+                                coalesced.push({ role, content: [{ text: text || '(empty)' }] });
+                            }
+                        }
+                        coalesced.push({ role: 'user', content: [{ text: summarizationPrompt }] });
+                        return coalesced;
+                    })(),
                     inferenceConfig: { maxTokens: 500, temperature: 0 }
                 }));
 
