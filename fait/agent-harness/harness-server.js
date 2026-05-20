@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { mkdirSync } = require('fs');
 const { SecretsManagerClient, GetSecretValueCommand } = require('@aws-sdk/client-secrets-manager');
-const { BedrockRuntimeClient, ConverseStreamCommand, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
+const { BedrockRuntimeClient, ConverseCommand, ConverseStreamCommand, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { BedrockAgentRuntimeClient, RetrieveCommand } = require('@aws-sdk/client-bedrock-agent-runtime');
@@ -209,6 +209,55 @@ async function rewriteQueryForRetrieval(userMessage, userId) {
     } catch (err) {
         console.warn(`[harness] query rewrite failed (non-fatal), using raw message: ${err.message} userId=${userId}`);
         return userMessage;
+    }
+}
+
+// ADO#3575 — Feature 9.1: Generate structured task brief via Haiku before CC spawn
+async function generateTaskBrief(history, userId) {
+    if (!history || history.length <= 2) return null;
+
+    try {
+        const HAIKU_MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+        const summarizationPrompt = `Produce a structured task brief for a coding agent about to execute a user's request. Based on the conversation history provided, include:
+- Objective: one sentence — what the agent should produce
+- Files involved: list each file with its role (e.g. "style-guide.docx = style reference")
+- Constraints and preferences: bullet list of anything the user specified
+- Expected output: file type, name if specified, destination folder
+
+Be concise and specific. Output only the brief, no preamble.`;
+
+        // Build messages: full history (last 20) + summarization prompt
+        const historyMessages = history.slice(-20).map(h => {
+            const role = h.role ?? h.Role ?? 'user';
+            const rawContent = h.content ?? h.Content ?? '';
+            let text = '';
+            if (typeof rawContent === 'string') {
+                text = rawContent;
+            } else if (Array.isArray(rawContent)) {
+                text = rawContent.map(c => c.text ?? c.Text ?? '').filter(Boolean).join(' ');
+            }
+            return { role: (role === 'assistant' ? 'assistant' : 'user'), content: [{ text: text || '(empty)' }] };
+        });
+
+        // Ensure messages alternate roles as required by Bedrock Converse API;
+        // append the summarization prompt as a final user message
+        historyMessages.push({ role: 'user', content: [{ text: summarizationPrompt }] });
+
+        const response = await bedrockClient.send(new ConverseCommand({
+            modelId: HAIKU_MODEL_ID,
+            messages: historyMessages,
+            inferenceConfig: { maxTokens: 500, temperature: 0 }
+        }));
+
+        const brief = response.output?.message?.content?.[0]?.text?.trim();
+        if (brief && brief.length > 50) {
+            console.log(`[CC spawn] task brief generated (len=${brief.length}) userId=${userId}`);
+            return brief;
+        }
+        return null;
+    } catch (err) {
+        console.warn('[CC spawn] task brief generation failed, using fallback:', err.message);
+        return null;
     }
 }
 
@@ -2855,31 +2904,38 @@ You have access to the user's workspace files and memory topics. When the user a
             }
         }
 
-        // ADO#3089 — inject session context recap on cold-start CC turns with existing history
+        // ADO#3575 — Feature 9.1: inject session context as AI-generated task brief (replaces ADO#3089 truncated recap)
         const hasHistory = Array.isArray(history) && history.length > 0;
         if (hasHistory) {
-            const MAX_RECAP_CHARS = 2000;
-            const MAX_MESSAGES = 5;
-            const recentMessages = history.slice(-MAX_MESSAGES);
-            const recapLines = recentMessages.map(h => {
-                const role = h.role ?? h.Role ?? 'unknown';
-                const content = h.content ?? h.Content ?? '';
-                let text = '';
-                if (typeof content === 'string') {
-                    text = content;
-                } else if (Array.isArray(content)) {
-                    text = content.map(c => c.text ?? c.Text ?? '').join(' ');
+            // Attempt Haiku-generated structured brief for history.length > 2
+            const generatedBrief = await generateTaskBrief(history, userId);
+            if (generatedBrief) {
+                contextParts.push(`## Task Brief\n${generatedBrief}`);
+            } else {
+                // Fallback: existing truncated recap (ADO#3089 — non-fatal, no user-visible error)
+                const MAX_RECAP_CHARS = 2000;
+                const MAX_MESSAGES = 5;
+                const recentMessages = history.slice(-MAX_MESSAGES);
+                const recapLines = recentMessages.map(h => {
+                    const role = h.role ?? h.Role ?? 'unknown';
+                    const content = h.content ?? h.Content ?? '';
+                    let text = '';
+                    if (typeof content === 'string') {
+                        text = content;
+                    } else if (Array.isArray(content)) {
+                        text = content.map(c => c.text ?? c.Text ?? '').join(' ');
+                    }
+                    const preview = text.trim().replace(/\n+/g, ' ').substring(0, 200);
+                    const roleLabel = role === 'user' ? 'User' : 'Assistant';
+                    return `- ${roleLabel}: ${preview}`;
+                });
+                let recap = `[Session Context — continuing conversation]\nRecent messages:\n${recapLines.join('\n')}`;
+                if (recap.length > MAX_RECAP_CHARS) {
+                    recap = recap.substring(0, MAX_RECAP_CHARS) + '\n[... recap truncated]';
                 }
-                const preview = text.trim().replace(/\n+/g, ' ').substring(0, 200);
-                const roleLabel = role === 'user' ? 'User' : 'Assistant';
-                return `- ${roleLabel}: ${preview}`;
-            });
-            let recap = `[Session Context — continuing conversation]\nRecent messages:\n${recapLines.join('\n')}`;
-            if (recap.length > MAX_RECAP_CHARS) {
-                recap = recap.substring(0, MAX_RECAP_CHARS) + '\n[... recap truncated]';
+                contextParts.push(recap);
+                console.log(`[harness] /turn: injected session recap (fallback, ${recap.length} chars, ${recentMessages.length} messages) into CC context`);
             }
-            contextParts.push(recap);
-            console.log(`[harness] /turn: injected session recap (${recap.length} chars, ${recentMessages.length} messages) into CC context`);
         }
 
         // ADO#3392 — KB retrieval for CC spawn path
