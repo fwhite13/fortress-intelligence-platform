@@ -2212,12 +2212,19 @@ function pruneToolResults(messages, windowSize = 10) {
 function classifyRequest(message, history) {
     const msg = (message || '').toLowerCase();
 
-    // File extension signals
+    // Incomplete-requirements guard: user wants to discuss scope, not spawn a task immediately.
+    // If message contains an action verb BUT also signals deferred/open-ended scope, stay conversational.
+    const incompleteRequirementsSignals = /\b(talk through|talk it through|figure out|not sure|thinking about|want to discuss|let me explain|what do you think|can we start|help me think|help me figure|work through|work it out|brainstorm|I('m| am) not sure|I('m| am) still|haven't decided|haven't thought|still deciding|explore options|what would you recommend)\b/i;
+
+    // File extension signals — always CC regardless
     const fileExtensions = /\.(docx|xlsx|pptx|csv|pdf|py|js|ts|json|yaml|xml)\b/i;
     if (fileExtensions.test(msg)) return true;
 
     // Action verbs (strong CC signals)
     const actionVerbs = /\b(create|build|generate|write|make|produce|analyze|run|execute|compile|draft|develop|implement|code|script|automate)\b/i;
+
+    // --- NEW: if action verb is present but scope signals are deferred, stay conversational ---
+    if (actionVerbs.test(msg) && incompleteRequirementsSignals.test(msg)) return false;
 
     // Scope signals (multi-step work)
     const scopeSignals = /\b(multi.?step|comprehensive|full|complete|entire|all|section|chapter|report|document|presentation|spreadsheet|dataset)\b/i;
