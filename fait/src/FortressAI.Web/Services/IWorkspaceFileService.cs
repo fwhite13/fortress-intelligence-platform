@@ -11,14 +11,14 @@ public record ArtifactPayload(
 
 public interface IWorkspaceFileService
 {
-    Task<UserWorkspaceFile> SaveArtifactAsync(
+    Task<WorkspaceUpload> SaveArtifactAsync(
         Guid userId, Guid conversationId, Guid? taskRunId,
         ArtifactPayload payload, CancellationToken ct = default);
 
-    Task<List<UserWorkspaceFile>> GetConversationArtifactsAsync(
+    Task<List<WorkspaceUpload>> GetConversationArtifactsAsync(
         Guid conversationId, CancellationToken ct = default);
 
-    Task<List<UserWorkspaceFile>> GetUserArtifactsAsync(
+    Task<List<WorkspaceUpload>> GetUserArtifactsAsync(
         Guid userId, CancellationToken ct = default);
 
     Task<string> GetPresignedDownloadUrlAsync(

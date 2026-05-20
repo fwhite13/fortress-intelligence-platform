@@ -475,8 +475,8 @@ else
     {
         _feedbackModal?.Open();
     }
-    private List<UserWorkspaceFile> _conversationArtifacts = new();
-    private UserWorkspaceFile? _pendingArtifact = null;
+    private List<WorkspaceUpload> _conversationArtifacts = new();
+    private WorkspaceUpload? _pendingArtifact = null;
     private FilesUpdatedPayload? _currentFileSummary = null;
 
     // Cold start UX — guard fields

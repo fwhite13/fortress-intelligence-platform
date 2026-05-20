@@ -231,6 +231,6 @@ User memory is stored in workspaces/{userId}/memory/MEMORY.md.
 Update MEMORY.md when the user states persistent preferences or facts about themselves.
 
 ## Workspace
-User workspace files are stored in workspaces/{userId}/artifacts/.
+User workspace files are stored in workspaces/{userId}/files/.
 """;
 }

@@ -48,7 +48,7 @@ public class WorkspaceController : ControllerBase
 
     /// <summary>
     /// Called by harness after writing an artifact to S3.
-    /// Inserts a user_workspace_files row.
+    /// Inserts a user_workspace_uploads row with source='assistant'.
     /// </summary>
     [HttpPost("save-artifact")]
     [AllowAnonymous]
@@ -107,7 +107,7 @@ public class WorkspaceController : ControllerBase
         var userId = GetCurrentUserId();
         if (userId == null) return Unauthorized();
         var folders = await _uploadService.GetFoldersAsync(userId.Value, parentId);
-        return Ok(folders.Select(f => new { f.Id, f.Name, f.ParentId, f.CreatedAt }));
+        return Ok(folders.Select(f => new { f.Id, f.Name, f.S3Prefix, f.CreatedAt }));
     }
 
     [HttpPost("folders")]
@@ -119,7 +119,7 @@ public class WorkspaceController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Name))
             return BadRequest(new { error = "Name is required" });
         var folder = await _uploadService.CreateFolderAsync(userId.Value, request.Name, request.ParentId);
-        return Ok(new { folder.Id, folder.Name, folder.ParentId, folder.CreatedAt });
+        return Ok(new { folder.Id, folder.Name, folder.S3Prefix, folder.CreatedAt });
     }
 
     [HttpDelete("folders/{folderId}")]

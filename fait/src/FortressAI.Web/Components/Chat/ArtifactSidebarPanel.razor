@@ -95,15 +95,15 @@
 </div>
 
 @code {
-    [Parameter, EditorRequired] public List<UserWorkspaceFile> Artifacts { get; set; } = new();
+    [Parameter, EditorRequired] public List<WorkspaceUpload> Artifacts { get; set; } = new();
 
-    private UserWorkspaceFile? _selectedArtifact;
+    private WorkspaceUpload? _selectedArtifact;
     private string? _previewUrl;
     private string? _previewError;
     private bool _previewLoading;
     private bool _downloadLoading;
 
-    private async Task SelectArtifact(UserWorkspaceFile artifact)
+    private async Task SelectArtifact(WorkspaceUpload artifact)
     {
         _selectedArtifact = artifact;
         _previewUrl = null;

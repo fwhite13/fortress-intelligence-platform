@@ -1226,7 +1226,7 @@ app.post('/tools/create_document', async (req, res) => {
             .substring(0, 100);
         const timestamp = Date.now();
         const filename = `${sanitized}-${timestamp}.docx`;
-        const s3Key = `workspaces/${userId}/artifacts/${conversationId}/${filename}`;
+        const s3Key = `workspaces/${userId}/files/assistant-docs/${filename}`;
 
         // 3. Upload to S3
         await s3Client.send(new PutObjectCommand({
@@ -1254,21 +1254,19 @@ app.post('/tools/list_files', async (req, res) => {
             // Resolve folder_path to folderId (same traversal as read_file)
             let folderId = null;
             if (folder_path) {
-                const parts = folder_path.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
-                let parentId = null;
-                for (const segment of parts) {
-                    const paramArr = parentId === null ? [userId, segment] : [userId, segment, parentId];
-                    const sql = parentId === null
-                        ? 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id IS NULL'
-                        : 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id = ?';
-                    const [rows] = await conn.execute(sql, paramArr);
-                    if (rows.length === 0) {
-                        // folder not found — return empty list, not an error
+                // workspace_folders is flat (s3_prefix-based, no parent_id)
+                // Treat folder_path as folder name — look up top-level folder by name
+                const folderName = folder_path.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)[0];
+                if (folderName) {
+                    const [folderRows] = await conn.execute(
+                        'SELECT id FROM workspace_folders WHERE user_id = ? AND name = ?',
+                        [userId, folderName]
+                    );
+                    if (folderRows.length === 0) {
                         return res.json({ items: [] });
                     }
-                    parentId = rows[0].id;
+                    folderId = folderRows[0].id;
                 }
-                folderId = parentId;
             }
 
             // Query files in resolved folder (or root)
@@ -1312,22 +1310,18 @@ app.post('/tools/read_file', async (req, res) => {
         const filename = parts.pop();
         const folderPath = parts;
 
-        // Resolve folder
+        // Resolve folder (workspace_folders is flat — look up by name only)
         let folderId = null;
         if (folderPath.length > 0) {
-            let parentId = null;
-            for (const segment of folderPath) {
-                const paramArr = parentId === null ? [userId, segment] : [userId, segment, parentId];
-                const sql = parentId === null
-                    ? 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id IS NULL'
-                    : 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id = ?';
-                const [rows] = await conn.execute(sql, paramArr);
-                if (rows.length === 0) {
-                    return res.json({ content: `File not found: ${file_path}` });
-                }
-                parentId = rows[0].id;
+            const folderName = folderPath[0]; // top-level only in flat model
+            const [folderRows] = await conn.execute(
+                'SELECT id FROM workspace_folders WHERE user_id = ? AND name = ?',
+                [userId, folderName]
+            );
+            if (folderRows.length === 0) {
+                return res.json({ content: `File not found: ${file_path}` });
             }
-            folderId = parentId;
+            folderId = folderRows[0].id;
         }
 
         // Find file
@@ -1427,30 +1421,25 @@ app.post('/tools/write_file', async (req, res) => {
         if (folderSegments.length > 0) {
             const conn2 = await getDbConnection();
             try {
-                let parentId = null;
-                for (const segment of folderSegments) {
-                    const paramArr = parentId === null ? [userId, segment] : [userId, segment, parentId];
-                    const sql = parentId === null
-                        ? 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id IS NULL'
-                        : 'SELECT id FROM user_workspace_folders WHERE user_id = ? AND name = ? AND parent_id = ?';
-                    const [rows] = await conn2.execute(sql, paramArr);
-                    if (rows.length > 0) {
-                        parentId = rows[0].id;
-                    } else {
-                        // Create missing folder
-                        const newFolderId = crypto.randomUUID();
-                        const now2 = new Date().toISOString().slice(0, 19).replace('T', ' ');
-                        const insertSql = parentId === null
-                            ? 'INSERT INTO user_workspace_folders (id, user_id, name, parent_id, created_at) VALUES (?, ?, ?, NULL, ?)'
-                            : 'INSERT INTO user_workspace_folders (id, user_id, name, parent_id, created_at) VALUES (?, ?, ?, ?, ?)';
-                        const insertParams = parentId === null
-                            ? [newFolderId, userId, segment, now2]
-                            : [newFolderId, userId, segment, parentId, now2];
-                        await conn2.execute(insertSql, insertParams);
-                        parentId = newFolderId;
-                    }
+                // workspace_folders is flat (s3_prefix-based, no parent_id)
+                // Use first segment as the folder name
+                const folderName = folderSegments[0] || 'general';
+                const [existingRows] = await conn2.execute(
+                    'SELECT id FROM workspace_folders WHERE user_id = ? AND name = ?',
+                    [userId, folderName]
+                );
+                if (existingRows.length > 0) {
+                    folderId = existingRows[0].id;
+                } else {
+                    // Create missing folder in workspace_folders
+                    const newFolderId = crypto.randomUUID();
+                    const now2 = new Date().toISOString().slice(0, 19).replace('T', ' ');
+                    await conn2.execute(
+                        'INSERT INTO workspace_folders (id, user_id, name, s3_prefix, created_at) VALUES (?, ?, ?, ?, ?)',
+                        [newFolderId, userId, folderName, `files/${newFolderId}/`, now2]
+                    );
+                    folderId = newFolderId;
                 }
-                folderId = parentId;
             } finally {
                 await conn2.end();
             }
@@ -1474,7 +1463,7 @@ app.post('/tools/write_file', async (req, res) => {
                 // File exists: bump version, use versioned S3 key
                 const existingId = existingRows[0].id;
                 const newVersion = (existingRows[0].current_version || 1) + 1;
-                const s3Key = `workspaces/${userId}/files/${s3FolderPart}/v${newVersion}/${filename}`;
+                const s3Key = `workspaces/${userId}/files/${s3FolderPart}/${filename}`;
 
                 // Write to S3
                 await s3Client.send(new PutObjectCommand({
@@ -1499,7 +1488,7 @@ app.post('/tools/write_file', async (req, res) => {
 
             } else {
                 // New file: v1 S3 key
-                const s3Key = `workspaces/${userId}/files/${s3FolderPart}/v1/${filename}`;
+                const s3Key = `workspaces/${userId}/files/${s3FolderPart}/${filename}`;
 
                 // Write to S3
                 await s3Client.send(new PutObjectCommand({
@@ -1562,19 +1551,6 @@ app.post('/tools/read_workspace_file', async (req, res) => {
                     s3Key = fileRecord.s3_key;
                     filename = fileRecord.filename;
                     mimeType = fileRecord.mime_type;
-                } else {
-                    // Try user_workspace_files (artifacts)
-                    const [artifactRows] = await conn.execute(
-                        'SELECT id, filename, mime_type, s3_key, size_bytes FROM user_workspace_files WHERE id = ? AND user_id = ? LIMIT 1',
-                        [fileId, userId]
-                    );
-                    if (artifactRows.length > 0) {
-                        fileRecord = artifactRows[0];
-                        s3Key = fileRecord.s3_key;
-                        filename = fileRecord.filename;
-                        mimeType = fileRecord.mime_type;
-                    }
-                }
             } else if (filePath) {
                 // Path-based: look up in user_workspace_uploads by filename
                 const safeFilename = filePath.split('/').pop();
@@ -1739,10 +1715,10 @@ app.post('/tools/list_workspace_files', async (req, res) => {
                 files.push(...uploads);
             }
 
-            // type='generated' or 'all': query user_workspace_files (artifacts)
+            // type='generated' or 'all': query user_workspace_uploads WHERE source IN ('assistant','cc')
             if (type === 'generated' || type === 'all') {
                 const [artifactRows] = await conn.execute(
-                    'SELECT id, filename, mime_type, s3_key, size_bytes, created_at, conversation_id FROM user_workspace_files WHERE user_id = ? ORDER BY created_at DESC',
+                    "SELECT id, filename, mime_type, s3_key, size_bytes, created_at, conversation_id, source FROM user_workspace_uploads WHERE user_id = ? AND source IN ('assistant','cc') ORDER BY created_at DESC",
                     [userId]
                 );
                 const artifacts = artifactRows.map(r => ({
@@ -1753,7 +1729,7 @@ app.post('/tools/list_workspace_files', async (req, res) => {
                     sizeBytes: Number(r.size_bytes),
                     createdAt: r.created_at,
                     conversationId: r.conversation_id,
-                    source: 'assistant',
+                    source: r.source || 'assistant',
                     fileType: 'generated'
                 }));
                 files.push(...artifacts);
@@ -2058,7 +2034,8 @@ async function scanAndUploadArtifacts(userId, workspaceDir) {
         .sort((a, b) => b.mtime - a.mtime)[0];
 
     const filePath = path.join(artifactsDir, latestFile.name);
-    const s3Key = `${S3_PREFIX}artifacts/${userId}/${latestFile.name}`;
+    // Use files/ prefix per workspace canonical model. No DB insert here — handled by harness task completion flow.
+    const s3Key = `${S3_PREFIX}files/assistant-output/${latestFile.name}`;
     const fileBuffer = fs.readFileSync(filePath);
     const ext = path.extname(latestFile.name).toLowerCase();
 
@@ -2304,7 +2281,7 @@ async function getWorkspaceManifest(userId) {
         const conn = await getDbConnection();
         try {
             const [folders] = await conn.execute(
-                'SELECT wf.name, COUNT(wfi.id) as file_count FROM workspace_folders wf LEFT JOIN user_workspace_files wfi ON wfi.folder_id = wf.id WHERE wf.user_id = ? GROUP BY wf.id, wf.name ORDER BY wf.name',
+                'SELECT wf.name, COUNT(wfi.id) as file_count FROM workspace_folders wf LEFT JOIN user_workspace_uploads wfi ON wfi.folder_id = wf.id WHERE wf.user_id = ? GROUP BY wf.id, wf.name ORDER BY wf.name',
                 [userId]
             );
             if (folders.length === 0) return null;

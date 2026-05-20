@@ -711,9 +711,9 @@
     // ── Generated (existing) state ──────────────────────────────────────────
     private bool _loading = true;
     private int _activeTab = 0;
-    private List<UserWorkspaceFile> _artifacts = new();
+    private List<WorkspaceUpload> _artifacts = new();
     private List<ArtifactGroup> _groupedArtifacts = new();
-    private record ArtifactGroup(string ConversationTitle, Guid ConversationId, List<UserWorkspaceFile> Artifacts);
+    private record ArtifactGroup(string ConversationTitle, string? ConversationId, List<WorkspaceUpload> Artifacts);
 
     // ── Files tab state ─────────────────────────────────────────────────────
     private Guid? _currentFolderId = null;
@@ -1327,9 +1327,11 @@
             var result = new List<ArtifactGroup>();
             foreach (var group in grouped)
             {
-                var conv = await ChatSvc.GetConversationAsync(group.Key, Session.UserId);
+                var convGuid = Guid.TryParse(group.Key, out var g) ? g : Guid.Empty;
+                var conv = convGuid != Guid.Empty ? await ChatSvc.GetConversationAsync(convGuid, Session.UserId) : null;
+                var keyStr = group.Key ?? "";
                 var title = string.IsNullOrWhiteSpace(conv?.Title)
-                    ? $"Conversation {group.Key.ToString()[..8]}"
+                    ? $"Conversation {(keyStr.Length >= 8 ? keyStr[..8] : keyStr)}"
                     : conv!.Title;
                 result.Add(new ArtifactGroup(title, group.Key,
                     group.OrderByDescending(a => a.CreatedAt).ToList()));
@@ -1346,12 +1348,12 @@
         }
     }
 
-    private void PreviewArtifact(UserWorkspaceFile artifact)
+    private void PreviewArtifact(WorkspaceUpload artifact)
     {
         NavigationManager.NavigateTo($"/chat/{artifact.ConversationId}?previewArtifact={artifact.Id}");
     }
 
-    private async Task DownloadArtifactAsync(UserWorkspaceFile artifact)
+    private async Task DownloadArtifactAsync(WorkspaceUpload artifact)
     {
         try
         {

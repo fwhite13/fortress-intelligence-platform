@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace FortressAI.Shared.Models;
 
-[Table("user_workspace_folders")]
+[Table("workspace_folders")]
 public class WorkspaceFolder
 {
     [Key]
@@ -14,12 +14,16 @@ public class WorkspaceFolder
     public Guid UserId { get; set; }
 
     [Column("name")]
-    [MaxLength(255)]
+    [MaxLength(64)]
     public string Name { get; set; } = "";
 
-    [Column("parent_id")]
-    public Guid? ParentId { get; set; }
+    [Column("s3_prefix")]
+    [MaxLength(500)]
+    public string S3Prefix { get; set; } = "";
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
+
+    [Column("last_used_at")]
+    public DateTime? LastUsedAt { get; set; }
 }

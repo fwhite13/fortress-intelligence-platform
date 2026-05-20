@@ -440,7 +440,10 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE scheduled_task_runs ADD COLUMN ResultSummary VARCHAR(500) NULL",
                 // ADO#3438: workspace versioning columns (idempotent — 1060 catch handles duplicate)
                 "ALTER TABLE user_workspace_uploads ADD COLUMN current_version INT NOT NULL DEFAULT 1",
-                "ALTER TABLE user_workspace_uploads ADD COLUMN source VARCHAR(20) NULL"
+                "ALTER TABLE user_workspace_uploads ADD COLUMN source VARCHAR(20) NULL",
+                // ADO#3573: workspace schema unify — add conversation_id and turn_index to user_workspace_uploads
+                "ALTER TABLE user_workspace_uploads ADD COLUMN conversation_id CHAR(36) NULL",
+                "ALTER TABLE user_workspace_uploads ADD COLUMN turn_index INT NULL"
             };
 
             foreach (var alterSql in alterStatements)

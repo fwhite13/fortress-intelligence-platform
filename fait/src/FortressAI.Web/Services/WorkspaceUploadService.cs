@@ -30,8 +30,9 @@ public class WorkspaceUploadService : IWorkspaceUploadService
     public async Task<List<WorkspaceFolder>> GetFoldersAsync(Guid userId, Guid? parentId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
+        // workspace_folders is flat (no parent_id) — parentId parameter ignored
         return await db.WorkspaceFolders
-            .Where(f => f.UserId == userId && f.ParentId == parentId)
+            .Where(f => f.UserId == userId)
             .OrderBy(f => f.Name)
             .ToListAsync();
     }
@@ -39,12 +40,14 @@ public class WorkspaceUploadService : IWorkspaceUploadService
     public async Task<WorkspaceFolder> CreateFolderAsync(Guid userId, string name, Guid? parentId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
+        var id = Guid.NewGuid();
+        // workspace_folders is flat — parentId ignored; s3_prefix encodes folder identity
         var folder = new WorkspaceFolder
         {
-            Id = Guid.NewGuid(),
+            Id = id,
             UserId = userId,
             Name = name.Trim(),
-            ParentId = parentId,
+            S3Prefix = $"files/{id}/",
             CreatedAt = DateTime.UtcNow
         };
         db.WorkspaceFolders.Add(folder);
@@ -121,14 +124,6 @@ public class WorkspaceUploadService : IWorkspaceUploadService
                 keys.Add(upload.S3Key);
         }
 
-        var childFolders = await db.WorkspaceFolders
-            .Where(f => f.UserId == userId && f.ParentId == folderId)
-            .Select(f => f.Id)
-            .ToListAsync();
-        foreach (var childId in childFolders)
-        {
-            await CollectS3KeysRecursiveAsync(db, userId, childId, keys);
-        }
     }
 
     // C3: New helper — collect all upload IDs in a folder tree for version row cleanup
@@ -141,15 +136,6 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             .ToListAsync();
         ids.AddRange(uploads);
 
-        var childFolders = await db.WorkspaceFolders
-            .Where(f => f.UserId == userId && f.ParentId == folderId)
-            .Select(f => f.Id)
-            .ToListAsync();
-        foreach (var childId in childFolders)
-        {
-            var childIds = await CollectUploadIdsRecursiveAsync(db, userId, childId);
-            ids.AddRange(childIds);
-        }
         return ids;
     }
 
@@ -181,7 +167,7 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             .FirstOrDefaultAsync(u => u.UserId == userId && u.Filename == safeFilename && u.FolderId == folderId);
 
         var versionNumber = (existingFile?.CurrentVersion ?? 0) + 1;
-        var s3Key = $"workspaces/{userId}/files/{folderId?.ToString() ?? "root"}/v{versionNumber}/{safeFilename}";
+        var s3Key = $"workspaces/{userId}/files/{folderId?.ToString() ?? "root"}/{safeFilename}";
 
         await _s3.PutObjectAsync(new PutObjectRequest
         {
@@ -337,22 +323,23 @@ public class WorkspaceUploadService : IWorkspaceUploadService
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var filename = parts[^1];
-        var folderSegments = parts[..^1];
+        var folderName = parts.Length > 1 ? parts[0] : null;
 
-        Guid? currentParentId = null;
-        foreach (var segment in folderSegments)
+        Guid? folderId = null;
+        if (folderName != null)
         {
+            // workspace_folders is flat — match by name only (first segment only)
             var folder = await db.WorkspaceFolders
-                .FirstOrDefaultAsync(f => f.UserId == userId && f.Name == segment && f.ParentId == currentParentId);
+                .FirstOrDefaultAsync(f => f.UserId == userId && f.Name == folderName);
             if (folder == null) return null;
-            currentParentId = folder.Id;
+            folderId = folder.Id;
         }
 
         var upload = await db.WorkspaceUploads
-            .FirstOrDefaultAsync(u => u.UserId == userId && u.Filename == filename && u.FolderId == currentParentId);
+            .FirstOrDefaultAsync(u => u.UserId == userId && u.Filename == filename && u.FolderId == folderId);
         if (upload == null) return null;
 
-        return (currentParentId, upload.S3Key);
+        return (folderId, upload.S3Key);
     }
 
     public async Task<List<WorkspaceFileVersion>> GetFileVersionsAsync(Guid userId, Guid fileId)

@@ -25,44 +25,66 @@ public class WorkspaceFileService : IWorkspaceFileService
         _logger = logger;
     }
 
-    public async Task<UserWorkspaceFile> SaveArtifactAsync(
+    public async Task<WorkspaceUpload> SaveArtifactAsync(
         Guid userId, Guid conversationId, Guid? taskRunId,
         ArtifactPayload payload, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var file = new UserWorkspaceFile
+
+        // Find or create the default 'assistant-artifacts' folder for this user
+        var folder = await db.WorkspaceFolders
+            .FirstOrDefaultAsync(f => f.UserId == userId && f.Name == "assistant-artifacts", ct);
+
+        if (folder == null)
+        {
+            var folderId = Guid.NewGuid();
+            folder = new WorkspaceFolder
+            {
+                Id = folderId,
+                UserId = userId,
+                Name = "assistant-artifacts",
+                S3Prefix = $"files/{folderId}/",
+                CreatedAt = DateTime.UtcNow
+            };
+            db.WorkspaceFolders.Add(folder);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var upload = new WorkspaceUpload
         {
             Id = Guid.NewGuid(),
             UserId = userId,
-            ConversationId = conversationId,
-            TaskRunId = taskRunId,
+            FolderId = folder.Id,
             Filename = payload.Filename,
             MimeType = payload.MimeType,
             S3Key = payload.S3Key,
             SizeBytes = payload.SizeBytes,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            CurrentVersion = 1,
+            Source = "assistant",
+            ConversationId = conversationId.ToString()
         };
-        db.UserWorkspaceFiles.Add(file);
+        db.WorkspaceUploads.Add(upload);
         await db.SaveChangesAsync(ct);
-        return file;
+        return upload;
     }
 
-    public async Task<List<UserWorkspaceFile>> GetConversationArtifactsAsync(
+    public async Task<List<WorkspaceUpload>> GetConversationArtifactsAsync(
         Guid conversationId, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.UserWorkspaceFiles
-            .Where(f => f.ConversationId == conversationId)
+        return await db.WorkspaceUploads
+            .Where(f => f.ConversationId == conversationId.ToString() && f.Source == "assistant")
             .OrderBy(f => f.CreatedAt)
             .ToListAsync(ct);
     }
 
-    public async Task<List<UserWorkspaceFile>> GetUserArtifactsAsync(
+    public async Task<List<WorkspaceUpload>> GetUserArtifactsAsync(
         Guid userId, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.UserWorkspaceFiles
-            .Where(f => f.UserId == userId)
+        return await db.WorkspaceUploads
+            .Where(f => f.UserId == userId && f.Source == "assistant")
             .OrderByDescending(f => f.CreatedAt)
             .ToListAsync(ct);
     }

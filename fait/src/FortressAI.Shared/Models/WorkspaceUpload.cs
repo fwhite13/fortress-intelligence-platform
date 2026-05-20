@@ -40,4 +40,11 @@ public class WorkspaceUpload
     [Column("source")]
     [MaxLength(20)]
     public string? Source { get; set; }
+
+    [Column("conversation_id")]
+    [MaxLength(36)]
+    public string? ConversationId { get; set; }
+
+    [Column("turn_index")]
+    public int? TurnIndex { get; set; }
 }

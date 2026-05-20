@@ -42,7 +42,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<ScheduledTaskRun> ScheduledTaskRuns => Set<ScheduledTaskRun>();
     public DbSet<MemoryTopic> MemoryTopics => Set<MemoryTopic>();
-    public DbSet<UserWorkspaceFile> UserWorkspaceFiles => Set<UserWorkspaceFile>();
+    // UserWorkspaceFiles DbSet removed — user_workspace_files table dropped in WorkspaceSchemaUnify migration
     public DbSet<WorkspaceFolder> WorkspaceFolders { get; set; }
     public DbSet<WorkspaceUpload> WorkspaceUploads { get; set; }
     public DbSet<WorkspaceFileVersion> WorkspaceFileVersions { get; set; }
@@ -507,38 +507,17 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<UserWorkspaceFile>(entity =>
-        {
-            entity.ToTable("user_workspace_files");
-            entity.Property(e => e.Id).HasColumnType("CHAR(36)").HasColumnName("id");
-            entity.Property(e => e.UserId).HasColumnType("CHAR(36)").HasColumnName("user_id");
-            entity.Property(e => e.ConversationId).HasColumnType("CHAR(36)").HasColumnName("conversation_id");
-            entity.Property(e => e.TaskRunId).HasColumnType("CHAR(36)").HasColumnName("task_run_id");
-            entity.Property(e => e.Filename).HasColumnName("filename").HasMaxLength(500);
-            entity.Property(e => e.MimeType).HasColumnName("mime_type").HasMaxLength(200);
-            entity.Property(e => e.S3Key).HasColumnName("s3_key").HasMaxLength(1000);
-            entity.Property(e => e.SizeBytes).HasColumnName("size_bytes");
-            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)");
-            entity.HasIndex(e => e.UserId).HasDatabaseName("idx_uwf_user_id");
-            entity.HasIndex(e => e.ConversationId).HasDatabaseName("idx_uwf_conversation_id");
-        });
-
         modelBuilder.Entity<WorkspaceFolder>(entity =>
         {
-            entity.ToTable("user_workspace_folders");
+            entity.ToTable("workspace_folders");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasColumnType("CHAR(36)").ValueGeneratedNever();
             entity.Property(e => e.UserId).HasColumnType("CHAR(36)").HasColumnName("user_id");
-            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(255).IsRequired();
-            entity.Property(e => e.ParentId).HasColumnType("CHAR(36)").HasColumnName("parent_id");
+            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(64).IsRequired();
+            entity.Property(e => e.S3Prefix).HasColumnName("s3_prefix").HasMaxLength(500).IsRequired();
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
-            entity.HasIndex(e => e.UserId).HasDatabaseName("idx_uwfold_user_id");
-            entity.HasIndex(e => e.ParentId).HasDatabaseName("idx_uwfold_parent_id");
-            entity.HasOne<WorkspaceFolder>()
-                  .WithMany()
-                  .HasForeignKey(f => f.ParentId)
-                  .OnDelete(DeleteBehavior.Cascade)
-                  .IsRequired(false);
+            entity.Property(e => e.LastUsedAt).HasColumnName("last_used_at").HasColumnType("DATETIME(6)").IsRequired(false);
+            entity.HasIndex(e => e.UserId).HasDatabaseName("idx_wf_user_id");
         });
 
         modelBuilder.Entity<WorkspaceUpload>(entity =>
@@ -555,6 +534,8 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasColumnType("DATETIME(6)").HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.Property(e => e.CurrentVersion).HasColumnName("current_version").HasDefaultValue(1);
             entity.Property(e => e.Source).HasColumnName("source").HasMaxLength(20).IsRequired(false);
+            entity.Property(e => e.ConversationId).HasColumnName("conversation_id").HasColumnType("CHAR(36)").IsRequired(false);
+            entity.Property(e => e.TurnIndex).HasColumnName("turn_index").IsRequired(false);
             entity.HasIndex(e => e.UserId).HasDatabaseName("idx_uwup_user_id");
             entity.HasIndex(e => e.FolderId).HasDatabaseName("idx_uwup_folder_id");
             entity.HasOne<WorkspaceFolder>()
