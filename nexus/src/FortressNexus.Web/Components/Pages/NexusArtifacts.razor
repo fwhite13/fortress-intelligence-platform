@@ -1125,7 +1125,8 @@ else if (_artifactSet is not null)
         {
             var dtos = _workItems.Select(MapToDto).ToList();
             _artifactSet!.AdoProjectName = _selectedAdoProject!;
-            var results = await AdoService.CreateWorkItemBatchAsync(_artifactSet!, dtos);
+            var callerUpn = await UserContextService.GetUpnAsync();
+            var results = await AdoService.CreateWorkItemBatchAsync(_artifactSet!, dtos, callerUpn);
             _postResults = results;
             await WriteBackResultsAsync(results);
             Snackbar.Add($"Posted {results.Count(r => r.Status == "Created")} work items to ADO.", Severity.Success);

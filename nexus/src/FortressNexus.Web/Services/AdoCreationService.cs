@@ -64,14 +64,14 @@ public class AdoCreationService : IAdoService
         throw new NotSupportedException("Use CreateWorkItemBatchAsync for ADO work item creation.");
     }
 
-    public async Task<List<WorkItemRecord>> CreateWorkItemBatchAsync(ArtifactSet artifactSet, List<AdoWorkItemDto> items)
+    public async Task<List<WorkItemRecord>> CreateWorkItemBatchAsync(ArtifactSet artifactSet, List<AdoWorkItemDto> items, string callerUpn)
     {
-        _logger.LogInformation("[AdoCreationService] CreateWorkItemBatchAsync: {Count} items for {Project}",
-            items.Count, artifactSet.AdoProjectName);
+        _logger.LogInformation("[AdoCreationService] CreateWorkItemBatchAsync: {Count} items for {Project} (caller: {Upn})",
+            items.Count, artifactSet.AdoProjectName, callerUpn);
 
-        // Step 1: Get caller's PAT
-        var pat = await _credentialService.GetDecryptedPatAsync(artifactSet.CreatedBy)
-            ?? throw new InvalidOperationException($"No ADO credential found for {artifactSet.CreatedBy}. Please add your PAT in the project selector.");
+        // Step 1: Get caller's PAT — use the currently authenticated user, not the artifact set owner
+        var pat = await _credentialService.GetDecryptedPatAsync(callerUpn)
+            ?? throw new InvalidOperationException($"No ADO credential found for {callerUpn}. Please add your PAT in the project selector.");
 
         var project = artifactSet.AdoProjectName;
         var org = _config["Nexus:Ado:Organization"] ?? "FortressAffinityGroup";

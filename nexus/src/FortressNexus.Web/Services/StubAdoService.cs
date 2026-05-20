@@ -64,7 +64,7 @@ public class StubAdoService : IAdoService
         return Task.FromResult(record);
     }
 
-    public Task<List<WorkItemRecord>> CreateWorkItemBatchAsync(ArtifactSet artifactSet, List<AdoWorkItemDto> items)
+    public Task<List<WorkItemRecord>> CreateWorkItemBatchAsync(ArtifactSet artifactSet, List<AdoWorkItemDto> items, string callerUpn)
     {
         _logger.LogInformation("[StubAdoService] CreateWorkItemBatchAsync: {Count} items", items.Count);
         _logger.LogInformation("[StubAdoService] CreateWorkItemBatchAsync items: {ItemsJson}",
