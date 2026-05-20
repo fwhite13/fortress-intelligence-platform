@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Caching.Memory;
 using MySqlConnector;
 using Amazon.BedrockAgentRuntime;
+using Amazon.BedrockRuntime;
+using Amazon.Rekognition;
 using MudBlazor.Services;
 using FortressAI.Web.Data;
 using FortressAI.Web.Services;
@@ -141,6 +143,14 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<KbSyncRetryService
 builder.Services.AddScoped<ForgeService>();
 builder.Services.AddScoped<ForgeQueryService>();
 builder.Services.AddSingleton<KbQueryService>();
+builder.Services.AddSingleton<IAmazonBedrockRuntime>(sp =>
+    new AmazonBedrockRuntimeClient(
+        Amazon.RegionEndpoint.GetBySystemName(
+            builder.Configuration["AWS:Region"] ?? "us-east-1")));
+builder.Services.AddSingleton<IAmazonRekognition>(sp =>
+    new AmazonRekognitionClient(
+        Amazon.RegionEndpoint.GetBySystemName(
+            builder.Configuration["AWS:Region"] ?? "us-east-1")));
 builder.Services.AddSingleton<ContentModerationService>();
 
 // Phase 2: Email Intelligence services

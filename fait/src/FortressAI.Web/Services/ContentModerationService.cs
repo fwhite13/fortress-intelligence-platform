@@ -1,8 +1,8 @@
-using Amazon;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Rekognition;
 using Amazon.Rekognition.Model;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
@@ -12,24 +12,24 @@ public record ModerationResult(bool Passed, string? Reason);
 
 public class ContentModerationService
 {
-    private readonly AmazonBedrockRuntimeClient _bedrockClient;
-    private readonly AmazonRekognitionClient _rekognitionClient;
+    private readonly IAmazonBedrockRuntime _bedrockClient;
+    private readonly IAmazonRekognition _rekognitionClient;
     private readonly ILogger<ContentModerationService> _logger;
 
-    private const string HaikuModelId = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+    private readonly string _haikuModelId;
     private const float ConfidenceThreshold = 70f;
 
-    public ContentModerationService(ILogger<ContentModerationService> logger)
+    public ContentModerationService(
+        IAmazonBedrockRuntime bedrockClient,
+        IAmazonRekognition rekognitionClient,
+        IConfiguration configuration,
+        ILogger<ContentModerationService> logger)
     {
+        _bedrockClient = bedrockClient;
+        _rekognitionClient = rekognitionClient;
         _logger = logger;
-        _bedrockClient = new AmazonBedrockRuntimeClient(new AmazonBedrockRuntimeConfig
-        {
-            RegionEndpoint = RegionEndpoint.USEast1
-        });
-        _rekognitionClient = new AmazonRekognitionClient(new AmazonRekognitionConfig
-        {
-            RegionEndpoint = RegionEndpoint.USEast1
-        });
+        _haikuModelId = configuration["Bedrock:ModerationModelId"]
+            ?? "us.anthropic.claude-haiku-4-5-20251001-v1:0";
     }
 
     public async Task<ModerationResult> CheckNameAsync(string text)
@@ -49,7 +49,7 @@ public class ContentModerationService
         {
             var request = new InvokeModelRequest
             {
-                ModelId = HaikuModelId,
+                ModelId = _haikuModelId,
                 ContentType = "application/json",
                 Accept = "application/json",
                 Body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
@@ -122,10 +122,14 @@ public class ContentModerationService
         }
     }
 
+    private const int MaxImageBytes = 5 * 1024 * 1024;
+
     private static async Task<byte[]> ReadStreamAsync(Stream stream)
     {
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms);
+        if (ms.Length > MaxImageBytes)
+            throw new InvalidOperationException($"Image exceeds {MaxImageBytes}-byte Rekognition limit.");
         return ms.ToArray();
     }
 }
