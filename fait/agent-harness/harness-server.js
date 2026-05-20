@@ -2586,7 +2586,7 @@ app.post('/turn', async (req, res) => {
                     const connFolders = await getDbConnection();
                     try {
                         const [folderRows] = await connFolders.execute(
-                            'SELECT id, name, updated_at as lastUsedAt FROM workspace_folders WHERE user_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 50',
+                            'SELECT id, name, last_used_at as lastUsedAt FROM workspace_folders WHERE user_id = ? ORDER BY COALESCE(last_used_at, created_at) DESC LIMIT 50',
                             [userId]
                         );
                         folders = folderRows.map(r => ({ id: r.id, name: r.name, lastUsedAt: r.lastUsedAt }));
@@ -2600,6 +2600,38 @@ app.post('/turn', async (req, res) => {
                     }
                 } catch (folderFetchErr) {
                     console.warn(`[harness] ADO#3560 folder fetch failed (non-fatal): ${folderFetchErr.message}`);
+                }
+
+                // Auto-create /general/ if no folders exist yet (Candidate E fix)
+                if (folders.length === 0) {
+                    try {
+                        const connCreate = await getDbConnection();
+                        try {
+                            // Check again inside this connection to avoid race
+                            const [existingCheck] = await connCreate.execute(
+                                "SELECT id, name FROM workspace_folders WHERE user_id = ? AND name = 'general' LIMIT 1",
+                                [userId]
+                            );
+                            if (existingCheck.length > 0) {
+                                folders = [{ id: existingCheck[0].id, name: existingCheck[0].name, lastUsedAt: null }];
+                                lastFolderId = existingCheck[0].id;
+                            } else {
+                                const newGeneralId = crypto.randomUUID();
+                                const s3Prefix = `workspaces/${userId}/general/`;
+                                await connCreate.execute(
+                                    'INSERT INTO workspace_folders (id, user_id, name, s3_prefix, created_at) VALUES (?, ?, ?, ?, NOW(6))',
+                                    [newGeneralId, userId, 'general', s3Prefix]
+                                );
+                                folders = [{ id: newGeneralId, name: 'general', lastUsedAt: null }];
+                                lastFolderId = newGeneralId;
+                                console.log(`[harness] ADO#3565: auto-created /general/ folder id=${newGeneralId} for userId=${userId}`);
+                            }
+                        } finally {
+                            connCreate.end();
+                        }
+                    } catch (autoCreateErr) {
+                        console.warn(`[harness] ADO#3565: auto-create /general/ failed (non-fatal): ${autoCreateErr.message}`);
+                    }
                 }
 
                 sendEvent({ type: 'folder_required', folders, lastFolderId });

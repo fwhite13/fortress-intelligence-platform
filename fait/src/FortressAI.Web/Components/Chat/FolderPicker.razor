@@ -81,7 +81,15 @@
 
     protected override void OnInitialized()
     {
-        _selectedFolderId = LastFolderId ?? Folders.FirstOrDefault()?.Id ?? "";
+        if (Folders.Count > 0)
+        {
+            _selectedFolderId = LastFolderId ?? Folders.FirstOrDefault()!.Id;
+        }
+        else
+        {
+            _selectedFolderId = "__new__";
+            _showNewFolderInput = true;
+        }
         ApplyHeuristics();
     }
 
