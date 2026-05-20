@@ -2377,7 +2377,7 @@ async function resolveTaskFolder(userId, taskFolderId) {
             }
             // Create it
             const newId = crypto.randomUUID();
-            const s3Prefix = `workspaces/${userId}/general/`;
+            const s3Prefix = `workspaces/${userId}/files/${newId}/`;
             await conn.execute(
                 'INSERT INTO workspace_folders (id, user_id, name, s3_prefix, created_at) VALUES (?, ?, ?, ?, NOW(6))',
                 [newId, userId, 'general', s3Prefix]
@@ -2439,7 +2439,7 @@ app.post('/turn/folder-confirm', async (req, res) => {
                 return res.status(400).json({ error: 'Invalid folder name' });
             }
             const newId = crypto.randomUUID();
-            const s3Prefix = `workspaces/${pendingUserId}/${newId}/`;
+            const s3Prefix = `workspaces/${pendingUserId}/files/${newId}/`;
             const conn = await getDbConnection();
             try {
                 await conn.execute(
@@ -2731,7 +2731,7 @@ app.post('/turn', async (req, res) => {
                                 lastFolderId = existingCheck[0].id;
                             } else {
                                 const newGeneralId = crypto.randomUUID();
-                                const s3Prefix = `workspaces/${userId}/general/`;
+                                const s3Prefix = `workspaces/${userId}/files/${newGeneralId}/`;
                                 await connCreate.execute(
                                     'INSERT INTO workspace_folders (id, user_id, name, s3_prefix, created_at) VALUES (?, ?, ?, ?, NOW(6))',
                                     [newGeneralId, userId, 'general', s3Prefix]
