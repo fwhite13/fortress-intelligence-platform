@@ -141,6 +141,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<KbSyncRetryService
 builder.Services.AddScoped<ForgeService>();
 builder.Services.AddScoped<ForgeQueryService>();
 builder.Services.AddSingleton<KbQueryService>();
+builder.Services.AddSingleton<ContentModerationService>();
 
 // Phase 2: Email Intelligence services
 builder.Services.AddScoped<GraphWebhookService>();
