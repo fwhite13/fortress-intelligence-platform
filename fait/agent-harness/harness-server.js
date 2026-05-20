@@ -2849,7 +2849,7 @@ Do not explain this assessment process to the user. [TASK_READY] and [TASK_HOLD]
             }
 
             // Parse sentinels
-            const hasTaskReady = gateResponseText.includes('[TASK_READY]');
+            const hasTaskReady = gateResponseText.trimEnd().endsWith('[TASK_READY]');
             const hasTaskHold = gateResponseText.includes('[TASK_HOLD]');
             const cleanGateResponse = gateResponseText.replace(/\[TASK_READY\]|\[TASK_HOLD\]/g, '').trim();
 
@@ -2863,7 +2863,7 @@ Do not explain this assessment process to the user. [TASK_READY] and [TASK_HOLD]
                 }
 
                 // Emit task_hold SSE event — Blazor will deselect Task toggle
-                res.write(`data: ${JSON.stringify({ type: 'task_hold' })}\n\n`);
+                sendEvent({ type: 'task_hold' });
 
                 endResponse({ type: 'done', exitCode: 0 });
                 return;
