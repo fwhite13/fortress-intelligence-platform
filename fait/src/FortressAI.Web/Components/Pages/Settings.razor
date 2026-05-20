@@ -18,6 +18,7 @@
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> ContextFactory
 @inject IAmazonS3 S3
 @inject ILogger<Settings> Logger
+@inject ContentModerationService ContentModerationService
 
 <MudContainer MaxWidth="MaxWidth.Medium" Class="py-4">
     <MudText Typo="Typo.h4" Class="mb-4">Settings</MudText>
@@ -606,7 +607,27 @@
         _saving = true;
         try
         {
-            _colorHex = _accentColor.ToString(MudColorOutputFormats.Hex);
+            // Moderation checks before save
+        if (!string.IsNullOrWhiteSpace(_assistantName))
+        {
+            var assistantNameResult = await ContentModerationService.CheckNameAsync(_assistantName);
+            if (!assistantNameResult.Passed)
+            {
+                Snackbar.Add("That assistant name is not appropriate for a workplace app. Please choose another.", Severity.Error);
+                return;
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(_preferredName))
+        {
+            var preferredNameResult = await ContentModerationService.CheckNameAsync(_preferredName);
+            if (!preferredNameResult.Passed)
+            {
+                Snackbar.Add("That display name is not appropriate for a workplace app. Please choose another.", Severity.Error);
+                return;
+            }
+        }
+
+        _colorHex = _accentColor.ToString(MudColorOutputFormats.Hex);
             await ConfigSvc.SaveConfigAsync(Session.UserId, _assistantName, _avatarId, _colorHex, _personalityPreset, _firmAutoTranscript, _firmAutoSummary);
 
             if (_deliveryTime.HasValue)

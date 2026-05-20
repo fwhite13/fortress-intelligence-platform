@@ -8,6 +8,7 @@
 @inject ILogger<AssistantSetup> Logger
 @inject AssistantConfigService ConfigSvc
 @inject UserProvisioningService ProvisioningSvc
+@inject ContentModerationService ContentModerationService
 @using Microsoft.EntityFrameworkCore
 @using FortressAI.Web.Data
 @using FortressAI.Shared.Models
@@ -155,6 +156,10 @@
                            placeholder="e.g. Fred"
                            @bind="_preferredName"
                            maxlength="100" />
+                    @if (_preferredNameError != null)
+                    {
+                        <div class="setup-field-error">@_preferredNameError</div>
+                    }
                 </div>
                 <div class="setup-field">
                     <label class="setup-label" for="assistantName">Your assistant's name</label>
@@ -164,6 +169,10 @@
                            placeholder="e.g. Aria"
                            @bind="_assistantName"
                            maxlength="100" />
+                    @if (_assistantNameError != null)
+                    {
+                        <div class="setup-field-error">@_assistantNameError</div>
+                    }
                 </div>
                 <div class="setup-field">
                     <label class="setup-label">Accent color</label>
@@ -209,6 +218,8 @@
     private const int TotalSteps = 4;
     private bool _isSubmitting = false;
     private string? _errorMessage;
+    private string? _assistantNameError;
+    private string? _preferredNameError;
 
     // Step 1 — Role
     private string _role = "";
@@ -335,8 +346,34 @@
     {
         _isSubmitting = true;
         _errorMessage = null;
+        _assistantNameError = null;
+        _preferredNameError = null;
         try
         {
+            // Moderation checks before DB write
+            if (!string.IsNullOrWhiteSpace(_assistantName))
+            {
+                var assistantNameResult = await ContentModerationService.CheckNameAsync(_assistantName);
+                if (!assistantNameResult.Passed)
+                {
+                    _assistantNameError = "That assistant name is not appropriate for a workplace app. Please choose another.";
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(_preferredName))
+            {
+                var preferredNameResult = await ContentModerationService.CheckNameAsync(_preferredName);
+                if (!preferredNameResult.Passed)
+                {
+                    _preferredNameError = "That display name is not appropriate for a workplace app. Please choose another.";
+                }
+            }
+            if (_assistantNameError != null || _preferredNameError != null)
+            {
+                _isSubmitting = false;
+                StateHasChanged();
+                return;
+            }
+
             await using var db = await DbFactory.CreateDbContextAsync();
 
             // Update user record
