@@ -2689,10 +2689,11 @@ app.post('/turn', async (req, res) => {
 
             // Inject task gate instructions at end of system prompt
             gateSystemParts.push(`[TASK GATE — read carefully]
-The user has indicated they want to execute a task. Before proceeding, assess whether you have sufficient context.
-- If you have a clear objective, know what files/data are involved, and can execute without guessing: write a one-sentence confirmation of what you will do, then append [TASK_READY] at the very end of your response.
+You are the FAIT assistant. When Task mode is active, you have the ability to launch Claude Code CLI to execute coding tasks on the user's behalf.
+The user has indicated they want to execute a task. Your ONLY job right now is to assess whether you have sufficient requirements to proceed. Do NOT discuss or question your own capabilities.
+- If you have a clear objective, know what files/data are involved, and can execute without guessing: write a one-sentence confirmation of what you will do, then append [TASK_PROCEED] at the very end of your response.
 - If you need one specific piece of information to proceed well: ask that one question conversationally, then append [TASK_HOLD] at the very end of your response.
-Do not explain this assessment process to the user. [TASK_READY] and [TASK_HOLD] will be stripped before display.`);
+Do not explain this assessment process to the user. [TASK_PROCEED] and [TASK_HOLD] will be stripped before display.`);
 
             const gateSystemPrompt = gateSystemParts.join('\n\n---\n\n');
 
@@ -2746,13 +2747,13 @@ Do not explain this assessment process to the user. [TASK_READY] and [TASK_HOLD]
             }
 
             // Parse sentinels
-            const hasTaskReady = gateResponseText.trimEnd().endsWith('[TASK_READY]');
+            const hasTaskProceed = gateResponseText.includes('[TASK_PROCEED]');
             const hasTaskHold = gateResponseText.includes('[TASK_HOLD]');
-            const cleanGateResponse = gateResponseText.replace(/\[TASK_READY\]|\[TASK_HOLD\]/g, '').trim();
+            const cleanGateResponse = gateResponseText.replace(/\[TASK_PROCEED\]|\[TASK_HOLD\]/g, '').trim();
 
-            if (!hasTaskReady) {
-                // TASK_HOLD path (or no sentinel — default to hold)
-                console.log(`[harness] ADO#3576: gate → TASK_HOLD for userId=${userId}, hasTaskHold=${hasTaskHold}`);
+            if (hasTaskHold) {
+                // TASK_HOLD path — model explicitly requested more info
+                console.log(`[harness] ADO#3924: gate → TASK_HOLD for userId=${userId}`);
 
                 // Stream the clean response to user
                 if (cleanGateResponse) {
@@ -2766,8 +2767,13 @@ Do not explain this assessment process to the user. [TASK_READY] and [TASK_HOLD]
                 return;
             }
 
-            // TASK_READY path — send confirmation to user, then fall through to CC spawn
-            console.log(`[harness] ADO#3576: gate → TASK_READY for userId=${userId}`);
+            if (!hasTaskProceed) {
+                // No sentinel present — model gave a confused/capability-confusion response
+                console.warn(`[harness] ADO#3924: gate → no sentinel detected (confused response), treating as TASK_PROCEED. Raw gate response: ${gateResponseText}`);
+            }
+
+            // TASK_PROCEED path — send confirmation to user, then fall through to CC spawn
+            console.log(`[harness] ADO#3924: gate → TASK_PROCEED for userId=${userId}`);
             if (cleanGateResponse) {
                 sendEvent({ type: 'text', content: cleanGateResponse });
             }
