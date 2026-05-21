@@ -150,13 +150,21 @@
         }
         ApplyHeuristics();
         _initialized = true;
-        StateHasChanged();  // triggers re-render so MudSelect resolves label after items are set
     }
 
     protected override void OnParametersSet()
     {
         if (!_initialized) return;
         ApplyHeuristics();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            StateHasChanged();  // ADO#4000: force re-render after MudSelectItem children have registered, so MudSelect resolves label from GUID
+        }
+        await Task.CompletedTask;
     }
 
     private void ApplyHeuristics()

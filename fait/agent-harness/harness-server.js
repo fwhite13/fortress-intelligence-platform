@@ -2691,9 +2691,9 @@ app.post('/turn', async (req, res) => {
             gateSystemParts.push(`[TASK GATE — read carefully]
 You are the FAIT assistant. When Task mode is active, you have the ability to launch Claude Code CLI to execute coding tasks on the user's behalf.
 The user has indicated they want to execute a task. Your ONLY job right now is to assess whether you have sufficient requirements to proceed. Do NOT discuss or question your own capabilities.
-- If you have a clear objective, know what files/data are involved, and can execute without guessing: write a one-sentence confirmation of what you will do, then append [TASK_PROCEED] at the very end of your response.
-- If you need one specific piece of information to proceed well: ask that one question conversationally, then append [TASK_HOLD] at the very end of your response.
-Do not explain this assessment process to the user. [TASK_PROCEED] and [TASK_HOLD] will be stripped before display.`);
+- If you have a clear objective, know what files/data are involved, and can execute without guessing: write a one-sentence confirmation of what you will do, then end your response with [TASK_PROCEED] on its own line.
+- If you need more information: ask your one clarifying question conversationally, then end your response with [TASK_HOLD] on its own line.
+You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on the final line. No other ending is acceptable. [TASK_PROCEED] and [TASK_HOLD] will be stripped before display.`);
 
             const gateSystemPrompt = gateSystemParts.join('\n\n---\n\n');
 
@@ -2772,14 +2772,22 @@ Do not explain this assessment process to the user. [TASK_PROCEED] and [TASK_HOL
             }
 
             if (!hasTaskProceed) {
-                // No sentinel present — model returned a confused or capability-confusion response.
-                // Policy: default to TASK_PROCEED (proceed) rather than TASK_HOLD.
-                // Rationale: holding on ambiguity permanently blocks the user; an extra CC spawn is
-                // cheaper than a stuck task gate. The console.warn provides CloudWatch visibility.
-                console.warn(`[harness] ADO#3924: gate → no sentinel detected (confused response), treating as TASK_PROCEED. Raw gate response: ${gateResponseText}`);
+                // No sentinel — model did not follow the required format.
+                // Safe default: TASK_HOLD. Never silently proceed on ambiguous gate output.
+                // ADO#4002: clarifying questions without sentinel should hold, not spawn CC.
+                console.warn(`[harness] ADO#4002: gate → no sentinel detected, defaulting to TASK_HOLD. Raw gate response: ${gateResponseText}`);
+
+                // Send whatever the model said as a conversational response (may be a clarifying question)
+                if (cleanGateResponse) {
+                    sendEvent({ type: 'text', content: cleanGateResponse });
+                }
+
+                sendEvent({ type: 'task_hold' });
+                endResponse({ type: 'done', exitCode: 0 });
+                return;
             }
 
-            // TASK_PROCEED path — send confirmation to user, then fall through to CC spawn
+            // TASK_PROCEED path — confirmed by explicit [TASK_PROCEED] sentinel
             console.log(`[harness] ADO#3924: gate → TASK_PROCEED for userId=${userId}`);
             if (cleanGateResponse) {
                 sendEvent({ type: 'text', content: cleanGateResponse });
