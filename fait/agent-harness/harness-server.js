@@ -3568,6 +3568,18 @@ You have access to the user's workspace files and memory topics. When the user a
 - Exception: if the user explicitly says "you already checked that" or similar, you may use context.
 - Memory reads (read_memory), file reads, email/calendar lookups — always live, every time.
 - Do not say you are going to call a tool and then not call it. If you say you will check something, check it.`);
+            systemParts.push(`## Task Mode Self-Escalation
+
+When you are in a conversation (non-task mode) and the user wants you to execute a coding task, you may gather requirements conversationally. When you have ALL the information needed to proceed — you know what to build, which files to create/modify, and the complete requirements — end your response with [TASK_READY] on its own line.
+
+The harness will detect [TASK_READY], strip it from the displayed response, and automatically escalate the turn to Task mode (spawning Claude Code CLI on your behalf). [TASK_READY] will be stripped before display — the user will see your response text and then the task mode activates.
+
+Only emit [TASK_READY] when you have everything you need. If you need more information, respond conversationally (do NOT emit [TASK_READY] — wait for the user to provide more info).
+
+Do NOT emit [TASK_READY] if:
+- The user is asking a question that doesn't require a coding task
+- You need more information before you can proceed
+- The task mode toggle is already active (the harness handles that path separately)`);
             if (systemPrompt) systemParts.push(systemPrompt);
 
             // ADO#3398 7.7-B — per-turn workspace brief injection
@@ -4289,6 +4301,20 @@ You have access to the user's workspace files and memory topics. When the user a
                     }
                     console.log(`[harness] ADO#3923: TASK_RESUME detected, emitting task_resume SSE for userId=${userId}`);
                     sendEvent({ type: 'task_resume' });
+                }
+
+                // ADO#4004: TASK_READY self-escalation detection
+                // When Vision emits [TASK_READY] in non-task mode, strip it and emit task_ready SSE
+                // Blazor handles task_ready by setting _taskMode = true and re-sending the last user message
+                if (fullAssistantText.trimEnd().endsWith('[TASK_READY]')) {
+                    // Strip [TASK_READY] from the last text block
+                    const lastTextIdx = assistantContent.map(b => !!b.text).lastIndexOf(true);
+                    if (lastTextIdx >= 0) {
+                        assistantContent[lastTextIdx].text = assistantContent[lastTextIdx].text
+                            .replace(/\[TASK_READY\]\s*$/, '').trimEnd();
+                    }
+                    console.log(`[harness] ADO#4004: TASK_READY detected in non-task-mode response for userId=${userId} — escalating to task mode`);
+                    sendEvent({ type: 'task_ready' });
                 }
 
                 // ADO#3215: if a tool was called, feed the result back to Bedrock and loop

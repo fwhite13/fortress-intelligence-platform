@@ -1,76 +1,77 @@
-@* ADO#3560 — Inline folder picker for CC task turns *@
+@* ADO#4003 — FolderPicker as MudDialog modal *@
 @using FortressAI.Web.Services
 @inject IUserAgentRuntime AgentRuntime
 @inject UserSessionService Session
 @inject ILogger<FolderPicker> Logger
 
-<MudPaper Elevation="1" Class="folder-picker pa-3">
-    <MudText Typo="Typo.caption" Class="folder-picker__label mb-2">Select a working folder for this task:</MudText>
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.caption" Class="folder-picker__label mb-2">Select a working folder for this task:</MudText>
 
-    <MudSelect T="string" Value="@_selectedFolderId" ValueChanged="OnSelectChanged"
-               Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
-               Class="folder-picker__select" AdornmentIcon="@Icons.Material.Filled.Folder"
-               Adornment="Adornment.Start">
-        @foreach (var folder in Folders)
-        {
-            <MudSelectItem T="string" Value="@folder.Id">@folder.Name</MudSelectItem>
-        }
-        <MudSelectItem T="string" Value="@("__new__")">+ New folder</MudSelectItem>
-    </MudSelect>
-
-    @if (_showNewFolderInput)
-    {
-        <div class="folder-picker__new-row d-flex align-center gap-2 mt-2">
-            <MudTextField @bind-Value="_newFolderName"
-                          Placeholder="folder-name"
-                          MaxLength="64"
-                          Variant="Variant.Outlined"
-                          Margin="Margin.Dense"
-                          Immediate="true"
-                          Class="folder-picker__new-input flex-grow-1"
-                          OnKeyDown="OnNewFolderKeyDown" />
-            <MudIconButton Icon="@Icons.Material.Filled.Check"
-                           Size="Size.Small"
-                           Color="Color.Primary"
-                           OnClick="@(() => _ = OnStartTask())"
-                           Title="Confirm folder name" />
-        </div>
-        @if (!string.IsNullOrEmpty(_validationError))
-        {
-            <MudText Color="Color.Error" Typo="Typo.caption" Class="mt-1">@_validationError</MudText>
-        }
-    }
-
-    @{
-        var otherFolders = Folders.Where(f => f.Id != _effectiveSelectedFolderId).ToList();
-    }
-    @if (otherFolders.Any())
-    {
-        <div class="folder-picker__readonly-section mt-3">
-            <MudText Typo="Typo.caption" Class="folder-picker__readonly-label mb-1">Also include (read-only):</MudText>
-            @foreach (var folder in otherFolders)
+        <MudSelect T="string" Value="@_selectedFolderId" ValueChanged="OnSelectChanged"
+                   Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined"
+                   Class="folder-picker__select" AdornmentIcon="@Icons.Material.Filled.Folder"
+                   Adornment="Adornment.Start">
+            @foreach (var folder in Folders)
             {
-                var folderId = folder.Id;
-                var isChecked = _readOnlyFolderIds.Contains(folderId);
-                var isReferenced = _referencedFolderIds.Contains(folderId);
-                <div class="folder-picker__readonly-item d-flex align-center gap-1">
-                    <MudCheckBox T="bool" Value="@isChecked"
-                                 ValueChanged="@(v => OnReadOnlyToggle(folderId, v))"
-                                 Dense="true" Size="Size.Small"
-                                 Color="Color.Primary" />
-                    <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" Class="folder-picker__folder-icon" />
-                    <MudText Typo="Typo.body2" Class="folder-picker__readonly-name">@folder.Name</MudText>
-                    @if (isReferenced)
-                    {
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                                 Color="Color.Info" Class="folder-picker__referenced-chip">Referenced in your message</MudChip>
-                    }
-                </div>
+                <MudSelectItem T="string" Value="@folder.Id">@folder.Name</MudSelectItem>
             }
-        </div>
-    }
+            <MudSelectItem T="string" Value="@("__new__")">+ New folder</MudSelectItem>
+        </MudSelect>
 
-    <div class="folder-picker__action-row d-flex align-center gap-2 mt-3">
+        @if (_showNewFolderInput)
+        {
+            <div class="folder-picker__new-row d-flex align-center gap-2 mt-2">
+                <MudTextField @bind-Value="_newFolderName"
+                              Placeholder="folder-name"
+                              MaxLength="64"
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense"
+                              Immediate="true"
+                              Class="folder-picker__new-input flex-grow-1"
+                              OnKeyDown="OnNewFolderKeyDown" />
+                <MudIconButton Icon="@Icons.Material.Filled.Check"
+                               Size="Size.Small"
+                               Color="Color.Primary"
+                               OnClick="@(() => _ = OnStartTask())"
+                               Title="Confirm folder name" />
+            </div>
+            @if (!string.IsNullOrEmpty(_validationError))
+            {
+                <MudText Color="Color.Error" Typo="Typo.caption" Class="mt-1">@_validationError</MudText>
+            }
+        }
+
+        @{
+            var otherFolders = Folders.Where(f => f.Id != _effectiveSelectedFolderId).ToList();
+        }
+        @if (otherFolders.Any())
+        {
+            <div class="folder-picker__readonly-section mt-3">
+                <MudText Typo="Typo.caption" Class="folder-picker__readonly-label mb-1">Also include (read-only):</MudText>
+                @foreach (var folder in otherFolders)
+                {
+                    var folderId = folder.Id;
+                    var isChecked = _readOnlyFolderIds.Contains(folderId);
+                    var isReferenced = _referencedFolderIds.Contains(folderId);
+                    <div class="folder-picker__readonly-item d-flex align-center gap-1">
+                        <MudCheckBox T="bool" Value="@isChecked"
+                                     ValueChanged="@(v => OnReadOnlyToggle(folderId, v))"
+                                     Dense="true" Size="Size.Small"
+                                     Color="Color.Primary" />
+                        <MudIcon Icon="@Icons.Material.Filled.Folder" Size="Size.Small" Class="folder-picker__folder-icon" />
+                        <MudText Typo="Typo.body2" Class="folder-picker__readonly-name">@folder.Name</MudText>
+                        @if (isReferenced)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                     Color="Color.Info" Class="folder-picker__referenced-chip">Referenced in your message</MudChip>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
                    OnClick="OnStartTask"
                    Disabled="@(_submitting || _confirming)"
@@ -85,15 +86,10 @@
                 <span>Start task</span>
             }
         </MudButton>
-    </div>
-</MudPaper>
+    </DialogActions>
+</MudDialog>
 
 <style>
-    .folder-picker {
-        max-width: 520px;
-        margin: 0.5rem 0 0.5rem 0.5rem;
-    }
-
     .folder-picker__label {
         color: var(--mud-palette-text-secondary);
     }
@@ -117,6 +113,8 @@
 </style>
 
 @code {
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
+
     [Parameter] public List<FolderInfo> Folders { get; set; } = new();
     [Parameter] public string? LastFolderId { get; set; }
     [Parameter] public string ConversationId { get; set; } = "";
@@ -271,10 +269,10 @@
                 return;
             }
 
-            await OnFolderConfirmed.InvokeAsync(new FolderConfirmedArgs(
+            MudDialog.Close(DialogResult.Ok(new FolderConfirmedArgs(
                 _selectedFolderId == "__new__" ? null : _selectedFolderId,
                 resolvedFolderName,
-                readOnlyIds));
+                readOnlyIds)));
         }
         catch (Exception ex)
         {

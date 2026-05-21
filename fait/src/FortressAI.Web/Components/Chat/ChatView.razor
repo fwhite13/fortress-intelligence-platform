@@ -19,6 +19,7 @@
 @inject IUserAgentRuntime AgentRuntime
 @inject IWorkspaceFileService WorkspaceFileSvc
 @inject ChatLayoutState LayoutState
+@inject IDialogService DialogService
 @using Amazon.S3
 @using Amazon.S3.Model
 @inject IAmazonS3 S3
@@ -170,15 +171,6 @@ else
             @if (isStreaming)
             {
                 <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
-            }
-            @if (_folderPickerVisible && _folderPickerConversationId != null)
-            {
-                <FolderPicker @key="@_folderPickerConversationId"
-                    Folders="@_folderPickerFolders"
-                    LastFolderId="@_folderPickerLastFolderId"
-                    ConversationId="@_folderPickerConversationId"
-                    TaskMessage="@_folderPickerTaskMessage"
-                    OnFolderConfirmed="@HandleFolderConfirmed" />
             }
             @if (_taskModeActive && (_taskProgressSteps.Any() || _taskStartTime.HasValue))
             {
@@ -445,13 +437,8 @@ else
     private bool _taskMode = false;
     private bool _taskModeActive = false; // set true on mode_switch event
     private bool _taskResumedThisTurn = false; // ADO#3923: guard finally from undoing task_resume
-    // ADO#3560 — folder picker state
-    private bool _folderPickerVisible = false;
-    private List<FolderInfo> _folderPickerFolders = new();
-    private string? _folderPickerLastFolderId = null;
-    private string? _folderPickerConversationId = null;
+    private bool _taskReadyPending = false; // ADO#4004: set by task_ready SSE, triggers re-submit after turn completes
     private string? _activeTaskFolderName = null;
-    private string _folderPickerTaskMessage = "";
     private string _pendingTaskMessage = "";
 
     // Task Progress Timeline state (ADO#3244)
@@ -1145,24 +1132,50 @@ else
                 }
                 else if (evt.Type == "folder_required")
                 {
-                    // ADO#3560 — folder picker: parse payload and show inline picker
+                    // ADO#4003 — folder_required: open MudDialog instead of inline picker
                     try
                     {
                         var folderPayload = System.Text.Json.JsonSerializer.Deserialize<FolderRequiredPayload>(
                             evt.Payload ?? "{}",
                             new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                        _folderPickerFolders = folderPayload?.Folders?
+                        var parsedFolders = folderPayload?.Folders?
                             .Select(f => new FolderInfo(f.Id, f.Name, f.LastUsedAt))
                             .ToList() ?? new();
-                        _folderPickerLastFolderId = folderPayload?.LastFolderId;
-                        _folderPickerConversationId = folderPayload?.ConversationId ?? conversation?.Id.ToString();
-                        _folderPickerTaskMessage = _pendingTaskMessage;
-                        _folderPickerVisible = true;
-                        StateHasChanged();
+                        var lastFolderId = folderPayload?.LastFolderId;
+                        var conversationId = folderPayload?.ConversationId ?? conversation?.Id.ToString() ?? "";
+                        var taskMessage = _pendingTaskMessage;
+
+                        var parameters = new DialogParameters
+                        {
+                            [nameof(FolderPicker.Folders)] = parsedFolders,
+                            [nameof(FolderPicker.LastFolderId)] = lastFolderId,
+                            [nameof(FolderPicker.ConversationId)] = conversationId,
+                            [nameof(FolderPicker.TaskMessage)] = taskMessage
+                        };
+                        var options = new DialogOptions
+                        {
+                            MaxWidth = MaxWidth.Small,
+                            FullWidth = true,
+                            CloseOnEscapeKey = false,
+                            BackdropClick = false
+                        };
+                        var dialog = await DialogService.ShowAsync<FolderPicker>("Select working folder", parameters, options);
+                        var result = await dialog.Result;
+
+                        if (result != null && !result.Canceled && result.Data is FolderPicker.FolderConfirmedArgs confirmedArgs)
+                        {
+                            HandleFolderConfirmed(confirmedArgs);
+                        }
+                        else
+                        {
+                            // Dialog cancelled — disable task mode (equivalent to task_hold)
+                            _taskMode = false;
+                            StateHasChanged();
+                        }
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogWarning(ex, "[ChatView] Failed to parse folder_required payload");
+                        Logger.LogWarning(ex, "[ChatView] Failed to handle folder_required / open dialog");
                     }
                 }
                 else if (evt.Type == "files_updated")
@@ -1432,10 +1445,9 @@ else
         _ => "🔧"
     };
 
-    // ADO#3560 — called by FolderPicker when user confirms folder selection
+    // ADO#4003 — called when FolderPicker dialog result returns confirmed args
     private void HandleFolderConfirmed(FolderPicker.FolderConfirmedArgs args)
     {
-        _folderPickerVisible = false;
         _activeTaskFolderName = args.FolderName;
         StateHasChanged();
     }
