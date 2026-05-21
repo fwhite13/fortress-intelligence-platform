@@ -488,6 +488,9 @@ else
     private bool _isBriefStreaming = false;
     private string? _currentHarnessSessionId;
     private System.Text.StringBuilder _briefContent = new();
+    // ADO#4001 — tracks whether the current conversation was just created in this session
+    // (lazy creation on first send). Used to prevent spurious resumption brief on ConversationId change.
+    private bool _conversationCreatedThisSession = false;
 
     // Failed-task banner state
     private bool _hasFailedTasks = false;
@@ -621,7 +624,19 @@ else
             // Reset resumption brief state for new conversation
             _briefContent = new System.Text.StringBuilder();
             _resumptionBriefSent = false;
-            _wasColdStart = _agentReady; // ADO#3285 — treat cross-chat navigation as cold start if agent is ready
+            // ADO#4001 — if conversation was just created in this session (lazy creation on first send),
+            // do NOT set _wasColdStart — there is no pre-existing history to resume from.
+            // This prevents a spurious resumption brief from firing after the first user message.
+            if (_conversationCreatedThisSession)
+            {
+                _conversationCreatedThisSession = false; // consume the flag
+                _wasColdStart = false;
+                Logger.LogInformation("[ChatView] OnParametersSetAsync: new conversation created this session — suppressing cold-start resumption brief");
+            }
+            else
+            {
+                _wasColdStart = _agentReady; // ADO#3285 — treat cross-chat navigation as cold start if agent is ready
+            }
             _isBriefStreaming = false;
             _activeToolCalls.Clear();  // ADO#3241
             LayoutState.CloseArtifactSidebar(); // ADO#3456 — reset sidebar on conversation switch
@@ -801,6 +816,7 @@ else
             // Sync local KB toggle state to the new conversation
             await ChatSvc.UpdateConversationKbAsync(conversation.Id, _fortressKbEnabled, _personalKbEnabled, _selectedTeamIds.ToList());
             Logger.LogInformation("[ChatView] Nav.NavigateTo — /chat/{ConversationId} (lazy creation, replace=true)", conversation.Id);
+            _conversationCreatedThisSession = true; // ADO#4001 — guard against spurious resumption brief on nav
             Nav.NavigateTo($"/chat/{conversation.Id}", replace: true);
         }
 
