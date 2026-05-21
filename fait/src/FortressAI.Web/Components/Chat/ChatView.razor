@@ -998,7 +998,8 @@ else
                             return Task.CompletedTask;
                         }));
                     }
-                    fullResponse.Append(evt.Content ?? "");
+                    var textContent = (evt.Content ?? "").Replace("[TASK_RESUME]", "").TrimEnd();
+                    fullResponse.Append(textContent);
                     streamingMessage.Content = fullResponse.ToString();
                     StateHasChanged();
                     await ScrollToBottom();
@@ -1138,7 +1139,7 @@ else
                             .Select(f => new FolderInfo(f.Id, f.Name, f.LastUsedAt))
                             .ToList() ?? new();
                         _folderPickerLastFolderId = folderPayload?.LastFolderId;
-                        _folderPickerConversationId = conversation?.Id.ToString();
+                        _folderPickerConversationId = folderPayload?.ConversationId ?? conversation?.Id.ToString();
                         _folderPickerTaskMessage = _pendingTaskMessage;
                         _folderPickerVisible = true;
                         StateHasChanged();
@@ -1169,6 +1170,12 @@ else
                 {
                     // ADO#3576 — 9.2: gate returned TASK_HOLD; deselect Task toggle
                     _taskMode = false;
+                    StateHasChanged();
+                }
+                else if (evt.Type == "task_resume")
+                {
+                    // ADO#3923: model signaled requirements are now clear — re-enable task mode
+                    _taskMode = true;
                     StateHasChanged();
                 }
                 // "log" events: swallow silently

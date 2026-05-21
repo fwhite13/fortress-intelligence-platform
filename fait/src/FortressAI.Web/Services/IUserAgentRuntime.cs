@@ -115,7 +115,8 @@ public record TaskProgressPayload(
 // ADO#3560 — folder_required SSE payload
 public record FolderRequiredPayload(
     [property: JsonPropertyName("folders")] List<FolderInfo>? Folders,
-    [property: JsonPropertyName("lastFolderId")] string? LastFolderId
+    [property: JsonPropertyName("lastFolderId")] string? LastFolderId,
+    [property: JsonPropertyName("conversationId")] string? ConversationId  // ADO#3923: per-turn conversationId for @key
 );
 
 public record FolderInfo(

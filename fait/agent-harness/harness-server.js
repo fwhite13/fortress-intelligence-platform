@@ -4254,6 +4254,22 @@ You have access to the user's workspace files and memory topics. When the user a
                     assistantTextAccumulator = '';
                 }
 
+                // ADO#3923: TASK_RESUME detection — if model appends [TASK_RESUME], strip it and emit task_resume SSE
+                const fullAssistantText = assistantContent
+                    .filter(b => b.text)
+                    .map(b => b.text)
+                    .join('');
+                if (fullAssistantText.trimEnd().endsWith('[TASK_RESUME]')) {
+                    // Strip [TASK_RESUME] from the last text block so it doesn't appear in saved content
+                    const lastTextIdx = assistantContent.map(b => !!b.text).lastIndexOf(true);
+                    if (lastTextIdx >= 0) {
+                        assistantContent[lastTextIdx].text = assistantContent[lastTextIdx].text
+                            .replace(/\[TASK_RESUME\]\s*$/, '').trimEnd();
+                    }
+                    console.log(`[harness] ADO#3923: TASK_RESUME detected, emitting task_resume SSE for userId=${userId}`);
+                    sendEvent({ type: 'task_resume' });
+                }
+
                 // ADO#3215: if a tool was called, feed the result back to Bedrock and loop
                 if (pendingToolResults.length > 0) {
                     messages.push({ role: 'assistant', content: assistantContent });

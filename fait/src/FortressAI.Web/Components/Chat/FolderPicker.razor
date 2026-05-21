@@ -138,26 +138,19 @@
 
     protected override void OnInitialized()
     {
+        if (Folders.Count > 0)
+        {
+            var hasLastFolder = LastFolderId != null && Folders.Any(f => f.Id == LastFolderId);
+            _selectedFolderId = hasLastFolder ? LastFolderId! : Folders.First().Id;
+        }
+        else
+        {
+            _selectedFolderId = "__new__";
+            _showNewFolderInput = true;
+        }
         ApplyHeuristics();
         _initialized = true;
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender)
-        {
-            if (Folders.Count > 0)
-            {
-                var hasLastFolder = LastFolderId != null && Folders.Any(f => f.Id == LastFolderId);
-                _selectedFolderId = hasLastFolder ? LastFolderId! : Folders.First().Id;
-            }
-            else
-            {
-                _selectedFolderId = "__new__";
-                _showNewFolderInput = true;
-            }
-            StateHasChanged();
-        }
+        StateHasChanged();  // triggers re-render so MudSelect resolves label after items are set
     }
 
     protected override void OnParametersSet()
