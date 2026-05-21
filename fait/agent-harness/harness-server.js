@@ -2765,7 +2765,8 @@ app.post('/turn', async (req, res) => {
                     }
                 }
 
-                sendEvent({ type: 'folder_required', folders, lastFolderId });
+                console.log(`[harness] ADO#3918 folder_required: folderCount=${folders.length} lastFolderId=${lastFolderId} conversationId=${conversationId}`);
+                sendEvent({ type: 'folder_required', folders, lastFolderId, conversationId });
                 console.log(`[harness] ADO#3560 holding for folder-confirm: conversationId=${conversationId} userId=${userId}`);
 
                 try {
