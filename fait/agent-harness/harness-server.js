@@ -2812,7 +2812,7 @@ app.post('/turn', async (req, res) => {
             console.warn(`[harness] folder resolution failed (non-fatal), using userWorkspaceDir: ${folderErr.message}`);
         }
         // ADO#3576 — 9.2 Pre-Task Confirmation Gate
-        // Only fires for explicit ForceTaskMode=true turns (not auto-classified, not scheduled)
+        // ADO#3913: fires for all taskMode=true turns (explicit ForceTaskMode OR auto-classified), except scheduled tasks
         if (taskMode === true && isScheduledTask !== true) {
             console.log(`[harness] ADO#3576: task gate firing for userId=${userId}, taskMode=${taskMode}`);
 
