@@ -173,7 +173,7 @@ else
             }
             @if (_folderPickerVisible && _folderPickerConversationId != null)
             {
-                <FolderPicker
+                <FolderPicker @key="@_folderPickerConversationId"
                     Folders="@_folderPickerFolders"
                     LastFolderId="@_folderPickerLastFolderId"
                     ConversationId="@_folderPickerConversationId"

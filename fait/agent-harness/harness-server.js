@@ -2655,10 +2655,6 @@ app.post('/turn', async (req, res) => {
         console.log(`[harness] /turn: taskMode=true — entering CC spawn path for userId=${userId}`);
         sendEvent({ type: 'mode_switch', payload: JSON.stringify({ reason: 'task_mode' }) });
         sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'start', status: 'starting', message: 'Starting Claude Code task...' }) });
-        // ADO#3560 — Folder picker: fast-path or emit folder_required and hold
-        const isAutoClassified = !forceTaskMode;
-        let taskFolderIdResolved = taskFolderId;
-
         let ended = false;
         const endResponse = (data) => {
             if (ended) return;
@@ -2666,6 +2662,122 @@ app.post('/turn', async (req, res) => {
             sendEvent(data);
             res.end();
         };
+
+        // ADO#3576 — 9.2 Pre-Task Confirmation Gate
+        // ADO#3913: fires for all taskMode=true turns (explicit ForceTaskMode OR auto-classified), except scheduled tasks
+        if (taskMode === true && isScheduledTask !== true) {
+            console.log(`[harness] ADO#3576: task gate firing for userId=${userId}, taskMode=${taskMode}`);
+
+            // Load S3 context for gate assessment (same files as regular Bedrock path)
+            const gatePrefix = S3_PREFIX || `workspaces/${userId}/`;
+            const [gateSoulMd, gateUserMd, gateMemoryMd] = await Promise.all([
+                fetchS3File(`${gatePrefix}assistants/SOUL.md`),
+                fetchS3File(`${gatePrefix}assistants/USER.md`),
+                fetchS3File(`${gatePrefix}memory/MEMORY.md`),
+            ]);
+
+            // Build gate system prompt
+            const gateSystemParts = [];
+            if (pluginAgentSoul) {
+                gateSystemParts.push(`## Plugin Agent Identity\n${pluginAgentSoul}`);
+            } else if (gateSoulMd) {
+                gateSystemParts.push(`## Assistant Identity\n${gateSoulMd}`);
+            }
+            if (gateUserMd) gateSystemParts.push(`## About the User\n${gateUserMd}`);
+            if (gateMemoryMd) gateSystemParts.push(`## Long-Term Memory\n${gateMemoryMd}`);
+            if (systemPrompt) gateSystemParts.push(systemPrompt);
+
+            // Inject task gate instructions at end of system prompt
+            gateSystemParts.push(`[TASK GATE — read carefully]
+The user has indicated they want to execute a task. Before proceeding, assess whether you have sufficient context.
+- If you have a clear objective, know what files/data are involved, and can execute without guessing: write a one-sentence confirmation of what you will do, then append [TASK_READY] at the very end of your response.
+- If you need one specific piece of information to proceed well: ask that one question conversationally, then append [TASK_HOLD] at the very end of your response.
+Do not explain this assessment process to the user. [TASK_READY] and [TASK_HOLD] will be stripped before display.`);
+
+            const gateSystemPrompt = gateSystemParts.join('\n\n---\n\n');
+
+            // Build gate messages (include history for context)
+            const gateMessages = [];
+            if (Array.isArray(history)) {
+                for (const h of history) {
+                    if (h.role && h.content) {
+                        gateMessages.push({
+                            role: h.role === 'assistant' ? 'assistant' : 'user',
+                            content: [{ text: typeof h.content === 'string' ? h.content : (h.Content || '(empty)') }]
+                        });
+                    }
+                }
+            }
+            gateMessages.push({ role: 'user', content: [{ text: message }] });
+
+            // Coalesce consecutive same-role messages (Bedrock constraint)
+            const coalescedGateMessages = [];
+            for (const msg of gateMessages) {
+                const last = coalescedGateMessages[coalescedGateMessages.length - 1];
+                if (last && last.role === msg.role) {
+                    const existingText = last.content[0]?.text || '';
+                    const newText = msg.content[0]?.text || '';
+                    last.content[0].text = `${existingText}\n${newText}`.trim();
+                } else {
+                    coalescedGateMessages.push(JSON.parse(JSON.stringify(msg))); // deep copy
+                }
+            }
+
+            let gateResponseText = '';
+            try {
+                console.log(`[harness] ADO#3576: calling Bedrock gate assessment, modelId=${resolvedModelId}, messages=${coalescedGateMessages.length}`);
+                const gateCmd = new ConverseStreamCommand({
+                    modelId: resolvedModelId,
+                    messages: coalescedGateMessages,
+                    system: [{ text: gateSystemPrompt }],
+                    inferenceConfig: { maxTokens: 512, temperature: 0.5 }
+                });
+                const gateResp = await bedrockClient.send(gateCmd);
+                for await (const event of gateResp.stream) {
+                    if (event.contentBlockDelta?.delta?.text) {
+                        gateResponseText += event.contentBlockDelta.delta.text;
+                    }
+                }
+                console.log(`[harness] ADO#3576: gate response (len=${gateResponseText.length}): ${gateResponseText.substring(0, 200)}`);
+            } catch (gateErr) {
+                // Gate call failed — default to HOLD for safety
+                console.error(`[harness] ADO#3576: gate assessment failed, defaulting to task_hold: ${gateErr.message}`);
+                gateResponseText = '[TASK_HOLD]';
+            }
+
+            // Parse sentinels
+            const hasTaskReady = gateResponseText.trimEnd().endsWith('[TASK_READY]');
+            const hasTaskHold = gateResponseText.includes('[TASK_HOLD]');
+            const cleanGateResponse = gateResponseText.replace(/\[TASK_READY\]|\[TASK_HOLD\]/g, '').trim();
+
+            if (!hasTaskReady) {
+                // TASK_HOLD path (or no sentinel — default to hold)
+                console.log(`[harness] ADO#3576: gate → TASK_HOLD for userId=${userId}, hasTaskHold=${hasTaskHold}`);
+
+                // Stream the clean response to user
+                if (cleanGateResponse) {
+                    sendEvent({ type: 'text', content: cleanGateResponse });
+                }
+
+                // Emit task_hold SSE event — Blazor will deselect Task toggle
+                sendEvent({ type: 'task_hold' });
+
+                endResponse({ type: 'done', exitCode: 0 });
+                return;
+            }
+
+            // TASK_READY path — send confirmation to user, then fall through to CC spawn
+            console.log(`[harness] ADO#3576: gate → TASK_READY for userId=${userId}`);
+            if (cleanGateResponse) {
+                sendEvent({ type: 'text', content: cleanGateResponse });
+            }
+            // Fall through — CC spawn runs below
+        }
+        // End ADO#3576 gate
+
+        // ADO#3560 — Folder picker: fast-path or emit folder_required and hold
+        const isAutoClassified = !forceTaskMode;
+        let taskFolderIdResolved = taskFolderId;
 
         let readOnlyFolderIdsConfirmed = [];  // ADO#3561 — populated by folder confirm or empty on fast-path
 
@@ -2811,117 +2923,6 @@ app.post('/turn', async (req, res) => {
         } catch (folderErr) {
             console.warn(`[harness] folder resolution failed (non-fatal), using userWorkspaceDir: ${folderErr.message}`);
         }
-        // ADO#3576 — 9.2 Pre-Task Confirmation Gate
-        // ADO#3913: fires for all taskMode=true turns (explicit ForceTaskMode OR auto-classified), except scheduled tasks
-        if (taskMode === true && isScheduledTask !== true) {
-            console.log(`[harness] ADO#3576: task gate firing for userId=${userId}, taskMode=${taskMode}`);
-
-            // Load S3 context for gate assessment (same files as regular Bedrock path)
-            const gatePrefix = S3_PREFIX || `workspaces/${userId}/`;
-            const [gateSoulMd, gateUserMd, gateMemoryMd] = await Promise.all([
-                fetchS3File(`${gatePrefix}assistants/SOUL.md`),
-                fetchS3File(`${gatePrefix}assistants/USER.md`),
-                fetchS3File(`${gatePrefix}memory/MEMORY.md`),
-            ]);
-
-            // Build gate system prompt
-            const gateSystemParts = [];
-            if (pluginAgentSoul) {
-                gateSystemParts.push(`## Plugin Agent Identity\n${pluginAgentSoul}`);
-            } else if (gateSoulMd) {
-                gateSystemParts.push(`## Assistant Identity\n${gateSoulMd}`);
-            }
-            if (gateUserMd) gateSystemParts.push(`## About the User\n${gateUserMd}`);
-            if (gateMemoryMd) gateSystemParts.push(`## Long-Term Memory\n${gateMemoryMd}`);
-            if (systemPrompt) gateSystemParts.push(systemPrompt);
-
-            // Inject task gate instructions at end of system prompt
-            gateSystemParts.push(`[TASK GATE — read carefully]
-The user has indicated they want to execute a task. Before proceeding, assess whether you have sufficient context.
-- If you have a clear objective, know what files/data are involved, and can execute without guessing: write a one-sentence confirmation of what you will do, then append [TASK_READY] at the very end of your response.
-- If you need one specific piece of information to proceed well: ask that one question conversationally, then append [TASK_HOLD] at the very end of your response.
-Do not explain this assessment process to the user. [TASK_READY] and [TASK_HOLD] will be stripped before display.`);
-
-            const gateSystemPrompt = gateSystemParts.join('\n\n---\n\n');
-
-            // Build gate messages (include history for context)
-            const gateMessages = [];
-            if (Array.isArray(history)) {
-                for (const h of history) {
-                    if (h.role && h.content) {
-                        gateMessages.push({
-                            role: h.role === 'assistant' ? 'assistant' : 'user',
-                            content: [{ text: typeof h.content === 'string' ? h.content : (h.Content || '(empty)') }]
-                        });
-                    }
-                }
-            }
-            gateMessages.push({ role: 'user', content: [{ text: message }] });
-
-            // Coalesce consecutive same-role messages (Bedrock constraint)
-            const coalescedGateMessages = [];
-            for (const msg of gateMessages) {
-                const last = coalescedGateMessages[coalescedGateMessages.length - 1];
-                if (last && last.role === msg.role) {
-                    const existingText = last.content[0]?.text || '';
-                    const newText = msg.content[0]?.text || '';
-                    last.content[0].text = `${existingText}\n${newText}`.trim();
-                } else {
-                    coalescedGateMessages.push(JSON.parse(JSON.stringify(msg))); // deep copy
-                }
-            }
-
-            let gateResponseText = '';
-            try {
-                console.log(`[harness] ADO#3576: calling Bedrock gate assessment, modelId=${resolvedModelId}, messages=${coalescedGateMessages.length}`);
-                const gateCmd = new ConverseStreamCommand({
-                    modelId: resolvedModelId,
-                    messages: coalescedGateMessages,
-                    system: [{ text: gateSystemPrompt }],
-                    inferenceConfig: { maxTokens: 512, temperature: 0.5 }
-                });
-                const gateResp = await bedrockClient.send(gateCmd);
-                for await (const event of gateResp.stream) {
-                    if (event.contentBlockDelta?.delta?.text) {
-                        gateResponseText += event.contentBlockDelta.delta.text;
-                    }
-                }
-                console.log(`[harness] ADO#3576: gate response (len=${gateResponseText.length}): ${gateResponseText.substring(0, 200)}`);
-            } catch (gateErr) {
-                // Gate call failed — default to HOLD for safety
-                console.error(`[harness] ADO#3576: gate assessment failed, defaulting to task_hold: ${gateErr.message}`);
-                gateResponseText = '[TASK_HOLD]';
-            }
-
-            // Parse sentinels
-            const hasTaskReady = gateResponseText.trimEnd().endsWith('[TASK_READY]');
-            const hasTaskHold = gateResponseText.includes('[TASK_HOLD]');
-            const cleanGateResponse = gateResponseText.replace(/\[TASK_READY\]|\[TASK_HOLD\]/g, '').trim();
-
-            if (!hasTaskReady) {
-                // TASK_HOLD path (or no sentinel — default to hold)
-                console.log(`[harness] ADO#3576: gate → TASK_HOLD for userId=${userId}, hasTaskHold=${hasTaskHold}`);
-
-                // Stream the clean response to user
-                if (cleanGateResponse) {
-                    sendEvent({ type: 'text', content: cleanGateResponse });
-                }
-
-                // Emit task_hold SSE event — Blazor will deselect Task toggle
-                sendEvent({ type: 'task_hold' });
-
-                endResponse({ type: 'done', exitCode: 0 });
-                return;
-            }
-
-            // TASK_READY path — send confirmation to user, then fall through to CC spawn
-            console.log(`[harness] ADO#3576: gate → TASK_READY for userId=${userId}`);
-            if (cleanGateResponse) {
-                sendEvent({ type: 'text', content: cleanGateResponse });
-            }
-            // Fall through — CC spawn runs below
-        }
-        // End ADO#3576 gate
         // Always load S3 context for task mode
         const prefix = S3_PREFIX || `workspaces/${userId}/`;
         const [soulMd, userMd, memoryMd] = await Promise.all([
