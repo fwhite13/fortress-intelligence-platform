@@ -782,7 +782,6 @@ else
         _currentFileSummary = null;
         _activeToolCalls.Clear();  // ADO#3241 — Reset tool call indicators
         _taskModeActive = false; // Reset — will be set by mode_switch event in this turn
-        _taskMode = false; // ADO#3917: reset at start of send — re-sampled from toggle state only this turn
         _taskProgressSteps.Clear();
         _elapsedTimer?.Dispose();
         _elapsedTimer = null;

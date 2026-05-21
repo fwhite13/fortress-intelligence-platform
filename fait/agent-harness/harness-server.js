@@ -2212,19 +2212,12 @@ function pruneToolResults(messages, windowSize = 10) {
 function classifyRequest(message, history) {
     const msg = (message || '').toLowerCase();
 
-    // Incomplete-requirements guard: user wants to discuss scope, not spawn a task immediately.
-    // If message contains an action verb BUT also signals deferred/open-ended scope, stay conversational.
-    const incompleteRequirementsSignals = /\b(talk through|talk it through|thinking about|want to discuss|let me explain|what do you think|can we start|help me think|brainstorm|I('m| am) not sure|I('m| am) still|haven't decided|haven't thought|still deciding|explore options|what would you recommend)\b/i;
-
     // File extension signals — always CC regardless
     const fileExtensions = /\.(docx|xlsx|pptx|csv|pdf|py|js|ts|json|yaml|xml)\b/i;
     if (fileExtensions.test(msg)) return true;
 
     // Action verbs (strong CC signals)
     const actionVerbs = /\b(create|build|generate|write|make|produce|analyze|run|execute|compile|draft|develop|implement|code|script|automate)\b/i;
-
-    // --- NEW: if action verb is present but scope signals are deferred, stay conversational ---
-    if (actionVerbs.test(msg) && incompleteRequirementsSignals.test(msg)) return false;
 
     // Scope signals (multi-step work)
     const scopeSignals = /\b(multi.?step|comprehensive|full|complete|entire|all|section|chapter|report|document|presentation|spreadsheet|dataset)\b/i;
@@ -2820,8 +2813,8 @@ app.post('/turn', async (req, res) => {
         }
         // ADO#3576 — 9.2 Pre-Task Confirmation Gate
         // Only fires for explicit ForceTaskMode=true turns (not auto-classified, not scheduled)
-        if (forceTaskMode === true && isScheduledTask !== true) {
-            console.log(`[harness] ADO#3576: task gate firing for userId=${userId}, forceTaskMode=${forceTaskMode}`);
+        if (taskMode === true && isScheduledTask !== true) {
+            console.log(`[harness] ADO#3576: task gate firing for userId=${userId}, taskMode=${taskMode}`);
 
             // Load S3 context for gate assessment (same files as regular Bedrock path)
             const gatePrefix = S3_PREFIX || `workspaces/${userId}/`;
