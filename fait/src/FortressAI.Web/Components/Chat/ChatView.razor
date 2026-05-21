@@ -1208,11 +1208,19 @@ else
                     _taskMode = true;
                     StateHasChanged();
                 }
+                else if (evt.Type == "task_ready")
+                {
+                    // ADO#4004: model self-escalated to task mode — set task mode and queue re-submission
+                    _taskMode = true;
+                    _taskReadyPending = true;
+                    _taskResumedThisTurn = true; // prevent finally from resetting _taskMode
+                    StateHasChanged();
+                }
                 // "log" events: swallow silently
             }
 
-            // ADO#3923: strip TASK_RESUME sentinel at turn-end (may have split across chunks)
-            var assistantResponseText = fullResponse.ToString().Replace("[TASK_RESUME]", "").TrimEnd();
+            // ADO#3923/4004: strip sentinels at turn-end (may have split across chunks)
+            var assistantResponseText = fullResponse.ToString().Replace("[TASK_RESUME]", "").Replace("[TASK_READY]", "").TrimEnd();
 
             // Save assistant message
             var assistantMsg = await ChatSvc.AddMessageAsync(
@@ -1250,6 +1258,15 @@ else
             _toolCallsFading = false;    // ADO#3455
             streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
             StateHasChanged();
+        }
+
+        // ADO#4004: if task_ready was received, re-submit the message with task mode on
+        if (_taskReadyPending && !string.IsNullOrWhiteSpace(_pendingTaskMessage))
+        {
+            _taskReadyPending = false;
+            var resubmitText = _pendingTaskMessage;
+            _pendingTaskMessage = "";
+            await HandleSend(resubmitText);
         }
     }
 
