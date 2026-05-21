@@ -444,6 +444,7 @@ else
     // Task mode state
     private bool _taskMode = false;
     private bool _taskModeActive = false; // set true on mode_switch event
+    private bool _taskResumedThisTurn = false; // ADO#3923: guard finally from undoing task_resume
     // ADO#3560 — folder picker state
     private bool _folderPickerVisible = false;
     private List<FolderInfo> _folderPickerFolders = new();
@@ -998,8 +999,7 @@ else
                             return Task.CompletedTask;
                         }));
                     }
-                    var textContent = (evt.Content ?? "").Replace("[TASK_RESUME]", "").TrimEnd();
-                    fullResponse.Append(textContent);
+                    fullResponse.Append(evt.Content ?? "");
                     streamingMessage.Content = fullResponse.ToString();
                     StateHasChanged();
                     await ScrollToBottom();
@@ -1175,15 +1175,19 @@ else
                 else if (evt.Type == "task_resume")
                 {
                     // ADO#3923: model signaled requirements are now clear — re-enable task mode
+                    _taskResumedThisTurn = true;
                     _taskMode = true;
                     StateHasChanged();
                 }
                 // "log" events: swallow silently
             }
 
+            // ADO#3923: strip TASK_RESUME sentinel at turn-end (may have split across chunks)
+            var assistantResponseText = fullResponse.ToString().Replace("[TASK_RESUME]", "").TrimEnd();
+
             // Save assistant message
             var assistantMsg = await ChatSvc.AddMessageAsync(
-                conversation.Id, "assistant", fullResponse.ToString(),
+                conversation.Id, "assistant", assistantResponseText,
                 currentModel, inputTokens, outputTokens);
             messages.Add(assistantMsg);
 
@@ -1192,7 +1196,7 @@ else
             {
                 var convId = conversation.Id;
                 var userText = text;
-                var assistantText = fullResponse.ToString();
+                var assistantText = assistantResponseText;
                 _ = Task.Run(async () =>
                 {
                     await ChatSvc.GenerateConversationTitleAsync(convId, userText, assistantText);
@@ -1207,7 +1211,8 @@ else
         finally
         {
             isStreaming = false;
-            _taskMode = false; // reset toggle after send completes
+            _taskMode = _taskResumedThisTurn;   // ADO#3923: preserve if task_resume fired this turn
+            _taskResumedThisTurn = false;        // always reset the guard flag
             _elapsedTimer?.Dispose();
             _elapsedTimer = null;
             _taskModeActive = false;
