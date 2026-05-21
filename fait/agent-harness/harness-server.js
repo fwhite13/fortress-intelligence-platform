@@ -2726,7 +2726,7 @@ Do not explain this assessment process to the user. [TASK_PROCEED] and [TASK_HOL
 
             let gateResponseText = '';
             try {
-                console.log(`[harness] ADO#3576: calling Bedrock gate assessment, modelId=${resolvedModelId}, messages=${coalescedGateMessages.length}`);
+                console.log(`[harness] ADO#3924: calling Bedrock gate assessment, modelId=${resolvedModelId}, messages=${coalescedGateMessages.length}`);
                 const gateCmd = new ConverseStreamCommand({
                     modelId: resolvedModelId,
                     messages: coalescedGateMessages,
@@ -2739,19 +2739,23 @@ Do not explain this assessment process to the user. [TASK_PROCEED] and [TASK_HOL
                         gateResponseText += event.contentBlockDelta.delta.text;
                     }
                 }
-                console.log(`[harness] ADO#3576: gate response (len=${gateResponseText.length}): ${gateResponseText.substring(0, 200)}`);
+                console.log(`[harness] ADO#3924: gate response (len=${gateResponseText.length}): ${gateResponseText.substring(0, 200)}`);
             } catch (gateErr) {
                 // Gate call failed — default to HOLD for safety
-                console.error(`[harness] ADO#3576: gate assessment failed, defaulting to task_hold: ${gateErr.message}`);
+                console.error(`[harness] ADO#3924: gate assessment failed, defaulting to task_hold: ${gateErr.message}`);
                 gateResponseText = '[TASK_HOLD]';
             }
 
             // Parse sentinels
-            const hasTaskProceed = gateResponseText.includes('[TASK_PROCEED]');
-            const hasTaskHold = gateResponseText.includes('[TASK_HOLD]');
+            const trimmed = gateResponseText.trimEnd();
+            const hasTaskProceed = trimmed.endsWith('[TASK_PROCEED]');
+            const hasTaskHold = trimmed.endsWith('[TASK_HOLD]');
             const cleanGateResponse = gateResponseText.replace(/\[TASK_PROCEED\]|\[TASK_HOLD\]/g, '').trim();
 
             if (hasTaskHold) {
+                if (hasTaskProceed) {
+                    console.warn(`[harness] ADO#3924: gate → both TASK_HOLD and TASK_PROCEED detected, TASK_HOLD takes priority. Raw: ${gateResponseText.substring(0, 200)}`);
+                }
                 // TASK_HOLD path — model explicitly requested more info
                 console.log(`[harness] ADO#3924: gate → TASK_HOLD for userId=${userId}`);
 
@@ -2768,7 +2772,10 @@ Do not explain this assessment process to the user. [TASK_PROCEED] and [TASK_HOL
             }
 
             if (!hasTaskProceed) {
-                // No sentinel present — model gave a confused/capability-confusion response
+                // No sentinel present — model returned a confused or capability-confusion response.
+                // Policy: default to TASK_PROCEED (proceed) rather than TASK_HOLD.
+                // Rationale: holding on ambiguity permanently blocks the user; an extra CC spawn is
+                // cheaper than a stuck task gate. The console.warn provides CloudWatch visibility.
                 console.warn(`[harness] ADO#3924: gate → no sentinel detected (confused response), treating as TASK_PROCEED. Raw gate response: ${gateResponseText}`);
             }
 
