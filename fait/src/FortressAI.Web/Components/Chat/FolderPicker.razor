@@ -118,7 +118,6 @@
     [Parameter] public List<FolderInfo> Folders { get; set; } = new();
     [Parameter] public string? LastFolderId { get; set; }
     [Parameter] public string ConversationId { get; set; } = "";
-    [Parameter] public EventCallback<FolderConfirmedArgs> OnFolderConfirmed { get; set; }
     [Parameter] public string TaskMessage { get; set; } = "";
 
     private string _selectedFolderId = "";
