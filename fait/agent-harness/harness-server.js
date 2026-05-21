@@ -2214,7 +2214,7 @@ function classifyRequest(message, history) {
 
     // Incomplete-requirements guard: user wants to discuss scope, not spawn a task immediately.
     // If message contains an action verb BUT also signals deferred/open-ended scope, stay conversational.
-    const incompleteRequirementsSignals = /\b(talk through|talk it through|figure out|not sure|thinking about|want to discuss|let me explain|what do you think|can we start|help me think|help me figure|work through|work it out|brainstorm|I('m| am) not sure|I('m| am) still|haven't decided|haven't thought|still deciding|explore options|what would you recommend)\b/i;
+    const incompleteRequirementsSignals = /\b(talk through|talk it through|thinking about|want to discuss|let me explain|what do you think|can we start|help me think|brainstorm|I('m| am) not sure|I('m| am) still|haven't decided|haven't thought|still deciding|explore options|what would you recommend)\b/i;
 
     // File extension signals — always CC regardless
     const fileExtensions = /\.(docx|xlsx|pptx|csv|pdf|py|js|ts|json|yaml|xml)\b/i;
@@ -2340,7 +2340,8 @@ async function resolveTaskFolder(userId, taskFolderId) {
             );
             if (rows.length > 0) {
                 console.log(`[harness] resolveTaskFolder: found folder id=${taskFolderId} name=${rows[0].name}`);
-                return rows[0];
+                const r0 = rows[0];
+                return { id: String(r0.id), name: String(r0.name), s3_prefix: String(r0.s3_prefix) };
             }
             console.warn(`[harness] resolveTaskFolder: taskFolderId=${taskFolderId} not found for userId=${userId}, falling back`);
         } finally {
@@ -2363,7 +2364,8 @@ async function resolveTaskFolder(userId, taskFolderId) {
                 );
                 if (folderRows.length > 0) {
                     console.log(`[harness] resolveTaskFolder: using last_task_folder_id=${lastFolderId} name=${folderRows[0].name}`);
-                    return folderRows[0];
+                    const r1 = folderRows[0];
+                    return { id: String(r1.id), name: String(r1.name), s3_prefix: String(r1.s3_prefix) };
                 }
             }
         } finally {
@@ -2380,7 +2382,8 @@ async function resolveTaskFolder(userId, taskFolderId) {
             );
             if (existing.length > 0) {
                 console.log(`[harness] resolveTaskFolder: using existing general folder id=${existing[0].id}`);
-                return existing[0];
+                const r2 = existing[0];
+                return { id: String(r2.id), name: String(r2.name), s3_prefix: String(r2.s3_prefix) };
             }
             // Create it
             const newId = crypto.randomUUID();
