@@ -2502,7 +2502,7 @@ app.post('/turn', async (req, res) => {
         'claude-sonnet-4-6':  'us.anthropic.claude-sonnet-4-6',
         'claude-opus-4-6':    'us.anthropic.claude-opus-4-6-v1',
         'claude-haiku-4-5':   'us.anthropic.claude-haiku-4-5-20251001-v1:0',
-        'haiku':              'us.anthropic.claude-haiku-4-5-20251014-v1:0',
+        'haiku':              'us.anthropic.claude-haiku-4-5-20251001-v1:0',
     };
     const resolvedModelId = BEDROCK_MODEL_MAP[modelId] ?? modelId;
 
@@ -3087,7 +3087,7 @@ Be concise and specific. Output only the brief, no preamble.`;
         // ADO#3575: first try Haiku-generated task brief; fall back to truncated recap on failure
         const hasHistory = Array.isArray(history) && history.length > 0;
         if (hasHistory) {
-            const haiku3575ModelId = BEDROCK_MODEL_MAP['haiku'] || 'us.anthropic.claude-haiku-4-5-20251014-v1:0';
+            const haiku3575ModelId = BEDROCK_MODEL_MAP['haiku'] || 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
             const generatedBrief = await generateTaskBrief(history, bedrockClient, haiku3575ModelId);
             if (generatedBrief) {
                 contextParts.push(`## Task Brief (Generated)\n${generatedBrief}`);
