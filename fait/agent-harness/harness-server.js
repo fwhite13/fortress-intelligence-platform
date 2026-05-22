@@ -3291,6 +3291,17 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
             }
         }
 
+        // ADO#4035 cycle 2 — inject CLAUDE.md workspace rules into CC context
+        let claudeMdContent = '';
+        try {
+            claudeMdContent = fs.readFileSync(path.join(__dirname, 'CLAUDE.md'), 'utf8');
+        } catch (_) {
+            // non-fatal — CLAUDE.md missing just means no workspace rules injected
+        }
+        if (claudeMdContent) {
+            contextParts.push(`## Workspace Rules\n${claudeMdContent}`);
+        }
+
         const fullContext = contextParts.join('\n\n---\n\n');
         const briefContent = fullContext
             ? `${fullContext}\n\n---\n\nUser: ${message}`
