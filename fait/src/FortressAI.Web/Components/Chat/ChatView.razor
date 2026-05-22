@@ -1187,6 +1187,11 @@ else
                         if (payload?.Files?.Count > 0)
                         {
                             _currentFileSummary = payload;
+                            // ADO#4033: refresh artifact indicator live
+                            if (conversation != null)
+                            {
+                                _conversationArtifacts = await WorkspaceFileSvc.GetConversationArtifactsAsync(conversation.Id);
+                            }
                             StateHasChanged();
                         }
                     }
@@ -1266,6 +1271,8 @@ else
             _taskReadyPending = false;
             var resubmitText = _pendingTaskMessage;
             _pendingTaskMessage = "";
+            _taskModeActive = true;   // ADO#4032: activate UI immediately on TASK_READY re-submit
+            StateHasChanged();
             await HandleSend(resubmitText);
         }
     }

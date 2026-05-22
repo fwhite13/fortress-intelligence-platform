@@ -74,7 +74,7 @@ public class WorkspaceFileService : IWorkspaceFileService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.WorkspaceUploads
-            .Where(f => f.ConversationId == conversationId.ToString() && f.Source == "assistant")
+            .Where(f => f.ConversationId == conversationId.ToString() && (f.Source == "assistant" || f.Source == "cc"))
             .OrderBy(f => f.CreatedAt)
             .ToListAsync(ct);
     }
@@ -84,7 +84,7 @@ public class WorkspaceFileService : IWorkspaceFileService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.WorkspaceUploads
-            .Where(f => f.UserId == userId && f.Source == "assistant")
+            .Where(f => f.UserId == userId && (f.Source == "assistant" || f.Source == "cc"))
             .OrderByDescending(f => f.CreatedAt)
             .ToListAsync(ct);
     }
