@@ -160,6 +160,10 @@ else
                     🔍 @(_currentToolName ?? "Calling tool")...
                 </MudAlert>
             }
+            @if (isStreaming)
+            {
+                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
+            }
             @if (_activeToolCalls.Any() || _toolCallsFading)
             {
                 <div class="tool-call-indicator-list @(_toolCallsFading ? "tool-call-list-fading" : "")">
@@ -167,14 +171,10 @@ else
                     {
                         <div class="tool-call-indicator @(tc.Status == "calling" ? "tool-call-active" : tc.Status == "error" ? "tool-call-error" : "tool-call-done")">
                             <span class="tool-call-emoji @(tc.Status == "calling" ? "tool-call-emoji-spin" : "")">@GetToolEmoji(tc.ToolName, tc.Server)</span>
-                            <span class="tool-call-summary">@tc.Summary</span>
+                            <span class="tool-call-summary">@GetToolLabel(tc.ToolName, tc.Server, tc.Summary)</span>
                         </div>
                     }
                 </div>
-            }
-            @if (isStreaming)
-            {
-                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
             }
 
             @if (_currentFileSummary != null && _currentFileSummary.Files.Count > 0)
@@ -1086,10 +1086,10 @@ else
                                         _taskElapsed = elapsed.ToString(@"mm\:ss");
                                         InvokeAsync(StateHasChanged);
                                     }
-                                }, null, 0, 1000);
+                                }, null, 0, 500);
                             }
                             var stepMessage = progressPayload.Message
-                                ?? (progressPayload.Step == "tool_use" ? $"Calling {progressPayload.ToolName}..." : progressPayload.Step ?? "Working...");
+                                ?? GetToolLabel(progressPayload.ToolName ?? "cc", "task", null);
                             var toolName = progressPayload.ToolName ?? "cc";
                             var isFinal = progressPayload.Step == "done" || progressPayload.Status == "done";
                             _activeToolCalls.Add(new ToolCallEvent("task", toolName, isFinal ? "done" : "calling", stepMessage, DateTime.UtcNow));
@@ -1441,6 +1441,38 @@ else
         _ => "🔧"
     };
 
+    // ADO#4056 — human-readable labels for tool chips (raw CC tool names → readable text)
+    private static string GetToolLabel(string toolName, string server, string? summary = null)
+    {
+        // If summary already looks human-readable (no underscores, not a "Calling X..." fallback), use it
+        if (!string.IsNullOrWhiteSpace(summary) && !summary.Contains('_') && !summary.StartsWith("Calling "))
+            return summary;
+
+        return toolName switch
+        {
+            "read_memory" => "Reading memory...",
+            "write_memory" => "Saving to memory...",
+            "search_memory" => "Searching memory...",
+            "read_file" or "read_workspace_file" => "Reading file...",
+            "write_file" => "Saving file...",
+            "list_files" or "list_workspace_files" => "Listing files...",
+            "search_kb" or "retrieve_kb" => "Searching knowledge base...",
+            "graph_list_emails" => "Reading inbox...",
+            "graph_get_email" => "Reading email...",
+            "graph_send_email" => "Sending email...",
+            "graph_list_calendar_events" => "Checking calendar...",
+            "create_document" => "Creating document...",
+            "str_replace_based_edit_tool" or "str_replace_editor" => "Editing file...",
+            "bash" or "computer" => "Running command...",
+            var t when t.Contains("search") => "Searching...",
+            var t when t.Contains("read") || t.Contains("get") => "Reading...",
+            var t when t.Contains("write") || t.Contains("save") || t.Contains("create") => "Saving...",
+            var t when t.Contains("list") => "Listing...",
+            var t when t.Contains("exec") || t.Contains("run") || t.Contains("bash") => "Running...",
+            _ => !string.IsNullOrWhiteSpace(summary) ? summary : "Working...",
+        };
+    }
+
     // ADO#4003 — called when FolderPicker dialog result returns confirmed args
     private void HandleFolderConfirmed(FolderPicker.FolderConfirmedArgs args)
     {
@@ -1448,7 +1480,10 @@ else
         StateHasChanged();
     }
 
+    private const int ToolChipMinDisplayMs = 1500;
+
     // ADO#3241 — Handle tool_call SSE events
+    // ADO#4055 — minimum 1500ms display duration before chip transitions to "done"
     private void HandleToolCallEvent(ToolCallPayload payload)
     {
         var server = payload.Server ?? "";
@@ -1465,7 +1500,27 @@ else
             var idx = _activeToolCalls.FindLastIndex(t => t.ToolName == toolName && t.Status == "calling");
             if (idx >= 0)
             {
-                _activeToolCalls[idx] = new ToolCallEvent(server, toolName, status, summary, _activeToolCalls[idx].Timestamp);
+                var startTime = _activeToolCalls[idx].Timestamp;
+                var elapsed = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                var delay = Math.Max(0, ToolChipMinDisplayMs - elapsed);
+
+                var capturedIdx = idx;
+                var updatedEvent = new ToolCallEvent(server, toolName, status, summary, startTime);
+
+                if (delay <= 0)
+                {
+                    _activeToolCalls[capturedIdx] = updatedEvent;
+                }
+                else
+                {
+                    _ = Task.Delay((int)delay).ContinueWith(_ => InvokeAsync(() =>
+                    {
+                        if (capturedIdx < _activeToolCalls.Count)
+                            _activeToolCalls[capturedIdx] = updatedEvent;
+                        StateHasChanged();
+                        return Task.CompletedTask;
+                    }));
+                }
             }
         }
     }
