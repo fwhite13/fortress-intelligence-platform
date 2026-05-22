@@ -438,6 +438,7 @@ else
     private bool _taskModeActive = false; // set true on mode_switch event
     private bool _taskResumedThisTurn = false; // ADO#3923: guard finally from undoing task_resume
     private bool _taskReadyPending = false; // ADO#4004: set by task_ready SSE, triggers re-submit after turn completes
+    private bool _taskReadyResubmit = false; // ADO#4032: prevents HandleSend from resetting _taskModeActive on TASK_READY re-submit
     private string? _activeTaskFolderName = null;
     private string _pendingTaskMessage = "";
 
@@ -784,7 +785,9 @@ else
         _lastKbResult = null;  // Clear stale result before new send
         _currentFileSummary = null;
         _activeToolCalls.Clear();  // ADO#3241 — Reset tool call indicators
-        _taskModeActive = false; // Reset — will be set by mode_switch event in this turn
+        if (!_taskReadyResubmit)
+            _taskModeActive = false; // Reset — will be set by mode_switch event in this turn
+        _taskReadyResubmit = false;  // ADO#4032: clear after consuming
         _taskProgressSteps.Clear();
         _elapsedTimer?.Dispose();
         _elapsedTimer = null;
@@ -1271,8 +1274,9 @@ else
             _taskReadyPending = false;
             var resubmitText = _pendingTaskMessage;
             _pendingTaskMessage = "";
-            _taskModeActive = true;   // ADO#4032: activate UI immediately on TASK_READY re-submit
-            StateHasChanged();
+            _taskModeActive = true;        // ADO#4032: activate UI immediately
+            _taskReadyResubmit = true;     // ADO#4032: guard HandleSend reset
+            await InvokeAsync(StateHasChanged);
             await HandleSend(resubmitText);
         }
     }
