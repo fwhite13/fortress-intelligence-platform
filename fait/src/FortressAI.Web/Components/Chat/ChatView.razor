@@ -70,7 +70,11 @@ else
             @if (_taskModeActive)
             {
                 <div class="chat-task-indicator">
-                    <i class="fas fa-tasks"></i> Task Mode
+                    <i class="fas fa-tasks"></i>
+                    <span>⚡ Task Mode@(_taskStartTime.HasValue ? $" · {_taskElapsed}" : "")</span>
+                    <button class="chat-task-indicator__cancel" @onclick="CancelTask" title="Cancel task">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
             }
         </div>
@@ -172,37 +176,7 @@ else
             {
                 <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
             }
-            @if (_taskModeActive && (_taskProgressSteps.Any() || _taskStartTime.HasValue))
-            {
-                <div class="task-progress-timeline">
-                    <div class="task-progress-timeline__header">
-                        <i class="fas fa-tasks"></i>
-                        <span>Task in progress@(string.IsNullOrEmpty(_activeTaskFolderName) ? "" : $" · /{_activeTaskFolderName}")</span>
-                        <span class="task-progress-timeline__elapsed">@_taskElapsed</span>
-                        <button class="task-progress-timeline__cancel" @onclick="CancelTask" title="Cancel task">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                    <div class="task-progress-timeline__steps">
-                        @foreach (var step in _taskProgressSteps.TakeLast(8))
-                        {
-                            var stepLocal = step;
-                            <div class="task-progress-timeline__step task-progress-timeline__step--@stepLocal.Status">
-                                @if (stepLocal.ToolName != null)
-                                {
-                                    <i class="fas fa-wrench"></i>
-                                }
-                                else
-                                {
-                                    <i class="fas fa-circle-notch fa-spin"></i>
-                                }
-                                <span class="task-progress-timeline__step-msg">@stepLocal.Message</span>
-                                <span class="task-progress-timeline__step-time">@stepLocal.At.ToString("HH:mm:ss")</span>
-                            </div>
-                        }
-                    </div>
-                </div>
-            }
+
             @if (_currentFileSummary != null && _currentFileSummary.Files.Count > 0)
             {
                 <div class="file-summary-block">
@@ -443,11 +417,9 @@ else
     private string _pendingTaskMessage = "";
 
     // Task Progress Timeline state (ADO#3244)
-    private List<TaskProgressStep> _taskProgressSteps = new();
     private DateTime? _taskStartTime;
     private string _taskElapsed = "00:00";
     private System.Threading.Timer? _elapsedTimer;
-    private record TaskProgressStep(string Status, string? ToolName, string Message, DateTime At);
 
     private void CancelTask()
     {
@@ -455,7 +427,7 @@ else
         _elapsedTimer?.Dispose();
         _elapsedTimer = null;
         _taskModeActive = false;
-        _taskProgressSteps.Clear();
+        _activeToolCalls.Clear();
         StateHasChanged();
     }
     private FeedbackModal? _feedbackModal;
@@ -788,7 +760,6 @@ else
         if (!_taskReadyResubmit)
             _taskModeActive = false; // Reset — will be set by mode_switch event in this turn
         _taskReadyResubmit = false;  // ADO#4032: clear after consuming
-        _taskProgressSteps.Clear();
         _elapsedTimer?.Dispose();
         _elapsedTimer = null;
         // ADO#3308 — Clear in-memory resumption brief when user sends their first message
@@ -1106,7 +1077,6 @@ else
                             if (progressPayload.Step == "start")
                             {
                                 _taskStartTime = DateTime.UtcNow;
-                                _taskProgressSteps.Clear();
                                 _elapsedTimer?.Dispose();
                                 _elapsedTimer = new System.Threading.Timer(_ =>
                                 {
@@ -1120,11 +1090,9 @@ else
                             }
                             var stepMessage = progressPayload.Message
                                 ?? (progressPayload.Step == "tool_use" ? $"Calling {progressPayload.ToolName}..." : progressPayload.Step ?? "Working...");
-                            _taskProgressSteps.Add(new TaskProgressStep(
-                                progressPayload.Status ?? "running",
-                                progressPayload.ToolName,
-                                stepMessage,
-                                DateTime.UtcNow));
+                            var toolName = progressPayload.ToolName ?? "cc";
+                            var isFinal = progressPayload.Step == "done" || progressPayload.Status == "done";
+                            _activeToolCalls.Add(new ToolCallEvent("task", toolName, isFinal ? "done" : "calling", stepMessage, DateTime.UtcNow));
                             StateHasChanged();
                         }
                     }
@@ -1965,70 +1933,21 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
     background: var(--color-accent-light, var(--color-background-subtle));
     border-radius: var(--radius-sm);
-}
-/* ADO#3244 — Task Progress Timeline */
-.task-progress-timeline {
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-surface-elevated, var(--color-surface));
-    padding: var(--space-3, 0.75rem);
-    margin: var(--space-2, 0.5rem) var(--space-4, 1rem);
-    font-size: var(--text-sm, 0.875rem);
-}
-.task-progress-timeline__header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2, 0.5rem);
-    font-weight: var(--font-medium, 600);
-    margin-bottom: var(--space-2, 0.5rem);
-    color: var(--color-text-primary);
-}
-.task-progress-timeline__elapsed {
-    margin-left: auto;
     font-variant-numeric: tabular-nums;
-    color: var(--color-text-secondary);
 }
-.task-progress-timeline__cancel {
+.chat-task-indicator__cancel {
     background: none;
     border: none;
     cursor: pointer;
-    color: var(--color-text-secondary);
-    padding: var(--space-1, 0.25rem);
+    color: var(--color-accent);
+    padding: 0 var(--space-1, 0.25rem);
     border-radius: var(--radius-sm);
     transition: color 0.15s;
+    font-size: var(--text-sm, 0.875rem);
+    line-height: 1;
 }
-.task-progress-timeline__cancel:hover {
+.chat-task-indicator__cancel:hover {
     color: var(--color-error);
-}
-.task-progress-timeline__steps {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1, 0.25rem);
-}
-.task-progress-timeline__step {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2, 0.5rem);
-    color: var(--color-text-secondary);
-    padding: var(--space-1, 0.25rem) 0;
-}
-.task-progress-timeline__step--done {
-    color: var(--color-success);
-}
-.task-progress-timeline__step--error {
-    color: var(--color-error);
-}
-.task-progress-timeline__step-msg {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.task-progress-timeline__step-time {
-    font-size: var(--text-xs, 0.75rem);
-    color: var(--color-text-tertiary, var(--color-text-secondary));
-    font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
 }
 .resumption-brief-card {
     margin: var(--space-3, 0.75rem) var(--space-4, 1rem);
