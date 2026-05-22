@@ -44,6 +44,7 @@ RUN npm install --production
 # Install Stitch MCP globally
 RUN npm install -g stitch-mcp
 COPY harness-server.js ./
+COPY CLAUDE.md ./
 
 # Create non-root user for Claude Code CLI compatibility (refuses to run as root)
 RUN groupadd -r harness && useradd -r -g harness -m -d /home/harness harness
