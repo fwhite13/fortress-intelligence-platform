@@ -3035,16 +3035,19 @@ You have access to the user's workspace files and memory topics. When the user a
         }
 
         // ADO#3575 — async helper: generate structured task brief via Haiku summarization
-        async function generateTaskBrief(hist, bClient, mId) {
+        async function generateTaskBrief(hist, bClient, mId, workspaceFiles) {
             if (!hist || hist.length <= 2) return null;
             try {
+                const filesSection = workspaceFiles && workspaceFiles.length > 0
+                    ? `\n\n## Existing Workspace Files\n${workspaceFiles.map(f => `- ${f}`).join('\n')}`
+                    : '\n\n## Existing Workspace Files\nNone';
                 const summarizationPrompt = `Produce a structured task brief for a coding agent about to execute a user's request. Based on the conversation history, include:
 - Objective: one sentence — what the agent should produce
 - Files involved: list each file with its role (e.g. "report.xlsx = source data")
 - Constraints and preferences: bullet list of anything the user specified
 - Expected output: file type, name if specified, destination folder
 
-Be concise and specific. Output only the brief, no preamble.`;
+Be concise and specific. Output only the brief, no preamble.${filesSection}`;
 
                 const response = await bClient.send(new ConverseCommand({
                     modelId: mId,
@@ -3088,7 +3091,16 @@ Be concise and specific. Output only the brief, no preamble.`;
         const hasHistory = Array.isArray(history) && history.length > 0;
         if (hasHistory) {
             const haiku3575ModelId = BEDROCK_MODEL_MAP['haiku'] || 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
-            const generatedBrief = await generateTaskBrief(history, bedrockClient, haiku3575ModelId);
+            // ADO#4035: build workspace file list for brief context
+            let briefWorkspaceFiles = [];
+            try {
+                if (folderLocalDir) {
+                    briefWorkspaceFiles = fs.readdirSync(folderLocalDir).filter(f => !f.startsWith('.'));
+                }
+            } catch (_wfErr) {
+                // non-fatal
+            }
+            const generatedBrief = await generateTaskBrief(history, bedrockClient, haiku3575ModelId, briefWorkspaceFiles);
             if (generatedBrief) {
                 contextParts.push(`## Task Brief (Generated)\n${generatedBrief}`);
                 console.log(`[harness] /turn: injected Haiku-generated task brief (len=${generatedBrief.length}) into CC context`);
@@ -3570,16 +3582,18 @@ You have access to the user's workspace files and memory topics. When the user a
 - Do not say you are going to call a tool and then not call it. If you say you will check something, check it.`);
             systemParts.push(`## Task Mode Self-Escalation
 
-When you are in a conversation (non-task mode) and the user wants you to execute a coding task, you may gather requirements conversationally. When you have ALL the information needed to proceed — you know what to build, which files to create/modify, and the complete requirements — end your response with [TASK_READY] on its own line.
+When the user wants you to execute a coding task and you have all information needed to proceed (clear objective, specific files or functionality to create/modify, no ambiguous requirements), you MUST emit [TASK_READY] at the end of your response on its own line.
 
-The harness will detect [TASK_READY], strip it from the displayed response, and automatically escalate the turn to Task mode (spawning Claude Code CLI on your behalf). [TASK_READY] will be stripped before display — the user will see your response text and then the task mode activates.
+Do not ask for confirmation before emitting [TASK_READY]. Do not wait for the user to say "go ahead" or "start" or "do it". Do not ask if they are ready. When you have what you need, escalate immediately.
 
-Only emit [TASK_READY] when you have everything you need. If you need more information, respond conversationally (do NOT emit [TASK_READY] — wait for the user to provide more info).
+The harness will detect [TASK_READY], strip it from the displayed response, and automatically spawn Claude Code CLI on your behalf to execute the task.
+
+Only ask clarifying questions when requirements are genuinely incomplete — you are missing specific information needed to write correct code (e.g., unknown file path, ambiguous behavior, missing data structure). Do not ask clarifying questions out of caution when the intent is already clear.
 
 Do NOT emit [TASK_READY] if:
-- The user is asking a question that doesn't require a coding task
-- You need more information before you can proceed
-- The task mode toggle is already active (the harness handles that path separately)`);
+- Task mode is already active (you are already in a CC spawn context)
+- The user is asking a question, not requesting a task
+- You genuinely need more information to proceed (state what you need and wait)`);
             if (systemPrompt) systemParts.push(systemPrompt);
 
             // ADO#3398 7.7-B — per-turn workspace brief injection
