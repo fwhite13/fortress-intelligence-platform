@@ -2984,7 +2984,17 @@ You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on
 
 Before any substantive response about prior work, decisions, people, or preferences: call \`read_memory\` with the relevant slug.
 When the user states a preference, makes a decision, or shares a new fact worth keeping: call \`write_memory\`.
-When the user asks to save something to workspace: call \`write_file\`.
+
+## MANDATORY: Workspace File Saving
+CRITICAL: When the user asks you to save, create, write, or generate a file for their workspace — you MUST call the \`write_file\` tool. Do NOT describe what you would write. Do NOT provide the content as a text response. ALWAYS call \`write_file\` with the actual content. This is non-negotiable. Saying "I've saved..." without calling write_file is incorrect behavior.
+
+Triggers that REQUIRE a write_file tool call (not an exhaustive list):
+- "save this to my workspace"
+- "create a file called..."
+- "write a [document/report/summary] to workspace"
+- "save [content] as [filename]"
+- Any request to persist text as a named file
+
 When referencing prior artifacts: call \`list_workspace_files(type=generated)\` first to see what exists.`);
         contextParts.push(buildToolManifestSection(enabledMcpSlugs));
         contextParts.push(`## Context Awareness
@@ -3357,10 +3367,17 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                 }
                 const evtType = parsed.type;
                 if (evtType === 'assistant' && parsed.message?.content) {
+                    // ADO#4048 — filter CC narration: suppress text blocks from messages that also contain tool_use
+                    const hasToolUse = parsed.message.content.some(b => b.type === 'tool_use');
                     for (const block of parsed.message.content) {
                         if (block.type === 'text' && block.text) {
-                            ccTextEmitted = true;
-                            sendEvent({ type: 'text', content: scrubSecrets(block.text) });
+                            if (hasToolUse) {
+                                // Narration text co-located with tool calls — suppress from UI, log only
+                                console.log(`[CC spawn] narration suppressed (tool_use colocated, ${block.text.length} chars) userId=${userId}`);
+                            } else {
+                                ccTextEmitted = true;
+                                sendEvent({ type: 'text', content: scrubSecrets(block.text) });
+                            }
                         } else if (block.type === 'tool_use') {
                             toolUseMap.set(block.id, block.name || 'tool');
                             const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
@@ -3579,7 +3596,17 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
 
 Before any substantive response about prior work, decisions, people, or preferences: call \`read_memory\` with the relevant slug.
 When the user states a preference, makes a decision, or shares a new fact worth keeping: call \`write_memory\`.
-When the user asks to save something to workspace: call \`write_file\`.
+
+## MANDATORY: Workspace File Saving
+CRITICAL: When the user asks you to save, create, write, or generate a file for their workspace — you MUST call the \`write_file\` tool. Do NOT describe what you would write. Do NOT provide the content as a text response. ALWAYS call \`write_file\` with the actual content. This is non-negotiable. Saying "I've saved..." without calling write_file is incorrect behavior.
+
+Triggers that REQUIRE a write_file tool call (not an exhaustive list):
+- "save this to my workspace"
+- "create a file called..."
+- "write a [document/report/summary] to workspace"
+- "save [content] as [filename]"
+- Any request to persist text as a named file
+
 When referencing prior artifacts: call \`list_workspace_files(type=generated)\` first to see what exists.`);
             systemParts.push(buildToolManifestSection(enabledMcpSlugs));
             systemParts.push(`## Context Awareness
