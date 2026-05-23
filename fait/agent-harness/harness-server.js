@@ -3385,7 +3385,7 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                         if (block.type === 'text' && block.text) {
                             if (hasToolUse) {
                                 // Narration text co-located with tool calls — suppress from UI, log only
-                                console.log(`[CC spawn] narration suppressed (tool_use colocated, ${block.text.length} chars) userId=${userId}`);
+                                console.debug(`[CC spawn] narration suppressed (tool_use colocated, ${block.text.length} chars) userId=${userId}`);
                             } else {
                                 ccTextEmitted = true;
                                 sendEvent({ type: 'text', content: scrubSecrets(block.text) });
@@ -3418,6 +3418,7 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                 } else if (evtType === 'result') {
                     if (!ccTextEmitted && parsed.result) {
                         sendEvent({ type: 'text', content: scrubSecrets(parsed.result) });
+                        ccTextEmitted = true;
                     }
                     const resultText = parsed.result || '';
                     if (resultText) {
