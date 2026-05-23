@@ -32,6 +32,23 @@
                 <MudButton Variant="Variant.Outlined" OnClick="LoadPreview">Retry</MudButton>
             </div>
         }
+        else if (!_canPreview)
+        {
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 16px; padding: 32px; text-align: center;">
+                <MudIcon Icon="@Icons.Material.Filled.InsertDriveFile" Size="Size.Large" Style="opacity: 0.4;" />
+                <MudText Typo="Typo.body1" Style="opacity: 0.6;">Preview not available for this file type.</MudText>
+                @if (!string.IsNullOrEmpty(_rawPresignedUrl))
+                {
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Download"
+                               Href="@_rawPresignedUrl"
+                               Target="_blank">
+                        Download File
+                    </MudButton>
+                }
+            </div>
+        }
         else if (_presignedUrl != null)
         {
             <iframe src="@_presignedUrl"
@@ -43,7 +60,14 @@
 </div>
 
 @code {
+    private static readonly HashSet<string> PreviewableExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pdf", ".doc", ".docx", ".ppt", ".pptx"
+    };
+
     private string? _presignedUrl;
+    private string? _rawPresignedUrl;
+    private bool _canPreview;
     private bool _loading;
     private string? _error;
     private ArtifactRef? _loadedFor;
@@ -73,13 +97,31 @@
         _loading = true;
         _error = null;
         _presignedUrl = null;
+        _rawPresignedUrl = null;
+        _canPreview = false;
         StateHasChanged();
 
         try
         {
-            var url = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(artifact.S3Key, expiryMinutes: 30);
-            var encoded = Uri.EscapeDataString(url);
-            _presignedUrl = $"https://view.officeapps.live.com/op/embed.aspx?src={encoded}";
+            var rawUrl = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(artifact.S3Key, expiryMinutes: 30);
+            _rawPresignedUrl = rawUrl;
+
+            var ext = Path.GetExtension(artifact.Filename);
+            _canPreview = PreviewableExtensions.Contains(ext);
+
+            if (_canPreview)
+            {
+                if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    _presignedUrl = rawUrl;
+                }
+                else
+                {
+                    var encoded = Uri.EscapeDataString(rawUrl);
+                    _presignedUrl = $"https://view.officeapps.live.com/op/embed.aspx?src={encoded}";
+                }
+            }
+
             _loadedFor = artifact;
         }
         catch (Exception ex)

@@ -437,6 +437,7 @@
 @* ── Version history panel ── *@
 @if (_versionPanelVisible && _versionPanelFile != null)
 {
+    <div class="workspace-version-backdrop" @onclick="CloseVersionPanel"></div>
     <div class="workspace-version-panel">
         <div class="workspace-version-panel-header">
             <MudText Typo="Typo.h6">Version History: @_versionPanelFile.Filename</MudText>
@@ -556,11 +557,18 @@
         border-top: 1px solid var(--color-border);
         margin: 4px 0;
     }
+    .workspace-version-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 899;
+        background: transparent;
+        cursor: default;
+    }
     .workspace-version-panel {
         position: fixed;
         right: 0;
-        top: 0;
-        height: 100%;
+        top: 76px;
+        height: calc(100% - 76px);
         width: 380px;
         background: var(--color-surface, #fff);
         border-left: 1px solid var(--color-border);
