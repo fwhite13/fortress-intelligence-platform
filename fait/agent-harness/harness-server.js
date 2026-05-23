@@ -2346,7 +2346,7 @@ async function resolveTaskFolder(userId, taskFolderId) {
             if (rows.length > 0) {
                 console.log(`[harness] resolveTaskFolder: found folder id=${taskFolderId} name=${rows[0].name}`);
                 const r0 = rows[0];
-                return { id: String(r0.id), name: String(r0.name), s3_prefix: normalizeS3Prefix(String(r0.s3_prefix), userId) };
+                return { id: String(r0.id), name: String(r0.name), s3_prefix: normalizeS3Prefix(r0.s3_prefix || '', userId) };
             }
             console.warn(`[harness] resolveTaskFolder: taskFolderId=${taskFolderId} not found for userId=${userId}, falling back`);
         } finally {
@@ -2370,7 +2370,7 @@ async function resolveTaskFolder(userId, taskFolderId) {
                 if (folderRows.length > 0) {
                     console.log(`[harness] resolveTaskFolder: using last_task_folder_id=${lastFolderId} name=${folderRows[0].name}`);
                     const r1 = folderRows[0];
-                    return { id: String(r1.id), name: String(r1.name), s3_prefix: normalizeS3Prefix(String(r1.s3_prefix), userId) };
+                    return { id: String(r1.id), name: String(r1.name), s3_prefix: normalizeS3Prefix(r1.s3_prefix || '', userId) };
                 }
             }
         } finally {
@@ -2388,7 +2388,7 @@ async function resolveTaskFolder(userId, taskFolderId) {
             if (existing.length > 0) {
                 console.log(`[harness] resolveTaskFolder: using existing general folder id=${existing[0].id}`);
                 const r2 = existing[0];
-                return { id: String(r2.id), name: String(r2.name), s3_prefix: normalizeS3Prefix(String(r2.s3_prefix), userId) };
+                return { id: String(r2.id), name: String(r2.name), s3_prefix: normalizeS3Prefix(r2.s3_prefix || '', userId) };
             }
             // Create it
             const newId = crypto.randomUUID();
