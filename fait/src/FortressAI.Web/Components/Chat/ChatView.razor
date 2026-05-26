@@ -979,7 +979,9 @@ else
                 if (evt.Type == "text")
                 {
                     // Fade out tool call strip on first response token (ADO#3455)
-                    if (_activeToolCalls.Any() && !_toolCallsFading)
+                    // ADO#4141: only fade if no chip is still actively calling/in-progress
+                    if (_activeToolCalls.Any() && !_toolCallsFading &&
+                        !_activeToolCalls.Any(tc => tc.Status == "calling" || tc.Status == "in-progress"))
                     {
                         _toolCallsFading = true;
                         _ = Task.Delay(200).ContinueWith(_ => InvokeAsync(() =>
@@ -1113,7 +1115,7 @@ else
                                         {
                                             var elapsed = DateTime.UtcNow - _taskStartTime.Value;
                                             _taskElapsed = elapsed.ToString(@"mm\:ss");
-                                            await InvokeAsync(StateHasChanged);
+                                            _ = InvokeAsync(StateHasChanged); // ADO#4142: fire-and-forget — timer loop must never stall on render
                                         }
                                     }
                                 });
