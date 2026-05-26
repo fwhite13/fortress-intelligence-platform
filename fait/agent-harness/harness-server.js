@@ -3379,8 +3379,8 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                 }
                 const evtType = parsed.type;
                 if (evtType === 'assistant' && parsed.message?.content) {
-                    // ADO#4048 — filter CC narration: suppress text blocks from messages that also contain tool_use
-                    const hasToolUse = parsed.message.content.some(b => b.type === 'tool_use');
+                    // ADO#4048 + ADO#4100 — suppress ALL text blocks from assistant messages during CC execution.
+                    // Only the final `result` event should emit to the token stream.
                     for (const block of parsed.message.content) {
                         if (block.type === 'text' && block.text) {
                             // ADO#4100 — suppress ALL text blocks from assistant messages during CC execution.
