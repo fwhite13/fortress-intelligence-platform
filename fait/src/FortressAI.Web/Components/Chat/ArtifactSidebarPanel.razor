@@ -2,6 +2,7 @@
 @inject IWorkspaceFileService WorkspaceFileSvc
 @inject IJSRuntime JSRuntime
 @inject ISnackbar Snackbar
+@inject IHttpClientFactory HttpClientFactory
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
 @using System.IO
@@ -25,7 +26,7 @@
         {
             <MudIconButton Icon="@Icons.Material.Outlined.ArrowBack"
                            Size="Size.Small"
-                           OnClick="@(() => { _selectedArtifact = null; _previewUrl = null; _previewError = null; _officeOnlineRawUrl = null; })"
+                           OnClick="@(() => { _selectedArtifact = null; _previewUrl = null; _previewError = null; _officeOnlineRawUrl = null; _textPreviewContent = null; })"
                            Title="Back to list" />
             <MudText Typo="Typo.subtitle2" Class="artifact-sidebar__title artifact-sidebar__title--detail">@_selectedArtifact.Filename</MudText>
             <MudIconButton Icon="@(_isMaximized ? Icons.Material.Outlined.CloseFullscreen : Icons.Material.Outlined.OpenInFull)"
@@ -64,6 +65,12 @@
                     {
                         <div class="artifact-sidebar__preview-loading">
                             <MudProgressCircular Indeterminate="true" />
+                        </div>
+                    }
+                    else if (_textPreviewContent != null)
+                    {
+                        <div class="artifact-sidebar__text-preview">
+                            <pre><code class="@GetHighlightClass(_selectedArtifact.Filename)">@_textPreviewContent</code></pre>
                         </div>
                     }
                     else if (_previewUrl != null)
@@ -153,6 +160,7 @@
     private string? _previewUrl;
     private string? _previewError;
     private string? _officeOnlineRawUrl;
+    private string? _textPreviewContent;
     private bool _previewLoading;
     private bool _downloadLoading;
     private bool _isMaximized = false;
@@ -166,6 +174,10 @@
         {
             _dotNetRef = DotNetObjectReference.Create(this);
             await JSRuntime.InvokeVoidAsync("fortressChat.initSidebarResize", _dragHandle, _dotNetRef);
+        }
+        if (_textPreviewContent != null)
+        {
+            try { await JSRuntime.InvokeVoidAsync("fortressChat.highlightCode"); } catch { }
         }
     }
 
@@ -210,6 +222,7 @@
         _previewUrl = null;
         _previewError = null;
         _officeOnlineRawUrl = null;
+        _textPreviewContent = null;
 
         if (IsPreviewable(artifact))
         {
@@ -219,7 +232,23 @@
             {
                 var rawUrl = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(artifact.S3Key, expiryMinutes: 30);
                 var ext = Path.GetExtension(artifact.Filename);
-                if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+                if (IsTextPreviewable(artifact))
+                {
+                    try
+                    {
+                        using var http = HttpClientFactory.CreateClient();
+                        var content = await http.GetStringAsync(rawUrl);
+                        _textPreviewContent = content.Length > 200_000
+                            ? content[..200_000] + "\n\n[... truncated at 200KB ...]"
+                            : content;
+                    }
+                    catch (Exception ex)
+                    {
+                        _textPreviewContent = null;
+                        _previewError = "Could not load preview. Try downloading.";
+                    }
+                }
+                else if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
                     _previewUrl = rawUrl;
                 }
@@ -271,10 +300,46 @@
         ".pdf", ".doc", ".docx", ".ppt", ".pptx"
     };
 
+    private static readonly HashSet<string> TextPreviewableExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".txt", ".py", ".js", ".ts", ".cs", ".json", ".csv", ".md",
+        ".html", ".xml", ".yaml", ".yml", ".sh", ".bash", ".sql",
+        ".css", ".scss", ".java", ".rb", ".go", ".rs", ".toml", ".ini", ".cfg"
+    };
+
     private static bool IsPreviewable(WorkspaceUpload artifact)
     {
         var ext = Path.GetExtension(artifact.Filename);
-        return PreviewableExtensions.Contains(ext);
+        return PreviewableExtensions.Contains(ext) || TextPreviewableExtensions.Contains(ext);
+    }
+
+    private static bool IsTextPreviewable(WorkspaceUpload artifact)
+    {
+        var ext = Path.GetExtension(artifact.Filename);
+        return TextPreviewableExtensions.Contains(ext);
+    }
+
+    private static string GetHighlightClass(string filename)
+    {
+        var ext = Path.GetExtension(filename).ToLowerInvariant();
+        return ext switch
+        {
+            ".py" => "language-python",
+            ".js" or ".ts" => "language-javascript",
+            ".cs" => "language-csharp",
+            ".json" => "language-json",
+            ".md" => "language-markdown",
+            ".html" => "language-html",
+            ".xml" => "language-xml",
+            ".yaml" or ".yml" => "language-yaml",
+            ".sh" or ".bash" => "language-bash",
+            ".sql" => "language-sql",
+            ".css" or ".scss" => "language-css",
+            ".java" => "language-java",
+            ".rb" => "language-ruby",
+            ".go" => "language-go",
+            _ => "language-plaintext"
+        };
     }
 
     private static string GetFileIcon(string mimeType) => mimeType switch
@@ -422,5 +487,21 @@
 }
 .artifact-sidebar__office-link {
     text-decoration: none;
+}
+.artifact-sidebar__text-preview {
+    height: 100%;
+    overflow: auto;
+    padding: 8px;
+    background: var(--mud-palette-background-grey, #f5f5f5);
+    border-radius: 4px;
+}
+
+.artifact-sidebar__text-preview pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    line-height: 1.5;
 }
 </style>
