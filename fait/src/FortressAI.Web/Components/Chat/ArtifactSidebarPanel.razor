@@ -4,6 +4,7 @@
 @inject ISnackbar Snackbar
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
+@implements IAsyncDisposable
 
 <div class="artifact-sidebar">
     <div class="artifact-sidebar__drag-handle" @ref="_dragHandle"></div>
@@ -127,13 +128,21 @@
     private bool _isMaximized = false;
     private int _preMaximizeWidth = 320;
     private ElementReference _dragHandle;
+    private DotNetObjectReference<ArtifactSidebarPanel>? _dotNetRef;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            await JSRuntime.InvokeVoidAsync("fortressChat.initSidebarResize", _dragHandle, DotNetObjectReference.Create(this));
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JSRuntime.InvokeVoidAsync("fortressChat.initSidebarResize", _dragHandle, _dotNetRef);
         }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await JSRuntime.InvokeVoidAsync("fortressChat.disposeSidebarResize", _dragHandle);
+        _dotNetRef?.Dispose();
     }
 
     [JSInvokable]

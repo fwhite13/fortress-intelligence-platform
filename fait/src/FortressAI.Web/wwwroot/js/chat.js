@@ -207,6 +207,28 @@ window.fortressChat = {
         let startX = 0;
         let startWidth = 0;
 
+        const onMouseMove = function(e) {
+            if (!dragging) return;
+            const now = Date.now();
+            if (now - onMouseMove._last < 16) return;
+            onMouseMove._last = now;
+            const delta = startX - e.clientX;
+            const newWidth = Math.min(
+                Math.max(startWidth + delta, 280),
+                Math.round(window.innerWidth * 0.5)
+            );
+            dotNetRef.invokeMethodAsync('UpdateSidebarWidth', newWidth);
+        };
+        onMouseMove._last = 0;
+
+        const onMouseUp = function() {
+            if (dragging) {
+                dragging = false;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        };
+
         dragHandle.addEventListener('mousedown', function(e) {
             dragging = true;
             startX = e.clientX;
@@ -216,23 +238,20 @@ window.fortressChat = {
             e.preventDefault();
         });
 
-        document.addEventListener('mousemove', function(e) {
-            if (!dragging) return;
-            const delta = startX - e.clientX; // dragging left edge: moving left = wider
-            const newWidth = Math.min(
-                Math.max(startWidth + delta, 280),
-                Math.round(window.innerWidth * 0.5)
-            );
-            dotNetRef.invokeMethodAsync('UpdateSidebarWidth', newWidth);
-        });
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
 
-        document.addEventListener('mouseup', function() {
-            if (dragging) {
-                dragging = false;
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-            }
-        });
+        dragHandle._cleanupResize = function() {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        };
+    },
+
+    disposeSidebarResize: function(dragHandle) {
+        if (dragHandle && dragHandle._cleanupResize) {
+            dragHandle._cleanupResize();
+            delete dragHandle._cleanupResize;
+        }
     },
 
     setupDragDrop: function(elementId, dotNetRef) {
