@@ -72,7 +72,7 @@ else
             {
                 <div class="chat-task-indicator">
                     <i class="fas fa-tasks"></i>
-                    <span>⚡ Task Mode@(_taskStartTime.HasValue ? $" · {_taskElapsed}" : "")</span>
+                    <span>⚡ Task Mode · <span id="task-timer-display">00:00</span></span>
                     <button class="chat-task-indicator__cancel" @onclick="CancelTask" title="Cancel task">
                         <i class="fas fa-times"></i>
                     </button>
@@ -401,6 +401,7 @@ else
     // ADO#3241 — Tool call transparency events
     private List<ToolCallEvent> _activeToolCalls = new();
     private bool _toolCallsFading = false;
+    private bool _ccTaskActive = false; // ADO#4201 — true while CC task_progress is active, prevents premature chip fade
     private record ToolCallEvent(string Server, string ToolName, string Status, string Summary, DateTime Timestamp);
     // Attachment state
     private List<ChatAttachment> _pendingAttachments = new();
@@ -434,6 +435,7 @@ else
         _elapsedTimer = null;
         _taskTimerCts?.Cancel();
         _taskTimerCts = null;
+        _ = JS.InvokeVoidAsync("fortressChat.stopTaskTimer"); // ADO#4200
         _taskModeActive = false;
         _activeToolCalls.Clear();
         StateHasChanged();
@@ -1118,29 +1120,10 @@ else
                                 _elapsedTimer?.Dispose();
                                 _elapsedTimer = null;
                                 _taskTimerCts?.Cancel();
-                                _taskTimerCts = new CancellationTokenSource();
-                                var timerToken = _taskTimerCts.Token;
-                                _ = Task.Run(async () =>
-                                {
-                                    using var periodicTimer = new PeriodicTimer(TimeSpan.FromMilliseconds(500));
-                                    while (!timerToken.IsCancellationRequested)
-                                    {
-                                        try
-                                        {
-                                            await periodicTimer.WaitForNextTickAsync(timerToken);
-                                        }
-                                        catch (OperationCanceledException)
-                                        {
-                                            break;
-                                        }
-                                        if (_taskStartTime.HasValue)
-                                        {
-                                            var elapsed = DateTime.UtcNow - _taskStartTime.Value;
-                                            _taskElapsed = elapsed.ToString(@"mm\:ss");
-                                            _ = InvokeAsync(StateHasChanged); // ADO#4142: fire-and-forget — timer loop must never stall on render
-                                        }
-                                    }
-                                });
+                                _taskTimerCts = null;
+                                // ADO#4200: JS-driven timer bypasses Blazor circuit — no freeze during heavy SSE streaming
+                                var startMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                                _ = JS.InvokeVoidAsync("fortressChat.startTaskTimer", startMs);
                             }
                             var stepMessage = progressPayload.Message
                                 ?? GetToolLabel(progressPayload.ToolName ?? "cc", "task", null);
@@ -1284,6 +1267,7 @@ else
             _elapsedTimer = null;
             _taskTimerCts?.Cancel();
             _taskTimerCts = null;
+            _ = JS.InvokeVoidAsync("fortressChat.stopTaskTimer"); // ADO#4200
             _taskModeActive = false;
             _activeTaskFolderName = null;  // ADO#3560
             _activeToolCalls.Clear();    // ADO#3455 — ensure cleared on turn end
@@ -1791,6 +1775,7 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
         _elapsedTimer?.Dispose();
         _taskTimerCts?.Cancel();
         _taskTimerCts?.Dispose();
+        try { await JS.InvokeVoidAsync("fortressChat.stopTaskTimer"); } catch { } // ADO#4200
         streamingCts?.Cancel();
         streamingCts?.Dispose();
         if (_scrollListenerInitialized)

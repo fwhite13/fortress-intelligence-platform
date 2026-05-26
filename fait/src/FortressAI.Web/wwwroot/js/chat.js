@@ -273,6 +273,27 @@ window.fortressChat = {
             })));
             dotNetRef.invokeMethodAsync('HandleDroppedFiles', result);
         });
+    },
+
+    startTaskTimer: function(startTimestampMs) {
+        if (window._taskTimerInterval) clearInterval(window._taskTimerInterval);
+        window._taskTimerInterval = setInterval(function() {
+            var elapsed = Date.now() - startTimestampMs;
+            var totalSecs = Math.floor(elapsed / 1000);
+            var mins = Math.floor(totalSecs / 60).toString().padStart(2, '0');
+            var secs = (totalSecs % 60).toString().padStart(2, '0');
+            var el = document.getElementById('task-timer-display');
+            if (el) el.textContent = mins + ':' + secs;
+        }, 500);
+    },
+
+    stopTaskTimer: function() {
+        if (window._taskTimerInterval) {
+            clearInterval(window._taskTimerInterval);
+            window._taskTimerInterval = null;
+        }
+        var el = document.getElementById('task-timer-display');
+        if (el) el.textContent = '00:00';
     }
 };
 
