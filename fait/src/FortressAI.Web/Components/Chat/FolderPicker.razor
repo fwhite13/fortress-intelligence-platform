@@ -268,8 +268,26 @@
                 return;
             }
 
+            // ADO#4202: parse response to get resolved folderId (harness creates new folder and returns its UUID)
+            string? resolvedFolderId = _selectedFolderId == "__new__" ? null : _selectedFolderId;
+            try
+            {
+                var respBody = await response.Content.ReadAsStringAsync();
+                var respJson = System.Text.Json.JsonDocument.Parse(respBody);
+                if (respJson.RootElement.TryGetProperty("folderId", out var folderIdProp))
+                {
+                    var harnessFolderId = folderIdProp.GetString();
+                    if (!string.IsNullOrEmpty(harnessFolderId))
+                        resolvedFolderId = harnessFolderId;
+                }
+            }
+            catch (Exception parseEx)
+            {
+                Logger.LogWarning(parseEx, "[FolderPicker] ADO#4202: could not parse folderId from /turn/folder-confirm response — falling back");
+            }
+
             MudDialog.Close(DialogResult.Ok(new FolderConfirmedArgs(
-                _selectedFolderId == "__new__" ? null : _selectedFolderId,
+                resolvedFolderId,
                 resolvedFolderName,
                 readOnlyIds)));
         }
