@@ -1480,8 +1480,8 @@ else
     // ADO#4056 — human-readable labels for tool chips (raw CC tool names → readable text)
     private static string GetToolLabel(string toolName, string server, string? summary = null)
     {
-        // Prefer harness message if meaningful (non-empty, doesn't start with "Calling")
-        if (!string.IsNullOrWhiteSpace(summary) && !summary.StartsWith("Calling "))
+        // Prefer harness message if meaningful (non-empty, doesn't start with "Calling", no underscores)
+        if (!string.IsNullOrWhiteSpace(summary) && !summary.StartsWith("Calling ") && !summary.Contains('_'))
             return summary;
 
         return toolName switch
@@ -1504,9 +1504,8 @@ else
             var t when t.Contains("read") || t.Contains("get") => "Reading...",
             var t when t.Contains("write") || t.Contains("save") || t.Contains("create") => "Saving...",
             var t when t.Contains("list") => "Listing...",
-            var t when t.Contains("exec") || t.Contains("run") || t.Contains("bash") => "Running...",
+            var t when t.Contains("exec") || t.Contains("run") || t.Contains("bash") || t.Contains("shell") => "Running command...",
             var t when t.Contains("web") || t.Contains("fetch") || t.Contains("url") => "Fetching...",
-            var t when t.Contains("bash") || t.Contains("shell") || t.Contains("exec") || t.Contains("run") => "Running command...",
             var t when t.Contains("str_replace") || t.Contains("edit_tool") || t == "edit" => "Editing file...",
             var t when t.Contains("python") || t.Contains("pip") => "Running script...",
             _ => !string.IsNullOrWhiteSpace(summary) ? summary : "Working...",
