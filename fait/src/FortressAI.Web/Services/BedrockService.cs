@@ -298,7 +298,7 @@ public class BedrockService : IDisposable
     public async Task<string> InvokeClaudeAsync(string prompt, int maxTokens = 1000, string? systemPrompt = null,
         string? modelId = null)
     {
-        modelId ??= _config.GetValue<string>("Bedrock:InvokeModelId", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")!;
+        modelId ??= _config.GetValue<string>("Bedrock:InvokeModelId", "us.anthropic.claude-sonnet-4-6")!;
         var requestObj = new JsonObject
         {
             ["anthropic_version"] = "bedrock-2023-05-31",
