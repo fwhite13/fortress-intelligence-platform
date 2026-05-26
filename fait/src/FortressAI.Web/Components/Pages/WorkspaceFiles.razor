@@ -12,7 +12,6 @@
 @inject ISnackbar Snackbar
 @inject ILogger<WorkspaceFiles> Logger
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> DbFactory
-@inject IDialogService DialogService
 @implements IDisposable
 
 <PageTitle>Workspace — FAIT</PageTitle>
@@ -389,6 +388,17 @@
         </MudTabs>
     }
 </MudContainer>
+
+<MudMessageBox @ref="_deleteConfirmBox"
+               Title="@_deleteConfirmTitle"
+               CancelText="Cancel">
+    <MessageContent>
+        @_deleteConfirmMessage
+    </MessageContent>
+    <YesButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error">Delete</MudButton>
+    </YesButton>
+</MudMessageBox>
 
 @* ── Context menu ── *@
 @if (_contextMenuVisible)
@@ -770,6 +780,9 @@
     private Guid? _moveDest;
     private List<WorkspaceFolder> _allFoldersFlat = new();
     private bool _moveDialogLoading = false;
+    private MudMessageBox? _deleteConfirmBox;
+    private string _deleteConfirmTitle = "";
+    private string _deleteConfirmMessage = "";
 
     // ── MudDataGrid selection state ──────────────────────────────────────────────────────
     private HashSet<WorkspaceUpload> _selectedFiles = new();
@@ -887,16 +900,11 @@
 
     private async Task<bool> ShowConfirmDialog(string title, string message)
     {
-        var parameters = new DialogParameters
-        {
-            { "Title", title },
-            { "Message", message },
-            { "YesText", "Delete" },
-            { "NoText", "Cancel" }
-        };
-        var dialog = await DialogService.ShowAsync<MudMessageBox>(title, parameters);
-        var result = await dialog.Result;
-        return result != null && !result.Canceled;
+        _deleteConfirmTitle = title;
+        _deleteConfirmMessage = message;
+        StateHasChanged();
+        bool? result = await _deleteConfirmBox!.ShowAsync();
+        return result == true;
     }
 
     private async Task DeleteFolder(WorkspaceFolder folder)
