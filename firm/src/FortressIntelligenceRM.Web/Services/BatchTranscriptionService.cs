@@ -46,14 +46,21 @@ public class BatchTranscriptionService : IBatchTranscriptionService
                 ? await _userWikiService.GetEntriesAsync(creatorEntraOid, tenantId)
                 : new List<OrgContextEntry>();
 
-            var allContext = new List<object>();
-            if (orgEntries.Count > 0)
-                allContext.Add(new { source = "organization", entries = orgEntries });
-            if (userWikiEntries.Count > 0)
-                allContext.Add(new { source = "personal", entries = userWikiEntries.Select(e => new { e.Term, e.Description }) });
+            // Flatten into a single list of {Term, Description, Source} entries.
+            // transcribe.py iterates this as a flat array — the old nested {source, entries[]}
+            // wrapper caused e.get("Term") to always return "" (the wrapper object has no Term key).
+            var flatEntries = new List<object>();
+            foreach (var e in orgEntries)
+                flatEntries.Add(new { e.Term, e.Description, Source = "organization" });
+            foreach (var e in userWikiEntries)
+                flatEntries.Add(new { e.Term, e.Description, Source = "personal" });
 
-            wikiJson = allContext.Count > 0
-                ? System.Text.Json.JsonSerializer.Serialize(allContext)
+            if (flatEntries.Count > 0)
+                _logger.LogInformation("FIRM: ORG_WIKI_JSON will contain {Count} entries ({Org} org, {Personal} personal) for meeting {MeetingId}",
+                    flatEntries.Count, orgEntries.Count, userWikiEntries.Count, meetingId);
+
+            wikiJson = flatEntries.Count > 0
+                ? System.Text.Json.JsonSerializer.Serialize(flatEntries)
                 : null;
         }
 
