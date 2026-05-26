@@ -104,6 +104,9 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP(6)");
             entity.HasOne(e => e.User).WithMany(u => u.Conversations).HasForeignKey(e => e.UserId);
             entity.HasOne(e => e.Project).WithMany(p => p.Conversations).HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.SetNull);
+            entity.Property(e => e.WorkingFolderId)
+                  .HasColumnName("working_folder_id")
+                  .HasColumnType("char(36)");
         });
 
         modelBuilder.Entity<ChatMessage>(entity =>

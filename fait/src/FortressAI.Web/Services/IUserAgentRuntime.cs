@@ -61,7 +61,8 @@ public record TurnRequest(
     string? ConversationId = null,
     List<string>? EnabledMcpSlugs = null,
     KbFlags? KbFlags = null,
-    string? Model = null   // ADO#3395 — per-turn model override; null = use harness default
+    string? Model = null,   // ADO#3395 — per-turn model override; null = use harness default
+    string? PersistedWorkingFolderId = null   // ADO#4144 — conversation's persisted working folder; harness uses to skip picker
 );
 
 // ADO#3241 — KB flags passed to harness for harness-side KB retrieval

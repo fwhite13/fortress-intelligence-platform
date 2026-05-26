@@ -323,6 +323,10 @@ namespace FortressAI.Web.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("char(36)");
 
+                    b.Property<Guid?>("WorkingFolderId")
+                        .HasColumnType("char(36)")
+                        .HasColumnName("working_folder_id");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ProjectId");

@@ -18,6 +18,7 @@
 @inject MicrosoftTokenService M365TokenSvc
 @inject IUserAgentRuntime AgentRuntime
 @inject IWorkspaceFileService WorkspaceFileSvc
+@inject IWorkspaceUploadService UploadSvc
 @inject ChatLayoutState LayoutState
 @inject IDialogService DialogService
 @using Amazon.S3
@@ -414,6 +415,8 @@ else
     private bool _taskReadyPending = false; // ADO#4004: set by task_ready SSE, triggers re-submit after turn completes
     private bool _taskReadyResubmit = false; // ADO#4032: prevents HandleSend from resetting _taskModeActive on TASK_READY re-submit
     private string? _activeTaskFolderName = null;
+    private Guid? _persistedWorkingFolderId = null;   // ADO#4144 — persisted working folder for this conversation
+    private string? _persistedWorkingFolderName = null; // display name for the persisted folder
     private string _pendingTaskMessage = "";
 
     // Task Progress Timeline state (ADO#3244)
@@ -547,6 +550,22 @@ else
                 _fortressKbEnabled = conversation.EnableFortressKb;
                 _personalKbEnabled = conversation.EnablePersonalKb;
                 _conversationArtifacts = await WorkspaceFileSvc.GetConversationArtifactsAsync(conversation.Id);
+                // ADO#4144 — restore persisted working folder (no re-prompt on reload)
+                if (conversation.WorkingFolderId.HasValue && _persistedWorkingFolderId != conversation.WorkingFolderId)
+                {
+                    _persistedWorkingFolderId = conversation.WorkingFolderId;
+                    try
+                    {
+                        var folders = await UploadSvc.GetFoldersAsync(Session.UserId, null);
+                        var match = folders?.FirstOrDefault(f => f.Id == conversation.WorkingFolderId);
+                        _persistedWorkingFolderName = match?.Name ?? "workspace";
+                        _activeTaskFolderName = _persistedWorkingFolderName;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[ChatView] ADO#4144: Failed to load folder name for persistedWorkingFolderId={Id}", _persistedWorkingFolderId);
+                    }
+                }
             }
             else
             {
@@ -957,6 +976,7 @@ else
                 ConversationId: conversation.Id.ToString(),
                 EnabledMcpSlugs: enabledMcpSlugs.Count > 0 ? enabledMcpSlugs : null,
                 Model: currentModel,
+                PersistedWorkingFolderId: _persistedWorkingFolderId?.ToString(),  // ADO#4144
                 // ADO#3316-fix: always send KbFlags (never null) so harness preference gate fires even when all KBs are off
                 KbFlags: new KbFlags(
                     CorpKbEnabled: hasCorpKb,
@@ -1264,6 +1284,8 @@ else
             _taskTimerCts = null;
             _taskModeActive = false;
             _activeTaskFolderName = null;  // ADO#3560
+            _persistedWorkingFolderId = null;    // ADO#4144
+            _persistedWorkingFolderName = null;  // ADO#4144
             _activeToolCalls.Clear();    // ADO#3455 — ensure cleared on turn end
             _toolCallsFading = false;    // ADO#3455
             streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
@@ -1518,7 +1540,27 @@ else
     private void HandleFolderConfirmed(FolderPicker.FolderConfirmedArgs args)
     {
         _activeTaskFolderName = args.FolderName;
+        // ADO#4144 — persist selected folder to DB against this conversation
+        if (conversation != null && args.FolderId != null && Guid.TryParse(args.FolderId, out var folderId))
+        {
+            _persistedWorkingFolderId = folderId;
+            _persistedWorkingFolderName = args.FolderName;
+            _ = PersistWorkingFolderAsync(conversation.Id, args.FolderId);
+        }
         StateHasChanged();
+    }
+
+    private async Task PersistWorkingFolderAsync(Guid conversationId, string folderId)
+    {
+        try
+        {
+            await ChatSvc.UpdateConversationWorkingFolderAsync(conversationId, Guid.Parse(folderId));
+            Logger.LogInformation("[ChatView] ADO#4144: persisted working folder {FolderId} for conversation {ConversationId}", folderId, conversationId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[ChatView] ADO#4144: failed to persist working folder");
+        }
     }
 
     private const int ToolChipMinDisplayMs = 1500;

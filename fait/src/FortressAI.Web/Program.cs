@@ -610,6 +610,34 @@ app.MapGet("/api/internal/user-tokens/{userId}", async (HttpContext context, str
     });
 }).AllowAnonymous().DisableAntiforgery();
 
+// ADO#4144 — persist working folder selection for a conversation
+app.MapPost("/api/internal/conversation/{conversationId}/working-folder", async (
+    HttpContext context,
+    string conversationId,
+    ChatService chatSvc,
+    IConfiguration config) =>
+{
+    // Validate internal token
+    var expectedToken = config["INTERNAL_API_TOKEN"] ?? "";
+    var providedToken = context.Request.Headers["X-Internal-Token"].FirstOrDefault() ?? "";
+    if (!string.IsNullOrEmpty(expectedToken) && providedToken != expectedToken)
+        return Results.Unauthorized();
+
+    if (!Guid.TryParse(conversationId, out var convId))
+        return Results.BadRequest(new { error = "Invalid conversationId" });
+
+    WorkingFolderRequest? body;
+    try { body = await context.Request.ReadFromJsonAsync<WorkingFolderRequest>(); }
+    catch { return Results.BadRequest(new { error = "Invalid JSON body" }); }
+
+    Guid? folderId = null;
+    if (!string.IsNullOrEmpty(body?.FolderId) && Guid.TryParse(body.FolderId, out var parsed))
+        folderId = parsed;
+
+    await chatSvc.UpdateConversationWorkingFolderAsync(convId, folderId);
+    return Results.Ok(new { success = true });
+}).AllowAnonymous().DisableAntiforgery();
+
 // Internal endpoint for harness — get decrypted ADO PAT for a user
 app.MapGet("/api/internal/devops-pat/{userId}", async (HttpContext context, string userId, DevOpsConnectionService devopsConn, IConfiguration config) =>
 {
@@ -811,6 +839,8 @@ bool IsInternalAuthorized(HttpContext ctx, IConfiguration cfg)
     if (string.IsNullOrEmpty(token)) return false;
     return ctx.Request.Headers.TryGetValue("X-Internal-Token", out var h) && h.ToString() == token;
 }
+
+record WorkingFolderRequest(string? FolderId);
 
 record FeedbackRequest(
     string Type,

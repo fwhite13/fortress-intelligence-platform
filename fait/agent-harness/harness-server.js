@@ -2213,20 +2213,40 @@ function classifyRequest(message, history) {
     const msg = (message || '').toLowerCase();
 
     // File extension signals — always CC regardless
-    const fileExtensions = /\.(docx|xlsx|pptx|csv|pdf|py|js|ts|json|yaml|xml)\b/i;
+    const fileExtensions = /\.(docx|xlsx|pptx|csv|pdf|py|js|ts|json|yaml|xml|txt|md)\b/i;
     if (fileExtensions.test(msg)) return true;
 
-    // Action verbs (strong CC signals)
-    const actionVerbs = /\b(create|build|generate|write|make|produce|analyze|run|execute|compile|draft|develop|implement|code|script|automate)\b/i;
+    // ADO#4143 — Explicit file operation verbs (create, write, generate, update, modify, edit, revise)
+    const fileActionVerbs = /\b(create|build|generate|write|make|produce|draft|develop|implement|code|script|automate|update|modify|edit|change|revise|rewrite|fix|patch|add\s+to|append\s+to|insert\s+into|remove\s+from|delete\s+from)\b/i;
 
-    // Scope signals (multi-step work)
-    const scopeSignals = /\b(multi.?step|comprehensive|full|complete|entire|all|section|chapter|report|document|presentation|spreadsheet|dataset)\b/i;
+    // Scope/artifact signals (multi-step work or file artifact)
+    const scopeSignals = /\b(multi.?step|comprehensive|full|complete|entire|all|section|chapter|report|document|presentation|spreadsheet|dataset|file|script|notebook|template|dashboard|diagram|chart|graph|table)\b/i;
 
-    // Long message with action verb = CC candidate
-    if (message.length > 200 && actionVerbs.test(msg)) return true;
+    // ADO#4143 — Prior artifact reference patterns
+    // Catches: "the file you made", "that spreadsheet", "the PPTX", "what you created", "the one from earlier"
+    const priorArtifactPatterns = [
+        /\b(the\s+)?(file|document|spreadsheet|presentation|pptx|xlsx|docx|pdf|script|report|chart|diagram|table|notebook)\s+(you\s+)?(created|made|built|wrote|generated|produced|saved)/i,
+        /\b(update|modify|edit|change|revise|fix|add\s+to|append\s+to)\s+(the|that|this|it|them)/i,
+        /\b(the\s+)?(file|doc|document|sheet|slide|presentation|spreadsheet)\s+(from\s+)?(earlier|before|last\s+time|previously)/i,
+        /\b(what\s+you\s+(created|made|built|wrote|generated|produced))/i,
+        /\b(add\s+(a|another|more|some)\s+(slide|page|section|row|column|sheet|tab|entry|item))/i,
+        /\b(the\s+one\s+you\s+(made|created|built|wrote|generated))/i,
+        /\b(that\s+(file|document|spreadsheet|presentation|script|report))\b/i,
+    ];
+    if (priorArtifactPatterns.some(p => p.test(msg))) return true;
 
-    // Action verb + scope signal
-    if (actionVerbs.test(msg) && scopeSignals.test(msg)) return true;
+    // ADO#4143 — Pronoun + action (update it, change that, edit it, fix that file)
+    const pronounActionPatterns = [
+        /\b(update|modify|edit|change|fix|revise|rewrite)\s+(it|that|this|them)\b/i,
+        /\b(add\s+(to|a|an)|append\s+to)\s+(it|that|this|them)\b/i,
+    ];
+    if (pronounActionPatterns.some(p => p.test(msg))) return true;
+
+    // Long message with file action verb = CC candidate
+    if (message.length > 200 && fileActionVerbs.test(msg)) return true;
+
+    // File action verb + scope signal
+    if (fileActionVerbs.test(msg) && scopeSignals.test(msg)) return true;
 
     // Prior turn was CC task = stay on CC path
     if (Array.isArray(history) && history.length > 0) {
@@ -2816,7 +2836,15 @@ You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on
 
         {
             let useFastPath = false;
-            if (isAutoClassified) {
+            // ADO#4144: if a persisted working folder was sent from Blazor (from conversations.working_folder_id), skip picker
+            const persistedWorkingFolderId = rawBody.persistedWorkingFolderId ?? rawBody.PersistedWorkingFolderId ?? null;
+            if (persistedWorkingFolderId && !taskFolderIdResolved) {
+                useFastPath = true;
+                taskFolderIdResolved = persistedWorkingFolderId.toString();
+                console.log(`[harness] ADO#4144: using persisted working folder from conversation DB: folderId=${taskFolderIdResolved} userId=${userId}`);
+            }
+
+            if (!useFastPath && isAutoClassified) {
                 // Fast path: auto-classified AND user has a last_task_folder_id — skip picker
                 try {
                     const connFast = await getDbConnection();
@@ -3630,17 +3658,26 @@ You have access to the user's workspace files and memory topics. When the user a
 - Do not say you are going to call a tool and then not call it. If you say you will check something, check it.`);
             systemParts.push(`## Task Mode Self-Escalation
 
-When the user wants you to execute a coding task and you have all information needed to proceed (clear objective, specific files or functionality to create/modify, no ambiguous requirements), you MUST emit [TASK_READY] at the end of your response on its own line.
+When the user asks you to create, write, generate, update, modify, edit, or otherwise produce a file or artifact, you MUST emit [TASK_READY] at the end of your response on its own line.
+
+**File-related requests that ALWAYS trigger [TASK_READY]:**
+- Creating any file (script, spreadsheet, presentation, document, report, chart, etc.)
+- Updating, modifying, or editing a file you previously created or that exists in the workspace
+- References to prior CC artifacts, even with pronouns ("update it", "change that", "add a slide to that presentation", "the file you made")
+- Adding content to, removing content from, or revising any prior output artifact
+- Any request involving a file extension (.xlsx, .pptx, .docx, .py, .js, .csv, .pdf, etc.)
 
 Do not ask for confirmation before emitting [TASK_READY]. Do not wait for the user to say "go ahead" or "start" or "do it". Do not ask if they are ready. When you have what you need, escalate immediately.
 
 The harness will detect [TASK_READY], strip it from the displayed response, and automatically spawn Claude Code CLI on your behalf to execute the task.
 
-Only ask clarifying questions when requirements are genuinely incomplete — you are missing specific information needed to write correct code (e.g., unknown file path, ambiguous behavior, missing data structure). Do not ask clarifying questions out of caution when the intent is already clear.
+A false positive (CC handles something simple) is better than a false negative (assistant fails to execute a file task and responds inline instead).
+
+Only ask clarifying questions when requirements are genuinely incomplete — you are missing specific information needed to execute the task (e.g., unknown format, missing data, ambiguous behavior). Do not ask clarifying questions out of caution when the intent is already clear.
 
 Do NOT emit [TASK_READY] if:
 - Task mode is already active (you are already in a CC spawn context)
-- The user is asking a question, not requesting a task
+- The user is asking a question or requesting an explanation, not requesting file creation or modification
 - You genuinely need more information to proceed (state what you need and wait)`);
             if (systemPrompt) systemParts.push(systemPrompt);
 

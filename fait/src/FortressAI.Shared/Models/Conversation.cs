@@ -12,6 +12,7 @@ public class Conversation
     public List<ConversationTeamKb> TeamKbs { get; set; } = new();
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public Guid? WorkingFolderId { get; set; }
 
     // Navigation
     public AppUser? User { get; set; }

@@ -208,6 +208,16 @@ public class ChatService
         await db.SaveChangesAsync();
     }
 
+    public async Task UpdateConversationWorkingFolderAsync(Guid conversationId, Guid? workingFolderId)
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync();
+        var conversation = await db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId);
+        if (conversation == null) return;
+        conversation.WorkingFolderId = workingFolderId;
+        conversation.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>
     /// Estimates token count for a string using rough chars/4 approximation.
     /// </summary>
