@@ -3373,8 +3373,8 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                 if (!line.trim()) continue;
                 let parsed;
                 try { parsed = JSON.parse(line); } catch {
-                    // Non-JSON line — emit as raw text fallback
-                    sendEvent({ type: 'text', content: scrubSecrets(line) });
+                    // Non-JSON line — suppress during CC execution (ADO#4100), log only
+                    console.debug(`[CC spawn] non-JSON line suppressed: ${line.slice(0, 200)} userId=${userId}`);
                     continue;
                 }
                 const evtType = parsed.type;
@@ -3383,13 +3383,10 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                     const hasToolUse = parsed.message.content.some(b => b.type === 'tool_use');
                     for (const block of parsed.message.content) {
                         if (block.type === 'text' && block.text) {
-                            if (hasToolUse) {
-                                // Narration text co-located with tool calls — suppress from UI, log only
-                                console.debug(`[CC spawn] narration suppressed (tool_use colocated, ${block.text.length} chars) userId=${userId}`);
-                            } else {
-                                ccTextEmitted = true;
-                                sendEvent({ type: 'text', content: scrubSecrets(block.text) });
-                            }
+                            // ADO#4100 — suppress ALL text blocks from assistant messages during CC execution.
+                            // Only the final `result` event should emit to the token stream.
+                            // Co-located narration (with tool_use) was already suppressed; now suppress standalone narration too.
+                            console.debug(`[CC spawn] narration suppressed (assistant message text block, ${block.text.length} chars) userId=${userId}`);
                         } else if (block.type === 'tool_use') {
                             toolUseMap.set(block.id, block.name || 'tool');
                             const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
