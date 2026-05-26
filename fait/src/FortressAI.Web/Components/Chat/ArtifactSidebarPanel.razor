@@ -4,6 +4,7 @@
 @inject ISnackbar Snackbar
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
+@using System.IO
 @implements IAsyncDisposable
 
 <div class="artifact-sidebar">
@@ -24,7 +25,7 @@
         {
             <MudIconButton Icon="@Icons.Material.Outlined.ArrowBack"
                            Size="Size.Small"
-                           OnClick="@(() => _selectedArtifact = null)"
+                           OnClick="@(() => { _selectedArtifact = null; _previewUrl = null; _previewError = null; })"
                            Title="Back to list" />
             <MudText Typo="Typo.subtitle2" Class="artifact-sidebar__title artifact-sidebar__title--detail">@_selectedArtifact.Filename</MudText>
             <MudIconButton Icon="@(_isMaximized ? Icons.Material.Outlined.CloseFullscreen : Icons.Material.Outlined.OpenInFull)"
@@ -57,7 +58,7 @@
     {
         <div class="artifact-sidebar__detail">
             <div class="artifact-sidebar__preview">
-                @if (IsPreviewable(_selectedArtifact.MimeType))
+                @if (IsPreviewable(_selectedArtifact))
                 {
                     @if (_previewLoading)
                     {
@@ -68,7 +69,7 @@
                     else if (_previewUrl != null)
                     {
                         <iframe src="@_previewUrl" class="artifact-sidebar__iframe"
-                                sandbox="allow-scripts allow-same-origin allow-popups" />
+                                sandbox="allow-scripts allow-same-origin allow-popups allow-forms" />
                     }
                     else if (_previewError != null)
                     {
@@ -180,13 +181,23 @@
         _previewUrl = null;
         _previewError = null;
 
-        if (IsPreviewable(artifact.MimeType))
+        if (IsPreviewable(artifact))
         {
             _previewLoading = true;
             StateHasChanged();
             try
             {
-                _previewUrl = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(artifact.S3Key);
+                var rawUrl = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(artifact.S3Key, expiryMinutes: 30);
+                var ext = Path.GetExtension(artifact.Filename);
+                if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    _previewUrl = rawUrl;
+                }
+                else
+                {
+                    var encoded = Uri.EscapeDataString(rawUrl);
+                    _previewUrl = $"https://view.officeapps.live.com/op/embed.aspx?src={encoded}";
+                }
             }
             catch
             {
@@ -222,8 +233,16 @@
         }
     }
 
-    private static bool IsPreviewable(string mimeType) =>
-        mimeType is "application/pdf";
+    private static readonly HashSet<string> PreviewableExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pdf", ".doc", ".docx", ".ppt", ".pptx"
+    };
+
+    private static bool IsPreviewable(WorkspaceUpload artifact)
+    {
+        var ext = Path.GetExtension(artifact.Filename);
+        return PreviewableExtensions.Contains(ext);
+    }
 
     private static string GetFileIcon(string mimeType) => mimeType switch
     {
