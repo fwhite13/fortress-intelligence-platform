@@ -438,6 +438,7 @@ else
         _ = JS.InvokeVoidAsync("fortressChat.stopTaskTimer"); // ADO#4200
         _taskModeActive = false;
         _activeToolCalls.Clear();
+        _ccTaskActive = false;
         StateHasChanged();
     }
 
@@ -636,6 +637,7 @@ else
             }
             _isBriefStreaming = false;
             _activeToolCalls.Clear();  // ADO#3241
+            _ccTaskActive = false;
             LayoutState.CloseArtifactSidebar(); // ADO#3456 — reset sidebar on conversation switch
 
             // ADO#3308 — refresh harness session ID for warm cross-chat navigation
@@ -794,6 +796,7 @@ else
         _lastKbResult = null;  // Clear stale result before new send
         _currentFileSummary = null;
         _activeToolCalls.Clear();  // ADO#3241 — Reset tool call indicators
+        _ccTaskActive = false;
         if (!_taskReadyResubmit)
             _taskModeActive = false; // Reset — will be set by mode_switch event in this turn
         _taskReadyResubmit = false;  // ADO#4032: clear after consuming
@@ -1004,13 +1007,14 @@ else
                 {
                     // Fade out tool call strip on first response token (ADO#3455)
                     // ADO#4141: only fade if no chip is still actively calling/in-progress
-                    if (_activeToolCalls.Any() && !_toolCallsFading &&
+                    if (_activeToolCalls.Any() && !_toolCallsFading && !_ccTaskActive &&
                         !_activeToolCalls.Any(tc => tc.Status == "calling" || tc.Status == "in-progress"))
                     {
                         _toolCallsFading = true;
                         _ = Task.Delay(200).ContinueWith(_ => InvokeAsync(() =>
                         {
                             _activeToolCalls.Clear();
+                            _ccTaskActive = false;
                             _toolCallsFading = false;
                             StateHasChanged();
                             return Task.CompletedTask;
@@ -1116,6 +1120,7 @@ else
                         {
                             if (progressPayload.Step == "start")
                             {
+                                _ccTaskActive = true;
                                 _taskStartTime = DateTime.UtcNow;
                                 _elapsedTimer?.Dispose();
                                 _elapsedTimer = null;
@@ -1130,6 +1135,8 @@ else
                             var toolName = progressPayload.ToolName ?? "cc";
                             var isFinal = progressPayload.Step == "done" || progressPayload.Status == "done";
                             _activeToolCalls.Add(new ToolCallEvent("task", toolName, isFinal ? "done" : "calling", stepMessage, DateTime.UtcNow));
+                            if (isFinal)
+                                _ccTaskActive = false;
                             StateHasChanged();
                         }
                     }
@@ -1271,6 +1278,7 @@ else
             _taskModeActive = false;
             _activeTaskFolderName = null;  // ADO#3560
             _activeToolCalls.Clear();    // ADO#3455 — ensure cleared on turn end
+            _ccTaskActive = false;
             _toolCallsFading = false;    // ADO#3455
             streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
             StateHasChanged();
