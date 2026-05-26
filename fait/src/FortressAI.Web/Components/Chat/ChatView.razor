@@ -1801,33 +1801,7 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
         var capturedConversationId = ConversationId; // capture before any await
         try
         {
-            // Build history from last 3 messages if any
-            var recentHistory = messages
-                .TakeLast(3)
-                .Select(m => new ChatHistoryEntry(m.Role, m.Content))
-                .ToList();
-
-            var briefRequest = new TurnRequest(
-                UserId: Session.UserId.ToString(),
-                Message: "__resumption_brief__",
-                History: recentHistory.Any() ? recentHistory : null,
-                TaskMode: false,
-                Model: currentModel
-            );
-
-            await foreach (var evt in AgentRuntime.SendTurnAsync(Session.UserId.ToString(), briefRequest, CancellationToken.None))
-            {
-                if (evt.Type == "text")
-                {
-                    var content = evt.Content ?? "";
-                    _briefContent.Append(content);
-                    StateHasChanged();
-                }
-                else if (evt.Type is "done" or "error")
-                {
-                    break;
-                }
-            }
+            await ExecuteBriefWithRetryAsync();
         }
         catch (Exception ex)
         {
@@ -1867,6 +1841,55 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
             // ADO#3308 Bug 4 — trigger scroll after brief finishes
             _needsScroll = true;
             StateHasChanged();
+        }
+    }
+
+    private async Task ExecuteBriefWithRetryAsync()
+    {
+        const int maxAttempts = 2;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                var recentHistory = messages
+                    .TakeLast(3)
+                    .Select(m => new ChatHistoryEntry(m.Role, m.Content))
+                    .ToList();
+
+                var briefRequest = new TurnRequest(
+                    UserId: Session.UserId.ToString(),
+                    Message: "__resumption_brief__",
+                    History: recentHistory.Any() ? recentHistory : null,
+                    TaskMode: false,
+                    Model: currentModel
+                );
+
+                await foreach (var evt in AgentRuntime.SendTurnAsync(
+                    Session.UserId.ToString(), briefRequest, CancellationToken.None))
+                {
+                    if (evt.Type == "text")
+                    {
+                        var content = evt.Content ?? "";
+                        _briefContent.Append(content);
+                        StateHasChanged();
+                    }
+                    else if (evt.Type is "done" or "error")
+                    {
+                        break;
+                    }
+                }
+                return; // success — exit retry loop
+            }
+            catch (InvalidOperationException ex) when (
+                attempt < maxAttempts &&
+                (ex.Message.Contains("Stale session") || ex.Message.Contains("no longer RUNNING")))
+            {
+                Logger.LogWarning(ex,
+                    "[ChatView] SendResumptionBrief: stale task on attempt {Attempt} — waiting 5s then retrying", attempt);
+                _briefContent.Clear();
+                await Task.Delay(TimeSpan.FromSeconds(5), CancellationToken.None);
+            }
+            // All other exceptions propagate to SendResumptionBrief's catch block
         }
     }
 
