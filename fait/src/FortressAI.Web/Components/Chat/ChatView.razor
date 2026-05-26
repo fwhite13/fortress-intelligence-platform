@@ -348,8 +348,8 @@ else
 
     @if (LayoutState.ArtifactSidebarOpen)
     {
-        <div style="width: 320px; min-width: 280px; max-width: 400px; flex-shrink: 0; overflow: hidden; transition: all 0.2s ease;">
-            <ArtifactSidebarPanel Artifacts="_conversationArtifacts" />
+        <div style="width: @(_artifactSidebarWidth)px; min-width: 280px; max-width: 50vw; flex-shrink: 0; overflow: hidden;">
+            <ArtifactSidebarPanel Artifacts="_conversationArtifacts" PanelWidth="@_artifactSidebarWidth" OnWidthChanged="@((w) => _artifactSidebarWidth = w)" />
         </div>
     }
 
@@ -361,6 +361,8 @@ else
 
     [CascadingParameter(Name = "DrawerOpen")]
     private bool DrawerOpen { get; set; }
+
+    private int _artifactSidebarWidth = 320;
 
     private Conversation? conversation;
     private List<ChatMessage> messages = new();

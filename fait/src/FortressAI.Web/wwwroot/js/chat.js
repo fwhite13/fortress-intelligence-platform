@@ -201,6 +201,40 @@ window.fortressChat = {
         }
     },
 
+    initSidebarResize: function(dragHandle, dotNetRef) {
+        if (!dragHandle) return;
+        let dragging = false;
+        let startX = 0;
+        let startWidth = 0;
+
+        dragHandle.addEventListener('mousedown', function(e) {
+            dragging = true;
+            startX = e.clientX;
+            startWidth = dragHandle.parentElement ? dragHandle.parentElement.offsetWidth : 320;
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (!dragging) return;
+            const delta = startX - e.clientX; // dragging left edge: moving left = wider
+            const newWidth = Math.min(
+                Math.max(startWidth + delta, 280),
+                Math.round(window.innerWidth * 0.5)
+            );
+            dotNetRef.invokeMethodAsync('UpdateSidebarWidth', newWidth);
+        });
+
+        document.addEventListener('mouseup', function() {
+            if (dragging) {
+                dragging = false;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
+    },
+
     setupDragDrop: function(elementId, dotNetRef) {
         const el = document.getElementById(elementId);
         if (!el) return;

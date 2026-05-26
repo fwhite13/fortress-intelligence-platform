@@ -6,10 +6,15 @@
 @using FortressAI.Web.Services
 
 <div class="artifact-sidebar">
+    <div class="artifact-sidebar__drag-handle" @ref="_dragHandle"></div>
     <div class="artifact-sidebar__header">
         @if (_selectedArtifact == null)
         {
             <MudText Typo="Typo.subtitle2" Class="artifact-sidebar__title">Artifacts (@Artifacts.Count)</MudText>
+            <MudIconButton Icon="@(_isMaximized ? Icons.Material.Outlined.CloseFullscreen : Icons.Material.Outlined.OpenInFull)"
+                           Size="Size.Small"
+                           Title="@(_isMaximized ? "Restore" : "Maximize")"
+                           OnClick="ToggleMaximize" />
             <MudIconButton Icon="@Icons.Material.Outlined.Close"
                            Size="Size.Small"
                            OnClick="@(() => LayoutState.CloseArtifactSidebar())" />
@@ -21,6 +26,10 @@
                            OnClick="@(() => _selectedArtifact = null)"
                            Title="Back to list" />
             <MudText Typo="Typo.subtitle2" Class="artifact-sidebar__title artifact-sidebar__title--detail">@_selectedArtifact.Filename</MudText>
+            <MudIconButton Icon="@(_isMaximized ? Icons.Material.Outlined.CloseFullscreen : Icons.Material.Outlined.OpenInFull)"
+                           Size="Size.Small"
+                           Title="@(_isMaximized ? "Restore" : "Maximize")"
+                           OnClick="ToggleMaximize" />
             <MudIconButton Icon="@Icons.Material.Outlined.Close"
                            Size="Size.Small"
                            OnClick="@(() => LayoutState.CloseArtifactSidebar())" />
@@ -73,7 +82,18 @@
                     <div class="artifact-sidebar__no-preview">
                         <MudIcon Icon="@GetFileIcon(_selectedArtifact.MimeType)" Size="Size.Large" />
                         <MudText Typo="Typo.body2" Color="Color.Secondary">Preview not available for this file type</MudText>
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">Download the file to view it</MudText>
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Outlined.Download"
+                                   Disabled="@_downloadLoading"
+                                   OnClick="DownloadAsync"
+                                   Class="mt-2">
+                            @if (_downloadLoading)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                            }
+                            Download file
+                        </MudButton>
                     </div>
                 }
             </div>
@@ -96,12 +116,54 @@
 
 @code {
     [Parameter, EditorRequired] public List<WorkspaceUpload> Artifacts { get; set; } = new();
+    [Parameter] public int PanelWidth { get; set; } = 320;
+    [Parameter] public EventCallback<int> OnWidthChanged { get; set; }
 
     private WorkspaceUpload? _selectedArtifact;
     private string? _previewUrl;
     private string? _previewError;
     private bool _previewLoading;
     private bool _downloadLoading;
+    private bool _isMaximized = false;
+    private int _preMaximizeWidth = 320;
+    private ElementReference _dragHandle;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JSRuntime.InvokeVoidAsync("fortressChat.initSidebarResize", _dragHandle, DotNetObjectReference.Create(this));
+        }
+    }
+
+    [JSInvokable]
+    public async Task UpdateSidebarWidth(int newWidth)
+    {
+        if (_isMaximized)
+            _isMaximized = false;
+        PanelWidth = newWidth;
+        await OnWidthChanged.InvokeAsync(newWidth);
+        StateHasChanged();
+    }
+
+    private async Task ToggleMaximize()
+    {
+        if (_isMaximized)
+        {
+            _isMaximized = false;
+            await OnWidthChanged.InvokeAsync(_preMaximizeWidth);
+            PanelWidth = _preMaximizeWidth;
+        }
+        else
+        {
+            _preMaximizeWidth = PanelWidth;
+            _isMaximized = true;
+            var maxWidth = (int)(await JSRuntime.InvokeAsync<double>("eval", "window.innerWidth * 0.6"));
+            PanelWidth = Math.Max(maxWidth, 400);
+            await OnWidthChanged.InvokeAsync(PanelWidth);
+        }
+        StateHasChanged();
+    }
 
     private async Task SelectArtifact(WorkspaceUpload artifact)
     {
@@ -181,11 +243,27 @@
 
 <style>
 .artifact-sidebar {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
     background: var(--color-surface);
     border-left: 1px solid var(--color-border);
+}
+.artifact-sidebar__drag-handle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10;
+    background: transparent;
+    transition: background 150ms ease;
+}
+.artifact-sidebar__drag-handle:hover {
+    background: var(--color-primary, #1976d2);
+    opacity: 0.3;
 }
 .artifact-sidebar__header {
     display: flex;
