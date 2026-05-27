@@ -259,30 +259,61 @@ function emitToolCall(res, server, toolName, status, summary) {
     res.write(`event: tool_call\ndata: ${JSON.stringify({ server, toolName, status, summary })}\n\n`);
 }
 
+// ADO#4249 — Truncate context strings for chip display
+function chipTrunc(str, max = 57) {
+    if (!str) return '';
+    str = String(str).trim();
+    return str.length > max ? str.substring(0, max) + '...' : str;
+}
+
 // ADO#3577 — Human-readable CC progress labels
 function resolveProgressLabel(toolName, toolInput) {
-    const input = (typeof toolInput === 'string' ? toolInput : JSON.stringify(toolInput || '')).toLowerCase();
+    try {
+        const input = typeof toolInput === 'string' ? JSON.parse(toolInput || '{}') : (toolInput || {});
+        const rawStr = JSON.stringify(input).toLowerCase();
 
-    if (toolName === 'bash' || toolName === 'computer') {
-        if (input.includes('pip install') || input.includes('pip3 install')) return 'Installing dependencies...';
-        if (input.includes('openpyxl') || input.includes('.xlsx') || input.includes('xlrd') || input.includes('xlwt')) return 'Building spreadsheet...';
-        if (input.includes('pptx') || input.includes('python-pptx')) return 'Building presentation...';
-        if (input.includes('docx') || input.includes('python-docx')) return 'Building document...';
-        if (input.includes('python ') || input.includes('python3 ') || input.match(/\.py\b/)) return 'Running Python script...';
-        if (input.match(/\b(ls|find|cat|head|tail|grep)\b/)) return 'Reading files...';
-        if (input.includes('curl ') || input.includes('wget ') || input.includes('requests')) return 'Fetching data...';
-        return 'Running command...';
+        if (toolName === 'bash' || toolName === 'computer') {
+            const cmd = input.command || input.cmd || '';
+            if (cmd) {
+                if (/pip\s*install|pip3\s*install/.test(cmd)) return 'Installing dependencies...';
+                if (/openpyxl|\.xlsx|xlrd|xlwt/.test(cmd)) return 'Building spreadsheet...';
+                if (/pptx|python-pptx/.test(cmd)) return 'Building presentation...';
+                if (/docx|python-docx/.test(cmd)) return 'Building document...';
+                if (/python3?\s+\S+\.py/.test(cmd)) return 'Running Python script...';
+                const preview = chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40);
+                return `Running: ${preview}`;
+            }
+            if (rawStr.includes('pip install') || rawStr.includes('pip3 install')) return 'Installing dependencies...';
+            if (rawStr.match(/\.xlsx|openpyxl|xlrd/)) return 'Building spreadsheet...';
+            if (rawStr.includes('pptx')) return 'Building presentation...';
+            if (rawStr.includes('docx')) return 'Building document...';
+            if (rawStr.match(/python3? /) || rawStr.match(/\.py\b/)) return 'Running Python script...';
+            if (rawStr.match(/\b(ls|find|cat|head|tail|grep)\b/)) return 'Reading files...';
+            if (rawStr.includes('curl ') || rawStr.includes('wget ') || rawStr.includes('requests')) return 'Fetching data...';
+            return 'Running command...';
+        }
+        if (toolName === 'str_replace_based_edit_tool' || toolName === 'str_replace_editor') {
+            const fp = input.path || input.filename || '';
+            const fname = fp ? fp.split('/').pop() : '';
+            return fname ? `Editing: ${chipTrunc(fname)}` : 'Editing file...';
+        }
+        if (toolName === 'write_file') {
+            const fp = input.path || input.filename || '';
+            const fname = fp ? fp.split('/').pop() : '';
+            return fname ? `Saving: ${chipTrunc(fname)}` : 'Saving file...';
+        }
+        if (toolName === 'read_file') {
+            const fp = input.path || input.filename || '';
+            const fname = fp ? fp.split('/').pop() : '';
+            return fname ? `Reading: ${chipTrunc(fname)}` : 'Reading file...';
+        }
+        if (toolName === 'list_files') return 'Listing files...';
+        return 'Working...';
+    } catch {
+        const rawStr = (typeof toolInput === 'string' ? toolInput : JSON.stringify(toolInput || '')).toLowerCase();
+        if (rawStr.includes('pip install')) return 'Installing dependencies...';
+        return 'Working...';
     }
-    if (toolName === 'write_file') {
-        const filename = extractFilename(toolInput);
-        return filename ? `Saving ${filename}...` : 'Saving file...';
-    }
-    if (toolName === 'read_file') {
-        const filename = extractFilename(toolInput);
-        return filename ? `Reading ${filename}...` : 'Reading file...';
-    }
-    if (toolName === 'list_files') return 'Listing files...';
-    return 'Working...';
 }
 
 function extractFilename(toolInput) {
@@ -296,15 +327,37 @@ function extractFilename(toolInput) {
 // ADO#3241 — Human-readable summaries for builtin tool_call events
 function getBuiltinSummary(toolName, toolInput) {
     switch(toolName) {
-        case 'search_knowledge_base': return `Searching knowledge base: "${(toolInput.query||'').substring(0,50)}"`;
-        case 'search_memory': return 'Searching memory...';
-        case 'read_memory': return 'Reading memory...';
-        case 'write_memory': return 'Saving to memory...';
+        case 'search_knowledge_base': return `Searching KB: "${chipTrunc(toolInput.query||'', 50)}"`;
+        case 'search_memory': return `Searching memory: "${chipTrunc(toolInput.query||'', 50)}"`;
+        case 'read_memory': {
+            const slug = toolInput.slug || toolInput.key || toolInput.id || '';
+            return slug ? `Reading memory: ${chipTrunc(slug)}` : 'Reading memory...';
+        }
+        case 'write_memory': {
+            const title = toolInput.title || toolInput.slug || toolInput.key || '';
+            return title ? `Saving memory: ${chipTrunc(title)}` : 'Saving to memory...';
+        }
         case 'list_workspace_files': return 'Listing workspace files...';
-        case 'create_document': return `Creating document: "${toolInput.filename||toolInput.title||'document'}"`;
-        case 'read_file': return `Reading file: ${toolInput.path||''}`;
-        case 'write_file': return `Saving file: "${toolInput.path || 'file'}"`;
+        case 'create_document': {
+            const docName = toolInput.filename || toolInput.title || 'document';
+            return `Creating: ${chipTrunc(docName)}`;
+        }
+        case 'read_file': {
+            const fp = toolInput.path || toolInput.filename || '';
+            const fname = fp.split('/').pop();
+            return fname ? `Reading: ${chipTrunc(fname)}` : 'Reading file...';
+        }
+        case 'write_file': {
+            const fp = toolInput.path || toolInput.filename || '';
+            const fname = fp.split('/').pop();
+            return fname ? `Saving: ${chipTrunc(fname)}` : 'Saving file...';
+        }
         case 'list_files': return 'Listing files...';
+        case 'read_workspace_file': {
+            const fp = toolInput.path || toolInput.filename || '';
+            const fname = fp.split('/').pop();
+            return fname ? `Reading: ${chipTrunc(fname)}` : 'Reading workspace file...';
+        }
         default: return `${toolName}...`;
     }
 }
@@ -1213,6 +1266,49 @@ app.post('/tools/write_memory', async (req, res) => {
     } catch (err) {
         console.error('[harness] write_memory error:', err.message);
         // Best-effort — return success:false on error, do not crash
+        res.json({ success: false, error: err.message });
+    }
+});
+
+// ─── import-memory endpoint (ADO#4053) ───────────────────────────────────────
+app.post('/import-memory', async (req, res) => {
+    const { userId, content } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    if (!content || !content.trim()) return res.status(400).json({ error: 'content required' });
+
+    const internalToken = process.env.INTERNAL_API_TOKEN || '';
+
+    // Calculate chunk count
+    const CHUNK_SIZE = 500, OVERLAP = 50;
+    let chunkCount = 0;
+    for (let i = 0; i < content.length; i += CHUNK_SIZE - OVERLAP) {
+        chunkCount++;
+        if (i + CHUNK_SIZE >= content.length) break;
+    }
+
+    try {
+        // Write to S3 + DB via Blazor API
+        const resp = await fetch(`${FAIT_BASE_URL}/api/memory/write`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(internalToken ? { 'X-Internal-Token': internalToken } : {}),
+            },
+            body: JSON.stringify({ userId, slug: 'imported-memory', title: 'Imported Memory', content }),
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            const isHtml = text.trim().startsWith('<') || text.includes('<!DOCTYPE');
+            const safeText = isHtml ? `[non-JSON response, HTTP ${resp.status}]` : text.substring(0, 200);
+            throw new Error(`memory/write failed (${resp.status}): ${safeText}`);
+        }
+
+        // Upsert into pgvector
+        await upsertMemoryChunks(userId, 'memory/imported-memory.md', content);
+
+        res.json({ success: true, chunks: chunkCount });
+    } catch (err) {
+        console.error('[harness] import-memory error:', err.message);
         res.json({ success: false, error: err.message });
     }
 });
@@ -2686,7 +2782,7 @@ app.post('/turn', async (req, res) => {
     if (taskMode) {
         console.log(`[harness] /turn: taskMode=true — entering CC spawn path for userId=${userId}`);
         sendEvent({ type: 'mode_switch', payload: JSON.stringify({ reason: 'task_mode' }) });
-        sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'start', status: 'starting', message: 'Starting Claude Code task...' }) });
+        sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'start', status: 'starting', message: 'Starting task...' }) });
         let ended = false;
         const endResponse = (data) => {
             if (ended) return;
@@ -2981,6 +3077,13 @@ You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on
             folder = await resolveTaskFolder(userId, taskFolderIdResolved ?? taskFolderId);
             folderLocalDir = `${WORKSPACE_DIR}/${userId}/${folder.id}`;
             mkdirSync(folderLocalDir, { recursive: true });
+            // ADO#4249 — emit folder context chip now that folder is resolved
+            if (folder && folder.name) {
+                sendEvent({ type: 'task_progress', payload: JSON.stringify({
+                    step: 'tool_use', toolName: 'folder', status: 'calling',
+                    message: `Working in: /${chipTrunc(folder.name, 40)}`
+                }) });
+            }
         } catch (folderErr) {
             console.warn(`[harness] folder resolution failed (non-fatal), using userWorkspaceDir: ${folderErr.message}`);
         }
@@ -4277,9 +4380,9 @@ Do NOT emit [TASK_READY] if:
                             // ADO#3241 — tool_call SSE events
                             const adoSummaries = {
                                 ado_list_work_items: 'Querying ADO work items...',
-                                ado_get_work_item: `Looking up work item ${toolInput.id ?? ''}...`,
-                                ado_create_work_item: `Creating work item: ${toolInput.title ?? ''}...`,
-                                ado_update_work_item: `Updating work item ${toolInput.id ?? ''}...`,
+                                ado_get_work_item: `Looking up WI #${toolInput.id ?? ''}`,
+                                ado_create_work_item: `Filing WI: ${chipTrunc(toolInput.title ?? '')}`,
+                                ado_update_work_item: `Updating WI #${toolInput.id ?? ''}`,
                                 ado_wiql_query: 'Running ADO query...'
                             };
                             emitToolCall(res, 'ado', toolUseAccumulator.name, 'calling', adoSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
@@ -4298,7 +4401,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'ado', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'web_search') {
-                            emitToolCall(res, 'brave', 'web_search', 'calling', `Searching the web for: ${toolInput.query ?? ''}`);
+                            emitToolCall(res, 'brave', 'web_search', 'calling', `Searching: ${chipTrunc(toolInput.query ?? '', 50)}`);
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/web_search`, {
                                     method: 'POST',

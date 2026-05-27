@@ -14,6 +14,7 @@ public class MemoryFileService : IMemoryFileService
     private readonly IAmazonS3 _s3;
     private readonly IConfiguration _config;
     private readonly ILogger<MemoryFileService> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     private string BucketName => _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
 
@@ -27,12 +28,14 @@ public class MemoryFileService : IMemoryFileService
         IDbContextFactory<AppDbContext> dbFactory,
         IAmazonS3 s3,
         IConfiguration config,
-        ILogger<MemoryFileService> logger)
+        ILogger<MemoryFileService> logger,
+        IHttpClientFactory httpClientFactory)
     {
         _dbFactory = dbFactory;
         _s3 = s3;
         _config = config;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task<List<MemoryTopic>> GetTopicsAsync(Guid userId, CancellationToken ct = default)
@@ -190,4 +193,26 @@ public class MemoryFileService : IMemoryFileService
         ms.Position = 0;
         return ms;
     }
+
+    public async Task<ImportMemoryResult> ImportMemoryAsync(Guid userId, string content, CancellationToken ct = default)
+    {
+        var harnessUrl = _config["HARNESS_URL"] ?? "http://localhost:3000";
+        var http = _httpClientFactory.CreateClient();
+        var payload = new { userId = userId.ToString(), content };
+        var json = System.Text.Json.JsonSerializer.Serialize(payload);
+        var httpContent = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+        var response = await http.PostAsync($"{harnessUrl}/import-memory", httpContent, ct);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync(ct);
+        var result = System.Text.Json.JsonSerializer.Deserialize<ImportMemoryResponse>(body);
+        if (result?.Success != true)
+            throw new InvalidOperationException(result?.Error ?? "Import failed");
+        return new ImportMemoryResult(result.Chunks);
+    }
+
+    private record ImportMemoryResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("success")] bool Success,
+        [property: System.Text.Json.Serialization.JsonPropertyName("chunks")] int Chunks,
+        [property: System.Text.Json.Serialization.JsonPropertyName("error")] string? Error
+    );
 }

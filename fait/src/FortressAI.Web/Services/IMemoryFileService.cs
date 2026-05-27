@@ -21,4 +21,9 @@ public interface IMemoryFileService
 
     /// <summary>Returns a ZIP stream of all topic .md files + MEMORY.md for this user.</summary>
     Task<Stream> ExportZipAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>Sends raw text to the harness import-memory endpoint. Returns chunk count.</summary>
+    Task<ImportMemoryResult> ImportMemoryAsync(Guid userId, string content, CancellationToken ct = default);
 }
+
+public record ImportMemoryResult(int Chunks);

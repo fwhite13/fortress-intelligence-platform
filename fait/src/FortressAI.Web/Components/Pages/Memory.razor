@@ -8,6 +8,7 @@
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject NavigationManager NavigationManager
+@inject IJSRuntime JS
 
 @if (!Session.IsAuthenticated)
 {
@@ -42,6 +43,12 @@ else
                         {
                             <span>Export</span>
                         }
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Secondary"
+                               StartIcon="@Icons.Material.Filled.CloudDownload"
+                               OnClick="OpenImportDialog">
+                        Import
                     </MudButton>
                 </div>
 
@@ -181,6 +188,89 @@ else
         </MudOverlay>
     }
 
+    <!-- Import Memory Dialog (ADO#4053) -->
+    @if (_showImportDialog)
+    {
+        <MudOverlay Visible="true" DarkBackground="true" ZIndex="1200">
+            <MudCard Style="min-width: 500px; max-width: 700px; padding: 16px;">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Import Memory</MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (_importStep == 1)
+                    {
+                        <MudText Typo="Typo.body2" Class="mb-3">
+                            Copy this prompt and paste it into Claude, ChatGPT, or any other AI to export your memories:
+                        </MudText>
+                        <MudPaper Elevation="0" Class="pa-3 mb-3" Style="background: var(--mud-palette-background-grey); border-radius: 4px;">
+                            <MudText Typo="Typo.body2" Style="font-family: monospace; white-space: pre-wrap;">@_importPrompt</MudText>
+                        </MudPaper>
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.ContentCopy"
+                                   OnClick="CopyImportPromptAsync">
+                            @(_importPromptCopied ? "Copied!" : "Copy Prompt")
+                        </MudButton>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Class="mb-3">
+                            Paste the exported content from your other AI below:
+                        </MudText>
+                        <MudTextField @bind-Value="_importContent"
+                                      Label="Paste exported memory here"
+                                      Variant="Variant.Outlined"
+                                      Lines="12"
+                                      FullWidth="true"
+                                      AutoGrow="true"
+                                      Disabled="@_importLoading" />
+                        @if (_importError != null)
+                        {
+                            <MudAlert Severity="Severity.Error" Class="mt-2">@_importError</MudAlert>
+                        }
+                    }
+                </MudCardContent>
+                <MudCardActions>
+                    @if (_importStep == 1)
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                   OnClick="() => _importStep = 2">
+                            Next: Paste Content
+                        </MudButton>
+                    }
+                    else
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                   OnClick="RunImportAsync"
+                                   Disabled="@(string.IsNullOrWhiteSpace(_importContent) || _importLoading)">
+                            @if (_importLoading)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                                <span>Importing...</span>
+                            }
+                            else
+                            {
+                                <span>Import</span>
+                            }
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined"
+                                   OnClick="() => _importStep = 1"
+                                   Disabled="@_importLoading">
+                            Back
+                        </MudButton>
+                    }
+                    <MudButton Variant="Variant.Text"
+                               OnClick="CloseImportDialog"
+                               Disabled="@_importLoading">
+                        Cancel
+                    </MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudOverlay>
+    }
+
     <!-- Delete Confirmation Dialog -->
     @if (_showDeleteConfirm)
     {
@@ -228,6 +318,15 @@ else
     private bool _slugManuallyEdited = false;
     private bool _exportLoading = false;
     private IDisposable? _locationChangingHandler;
+
+    // Import memory (ADO#4053)
+    private bool _showImportDialog = false;
+    private int _importStep = 1;
+    private string _importContent = string.Empty;
+    private bool _importLoading = false;
+    private bool _importPromptCopied = false;
+    private string? _importError = null;
+    private const string _importPrompt = "Export all of my stored memories and any context you've learned about me from past conversations. Preserve my words verbatim where possible, especially instructions and preferences.";
 
     protected override async Task OnInitializedAsync()
     {
@@ -416,6 +515,62 @@ else
         if (diff.TotalDays < 1) return $"{(int)diff.TotalHours}h ago";
         if (diff.TotalDays < 7) return $"{(int)diff.TotalDays}d ago";
         return dt.ToString("MMM d");
+    }
+
+    private void OpenImportDialog()
+    {
+        _showImportDialog = true;
+        _importStep = 1;
+        _importContent = string.Empty;
+        _importLoading = false;
+        _importPromptCopied = false;
+        _importError = null;
+    }
+
+    private void CloseImportDialog()
+    {
+        _showImportDialog = false;
+    }
+
+    private async Task CopyImportPromptAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _importPrompt);
+        }
+        catch
+        {
+            // Clipboard API might be blocked — silently fall through
+        }
+        _importPromptCopied = true;
+        Snackbar.Add("Prompt copied — paste into your AI.", Severity.Info);
+        await Task.Delay(2000);
+        _importPromptCopied = false;
+        StateHasChanged();
+    }
+
+    private async Task RunImportAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_importContent)) return;
+        _importLoading = true;
+        _importError = null;
+        StateHasChanged();
+        try
+        {
+            var result = await MemoryService.ImportMemoryAsync(Session.UserId, _importContent);
+            _showImportDialog = false;
+            await LoadTopicsAsync();
+            Snackbar.Add($"Import complete — {result.Chunks} chunks added to memory.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            _importError = $"Import failed: {ex.Message}";
+        }
+        finally
+        {
+            _importLoading = false;
+            StateHasChanged();
+        }
     }
 
     public ValueTask DisposeAsync()
