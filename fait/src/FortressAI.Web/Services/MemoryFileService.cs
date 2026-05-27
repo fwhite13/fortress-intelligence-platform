@@ -197,7 +197,7 @@ public class MemoryFileService : IMemoryFileService
     public async Task<ImportMemoryResult> ImportMemoryAsync(Guid userId, string content, CancellationToken ct = default)
     {
         var harnessUrl = _config["HARNESS_URL"] ?? "http://localhost:3000";
-        var http = _httpClientFactory.CreateClient();
+        var http = _httpClientFactory.CreateClient("HarnessClient");
         var payload = new { userId = userId.ToString(), content };
         var json = System.Text.Json.JsonSerializer.Serialize(payload);
         var httpContent = new StringContent(json, System.Text.Encoding.UTF8, "application/json");

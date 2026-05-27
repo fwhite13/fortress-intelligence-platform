@@ -537,16 +537,16 @@ else
         try
         {
             await JS.InvokeVoidAsync("navigator.clipboard.writeText", _importPrompt);
+            _importPromptCopied = true;
+            Snackbar.Add("Prompt copied — paste into your AI.", Severity.Info);
+            await Task.Delay(2000);
+            _importPromptCopied = false;
+            StateHasChanged();
         }
         catch
         {
             // Clipboard API might be blocked — silently fall through
         }
-        _importPromptCopied = true;
-        Snackbar.Add("Prompt copied — paste into your AI.", Severity.Info);
-        await Task.Delay(2000);
-        _importPromptCopied = false;
-        StateHasChanged();
     }
 
     private async Task RunImportAsync()
