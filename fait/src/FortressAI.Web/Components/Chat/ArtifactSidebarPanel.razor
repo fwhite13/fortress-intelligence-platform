@@ -1,6 +1,5 @@
 @inject ChatLayoutState LayoutState
 @inject IWorkspaceFileService WorkspaceFileSvc
-@inject ICloudFrontSignedUrlService CloudFrontSvc
 @inject IJSRuntime JSRuntime
 @inject ISnackbar Snackbar
 @inject IHttpClientFactory HttpClientFactory
@@ -77,7 +76,7 @@
                     else if (_previewUrl != null)
                     {
                         <iframe src="@_previewUrl" class="artifact-sidebar__iframe"
-                                sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-popups-to-escape-sandbox" />
+                                sandbox="allow-scripts allow-popups allow-forms allow-popups-to-escape-sandbox" />
                     }
                     else if (_previewError != null)
                     {
@@ -255,25 +254,24 @@
                 }
                 else
                 {
-                    // Office Online requires a publicly accessible URL.
-                    // Use CloudFront signed URL (publicly resolvable) if available; otherwise store for fallback link.
-                    if (CloudFrontSvc.IsConfigured)
+                    // Route through the service — it handles CF signed URL vs S3 presigned fallback.
+                    // GetFilePreviewUrlAsync returns a CloudFront signed URL when configured,
+                    // falling back to S3 presigned. Office Online requires a publicly accessible URL,
+                    // so only use inline embed when CloudFront is configured.
+                    var previewUrl = await WorkspaceFileSvc.GetFilePreviewUrlAsync(artifact.S3Key, expirySeconds: 3600);
+                    // Determine if the URL is a CF URL (not an S3 presigned URL) by checking for the S3 domain.
+                    // If the service returned a CloudFront URL, it will NOT contain ".s3." in the host.
+                    bool isCfUrl = !previewUrl.Contains(".s3.", StringComparison.OrdinalIgnoreCase)
+                                   && !previewUrl.Contains("amazonaws.com", StringComparison.OrdinalIgnoreCase);
+                    if (isCfUrl)
                     {
-                        var signedUrl = await CloudFrontSvc.GetSignedUrlAsync(artifact.S3Key);
-                        if (signedUrl != null)
-                        {
-                            var encodedSrc = Uri.EscapeDataString(signedUrl);
-                            _previewUrl = $"https://view.officeapps.live.com/op/embed.aspx?src={encodedSrc}";
-                            _officeOnlineRawUrl = null;
-                        }
-                        else
-                        {
-                            _officeOnlineRawUrl = rawUrl;
-                            _previewUrl = null;
-                        }
+                        var encodedSrc = Uri.EscapeDataString(previewUrl);
+                        _previewUrl = $"https://view.officeapps.live.com/op/embed.aspx?src={encodedSrc}";
+                        _officeOnlineRawUrl = null;
                     }
                     else
                     {
+                        // S3 presigned URLs are not publicly accessible; show fallback link instead.
                         _officeOnlineRawUrl = rawUrl;
                         _previewUrl = null;
                     }
