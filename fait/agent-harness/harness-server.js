@@ -358,7 +358,7 @@ function getBuiltinSummary(toolName, toolInput) {
             const fname = fp.split('/').pop();
             return fname ? `Reading: ${chipTrunc(fname)}` : 'Reading workspace file...';
         }
-        default: return `${toolName}...`;
+        default: return 'Working...';
     }
 }
 
@@ -1276,6 +1276,16 @@ app.post('/import-memory', async (req, res) => {
     if (!userId) return res.status(400).json({ error: 'userId required' });
     if (!content || !content.trim()) return res.status(400).json({ error: 'content required' });
 
+    const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!GUID_RE.test(userId)) {
+        return res.status(400).json({ error: 'Invalid userId' });
+    }
+
+    const MAX_CONTENT_CHARS = 50_000;
+    if (content.length > MAX_CONTENT_CHARS) {
+        return res.status(400).json({ error: `Content too large (max ${MAX_CONTENT_CHARS} chars)` });
+    }
+
     const internalToken = process.env.INTERNAL_API_TOKEN || '';
 
     // Calculate chunk count
@@ -1303,10 +1313,18 @@ app.post('/import-memory', async (req, res) => {
             throw new Error(`memory/write failed (${resp.status}): ${safeText}`);
         }
 
-        // Upsert into pgvector
-        await upsertMemoryChunks(userId, 'memory/imported-memory.md', content);
+        // Upsert into pgvector (non-fatal — S3 write already succeeded)
+        let pgvectorWarning = null;
+        try {
+            await upsertMemoryChunks(userId, 'memory/imported-memory.md', content);
+        } catch (pgErr) {
+            console.error('[harness] import-memory pgvector upsert failed (non-fatal):', pgErr.message);
+            pgvectorWarning = pgErr.message;
+        }
 
-        res.json({ success: true, chunks: chunkCount });
+        const result = { success: true, chunks: chunkCount };
+        if (pgvectorWarning) result.pgvectorWarning = pgvectorWarning;
+        res.json(result);
     } catch (err) {
         console.error('[harness] import-memory error:', err.message);
         res.json({ success: false, error: err.message });
@@ -4381,7 +4399,7 @@ Do NOT emit [TASK_READY] if:
                             const adoSummaries = {
                                 ado_list_work_items: 'Querying ADO work items...',
                                 ado_get_work_item: `Looking up WI #${toolInput.id ?? ''}`,
-                                ado_create_work_item: `Filing WI: ${chipTrunc(toolInput.title ?? '')}`,
+                                ado_create_work_item: toolInput.title ? `Filing WI: ${chipTrunc(toolInput.title)}` : 'Filing WI...',
                                 ado_update_work_item: `Updating WI #${toolInput.id ?? ''}`,
                                 ado_wiql_query: 'Running ADO query...'
                             };
@@ -4401,7 +4419,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'ado', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'web_search') {
-                            emitToolCall(res, 'brave', 'web_search', 'calling', `Searching: ${chipTrunc(toolInput.query ?? '', 50)}`);
+                            emitToolCall(res, 'brave', 'web_search', 'calling', toolInput.query ? `Searching: ${chipTrunc(toolInput.query, 50)}` : 'Searching...');
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/web_search`, {
                                     method: 'POST',
