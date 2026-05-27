@@ -72,7 +72,7 @@ public class FirmDbContext : DbContext
                 .WithOne(mm => mm.Meeting)
                 .HasForeignKey<FirmMeetingMindmap>(mm => mm.MeetingId)
                 .OnDelete(DeleteBehavior.Cascade)
-                .HasConstraintName("fk_fmm_meeting");
+                .HasConstraintName("fk_fmm_meeting_id");
             entity.Property(e => e.StartDatetime).HasColumnName("start_datetime");
             entity.Property(e => e.CalendarEventId).HasColumnName("calendar_event_id").HasMaxLength(500);
             entity.Property(e => e.Mode).HasColumnName("mode").HasMaxLength(2);

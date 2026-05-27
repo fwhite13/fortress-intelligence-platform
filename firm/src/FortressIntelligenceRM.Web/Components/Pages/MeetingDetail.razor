@@ -686,7 +686,7 @@
         StateHasChanged();
         try
         {
-            var mindmap = await MindmapService.GenerateAsync(_meeting.Id);
+            var mindmap = await MindmapService.GenerateAsync(_meeting.Id, forceRegenerate: false);
             if (mindmap != null)
             {
                 _mindmapJson = mindmap.MindmapJson;
@@ -714,11 +714,33 @@
 
     private async Task RegenerateMindmap()
     {
+        if (_mindmapLoading) return;
         _mindmapJson = null;
         _mindmapError = null;
-        _mindmapTabOpened = false; // force reload
-        await LoadMindmapAsync();
-        _mindmapTabOpened = true;
+        _mindmapLoading = true;
+        StateHasChanged();
+        try
+        {
+            var mindmap = await MindmapService.GenerateAsync(_meeting.Id, forceRegenerate: true);
+            if (mindmap != null)
+            {
+                _mindmapJson = mindmap.MindmapJson;
+                _mindmapLoading = false;
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(200);
+                await JS.InvokeVoidAsync("firmMindmap.render", "mindmap-container", _mindmapJson);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: mind map regeneration failed for meeting {Id}", _meeting.Id);
+            _mindmapError = "Failed to regenerate mind map.";
+        }
+        finally
+        {
+            _mindmapLoading = false;
+            StateHasChanged();
+        }
     }
 
 

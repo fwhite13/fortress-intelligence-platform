@@ -14,7 +14,7 @@ namespace FortressIntelligenceRM.Web.Services;
 public interface IMindmapService
 {
     /// <summary>Generate a mind map for the given meeting. Non-fatal — logs and returns null on failure.</summary>
-    Task<FirmMeetingMindmap?> GenerateAsync(long meetingId, CancellationToken ct = default);
+    Task<FirmMeetingMindmap?> GenerateAsync(long meetingId, bool forceRegenerate = false, CancellationToken ct = default);
     /// <summary>Export the stored mind map as a FreeMind .mm XML string. Returns null if no mindmap exists.</summary>
     Task<string?> ExportFreeMindAsync(long meetingId, Guid userId);
 }
@@ -28,7 +28,7 @@ public class MindmapService : IMindmapService
     private readonly ILogger<MindmapService> _logger;
 
     private string ModelId => _config.GetValue<string>("Bedrock:SummaryModelId", "anthropic.claude-3-sonnet-20240229-v1:0")!;
-    private string BucketName => _config["Firm:KbS3Bucket"] ?? "fortress-tools";
+    private string BucketName => _config["Firm:S3Bucket"] ?? "firm-recordings-dev";
 
     public MindmapService(
         IDbContextFactory<FirmDbContext> dbFactory,
@@ -44,11 +44,22 @@ public class MindmapService : IMindmapService
         _logger = logger;
     }
 
-    public async Task<FirmMeetingMindmap?> GenerateAsync(long meetingId, CancellationToken ct = default)
+    public async Task<FirmMeetingMindmap?> GenerateAsync(long meetingId, bool forceRegenerate = false, CancellationToken ct = default)
     {
         try
         {
             await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+            // Return existing mindmap without hitting Bedrock unless forced
+            if (!forceRegenerate)
+            {
+                var cached = await db.Mindmaps.FirstOrDefaultAsync(m => m.MeetingId == meetingId, ct);
+                if (cached != null)
+                {
+                    _logger.LogInformation("MindmapService: Returning cached mind map for meeting {MeetingId}", meetingId);
+                    return cached;
+                }
+            }
 
             var summary = await db.Summaries.FirstOrDefaultAsync(s => s.MeetingId == meetingId, ct);
             if (summary == null)
@@ -254,7 +265,7 @@ Open Questions: {summary.OpenQuestionsJson ?? "[]"}";
     {
         try
         {
-            var key = $"firm-transcripts/{meetingId}/mindmap.json";
+            var key = $"firm-mindmaps/{meetingId}/mindmap.json";
             var bytes = Encoding.UTF8.GetBytes(mindmapJson);
             await _s3.PutObjectAsync(new Amazon.S3.Model.PutObjectRequest
             {
