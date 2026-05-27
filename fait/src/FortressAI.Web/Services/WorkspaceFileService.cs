@@ -11,17 +11,20 @@ public class WorkspaceFileService : IWorkspaceFileService
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IAmazonS3 _s3;
     private readonly string _bucket;
+    private readonly ICloudFrontSignedUrlService _cloudFront;
     private readonly ILogger<WorkspaceFileService> _logger;
 
     public WorkspaceFileService(
         IDbContextFactory<AppDbContext> dbFactory,
         IAmazonS3 s3,
         IConfiguration config,
+        ICloudFrontSignedUrlService cloudFront,
         ILogger<WorkspaceFileService> logger)
     {
         _dbFactory = dbFactory;
         _s3 = s3;
         _bucket = config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
+        _cloudFront = cloudFront;
         _logger = logger;
     }
 
@@ -101,5 +104,15 @@ public class WorkspaceFileService : IWorkspaceFileService
         };
         var url = _s3.GetPreSignedURL(request);
         return Task.FromResult(url);
+    }
+
+    public async Task<string> GetFilePreviewUrlAsync(string s3Key, int? expirySeconds = null, CancellationToken ct = default)
+    {
+        if (_cloudFront.IsConfigured)
+        {
+            var signed = await _cloudFront.GetSignedUrlAsync(s3Key, expirySeconds);
+            if (signed != null) return signed;
+        }
+        return await GetPresignedDownloadUrlAsync(s3Key, expiryMinutes: expirySeconds.HasValue ? expirySeconds.Value / 60 : 30, ct);
     }
 }

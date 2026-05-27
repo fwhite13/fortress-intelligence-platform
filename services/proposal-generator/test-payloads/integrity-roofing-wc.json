@@ -1,0 +1,104 @@
+{
+  "templateId": "nbais-wc",
+  "proposalNumber": "PROP-2026-IR-001",
+  "outputFormat": "docx",
+  "metadata": {
+    "amName": "Dianne Slater",
+    "amEmail": "dslater@nbais.com",
+    "amTitle": "Producer"
+  },
+  "insured": {
+    "name": "Integrity Roofing",
+    "entityType": "LLC",
+    "address": {
+      "street1": "5681 Golestan Ct.",
+      "city": "Las Vegas",
+      "state": "NV",
+      "zip": "89149"
+    }
+  },
+  "policyPeriod": {
+    "effectiveDate": "2026-05-28",
+    "expirationDate": "2027-05-28"
+  },
+  "quotes": [
+    {
+      "lineOfBusiness": "WorkersCompensation",
+      "carrier": {
+        "name": "Builders Association of Western Nevada Self-Insured Group (BAWNSIG)"
+      },
+      "status": "quoted",
+      "isAdmitted": true,
+      "premium": 38762.68,
+      "attributes": [
+        { "key": "el_each_accident", "value": 1000000, "label": "Employers' Liability — Each Accident", "format": "currency" },
+        { "key": "el_disease_each_employee", "value": 1000000, "label": "Employers' Liability — Disease (Each Employee)", "format": "currency" },
+        { "key": "el_disease_policy_limit", "value": 1000000, "label": "Employers' Liability — Disease (Policy Limit)", "format": "currency" }
+      ],
+      "scheduleItems": [
+        {
+          "itemType": "employee_class",
+          "itemNumber": 1,
+          "description": "Roofing--All Kinds & Drivers",
+          "attributes": [
+            { "key": "state", "value": "NV", "format": "text" },
+            { "key": "class_code", "value": "5551", "format": "text" },
+            { "key": "class_description", "value": "Roofing--All Kinds & Drivers", "format": "text" },
+            { "key": "payroll", "value": 275000, "format": "currency" },
+            { "key": "rate_per_hundred", "value": "11.694", "format": "text" },
+            { "key": "estimated_premium", "value": 32158.50, "format": "currency" }
+          ]
+        },
+        {
+          "itemType": "employee_class",
+          "itemNumber": 2,
+          "description": "Roofing – LLC Member/Manager",
+          "attributes": [
+            { "key": "state", "value": "NV", "format": "text" },
+            { "key": "class_code", "value": "5551", "format": "text" },
+            { "key": "class_description", "value": "Roofing – LLC Member/Manager", "format": "text" },
+            { "key": "payroll", "value": 36000, "format": "currency" },
+            { "key": "rate_per_hundred", "value": "11.694", "format": "text" },
+            { "key": "estimated_premium", "value": 4209.84, "format": "currency" }
+          ]
+        },
+        {
+          "itemType": "employee_class",
+          "itemNumber": 3,
+          "description": "Roofing-Foreman",
+          "attributes": [
+            { "key": "state", "value": "NV", "format": "text" },
+            { "key": "class_code", "value": "5551", "format": "text" },
+            { "key": "class_description", "value": "Roofing-Foreman", "format": "text" },
+            { "key": "payroll", "value": 36000, "format": "currency" },
+            { "key": "rate_per_hundred", "value": "11.694", "format": "text" },
+            { "key": "estimated_premium", "value": 4209.84, "format": "currency" }
+          ]
+        },
+        {
+          "itemType": "employee_class",
+          "itemNumber": 4,
+          "description": "Outside Sales",
+          "attributes": [
+            { "key": "state", "value": "NV", "format": "text" },
+            { "key": "class_code", "value": "8742", "format": "text" },
+            { "key": "class_description", "value": "Outside Sales", "format": "text" },
+            { "key": "payroll", "value": 36000, "format": "currency" },
+            { "key": "rate_per_hundred", "value": "0.624", "format": "text" },
+            { "key": "estimated_premium", "value": 224.64, "format": "currency" }
+          ]
+        }
+      ]
+    }
+  ],
+  "nbaisWc": {
+    "quoteDate": "2026-05-27",
+    "memberLegalName": "Integrity Roofing",
+    "excludedPersons": []
+  },
+  "templateConfig": {
+    "boilerplateSelections": [],
+    "includeToc": false,
+    "includeRecommendations": true
+  }
+}

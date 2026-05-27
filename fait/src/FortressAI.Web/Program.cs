@@ -135,6 +135,11 @@ builder.Services.AddSingleton<Amazon.BedrockAgent.IAmazonBedrockAgent>(sp =>
     new Amazon.BedrockAgent.AmazonBedrockAgentClient(
         Amazon.RegionEndpoint.GetBySystemName(
             builder.Configuration["AWS:Region"] ?? "us-east-1")));
+builder.Services.AddSingleton<Amazon.SecretsManager.IAmazonSecretsManager>(sp =>
+    new Amazon.SecretsManager.AmazonSecretsManagerClient(
+        Amazon.RegionEndpoint.GetBySystemName(
+            builder.Configuration["AWS:Region"] ?? "us-east-1")));
+builder.Services.AddSingleton<ICloudFrontSignedUrlService, CloudFrontSignedUrlService>();
 
 builder.Services.AddScoped<KnowledgeBaseService>();
 builder.Services.AddScoped<KbDocumentService>();

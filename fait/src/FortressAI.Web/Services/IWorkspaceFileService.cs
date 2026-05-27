@@ -23,4 +23,10 @@ public interface IWorkspaceFileService
 
     Task<string> GetPresignedDownloadUrlAsync(
         string s3Key, int expiryMinutes = 30, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns a CloudFront signed URL if CloudFront is configured, otherwise falls back to S3 presigned URL.
+    /// Use this for Office Online embed (requires publicly accessible URL).
+    /// </summary>
+    Task<string> GetFilePreviewUrlAsync(string s3Key, int? expirySeconds = null, CancellationToken ct = default);
 }
