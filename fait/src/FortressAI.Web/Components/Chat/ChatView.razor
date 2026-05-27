@@ -188,7 +188,7 @@ else
                             {
                                 <span class="tool-call-emoji @(tc.Status == "calling" ? "tool-call-emoji-spin" : "")">@GetToolEmoji(tc.ToolName, tc.Server)</span>
                             }
-                            <span class="tool-call-summary">@GetToolLabel(tc.ToolName, tc.Server, tc.Summary)</span>
+                            <span class="tool-call-summary">@TruncChip(GetToolLabel(tc.ToolName, tc.Server, tc.Summary))</span>
                         </div>
                     }
                 </div>
@@ -1509,11 +1509,15 @@ else
         return "⚙️";
     }
 
+    // ADO#4249 — Truncate chip label for display safety
+    private static string TruncChip(string? s, int max = 60) =>
+        s == null ? "" : s.Length > max ? s[..57] + "..." : s;
+
     // ADO#4056 — human-readable labels for tool chips (raw CC tool names → readable text)
     private static string GetToolLabel(string toolName, string server, string? summary = null)
     {
-        // Prefer harness message if meaningful (non-empty, doesn't start with "Calling", no underscores)
-        if (!string.IsNullOrWhiteSpace(summary) && !summary.StartsWith("Calling ") && !summary.Contains('_'))
+        // ADO#4249 — prefer harness summary (now always contextual) when present
+        if (!string.IsNullOrWhiteSpace(summary))
             return summary;
 
         return toolName switch
@@ -1540,7 +1544,7 @@ else
             var t when t.Contains("web") || t.Contains("fetch") || t.Contains("url") => "Fetching...",
             var t when t.Contains("str_replace") || t.Contains("edit_tool") || t == "edit" => "Editing file...",
             var t when t.Contains("python") || t.Contains("pip") => "Running script...",
-            _ => !string.IsNullOrWhiteSpace(summary) ? summary : "Working...",
+            _ => "Working...",
         };
     }
 

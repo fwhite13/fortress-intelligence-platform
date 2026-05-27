@@ -1,0 +1,93 @@
+ADO#4249 — Ephemeral Tool Chips: Show Contextual Detail
+Build Report
+Date: 2026-05-27
+========================================================
+
+## Changes Made
+
+### 1. fait/agent-harness/harness-server.js
+
+**Lines ~262–266 (inserted before resolveProgressLabel):**
+- Added `chipTrunc(str, max=57)` helper function
+  - Trims and truncates strings with ellipsis at 57 chars (60 total with "...")
+
+**Lines ~268–319 (replaced resolveProgressLabel):**
+- Rewrote `resolveProgressLabel` to extract structured input (JSON parse instead of raw string match)
+- bash/computer: extracts `input.command`, shows "Running: [first 40 chars]" for generic commands; pip/xlsx/pptx/docx/python patterns still return descriptive labels
+- str_replace_based_edit_tool / str_replace_editor: new cases -> "Editing: [filename]"
+- write_file: "Saving: [filename]"
+- read_file: "Reading: [filename]"
+- Added try/catch fallback for unparseable toolInput
+
+**Lines ~321–358 (replaced getBuiltinSummary):**
+- search_knowledge_base: "Searching KB: \"[query truncated to 50]\""
+- search_memory: "Searching memory: \"[query truncated to 50]\""
+- read_memory: "Reading memory: [slug/key/id]" (or generic if no slug)
+- write_memory: "Saving memory: [title/slug/key]" (or generic if no title)
+- create_document: "Creating: [filename/title]"
+- read_file: "Reading: [basename]"
+- write_file: "Saving: [basename]"
+- read_workspace_file: new case -> "Reading: [basename]"
+- All dynamic strings passed through chipTrunc
+
+**Line ~2732 (task-start chip):**
+- Changed message from "Starting Claude Code task..." to "Starting task..."
+
+**Lines ~3025–3031 (after folder resolution):**
+- Added folder context chip emitted after resolveTaskFolder() succeeds:
+  sendEvent({ type: 'task_progress', payload: { step: 'tool_use', toolName: 'folder', status: 'calling', message: "Working in: /[folder.name truncated to 40]" } })
+
+**Lines ~4321–4326 (ADO summaries):**
+- ado_get_work_item: "Looking up WI #[id]" (was "Looking up work item [id]...")
+- ado_create_work_item: "Filing WI: [chipTrunc(title)]" (was "Creating work item: [title]...")
+- ado_update_work_item: "Updating WI #[id]" (was "Updating work item [id]...")
+
+**Line ~4344 (web_search chip):**
+- Changed from "Searching the web for: [query]" to "Searching: [chipTrunc(query, 50)]"
+
+---
+
+### 2. fait/src/FortressAI.Web/Components/Chat/ChatView.razor
+
+**Line ~191 (chip rendering):**
+- Wrapped GetToolLabel call in TruncChip(): @TruncChip(GetToolLabel(tc.ToolName, tc.Server, tc.Summary))
+
+**Lines ~1513–1516 (new TruncChip helper, inserted before GetToolLabel):**
+- Added: private static string TruncChip(string? s, int max = 60) => s == null ? "" : s.Length > max ? s[..57] + "..." : s;
+
+**Lines ~1515–1549 (GetToolLabel):**
+- Simplified summary preference: now uses summary when non-null/empty (removed old checks for "Calling " prefix and underscore presence)
+- Removed fallback _ => !string.IsNullOrWhiteSpace(summary) ? summary : "Working..." -- now just _ => "Working..."
+
+---
+
+## Acceptance Criteria Verification
+
+1. getBuiltinSummary('read_memory', { slug: 'preferences' }) -> "Reading memory: preferences" PASS
+2. getBuiltinSummary('write_memory', { title: 'User Preferences' }) -> "Saving memory: User Preferences" PASS
+3. getBuiltinSummary('write_file', { path: '/workspace/summary.md' }) -> "Saving: summary.md" PASS
+4. getBuiltinSummary('read_file', { path: '/workspace/quarterly-report.xlsx' }) -> "Reading: quarterly-report.xlsx" PASS
+5. web_search chip: "Searching: [truncated query <= 50 chars]" PASS
+6. ado_create_work_item: "Filing WI: [title]" PASS
+7. Folder context chip emitted after folder resolution: "Working in: /[folder-name]" PASS
+8. CC sub-tool bash: "Running: [cmd preview <= 40 chars]"; read_file: "Reading: [filename]" PASS
+9. Long strings truncated at 57 chars + "..." = 60 total PASS
+10. dotnet build: PASSED -- 0 errors, 50 warnings (all pre-existing) PASS
+
+---
+
+## Edge Cases
+
+- resolveProgressLabel: toolInput may be string or object; try/catch handles JSON.parse failure gracefully
+- read_memory/write_memory: falls back to generic label if slug/title fields absent
+- Folder chip only emitted inside the try block if folder.name is truthy; non-fatal folder resolution failure still suppressed
+- TruncChip handles null input (returns "")
+
+---
+
+## Build Result
+
+Build succeeded.
+  0 Error(s)
+  50 Warning(s) (all pre-existing, none introduced by this change)
+Time Elapsed: 00:00:06.71
