@@ -104,6 +104,7 @@ builder.Services.AddAWSService<IAmazonECS>();
 builder.Services.AddAWSService<IAmazonS3>();
 builder.Services.AddAWSService<IAmazonBatch>();
 builder.Services.AddScoped<IBatchTranscriptionService, BatchTranscriptionService>();
+builder.Services.AddScoped<IMindmapService, MindmapService>();
 builder.Services.AddAWSService<Amazon.BedrockAgent.IAmazonBedrockAgent>();
 builder.Services.AddAWSService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
 

@@ -17,5 +17,7 @@ public class FirmUser
     public DateTime? LastLoginAt { get; set; }
     public string? FaitUserId { get; set; }
     public bool IsAdmin { get; set; }
+    [MaxLength(200)]
+    public string? ExpoPushToken { get; set; }
     public ICollection<FirmMeeting> Meetings { get; set; } = new List<FirmMeeting>();
 }

@@ -109,4 +109,18 @@ public class S3Service
         _logger.LogInformation("FIRM: Uploaded text to S3: {Key}", s3Key);
         return s3Key;
     }
+
+    public async Task<string> UploadStreamAsync(string s3Key, Stream stream, string contentType = "application/octet-stream")
+    {
+        var request = new PutObjectRequest
+        {
+            BucketName = Bucket,
+            Key = s3Key,
+            InputStream = stream,
+            ContentType = contentType
+        };
+        await _s3.PutObjectAsync(request);
+        _logger.LogInformation("FIRM: Uploaded stream to S3: {Key}", s3Key);
+        return s3Key;
+    }
 }

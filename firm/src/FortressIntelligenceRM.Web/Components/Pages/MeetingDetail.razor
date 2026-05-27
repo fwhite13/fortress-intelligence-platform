@@ -8,6 +8,7 @@
 @inject FirmKbService FirmKbService
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
+@inject IMindmapService MindmapService
 @inject IFaitV2IntegrationService FaitV2Service
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
@@ -267,6 +268,42 @@
                     }
                 </MudPaper>
             </MudTabPanel>
+
+            <MudTabPanel Text="Mind Map" Style="color: var(--color-text-primary);" OnClick="OnMindMapTabSelected">
+                <MudPaper Class="pa-4" Style="background: transparent;" Elevation="0">
+                    @if (_meeting!.Status != MeetingStatus.Complete)
+                    {
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">Mind map will be available when the meeting completes.</MudText>
+                    }
+                    else
+                    {
+                        @* Status/action row *@
+                        @if (_mindmapLoading)
+                        {
+                            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+                        }
+                        else if (_mindmapError != null)
+                        {
+                            <MudText Color="Color.Error" Typo="Typo.body2">@_mindmapError</MudText>
+                            <MudButton Variant="Variant.Text" Color="Color.Primary" Class="mt-2" OnClick="RegenerateMindmap">Regenerate</MudButton>
+                        }
+                        else if (_mindmapJson == null)
+                        {
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">No mind map yet.</MudText>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-2" OnClick="RegenerateMindmap">Generate Mind Map</MudButton>
+                        }
+                        else
+                        {
+                            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 8px;">
+                                <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small" OnClick="RegenerateMindmap">Regenerate</MudButton>
+                                <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small" Href="@($"/api/meetings/{_meeting.Id}/mindmap/export?format=freemind")" Target="_blank">Export .mm</MudButton>
+                            </div>
+                        }
+                        @* Container is ALWAYS in DOM for Complete meetings — JS interop requires it to exist regardless of loading state *@
+                        <div id="mindmap-container" style="width: 100%; height: 520px; border-radius: 8px; overflow: hidden; @(_mindmapJson == null ? "display:none;" : "")"></div>
+                    }
+                </MudPaper>
+            </MudTabPanel>
         </MudTabs>
     }
 </MudContainer>
@@ -281,6 +318,10 @@
     private bool _isAdmin = false;
     private bool _retranscribing = false;
     private string? _retranscribeError = null;
+    private string? _mindmapJson = null;
+    private bool _mindmapLoading = false;
+    private string? _mindmapError = null;
+    private bool _mindmapTabOpened = false;
     private FortressIntelligenceRM.Web.Models.FirmUser? _user;
 
     // KB push status (loaded from /kb-status on init)
@@ -628,4 +669,57 @@
         builder.AddContent(2, label);
         builder.CloseElement();
     };
+    // ── Mind Map ─────────────────────────────────────────────────────────────
+
+    private async Task OnMindMapTabSelected()
+    {
+        if (_mindmapTabOpened || _meeting?.Status != MeetingStatus.Complete) return;
+        _mindmapTabOpened = true;
+        await LoadMindmapAsync();
+    }
+
+    private async Task LoadMindmapAsync()
+    {
+        if (_meeting == null) return;
+        _mindmapLoading = true;
+        _mindmapError = null;
+        StateHasChanged();
+        try
+        {
+            var mindmap = await MindmapService.GenerateAsync(_meeting.Id);
+            if (mindmap != null)
+            {
+                _mindmapJson = mindmap.MindmapJson;
+                _mindmapLoading = false; // clear loading BEFORE JS so container is visible in DOM
+                await InvokeAsync(StateHasChanged); // re-render: shows container, hides spinner
+                await Task.Delay(200); // allow DOM to flush
+                await JS.InvokeVoidAsync("firmMindmap.render", "mindmap-container", _mindmapJson);
+            }
+            else
+            {
+                _mindmapJson = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: mind map load failed for meeting {Id}", _meeting.Id);
+            _mindmapError = "Failed to load mind map. Try regenerating.";
+        }
+        finally
+        {
+            _mindmapLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RegenerateMindmap()
+    {
+        _mindmapJson = null;
+        _mindmapError = null;
+        _mindmapTabOpened = false; // force reload
+        await LoadMindmapAsync();
+        _mindmapTabOpened = true;
+    }
+
+
 }

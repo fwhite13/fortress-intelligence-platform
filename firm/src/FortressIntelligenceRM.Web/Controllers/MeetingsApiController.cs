@@ -27,6 +27,7 @@ public class MeetingsApiController : ControllerBase
     private readonly IFirmBotService _firmBotService;
     private readonly TeamsGraphService _teamsGraphService;
     private readonly IOrgContextService _orgContextService;
+    private readonly IMindmapService _mindmapService;
 
     public MeetingsApiController(
         MeetingService meetingService,
@@ -39,7 +40,8 @@ public class MeetingsApiController : ControllerBase
         ILogger<MeetingsApiController> logger,
         IFirmBotService firmBotService,
         TeamsGraphService teamsGraphService,
-        IOrgContextService orgContextService)
+        IOrgContextService orgContextService,
+        IMindmapService mindmapService)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
@@ -52,6 +54,7 @@ public class MeetingsApiController : ControllerBase
         _firmBotService = firmBotService;
         _teamsGraphService = teamsGraphService;
         _orgContextService = orgContextService;
+        _mindmapService = mindmapService;
     }
 
 [HttpPost("/api/meetings/join")]
@@ -392,6 +395,47 @@ public class MeetingsApiController : ControllerBase
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "FIRM: Failed to notify FAIT of meeting completion (non-fatal)");
+                }
+            });
+        }
+
+        // Fire-and-forget: generate mind map after summary is written
+        if (meetingStatus == MeetingStatus.Complete)
+        {
+            _ = _mindmapService.GenerateAsync(payload.MeetingId);
+        }
+
+        // Fire-and-forget: send Expo push notification to mobile user if token registered
+        if (meetingStatus == MeetingStatus.Complete)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var pushDb = await _dbFactory.CreateDbContextAsync();
+                    var pushMeeting = await pushDb.Meetings
+                        .Include(m => m.CreatedByUser)
+                        .FirstOrDefaultAsync(m => m.Id == payload.MeetingId);
+                    var pushToken = pushMeeting?.CreatedByUser?.ExpoPushToken;
+                    if (string.IsNullOrEmpty(pushToken)) return;
+
+                    var pushTitle = pushMeeting?.Title ?? "Recording complete";
+                    var pushBody = new
+                    {
+                        to = pushToken,
+                        title = "FIRM — Recording Ready",
+                        body = $"Transcript and summary ready: {pushTitle}",
+                        data = new { meetingId = payload.MeetingId }
+                    };
+                    var httpClient = _httpClientFactory.CreateClient();
+                    var req = new HttpRequestMessage(HttpMethod.Post, "https://exp.host/--/api/v2/push/send");
+                    req.Content = new StringContent(JsonSerializer.Serialize(pushBody), System.Text.Encoding.UTF8, "application/json");
+                    await httpClient.SendAsync(req);
+                    _logger.LogInformation("FIRM: Expo push notification sent for meeting {MeetingId}", payload.MeetingId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "FIRM: Expo push notification failed for meeting {MeetingId} (non-fatal)", payload.MeetingId);
                 }
             });
         }
@@ -985,6 +1029,240 @@ public class MeetingsApiController : ControllerBase
         return sb.ToString();
     }
 
+
+    // ── Mind Map Endpoints ────────────────────────────────────────────────────
+
+    [HttpGet("/api/meetings/{id}/mindmap")]
+    [Authorize]
+    public async Task<IActionResult> GetMindmap(long id)
+    {
+        var (meeting, error) = await ResolveOwnedMeeting(id);
+        if (error != null) return error;
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var mindmap = await db.Mindmaps.FirstOrDefaultAsync(m => m.MeetingId == id);
+        if (mindmap == null)
+            return NotFound(new { error = "Mind map not yet generated" });
+
+        try
+        {
+            using var doc = JsonDocument.Parse(mindmap.MindmapJson);
+            return Ok(new
+            {
+                meetingId = id,
+                createdAt = mindmap.CreatedAt,
+                mindmap = doc.RootElement
+            });
+        }
+        catch
+        {
+            return StatusCode(500, new { error = "Mind map data is corrupt — try regenerating" });
+        }
+    }
+
+    [HttpPost("/api/meetings/{id}/generate-mindmap")]
+    [Authorize]
+    public async Task<IActionResult> GenerateMindmap(long id)
+    {
+        var (meeting, error) = await ResolveOwnedMeeting(id);
+        if (error != null) return error;
+
+        if (meeting!.Status != MeetingStatus.Complete)
+            return BadRequest(new { error = "Meeting must be complete before generating a mind map" });
+
+        _ = _mindmapService.GenerateAsync(id);
+        return Accepted(new { status = "queued", meetingId = id });
+    }
+
+    [HttpGet("/api/meetings/{id}/mindmap/export")]
+    [Authorize]
+    public async Task<IActionResult> ExportMindmap(long id, [FromQuery] string format = "freemind")
+    {
+        var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
+        if (error != null) return error;
+
+        if (!string.Equals(format, "freemind", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { error = "Supported formats: freemind" });
+
+        var xml = await _mindmapService.ExportFreeMindAsync(id, user!.Id);
+        if (xml == null)
+            return NotFound(new { error = "No mind map found for this meeting" });
+
+        var slug = meeting!.Title?.ToLowerInvariant().Replace(" ", "-") ?? $"meeting-{id}";
+        slug = System.Text.RegularExpressions.Regex.Replace(slug, @"[^a-z0-9\-]", "");
+        return File(System.Text.Encoding.UTF8.GetBytes(xml), "application/xml", $"{slug}-mindmap.mm");
+    }
+
+    // ── Mobile API Endpoints ──────────────────────────────────────────────────
+
+    [HttpGet("/api/firm/me")]
+    [Authorize]
+    public async Task<IActionResult> GetMe()
+    {
+        var entraOid = User.FindFirst("oid")?.Value
+            ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
+        if (user == null) return NotFound(new { error = "User not found in FIRM" });
+
+        return Ok(new
+        {
+            firmUserId = user.Id,
+            entraOid = user.EntraOid,
+            displayName = user.DisplayName,
+            email = user.Email,
+            isAdmin = user.IsAdmin
+        });
+    }
+
+    [HttpPost("/api/firm/register-push-token")]
+    [Authorize]
+    public async Task<IActionResult> RegisterPushToken([FromBody] RegisterPushTokenRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.ExpoPushToken))
+            return BadRequest(new { error = "ExpoPushToken is required" });
+
+        var entraOid = User.FindFirst("oid")?.Value
+            ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
+        if (user == null) return NotFound(new { error = "User not found in FIRM" });
+
+        user.ExpoPushToken = request.ExpoPushToken;
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        return Ok(new { registered = true });
+    }
+
+    [HttpPost("/api/meetings/mobile-upload")]
+    [Authorize]
+    [RequestSizeLimit(600_000_000)] // 600MB limit
+    public async Task<IActionResult> MobileUpload([FromForm] MobileUploadRequest request)
+    {
+        if (request.Audio == null || request.Audio.Length == 0)
+            return BadRequest(new { error = "Audio file is required" });
+
+        var entraOid = User.FindFirst("oid")?.Value
+            ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var email = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            ?? User.FindFirst("preferred_username")?.Value ?? "";
+        var displayName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? User.FindFirst("name")?.Value ?? email;
+
+        if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
+
+        var firmUser = await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
+        if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
+
+        // Create meeting record
+        var title = !string.IsNullOrWhiteSpace(request.Title)
+            ? request.Title
+            : $"Recording {(request.RecordedAt ?? DateTime.UtcNow):yyyy-MM-dd HH:mm}";
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = new FirmMeeting
+        {
+            Title = title,
+            Platform = "mobile",
+            Source = "mobile",
+            MeetingUrl = null,
+            Status = MeetingStatus.Transcribing,
+            CreatedBy = firmUser.Id,
+            CreatorEntraOid = entraOid,
+            StartedAt = request.RecordedAt?.ToUniversalTime() ?? DateTime.UtcNow,
+            EndedAt = request.RecordedAt.HasValue && request.DurationSec.HasValue
+                ? request.RecordedAt.Value.ToUniversalTime().AddSeconds(request.DurationSec.Value)
+                : DateTime.UtcNow,
+            DurationSeconds = request.DurationSec,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Meetings.Add(meeting);
+        await db.SaveChangesAsync();
+
+        // Upload audio to S3
+        var ext = System.IO.Path.GetExtension(request.Audio.FileName)?.ToLower() ?? ".m4a";
+        var audioKey = $"firm-recordings-dev/{meeting.Id}/audio{ext}";
+        try
+        {
+            await using var audioStream = request.Audio.OpenReadStream();
+            await _s3Service.UploadStreamAsync(audioKey, audioStream, request.Audio.ContentType ?? "audio/mp4");
+            meeting.AudioS3Key = audioKey;
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Mobile upload S3 write failed for meeting {MeetingId}", meeting.Id);
+            meeting.Status = MeetingStatus.Failed;
+            meeting.ErrorMessage = "Audio upload to storage failed";
+            await db.SaveChangesAsync();
+            return StatusCode(500, new { error = "Failed to store audio file" });
+        }
+
+        // Submit Batch transcription job (same path as VP Bot recording_complete)
+        try
+        {
+            var jobId = await _meetingService.SubmitTranscriptionJobAsync(meeting.Id);
+            _logger.LogInformation("FIRM: Mobile upload Batch job {JobId} submitted for meeting {MeetingId}", jobId, meeting.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Mobile upload failed to submit Batch job for meeting {MeetingId}", meeting.Id);
+            // Non-fatal for the response — meeting is created, audio is stored, can retry transcription
+        }
+
+        return Ok(new
+        {
+            meetingId = meeting.Id,
+            status = "transcribing",
+            message = "Recording received. Transcript will be ready shortly."
+        });
+    }
+
+    [HttpGet("/api/meetings/list")]
+    [Authorize]
+    public async Task<IActionResult> ListMeetings([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        page = Math.Max(1, page);
+
+        var entraOid = User.FindFirst("oid")?.Value
+            ?? User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        if (string.IsNullOrEmpty(entraOid)) return Unauthorized();
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.EntraOid == entraOid);
+        if (user == null) return Ok(new { meetings = Array.Empty<object>(), total = 0, page });
+
+        var query = db.Meetings.Where(m => m.CreatedBy == user.Id);
+        var total = await query.CountAsync();
+        var meetings = await query
+            .OrderByDescending(m => m.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(m => new
+            {
+                id = m.Id,
+                title = m.Title,
+                status = m.Status.ToString().ToLower(),
+                source = m.Source,
+                platform = m.Platform,
+                recordedAt = m.StartedAt,
+                durationSec = m.DurationSeconds,
+                hasSummary = db.Summaries.Any(s => s.MeetingId == m.Id),
+                hasMindmap = db.Mindmaps.Any(mm => mm.MeetingId == m.Id),
+                createdAt = m.CreatedAt
+            })
+            .ToListAsync();
+
+        return Ok(new { meetings, total, page, pageSize });
+    }
+
     public record PushToKbRequest(string DocType, List<string> KbScopes);
 
     private async Task<(FirmMeeting? meeting, IActionResult? error)> ResolveOwnedMeeting(long id)
@@ -1090,4 +1368,15 @@ public class ActionItem
     public string? Owner { get; set; }
     [JsonPropertyName("deadline")]
     public string? Deadline { get; set; }
+}
+
+public record RegisterPushTokenRequest(string ExpoPushToken);
+
+public class MobileUploadRequest
+{
+    public IFormFile? Audio { get; set; }
+    public string? Title { get; set; }
+    public DateTime? RecordedAt { get; set; }
+    public int? DurationSec { get; set; }
+    public string KbScope { get; set; } = "none";
 }
