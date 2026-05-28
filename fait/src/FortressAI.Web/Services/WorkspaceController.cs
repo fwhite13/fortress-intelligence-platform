@@ -372,14 +372,21 @@ public class WorkspaceController : ControllerBase
 
             // Zip slip protection
             var entryPath = entry.FullName.Replace('\\', '/').TrimStart('/');
-            if (entryPath.Contains("..") || Path.IsPathRooted(entryPath))
+            if (entryPath.Contains("..")) // Path.IsPathRooted is a no-op here (TrimStart already removed leading slash)
             {
                 skipped++;
                 _logger.LogWarning("[WorkspaceController] Zip slip attempt: {EntryPath}", entryPath);
                 continue;
             }
 
-            var filename = entryPath;
+            const long MaxEntryBytes = 52_428_800; // 50MB per entry uncompressed
+            if (entry.Length > MaxEntryBytes)
+            {
+                skipped++;
+                _logger.LogWarning("[WorkspaceController] ZIP entry too large ({Size} bytes), skipped: {EntryName}", entry.Length, entry.FullName);
+                continue;
+            }
+
             var mimeType = GetMimeTypeForFilename(entry.Name);
 
             await using var entryStream = entry.Open();
@@ -387,8 +394,8 @@ public class WorkspaceController : ControllerBase
             await entryStream.CopyToAsync(ms);
             ms.Position = 0;
 
-            await _uploadService.SaveUploadAsync(userId.Value, folderId, filename, mimeType, ms);
-            extracted.Add(filename);
+            await _uploadService.SaveUploadAsync(userId.Value, folderId, entry.Name, mimeType, ms);
+            extracted.Add(entry.Name);
         }
 
         _logger.LogInformation("[WorkspaceController] ZIP extracted: {Count} files, {Skipped} skipped for user {UserId}",

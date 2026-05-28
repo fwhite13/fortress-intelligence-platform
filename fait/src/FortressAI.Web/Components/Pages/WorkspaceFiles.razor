@@ -728,7 +728,7 @@
     .workspace-drop-zone {
         transition: background 0.15s;
     }
-    .workspace-drop-zone--active {
+    .workspace-drop-zone--hover {
         background: rgba(var(--color-primary-rgb, 25,118,210), 0.05);
         outline: 2px dashed var(--color-primary);
         border-radius: 4px;
@@ -1005,24 +1005,31 @@
                 {
                     if (string.IsNullOrEmpty(entry.Name)) continue;
                     var entryPath = entry.FullName.Replace('\\', '/').TrimStart('/');
-                    if (entryPath.Contains("..") || Path.IsPathRooted(entryPath))
+                    if (entryPath.Contains("..")) // Path.IsPathRooted is a no-op here (TrimStart already removed leading slash)
                     {
                         skipped++;
                         Logger.LogWarning("[WorkspaceFiles] Zip slip attempt: {EntryPath}", entryPath);
+                        continue;
+                    }
+                    const long MaxEntryBytes = 52_428_800; // 50MB per entry uncompressed
+                    if (entry.Length > MaxEntryBytes)
+                    {
+                        skipped++;
+                        Logger.LogWarning("[WorkspaceFiles] ZIP entry too large ({Size} bytes), skipped: {EntryName}", entry.Length, entry.FullName);
                         continue;
                     }
                     var mime = GetMimeTypeForFilename(entry.Name);
                     await using var entryMs = new MemoryStream();
                     await using (var es = entry.Open()) await es.CopyToAsync(entryMs);
                     entryMs.Position = 0;
-                    await UploadSvc.SaveUploadAsync(Session.UserId, _currentFolderId, entryPath, mime, entryMs);
+                    await UploadSvc.SaveUploadAsync(Session.UserId, _currentFolderId, entry.Name, mime, entryMs);
                     extracted++;
                 }
 
                 _uploadProgress[zipFile.Name] = 100;
                 StateHasChanged();
                 var msg = extracted > 0
-                    ? $"Extracted {extracted} file(s) from {zipFile.Name}"
+                    ? $"Extracted {extracted} file(s) from {zipFile.Name} (files stored flat — folder structure not preserved)"
                     : $"ZIP {zipFile.Name} contained no extractable files";
                 if (skipped > 0) msg += $" ({skipped} skipped)";
                 Snackbar.Add(msg, extracted > 0 ? Severity.Success : Severity.Warning);
@@ -1049,7 +1056,7 @@
                     Snackbar.Add($"{file.Name} exceeds 50MB limit — skipped.", Severity.Warning);
                     _uploadProgress.Remove(file.Name);
                     await InvokeAsync(StateHasChanged);
-                    return (file.Name, success: false);
+                    return (file.Name, success: false, overLimit: true);
                 }
                 try
                 {
@@ -1058,20 +1065,20 @@
                     await UploadSvc.SaveUploadAsync(Session.UserId, _currentFolderId, file.Name, mimeType, stream);
                     _uploadProgress[file.Name] = 100;
                     await InvokeAsync(StateHasChanged);
-                    return (file.Name, success: true);
+                    return (file.Name, success: true, overLimit: false);
                 }
                 catch (Exception ex)
                 {
                     Logger.LogError(ex, "[WorkspaceFiles] Upload failed for {Filename}", file.Name);
                     _uploadProgress.Remove(file.Name);
                     await InvokeAsync(StateHasChanged);
-                    return (file.Name, success: false);
+                    return (file.Name, success: false, overLimit: false);
                 }
             }).ToList();
 
             var results = await Task.WhenAll(uploadTasks);
             var succeeded = results.Count(r => r.success);
-            var failed = results.Where(r => !r.success).ToList();
+            var failed = results.Where(r => !r.success && !r.overLimit).ToList();
 
             if (succeeded > 0 && failed.Count == 0)
                 Snackbar.Add($"{succeeded} file{(succeeded == 1 ? "" : "s")} uploaded successfully.", Severity.Success);

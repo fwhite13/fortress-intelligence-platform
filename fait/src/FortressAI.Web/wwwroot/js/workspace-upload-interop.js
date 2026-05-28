@@ -33,7 +33,7 @@ window.workspaceUploadInterop = {
                 }
             }
             if (hasDir) {
-                dotnetRef.invokeMethodAsync('OnFolderDropDetected');
+                dotnetRef.invokeMethodAsync('OnFolderDropDetected').catch(() => {});
                 return;
             }
             // Transfer files to the hidden input (works in Chrome/Edge/Firefox)
