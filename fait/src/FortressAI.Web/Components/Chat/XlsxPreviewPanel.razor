@@ -63,6 +63,8 @@
     private async Task OnTabChanged(int index)
     {
         _activeSheet = index;
+        StateHasChanged();
+        await Task.Yield(); // wait for tab panel to render before invoking JS
         if (_fileBytes != null && index < _sheetNames.Count)
         {
             await RenderSheetAsync(index);
@@ -103,6 +105,7 @@
 
             _loading = false;
             StateHasChanged();
+            await Task.Yield(); // let render flush so container div exists in DOM
 
             // Render first sheet after DOM update
             await RenderSheetAsync(0);
