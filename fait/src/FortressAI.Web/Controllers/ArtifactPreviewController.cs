@@ -136,19 +136,25 @@ public class ArtifactPreviewController : ControllerBase
         if (!string.IsNullOrEmpty(artifact.PreviewS3Key))
             return Ok(new { previewS3Key = artifact.PreviewS3Key });
 
-        // Call harness to convert
-        var harnessBase = _config["HARNESS_BASE_URL"] ?? "http://localhost:3000";
-        using var client = _httpClientFactory.CreateClient("HarnessClient");
+        // Call dedicated converter service
+        var converterBase = _config["CONVERTER_BASE_URL"] ?? "http://localhost:3001";
+        var converterApiKey = _config["CONVERTER_API_KEY"];
+        using var client = _httpClientFactory.CreateClient("HarnessClient"); // reuse 10-min timeout client
+        if (!string.IsNullOrEmpty(converterApiKey))
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
         var body = new
         {
             artifactId = id.ToString(),
             s3Key = artifact.S3Key,
             userId = artifact.UserId.ToString(),
-            previewS3Key = artifact.PreviewS3Key
+            outputBucket = _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces"
         };
-        var resp = await client.PostAsJsonAsync($"{harnessBase}/convert-pptx-preview", body);
+        var resp = await client.PostAsJsonAsync($"{converterBase}/convert", body);
         if (!resp.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("PPTX converter returned {status}", resp.StatusCode);
             return StatusCode(502, new { error = "Conversion failed" });
+        }
 
         var result = await resp.Content.ReadFromJsonAsync<ConvertPptxResult>();
         if (result?.PreviewS3Key != null)
@@ -158,5 +164,25 @@ public class ArtifactPreviewController : ControllerBase
         }
 
         return Ok(new { previewS3Key = result?.PreviewS3Key });
+    }
+
+    [HttpGet("{id:guid}/preview-status")]
+    [Authorize]
+    public async Task<IActionResult> PreviewStatus(Guid id)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var artifact = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == id);
+        if (artifact == null) return NotFound();
+
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (artifact.UserId.ToString() != userId) return Forbid();
+
+        if (string.IsNullOrEmpty(artifact.PreviewS3Key))
+            return Ok(new { status = "pending" });
+
+        // Generate HMAC token for preview URL
+        var (token, expires) = _previewService.GenerateToken(id, artifact.UserId);
+        var previewUrl = $"/api/artifacts/{id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}&preview=true";
+        return Ok(new { status = "ready", previewUrl });
     }
 }

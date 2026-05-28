@@ -13,7 +13,7 @@
     {
         <div class="pptx-preview-panel__loading">
             <MudProgressCircular Indeterminate="true" />
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">Converting presentation...</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">Generating preview… this may take a moment.</MudText>
         </div>
     }
     else if (_error != null)
@@ -91,25 +91,86 @@
                 return;
             }
 
-            // Step 1: Trigger conversion (or use cached previewS3Key)
-            string? previewKey = ExistingPreviewS3Key;
-            if (string.IsNullOrEmpty(previewKey))
+            // Step 1: If we already have a preview key, skip conversion
+            string? resolvedPreviewUrl = null;
+            if (!string.IsNullOrEmpty(ExistingPreviewS3Key))
             {
+                // Use cached key — generate token and fetch directly
+                var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
+                resolvedPreviewUrl = NavManager.ToAbsoluteUri(
+                    $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}&preview=true"
+                ).ToString();
+            }
+            else
+            {
+                // Step 2: Trigger conversion
                 var convertUrl = NavManager.ToAbsoluteUri($"/api/artifacts/{ArtifactId}/convert-pptx").ToString();
                 using var http = HttpClientFactory.CreateClient();
                 var convertResp = await http.PostAsync(convertUrl, null);
-                if (!convertResp.IsSuccessStatusCode)
+
+                if (convertResp.StatusCode == System.Net.HttpStatusCode.OK)
                 {
+                    // Synchronous success — previewS3Key returned directly
+                    var convertResult = await convertResp.Content.ReadFromJsonAsync<ConvertPptxResponse>();
+                    if (!string.IsNullOrEmpty(convertResult?.PreviewS3Key))
+                    {
+                        var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
+                        resolvedPreviewUrl = NavManager.ToAbsoluteUri(
+                            $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}&preview=true"
+                        ).ToString();
+                    }
+                    else
+                    {
+                        _error = "Conversion produced no output. Try downloading the file.";
+                        _loading = false;
+                        StateHasChanged();
+                        return;
+                    }
+                }
+                else if (convertResp.StatusCode == System.Net.HttpStatusCode.Accepted)
+                {
+                    // Async conversion in progress — poll status endpoint
+                    var statusUrl = NavManager.ToAbsoluteUri($"/api/artifacts/{ArtifactId}/preview-status").ToString();
+                    using var pollHttp = HttpClientFactory.CreateClient();
+                    var started = DateTime.UtcNow;
+                    while (true)
+                    {
+                        if ((DateTime.UtcNow - started).TotalSeconds > 120)
+                        {
+                            _error = "Preview generation timed out. Try downloading the file.";
+                            _loading = false;
+                            StateHasChanged();
+                            return;
+                        }
+                        await Task.Delay(2000);
+                        var statusResp = await pollHttp.GetAsync(statusUrl);
+                        if (!statusResp.IsSuccessStatusCode)
+                        {
+                            _error = "Failed to check preview status. Try downloading the file.";
+                            _loading = false;
+                            StateHasChanged();
+                            return;
+                        }
+                        var status = await statusResp.Content.ReadFromJsonAsync<PreviewStatusResponse>();
+                        if (status?.Status == "ready" && !string.IsNullOrEmpty(status.PreviewUrl))
+                        {
+                            resolvedPreviewUrl = NavManager.ToAbsoluteUri(status.PreviewUrl).ToString();
+                            break;
+                        }
+                        // status == "pending" — keep polling
+                    }
+                }
+                else
+                {
+                    // Error from conversion endpoint
                     _error = "Failed to convert presentation. Try downloading the file.";
                     _loading = false;
                     StateHasChanged();
                     return;
                 }
-                var convertResult = await convertResp.Content.ReadFromJsonAsync<ConvertPptxResponse>();
-                previewKey = convertResult?.PreviewS3Key;
             }
 
-            if (string.IsNullOrEmpty(previewKey))
+            if (string.IsNullOrEmpty(resolvedPreviewUrl))
             {
                 _error = "Conversion produced no output. Try downloading the file.";
                 _loading = false;
@@ -117,13 +178,9 @@
                 return;
             }
 
-            // Step 2: Fetch PDF bytes via proxy with ?preview=true
-            var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
-            var previewUrl = NavManager.ToAbsoluteUri(
-                $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}&preview=true"
-            ).ToString();
+            // Step 3: Fetch PDF bytes
             using var http2 = HttpClientFactory.CreateClient();
-            _pendingBytes = await http2.GetByteArrayAsync(previewUrl);
+            _pendingBytes = await http2.GetByteArrayAsync(resolvedPreviewUrl);
             _loading = false;
             StateHasChanged();
         }
@@ -153,6 +210,11 @@
 
     private record ConvertPptxResponse(
         [property: System.Text.Json.Serialization.JsonPropertyName("previewS3Key")] string? PreviewS3Key
+    );
+
+    private record PreviewStatusResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("status")] string? Status,
+        [property: System.Text.Json.Serialization.JsonPropertyName("previewUrl")] string? PreviewUrl
     );
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
