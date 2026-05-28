@@ -47,4 +47,8 @@ public class WorkspaceUpload
 
     [Column("turn_index")]
     public int? TurnIndex { get; set; }
+
+    [Column("preview_s3_key")]
+    [MaxLength(500)]
+    public string? PreviewS3Key { get; set; }
 }

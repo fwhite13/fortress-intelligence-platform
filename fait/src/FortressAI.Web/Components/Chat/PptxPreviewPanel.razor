@@ -1,0 +1,210 @@
+@inject ArtifactPreviewService PreviewSvc
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JSRuntime
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager NavManager
+@using FortressAI.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Net.Http.Json
+@implements IAsyncDisposable
+
+<div class="pptx-preview-panel">
+    @if (_loading)
+    {
+        <div class="pptx-preview-panel__loading">
+            <MudProgressCircular Indeterminate="true" />
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">Converting presentation...</MudText>
+        </div>
+    }
+    else if (_error != null)
+    {
+        <div class="pptx-preview-panel__error">
+            <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Size="Size.Large" />
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@_error</MudText>
+        </div>
+    }
+    else
+    {
+        <div class="pptx-preview-panel__viewer">
+            <div id="@_containerId" class="pptx-preview-panel__canvas-container"></div>
+            @if (_totalPages > 1)
+            {
+                <div class="pptx-preview-panel__nav">
+                    <MudIconButton Icon="@Icons.Material.Outlined.ChevronLeft"
+                                   Size="Size.Small"
+                                   Disabled="@(_currentPage <= 1)"
+                                   OnClick="PrevPage" />
+                    <MudText Typo="Typo.body2" Class="pptx-preview-panel__page-label">
+                        Page @_currentPage of @_totalPages
+                    </MudText>
+                    <MudIconButton Icon="@Icons.Material.Outlined.ChevronRight"
+                                   Size="Size.Small"
+                                   Disabled="@(_currentPage >= _totalPages)"
+                                   OnClick="NextPage" />
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ArtifactId { get; set; }
+    [Parameter, EditorRequired] public string S3Key { get; set; } = "";
+    [Parameter] public string? ExistingPreviewS3Key { get; set; }
+
+    private bool _loading = true;
+    private string? _error;
+    private byte[]? _pendingBytes;
+    private string _containerId = $"pptx-{Guid.NewGuid():N}";
+    private int _currentPage = 1;
+    private int _totalPages = 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await FetchAndConvertAsync();
+            return;
+        }
+
+        if (_pendingBytes != null)
+        {
+            var bytes = _pendingBytes;
+            _pendingBytes = null;
+            var base64 = Convert.ToBase64String(bytes);
+            _totalPages = await JSRuntime.InvokeAsync<int>("pptxPreviewInterop.render", base64, _containerId);
+            StateHasChanged();
+        }
+    }
+
+    private async Task FetchAndConvertAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var userIdStr = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (!Guid.TryParse(userIdStr, out var userId))
+            {
+                _error = "Authentication error. Please refresh.";
+                _loading = false;
+                StateHasChanged();
+                return;
+            }
+
+            // Step 1: Trigger conversion (or use cached previewS3Key)
+            string? previewKey = ExistingPreviewS3Key;
+            if (string.IsNullOrEmpty(previewKey))
+            {
+                var convertUrl = NavManager.ToAbsoluteUri($"/api/artifacts/{ArtifactId}/convert-pptx").ToString();
+                using var http = HttpClientFactory.CreateClient();
+                var convertResp = await http.PostAsync(convertUrl, null);
+                if (!convertResp.IsSuccessStatusCode)
+                {
+                    _error = "Failed to convert presentation. Try downloading the file.";
+                    _loading = false;
+                    StateHasChanged();
+                    return;
+                }
+                var convertResult = await convertResp.Content.ReadFromJsonAsync<ConvertPptxResponse>();
+                previewKey = convertResult?.PreviewS3Key;
+            }
+
+            if (string.IsNullOrEmpty(previewKey))
+            {
+                _error = "Conversion produced no output. Try downloading the file.";
+                _loading = false;
+                StateHasChanged();
+                return;
+            }
+
+            // Step 2: Fetch PDF bytes via proxy with ?preview=true
+            var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
+            var previewUrl = NavManager.ToAbsoluteUri(
+                $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}&preview=true"
+            ).ToString();
+            using var http2 = HttpClientFactory.CreateClient();
+            _pendingBytes = await http2.GetByteArrayAsync(previewUrl);
+            _loading = false;
+            StateHasChanged();
+        }
+        catch (Exception)
+        {
+            _error = "Failed to load presentation preview. Try downloading the file.";
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task PrevPage()
+    {
+        if (_currentPage <= 1) return;
+        _currentPage--;
+        await JSRuntime.InvokeVoidAsync("pptxPreviewInterop.renderPage", _containerId, _currentPage);
+        StateHasChanged();
+    }
+
+    private async Task NextPage()
+    {
+        if (_currentPage >= _totalPages) return;
+        _currentPage++;
+        await JSRuntime.InvokeVoidAsync("pptxPreviewInterop.renderPage", _containerId, _currentPage);
+        StateHasChanged();
+    }
+
+    private record ConvertPptxResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("previewS3Key")] string? PreviewS3Key
+    );
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+<style>
+.pptx-preview-panel {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+}
+.pptx-preview-panel__loading,
+.pptx-preview-panel__error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    padding: 24px;
+    text-align: center;
+    color: var(--color-text-secondary);
+}
+.pptx-preview-panel__viewer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+.pptx-preview-panel__canvas-container {
+    flex: 1;
+    overflow: auto;
+    background: var(--color-surface-sunken, #f5f5f5);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 16px;
+}
+.pptx-preview-panel__canvas-container canvas {
+    max-width: 100%;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.pptx-preview-panel__nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-top: 1px solid var(--color-border);
+    flex-shrink: 0;
+}
+.pptx-preview-panel__page-label {
+    min-width: 100px;
+    text-align: center;
+}
+</style>

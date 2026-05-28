@@ -27,6 +27,14 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     Pillow \
     requests
 
+# LibreOffice headless for PPTX → PDF conversion (ADO#4569)
+RUN apt-get update && apt-get install -y \
+    libreoffice-impress \
+    libreoffice-common \
+    fonts-liberation \
+    fonts-dejavu \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install AWS CLI v2 (for S3 workspace access)
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip \
     && unzip /tmp/awscli.zip -d /tmp \

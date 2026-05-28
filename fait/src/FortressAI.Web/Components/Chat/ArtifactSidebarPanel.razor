@@ -84,6 +84,12 @@
                     {
                         <DocxPreviewPanel Artifact="@_selectedArtifact" />
                     }
+                    else if (IsPptxType(_selectedArtifact))
+                    {
+                        <PptxPreviewPanel ArtifactId="@_selectedArtifact.Id"
+                                          S3Key="@_selectedArtifact.S3Key"
+                                          ExistingPreviewS3Key="@_selectedArtifact.PreviewS3Key" />
+                    }
                     else if (_previewUrl != null)
                     {
                         <iframe src="@_previewUrl" class="artifact-sidebar__iframe"
@@ -246,6 +252,14 @@
                     return;
                 }
 
+                if (IsPptxType(artifact))
+                {
+                    // PptxPreviewPanel handles its own loading — no presign needed
+                    _previewLoading = false;
+                    StateHasChanged();
+                    return;
+                }
+
                 var rawUrl = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(artifact.S3Key, expiryMinutes: 30);
                 var ext = Path.GetExtension(artifact.Filename);
                 if (IsTextPreviewable(artifact))
@@ -354,6 +368,13 @@
         var ext = Path.GetExtension(artifact.Filename);
         return ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase)
             || artifact.MimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    }
+
+    private static bool IsPptxType(WorkspaceUpload artifact)
+    {
+        var ext = Path.GetExtension(artifact.Filename);
+        return ext.Equals(".pptx", StringComparison.OrdinalIgnoreCase)
+            || artifact.MimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation";
     }
 
     private static bool IsOfficeDocType(WorkspaceUpload artifact)

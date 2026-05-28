@@ -3,6 +3,9 @@ using Amazon.S3;
 using FortressAI.Web.Services;
 using FortressAI.Web.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Authorization;
 
 namespace FortressAI.Web.Controllers;
 
@@ -15,26 +18,32 @@ public class ArtifactPreviewController : ControllerBase
     private readonly IAmazonS3 _s3;
     private readonly string _bucket;
     private readonly ILogger<ArtifactPreviewController> _logger;
+    private readonly IConfiguration _config;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     public ArtifactPreviewController(
         ArtifactPreviewService previewService,
         IDbContextFactory<AppDbContext> dbFactory,
         IAmazonS3 s3,
         IConfiguration config,
-        ILogger<ArtifactPreviewController> logger)
+        ILogger<ArtifactPreviewController> logger,
+        IHttpClientFactory httpClientFactory)
     {
         _previewService = previewService;
         _dbFactory = dbFactory;
         _s3 = s3;
         _bucket = config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
         _logger = logger;
+        _config = config;
+        _httpClientFactory = httpClientFactory;
     }
 
     [HttpGet("{id:guid}/preview")]
     public async Task<IActionResult> Preview(
         Guid id,
         [FromQuery] string token,
-        [FromQuery] long expires)
+        [FromQuery] long expires,
+        [FromQuery] bool preview = false)
     {
         if (string.IsNullOrEmpty(token))
             return Unauthorized(new { error = "Missing token" });
@@ -67,12 +76,15 @@ public class ArtifactPreviewController : ControllerBase
 
         try
         {
-            var s3Response = await _s3.GetObjectAsync(_bucket, artifact.S3Key);
+            var s3KeyToFetch = preview && !string.IsNullOrEmpty(artifact.PreviewS3Key)
+                ? artifact.PreviewS3Key
+                : artifact.S3Key;
+            var s3Response = await _s3.GetObjectAsync(_bucket, s3KeyToFetch);
 
             // Stream directly to response — no buffering
-            Response.ContentType = !string.IsNullOrEmpty(artifact.MimeType)
-                ? artifact.MimeType
-                : "application/octet-stream";
+            Response.ContentType = preview && !string.IsNullOrEmpty(artifact.PreviewS3Key)
+                ? "application/pdf"
+                : (!string.IsNullOrEmpty(artifact.MimeType) ? artifact.MimeType : "application/octet-stream");
             Response.Headers["X-Content-Type-Options"] = "nosniff";
             Response.ContentLength = artifact.SizeBytes > 0 ? artifact.SizeBytes : null;
             var cd = new System.Net.Http.Headers.ContentDispositionHeaderValue("inline");
@@ -103,5 +115,46 @@ public class ArtifactPreviewController : ControllerBase
             _logger.LogError(ex, "[ArtifactPreview] Unexpected error fetching artifact {Id}", id);
             return StatusCode(500, new { error = "Internal error" });
         }
+    }
+
+    private record ConvertPptxResult([property: JsonPropertyName("previewS3Key")] string? PreviewS3Key);
+
+    [HttpPost("{id:guid}/convert-pptx")]
+    [Authorize]
+    public async Task<IActionResult> ConvertPptx(Guid id)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var artifact = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == id);
+        if (artifact == null) return NotFound();
+
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (artifact.UserId.ToString() != userId) return Forbid();
+
+        // Return cached key if already converted
+        if (!string.IsNullOrEmpty(artifact.PreviewS3Key))
+            return Ok(new { previewS3Key = artifact.PreviewS3Key });
+
+        // Call harness to convert
+        var harnessBase = _config["HARNESS_BASE_URL"] ?? "http://localhost:3000";
+        using var client = _httpClientFactory.CreateClient();
+        var body = new
+        {
+            artifactId = id.ToString(),
+            s3Key = artifact.S3Key,
+            userId = artifact.UserId.ToString(),
+            previewS3Key = artifact.PreviewS3Key
+        };
+        var resp = await client.PostAsJsonAsync($"{harnessBase}/convert-pptx-preview", body);
+        if (!resp.IsSuccessStatusCode)
+            return StatusCode(502, new { error = "Conversion failed" });
+
+        var result = await resp.Content.ReadFromJsonAsync<ConvertPptxResult>();
+        if (result?.PreviewS3Key != null)
+        {
+            artifact.PreviewS3Key = result.PreviewS3Key;
+            await db.SaveChangesAsync();
+        }
+
+        return Ok(new { previewS3Key = result?.PreviewS3Key });
     }
 }

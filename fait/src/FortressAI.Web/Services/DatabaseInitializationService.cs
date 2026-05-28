@@ -470,7 +470,9 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE workspace_folders ADD COLUMN parent_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL",
                 "ALTER TABLE workspace_folders ADD CONSTRAINT FK_workspace_folders_workspace_folders_parent_id FOREIGN KEY (parent_id) REFERENCES workspace_folders(id) ON DELETE SET NULL",
                 // ADO#4144: persist working folder selection per conversation
-                "ALTER TABLE conversations ADD COLUMN working_folder_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL"
+                "ALTER TABLE conversations ADD COLUMN working_folder_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL",
+                // ADO#4569: PPTX preview cache column
+                "ALTER TABLE user_workspace_uploads ADD COLUMN preview_s3_key VARCHAR(500) NULL"
             };
 
             foreach (var alterSql in alterStatements)

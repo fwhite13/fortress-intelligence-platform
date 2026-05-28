@@ -63,6 +63,12 @@
         {
             <DocxPreviewPanel Artifact="@_currentArtifactUpload" />
         }
+        else if (_isPptx && _currentPptxUpload != null)
+        {
+            <PptxPreviewPanel ArtifactId="@_currentPptxUpload.Id"
+                              S3Key="@_currentPptxUpload.S3Key"
+                              ExistingPreviewS3Key="@_currentPptxUpload.PreviewS3Key" />
+        }
         else if (_presignedUrl != null)
         {
             <iframe src="@_presignedUrl"
@@ -86,6 +92,13 @@
             || mimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     }
 
+    private static bool IsPptxType(string filename, string mimeType)
+    {
+        var ext = Path.GetExtension(filename);
+        return ext.Equals(".pptx", StringComparison.OrdinalIgnoreCase)
+            || mimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    }
+
     private string? _presignedUrl;
     private string? _rawPresignedUrl;
     private bool _canPreview;
@@ -94,6 +107,8 @@
     private ArtifactRef? _loadedFor;
     private bool _isDocx;
     private WorkspaceUpload? _currentArtifactUpload;
+    private bool _isPptx;
+    private WorkspaceUpload? _currentPptxUpload;
 
     protected override async Task OnInitializedAsync()
     {
@@ -124,6 +139,8 @@
         _canPreview = false;
         _isDocx = false;
         _currentArtifactUpload = null;
+        _isPptx = false;
+        _currentPptxUpload = null;
         StateHasChanged();
 
         try
@@ -131,6 +148,25 @@
             if (IsXlsxType(artifact.Filename, artifact.MimeType))
             {
                 // XlsxPreviewPanel handles its own loading
+                _canPreview = true;
+                _presignedUrl = null;
+                _loading = false;
+                _loadedFor = artifact;
+                StateHasChanged();
+                return;
+            }
+
+            if (IsPptxType(artifact.Filename, artifact.MimeType))
+            {
+                // PptxPreviewPanel handles its own loading
+                _isPptx = true;
+                _currentPptxUpload = new WorkspaceUpload
+                {
+                    Id = artifact.Id,
+                    S3Key = artifact.S3Key,
+                    Filename = artifact.Filename,
+                    MimeType = artifact.MimeType
+                };
                 _canPreview = true;
                 _presignedUrl = null;
                 _loading = false;
