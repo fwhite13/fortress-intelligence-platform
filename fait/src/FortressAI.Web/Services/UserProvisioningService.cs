@@ -62,10 +62,6 @@ public class UserProvisioningService
             await WriteS3Async($"{prefix}assistants/USER.md", userContent);
             writtenKeys.Add($"{prefix}assistants/USER.md");
 
-            // AGENTS.md (static boilerplate)
-            await WriteS3Async($"{prefix}assistants/AGENTS.md", AgentsBoilerplate);
-            writtenKeys.Add($"{prefix}assistants/AGENTS.md");
-
             // MEMORY.md (empty index)
             var memContent = BuildMemoryMd(config);
             await WriteS3Async($"{prefix}memory/MEMORY.md", memContent);
@@ -213,24 +209,4 @@ _Last updated: {timestamp}_
 (populated as memory grows)
 """;
     }
-
-    private const string AgentsBoilerplate = """
-# AGENTS.md — Harness Configuration
-
-This file contains operational configuration for the AI assistant harness.
-
-## Available Tools
-- search_knowledge_base: Search the user's personal knowledge base
-- list_workspace_files: List files in the user's S3 workspace
-- MS365 Graph tools: email, calendar (when configured)
-- ADO tools: work item management (when configured)
-- Brave Search: web search
-
-## Memory
-User memory is stored in workspaces/{userId}/memory/MEMORY.md.
-Update MEMORY.md when the user states persistent preferences or facts about themselves.
-
-## Workspace
-User workspace files are stored in workspaces/{userId}/files/.
-""";
 }
