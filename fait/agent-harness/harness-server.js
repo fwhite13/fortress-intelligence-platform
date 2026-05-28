@@ -644,6 +644,7 @@ const MCP_TOOL_ALLOWLIST = {
         'fetch_screen_image', 'list_projects', 'list_screens', 'refine_screen'
     ]),
     'brave': new Set(['web_search']),
+    'webfetch': new Set(['web_fetch']),
 };
 
 const BUILTIN_TOOLS = new Set([
@@ -752,6 +753,23 @@ const MCP_TOOL_SPECS = {
         }
       }
     }
+  ],
+  webfetch: [
+    {
+      toolSpec: {
+        name: 'web_fetch',
+        description: 'Fetch and read the full content of a specific web page. Use when the user provides a URL and wants you to read or extract information from it. Returns clean markdown of the page content. Not for general search — use web_search for discovery.',
+        inputSchema: {
+          json: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', description: 'The full URL to fetch, including https://' }
+            },
+            required: ['url']
+          }
+        }
+      }
+    }
   ]
 };
 // Support all slug variants for Azure DevOps
@@ -792,10 +810,20 @@ function buildToolManifestSection(enabledPlugins) {
         if (enabledPlugins.includes('brave')) {
             tools.push({ name: 'web_search', use: 'Searching the internet for current information' });
         }
+        if (enabledPlugins.includes('webfetch')) {
+            tools.push({ name: 'web_fetch', use: 'Fetching and reading the full content of a specific URL' });
+        }
     }
 
     const rows = tools.map(t => `| ${t.name} | ${t.use} |`).join('\n');
-    return `## Available Tools\n\n| Tool | Use when |\n|------|----------|\n${rows}`;
+    let section = `## Available Tools\n\n| Tool | Use when |\n|------|----------|\n${rows}`;
+
+    // Add Web Tools guidance when both brave and webfetch are enabled
+    if (Array.isArray(enabledPlugins) && enabledPlugins.includes('brave') && enabledPlugins.includes('webfetch')) {
+        section += `\n\n## Web Tools\n\n**web_search** — Use for discovery: finding pages, researching topics, answering questions about what exists on the web. Returns a list of relevant URLs and summaries. Use when the user asks a general question that benefits from current web information.\n\n**web_fetch** — Use for extraction: reading the actual content of a specific page the user has provided or that you found via web_search. Returns the full page text as markdown. Use when:\n- The user provides a URL and asks you to read, summarize, or extract information from it\n- The user asks you to "match the style of" or "follow the format of" a specific website\n- You've found a promising result via web_search and need to read the full content\n- The user asks for specific details that wouldn't be in a search snippet\n\nDo not use web_search when the user has already given you a specific URL — use web_fetch directly.\nDo not use web_fetch for general questions where you don't have a target URL — use web_search first.`;
+    }
+
+    return section;
 }
 
 function isToolAllowed(toolName) {
@@ -1974,6 +2002,48 @@ app.post('/tools/web_search', async (req, res) => {
         res.json({ result: text });
     } catch (err) {
         console.error('[harness] web_search error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── Web Fetch tool handler (ADO#4559) ────────────────────────────────────
+app.post('/tools/web_fetch', async (req, res) => {
+    const { url } = req.body || {};
+    if (!url) return res.status(400).json({ error: 'url required' });
+
+    const webFetchUrl = `${FAIT_BASE_URL}/internal/mcp/webfetch`;
+    const internalToken = INTERNAL_API_TOKEN;
+
+    try {
+        const resp = await fetch(webFetchUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(internalToken ? { 'X-Internal-Token': internalToken } : {}),
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: '1',
+                method: 'tools/call',
+                params: {
+                    name: 'web_fetch',
+                    arguments: { url }
+                }
+            }),
+        });
+        if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`Web fetch MCP call failed (${resp.status}): ${text}`);
+        }
+        const mcpResponse = await resp.json();
+        const content = mcpResponse?.result?.content;
+        const text = Array.isArray(content) ? content.map(c => c.text || '').join('\n') : JSON.stringify(mcpResponse);
+        if (mcpResponse?.result?.isError) {
+            throw new Error(`Web fetch error: ${text}`);
+        }
+        res.json({ result: text });
+    } catch (err) {
+        console.error('[harness] web_fetch error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -4433,6 +4503,22 @@ Do NOT emit [TASK_READY] if:
                                 toolResultText = `Web search error: ${mcpErr.message}`;
                                 isError = true;
                                 emitToolCall(res, 'brave', 'web_search', 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
+                            }
+                        } else if (toolUseAccumulator.name === 'web_fetch') {
+                            emitToolCall(res, 'webfetch', 'web_fetch', 'calling', toolInput.url ? `Fetching: ${chipTrunc(toolInput.url, 60)}` : 'Fetching page...');
+                            try {
+                                const mcpRes = await fetch(`http://localhost:${PORT}/tools/web_fetch`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, ...toolInput })
+                                });
+                                const mcpData = await mcpRes.json();
+                                toolResultText = JSON.stringify(mcpData, null, 2);
+                                emitToolCall(res, 'webfetch', 'web_fetch', 'done', 'Page fetched.');
+                            } catch (mcpErr) {
+                                toolResultText = `Web fetch error: ${mcpErr.message}`;
+                                isError = true;
+                                emitToolCall(res, 'webfetch', 'web_fetch', 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
                             }
                         } else {
                             // default: search_knowledge_base

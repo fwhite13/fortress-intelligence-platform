@@ -686,6 +686,80 @@ public class DatabaseInitializationService : IHostedService
                 _logger.LogWarning(ex, "MCP server seed migration failed (non-fatal)");
             }
 
+            // Seed web_fetch MCP server — runs once, guarded by applied_migrations (mcp-server-seed-v2)
+            try
+            {
+                var migConn2 = db.Database.GetDbConnection();
+                if (migConn2.State != System.Data.ConnectionState.Open)
+                    await migConn2.OpenAsync(cancellationToken);
+                int webFetchSeedRan;
+                using (var cmd = migConn2.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT COUNT(*) FROM applied_migrations WHERE name = @name";
+                    var p = cmd.CreateParameter(); p.ParameterName = "@name"; p.Value = "mcp-server-seed-v2";
+                    cmd.Parameters.Add(p);
+                    webFetchSeedRan = Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken));
+                }
+                if (webFetchSeedRan == 0)
+                {
+                    try
+                    {
+                        var webFetchId = "00000000-0000-0000-0000-000000000004";
+                        var webFetchEndpointUrl = "http://localhost:8080/internal/mcp/webfetch";
+                        var webFetchManifest = System.Text.Json.JsonSerializer.Serialize(new[]
+                        {
+                            new
+                            {
+                                Name = "web_fetch",
+                                Description = "Fetch and read the full content of a specific web page. Use when the user provides a URL and wants you to read or extract information from it. Returns clean markdown of the page content. Not for general search — use web_search for discovery.",
+                                InputSchema = System.Text.Json.JsonDocument.Parse(@"{
+                                  ""type"": ""object"",
+                                  ""properties"": {
+                                    ""url"": { ""type"": ""string"", ""description"": ""The full URL to fetch, including https://"" }
+                                  },
+                                  ""required"": [""url""]
+                                }").RootElement
+                            }
+                        });
+                        await db.Database.ExecuteSqlRawAsync(
+                            """
+                            INSERT INTO mcp_servers (id, name, slug, description, transport_type, endpoint_url,
+                                auth_type, requires_user_auth, is_active, tool_manifest, created_at, updated_at)
+                            VALUES ({0}, 'Web Fetch', 'webfetch', 'Fetch and read the full content of a specific web page',
+                                'http', {1}, 'api_key', 0, 1, {2},
+                                NOW(6), NOW(6))
+                            ON DUPLICATE KEY UPDATE
+                                endpoint_url = VALUES(endpoint_url),
+                                updated_at = NOW(6)
+                            """,
+                            webFetchId, webFetchEndpointUrl, webFetchManifest);
+                        _logger.LogInformation("Seeded Web Fetch MCP server (endpoint: {Url}).", webFetchEndpointUrl);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Web Fetch seed (non-fatal): {Message}", ex.Message);
+                    }
+
+                    // Record migration as applied
+                    using (var cmd = migConn2.CreateCommand())
+                    {
+                        cmd.CommandText = "INSERT IGNORE INTO applied_migrations (name, applied_at) VALUES (@name, NOW())";
+                        var p = cmd.CreateParameter(); p.ParameterName = "@name"; p.Value = "mcp-server-seed-v2";
+                        cmd.Parameters.Add(p);
+                        await cmd.ExecuteNonQueryAsync(cancellationToken);
+                    }
+                    _logger.LogInformation("MCP server seed migration complete (mcp-server-seed-v2).");
+                }
+                else
+                {
+                    _logger.LogInformation("MCP server seed (v2) already applied — skipping.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Web Fetch MCP server seed migration failed (non-fatal)");
+            }
+
             // One-time cleanup: delete ghost conversations (created on page load with no messages)
             try
             {
