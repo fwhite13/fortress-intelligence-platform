@@ -31,8 +31,49 @@ public class WebFetchClient : IWebFetchClient
         _logger = logger;
     }
 
+    private static bool IsBlockedHost(string host)
+    {
+        if (string.IsNullOrEmpty(host)) return true;
+        var h = host.ToLowerInvariant().TrimEnd('.');
+
+        // Loopback
+        if (h == "localhost" || h == "127.0.0.1" || h == "::1") return true;
+
+        // ECS Fargate IMDS (highest priority — vends IAM credentials)
+        if (h == "169.254.170.2") return true;
+
+        // EC2 IMDS (defense-in-depth)
+        if (h == "169.254.169.254") return true;
+
+        // All link-local (169.254.x.x)
+        if (h.StartsWith("169.254.")) return true;
+
+        // RFC-1918 private ranges
+        if (h.StartsWith("10.")) return true;
+        if (h.StartsWith("192.168.")) return true;
+        if (System.Text.RegularExpressions.Regex.IsMatch(h, @"^172\.(1[6-9]|2\d|3[01])\.")) return true;
+
+        // Internal hostnames
+        if (h.EndsWith(".internal") || h.EndsWith(".local") || h.EndsWith(".localhost")) return true;
+
+        return false;
+    }
+
     public async Task<WebFetchResult> FetchAsync(string url, CancellationToken ct = default)
     {
+        // SSRF guard — validate URL before issuing request
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsedUri) ||
+            (parsedUri.Scheme != "http" && parsedUri.Scheme != "https") ||
+            IsBlockedHost(parsedUri.Host))
+        {
+            return new WebFetchResult(
+                Success: false,
+                Title: null,
+                MarkdownContent: null,
+                ErrorMessage: $"URL is not a permitted fetch target.",
+                IsJsRendered: false);
+        }
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(10));
 
