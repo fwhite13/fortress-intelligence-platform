@@ -781,6 +781,7 @@ function buildToolManifestSection(enabledPlugins) {
     const tools = [
         { name: 'read_memory', use: 'Looking up prior context, preferences, or decisions about a topic' },
         { name: 'write_memory', use: 'User states a preference, decision, or fact worth persisting' },
+        { name: 'update_user_profile', use: 'User shares durable facts about themselves (name, role, family, location, life facts) — persist to their profile' },
         { name: 'search_memory', use: 'Searching across all memory topics by keyword' },
         { name: 'create_document', use: 'User asks to create a Word document, report, or structured deliverable' },
         { name: 'list_files', use: 'Listing files the user uploaded to their workspace' },
@@ -1295,6 +1296,45 @@ app.post('/tools/write_memory', async (req, res) => {
         console.error('[harness] write_memory error:', err.message);
         // Best-effort — return success:false on error, do not crash
         res.json({ success: false, error: err.message });
+    }
+});
+
+// ─── update_user_profile tool handler (ADO#4564) ─────────────────────────────
+app.post('/tools/update_user_profile', async (req, res) => {
+    const { userId, content, mode } = req.body || {};
+    if (!userId || !content) {
+        return res.status(400).json({ error: 'userId and content are required' });
+    }
+    const effectiveMode = mode || 'merge';
+    const s3Key = `workspaces/${userId}/assistants/USER.md`;
+    try {
+        let finalContent = content;
+        if (effectiveMode === 'merge') {
+            // Fetch existing USER.md if it exists
+            try {
+                const existing = await s3Client.send(new GetObjectCommand({
+                    Bucket: S3_BUCKET,
+                    Key: s3Key
+                }));
+                const existingText = await existing.Body.transformToString();
+                finalContent = existingText.trimEnd() + '\n\n' + content;
+            } catch (e) {
+                // File doesn't exist yet — create with content as-is
+                if (e.name !== 'NoSuchKey' && e.$metadata?.httpStatusCode !== 404) {
+                    throw e;
+                }
+            }
+        }
+        await s3Client.send(new PutObjectCommand({
+            Bucket: S3_BUCKET,
+            Key: s3Key,
+            Body: finalContent,
+            ContentType: 'text/markdown'
+        }));
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[update_user_profile] error:', err);
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -3310,6 +3350,7 @@ You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on
 
 Before any substantive response about prior work, decisions, people, or preferences: call \`read_memory\` with the relevant slug.
 When the user states a preference, makes a decision, or shares a new fact worth keeping: call \`write_memory\`.
+When the user shares durable facts about themselves — their name, job, family, location, background, or any fact that should be known in every future conversation — call \`update_user_profile\` with the new information. Use mode=merge to add to existing profile without overwriting it.
 
 ## MANDATORY: Workspace File Saving
 CRITICAL: When the user asks you to save, create, write, or generate a file for their workspace — you MUST call the \`write_file\` tool. Do NOT describe what you would write. Do NOT provide the content as a text response. ALWAYS call \`write_file\` with the actual content. This is non-negotiable. Saying "I've saved..." without calling write_file is incorrect behavior.
@@ -3920,6 +3961,7 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
 
 Before any substantive response about prior work, decisions, people, or preferences: call \`read_memory\` with the relevant slug.
 When the user states a preference, makes a decision, or shares a new fact worth keeping: call \`write_memory\`.
+When the user shares durable facts about themselves — their name, job, family, location, background, or any fact that should be known in every future conversation — call \`update_user_profile\` with the new information. Use mode=merge to add to existing profile without overwriting it.
 
 ## MANDATORY: Workspace File Saving
 CRITICAL: When the user asks you to save, create, write, or generate a file for their workspace — you MUST call the \`write_file\` tool. Do NOT describe what you would write. Do NOT provide the content as a text response. ALWAYS call \`write_file\` with the actual content. This is non-negotiable. Saying "I've saved..." without calling write_file is incorrect behavior.
@@ -4212,6 +4254,22 @@ Do NOT emit [TASK_READY] if:
                     },
                     {
                         toolSpec: {
+                            name: 'update_user_profile',
+                            description: 'Update the persistent user profile (USER.md). Call this when the user shares durable facts about themselves — name, role, family, location, preferences that apply across all conversations. Use mode=replace only when doing a full profile rewrite; use mode=merge (default) to append new information.',
+                            inputSchema: {
+                                json: {
+                                    type: 'object',
+                                    properties: {
+                                        content: { type: 'string', description: 'Profile content to write or merge' },
+                                        mode: { type: 'string', enum: ['merge', 'replace'], description: 'merge (default): append to existing profile. replace: overwrite entire profile.' }
+                                    },
+                                    required: ['content']
+                                }
+                            }
+                        }
+                    },
+                    {
+                        toolSpec: {
                             name: 'create_document',
                             description: 'Use this tool to create a real Word document (.docx) artifact that will be saved and made available for download in the chat. When the user asks for a Word doc, report, proposal, or any other document file, ALWAYS use this tool — do not produce markdown as a substitute. This is the ONLY way to produce a downloadable file artifact. The document will appear as a clickable artifact card in the chat after generation.',
                             inputSchema: {
@@ -4444,6 +4502,22 @@ Do NOT emit [TASK_READY] if:
                             } catch (wmErr) {
                                 toolResultText = `\n\n[Memory Write Error]\n${wmErr.message}\n\n`;
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${wmErr.message.substring(0,100)}`);
+                            }
+                        } else if (toolUseAccumulator.name === 'update_user_profile') {
+                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
+                            try {
+                                const upRes = await fetch(`http://localhost:${PORT}/tools/update_user_profile`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId, ...toolInput })
+                                });
+                                const upResult = await upRes.json();
+                                toolResult = upResult.success ? 'Profile updated.' : `Error: ${upResult.error}`;
+                                toolResultText = `\n\n[Profile Update]\n${JSON.stringify(upResult, null, 2)}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
+                            } catch (upErr) {
+                                toolResultText = `\n\n[Profile Update Error]\n${upErr.message}\n\n`;
+                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${upErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'create_document') {
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
