@@ -5,6 +5,7 @@ using FortressAI.Web.Data;
 using FortressAI.Web.Services;
 using FortressAI.Shared.Models;
 using System.Text.Json;
+using System.IO.Compression;
 
 namespace FortressAI.Web.Controllers;
 
@@ -339,6 +340,82 @@ public class WorkspaceController : ControllerBase
             });
         }
         return Ok(new { deleted = result.Succeeded });
+    }
+
+    [HttpPost("upload-zip")]
+    [Authorize]
+    [RequestSizeLimit(104857600)] // 100MB
+    public async Task<IActionResult> UploadZip([FromForm] IFormFile file, [FromForm] Guid? folderId)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+
+        if (file == null || file.Length == 0)
+            return BadRequest(new { error = "No file provided" });
+
+        if (file.Length > 104857600)
+            return StatusCode(413, new { error = "ZIP file exceeds 100MB limit" });
+
+        if (!file.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { error = "Only .zip files are accepted" });
+
+        var extracted = new List<string>();
+        int skipped = 0;
+
+        await using var zipStream = file.OpenReadStream();
+        using var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read);
+
+        foreach (var entry in archive.Entries)
+        {
+            // Skip directories (entries with trailing slash / empty name)
+            if (string.IsNullOrEmpty(entry.Name)) continue;
+
+            // Zip slip protection
+            var entryPath = entry.FullName.Replace('\\', '/').TrimStart('/');
+            if (entryPath.Contains("..") || Path.IsPathRooted(entryPath))
+            {
+                skipped++;
+                _logger.LogWarning("[WorkspaceController] Zip slip attempt: {EntryPath}", entryPath);
+                continue;
+            }
+
+            var filename = entryPath;
+            var mimeType = GetMimeTypeForFilename(entry.Name);
+
+            await using var entryStream = entry.Open();
+            using var ms = new MemoryStream();
+            await entryStream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            await _uploadService.SaveUploadAsync(userId.Value, folderId, filename, mimeType, ms);
+            extracted.Add(filename);
+        }
+
+        _logger.LogInformation("[WorkspaceController] ZIP extracted: {Count} files, {Skipped} skipped for user {UserId}",
+            extracted.Count, skipped, userId);
+
+        return Ok(new { filesExtracted = extracted.Count, skipped, paths = extracted });
+    }
+
+    private static string GetMimeTypeForFilename(string filename)
+    {
+        var ext = Path.GetExtension(filename).ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "application/pdf",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".txt" => "text/plain",
+            ".md" => "text/markdown",
+            ".json" => "application/json",
+            ".csv" => "text/csv",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".zip" => "application/zip",
+            _ => "application/octet-stream"
+        };
     }
 
     private Guid? GetCurrentUserId()

@@ -85,6 +85,7 @@
 
                     @* RIGHT: Breadcrumb + content *@
                     <div class="workspace-content-panel">
+                    <div id="workspace-drop-zone" class="workspace-drop-zone @(_folderDropWarning || _uploading ? "workspace-drop-zone--hover" : "")">
 
                 @* ── Breadcrumb ── *@
                 @if (_breadcrumb.Count > 0)
@@ -134,6 +135,15 @@
                             Cancel
                         </MudButton>
                     </div>
+                }
+
+                @* ── Folder drop warning ── *@
+                @if (_folderDropWarning)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2" ShowCloseIcon="true"
+                              CloseIconClicked="@(() => _folderDropWarning = false)">
+                        Folders can't be uploaded directly — zip your folder and drop the .zip instead.
+                    </MudAlert>
                 }
 
                 @* ── Per-file upload progress ── *@
@@ -318,6 +328,7 @@
                     }
                 }
 
+                    </div>
                     </div>
                 </div>
             </MudTabPanel>
@@ -714,6 +725,14 @@
         gap: var(--spacing-sm, 8px);
         justify-content: flex-end;
     }
+    .workspace-drop-zone {
+        transition: background 0.15s;
+    }
+    .workspace-drop-zone--active {
+        background: rgba(var(--color-primary-rgb, 25,118,210), 0.05);
+        outline: 2px dashed var(--color-primary);
+        border-radius: 4px;
+    }
 </style>
 
 @code {
@@ -743,6 +762,8 @@
     private bool _loadingFiles = true;
     private bool _uploading = false;
     private Dictionary<string, int> _uploadProgress = new();
+    private bool _folderDropWarning = false;
+    private DotNetObjectReference<WorkspaceFiles>? _dotnetRef;
     private MudTextField<string>? _newFolderField;
 
     // ── Context menu state ──────────────────────────────────────────────────
@@ -801,6 +822,12 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender && Session.IsAuthenticated)
+        {
+            _dotnetRef = DotNetObjectReference.Create(this);
+            await JSRuntime.InvokeVoidAsync("workspaceUploadInterop.attachDropListener",
+                "workspace-drop-zone", "fileUploadInput", _dotnetRef);
+        }
         if (firstRender)
         {
             try
@@ -816,9 +843,19 @@
         }
     }
 
+    [JSInvokable]
+    public void OnFolderDropDetected()
+    {
+        _folderDropWarning = true;
+        StateHasChanged();
+        // Auto-dismiss after 4 seconds
+        _ = Task.Delay(4000).ContinueWith(_ => { _folderDropWarning = false; InvokeAsync(StateHasChanged); });
+    }
+
     public void Dispose()
     {
         Session.OnAuthStateChanged -= StateHasChanged;
+        _dotnetRef?.Dispose();
     }
 
     // ── Files tab ──────────────────────────────────────────────────────────
@@ -929,39 +966,145 @@
 
     private async Task HandleFilesSelected(InputFileChangeEventArgs e)
     {
+        _folderDropWarning = false;
         _uploading = true;
         _uploadProgress.Clear();
-        var files = e.GetMultipleFiles(100);
+        var files = e.GetMultipleFiles(100).ToList();
 
-        foreach (var file in files)
+        // Separate ZIP files from regular files
+        var zipFiles = files.Where(f => f.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)).ToList();
+        var regularFiles = files.Where(f => !f.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        // Initialize progress for all files
+        foreach (var f in files)
+            _uploadProgress[f.Name] = 0;
+        StateHasChanged();
+
+        // Handle ZIPs first (sequential — each can contain many files)
+        foreach (var zipFile in zipFiles)
         {
-            if (file.Size > 52428800)
+            if (zipFile.Size > 104857600)
             {
-                Snackbar.Add($"{file.Name} exceeds 50MB limit — skipped.", Severity.Warning);
+                Snackbar.Add($"{zipFile.Name} exceeds 100MB ZIP limit — skipped.", Severity.Warning);
+                _uploadProgress.Remove(zipFile.Name);
+                StateHasChanged();
                 continue;
             }
-            _uploadProgress[file.Name] = 0;
-            StateHasChanged();
             try
             {
-                var mimeType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType;
-                await using var stream = file.OpenReadStream(maxAllowedSize: 52428800);
-                await UploadSvc.SaveUploadAsync(Session.UserId, _currentFolderId, file.Name, mimeType, stream);
-                _uploadProgress[file.Name] = 100;
+                _uploadProgress[zipFile.Name] = 10;
+                StateHasChanged();
+
+                int extracted = 0;
+                int skipped = 0;
+
+                await using var zipStream = zipFile.OpenReadStream(maxAllowedSize: 104857600);
+                using var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read);
+
+                foreach (var entry in archive.Entries)
+                {
+                    if (string.IsNullOrEmpty(entry.Name)) continue;
+                    var entryPath = entry.FullName.Replace('\\', '/').TrimStart('/');
+                    if (entryPath.Contains("..") || Path.IsPathRooted(entryPath))
+                    {
+                        skipped++;
+                        Logger.LogWarning("[WorkspaceFiles] Zip slip attempt: {EntryPath}", entryPath);
+                        continue;
+                    }
+                    var mime = GetMimeTypeForFilename(entry.Name);
+                    await using var entryMs = new MemoryStream();
+                    await using (var es = entry.Open()) await es.CopyToAsync(entryMs);
+                    entryMs.Position = 0;
+                    await UploadSvc.SaveUploadAsync(Session.UserId, _currentFolderId, entryPath, mime, entryMs);
+                    extracted++;
+                }
+
+                _uploadProgress[zipFile.Name] = 100;
+                StateHasChanged();
+                var msg = extracted > 0
+                    ? $"Extracted {extracted} file(s) from {zipFile.Name}"
+                    : $"ZIP {zipFile.Name} contained no extractable files";
+                if (skipped > 0) msg += $" ({skipped} skipped)";
+                Snackbar.Add(msg, extracted > 0 ? Severity.Success : Severity.Warning);
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "[WorkspaceFiles] Upload failed for {Filename}", file.Name);
-                var reason = ex.InnerException?.Message ?? ex.Message;
-                // Trim to ~120 chars for toast readability
-                if (reason.Length > 120) reason = reason[..120] + "…";
-                Snackbar.Add($"Upload failed: {file.Name} — {reason}", Severity.Error);
+                Logger.LogError(ex, "[WorkspaceFiles] ZIP upload failed for {Filename}", zipFile.Name);
+                Snackbar.Add($"ZIP upload failed: {zipFile.Name}", Severity.Error);
             }
+            finally
+            {
+                _uploadProgress.Remove(zipFile.Name);
+                StateHasChanged();
+            }
+        }
+
+        // Handle regular files in parallel
+        if (regularFiles.Count > 0)
+        {
+            var uploadTasks = regularFiles.Select(async file =>
+            {
+                if (file.Size > 52428800)
+                {
+                    Snackbar.Add($"{file.Name} exceeds 50MB limit — skipped.", Severity.Warning);
+                    _uploadProgress.Remove(file.Name);
+                    await InvokeAsync(StateHasChanged);
+                    return (file.Name, success: false);
+                }
+                try
+                {
+                    var mimeType = string.IsNullOrEmpty(file.ContentType) ? "application/octet-stream" : file.ContentType;
+                    await using var stream = file.OpenReadStream(maxAllowedSize: 52428800);
+                    await UploadSvc.SaveUploadAsync(Session.UserId, _currentFolderId, file.Name, mimeType, stream);
+                    _uploadProgress[file.Name] = 100;
+                    await InvokeAsync(StateHasChanged);
+                    return (file.Name, success: true);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "[WorkspaceFiles] Upload failed for {Filename}", file.Name);
+                    _uploadProgress.Remove(file.Name);
+                    await InvokeAsync(StateHasChanged);
+                    return (file.Name, success: false);
+                }
+            }).ToList();
+
+            var results = await Task.WhenAll(uploadTasks);
+            var succeeded = results.Count(r => r.success);
+            var failed = results.Where(r => !r.success).ToList();
+
+            if (succeeded > 0 && failed.Count == 0)
+                Snackbar.Add($"{succeeded} file{(succeeded == 1 ? "" : "s")} uploaded successfully.", Severity.Success);
+            else if (succeeded > 0 && failed.Count > 0)
+                Snackbar.Add($"{succeeded} uploaded, {failed.Count} failed: {string.Join(", ", failed.Select(r => r.Name))}", Severity.Warning);
+            else if (succeeded == 0 && failed.Count > 0)
+                Snackbar.Add($"Upload failed for: {string.Join(", ", failed.Select(r => r.Name))}", Severity.Error);
         }
 
         _uploading = false;
         _uploadProgress.Clear();
         await LoadFilesAsync();
+    }
+
+    private static string GetMimeTypeForFilename(string filename)
+    {
+        var ext = Path.GetExtension(filename).ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "application/pdf",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".txt" => "text/plain",
+            ".md" => "text/markdown",
+            ".json" => "application/json",
+            ".csv" => "text/csv",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".zip" => "application/zip",
+            _ => "application/octet-stream"
+        };
     }
 
     private async Task DownloadFile(WorkspaceUpload upload)
