@@ -359,7 +359,7 @@ public class WorkspaceController : ControllerBase
         if (!file.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { error = "Only .zip files are accepted" });
 
-        var extracted = new List<string>();
+        var extracted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int skipped = 0;
 
         await using var zipStream = file.OpenReadStream();
