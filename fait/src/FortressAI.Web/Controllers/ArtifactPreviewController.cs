@@ -97,5 +97,10 @@ public class ArtifactPreviewController : ControllerBase
                 id, artifact.S3Key, s3Ex.ErrorCode);
             return StatusCode(502, new { error = "File unavailable" });
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[ArtifactPreview] Unexpected error fetching artifact {Id}", id);
+            return StatusCode(500, new { error = "Internal error" });
+        }
     }
 }
