@@ -163,15 +163,45 @@ public class MemoryFileService : IMemoryFileService
         {
             // Add each topic file
             var topics = await GetTopicsAsync(userId, ct);
-            foreach (var topic in topics)
-            {
-                var content = await GetTopicContentAsync(userId, topic.Slug, ct);
-                if (content == null) continue;
 
-                var entry = zip.CreateEntry($"{topic.Slug}.md");
-                await using var entryStream = entry.Open();
-                await using var writer = new StreamWriter(entryStream);
-                await writer.WriteAsync(content);
+            if (topics.Count == 0)
+            {
+                // Fall back to S3 listing
+                var listResp = await _s3.ListObjectsV2Async(new ListObjectsV2Request
+                {
+                    BucketName = BucketName,
+                    Prefix = $"workspaces/{userId}/memory/"
+                }, ct);
+
+                foreach (var s3obj in listResp.S3Objects)
+                {
+                    if (!s3obj.Key.EndsWith(".md")) continue;
+                    var filename = s3obj.Key.Split('/').Last();
+                    try
+                    {
+                        var response = await _s3.GetObjectAsync(BucketName, s3obj.Key, ct);
+                        using var reader = new StreamReader(response.ResponseStream);
+                        var content = await reader.ReadToEndAsync(ct);
+                        var entry = zip.CreateEntry(filename);
+                        await using var entryStream = entry.Open();
+                        await using var writer = new StreamWriter(entryStream);
+                        await writer.WriteAsync(content);
+                    }
+                    catch { /* skip unreadable files */ }
+                }
+            }
+            else
+            {
+                foreach (var topic in topics)
+                {
+                    var content = await GetTopicContentAsync(userId, topic.Slug, ct);
+                    if (content == null) continue;
+
+                    var entry = zip.CreateEntry($"{topic.Slug}.md");
+                    await using var entryStream = entry.Open();
+                    await using var writer = new StreamWriter(entryStream);
+                    await writer.WriteAsync(content);
+                }
             }
 
             // Add MEMORY.md index
