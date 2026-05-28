@@ -39,6 +39,10 @@
                 <MudButton Variant="Variant.Outlined" OnClick="LoadPreview">Retry</MudButton>
             </div>
         }
+        else if (LayoutState.CurrentArtifact != null && IsXlsxType(LayoutState.CurrentArtifact.Filename, LayoutState.CurrentArtifact.MimeType))
+        {
+            <XlsxPreviewPanel ArtifactId="@LayoutState.CurrentArtifact.Id" Filename="@LayoutState.CurrentArtifact.Filename" MimeType="@LayoutState.CurrentArtifact.MimeType" />
+        }
         else if (!_canPreview)
         {
             <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 16px; padding: 32px; text-align: center;">
@@ -73,8 +77,15 @@
 @code {
     private static readonly HashSet<string> PreviewableExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".pdf"
+        ".pdf", ".xlsx"
     };
+
+    private static bool IsXlsxType(string filename, string mimeType)
+    {
+        var ext = Path.GetExtension(filename);
+        return ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase)
+            || mimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    }
 
     private string? _presignedUrl;
     private string? _rawPresignedUrl;
@@ -118,6 +129,17 @@
 
         try
         {
+            if (IsXlsxType(artifact.Filename, artifact.MimeType))
+            {
+                // XlsxPreviewPanel handles its own loading
+                _canPreview = true;
+                _presignedUrl = null;
+                _loading = false;
+                _loadedFor = artifact;
+                StateHasChanged();
+                return;
+            }
+
             var rawUrl = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(artifact.S3Key, expiryMinutes: 30);
             _rawPresignedUrl = rawUrl;
 
