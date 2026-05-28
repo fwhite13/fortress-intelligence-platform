@@ -358,6 +358,7 @@ function getBuiltinSummary(toolName, toolInput) {
             const fname = fp.split('/').pop();
             return fname ? `Reading: ${chipTrunc(fname)}` : 'Reading workspace file...';
         }
+        case 'update_user_profile': return 'Updating your profile...';
         default: return 'Working...';
     }
 }
@@ -431,7 +432,7 @@ async function provisionUserSchema(userId) {
             source_file VARCHAR(500) NOT NULL,
             chunk_index INT NOT NULL,
             content TEXT NOT NULL,
-            embedding vector(1536) NOT NULL,
+            embedding vector(1024) NOT NULL,
             updated_at TIMESTAMP NOT NULL DEFAULT NOW()
         )
     `);
@@ -456,7 +457,7 @@ async function provisionUserSchema(userId) {
 async function embedText(text) {
     const payload = {
         inputText: text.substring(0, 8000),
-        dimensions: 1536,
+        dimensions: 1024,
         normalize: true
     };
     const cmd = new InvokeModelCommand({

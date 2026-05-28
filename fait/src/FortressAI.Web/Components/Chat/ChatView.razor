@@ -1544,6 +1544,7 @@ else
             var t when t.Contains("web") || t.Contains("fetch") || t.Contains("url") => "Fetching...",
             var t when t.Contains("str_replace") || t.Contains("edit_tool") || t == "edit" => "Editing file...",
             var t when t.Contains("python") || t.Contains("pip") => "Running script...",
+            "update_user_profile" => "Updating your profile...",
             _ => "Working...",
         };
     }
