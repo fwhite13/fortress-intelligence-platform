@@ -1377,7 +1377,7 @@ app.post('/import-memory', async (req, res) => {
 
         // ── Step 2: Bedrock classification ───────────────────────────────────────
         const classifyRes = await bedrockClient.send(new InvokeModelCommand({
-            modelId: process.env.BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+            modelId: process.env.BEDROCK_MODEL_ID || MODEL_ID,
             contentType: 'application/json',
             accept: 'application/json',
             body: JSON.stringify({
@@ -1419,11 +1419,15 @@ If no userMd content is found, set userMd to null. If no topic content is found,
 
         // Write userMd to USER.md via update_user_profile if present
         if (routing.userMd) {
-            await fetch(`http://localhost:${PORT}/tools/update_user_profile`, {
+            const upRes = await fetch(`http://localhost:${PORT}/tools/update_user_profile`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userId, content: routing.userMd, mode: 'merge' })
             });
+            if (!upRes.ok) {
+                const upErr = await upRes.text().catch(() => String(upRes.status));
+                throw new Error(`update_user_profile failed: ${upErr}`);
+            }
         }
 
         // Write each topic to memory
