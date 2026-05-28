@@ -166,29 +166,43 @@ public class MemoryFileService : IMemoryFileService
 
             if (topics.Count == 0)
             {
-                // Fall back to S3 listing
-                var listResp = await _s3.ListObjectsV2Async(new ListObjectsV2Request
+                // Fall back to S3 listing (paginated — matches codebase pattern)
+                var listReq = new ListObjectsV2Request
                 {
                     BucketName = BucketName,
                     Prefix = $"workspaces/{userId}/memory/"
-                }, ct);
-
-                foreach (var s3obj in listResp.S3Objects)
+                };
+                ListObjectsV2Response listResp;
+                do
                 {
-                    if (!s3obj.Key.EndsWith(".md")) continue;
-                    var filename = s3obj.Key.Split('/').Last();
-                    try
+                    listResp = await _s3.ListObjectsV2Async(listReq, ct);
+                    foreach (var s3obj in listResp.S3Objects)
                     {
-                        var response = await _s3.GetObjectAsync(BucketName, s3obj.Key, ct);
-                        using var reader = new StreamReader(response.ResponseStream);
-                        var content = await reader.ReadToEndAsync(ct);
-                        var entry = zip.CreateEntry(filename);
-                        await using var entryStream = entry.Open();
-                        await using var writer = new StreamWriter(entryStream);
-                        await writer.WriteAsync(content);
+                        if (!s3obj.Key.EndsWith(".md")) continue;
+                        if (s3obj.Key.Split('/').Last().Equals("MEMORY.md", StringComparison.OrdinalIgnoreCase)) continue; // handled by dedicated block below
+                        var filename = s3obj.Key.Split('/').Last();
+                        try
+                        {
+                            var response = await _s3.GetObjectAsync(BucketName, s3obj.Key, ct);
+                            using var reader = new StreamReader(response.ResponseStream);
+                            var content = await reader.ReadToEndAsync(ct);
+                            var entry = zip.CreateEntry(filename);
+                            await using var entryStream = entry.Open();
+                            await using var writer = new StreamWriter(entryStream);
+                            await writer.WriteAsync(content);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw; // propagate cancellation — do not swallow
+                        }
+                        catch (AmazonS3Exception ex) when (ex.ErrorCode is "NoSuchKey" or "AccessDenied")
+                        {
+                            _logger.LogWarning("[MemoryFile] Skipping {Key}: {ErrorCode}", s3obj.Key, ex.ErrorCode);
+                        }
+                        // All other exceptions propagate — systemic failures (throttling, expired creds) surface as 500
                     }
-                    catch { /* skip unreadable files */ }
-                }
+                    listReq.ContinuationToken = listResp.NextContinuationToken;
+                } while (listResp.IsTruncated);
             }
             else
             {
