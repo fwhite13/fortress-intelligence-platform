@@ -373,6 +373,12 @@ if (builder.Environment.IsDevelopment())
 
 var app = builder.Build();
 
+// Fail fast on missing PREVIEW_TOKEN_SECRET — do not wait for first request
+var previewSecret = app.Configuration["PREVIEW_TOKEN_SECRET"];
+if (string.IsNullOrWhiteSpace(previewSecret))
+    throw new InvalidOperationException(
+        "PREVIEW_TOKEN_SECRET must be configured before startup. Set this environment variable in the ECS task definition.");
+
 // ⚠️ TEST AUTH — DEVELOPMENT ONLY
 if (app.Environment.IsDevelopment())
 {

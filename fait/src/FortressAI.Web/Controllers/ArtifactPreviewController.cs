@@ -73,6 +73,7 @@ public class ArtifactPreviewController : ControllerBase
             Response.ContentType = !string.IsNullOrEmpty(artifact.MimeType)
                 ? artifact.MimeType
                 : "application/octet-stream";
+            Response.Headers["X-Content-Type-Options"] = "nosniff";
             Response.ContentLength = artifact.SizeBytes > 0 ? artifact.SizeBytes : null;
             var cd = new System.Net.Http.Headers.ContentDispositionHeaderValue("inline");
             cd.FileNameStar = artifact.Filename;
