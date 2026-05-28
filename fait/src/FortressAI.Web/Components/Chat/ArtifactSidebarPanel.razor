@@ -1,11 +1,14 @@
 @inject ChatLayoutState LayoutState
 @inject IWorkspaceFileService WorkspaceFileSvc
+@inject ArtifactPreviewService PreviewSvc
+@inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JSRuntime
 @inject ISnackbar Snackbar
 @inject IHttpClientFactory HttpClientFactory
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
 @using System.IO
+@using Microsoft.AspNetCore.Components.Authorization
 @implements IAsyncDisposable
 
 <div class="artifact-sidebar">
@@ -250,7 +253,7 @@
                 }
                 else if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
-                    _previewUrl = rawUrl;
+                    _previewUrl = await GetProxyPreviewUrlAsync(artifact);
                 }
                 else
                 {
@@ -309,6 +312,15 @@
             _downloadLoading = false;
             StateHasChanged();
         }
+    }
+
+    private async Task<string> GetProxyPreviewUrlAsync(WorkspaceUpload artifact)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userIdStr = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(userIdStr, out var userId)) return "";
+        var (token, expires) = PreviewSvc.GenerateToken(artifact.Id, userId);
+        return $"/api/artifacts/{artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
     }
 
     private static readonly HashSet<string> PreviewableExtensions = new(StringComparer.OrdinalIgnoreCase)

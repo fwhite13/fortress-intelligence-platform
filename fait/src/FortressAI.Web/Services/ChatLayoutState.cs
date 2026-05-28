@@ -1,6 +1,6 @@
 namespace FortressAI.Web.Services;
 
-public record ArtifactRef(string S3Key, string Filename, string MimeType);
+public record ArtifactRef(Guid Id, string S3Key, string Filename, string MimeType);
 
 public class ChatLayoutState
 {

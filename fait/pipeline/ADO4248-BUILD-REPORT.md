@@ -24,3 +24,20 @@ cat /home/fredw/projects/fip/fait/pipeline/ADO4248-build-brief.md | claude --mod
 
 ## ADO Comment
 Posted to ADO#4248 — commit `fa1a953a`.
+
+---
+
+## Review Cycle 1 Fix
+
+**Issue (I1):** `.chat-task-indicator__cc-icon` missing `font-size` — MudIcon rendering at 24px default instead of ~14px.
+
+**Fix:** Added `font-size: 0.875rem` to `.chat-task-indicator__cc-icon` in `ChatView.razor` (~line 2098).
+
+**Commit:** `5534de9c`
+
+**CC Invocation:**
+```bash
+cat /home/fredw/projects/fip/fait/pipeline/ADO4248-fix-brief.md | claude --model sonnet --print --dangerously-skip-permissions
+```
+
+Returning to Clint for review.

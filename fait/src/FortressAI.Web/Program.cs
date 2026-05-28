@@ -116,6 +116,7 @@ builder.Services.AddScoped<ITaskNotificationService, TaskNotificationService>();
 builder.Services.AddScoped<IMemoryFileService, MemoryFileService>();
 builder.Services.AddScoped<IWorkspaceFileService, WorkspaceFileService>();
 builder.Services.AddScoped<IWorkspaceUploadService, WorkspaceUploadService>();
+builder.Services.AddScoped<ArtifactPreviewService>();
 builder.Services.AddScoped<ChatLayoutState>();
 builder.Services.AddSingleton<IDocumentGeneratorService, WordDocumentGenerator>();
 builder.Services.AddScoped<FeedbackDispatcher>();
@@ -302,6 +303,7 @@ builder.Services.AddScoped<IMcpConnectionService, McpConnectionService>();
 builder.Services.AddScoped<IMcpToolService, McpToolService>();
 builder.Services.AddSingleton<McpHttpTransport>();
 builder.Services.AddSingleton<BraveSearchClient>();
+builder.Services.AddSingleton<IWebFetchClient, WebFetchClient>();
 builder.Services.AddHostedService<ManifestRefreshService>();
 builder.Services.AddHostedService<BriefingSchedulerService>();
 builder.Services.AddMemoryCache();
@@ -826,6 +828,66 @@ app.MapPost("/internal/mcp/brave", async (HttpContext context, BraveSearchClient
     {
         return Results.Problem("Brave search failed", statusCode: 500);
     }
+}).AllowAnonymous().DisableAntiforgery();
+
+// Internal MCP endpoint for Web Fetch — token-authenticated (used by harness)
+app.MapPost("/internal/mcp/webfetch", async (HttpContext context, IWebFetchClient webFetchClient, IConfiguration config) =>
+{
+    if (!IsInternalAuthorized(context, config)) return Results.Unauthorized();
+
+    using var reader = new StreamReader(context.Request.Body);
+    var raw = await reader.ReadToEndAsync();
+
+    JsonElement root;
+    try
+    {
+        using var doc = JsonDocument.Parse(raw);
+        root = doc.RootElement.Clone();
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest("Invalid JSON body");
+    }
+
+    // MCP JSON-RPC envelope: { method: "tools/call", params: { name, arguments } }
+    var methodProp = root.TryGetProperty("method", out var m) ? m.GetString() : null;
+    if (methodProp != "tools/call") return Results.BadRequest("Only tools/call supported");
+
+    if (!root.TryGetProperty("params", out var paramsEl))
+        return Results.BadRequest("Missing 'params'");
+    if (!paramsEl.TryGetProperty("name", out var nameProp))
+        return Results.BadRequest("Missing 'params.name'");
+    var toolName = nameProp.GetString();
+    if (toolName != "web_fetch") return Results.BadRequest($"Unknown tool: {toolName}");
+
+    if (!paramsEl.TryGetProperty("arguments", out var args))
+        return Results.BadRequest("Missing 'params.arguments'");
+    var url = args.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+    if (string.IsNullOrWhiteSpace(url))
+        return Results.BadRequest("Missing 'arguments.url'");
+
+    var result = await webFetchClient.FetchAsync(url);
+
+    string text;
+    if (!result.Success)
+    {
+        text = $"Error fetching {url}: {result.ErrorMessage}";
+    }
+    else
+    {
+        var sb = new System.Text.StringBuilder();
+        if (!string.IsNullOrEmpty(result.Title))
+            sb.AppendLine($"# {result.Title}");
+        sb.AppendLine($"URL: {url}");
+        sb.AppendLine();
+        if (!string.IsNullOrEmpty(result.MarkdownContent))
+            sb.AppendLine(result.MarkdownContent);
+        if (result.IsJsRendered)
+            sb.AppendLine("\nNote: This page may use JavaScript rendering — some content may not be captured.");
+        text = sb.ToString();
+    }
+
+    return Results.Ok(new { content = new[] { new { type = "text", text } } });
 }).AllowAnonymous().DisableAntiforgery();
 
 app.MapControllers();

@@ -52,3 +52,21 @@ Commit d1f81cc2. Two-image deploy: harness + fred-chat. Sending to Clint for rev
 4. Trigger a memory read (e.g., ask "what do you remember about me?") — verify chip shows "Reading memory: [slug]"
 5. Trigger a web search — verify chip shows "Searching: [query truncated]"
 6. Trigger an ADO WI creation — verify "Filing WI: [title]"
+
+---
+
+## Review Cycle 1 Fixes — Commit `12378215`
+
+### Issues addressed
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| I1 | Important | `getBuiltinSummary` default case now returns `'Working...'` instead of raw `` `${toolName}...` `` — fixes AC4 violation where unrecognized tool names leaked as raw snake_case |
+| N1 | Nitpick | `ado_create_work_item` chip now guards against missing `title`: `toolInput.title ? \`Filing WI: ...\` : 'Filing WI...'` |
+| N2 | Nitpick | `web_search` chip now guards against missing `query`: `toolInput.query ? \`Searching: ...\` : 'Searching...'` |
+
+### Files changed
+- `fait/agent-harness/harness-server.js` — 3 line fixes, no structural changes
+
+### CC sessions
+1 run (CC Sonnet), pipe mode

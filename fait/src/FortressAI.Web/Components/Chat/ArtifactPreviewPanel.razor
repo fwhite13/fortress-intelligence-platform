@@ -1,8 +1,11 @@
 @inject IWorkspaceFileService WorkspaceFileSvc
+@inject ArtifactPreviewService PreviewSvc
+@inject AuthenticationStateProvider AuthStateProvider
 @inject ChatLayoutState LayoutState
 @inject ISnackbar Snackbar
 @implements IDisposable
 @using FortressAI.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
 
 <div style="display: flex; flex-direction: column; height: 100%; background: var(--color-surface); border-left: 1px solid var(--color-border);">
     <!-- Header -->
@@ -113,7 +116,7 @@
             {
                 if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
-                    _presignedUrl = rawUrl;
+                    _presignedUrl = await GetProxyPreviewUrlAsync(artifact);
                 }
                 else
                 {
@@ -133,6 +136,15 @@
             _loading = false;
             StateHasChanged();
         }
+    }
+
+    private async Task<string> GetProxyPreviewUrlAsync(ArtifactRef artifact)
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userIdStr = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(userIdStr, out var userId)) return "";
+        var (token, expires) = PreviewSvc.GenerateToken(artifact.Id, userId);
+        return $"/api/artifacts/{artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
     }
 
     private void Close() => LayoutState.CloseArtifactPreview();

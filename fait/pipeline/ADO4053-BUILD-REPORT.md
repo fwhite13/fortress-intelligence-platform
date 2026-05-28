@@ -37,6 +37,25 @@ Posted to ADO#4053 — comment ID 810293
 3. **HARNESS_URL config key** — The new `ImportMemoryAsync` uses `_config["HARNESS_URL"] ?? "http://localhost:3000"`. Confirm this env var is set in ECS task definition (or the default localhost:3000 is correct for container-to-container comms).
 4. **imported-memory slug** — All imports write to the single slug `imported-memory`, meaning repeated imports overwrite each other in S3/DB but upsert into pgvector by source_file. This is intentional per spec ("merge/upsert, no overwrite of existing memory").
 
+---
+
+## Review Cycle 1 Fixes — Commit `efa0a41c`
+
+### Fixes Applied
+
+| ID | Severity | File | Change |
+|----|----------|------|--------|
+| C1 | Critical | `harness-server.js` | Added `GUID_RE` regex guard before `upsertMemoryChunks` — returns HTTP 400 `Invalid userId` if `userId` is not a valid GUID format. Prevents schema injection via malformed userId. |
+| I1 | Important | `harness-server.js` | Added `MAX_CONTENT_CHARS = 50_000` guard — returns HTTP 400 with descriptive error if content exceeds limit. |
+| I2 | Important | `harness-server.js` | Wrapped `upsertMemoryChunks` in non-fatal try/catch. S3 write success is no longer blocked by pgvector failures. Response includes optional `pgvectorWarning` field if upsert fails. |
+| I3 | Important | `MemoryFileService.cs` | Changed `CreateClient()` → `CreateClient("HarnessClient")` for correct timeout on large import payloads. |
+| I4 | Important | `Memory.razor` | Moved `_importPromptCopied = true`, snackbar, delay, and `StateHasChanged()` inside the `try` block — no UI update if clipboard write throws. |
+
+### Note on harness-server.js commit
+C1, I1, I2 landed in commit `12378215` (CC applied them alongside ADO#4249 fixes during the same session). I3 and I4 are in `efa0a41c`. All 5 fixes are confirmed present in the tree via `git diff 632d07f6..efa0a41c`.
+
+---
+
 ## How to Test Locally
 1. Start harness + FAIT app
 2. Navigate to `/memory`
