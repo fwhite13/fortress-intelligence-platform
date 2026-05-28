@@ -3,8 +3,12 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject ChatLayoutState LayoutState
 @inject ISnackbar Snackbar
+@inject IJSRuntime JSRuntime
+@inject IHttpClientFactory HttpClientFactory
 @implements IDisposable
 @using FortressAI.Web.Services
+@using FortressAI.Shared.Models
+@using System.IO
 @using Microsoft.AspNetCore.Components.Authorization
 
 <div style="display: flex; flex-direction: column; height: 100%; background: var(--color-surface); border-left: 1px solid var(--color-border);">
@@ -52,6 +56,10 @@
                 }
             </div>
         }
+        else if (_isDocx && _currentArtifactUpload != null)
+        {
+            <DocxPreviewPanel Artifact="@_currentArtifactUpload" />
+        }
         else if (_presignedUrl != null)
         {
             <iframe src="@_presignedUrl"
@@ -74,6 +82,8 @@
     private bool _loading = true;
     private string? _error;
     private ArtifactRef? _loadedFor;
+    private bool _isDocx;
+    private WorkspaceUpload? _currentArtifactUpload;
 
     protected override async Task OnInitializedAsync()
     {
@@ -102,6 +112,8 @@
         _presignedUrl = null;
         _rawPresignedUrl = null;
         _canPreview = false;
+        _isDocx = false;
+        _currentArtifactUpload = null;
         StateHasChanged();
 
         try
@@ -110,9 +122,28 @@
             _rawPresignedUrl = rawUrl;
 
             var ext = Path.GetExtension(artifact.Filename);
-            _canPreview = PreviewableExtensions.Contains(ext);
+            _isDocx = ext.Equals(".docx", StringComparison.OrdinalIgnoreCase)
+                || artifact.MimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-            if (_canPreview)
+            if (_isDocx)
+            {
+                // Build a WorkspaceUpload-like object for DocxPreviewPanel
+                _currentArtifactUpload = new WorkspaceUpload
+                {
+                    Id = artifact.Id,
+                    S3Key = artifact.S3Key,
+                    Filename = artifact.Filename,
+                    MimeType = artifact.MimeType
+                };
+                _canPreview = true;
+            }
+            else
+            {
+                _canPreview = PreviewableExtensions.Contains(ext);
+                _currentArtifactUpload = null;
+            }
+
+            if (_canPreview && !_isDocx)
             {
                 if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
@@ -120,9 +151,8 @@
                 }
                 else
                 {
-                    // Office preview removed — Epic 12 will provide native DOCX/XLSX/PPTX previews
-                    _presignedUrl = null;
-                    _canPreview = false;
+                    var encoded = Uri.EscapeDataString(rawUrl);
+                    _presignedUrl = $"https://view.officeapps.live.com/op/embed.aspx?src={encoded}";
                 }
             }
 

@@ -64,7 +64,11 @@
             <div class="artifact-sidebar__preview">
                 @if (IsPreviewable(_selectedArtifact))
                 {
-                    @if (_previewLoading)
+                    @if (IsXlsxType(_selectedArtifact))
+                    {
+                        <XlsxPreviewPanel ArtifactId="@_selectedArtifact.Id" Filename="@_selectedArtifact.Filename" MimeType="@_selectedArtifact.MimeType" />
+                    }
+                    else if (_previewLoading)
                     {
                         <div class="artifact-sidebar__preview-loading">
                             <MudProgressCircular Indeterminate="true" />
@@ -75,6 +79,10 @@
                         <div class="artifact-sidebar__text-preview">
                             <pre><code class="@GetHighlightClass(_selectedArtifact.Filename)">@_textPreviewContent</code></pre>
                         </div>
+                    }
+                    else if (IsDocxType(_selectedArtifact))
+                    {
+                        <DocxPreviewPanel Artifact="@_selectedArtifact" />
                     }
                     else if (_previewUrl != null)
                     {
@@ -240,6 +248,10 @@
                         _previewError = "Could not load preview. Try downloading.";
                     }
                 }
+                else if (IsDocxType(artifact))
+                {
+                    // DocxPreviewPanel handles its own loading — don't set _previewUrl
+                }
                 else if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
                     _previewUrl = await GetProxyPreviewUrlAsync(artifact);
@@ -316,6 +328,20 @@
     {
         var ext = Path.GetExtension(artifact.Filename);
         return TextPreviewableExtensions.Contains(ext);
+    }
+
+    private static bool IsDocxType(WorkspaceUpload artifact)
+    {
+        var ext = Path.GetExtension(artifact.Filename);
+        return ext.Equals(".docx", StringComparison.OrdinalIgnoreCase)
+            || artifact.MimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    }
+
+    private static bool IsXlsxType(WorkspaceUpload artifact)
+    {
+        var ext = Path.GetExtension(artifact.Filename);
+        return ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase)
+            || artifact.MimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     }
 
     private static bool IsOfficeDocType(WorkspaceUpload artifact)

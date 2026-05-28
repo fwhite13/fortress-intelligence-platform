@@ -1,0 +1,176 @@
+@inject ArtifactPreviewService PreviewSvc
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JSRuntime
+@inject IHttpClientFactory HttpClientFactory
+@using FortressAI.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@implements IAsyncDisposable
+
+<div class="xlsx-preview-panel">
+    @if (_loading)
+    {
+        <div class="xlsx-preview-panel__loading">
+            <MudProgressCircular Indeterminate="true" />
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">Loading spreadsheet...</MudText>
+        </div>
+    }
+    else if (_error != null)
+    {
+        <div class="xlsx-preview-panel__error">
+            <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Size="Size.Large" />
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@_error</MudText>
+        </div>
+    }
+    else if (_sheetNames.Count > 0)
+    {
+        @if (_sheetNames.Count == 1)
+        {
+            <div id="@_containerId" class="xlsx-preview-panel__table-container"></div>
+        }
+        else
+        {
+            <MudTabs ActivePanelIndex="@_activeSheet" ActivePanelIndexChanged="OnTabChanged" Class="xlsx-preview-panel__tabs">
+                @foreach (var (name, index) in _sheetNames.Select((n, i) => (n, i)))
+                {
+                    <MudTabPanel Text="@name">
+                        <div id="@($"{_containerId}-{index}")" class="xlsx-preview-panel__table-container"></div>
+                    </MudTabPanel>
+                }
+            </MudTabs>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ArtifactId { get; set; }
+    [Parameter, EditorRequired] public string Filename { get; set; } = "";
+    [Parameter, EditorRequired] public string MimeType { get; set; } = "";
+
+    private bool _loading = true;
+    private string? _error;
+    private List<string> _sheetNames = new();
+    private int _activeSheet = 0;
+    private string _containerId = $"xlsx-{Guid.NewGuid():N}";
+    private byte[]? _fileBytes;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await LoadAndRenderAsync();
+    }
+
+    private async Task OnTabChanged(int index)
+    {
+        _activeSheet = index;
+        if (_fileBytes != null && index < _sheetNames.Count)
+        {
+            await RenderSheetAsync(index);
+        }
+    }
+
+    private async Task LoadAndRenderAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var userIdStr = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (!Guid.TryParse(userIdStr, out var userId))
+            {
+                _error = "Authentication error. Please refresh.";
+                _loading = false;
+                StateHasChanged();
+                return;
+            }
+
+            var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
+            var url = $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
+
+            using var http = HttpClientFactory.CreateClient();
+            _fileBytes = await http.GetByteArrayAsync(url);
+
+            // Get sheet names via JS interop
+            var names = await JSRuntime.InvokeAsync<string[]>("xlsxPreviewInterop.getSheetNames", _fileBytes);
+            _sheetNames = names?.ToList() ?? new List<string>();
+
+            if (_sheetNames.Count == 0)
+            {
+                _error = "No sheets found in this spreadsheet.";
+                _loading = false;
+                StateHasChanged();
+                return;
+            }
+
+            _loading = false;
+            StateHasChanged();
+
+            // Render first sheet after DOM update
+            await RenderSheetAsync(0);
+        }
+        catch (Exception)
+        {
+            _error = "Failed to load spreadsheet preview. Try downloading the file.";
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RenderSheetAsync(int index)
+    {
+        if (_fileBytes == null || index >= _sheetNames.Count) return;
+        var sheetName = _sheetNames[index];
+        var containerId = _sheetNames.Count == 1 ? _containerId : $"{_containerId}-{index}";
+        await JSRuntime.InvokeVoidAsync("xlsxPreviewInterop.renderSheet", _fileBytes, sheetName, containerId);
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+<style>
+.xlsx-preview-panel {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.xlsx-preview-panel__loading,
+.xlsx-preview-panel__error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    padding: 24px;
+    text-align: center;
+    color: var(--color-text-secondary);
+}
+.xlsx-preview-panel__tabs {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+.xlsx-preview-panel__table-container {
+    max-height: 60vh;
+    overflow-y: auto;
+    overflow-x: auto;
+    padding: 8px;
+    background: white;
+}
+.xlsx-preview-panel__table-container table {
+    border-collapse: collapse;
+    font-size: 12px;
+    font-family: 'Consolas', monospace;
+}
+.xlsx-preview-panel__table-container td,
+.xlsx-preview-panel__table-container th {
+    border: 1px solid #e0e0e0;
+    padding: 4px 8px;
+    white-space: nowrap;
+}
+.xlsx-preview-panel__table-container th {
+    background: #f5f5f5;
+    font-weight: 600;
+}
+</style>
