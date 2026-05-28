@@ -1096,7 +1096,7 @@ public class MeetingsApiController : ControllerBase
     // ── Mobile API Endpoints ──────────────────────────────────────────────────
 
     [HttpGet("/api/firm/me")]
-    [Authorize]
+    [Authorize(Policy = "CookieOrBearer")]
     public async Task<IActionResult> GetMe()
     {
         var entraOid = User.FindFirst("oid")?.Value
@@ -1118,7 +1118,7 @@ public class MeetingsApiController : ControllerBase
     }
 
     [HttpPost("/api/firm/register-push-token")]
-    [Authorize]
+    [Authorize(Policy = "CookieOrBearer")]
     public async Task<IActionResult> RegisterPushToken([FromBody] RegisterPushTokenRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.ExpoPushToken))
@@ -1140,7 +1140,7 @@ public class MeetingsApiController : ControllerBase
     }
 
     [HttpPost("/api/meetings/mobile-upload")]
-    [Authorize]
+    [Authorize(Policy = "CookieOrBearer")]
     [RequestSizeLimit(600_000_000)] // 600MB limit
     public async Task<IActionResult> MobileUpload([FromForm] MobileUploadRequest request)
     {
@@ -1225,7 +1225,7 @@ public class MeetingsApiController : ControllerBase
     }
 
     [HttpGet("/api/meetings/list")]
-    [Authorize]
+    [Authorize(Policy = "CookieOrBearer")]
     public async Task<IActionResult> ListMeetings([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
         pageSize = Math.Clamp(pageSize, 1, 100);

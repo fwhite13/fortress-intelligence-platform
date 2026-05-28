@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using MySqlConnector;
 using MudBlazor.Services;
 using FortressIntelligenceRM.Web.Data;
@@ -132,10 +133,27 @@ builder.Services.AddAuthentication(options =>
     options.Cookie.SameSite = SameSiteMode.Lax;
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
     options.Cookie.IsEssential = true;
+})
+.AddJwtBearer("Bearer", options =>
+{
+    options.Authority = $"https://login.microsoftonline.com/{builder.Configuration["AzureAd:TenantId"]}/v2.0";
+    options.Audience = $"api://{builder.Configuration["AzureAd:ClientId"]}";
+    options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true
+    };
 });
 builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = options.DefaultPolicy;
+    options.AddPolicy("CookieOrBearer", policy =>
+        policy.AddAuthenticationSchemes(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            "Bearer")
+        .RequireAuthenticatedUser());
 });
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
