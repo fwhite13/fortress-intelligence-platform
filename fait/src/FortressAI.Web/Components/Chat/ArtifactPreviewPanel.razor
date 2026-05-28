@@ -65,7 +65,7 @@
 @code {
     private static readonly HashSet<string> PreviewableExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".pdf", ".doc", ".docx", ".ppt", ".pptx"
+        ".pdf"
     };
 
     private string? _presignedUrl;
@@ -120,8 +120,9 @@
                 }
                 else
                 {
-                    var encoded = Uri.EscapeDataString(rawUrl);
-                    _presignedUrl = $"https://view.officeapps.live.com/op/embed.aspx?src={encoded}";
+                    // Office preview removed — Epic 12 will provide native DOCX/XLSX/PPTX previews
+                    _presignedUrl = null;
+                    _canPreview = false;
                 }
             }
 

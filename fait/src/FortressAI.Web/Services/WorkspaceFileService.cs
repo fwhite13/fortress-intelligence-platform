@@ -105,14 +105,4 @@ public class WorkspaceFileService : IWorkspaceFileService
         var url = _s3.GetPreSignedURL(request);
         return Task.FromResult(url);
     }
-
-    public async Task<string> GetFilePreviewUrlAsync(string s3Key, int? expirySeconds = null, CancellationToken ct = default)
-    {
-        if (_cloudFront.IsConfigured)
-        {
-            var signed = await _cloudFront.GetSignedUrlAsync(s3Key, expirySeconds);
-            if (signed != null) return signed;
-        }
-        return await GetPresignedDownloadUrlAsync(s3Key, expiryMinutes: expirySeconds.HasValue ? expirySeconds.Value / 60 : 30, ct);
-    }
 }
