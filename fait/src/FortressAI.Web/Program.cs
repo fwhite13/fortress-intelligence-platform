@@ -308,12 +308,12 @@ builder.Services.AddHostedService<ManifestRefreshService>();
 builder.Services.AddHostedService<BriefingSchedulerService>();
 builder.Services.AddMemoryCache();
 
-// Named HttpClient for WebFetch — enforces 3-redirect limit per spec
+// Named HttpClient for WebFetch — redirects handled manually in WebFetchClient (SSRF re-validation)
 builder.Services.AddHttpClient("WebFetch")
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
     {
-        AllowAutoRedirect = true,
-        MaxAutomaticRedirections = 3
+        AllowAutoRedirect = false,       // redirects handled manually in WebFetchClient
+        MaxAutomaticRedirections = 3     // no-op with AllowAutoRedirect=false, documents intent
     });
 
 // Named HttpClient for DevOps test connection — short timeout so bad org URL fails fast

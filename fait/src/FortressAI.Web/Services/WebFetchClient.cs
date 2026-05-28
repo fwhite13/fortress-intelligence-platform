@@ -36,8 +36,8 @@ public class WebFetchClient : IWebFetchClient
         if (string.IsNullOrEmpty(host)) return true;
         var h = host.ToLowerInvariant().TrimEnd('.');
 
-        // Loopback
-        if (h == "localhost" || h == "127.0.0.1" || h == "::1") return true;
+        // Full loopback range (not just 127.0.0.1)
+        if (h == "localhost" || h.StartsWith("127.") || h == "::1") return true;
 
         // ECS Fargate IMDS (highest priority — vends IAM credentials)
         if (h == "169.254.170.2") return true;
@@ -55,6 +55,16 @@ public class WebFetchClient : IWebFetchClient
 
         // Internal hostnames
         if (h.EndsWith(".internal") || h.EndsWith(".local") || h.EndsWith(".localhost")) return true;
+
+        // IPv6 link-local (fe80::/10)
+        if (h.StartsWith("fe80:") || h.StartsWith("fe80::")) return true;
+
+        // IPv6 ULA (fc00::/7 — covers fc00:: and fd00::)
+        if (h.StartsWith("fc") || h.StartsWith("fd")) return true;
+
+        // IPv4-mapped forms (::ffff:127.x, ::ffff:169.254.x)
+        if (h.StartsWith("::ffff:127.") || h.StartsWith("::ffff:169.254.")) return true;
+        if (h.StartsWith("0:0:0:0:0:ffff:127.") || h.StartsWith("0:0:0:0:0:ffff:169.254.")) return true;
 
         return false;
     }
@@ -81,13 +91,56 @@ public class WebFetchClient : IWebFetchClient
         {
             var client = _httpClientFactory.CreateClient("WebFetch");
 
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Add("User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-            request.Headers.Add("Accept-Language", "en-US,en;q=0.9");
+            // Manual redirect loop — re-validates each redirect destination through SSRF guard
+            const string UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+            var currentUrl = url;
+            int redirectCount = 0;
+            const int maxRedirects = 3;
+            HttpResponseMessage? response = null;
 
-            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            while (true)
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, currentUrl);
+                request.Headers.Add("User-Agent", UserAgent);
+                request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+                request.Headers.Add("Accept-Language", "en-US,en;q=0.9");
+
+                response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+
+                if ((int)response.StatusCode is >= 301 and <= 308)
+                {
+                    if (redirectCount >= maxRedirects)
+                        return new WebFetchResult(false, null, null, "Too many redirects.", false);
+
+                    var location = response.Headers.Location?.ToString();
+                    if (string.IsNullOrEmpty(location))
+                        return new WebFetchResult(false, null, null, "Redirect with no Location header.", false);
+
+                    // Resolve relative redirect URLs against current URL
+                    if (!Uri.TryCreate(location, UriKind.Absolute, out var absLocation))
+                    {
+                        if (!Uri.TryCreate(new Uri(currentUrl), location, out absLocation))
+                            return new WebFetchResult(false, null, null, "Invalid redirect URL.", false);
+                        location = absLocation.ToString();
+                    }
+
+                    // Re-validate redirect destination through SSRF guard
+                    if (!Uri.TryCreate(location, UriKind.Absolute, out var redirectUri) ||
+                        (redirectUri.Scheme != "http" && redirectUri.Scheme != "https") ||
+                        IsBlockedHost(redirectUri.Host))
+                    {
+                        return new WebFetchResult(false, null, null,
+                            "Redirect destination is not a permitted fetch target.", false);
+                    }
+
+                    currentUrl = location;
+                    redirectCount++;
+                    response.Dispose();
+                    continue;
+                }
+
+                break; // Non-redirect response — proceed with this response
+            }
 
             if (!response.IsSuccessStatusCode)
             {
