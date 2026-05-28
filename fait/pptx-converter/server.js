@@ -54,6 +54,7 @@ app.post('/convert', authMiddleware, async (req, res) => {
         await new Promise((resolve, reject) => {
             const lo = spawn('libreoffice', [
                 '--headless',
+                `--env:UserInstallation=file:///tmp/lo-profile-${artifactId}`,
                 '--convert-to', 'pdf',
                 '--outdir', '/tmp',
                 pptxPath
@@ -114,6 +115,7 @@ app.post('/convert', authMiddleware, async (req, res) => {
         // Cleanup temp files
         try { fs.unlinkSync(pptxPath); } catch (_) {}
         try { fs.unlinkSync(pdfPath); } catch (_) {}
+        try { fs.rmSync(`/tmp/lo-profile-${artifactId}`, { recursive: true, force: true }); } catch (_) {}
     }
 });
 

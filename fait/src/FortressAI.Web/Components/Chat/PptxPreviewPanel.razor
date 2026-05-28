@@ -58,6 +58,7 @@
     private string _containerId = $"pptx-{Guid.NewGuid():N}";
     private int _currentPage = 1;
     private int _totalPages = 0;
+    private CancellationTokenSource? _pollCts;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -129,9 +130,9 @@
                 }
                 else if (convertResp.StatusCode == System.Net.HttpStatusCode.Accepted)
                 {
-                    // Async conversion in progress — poll status endpoint
-                    var statusUrl = NavManager.ToAbsoluteUri($"/api/artifacts/{ArtifactId}/preview-status").ToString();
-                    using var pollHttp = HttpClientFactory.CreateClient();
+                    // Async conversion in progress — poll status via direct service call (no HTTP auth issues)
+                    _pollCts = new CancellationTokenSource();
+                    var ct = _pollCts.Token;
                     var started = DateTime.UtcNow;
                     while (true)
                     {
@@ -142,22 +143,21 @@
                             StateHasChanged();
                             return;
                         }
-                        await Task.Delay(2000);
-                        var statusResp = await pollHttp.GetAsync(statusUrl);
-                        if (!statusResp.IsSuccessStatusCode)
+                        try
                         {
-                            _error = "Failed to check preview status. Try downloading the file.";
-                            _loading = false;
-                            StateHasChanged();
+                            await Task.Delay(2000, ct);
+                        }
+                        catch (OperationCanceledException)
+                        {
                             return;
                         }
-                        var status = await statusResp.Content.ReadFromJsonAsync<PreviewStatusResponse>();
-                        if (status?.Status == "ready" && !string.IsNullOrEmpty(status.PreviewUrl))
+                        var (isReady, previewUrl) = await PreviewSvc.GetPreviewStatusAsync(ArtifactId, userId);
+                        if (isReady && !string.IsNullOrEmpty(previewUrl))
                         {
-                            resolvedPreviewUrl = NavManager.ToAbsoluteUri(status.PreviewUrl).ToString();
+                            resolvedPreviewUrl = NavManager.ToAbsoluteUri(previewUrl).ToString();
                             break;
                         }
-                        // status == "pending" — keep polling
+                        // not ready yet — keep polling
                     }
                 }
                 else
@@ -217,7 +217,12 @@
         [property: System.Text.Json.Serialization.JsonPropertyName("previewUrl")] string? PreviewUrl
     );
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public async ValueTask DisposeAsync()
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        await ValueTask.CompletedTask;
+    }
 }
 
 <style>

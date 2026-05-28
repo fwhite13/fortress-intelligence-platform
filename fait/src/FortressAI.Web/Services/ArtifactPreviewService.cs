@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using FortressAI.Web.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace FortressAI.Web.Services;
 
@@ -14,12 +16,14 @@ public class ArtifactPreviewService
 {
     private readonly string _secret;
     private readonly ILogger<ArtifactPreviewService> _logger;
+    private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private const int TokenValiditySeconds = 900; // 15 minutes
 
-    public ArtifactPreviewService(IConfiguration config, ILogger<ArtifactPreviewService> logger)
+    public ArtifactPreviewService(IConfiguration config, ILogger<ArtifactPreviewService> logger, IDbContextFactory<AppDbContext> dbFactory)
     {
         _secret = config["PREVIEW_TOKEN_SECRET"] ?? "";
         _logger = logger;
+        _dbFactory = dbFactory;
         if (string.IsNullOrWhiteSpace(_secret))
             throw new InvalidOperationException(
                 "PREVIEW_TOKEN_SECRET is not configured. This setting is required. " +
@@ -36,6 +40,23 @@ public class ArtifactPreviewService
         var payload = $"{artifactId}:{userId}:{expires}";
         var token = ComputeHmac(payload);
         return (token, expires);
+    }
+
+    /// <summary>
+    /// Checks whether a preview is ready for the given artifact and user.
+    /// Returns (isReady, previewUrl) — previewUrl is null if not ready.
+    /// Previewurl is a relative path like /api/artifacts/{id}/preview?token=...
+    /// </summary>
+    public async Task<(bool IsReady, string? PreviewUrl)> GetPreviewStatusAsync(Guid artifactId, Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var upload = await db.WorkspaceUploads
+            .FirstOrDefaultAsync(u => u.Id == artifactId && u.UserId == userId);
+        if (upload == null || string.IsNullOrEmpty(upload.PreviewS3Key))
+            return (false, null);
+        var (token, expires) = GenerateToken(artifactId, userId);
+        var previewUrl = $"/api/artifacts/{artifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}&preview=true";
+        return (true, previewUrl);
     }
 
     /// <summary>
