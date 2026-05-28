@@ -165,7 +165,8 @@
                     Id = artifact.Id,
                     S3Key = artifact.S3Key,
                     Filename = artifact.Filename,
-                    MimeType = artifact.MimeType
+                    MimeType = artifact.MimeType,
+                    PreviewS3Key = artifact.PreviewS3Key
                 };
                 _canPreview = true;
                 _presignedUrl = null;

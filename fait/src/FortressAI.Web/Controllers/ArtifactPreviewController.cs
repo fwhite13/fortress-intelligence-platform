@@ -86,7 +86,9 @@ public class ArtifactPreviewController : ControllerBase
                 ? "application/pdf"
                 : (!string.IsNullOrEmpty(artifact.MimeType) ? artifact.MimeType : "application/octet-stream");
             Response.Headers["X-Content-Type-Options"] = "nosniff";
-            Response.ContentLength = artifact.SizeBytes > 0 ? artifact.SizeBytes : null;
+            Response.ContentLength = (preview && !string.IsNullOrEmpty(artifact.PreviewS3Key))
+                ? s3Response.ContentLength
+                : (artifact.SizeBytes > 0 ? artifact.SizeBytes : null);
             var cd = new System.Net.Http.Headers.ContentDispositionHeaderValue("inline");
             cd.FileNameStar = artifact.Filename;
             Response.Headers["Content-Disposition"] = cd.ToString();
@@ -136,7 +138,7 @@ public class ArtifactPreviewController : ControllerBase
 
         // Call harness to convert
         var harnessBase = _config["HARNESS_BASE_URL"] ?? "http://localhost:3000";
-        using var client = _httpClientFactory.CreateClient();
+        using var client = _httpClientFactory.CreateClient("HarnessClient");
         var body = new
         {
             artifactId = id.ToString(),

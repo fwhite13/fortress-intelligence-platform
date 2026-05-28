@@ -691,7 +691,7 @@ else
                         // Mutual exclusion: close sidebar before opening preview panel
                         if (LayoutState.ArtifactSidebarOpen)
                             LayoutState.CloseArtifactSidebar();
-                        LayoutState.OpenArtifactPreview(new ArtifactRef(artifact.Id, artifact.S3Key, artifact.Filename, artifact.MimeType));
+                        LayoutState.OpenArtifactPreview(new ArtifactRef(artifact.Id, artifact.S3Key, artifact.Filename, artifact.MimeType, artifact.PreviewS3Key));
                     }
                 }
             }
