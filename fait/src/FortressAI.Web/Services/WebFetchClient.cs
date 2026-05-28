@@ -38,12 +38,6 @@ public class WebFetchClient : IWebFetchClient
 
         try
         {
-            var handler = new HttpClientHandler
-            {
-                MaxAutomaticRedirections = 3,
-                AllowAutoRedirect = true,
-            };
-
             var client = _httpClientFactory.CreateClient("WebFetch");
 
             var request = new HttpRequestMessage(HttpMethod.Get, url);
