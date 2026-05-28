@@ -1305,6 +1305,9 @@ app.post('/tools/update_user_profile', async (req, res) => {
     if (!userId || !content) {
         return res.status(400).json({ error: 'userId and content are required' });
     }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+        return res.status(400).json({ error: 'Invalid userId' });
+    }
     const effectiveMode = mode || 'merge';
     const s3Key = `workspaces/${userId}/assistants/USER.md`;
     try {
@@ -4512,9 +4515,14 @@ Do NOT emit [TASK_READY] if:
                                     body: JSON.stringify({ userId, ...toolInput })
                                 });
                                 const upResult = await upRes.json();
-                                toolResult = upResult.success ? 'Profile updated.' : `Error: ${upResult.error}`;
-                                toolResultText = `\n\n[Profile Update]\n${JSON.stringify(upResult, null, 2)}\n\n`;
-                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
+                                if (!upRes.ok || !upResult.success) {
+                                    isError = true;
+                                    toolResultText = `\n\n[Profile Update Error]\n${JSON.stringify(upResult, null, 2)}\n\n`;
+                                    emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${String(upResult.error || 'unknown').substring(0, 100)}`);
+                                } else {
+                                    toolResultText = `\n\n[Profile Update]\n${JSON.stringify(upResult, null, 2)}\n\n`;
+                                    emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
+                                }
                             } catch (upErr) {
                                 toolResultText = `\n\n[Profile Update Error]\n${upErr.message}\n\n`;
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${upErr.message.substring(0,100)}`);
