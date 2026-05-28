@@ -20,6 +20,10 @@ public class ArtifactPreviewService
     {
         _secret = config["PREVIEW_TOKEN_SECRET"] ?? "";
         _logger = logger;
+        if (string.IsNullOrWhiteSpace(_secret))
+            throw new InvalidOperationException(
+                "PREVIEW_TOKEN_SECRET is not configured. This setting is required. " +
+                "Set PREVIEW_TOKEN_SECRET in your ECS task definition or environment.");
     }
 
     /// <summary>

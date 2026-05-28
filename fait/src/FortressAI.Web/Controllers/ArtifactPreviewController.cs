@@ -39,6 +39,11 @@ public class ArtifactPreviewController : ControllerBase
         if (string.IsNullOrEmpty(token))
             return Unauthorized(new { error = "Missing token" });
 
+        // Fail immediately on expired token — before touching the DB
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (now >= expires)
+            return Unauthorized(new { error = "Invalid or expired token" });
+
         // We need the userId to validate the token. We'll look up the artifact first,
         // then validate that the token's userId matches the artifact owner.
         // To do this without a 2-pass query, we extract userId from the artifact record
@@ -65,13 +70,25 @@ public class ArtifactPreviewController : ControllerBase
             var s3Response = await _s3.GetObjectAsync(_bucket, artifact.S3Key);
 
             // Stream directly to response — no buffering
-            Response.ContentType = artifact.MimeType;
+            Response.ContentType = !string.IsNullOrEmpty(artifact.MimeType)
+                ? artifact.MimeType
+                : "application/octet-stream";
             Response.ContentLength = artifact.SizeBytes > 0 ? artifact.SizeBytes : null;
-            Response.Headers["Content-Disposition"] = $"inline; filename=\"{artifact.Filename}\"";
+            var cd = new System.Net.Http.Headers.ContentDispositionHeaderValue("inline");
+            cd.FileNameStar = artifact.Filename;
+            Response.Headers["Content-Disposition"] = cd.ToString();
             // Prevent caching of sensitive preview content
             Response.Headers["Cache-Control"] = "private, no-store";
 
-            await s3Response.ResponseStream.CopyToAsync(Response.Body);
+            try
+            {
+                await s3Response.ResponseStream.CopyToAsync(Response.Body);
+            }
+            catch (Exception copyEx)
+            {
+                _logger.LogError(copyEx, "[ArtifactPreview] Stream copy failed mid-response for artifact {Id}", id);
+                // Cannot change status code — response already started
+            }
             return new EmptyResult();
         }
         catch (AmazonS3Exception s3Ex)
