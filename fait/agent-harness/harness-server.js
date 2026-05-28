@@ -1372,125 +1372,96 @@ app.post('/import-memory', async (req, res) => {
     // Strip ===== banner lines (some AI tools wrap exports this way)
     parsed = parsed.replace(/^={5,}.*$/gm, '').trim();
 
-    // ── Step 2: Parse sections by ## N. CATEGORY headers ─────────────────────
-    const sectionRegex = /^##\s+\d+\.\s+(.+)/gm;
-    const sections = [];
-    let match;
-    let lastIndex = 0;
-    let lastTitle = null;
-
-    while ((match = sectionRegex.exec(parsed)) !== null) {
-        if (lastTitle !== null) {
-            sections.push({ title: lastTitle, body: parsed.slice(lastIndex, match.index).trim() });
-        }
-        lastTitle = match[1].trim().toUpperCase();
-        lastIndex = match.index + match[0].length;
-    }
-    if (lastTitle !== null) {
-        sections.push({ title: lastTitle, body: parsed.slice(lastIndex).trim() });
-    }
-
-    // ── Step 3: Slug/title maps ───────────────────────────────────────────────
-    const SLUG_MAP = {
-        'INSTRUCTIONS': 'imported-instructions',
-        'IDENTITY':     'imported-identity',
-        'CAREER':       'imported-career',
-        'PROJECTS':     'imported-projects',
-        'PREFERENCES':  'imported-preferences',
-    };
-    const TITLE_MAP = {
-        'INSTRUCTIONS': 'Imported Instructions',
-        'IDENTITY':     'Imported Identity',
-        'CAREER':       'Imported Career',
-        'PROJECTS':     'Imported Projects',
-        'PREFERENCES':  'Imported Preferences',
-    };
-
-    // Helper: calculate chunk count for a given string
-    const CHUNK_SIZE = 500, OVERLAP = 50;
-    function countChunks(text) {
-        let count = 0;
-        for (let i = 0; i < text.length; i += CHUNK_SIZE - OVERLAP) {
-            count++;
-            if (i + CHUNK_SIZE >= text.length) break;
-        }
-        return count;
-    }
-
-    // Helper: write one section via Blazor API + upsert pgvector
-    async function writeSection(slug, title, body) {
-        const resp = await fetch(`${FAIT_BASE_URL}/api/memory/write`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(internalToken ? { 'X-Internal-Token': internalToken } : {}),
-            },
-            body: JSON.stringify({ userId, slug, title, content: body }),
-        });
-        if (!resp.ok) {
-            const text = await resp.text();
-            const isHtml = text.trim().startsWith('<') || text.includes('<!DOCTYPE');
-            const safeText = isHtml ? `[non-JSON response, HTTP ${resp.status}]` : text.substring(0, 200);
-            throw new Error(`memory/write failed for "${slug}" (${resp.status}): ${safeText}`);
-        }
-
-        let pgvectorWarning = null;
-        try {
-            await upsertMemoryChunks(userId, `memory/${slug}.md`, body);
-        } catch (pgErr) {
-            console.error(`[harness] import-memory pgvector upsert failed for "${slug}" (non-fatal):`, pgErr.message);
-            pgvectorWarning = pgErr.message;
-        }
-
-        return { chunks: countChunks(body), pgvectorWarning };
-    }
-
     try {
-        // ── Step 4: Structured path — write each section separately ──────────
-        if (sections.length > 0) {
-            let totalChunks = 0;
-            const warnings = [];
+        const strippedContent = parsed; // alias for clarity in Bedrock call
 
-            for (const section of sections) {
-                const slug = SLUG_MAP[section.title] || `imported-${section.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-                const title = TITLE_MAP[section.title] || `Imported ${section.title.charAt(0) + section.title.slice(1).toLowerCase()}`;
-                const { chunks, pgvectorWarning } = await writeSection(slug, title, section.body);
-                totalChunks += chunks;
-                if (pgvectorWarning) warnings.push(`${slug}: ${pgvectorWarning}`);
+        // ── Step 2: Bedrock classification ───────────────────────────────────────
+        const classifyRes = await bedrockClient.send(new InvokeModelCommand({
+            modelId: process.env.BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+            contentType: 'application/json',
+            accept: 'application/json',
+            body: JSON.stringify({
+                anthropic_version: 'bedrock-2023-05-31',
+                max_tokens: 4096,
+                system: `You are a memory routing classifier. Given imported content, classify it into two categories:
+1. userMd: Personal facts about the user themselves (name, role, family, location, background, preferences, life facts that apply across all conversations). Extract ONLY user-specific personal facts.
+2. topics: An array of { topic: string, content: string } objects for everything else (knowledge, notes, facts about the world, project info, technical info, etc). Each topic should be a short descriptive slug (e.g. "project-fait", "meeting-notes-2026-05", "recipe-ideas").
+
+Respond with ONLY valid JSON in this exact shape:
+{
+  "userMd": "<markdown string of user personal facts, or null if none>",
+  "topics": [{ "topic": "<slug>", "content": "<markdown content>" }]
+}
+
+If no userMd content is found, set userMd to null. If no topic content is found, topics may be empty array. Do not include any text outside the JSON.`,
+                messages: [{
+                    role: 'user',
+                    content: `Classify this imported content:\n\n${strippedContent}`
+                }]
+            })
+        }));
+
+        const classifyBody = JSON.parse(new TextDecoder().decode(classifyRes.body));
+        const classifyText = classifyBody.content?.[0]?.text || '';
+
+        // ── Step 3: Parse routing response with fallback ──────────────────────────
+        let routing;
+        try {
+            routing = JSON.parse(classifyText);
+        } catch (e) {
+            // Fallback: treat entire content as single imported-memory topic
+            console.warn('[import-memory] Classification parse failed, using fallback topic');
+            routing = { userMd: null, topics: [{ topic: 'imported-memory', content: strippedContent }] };
+        }
+
+        // ── Step 4: Execute writes ────────────────────────────────────────────────
+        let totalChunks = 0;
+
+        // Write userMd to USER.md via update_user_profile if present
+        if (routing.userMd) {
+            await fetch(`http://localhost:${PORT}/tools/update_user_profile`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId, content: routing.userMd, mode: 'merge' })
+            });
+        }
+
+        // Write each topic to memory
+        for (const { topic, content: topicContent } of (routing.topics || [])) {
+            const slug = topic;
+            const title = topic.charAt(0).toUpperCase() + topic.slice(1).replace(/-/g, ' ');
+            const writeRes = await fetch(`${FAIT_BASE_URL}/api/memory/write`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(internalToken ? { 'X-Internal-Token': internalToken } : {}),
+                },
+                body: JSON.stringify({ userId, slug, title, content: topicContent }),
+            });
+            if (!writeRes.ok) {
+                const text = await writeRes.text();
+                const isHtml = text.trim().startsWith('<') || text.includes('<!DOCTYPE');
+                const safeText = isHtml ? `[non-JSON response, HTTP ${writeRes.status}]` : text.substring(0, 200);
+                throw new Error(`memory/write failed for "${slug}" (${writeRes.status}): ${safeText}`);
             }
 
-            const result = { success: true, chunks: totalChunks, sections: sections.length };
-            if (warnings.length > 0) result.pgvectorWarning = warnings.join('; ');
-            return res.json(result);
+            try {
+                await upsertMemoryChunks(userId, `memory/${slug}.md`, topicContent);
+            } catch (pgErr) {
+                console.error(`[harness] import-memory pgvector upsert failed for "${slug}" (non-fatal):`, pgErr.message);
+            }
+
+            // Count chunks
+            const CHUNK_SIZE = 500, OVERLAP = 50;
+            let chunkCount = 0;
+            for (let i = 0; i < topicContent.length; i += CHUNK_SIZE - OVERLAP) {
+                chunkCount++;
+                if (i + CHUNK_SIZE >= topicContent.length) break;
+            }
+            totalChunks += chunkCount;
         }
 
-        // ── Step 5: Fallback — unstructured paste (backward compat) ──────────
-        const resp = await fetch(`${FAIT_BASE_URL}/api/memory/write`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(internalToken ? { 'X-Internal-Token': internalToken } : {}),
-            },
-            body: JSON.stringify({ userId, slug: 'imported-memory', title: 'Imported Memory', content: parsed }),
-        });
-        if (!resp.ok) {
-            const text = await resp.text();
-            const isHtml = text.trim().startsWith('<') || text.includes('<!DOCTYPE');
-            const safeText = isHtml ? `[non-JSON response, HTTP ${resp.status}]` : text.substring(0, 200);
-            throw new Error(`memory/write failed (${resp.status}): ${safeText}`);
-        }
-
-        let pgvectorWarning = null;
-        try {
-            await upsertMemoryChunks(userId, 'memory/imported-memory.md', parsed);
-        } catch (pgErr) {
-            console.error('[harness] import-memory pgvector upsert failed (non-fatal):', pgErr.message);
-            pgvectorWarning = pgErr.message;
-        }
-
-        const result = { success: true, chunks: countChunks(parsed) };
-        if (pgvectorWarning) result.pgvectorWarning = pgvectorWarning;
-        res.json(result);
+        res.json({ success: true, chunks: totalChunks });
     } catch (err) {
         console.error('[harness] import-memory error:', err.message);
         res.json({ success: false, error: err.message });
