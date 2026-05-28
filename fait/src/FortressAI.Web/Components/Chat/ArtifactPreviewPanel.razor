@@ -4,7 +4,6 @@
 @inject ChatLayoutState LayoutState
 @inject ISnackbar Snackbar
 @inject IJSRuntime JSRuntime
-@inject IHttpClientFactory HttpClientFactory
 @implements IDisposable
 @using FortressAI.Web.Services
 @using FortressAI.Shared.Models
@@ -170,11 +169,6 @@
                 if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
                     _presignedUrl = await GetProxyPreviewUrlAsync(artifact);
-                }
-                else
-                {
-                    var encoded = Uri.EscapeDataString(rawUrl);
-                    _presignedUrl = $"https://view.officeapps.live.com/op/embed.aspx?src={encoded}";
                 }
             }
 

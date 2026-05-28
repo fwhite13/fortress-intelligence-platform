@@ -2,6 +2,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JSRuntime
 @inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager NavManager
 @using FortressAI.Web.Services
 @using Microsoft.AspNetCore.Components.Authorization
 @implements IAsyncDisposable
@@ -83,10 +84,10 @@
             }
 
             var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
-            var url = $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
-
+            var relativeUrl = $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
+            var absoluteUrl = NavManager.ToAbsoluteUri(relativeUrl).ToString();
             using var http = HttpClientFactory.CreateClient();
-            _fileBytes = await http.GetByteArrayAsync(url);
+            _fileBytes = await http.GetByteArrayAsync(absoluteUrl);
 
             // Get sheet names via JS interop
             var names = await JSRuntime.InvokeAsync<string[]>("xlsxPreviewInterop.getSheetNames", _fileBytes);

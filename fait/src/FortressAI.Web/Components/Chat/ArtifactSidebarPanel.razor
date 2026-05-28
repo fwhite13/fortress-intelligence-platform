@@ -237,6 +237,15 @@
                     StateHasChanged();
                     return;
                 }
+
+                if (IsDocxType(artifact))
+                {
+                    // DocxPreviewPanel handles its own loading — no presign needed
+                    _previewLoading = false;
+                    StateHasChanged();
+                    return;
+                }
+
                 var rawUrl = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(artifact.S3Key, expiryMinutes: 30);
                 var ext = Path.GetExtension(artifact.Filename);
                 if (IsTextPreviewable(artifact))
@@ -254,10 +263,6 @@
                         _textPreviewContent = null;
                         _previewError = "Could not load preview. Try downloading.";
                     }
-                }
-                else if (IsDocxType(artifact))
-                {
-                    // DocxPreviewPanel handles its own loading — don't set _previewUrl
                 }
                 else if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                 {

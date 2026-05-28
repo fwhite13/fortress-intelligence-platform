@@ -2,6 +2,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JSRuntime
 @inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager NavManager
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
 @using Microsoft.AspNetCore.Components.Authorization
@@ -33,15 +34,27 @@
 
     private bool _loading = true;
     private string? _error;
+    private byte[]? _pendingBytes;
     private string _containerId = $"docx-{Guid.NewGuid():N}";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
-        await LoadAndRenderAsync();
+        if (firstRender)
+        {
+            await FetchBytesAsync();
+            return;
+        }
+
+        // Second pass: bytes are ready and container div is now in DOM
+        if (_pendingBytes != null)
+        {
+            var bytes = _pendingBytes;
+            _pendingBytes = null;
+            await JSRuntime.InvokeVoidAsync("docxPreviewInterop.render", bytes, _containerId);
+        }
     }
 
-    private async Task LoadAndRenderAsync()
+    private async Task FetchBytesAsync()
     {
         try
         {
@@ -55,15 +68,12 @@
                 return;
             }
             var (token, expires) = PreviewSvc.GenerateToken(Artifact.Id, userId);
-            var url = $"/api/artifacts/{Artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
-
+            var relativeUrl = $"/api/artifacts/{Artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
+            var absoluteUrl = NavManager.ToAbsoluteUri(relativeUrl).ToString();
             using var http = HttpClientFactory.CreateClient();
-            var bytes = await http.GetByteArrayAsync(url);
-
+            _pendingBytes = await http.GetByteArrayAsync(absoluteUrl);
             _loading = false;
-            StateHasChanged();
-
-            await JSRuntime.InvokeVoidAsync("docxPreviewInterop.render", bytes, _containerId);
+            StateHasChanged(); // triggers second OnAfterRenderAsync pass
         }
         catch (Exception)
         {
