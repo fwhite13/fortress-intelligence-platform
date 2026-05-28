@@ -2907,11 +2907,10 @@ app.post('/turn', async (req, res) => {
             let memoryTimestamp = null;
             try {
                 const memKey = `${S3_PREFIX}workspaces/${userId}/memory/MEMORY.md`;
-                const headCmd = new HeadObjectCommand({ Bucket: S3_BUCKET, Key: memKey });
-                const headResp = await s3Client.send(headCmd);
-                memoryTimestamp = headResp.LastModified ? new Date(headResp.LastModified).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+                const memContent = await fetchS3File(memKey);
+                memoryTimestamp = memContent ? new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
             } catch (e) {
-                console.warn(`[harness] resumption brief: could not get MEMORY.md timestamp: ${e.message}`);
+                memoryTimestamp = null;
             }
 
             // Skip brief entirely if no history and no memory (ADO#3155 Bug 1 fix)
