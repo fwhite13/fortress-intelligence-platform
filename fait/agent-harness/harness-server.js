@@ -649,8 +649,8 @@ const MCP_TOOL_ALLOWLIST = {
 };
 
 const BUILTIN_TOOLS = new Set([
-    'list_workspace_files', 'read_workspace_file', 'search_memory', 'read_memory', 'write_memory', 'create_document',
-    'list_files', 'read_file', 'write_file'
+    'list_workspace_files', 'read_workspace_file', 'search_memory', 'read_memory', 'write_memory',
+    'list_files', 'read_file'
 ]);
 
 // ADO#3218 — MCP tool specs for dynamic toolConfig injection
@@ -784,10 +784,8 @@ function buildToolManifestSection(enabledPlugins) {
         { name: 'write_memory', use: 'User states a preference, decision, or fact worth persisting' },
         { name: 'update_user_profile', use: 'User shares durable facts about themselves (name, role, family, location, life facts) — persist to their profile' },
         { name: 'search_memory', use: 'Searching across all memory topics by keyword' },
-        { name: 'create_document', use: 'User asks to create a Word document, report, or structured deliverable' },
         { name: 'list_files', use: 'Listing files the user uploaded to their workspace' },
         { name: 'read_file', use: 'Reading content of a user-uploaded file by path' },
-        { name: 'write_file', use: 'Saving text content as a file in the user\'s workspace' },
         { name: 'list_workspace_files', use: 'Seeing assistant-generated artifacts from prior sessions' },
         { name: 'read_workspace_file', use: 'Reading content of an assistant-generated artifact by ID' },
     ];
@@ -2510,6 +2508,24 @@ function pruneToolResults(messages, windowSize = 10) {
 function classifyRequest(message, history) {
     const msg = (message || '').toLowerCase();
 
+    // ADO#4703 — Explicit workspace save/document creation triggers
+    const saveDocTriggers = [
+        /\bsave\s+(to|this\s+to|a\s+file|this)\b.*\bworkspace\b/i,
+        /\bsave\s+(to\s+my\s+workspace|a\s+file|this\s+to\s+my\s+workspace|this)\b/i,
+        /\bcreate\s+a\s+document\b/i,
+        /\bwrite\s+a\s+document\b/i,
+        /\bmake\s+a\s+word\s+doc\b/i,
+        /\bgenerate\s+a\s+report\b/i,
+        /\bcreate\s+a\s+report\b/i,
+        /\bcreate\s+an?\s+artifact\b/i,
+        /\bsave\s+an?\s+artifact\b/i,
+    ];
+    if (saveDocTriggers.some(p => p.test(msg))) return true;
+
+    // ADO#4703 — File extension triggers (extend existing)
+    const docExtensions = /\.(docx|xlsx|pptx|pdf)\b/i;
+    if (docExtensions.test(msg)) return true;
+
     // File extension signals — always CC regardless
     const fileExtensions = /\.(docx|xlsx|pptx|csv|pdf|py|js|ts|json|yaml|xml|txt|md)\b/i;
     if (fileExtensions.test(msg)) return true;
@@ -3330,17 +3346,7 @@ Before any substantive response about prior work, decisions, people, or preferen
 When the user states a preference, makes a decision, or shares a new fact worth keeping: call \`write_memory\`.
 When the user shares durable facts about themselves — their name, job, family, location, background, or any fact that should be known in every future conversation — call \`update_user_profile\` with the new information. Use mode=merge to add to existing profile without overwriting it.
 
-## MANDATORY: Workspace File Saving
-CRITICAL: When the user asks you to save, create, write, or generate a file for their workspace — you MUST call the \`write_file\` tool. Do NOT describe what you would write. Do NOT provide the content as a text response. ALWAYS call \`write_file\` with the actual content. This is non-negotiable. Saying "I've saved..." without calling write_file is incorrect behavior.
-
-Triggers that REQUIRE a write_file tool call (not an exhaustive list):
-- "save this to my workspace"
-- "create a file called..."
-- "write a [document/report/summary] to workspace"
-- "save [content] as [filename]"
-- Any request to persist text as a named file
-
-When referencing prior artifacts: call \`list_workspace_files(type=generated)\` first to see what exists.`);
+If the user asks you to save a file, create a document, or produce an artifact that should persist in their workspace, switch to task mode and use CC to create it. Small code snippets or text that fits in a chat message should be shown inline — do not use tools to save them.`);
         contextParts.push(buildToolManifestSection(enabledMcpSlugs));
         contextParts.push(`## Context Awareness
 
@@ -3941,16 +3947,6 @@ Before any substantive response about prior work, decisions, people, or preferen
 When the user states a preference, makes a decision, or shares a new fact worth keeping: call \`write_memory\`.
 When the user shares durable facts about themselves — their name, job, family, location, background, or any fact that should be known in every future conversation — call \`update_user_profile\` with the new information. Use mode=merge to add to existing profile without overwriting it.
 
-## MANDATORY: Workspace File Saving
-CRITICAL: When the user asks you to save, create, write, or generate a file for their workspace — you MUST call the \`write_file\` tool. Do NOT describe what you would write. Do NOT provide the content as a text response. ALWAYS call \`write_file\` with the actual content. This is non-negotiable. Saying "I've saved..." without calling write_file is incorrect behavior.
-
-Triggers that REQUIRE a write_file tool call (not an exhaustive list):
-- "save this to my workspace"
-- "create a file called..."
-- "write a [document/report/summary] to workspace"
-- "save [content] as [filename]"
-- Any request to persist text as a named file
-
 When referencing prior artifacts: call \`list_workspace_files(type=generated)\` first to see what exists.`);
             systemParts.push(buildToolManifestSection(enabledMcpSlugs));
             systemParts.push(`## Context Awareness
@@ -4248,34 +4244,6 @@ Do NOT emit [TASK_READY] if:
                     },
                     {
                         toolSpec: {
-                            name: 'create_document',
-                            description: 'Use this tool to create a real Word document (.docx) artifact that will be saved and made available for download in the chat. When the user asks for a Word doc, report, proposal, or any other document file, ALWAYS use this tool — do not produce markdown as a substitute. This is the ONLY way to produce a downloadable file artifact. The document will appear as a clickable artifact card in the chat after generation.',
-                            inputSchema: {
-                                json: {
-                                    type: 'object',
-                                    properties: {
-                                        type: { type: 'string', description: 'Document format — must be "word" for .docx output' },
-                                        title: { type: 'string', description: 'Document title, used as the filename base (e.g. "Q1 Report" → Q1_Report.docx)' },
-                                        sections: {
-                                            type: 'array',
-                                            items: {
-                                                type: 'object',
-                                                properties: {
-                                                    heading: { type: 'string' },
-                                                    content: { type: 'string' }
-                                                },
-                                                required: ['heading', 'content']
-                                            },
-                                            description: 'Array of document sections. Each section has a heading (string) and content (string body text for that section).'
-                                        }
-                                    },
-                                    required: ['type', 'title', 'sections']
-                                }
-                            }
-                        }
-                    },
-                    {
-                        toolSpec: {
                             name: 'list_files',
                             description: 'List folders and files in the user\'s workspace at a given folder path.',
                             inputSchema: {
@@ -4309,28 +4277,6 @@ Do NOT emit [TASK_READY] if:
                             }
                         }
                     },
-                    {
-                        toolSpec: {
-                            name: 'write_file',
-                            description: 'Save text content as a file in the user\'s workspace. Supports folder paths (e.g. "reports/q1/summary.md") — missing folders are created automatically. If a file already exists at the path, a new version is created automatically. Files appear immediately in the workspace FILES tab.',
-                            inputSchema: {
-                                json: {
-                                    type: 'object',
-                                    properties: {
-                                        path: {
-                                            type: 'string',
-                                            description: 'File path relative to user workspace root (e.g. "summary.md", "reports/q1.txt"). No leading slashes or .. traversal.'
-                                        },
-                                        content: {
-                                            type: 'string',
-                                            description: 'Text content to write to the file (max 1MB)'
-                                        }
-                                    },
-                                    required: ['path', 'content']
-                                }
-                            }
-                        }
-                    }
             ];
 
             const allTools = [...BUILTIN_TOOL_SPECS];
@@ -4502,42 +4448,6 @@ Do NOT emit [TASK_READY] if:
                                 toolResultText = `\n\n[Profile Update Error]\n${upErr.message}\n\n`;
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${upErr.message.substring(0,100)}`);
                             }
-                        } else if (toolUseAccumulator.name === 'create_document') {
-                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
-                            try {
-                                const cdRes = await fetch(`http://localhost:${PORT}/tools/create_document`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        userId,
-                                        conversationId,
-                                        type: toolInput.type,
-                                        title: toolInput.title,
-                                        sections: toolInput.sections
-                                    })
-                                });
-                                const cdData = await cdRes.json();
-                                if (cdData.error) {
-                                    emitToolCall(res, 'builtin', 'create_document', 'error', `Document creation failed: ${cdData.error}`);
-                                    toolResultText = `\n\n[Document Error]\n${cdData.error}\n\n`;
-                                } else {
-                                    // Emit artifact SSE event BEFORE the tool result text
-                                    sendEvent({
-                                        type: 'artifact',
-                                        payload: JSON.stringify({
-                                            filename: cdData.filename,
-                                            s3Key: cdData.s3Key,
-                                            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                            sizeBytes: cdData.sizeBytes
-                                        })
-                                    });
-                                    emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
-                                    toolResultText = `\n\nDocument created: ${cdData.filename}\n\n`;
-                                }
-                            } catch (cdErr) {
-                                toolResultText = `\n\n[Document Error]\n${cdErr.message}\n\n`;
-                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${cdErr.message.substring(0,100)}`);
-                            }
                         } else if (toolUseAccumulator.name === 'list_files') {
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
@@ -4567,31 +4477,6 @@ Do NOT emit [TASK_READY] if:
                             } catch (rfErr) {
                                 toolResultText = `Error reading file: ${rfErr.message}`;
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${rfErr.message.substring(0,100)}`);
-                            }
-                        } else if (toolUseAccumulator.name === 'write_file') {
-                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
-                            try {
-                                const wfRes = await fetch(`http://localhost:${PORT}/tools/write_file`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                        userId,
-                                        conversationId,
-                                        path: toolInput.path,
-                                        content: toolInput.content,
-                                    })
-                                });
-                                const wfData = await wfRes.json();
-                                if (wfData.error) {
-                                    toolResultText = `\n\n[Write File Error]\n${wfData.error}\n\n`;
-                                    emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${wfData.error.substring(0, 100)}`);
-                                } else {
-                                    emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `File saved: ${wfData.filename}`);
-                                    toolResultText = `\n\nFile saved to workspace: ${wfData.filename} (${wfData.sizeBytes} bytes). It will appear in the FILES tab.\n\n`;
-                                }
-                            } catch (wfErr) {
-                                toolResultText = `\n\n[Write File Error]\n${wfErr.message}\n\n`;
-                                emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${wfErr.message.substring(0, 100)}`);
                             }
                         } else if (toolUseAccumulator.name.startsWith('graph_')) {
                             // ADO#3241 — tool_call SSE events
