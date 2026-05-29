@@ -412,7 +412,7 @@ public class WorkspaceController : ControllerBase
 
             var targetFolderId = await GetOrCreateFolderPathAsync(userId.Value, entry.FullName, extractRootId);
             await _uploadService.SaveUploadAsync(userId.Value, targetFolderId, entry.Name, mimeType, ms);
-            extracted.Add(entry.Name);
+            extracted.Add(entryPath);
         }
 
         _logger.LogInformation("[WorkspaceController] ZIP extracted: {Count} files, {Skipped} skipped for user {UserId}",
