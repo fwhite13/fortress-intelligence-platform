@@ -1004,6 +1004,22 @@
                 memStream.Position = 0;
                 using var archive = new System.IO.Compression.ZipArchive(memStream, System.IO.Compression.ZipArchiveMode.Read);
 
+                // Resolve extraction root: use current folder, or create a folder named after the ZIP at root
+                Guid extractRootId;
+                if (_currentFolderId.HasValue)
+                {
+                    extractRootId = _currentFolderId.Value;
+                }
+                else
+                {
+                    // User is at root — create a folder named after the ZIP file (sans extension)
+                    var zipFolderName = Path.GetFileNameWithoutExtension(zipFile.Name);
+                    var existing = (await UploadSvc.GetFoldersAsync(Session.UserId, null))
+                        .FirstOrDefault(f => f.Name == zipFolderName);
+                    extractRootId = existing?.Id
+                        ?? (await UploadSvc.CreateFolderAsync(Session.UserId, zipFolderName, null)).Id;
+                }
+
                 foreach (var entry in archive.Entries)
                 {
                     if (string.IsNullOrEmpty(entry.Name)) continue;
@@ -1025,14 +1041,15 @@
                     await using var entryMs = new MemoryStream();
                     await using (var es = entry.Open()) await es.CopyToAsync(entryMs);
                     entryMs.Position = 0;
-                    await UploadSvc.SaveUploadAsync(Session.UserId, _currentFolderId, entry.Name, mime, entryMs);
+                    var targetFolderId = await GetOrCreateFolderPathAsync(entry.FullName, extractRootId);
+                    await UploadSvc.SaveUploadAsync(Session.UserId, targetFolderId, entry.Name, mime, entryMs);
                     extracted++;
                 }
 
                 _uploadProgress[zipFile.Name] = 100;
                 StateHasChanged();
                 var msg = extracted > 0
-                    ? $"Extracted {extracted} file(s) from {zipFile.Name} (files stored flat — folder structure not preserved)"
+                    ? $"Extracted {extracted} file(s) from {zipFile.Name}"
                     : $"ZIP {zipFile.Name} contained no extractable files";
                 if (skipped > 0) msg += $" ({skipped} skipped)";
                 Snackbar.Add(msg, extracted > 0 ? Severity.Success : Severity.Warning);
@@ -1094,6 +1111,31 @@
         _uploading = false;
         _uploadProgress.Clear();
         await LoadFilesAsync();
+    }
+
+    private async Task<Guid> GetOrCreateFolderPathAsync(string entryFullName, Guid rootFolderId)
+    {
+        var dir = Path.GetDirectoryName(entryFullName.Replace('\\', '/'))?.Replace('\\', '/') ?? "";
+        if (string.IsNullOrEmpty(dir)) return rootFolderId;
+
+        var segments = dir.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var currentId = rootFolderId;
+
+        foreach (var segment in segments)
+        {
+            var existing = (await UploadSvc.GetFoldersAsync(Session.UserId, currentId))
+                .FirstOrDefault(f => f.Name == segment);
+            if (existing != null)
+            {
+                currentId = existing.Id;
+            }
+            else
+            {
+                var created = await UploadSvc.CreateFolderAsync(Session.UserId, segment, currentId);
+                currentId = created.Id;
+            }
+        }
+        return currentId;
     }
 
     private static string GetMimeTypeForFilename(string filename)

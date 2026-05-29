@@ -365,6 +365,22 @@ public class WorkspaceController : ControllerBase
         await using var zipStream = file.OpenReadStream();
         using var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read);
 
+        // Resolve extraction root
+        Guid extractRootId;
+        if (folderId.HasValue)
+        {
+            extractRootId = folderId.Value;
+        }
+        else
+        {
+            // No folder specified — create a folder named after the ZIP file at root
+            var zipFolderName = Path.GetFileNameWithoutExtension(file.FileName);
+            var existingFolders = await _uploadService.GetFoldersAsync(userId.Value, null);
+            var existingFolder = existingFolders.FirstOrDefault(f => f.Name == zipFolderName);
+            extractRootId = existingFolder?.Id
+                ?? (await _uploadService.CreateFolderAsync(userId.Value, zipFolderName, null)).Id;
+        }
+
         foreach (var entry in archive.Entries)
         {
             // Skip directories (entries with trailing slash / empty name)
@@ -394,7 +410,8 @@ public class WorkspaceController : ControllerBase
             await entryStream.CopyToAsync(ms);
             ms.Position = 0;
 
-            await _uploadService.SaveUploadAsync(userId.Value, folderId, entry.Name, mimeType, ms);
+            var targetFolderId = await GetOrCreateFolderPathAsync(userId.Value, entry.FullName, extractRootId);
+            await _uploadService.SaveUploadAsync(userId.Value, targetFolderId, entry.Name, mimeType, ms);
             extracted.Add(entry.Name);
         }
 
@@ -402,6 +419,31 @@ public class WorkspaceController : ControllerBase
             extracted.Count, skipped, userId);
 
         return Ok(new { filesExtracted = extracted.Count, skipped, paths = extracted });
+    }
+
+    private async Task<Guid> GetOrCreateFolderPathAsync(Guid userId, string entryFullName, Guid rootFolderId)
+    {
+        var dir = Path.GetDirectoryName(entryFullName.Replace('\\', '/'))?.Replace('\\', '/') ?? "";
+        if (string.IsNullOrEmpty(dir)) return rootFolderId;
+
+        var segments = dir.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var currentId = rootFolderId;
+
+        foreach (var segment in segments)
+        {
+            var existing = (await _uploadService.GetFoldersAsync(userId, currentId))
+                .FirstOrDefault(f => f.Name == segment);
+            if (existing != null)
+            {
+                currentId = existing.Id;
+            }
+            else
+            {
+                var created = await _uploadService.CreateFolderAsync(userId, segment, currentId);
+                currentId = created.Id;
+            }
+        }
+        return currentId;
     }
 
     private static string GetMimeTypeForFilename(string filename)
