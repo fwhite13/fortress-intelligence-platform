@@ -1016,8 +1016,23 @@
                     var zipFolderName = Path.GetFileNameWithoutExtension(zipFile.Name);
                     var existing = (await UploadSvc.GetFoldersAsync(Session.UserId, null))
                         .FirstOrDefault(f => f.Name == zipFolderName);
-                    extractRootId = existing?.Id
-                        ?? (await UploadSvc.CreateFolderAsync(Session.UserId, zipFolderName, null)).Id;
+                    if (existing != null)
+                    {
+                        extractRootId = existing.Id;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            extractRootId = (await UploadSvc.CreateFolderAsync(Session.UserId, zipFolderName, null)).Id;
+                        }
+                        catch (DbUpdateException dupEx) when (dupEx.InnerException?.Message.Contains("Duplicate entry") == true || dupEx.InnerException?.Message.Contains("duplicate") == true)
+                        {
+                            Logger.LogWarning("[WorkspaceFiles] ZIP root folder already exists (race), fetching existing: {FolderName}", zipFolderName);
+                            var fallback = (await UploadSvc.GetFoldersAsync(Session.UserId, null)).FirstOrDefault(f => f.Name == zipFolderName);
+                            extractRootId = fallback?.Id ?? throw new InvalidOperationException($"Could not find or create ZIP root folder: {zipFolderName}");
+                        }
+                    }
                 }
 
                 foreach (var entry in archive.Entries)
@@ -1131,8 +1146,17 @@
             }
             else
             {
-                var created = await UploadSvc.CreateFolderAsync(Session.UserId, segment, currentId);
-                currentId = created.Id;
+                try
+                {
+                    var created = await UploadSvc.CreateFolderAsync(Session.UserId, segment, currentId);
+                    currentId = created.Id;
+                }
+                catch (DbUpdateException dupEx) when (dupEx.InnerException?.Message.Contains("Duplicate entry") == true || dupEx.InnerException?.Message.Contains("duplicate") == true)
+                {
+                    Logger.LogWarning("[WorkspaceFiles] ZIP subfolder already exists (race), fetching existing: {Segment}", segment);
+                    var fallback = (await UploadSvc.GetFoldersAsync(Session.UserId, currentId)).FirstOrDefault(f => f.Name == segment);
+                    currentId = fallback?.Id ?? throw new InvalidOperationException($"Could not find or create ZIP subfolder: {segment}");
+                }
             }
         }
         return currentId;

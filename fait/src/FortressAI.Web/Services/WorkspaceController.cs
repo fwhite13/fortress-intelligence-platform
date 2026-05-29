@@ -377,8 +377,23 @@ public class WorkspaceController : ControllerBase
             var zipFolderName = Path.GetFileNameWithoutExtension(file.FileName);
             var existingFolders = await _uploadService.GetFoldersAsync(userId.Value, null);
             var existingFolder = existingFolders.FirstOrDefault(f => f.Name == zipFolderName);
-            extractRootId = existingFolder?.Id
-                ?? (await _uploadService.CreateFolderAsync(userId.Value, zipFolderName, null)).Id;
+            if (existingFolder != null)
+            {
+                extractRootId = existingFolder.Id;
+            }
+            else
+            {
+                try
+                {
+                    extractRootId = (await _uploadService.CreateFolderAsync(userId.Value, zipFolderName, null)).Id;
+                }
+                catch (DbUpdateException dupEx) when (dupEx.InnerException?.Message.Contains("Duplicate entry") == true || dupEx.InnerException?.Message.Contains("duplicate") == true)
+                {
+                    _logger.LogWarning("[WorkspaceController] ZIP root folder already exists (race), fetching existing: {FolderName}", zipFolderName);
+                    var fallback = (await _uploadService.GetFoldersAsync(userId.Value, null)).FirstOrDefault(f => f.Name == zipFolderName);
+                    extractRootId = fallback?.Id ?? throw new InvalidOperationException($"Could not find or create ZIP root folder: {zipFolderName}");
+                }
+            }
         }
 
         foreach (var entry in archive.Entries)
@@ -439,8 +454,17 @@ public class WorkspaceController : ControllerBase
             }
             else
             {
-                var created = await _uploadService.CreateFolderAsync(userId, segment, currentId);
-                currentId = created.Id;
+                try
+                {
+                    var created = await _uploadService.CreateFolderAsync(userId, segment, currentId);
+                    currentId = created.Id;
+                }
+                catch (DbUpdateException dupEx) when (dupEx.InnerException?.Message.Contains("Duplicate entry") == true || dupEx.InnerException?.Message.Contains("duplicate") == true)
+                {
+                    _logger.LogWarning("[WorkspaceController] ZIP subfolder already exists (race), fetching existing: {Segment}", segment);
+                    var fallback = (await _uploadService.GetFoldersAsync(userId, currentId)).FirstOrDefault(f => f.Name == segment);
+                    currentId = fallback?.Id ?? throw new InvalidOperationException($"Could not find or create ZIP subfolder: {segment}");
+                }
             }
         }
         return currentId;
