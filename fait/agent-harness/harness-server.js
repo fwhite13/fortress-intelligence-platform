@@ -4406,7 +4406,6 @@ Do NOT emit [TASK_READY] if:
 
                         if (toolUseAccumulator.name === 'list_workspace_files') {
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const wsRes = await fetch(`http://localhost:${PORT}/tools/list_workspace_files`, {
                                     method: 'POST',
@@ -4422,7 +4421,6 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else if (toolUseAccumulator.name === 'read_workspace_file') {
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const rwfRes = await fetch(`http://localhost:${PORT}/tools/read_workspace_file`, {
                                     method: 'POST',
@@ -4438,7 +4436,6 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else if (toolUseAccumulator.name === 'read_memory') {
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const rmRes = await fetch(`http://localhost:${PORT}/tools/read_memory`, {
                                     method: 'POST',
@@ -4454,7 +4451,6 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else if (toolUseAccumulator.name === 'search_memory') {
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const smRes = await fetch(`http://localhost:${PORT}/tools/search_memory`, {
                                     method: 'POST',
@@ -4470,7 +4466,6 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else if (toolUseAccumulator.name === 'write_memory') {
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const wmRes = await fetch(`http://localhost:${PORT}/tools/write_memory`, {
                                     method: 'POST',
@@ -4486,7 +4481,6 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else if (toolUseAccumulator.name === 'update_user_profile') {
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const upRes = await fetch(`http://localhost:${PORT}/tools/update_user_profile`, {
                                     method: 'POST',
@@ -4508,7 +4502,6 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else if (toolUseAccumulator.name === 'list_files') {
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const lfRes = await fetch(`http://localhost:${PORT}/tools/list_files`, {
                                     method: 'POST',
@@ -4524,7 +4517,6 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else if (toolUseAccumulator.name === 'read_file') {
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const rfRes = await fetch(`http://localhost:${PORT}/tools/read_file`, {
                                     method: 'POST',
@@ -4547,7 +4539,6 @@ Do NOT emit [TASK_READY] if:
                                 graph_list_calendar_events: 'Checking your calendar...'
                             };
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'graph', toolUseAccumulator.name, 'calling', graphSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
                                     method: 'POST',
@@ -4572,7 +4563,6 @@ Do NOT emit [TASK_READY] if:
                                 ado_wiql_query: 'Running ADO query...'
                             };
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'ado', toolUseAccumulator.name, 'calling', adoSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
                                     method: 'POST',
@@ -4589,7 +4579,6 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else if (toolUseAccumulator.name === 'web_search') {
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'brave', 'web_search', 'calling', toolInput.query ? `Searching: ${chipTrunc(toolInput.query, 50)}` : 'Searching...');
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/web_search`, {
                                     method: 'POST',
@@ -4606,7 +4595,6 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else if (toolUseAccumulator.name === 'web_fetch') {
                             sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
-                            emitToolCall(res, 'webfetch', 'web_fetch', 'calling', toolInput.url ? `Fetching: ${chipTrunc(toolInput.url, 60)}` : 'Fetching page...');
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/web_fetch`, {
                                     method: 'POST',
@@ -4623,8 +4611,7 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else {
                             // default: search_knowledge_base
-                            sendEvent({ type: 'chip', content: getBedrockChipText('search_knowledge_base', toolInput) });
-                            emitToolCall(res, 'builtin', 'search_knowledge_base', 'calling', getBuiltinSummary('search_knowledge_base', toolInput));
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             try {
                                 // ADO#3309 — kbAccessForTurn fetched once before the loop, reused across iterations
                                 const kbSearchResult = await executeKbSearch(toolInput.query, toolInput.kb_type || 'personal', userId, kbAccessForTurn, kbFlags);
