@@ -748,7 +748,8 @@ else
             _wasColdStart = false;
             _isBriefStreaming = true;
             _briefContent = new System.Text.StringBuilder();
-            StateHasChanged();
+            // NOTE: Do NOT call StateHasChanged() here — it triggers re-entry into OnAfterRenderAsync.
+            // SendResumptionBrief will call StateHasChanged() as each streaming token arrives.
             _ = SendResumptionBrief();
         }
     }
