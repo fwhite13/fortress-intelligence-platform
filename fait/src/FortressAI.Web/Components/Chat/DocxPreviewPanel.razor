@@ -5,7 +5,7 @@
 @inject NavigationManager NavManager
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
-@implements IAsyncDisposable
+@implements IDisposable
 
 <div class="docx-preview-panel">
     @if (_loading)
@@ -36,6 +36,24 @@
     private byte[]? _pendingBytes;
     private string _containerId = $"docx-{Guid.NewGuid():N}";
 
+    protected override void OnInitialized()
+    {
+        Session.OnAuthStateChanged += HandleAuthStateChanged;
+    }
+
+    private void HandleAuthStateChanged()
+    {
+        // Session just populated — if we haven't loaded yet, kick off the fetch
+        if (_loading && Session.UserId != Guid.Empty)
+        {
+            InvokeAsync(async () =>
+            {
+                await FetchBytesAsync();
+                StateHasChanged();
+            });
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -60,9 +78,7 @@
             var userId = Session.UserId;
             if (userId == Guid.Empty)
             {
-                _error = "Authentication error. Please refresh.";
-                _loading = false;
-                StateHasChanged();
+                // Session not yet initialized — OnAuthStateChanged will re-trigger
                 return;
             }
             var (token, expires) = PreviewSvc.GenerateToken(Artifact.Id, userId);
@@ -81,7 +97,10 @@
         }
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public void Dispose()
+    {
+        Session.OnAuthStateChanged -= HandleAuthStateChanged;
+    }
 }
 
 <style>

@@ -4,7 +4,7 @@
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager NavManager
 @using FortressAI.Web.Services
-@implements IAsyncDisposable
+@implements IDisposable
 
 <div class="xlsx-preview-panel">
     @if (_loading)
@@ -53,6 +53,24 @@
     private string _containerId = $"xlsx-{Guid.NewGuid():N}";
     private byte[]? _fileBytes;
 
+    protected override void OnInitialized()
+    {
+        Session.OnAuthStateChanged += HandleAuthStateChanged;
+    }
+
+    private void HandleAuthStateChanged()
+    {
+        // Session just populated — if we haven't loaded yet, kick off the load
+        if (_loading && Session.UserId != Guid.Empty)
+        {
+            InvokeAsync(async () =>
+            {
+                await LoadAndRenderAsync();
+                StateHasChanged();
+            });
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -77,9 +95,7 @@
             var userId = Session.UserId;
             if (userId == Guid.Empty)
             {
-                _error = "Authentication error. Please refresh.";
-                _loading = false;
-                StateHasChanged();
+                // Session not yet initialized — OnAuthStateChanged will re-trigger
                 return;
             }
 
@@ -124,7 +140,10 @@
         await JSRuntime.InvokeVoidAsync("xlsxPreviewInterop.renderSheet", _fileBytes, sheetName, containerId);
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public void Dispose()
+    {
+        Session.OnAuthStateChanged -= HandleAuthStateChanged;
+    }
 }
 
 <style>
