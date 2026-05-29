@@ -73,9 +73,22 @@ public class WorkspaceFileService : IWorkspaceFileService
             Source = "assistant",
             ConversationId = conversationId.ToString()
         };
-        db.WorkspaceUploads.Add(upload);
-        await db.SaveChangesAsync(ct);
-        return upload;
+        try
+        {
+            db.WorkspaceUploads.Add(upload);
+            await db.SaveChangesAsync(ct);
+            return upload;
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx)
+            when (dbEx.InnerException is MySqlConnector.MySqlException my && my.Number == 1062)
+        {
+            // Concurrent insert won the race — re-fetch and return the winner
+            _logger.LogDebug("[WorkspaceFileService] Concurrent insert race on (userId={UserId}, s3Key={S3Key}), returning winner", userId, payload.S3Key);
+            var winner = await db.WorkspaceUploads
+                .FirstOrDefaultAsync(u => u.UserId == userId && u.S3Key == payload.S3Key, ct);
+            if (winner is null) throw; // winner should always exist at this point; re-throw only if somehow missing
+            return winner;
+        }
     }
 
     public async Task<List<WorkspaceUpload>> GetConversationArtifactsAsync(

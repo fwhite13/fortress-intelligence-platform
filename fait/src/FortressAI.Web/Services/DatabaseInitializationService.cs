@@ -473,7 +473,9 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE conversations ADD COLUMN working_folder_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL",
                 // ADO#4569: PPTX preview cache column
                 "ALTER TABLE user_workspace_uploads ADD COLUMN preview_s3_key VARCHAR(500) NULL",
-                // ADO#4700: unique constraint on (user_id, s3_key) to prevent duplicate artifact inserts
+                // ADO#4700: dedup first (idempotent — deletes nothing if already clean), then add constraint
+                "DELETE uw1 FROM user_workspace_uploads uw1 INNER JOIN user_workspace_uploads uw2 ON uw2.user_id = uw1.user_id AND uw2.s3_key = uw1.s3_key AND uw2.id < uw1.id",
+                // ADO#4700: unique constraint on (user_id, s3_key) — 1061 = already exists (idempotent)
                 "ALTER TABLE user_workspace_uploads ADD CONSTRAINT uq_user_s3_key UNIQUE (user_id, s3_key(500))"
             };
 
