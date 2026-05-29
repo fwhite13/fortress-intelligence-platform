@@ -472,7 +472,9 @@ public class DatabaseInitializationService : IHostedService
                 // ADO#4144: persist working folder selection per conversation
                 "ALTER TABLE conversations ADD COLUMN working_folder_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL",
                 // ADO#4569: PPTX preview cache column
-                "ALTER TABLE user_workspace_uploads ADD COLUMN preview_s3_key VARCHAR(500) NULL"
+                "ALTER TABLE user_workspace_uploads ADD COLUMN preview_s3_key VARCHAR(500) NULL",
+                // ADO#4700: unique constraint on (user_id, s3_key) to prevent duplicate artifact inserts
+                "ALTER TABLE user_workspace_uploads ADD CONSTRAINT uq_user_s3_key UNIQUE (user_id, s3_key(500))"
             };
 
             foreach (var alterSql in alterStatements)

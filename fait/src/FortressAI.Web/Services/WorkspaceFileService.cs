@@ -31,6 +31,15 @@ public class WorkspaceFileService : IWorkspaceFileService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
+        // DEDUP: if a row with this (userId, s3Key) already exists, return it immediately
+        var existing = await db.WorkspaceUploads
+            .FirstOrDefaultAsync(u => u.UserId == userId && u.S3Key == payload.S3Key, ct);
+        if (existing != null)
+        {
+            _logger.LogDebug("[WorkspaceFileService] Artifact already registered (s3_key={S3Key}), returning existing row {Id}", payload.S3Key, existing.Id);
+            return existing;
+        }
+
         // Find or create the default 'general' folder for this user
         var folder = await db.WorkspaceFolders
             .FirstOrDefaultAsync(f => f.UserId == userId && f.Name == "general", ct);
