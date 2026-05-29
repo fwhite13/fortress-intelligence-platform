@@ -1,14 +1,13 @@
 @inject ChatLayoutState LayoutState
 @inject IWorkspaceFileService WorkspaceFileSvc
 @inject ArtifactPreviewService PreviewSvc
-@inject AuthenticationStateProvider AuthStateProvider
+@inject UserSessionService Session
 @inject IJSRuntime JSRuntime
 @inject ISnackbar Snackbar
 @inject IHttpClientFactory HttpClientFactory
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
 @using System.IO
-@using Microsoft.AspNetCore.Components.Authorization
 @implements IAsyncDisposable
 
 <div class="artifact-sidebar">
@@ -325,9 +324,8 @@
 
     private async Task<string> GetProxyPreviewUrlAsync(WorkspaceUpload artifact)
     {
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var userIdStr = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (!Guid.TryParse(userIdStr, out var userId)) return "";
+        var userId = Session.UserId;
+        if (userId == Guid.Empty) return "";
         var (token, expires) = PreviewSvc.GenerateToken(artifact.Id, userId);
         return $"/api/artifacts/{artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
     }

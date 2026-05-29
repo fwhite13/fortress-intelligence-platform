@@ -1,11 +1,10 @@
 @inject ArtifactPreviewService PreviewSvc
-@inject AuthenticationStateProvider AuthStateProvider
+@inject UserSessionService Session
 @inject IJSRuntime JSRuntime
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager NavManager
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
-@using Microsoft.AspNetCore.Components.Authorization
 @implements IAsyncDisposable
 
 <div class="docx-preview-panel">
@@ -58,9 +57,8 @@
     {
         try
         {
-            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-            var userIdStr = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            if (!Guid.TryParse(userIdStr, out var userId))
+            var userId = Session.UserId;
+            if (userId == Guid.Empty)
             {
                 _error = "Authentication error. Please refresh.";
                 _loading = false;
