@@ -2975,7 +2975,7 @@ app.post('/turn', async (req, res) => {
             // Get MEMORY.md last-modified timestamp from S3
             let memoryTimestamp = null;
             try {
-                const memKey = `${S3_PREFIX}workspaces/${userId}/memory/MEMORY.md`;
+                const memKey = `${S3_PREFIX || `workspaces/${userId}/`}memory/MEMORY.md`;
                 const memContent = await fetchS3File(memKey);
                 memoryTimestamp = memContent ? new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
             } catch (e) {
