@@ -1,0 +1,26 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+      - echo "IMAGE_TAG=$IMAGE_TAG"
+  build:
+    commands:
+      - echo Building fait-pptx-converter...
+      - docker build -f fait/pptx-converter/Dockerfile -t fait-pptx-converter:$IMAGE_TAG fait/pptx-converter/
+      - docker tag fait-pptx-converter:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-pptx-converter:latest
+      - docker tag fait-pptx-converter:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-pptx-converter:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Pushing image...
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-pptx-converter:latest
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-pptx-converter:$IMAGE_TAG
+      - echo Done.
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_ACCOUNT_ID: 742932328420
