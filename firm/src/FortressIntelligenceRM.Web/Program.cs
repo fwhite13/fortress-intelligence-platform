@@ -147,15 +147,15 @@ builder.Services.AddAuthentication(options =>
 .AddJwtBearer("Bearer", options =>
 {
     options.Authority = $"https://login.microsoftonline.com/{builder.Configuration["AzureAd:TenantId"]}/v2.0";
-    options.Audience = $"api://{builder.Configuration["AzureAd:ClientId"]}";
+    // Do not set options.Audience — it overrides ValidAudiences. Use ValidAudiences only.
     options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
     {
         ValidateIssuer = true,
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
-        // Accept both api:// URI and bare client ID — Entra v2 tokens issued to the same
-        // app registration (mobile client = API) use the bare GUID as audience.
+        // Accept both api:// URI and bare client ID — Entra v2 tokens issued when the
+        // mobile client and API share the same app registration use the bare GUID as aud.
         ValidAudiences = new[]
         {
             $"api://{builder.Configuration["AzureAd:ClientId"]}",
