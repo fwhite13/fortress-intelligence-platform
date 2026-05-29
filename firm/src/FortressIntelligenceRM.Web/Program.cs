@@ -153,7 +153,14 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuer = true,
         ValidateAudience = true,
         ValidateLifetime = true,
-        ValidateIssuerSigningKey = true
+        ValidateIssuerSigningKey = true,
+        // Accept both api:// URI and bare client ID — Entra v2 tokens issued to the same
+        // app registration (mobile client = API) use the bare GUID as audience.
+        ValidAudiences = new[]
+        {
+            $"api://{builder.Configuration["AzureAd:ClientId"]}",
+            builder.Configuration["AzureAd:ClientId"] ?? ""
+        }
     };
 });
 builder.Services.AddAuthorization(options =>
