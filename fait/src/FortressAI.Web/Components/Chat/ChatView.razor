@@ -1110,6 +1110,13 @@ else
                         Logger.LogWarning(ex, "[ChatView] Failed to parse kb_sources payload");
                     }
                 }
+                else if (evt.Type == "chip")
+                {
+                    // ADO#4717 — ephemeral chip from Bedrock tool calls
+                    var chipText = evt.Content ?? "Working...";
+                    _activeToolCalls.Add(new ToolCallEvent("bedrock", "chip", "calling", chipText, DateTime.UtcNow));
+                    StateHasChanged();
+                }
                 else if (evt.Type == "tool_call")
                 {
                     try

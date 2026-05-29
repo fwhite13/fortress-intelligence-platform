@@ -363,6 +363,58 @@ function getBuiltinSummary(toolName, toolInput) {
     }
 }
 
+// ADO#4717 — Bedrock path ephemeral chip text
+function getBedrockChipText(toolName, toolInput) {
+    switch(toolName) {
+        case 'read_memory': {
+            const slug = toolInput.slug || toolInput.key || '';
+            return slug ? `Reading memory: ${chipTrunc(slug)}` : 'Reading memory...';
+        }
+        case 'search_memory': {
+            const q = toolInput.query || '';
+            return q ? `Searching memory: "${chipTrunc(q, 40)}"` : 'Searching memory...';
+        }
+        case 'write_memory': {
+            const title = toolInput.title || toolInput.slug || '';
+            return title ? `Saving memory: ${chipTrunc(title)}` : 'Saving to memory...';
+        }
+        case 'search_knowledge_base': {
+            const q = toolInput.query || '';
+            return q ? `Searching: "${chipTrunc(q, 40)}"` : 'Searching knowledge base...';
+        }
+        case 'update_user_profile': return 'Updating your profile...';
+        case 'list_workspace_files': return 'Listing workspace files...';
+        case 'read_workspace_file': {
+            const fp = toolInput.path || toolInput.fileId || '';
+            return fp ? `Reading: ${chipTrunc(fp.split('/').pop() || fp)}` : 'Reading workspace file...';
+        }
+        case 'list_files': return 'Listing files...';
+        case 'read_file': {
+            const fp = toolInput.file_path || toolInput.path || '';
+            return fp ? `Reading: ${chipTrunc(fp.split('/').pop() || fp)}` : 'Reading file...';
+        }
+        case 'web_search': {
+            const q = toolInput.query || '';
+            return q ? `Searching web: "${chipTrunc(q, 40)}"` : 'Searching web...';
+        }
+        case 'web_fetch': {
+            const url = toolInput.url || '';
+            if (url) {
+                try { return `Fetching: ${new URL(url).hostname}`; } catch { return `Fetching: ${chipTrunc(url, 40)}`; }
+            }
+            return 'Fetching page...';
+        }
+        default: {
+            if (toolName.startsWith('graph_')) return `Checking Microsoft 365...`;
+            if (toolName.startsWith('ado_')) {
+                const id = toolInput.id ? ` #${toolInput.id}` : '';
+                return `Checking DevOps${id}`;
+            }
+            return `Using tool: ${toolName}`;
+        }
+    }
+}
+
 app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || 3000;
@@ -4353,6 +4405,7 @@ Do NOT emit [TASK_READY] if:
                         let isError = false;
 
                         if (toolUseAccumulator.name === 'list_workspace_files') {
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const wsRes = await fetch(`http://localhost:${PORT}/tools/list_workspace_files`, {
@@ -4368,6 +4421,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${wsErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'read_workspace_file') {
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const rwfRes = await fetch(`http://localhost:${PORT}/tools/read_workspace_file`, {
@@ -4383,6 +4437,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${rwfErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'read_memory') {
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const rmRes = await fetch(`http://localhost:${PORT}/tools/read_memory`, {
@@ -4398,6 +4453,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${rmErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'search_memory') {
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const smRes = await fetch(`http://localhost:${PORT}/tools/search_memory`, {
@@ -4413,6 +4469,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${smErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'write_memory') {
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const wmRes = await fetch(`http://localhost:${PORT}/tools/write_memory`, {
@@ -4428,6 +4485,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${wmErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'update_user_profile') {
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const upRes = await fetch(`http://localhost:${PORT}/tools/update_user_profile`, {
@@ -4449,6 +4507,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${upErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'list_files') {
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const lfRes = await fetch(`http://localhost:${PORT}/tools/list_files`, {
@@ -4464,6 +4523,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'error', `Error: ${lfErr.message.substring(0,100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'read_file') {
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'builtin', toolUseAccumulator.name, 'calling', getBuiltinSummary(toolUseAccumulator.name, toolInput));
                             try {
                                 const rfRes = await fetch(`http://localhost:${PORT}/tools/read_file`, {
@@ -4486,6 +4546,7 @@ Do NOT emit [TASK_READY] if:
                                 graph_send_email: 'Sending email...',
                                 graph_list_calendar_events: 'Checking your calendar...'
                             };
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'graph', toolUseAccumulator.name, 'calling', graphSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
@@ -4510,6 +4571,7 @@ Do NOT emit [TASK_READY] if:
                                 ado_update_work_item: `Updating WI #${toolInput.id ?? ''}`,
                                 ado_wiql_query: 'Running ADO query...'
                             };
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'ado', toolUseAccumulator.name, 'calling', adoSummaries[toolUseAccumulator.name] || `Calling ${toolUseAccumulator.name}...`);
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/${toolUseAccumulator.name}`, {
@@ -4526,6 +4588,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'ado', toolUseAccumulator.name, 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'web_search') {
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'brave', 'web_search', 'calling', toolInput.query ? `Searching: ${chipTrunc(toolInput.query, 50)}` : 'Searching...');
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/web_search`, {
@@ -4542,6 +4605,7 @@ Do NOT emit [TASK_READY] if:
                                 emitToolCall(res, 'brave', 'web_search', 'error', `Error: ${mcpErr.message.substring(0, 100)}`);
                             }
                         } else if (toolUseAccumulator.name === 'web_fetch') {
+                            sendEvent({ type: 'chip', content: getBedrockChipText(toolUseAccumulator.name, toolInput) });
                             emitToolCall(res, 'webfetch', 'web_fetch', 'calling', toolInput.url ? `Fetching: ${chipTrunc(toolInput.url, 60)}` : 'Fetching page...');
                             try {
                                 const mcpRes = await fetch(`http://localhost:${PORT}/tools/web_fetch`, {
@@ -4559,6 +4623,7 @@ Do NOT emit [TASK_READY] if:
                             }
                         } else {
                             // default: search_knowledge_base
+                            sendEvent({ type: 'chip', content: getBedrockChipText('search_knowledge_base', toolInput) });
                             emitToolCall(res, 'builtin', 'search_knowledge_base', 'calling', getBuiltinSummary('search_knowledge_base', toolInput));
                             try {
                                 // ADO#3309 — kbAccessForTurn fetched once before the loop, reused across iterations
