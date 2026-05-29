@@ -983,9 +983,9 @@
         // Handle ZIPs first (sequential — each can contain many files)
         foreach (var zipFile in zipFiles)
         {
-            if (zipFile.Size > 104857600)
+            if (zipFile.Size > 524288000)
             {
-                Snackbar.Add($"{zipFile.Name} exceeds 100MB ZIP limit — skipped.", Severity.Warning);
+                Snackbar.Add($"{zipFile.Name} exceeds 500MB ZIP limit — skipped.", Severity.Warning);
                 _uploadProgress.Remove(zipFile.Name);
                 StateHasChanged();
                 continue;
@@ -998,8 +998,11 @@
                 int extracted = 0;
                 int skipped = 0;
 
-                await using var zipStream = zipFile.OpenReadStream(maxAllowedSize: 104857600);
-                using var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read);
+                await using var browserStream = zipFile.OpenReadStream(maxAllowedSize: 524288000);
+                using var memStream = new MemoryStream();
+                await browserStream.CopyToAsync(memStream);
+                memStream.Position = 0;
+                using var archive = new System.IO.Compression.ZipArchive(memStream, System.IO.Compression.ZipArchiveMode.Read);
 
                 foreach (var entry in archive.Entries)
                 {

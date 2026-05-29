@@ -344,7 +344,7 @@ public class WorkspaceController : ControllerBase
 
     [HttpPost("upload-zip")]
     [Authorize]
-    [RequestSizeLimit(104857600)] // 100MB
+    [RequestSizeLimit(524288000)] // 500MB
     public async Task<IActionResult> UploadZip([FromForm] IFormFile file, [FromForm] Guid? folderId)
     {
         var userId = GetCurrentUserId();
@@ -353,8 +353,8 @@ public class WorkspaceController : ControllerBase
         if (file == null || file.Length == 0)
             return BadRequest(new { error = "No file provided" });
 
-        if (file.Length > 104857600)
-            return StatusCode(413, new { error = "ZIP file exceeds 100MB limit" });
+        if (file.Length > 524288000)
+            return StatusCode(413, new { error = "ZIP file exceeds 500MB limit" });
 
         if (!file.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             return BadRequest(new { error = "Only .zip files are accepted" });
