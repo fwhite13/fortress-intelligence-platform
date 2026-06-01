@@ -115,11 +115,14 @@ function formatCurrencyWc(value) {
  *   memberLegalName    ← nbaisWc.memberLegalName || insured.name
  *   policyPeriod       ← policyPeriod.effectiveDate – expirationDate (formatted)
  *   quoteDate          ← nbaisWc.quoteDate || today
- *   estPremium         ← quotes[0].premium (WorkersCompensation) — formatted currency
- *   surplusContribution← COMPUTED: basePremium * 0.08 — formatted currency
+ *   manualPremium      ← SUM(scheduleItems[].estimated_premium) — computed
+ *   emr               ← quotes[0].attributes[key=emr] — optional decimal
+ *   hasEmr            ← boolean, true when emr present and != 1
+ *   annualPremium     ← manualPremium × emr (or manualPremium if no emr)
+ *   surplusContribution← COMPUTED: annualPremium * 0.08 — formatted currency
  *   employersLiabilityFee ← CONSTANT: $120 — formatted currency
- *   totalEstimatedPremium ← COMPUTED: estPremium + surplusContribution + elFee — formatted
- *   downPayment        ← COMPUTED: totalEstimatedPremium * 0.25 — formatted currency
+ *   totalEstimatedCost ← COMPUTED: annualPremium + surplusContribution + elFee — formatted
+ *   downPayment        ← COMPUTED: totalEstimatedCost * 0.25 — formatted currency
  *   classSchedule[]    ← quotes[0].scheduleItems[itemType=employee_class]
  *   excludedPersons[]  ← payload.nbaisWc.excludedPersons[]
  */
@@ -158,15 +161,24 @@ export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger
     name: trimVal(typeof ep === 'string' ? ep : (ep.name || '')),
   }))
 
-  // Compute premium fields
-  const basePremiumNum = wcQuote.premium != null
-    ? Number(wcQuote.premium)
-    : (attrs.estimated_premium ? Number(attrs.estimated_premium) : 0)
+  // Manual premium = sum of all employee_class schedule item estimated_premium values
+  // (NOT wcQuote.premium — that value is unreliable)
+  const manualPremiumNum = (wcQuote.scheduleItems || [])
+    .filter(i => i.itemType === 'employee_class')
+    .reduce((sum, item) => {
+      const ia = Object.fromEntries((item.attributes || []).map(a => [a.key, a.value]))
+      return sum + (Number(ia.estimated_premium) || 0)
+    }, 0)
 
-  const surplusContributionNum = Math.round(basePremiumNum * 0.08 * 100) / 100
+  const emrRaw = attrs.emr != null ? Number(attrs.emr) : null
+  const hasEmr = emrRaw != null && !isNaN(emrRaw) && emrRaw !== 1
+
+  const annualPremiumNum = hasEmr ? Math.round(manualPremiumNum * emrRaw * 100) / 100 : manualPremiumNum
+
+  const surplusContributionNum = Math.round(annualPremiumNum * 0.08 * 100) / 100
   const elFeeNum = 120   // BAWNSIG program constant — $120 EL fee
-  const totalEstimatedPremiumNum = basePremiumNum + surplusContributionNum + elFeeNum
-  const downPaymentNum = Math.round(totalEstimatedPremiumNum * 0.25 * 100) / 100
+  const totalEstimatedCostNum = annualPremiumNum + surplusContributionNum + elFeeNum
+  const downPaymentNum = Math.round(totalEstimatedCostNum * 0.25 * 100) / 100
 
   // Quote date
   const quoteDate = payload.nbaisWc?.quoteDate
@@ -185,12 +197,18 @@ export function assembleNbaisWcTemplateData(payload, templateMeta, logos, logger
     quoteDate: trimVal(quoteDate),
 
     // Premium fields (all formatted currency strings)
-    basePremium: trimVal(formatCurrencyWc(basePremiumNum)),
-    estPremium: trimVal(formatCurrencyWc(basePremiumNum)),
+    manualPremium: trimVal(formatCurrencyWc(manualPremiumNum)),
+    hasEmr,
+    emr: hasEmr ? String(emrRaw) : '',
+    annualPremium: trimVal(formatCurrencyWc(annualPremiumNum)),
     surplusContribution: trimVal(formatCurrencyWc(surplusContributionNum)),
     employersLiabilityFee: trimVal(formatCurrencyWc(elFeeNum)),
-    totalEstimatedPremium: trimVal(formatCurrencyWc(totalEstimatedPremiumNum)),
+    totalEstimatedCost: trimVal(formatCurrencyWc(totalEstimatedCostNum)),
     downPayment: trimVal(formatCurrencyWc(downPaymentNum)),
+    // Keep these aliases so any existing generic template references don't break
+    basePremium: trimVal(formatCurrencyWc(manualPremiumNum)),
+    estPremium: trimVal(formatCurrencyWc(manualPremiumNum)),
+    totalEstimatedPremium: trimVal(formatCurrencyWc(totalEstimatedCostNum)),
 
     // Class schedule (loop data)
     classSchedule,
