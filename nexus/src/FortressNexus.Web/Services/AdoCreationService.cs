@@ -253,10 +253,10 @@ public class AdoCreationService : IAdoService
         };
 
         if (!string.IsNullOrEmpty(dto.Description))
-            ops.Add(new { op = "add", path = "/fields/System.Description", value = dto.Description });
+            ops.Add(new { op = "add", path = "/fields/System.Description", value = WiTextFormatter.FormatDescriptionAsHtml(dto.Description) });
 
         if (!string.IsNullOrEmpty(dto.AcceptanceCriteria))
-            ops.Add(new { op = "add", path = "/fields/Microsoft.VSTS.Common.AcceptanceCriteria", value = dto.AcceptanceCriteria });
+            ops.Add(new { op = "add", path = "/fields/Microsoft.VSTS.Common.AcceptanceCriteria", value = WiTextFormatter.FormatAcAsHtml(dto.AcceptanceCriteria) });
 
         if (dto.Tags?.Count > 0)
             ops.Add(new { op = "add", path = "/fields/System.Tags", value = string.Join("; ", dto.Tags) });
