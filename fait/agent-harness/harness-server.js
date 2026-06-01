@@ -3629,13 +3629,13 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         try {
             if (folder) {
                 const { execSync } = require('child_process');
+                // ADO#4799 — chip 2: emit before sync begins (timing fix)
+                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: 'Syncing workspace...' }) });
                 execSync(
                     `aws s3 sync s3://${S3_BUCKET}/${folder.s3_prefix} ${folderLocalDir}/ --quiet`,
                     { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
                 );
                 console.log(`[harness] folder-scoped S3 sync complete: folder=${folder.name} folderId=${folder.id} userId=${userId}`);
-                // ADO#4799 — chip 2: workspace ready
-                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: 'Preparing workspace...' }) });
 
                 // Record pre-sync snapshot for dirty detection (after S3 sync, so we capture S3 state)
                 preSyncSnapshot = buildLocalSnapshot(folderLocalDir);
@@ -3881,6 +3881,7 @@ If you find yourself writing prose before making a tool call, STOP and make the 
                             Body: fs.createReadStream(localPath),
                         }));
                         console.log(`[harness] post-sync uploaded: ${relPath} → s3://${S3_BUCKET}/${s3Key} userId=${userId}`);
+                        ccFilesUploaded++; // ADO#4797: increment after confirmed S3 PUT, before DB work
 
                         // ADO#3562 — write provenance row
                         const connProv = await getDbConnection();
@@ -3902,7 +3903,6 @@ If you find yourself writing prose before making a tool call, STOP and make the 
                                     [crypto.randomUUID(), fileId, s3Key, fileSize ?? null, new Date(), 'cc', conversationId ?? null, turnIndex ?? null]
                                 );
                                 uploadedFiles.push({ filename: path.basename(relPath), fileId, version: 1, action: 'created', s3Key });
-                                ccFilesUploaded++;
                             } else {
                                 // Updated file
                                 const nextVersion = (existRows[0].current_version || 1) + 1;
@@ -3915,7 +3915,6 @@ If you find yourself writing prose before making a tool call, STOP and make the 
                                     [crypto.randomUUID(), existRows[0].id, nextVersion, s3Key, fileSize ?? null, new Date(), 'cc', conversationId ?? null, turnIndex ?? null]
                                 );
                                 uploadedFiles.push({ filename: path.basename(relPath), fileId: existRows[0].id, version: nextVersion, action: 'updated', s3Key });
-                                ccFilesUploaded++;
                             }
                         } catch (provErr) {
                             console.warn(`[harness] post-sync provenance error (non-fatal): ${provErr.message}`);
