@@ -1046,11 +1046,14 @@ else
                 {
                     inputTokens = evt.InputTokens ?? 0;
                     outputTokens = evt.OutputTokens ?? 0;
+                    _taskModeActive = false;
+                    await InvokeAsync(StateHasChanged);
                 }
                 else if (evt.Type == "error")
                 {
                     fullResponse.Append($"\n\n⚠️ {evt.ErrorMessage ?? "An error occurred."}");
                     streamingMessage.Content = fullResponse.ToString();
+                    _taskModeActive = false;
                     StateHasChanged();
                 }
                 else if (evt.Type == "mode_switch")

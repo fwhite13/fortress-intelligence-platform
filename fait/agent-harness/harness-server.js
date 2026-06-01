@@ -3189,6 +3189,8 @@ You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on
             if (cleanGateResponse) {
                 sendEvent({ type: 'text', content: cleanGateResponse });
             }
+            // ADO#4799 — chip 1: spawn starting
+            sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: 'Spawning agent...' }) });
             // Fall through — CC spawn runs below
         }
         // End ADO#3576 gate
@@ -3632,6 +3634,8 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                     { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
                 );
                 console.log(`[harness] folder-scoped S3 sync complete: folder=${folder.name} folderId=${folder.id} userId=${userId}`);
+                // ADO#4799 — chip 2: workspace ready
+                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: 'Preparing workspace...' }) });
 
                 // Record pre-sync snapshot for dirty detection (after S3 sync, so we capture S3 state)
                 preSyncSnapshot = buildLocalSnapshot(folderLocalDir);
@@ -3716,9 +3720,14 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         }
 
         const fullContext = contextParts.join('\n\n---\n\n');
+        const EXECUTE_DIRECTIVE = `YOUR ONLY JOB IS TO EXECUTE THE FOLLOWING TASK RIGHT NOW.
+DO NOT narrate what you will do. DO NOT explain your plan. DO NOT produce a summary.
+Execute the task immediately using your tools. Start with the first tool call.
+If you find yourself writing prose before making a tool call, STOP and make the tool call instead.`;
+
         const briefContent = fullContext
-            ? `${fullContext}\n\n---\n\nUser: ${message}`
-            : message;
+            ? `${EXECUTE_DIRECTIVE}\n\n---\n\n${fullContext}\n\n---\n\nUser: ${message}`
+            : `${EXECUTE_DIRECTIVE}\n\n---\n\n${message}`;
 
         // ADO#3289 — log the exact command being spawned
         const ccArgs = [
@@ -3744,6 +3753,8 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         });
         ccProcess.stdin.write(briefContent);
         ccProcess.stdin.end();
+        // ADO#4799 — chip 3: brief delivered
+        sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'document', status: 'calling', message: 'Task brief delivered' }) });
         const TURN_TIMEOUT_MS = parseInt(process.env.CC_TIMEOUT_MS || '300000', 10);
         const timeout = setTimeout(() => {
             ccProcess.kill('SIGTERM');
@@ -3752,10 +3763,19 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         // NDJSON parser for --output-format stream-json (ADO#3244)
         let ccStdoutBuffer = '';
         let ccTextEmitted = false;
+        let ccFilesUploaded = 0;
+        let firstChunkEmitted = false;
         const toolUseMap = new Map(); // track tool_use id → name for tool_result correlation
         let lastEmittedLabel = '';
         let consecutiveLabelCount = 0;
         ccProcess.stdout.on('data', (chunk) => {
+            // ADO#4799 — chip 4: first CC stdout — agent working
+            if (!firstChunkEmitted) {
+                firstChunkEmitted = true;
+                const folderDisplayName = folder?.name || folder?.id || '';
+                const workingChipText = folderDisplayName ? `Working in /${folderDisplayName}...` : 'Agent working...';
+                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: workingChipText }) });
+            }
             console.log(`[CC spawn] stdout chunk bytes=${chunk.length} userId=${userId}`);
             ccStdoutBuffer += chunk.toString();
             const lines = ccStdoutBuffer.split('\n');
@@ -3882,6 +3902,7 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                                     [crypto.randomUUID(), fileId, s3Key, fileSize ?? null, new Date(), 'cc', conversationId ?? null, turnIndex ?? null]
                                 );
                                 uploadedFiles.push({ filename: path.basename(relPath), fileId, version: 1, action: 'created', s3Key });
+                                ccFilesUploaded++;
                             } else {
                                 // Updated file
                                 const nextVersion = (existRows[0].current_version || 1) + 1;
@@ -3894,6 +3915,7 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                                     [crypto.randomUUID(), existRows[0].id, nextVersion, s3Key, fileSize ?? null, new Date(), 'cc', conversationId ?? null, turnIndex ?? null]
                                 );
                                 uploadedFiles.push({ filename: path.basename(relPath), fileId: existRows[0].id, version: nextVersion, action: 'updated', s3Key });
+                                ccFilesUploaded++;
                             }
                         } catch (provErr) {
                             console.warn(`[harness] post-sync provenance error (non-fatal): ${provErr.message}`);
@@ -3938,7 +3960,12 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                 console.warn(`[harness] post-run S3 sync failed (non-fatal): ${syncErr.message}`);
             }
 
-            if (artifact) {
+            // ADO#4797 — narration-only exit detection: warn if CC produced text but made no file changes
+            if (code === 0 && ccTextEmitted && ccFilesUploaded === 0 && !artifact) {
+                console.warn(`[CC spawn] ADO#4797: narration-only exit detected — ccTextEmitted=true ccFilesUploaded=0 artifact=null userId=${userId}`);
+                sendEvent({ type: 'task_hold', payload: JSON.stringify({ reason: 'narration_only', message: 'Task may not have executed — agent produced text output but made no file changes. Review the response and retry if needed.' }) });
+                endResponse({ type: 'done', exitCode: code });
+            } else if (artifact) {
                 endResponse({
                     type: 'done',
                     exitCode: code,
