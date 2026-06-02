@@ -2714,16 +2714,30 @@ function firePreferenceWrite(userId, message) {
 
 // ─── ADO#3559: Task folder model helpers ──────────────────────────────────
 
+// ADO#4834 — exclusion patterns for CC internals and Python cache
+const SYNC_EXCLUDE_DIRS = new Set(['.claude', '.git', '__pycache__', 'node_modules', '.env']);
+const SYNC_EXCLUDE_EXTS = new Set(['.pyc', '.pyo', '.pyd']);
+
 function buildLocalSnapshot(dir) {
     // Returns Map<relativePath, {size, mtime}> for all files in dir (recursive)
+    // ADO#4834 — excludes CC internals (__pycache__, .claude/, .git/) and Python bytecode
     const result = new Map();
     if (!fs.existsSync(dir)) return result;
     function walk(current, base) {
         for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-            const full = path.join(current, entry.name);
-            const rel = path.relative(base, full);
-            if (entry.isDirectory()) walk(full, base);
-            else {
+            // ADO#4834 — skip excluded directories
+            if (entry.isDirectory()) {
+                if (SYNC_EXCLUDE_DIRS.has(entry.name)) {
+                    console.log(`[harness] buildLocalSnapshot: excluding directory ${entry.name} at ${current}`);
+                    continue;
+                }
+                walk(path.join(current, entry.name), base);
+            } else {
+                // ADO#4834 — skip excluded file extensions
+                const ext = path.extname(entry.name).toLowerCase();
+                if (SYNC_EXCLUDE_EXTS.has(ext)) continue;
+                const full = path.join(current, entry.name);
+                const rel = path.relative(base, full);
                 const stat = fs.statSync(full);
                 result.set(rel, { size: stat.size, mtime: stat.mtimeMs });
             }
@@ -2743,6 +2757,24 @@ function findDirtyFiles(before, after) {
         }
     }
     return dirty;
+}
+
+// ADO#4834 — simple MIME type lookup for synced supporting files
+function guessMimeType(filename) {
+    const ext = path.extname(filename).toLowerCase();
+    const mimeMap = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+        '.pdf': 'application/pdf',
+        '.csv': 'text/csv', '.txt': 'text/plain', '.md': 'text/markdown',
+        '.json': 'application/json', '.xml': 'application/xml',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.zip': 'application/zip', '.html': 'text/html', '.css': 'text/css',
+        '.js': 'application/javascript', '.py': 'text/x-python',
+    };
+    return mimeMap[ext] || 'application/octet-stream';
 }
 
 // ADO#3560 — in-memory map for pending folder confirmations (keyed by conversationId)
@@ -3955,7 +3987,7 @@ Do NOT ask the user where to save output files — write all output to the worki
                                 const filename = path.basename(relPath);
                                 await connProv.execute(
                                     'INSERT INTO user_workspace_uploads (id, user_id, folder_id, filename, mime_type, s3_key, size_bytes, created_at, current_version, source, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)',
-                                    [fileId, userId, folder.id, filename, 'application/octet-stream', s3Key, fileSize ?? 0, new Date(), 'cc', conversationId ?? null]
+                                    [fileId, userId, folder.id, filename, guessMimeType(filename), s3Key, fileSize ?? 0, new Date(), 'cc', conversationId ?? null]
                                 );
                                 await connProv.execute(
                                     'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by, conversation_id, turn_index) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)',
