@@ -110,43 +110,46 @@ else
     @if (_agentReady && _hasFailedTasks && !_failedTaskBannerDismissed)
     {
         <MudAlert Severity="Severity.Warning" Dense="true"
+                  Style="cursor: pointer;"
                   ShowCloseIcon="true" CloseIconClicked="@(() => _failedTaskBannerDismissed = true)"
+                  @onclick="@(() => _debugInfoDialogOpen = true)"
                   Class="mx-2 mt-2">
             One or more scheduled tasks have failed.
-            <MudLink Href="/tasks">View tasks →</MudLink>
-            <MudLink Class="ml-2" Style="cursor:pointer;" @onclick="@(() => _debugInfoDialogOpen = true)">ⓘ Debug info</MudLink>
+            <MudLink Href="/tasks" @onclick:stopPropagation="true" Class="ml-1">View tasks →</MudLink>
         </MudAlert>
     }
 
     <MudDialog @bind-IsVisible="_debugInfoDialogOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true })">
         <TitleContent>
-            <MudText Typo="Typo.h6">Session Debug Info</MudText>
+            <MudText Typo="Typo.h6">Debug Info</MudText>
         </TitleContent>
         <DialogContent>
             <MudStack Spacing="2">
                 <div>
                     <MudText Typo="Typo.caption" Color="Color.Secondary">Build</MudText>
-                    <MudText Typo="Typo.body2" Style="font-family: monospace; word-break: break-all;">
-                        @BuildVersion
-                    </MudText>
+                    <MudText Typo="Typo.body2" Style="font-family: monospace; word-break: break-all;">@BuildVersion</MudText>
                 </div>
+                <MudDivider />
                 <div>
                     <MudText Typo="Typo.caption" Color="Color.Secondary">Conversation ID</MudText>
-                    <MudText Typo="Typo.body2" Style="font-family: monospace;">
-                        @(ConversationId?.ToString() ?? "none")
-                    </MudText>
+                    <MudText Typo="Typo.body2" Style="font-family: monospace;">@(ConversationId?.ToString() ?? "none")</MudText>
                 </div>
                 <div>
                     <MudText Typo="Typo.caption" Color="Color.Secondary">Harness Session ID</MudText>
-                    <MudText Typo="Typo.body2" Style="font-family: monospace;">
-                        @(_currentHarnessSessionId ?? "none")
-                    </MudText>
+                    <MudText Typo="Typo.body2" Style="font-family: monospace;">@(_currentHarnessSessionId ?? "none")</MudText>
+                </div>
+                <MudDivider />
+                <div>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">User ID</MudText>
+                    <MudText Typo="Typo.body2" Style="font-family: monospace;">@Session.UserId.ToString()</MudText>
                 </div>
                 <div>
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">Assistant</MudText>
-                    <MudText Typo="Typo.body2">
-                        @(_assistantConfig?.AssistantName ?? "default")
-                    </MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Active Iteration / Assistant</MudText>
+                    <MudText Typo="Typo.body2">@(_assistantConfig?.AssistantName ?? "default")</MudText>
+                </div>
+                <div>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Environment</MudText>
+                    <MudText Typo="Typo.body2">@(Config["ASPNETCORE_ENVIRONMENT"] ?? Config["Environment"] ?? "unknown")</MudText>
                 </div>
             </MudStack>
         </DialogContent>
@@ -1981,10 +1984,18 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
         {
             try
             {
+                // ADO#4827 — safety guard: never send brief if there's no real history
                 var recentHistory = messages
+                    .Where(m => !m.IsResumptionBrief && (m.Role == "user" || m.Role == "assistant"))
                     .TakeLast(3)
                     .Select(m => new ChatHistoryEntry(m.Role, m.Content))
                     .ToList();
+
+                if (!recentHistory.Any())
+                {
+                    Logger.LogInformation("[ChatView] ExecuteBriefWithRetryAsync: no real history found — skipping brief (attempt={Attempt})", attempt);
+                    return;
+                }
 
                 var briefRequest = new TurnRequest(
                     UserId: Session.UserId.ToString(),

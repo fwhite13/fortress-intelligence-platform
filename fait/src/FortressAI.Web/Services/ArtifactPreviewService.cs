@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using FortressAI.Web.Data;
@@ -17,6 +18,7 @@ public class ArtifactPreviewService
     private readonly string _secret;
     private readonly ILogger<ArtifactPreviewService> _logger;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
+    private readonly IConfiguration _config;
     private const int TokenValiditySeconds = 900; // 15 minutes
 
     public ArtifactPreviewService(IConfiguration config, ILogger<ArtifactPreviewService> logger, IDbContextFactory<AppDbContext> dbFactory)
@@ -24,6 +26,7 @@ public class ArtifactPreviewService
         _secret = config["PREVIEW_TOKEN_SECRET"] ?? "";
         _logger = logger;
         _dbFactory = dbFactory;
+        _config = config;
         if (string.IsNullOrWhiteSpace(_secret))
             throw new InvalidOperationException(
                 "PREVIEW_TOKEN_SECRET is not configured. This setting is required. " +
@@ -77,6 +80,50 @@ public class ArtifactPreviewService
         var expected = ComputeHmac(payload);
         return CryptographicEquals(expected, token);
     }
+
+    /// <summary>
+    /// Triggers PPTX → PDF conversion via the converter service, or returns the cached key.
+    /// Accepts IHttpClientFactory as a parameter to avoid a constructor dependency.
+    /// </summary>
+    public async Task<string?> ConvertPptxAsync(Guid artifactId, string s3Key, Guid userId, IHttpClientFactory httpClientFactory)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var upload = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == artifactId && u.UserId == userId);
+
+        if (upload != null && !string.IsNullOrEmpty(upload.PreviewS3Key))
+            return upload.PreviewS3Key;
+
+        var converterBase = _config["CONVERTER_BASE_URL"] ?? "http://localhost:3001";
+        var converterApiKey = _config["CONVERTER_API_KEY"];
+        using var client = httpClientFactory.CreateClient("HarnessClient");
+        if (!string.IsNullOrEmpty(converterApiKey))
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
+
+        var body = new
+        {
+            artifactId = artifactId.ToString(),
+            s3Key,
+            userId = userId.ToString(),
+            outputBucket = _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces"
+        };
+        var resp = await client.PostAsJsonAsync($"{converterBase}/convert", body);
+        if (!resp.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("[ArtifactPreview] PPTX converter returned {Status} for artifact {Id}", resp.StatusCode, artifactId);
+            return null;
+        }
+
+        var result = await resp.Content.ReadFromJsonAsync<ConvertPptxResult>();
+        if (result?.PreviewS3Key != null && upload != null)
+        {
+            upload.PreviewS3Key = result.PreviewS3Key;
+            await db.SaveChangesAsync();
+        }
+        return result?.PreviewS3Key;
+    }
+
+    private record ConvertPptxResult([property: System.Text.Json.Serialization.JsonPropertyName("previewS3Key")] string? PreviewS3Key);
 
     private string ComputeHmac(string payload)
     {
