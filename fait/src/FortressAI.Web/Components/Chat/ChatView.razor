@@ -780,7 +780,8 @@ else
         }
 
         // Cold start resumption brief — fires once after agent becomes ready
-        if (_wasColdStart && _agentReady && !_resumptionBriefSent && ConversationId.HasValue && ConversationId.Value != Guid.Empty)
+        if (_wasColdStart && _agentReady && !_resumptionBriefSent && ConversationId.HasValue && ConversationId.Value != Guid.Empty
+            && messages.Any(m => !m.IsResumptionBrief))
         {
             _resumptionBriefSent = true;
             _wasColdStart = false;
@@ -2071,17 +2072,22 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
                 }
 
                 _currentHarnessSessionId = currentSessionId;
-                _wasColdStart = true;
+                // ADO#4827 — only set cold-start if there is prior conversation history to resume
+                _wasColdStart = messages.Any(m => !m.IsResumptionBrief);
+                Logger.LogInformation("[ChatView] HandleAgentReady: setting _wasColdStart={WasColdStart} (messageCount={Count})", _wasColdStart, messages.Count(m => !m.IsResumptionBrief));
             }
             else
             {
-                _wasColdStart = true;
+                // ADO#4827 — no session ID yet, but still only cold-start if there's history
+                _wasColdStart = messages.Any(m => !m.IsResumptionBrief);
+                Logger.LogInformation("[ChatView] HandleAgentReady: no sessionId, _wasColdStart={WasColdStart} (messageCount={Count})", _wasColdStart, messages.Count(m => !m.IsResumptionBrief));
             }
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "[ChatView] Resumption brief session guard failed — proceeding with cold start");
-            _wasColdStart = true;
+            // ADO#4827 — even on error, don't set cold start for empty conversations
+            _wasColdStart = messages.Any(m => !m.IsResumptionBrief);
         }
 
         StateHasChanged();

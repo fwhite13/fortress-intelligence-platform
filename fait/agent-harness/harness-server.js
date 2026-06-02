@@ -3037,10 +3037,10 @@ app.post('/turn', async (req, res) => {
                 memoryTimestamp = null;
             }
 
-            // Skip brief entirely if no history and no memory (ADO#3155 Bug 1 fix)
+            // Skip brief entirely if no history (ADO#4827 — MEMORY.md alone is not sufficient to resume)
             const hasHistory = Array.isArray(history) && history.length > 0;
-            if (!hasHistory && !memoryTimestamp) {
-                console.log(`[harness] resumption brief: no history and no MEMORY.md for userId=${userId} — skipping brief`);
+            if (!hasHistory) {
+                console.log(`[harness] resumption brief: no history for userId=${userId} — skipping brief (memoryTimestamp=${memoryTimestamp})`);
                 sendEvent({ type: 'done', exitCode: 0 });
                 res.end();
                 return;
