@@ -31,9 +31,30 @@
       "isAdmitted": true,
       "premium": 38762.68,
       "attributes": [
-        { "key": "el_each_accident", "value": 1000000, "label": "Employers' Liability — Each Accident", "format": "currency" },
-        { "key": "el_disease_each_employee", "value": 1000000, "label": "Employers' Liability — Disease (Each Employee)", "format": "currency" },
-        { "key": "el_disease_policy_limit", "value": 1000000, "label": "Employers' Liability — Disease (Policy Limit)", "format": "currency" }
+        {
+          "key": "el_each_accident",
+          "value": 1000000,
+          "label": "Employers' Liability \u2014 Each Accident",
+          "format": "currency"
+        },
+        {
+          "key": "el_disease_each_employee",
+          "value": 1000000,
+          "label": "Employers' Liability \u2014 Disease (Each Employee)",
+          "format": "currency"
+        },
+        {
+          "key": "el_disease_policy_limit",
+          "value": 1000000,
+          "label": "Employers' Liability \u2014 Disease (Policy Limit)",
+          "format": "currency"
+        },
+        {
+          "key": "emr",
+          "value": "0.95",
+          "label": "Experience Modification Rate",
+          "format": "decimal"
+        }
       ],
       "scheduleItems": [
         {
@@ -41,25 +62,73 @@
           "itemNumber": 1,
           "description": "Roofing--All Kinds & Drivers",
           "attributes": [
-            { "key": "state", "value": "NV", "format": "text" },
-            { "key": "class_code", "value": "5551", "format": "text" },
-            { "key": "class_description", "value": "Roofing--All Kinds & Drivers", "format": "text" },
-            { "key": "payroll", "value": 275000, "format": "currency" },
-            { "key": "rate_per_hundred", "value": "11.694", "format": "text" },
-            { "key": "estimated_premium", "value": 32158.50, "format": "currency" }
+            {
+              "key": "state",
+              "value": "NV",
+              "format": "text"
+            },
+            {
+              "key": "class_code",
+              "value": "5551",
+              "format": "text"
+            },
+            {
+              "key": "class_description",
+              "value": "Roofing--All Kinds & Drivers",
+              "format": "text"
+            },
+            {
+              "key": "payroll",
+              "value": 275000,
+              "format": "currency"
+            },
+            {
+              "key": "rate_per_hundred",
+              "value": "11.694",
+              "format": "text"
+            },
+            {
+              "key": "estimated_premium",
+              "value": 32158.5,
+              "format": "currency"
+            }
           ]
         },
         {
           "itemType": "employee_class",
           "itemNumber": 2,
-          "description": "Roofing – LLC Member/Manager",
+          "description": "Roofing \u2013 LLC Member/Manager",
           "attributes": [
-            { "key": "state", "value": "NV", "format": "text" },
-            { "key": "class_code", "value": "5551", "format": "text" },
-            { "key": "class_description", "value": "Roofing – LLC Member/Manager", "format": "text" },
-            { "key": "payroll", "value": 36000, "format": "currency" },
-            { "key": "rate_per_hundred", "value": "11.694", "format": "text" },
-            { "key": "estimated_premium", "value": 4209.84, "format": "currency" }
+            {
+              "key": "state",
+              "value": "NV",
+              "format": "text"
+            },
+            {
+              "key": "class_code",
+              "value": "5551",
+              "format": "text"
+            },
+            {
+              "key": "class_description",
+              "value": "Roofing \u2013 LLC Member/Manager",
+              "format": "text"
+            },
+            {
+              "key": "payroll",
+              "value": 36000,
+              "format": "currency"
+            },
+            {
+              "key": "rate_per_hundred",
+              "value": "11.694",
+              "format": "text"
+            },
+            {
+              "key": "estimated_premium",
+              "value": 4209.84,
+              "format": "currency"
+            }
           ]
         },
         {
@@ -67,12 +136,36 @@
           "itemNumber": 3,
           "description": "Roofing-Foreman",
           "attributes": [
-            { "key": "state", "value": "NV", "format": "text" },
-            { "key": "class_code", "value": "5551", "format": "text" },
-            { "key": "class_description", "value": "Roofing-Foreman", "format": "text" },
-            { "key": "payroll", "value": 36000, "format": "currency" },
-            { "key": "rate_per_hundred", "value": "11.694", "format": "text" },
-            { "key": "estimated_premium", "value": 4209.84, "format": "currency" }
+            {
+              "key": "state",
+              "value": "NV",
+              "format": "text"
+            },
+            {
+              "key": "class_code",
+              "value": "5551",
+              "format": "text"
+            },
+            {
+              "key": "class_description",
+              "value": "Roofing-Foreman",
+              "format": "text"
+            },
+            {
+              "key": "payroll",
+              "value": 36000,
+              "format": "currency"
+            },
+            {
+              "key": "rate_per_hundred",
+              "value": "11.694",
+              "format": "text"
+            },
+            {
+              "key": "estimated_premium",
+              "value": 4209.84,
+              "format": "currency"
+            }
           ]
         },
         {
@@ -80,12 +173,36 @@
           "itemNumber": 4,
           "description": "Outside Sales",
           "attributes": [
-            { "key": "state", "value": "NV", "format": "text" },
-            { "key": "class_code", "value": "8742", "format": "text" },
-            { "key": "class_description", "value": "Outside Sales", "format": "text" },
-            { "key": "payroll", "value": 36000, "format": "currency" },
-            { "key": "rate_per_hundred", "value": "0.624", "format": "text" },
-            { "key": "estimated_premium", "value": 224.64, "format": "currency" }
+            {
+              "key": "state",
+              "value": "NV",
+              "format": "text"
+            },
+            {
+              "key": "class_code",
+              "value": "8742",
+              "format": "text"
+            },
+            {
+              "key": "class_description",
+              "value": "Outside Sales",
+              "format": "text"
+            },
+            {
+              "key": "payroll",
+              "value": 36000,
+              "format": "currency"
+            },
+            {
+              "key": "rate_per_hundred",
+              "value": "0.624",
+              "format": "text"
+            },
+            {
+              "key": "estimated_premium",
+              "value": 224.64,
+              "format": "currency"
+            }
           ]
         }
       ]
