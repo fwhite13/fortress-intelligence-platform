@@ -63,32 +63,6 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseMySql(fredConnectionString, fredServerVersion,
         mysqlOptions => mysqlOptions.EnableRetryOnFailure(3)));
 
-// SharedKeyRingDbContext: dedicated context for DataProtection key ring.
-// Must be registered as a standard scoped DbContext (not a factory) so that
-// PersistKeysToDbContext<SharedKeyRingDbContext>() can resolve it from DI.
-// Uses FIP_KEYRING_DB_NAME env var (defaults to fred_dev — same DB as FAIT's AppDbContext).
-var keyRingDbHost = builder.Configuration["FORTRESS_DB_HOST"];
-var keyRingDbPort = builder.Configuration["FORTRESS_DB_PORT"] ?? "3306";
-var keyRingDbUser = builder.Configuration["FORTRESS_DB_USER"] ?? "fortress_mysql";
-var keyRingDbPass = builder.Configuration["FORTRESS_DB_PASS"] ?? "";
-var keyRingDbName = builder.Configuration["FIP_KEYRING_DB_NAME"] ?? "fred_dev";
-
-var keyRingCsb = new MySqlConnector.MySqlConnectionStringBuilder
-{
-    Server = keyRingDbHost ?? "localhost",
-    Port = uint.Parse(keyRingDbPort),
-    Database = keyRingDbName,
-    UserID = keyRingDbUser,
-    Password = keyRingDbPass,
-    ConnectionTimeout = 10,
-    GuidFormat = MySqlGuidFormat.None
-};
-
-builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>
-    options.UseMySql(keyRingCsb.ConnectionString,
-        new MySqlServerVersion(new Version(8, 0, 28)),
-        mysql => mysql.EnableRetryOnFailure(3)));
-
 // Application services
 builder.Services.AddScoped<UserSessionService>();
 builder.Services.AddScoped<AuthService>();
@@ -346,15 +320,19 @@ builder.Services.AddHttpClient("HarnessClient", client =>
     client.Timeout = TimeSpan.FromMinutes(10);
 });
 
-// DataProtection: use SharedKeyRingDbContext (standard scoped DbContext) to persist/read keys.
-// AppDbContext is registered as a factory (AddDbContextFactory) and cannot be resolved by
-// PersistKeysToDbContext<> — that's why FAIT was generating ephemeral in-process keys instead
-// of reading FIP's key ring, causing the shared .FortressAI.Session cookie to be rejected.
-// DisableAutomaticKeyGeneration: FIP portal owns key creation — FAIT is a consumer only.
+// DataProtection: persist keys to SSM Parameter Store so all container instances
+// (across deploys and ECS task replacements) share the same key ring.
+// Previously used SharedKeyRingDbContext (MySQL) but that still caused 400 errors
+// after redeploys because EF-based key rings don't survive container replacement.
+// SSM path is environment-specific; IAM grant (ssm:GetParametersByPath, ssm:PutParameter,
+// ssm:DeleteParameter on the path) is managed by Rhodey on the ECS task role.
+var ssmKeyPath = builder.Environment.IsDevelopment()
+    ? "/fait/dev/dataprotection/keys"
+    : "/fait/prod/dataprotection/keys";
+
 builder.Services.AddDataProtection()
-    .PersistKeysToDbContext<SharedKeyRingDbContext>()
-    .SetApplicationName("FortressAI")
-    .DisableAutomaticKeyGeneration();
+    .PersistKeysToAWSSystemsManager(ssmKeyPath)
+    .SetApplicationName("FortressAI");
 
 // ⚠️ TEST AUTH — DEVELOPMENT ONLY — MUST NOT REACH PRODUCTION
 if (builder.Environment.IsDevelopment())
