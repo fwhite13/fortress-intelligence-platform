@@ -114,8 +114,46 @@ else
                   Class="mx-2 mt-2">
             One or more scheduled tasks have failed.
             <MudLink Href="/tasks">View tasks →</MudLink>
+            <MudLink Class="ml-2" Style="cursor:pointer;" @onclick="@(() => _debugInfoDialogOpen = true)">ⓘ Debug info</MudLink>
         </MudAlert>
     }
+
+    <MudDialog @bind-IsVisible="_debugInfoDialogOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true })">
+        <TitleContent>
+            <MudText Typo="Typo.h6">Session Debug Info</MudText>
+        </TitleContent>
+        <DialogContent>
+            <MudStack Spacing="2">
+                <div>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Build</MudText>
+                    <MudText Typo="Typo.body2" Style="font-family: monospace; word-break: break-all;">
+                        @BuildVersion
+                    </MudText>
+                </div>
+                <div>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Conversation ID</MudText>
+                    <MudText Typo="Typo.body2" Style="font-family: monospace;">
+                        @(ConversationId?.ToString() ?? "none")
+                    </MudText>
+                </div>
+                <div>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Harness Session ID</MudText>
+                    <MudText Typo="Typo.body2" Style="font-family: monospace;">
+                        @(_currentHarnessSessionId ?? "none")
+                    </MudText>
+                </div>
+                <div>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Assistant</MudText>
+                    <MudText Typo="Typo.body2">
+                        @(_assistantConfig?.AssistantName ?? "default")
+                    </MudText>
+                </div>
+            </MudStack>
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="@(() => _debugInfoDialogOpen = false)" Color="Color.Primary">Close</MudButton>
+        </DialogActions>
+    </MudDialog>
 
     <div class="chat-messages-wrapper">
         <div class="chat-messages" id="chat-messages">
@@ -487,6 +525,12 @@ else
     // Failed-task banner state
     private bool _hasFailedTasks = false;
     private bool _failedTaskBannerDismissed = false;
+    private bool _debugInfoDialogOpen = false;
+    private static string BuildVersion =>
+        (System.Reflection.Assembly.GetExecutingAssembly()
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .FirstOrDefault() as System.Reflection.AssemblyInformationalVersionAttribute)
+            ?.InformationalVersion ?? "unknown";
 
     protected override async Task OnInitializedAsync()
     {
