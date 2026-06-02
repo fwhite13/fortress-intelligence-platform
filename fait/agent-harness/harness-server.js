@@ -316,6 +316,19 @@ function resolveProgressLabel(toolName, toolInput) {
     }
 }
 
+function resolveProgressIcon(toolName) {
+    const t = (toolName || '').toLowerCase();
+    if (t === 'web_search' || t.includes('search')) return 'search';
+    if (t === 'web_fetch' || t.includes('fetch') || t.includes('url') || t.includes('browser') || t.includes('web')) return 'search';
+    if (t === 'bash' || t === 'computer' || t.includes('exec') || t.includes('run') || t.includes('shell') || t.includes('python')) return 'code';
+    if (t.includes('write') || t.includes('save') || t.includes('create') || t.includes('str_replace') || t.includes('edit_tool') || t === 'edit') return 'document';
+    if (t.includes('read') || t.includes('list')) return 'document';
+    if (t.includes('agent') || t.includes('spawn') || t.includes('claude') || t.includes('subagent')) return 'agent';
+    if (t === 'sync' || t.includes('sync')) return 'sync';
+    if (t === 'document') return 'document';
+    return 'agent';
+}
+
 function extractFilename(toolInput) {
     try {
         const obj = typeof toolInput === 'string' ? JSON.parse(toolInput) : toolInput;
@@ -3090,7 +3103,8 @@ You are the FAIT assistant. When Task mode is active, you have the ability to la
 The user has indicated they want to execute a task. Your ONLY job right now is to assess whether you have sufficient requirements to proceed. Do NOT discuss or question your own capabilities.
 - If you have a clear objective, know what files/data are involved, and can execute without guessing: write a one-sentence confirmation of what you will do, then end your response with [TASK_PROCEED] on its own line.
 - If you need more information: ask your one clarifying question conversationally, then end your response with [TASK_HOLD] on its own line.
-You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on the final line. No other ending is acceptable. [TASK_PROCEED] and [TASK_HOLD] will be stripped before display.`);
+You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on the final line. No other ending is acceptable. [TASK_PROCEED] and [TASK_HOLD] will be stripped before display.
+IMPORTANT: Never tell the user you cannot run Claude Code or that you lack a Claude Code connection. Task execution is handled automatically by the system when you respond with TASK_PROCEED — you do not call any tool to spawn it. If you need more information before proceeding, respond with TASK_HOLD and ask a clarifying question instead of disclaiming your capabilities.`);
 
             const gateSystemPrompt = gateSystemParts.join('\n\n---\n\n');
 
@@ -3190,7 +3204,7 @@ You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on
                 sendEvent({ type: 'text', content: cleanGateResponse });
             }
             // ADO#4799 — chip 1: spawn starting
-            sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: 'Spawning agent...' }) });
+            sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: 'Spawning agent...', chipIcon: 'agent' }) });
             // Fall through — CC spawn runs below
         }
         // End ADO#3576 gate
@@ -3212,7 +3226,9 @@ You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on
             }
 
             if (!useFastPath && isAutoClassified) {
-                // Fast path: auto-classified AND user has a last_task_folder_id — skip picker
+                // ADO#4812: DO NOT auto-fast-path on last_task_folder_id — this bypasses picker for new conversations.
+                // Fast-path is only valid when persistedWorkingFolderId is present (conversation has a pinned folder).
+                // Log the last_task_folder_id for diagnostics but do not skip the picker.
                 try {
                     const connFast = await getDbConnection();
                     try {
@@ -3221,12 +3237,7 @@ You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on
                             [userId]
                         );
                         if (fastRows.length > 0 && fastRows[0].last_task_folder_id) {
-                            useFastPath = true;
-                            if (!taskFolderIdResolved) {
-                                const rawFast = fastRows[0].last_task_folder_id;
-                                taskFolderIdResolved = rawFast != null ? (rawFast?.toString?.() ?? String(rawFast)) : null;
-                            }
-                            console.log(`[harness] ADO#3560 fast-path: auto-classified + last_task_folder_id=${taskFolderIdResolved} — skipping folder picker userId=${userId}`);
+                            console.log(`[harness] ADO#4812: last_task_folder_id=${fastRows[0].last_task_folder_id} found but NOT using as fast-path (no pinned folder for this conversation) userId=${userId}`);
                         }
                     } finally {
                         connFast.end();
@@ -3630,7 +3641,7 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
             if (folder) {
                 const { execSync } = require('child_process');
                 // ADO#4799 — chip 2: emit before sync begins (timing fix)
-                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: 'Syncing workspace...' }) });
+                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: 'Syncing workspace...', chipIcon: 'sync' }) });
                 execSync(
                     `aws s3 sync s3://${S3_BUCKET}/${folder.s3_prefix} ${folderLocalDir}/ --quiet`,
                     { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
@@ -3723,7 +3734,9 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
         const EXECUTE_DIRECTIVE = `YOUR ONLY JOB IS TO EXECUTE THE FOLLOWING TASK RIGHT NOW.
 DO NOT narrate what you will do. DO NOT explain your plan. DO NOT produce a summary.
 Execute the task immediately using your tools. Start with the first tool call.
-If you find yourself writing prose before making a tool call, STOP and make the tool call instead.`;
+If you find yourself writing prose before making a tool call, STOP and make the tool call instead.
+Use web_search and web_fetch tools to retrieve any external content you need (images, current data, URLs, research).
+Do NOT use hardcoded URLs, guessed paths, or training-data assumptions for content that should be fetched live.`;
 
         const briefContent = fullContext
             ? `${EXECUTE_DIRECTIVE}\n\n---\n\n${fullContext}\n\n---\n\nUser: ${message}`
@@ -3754,7 +3767,7 @@ If you find yourself writing prose before making a tool call, STOP and make the 
         ccProcess.stdin.write(briefContent);
         ccProcess.stdin.end();
         // ADO#4799 — chip 3: brief delivered
-        sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'document', status: 'calling', message: 'Task brief delivered' }) });
+        sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'document', status: 'calling', message: 'Task brief delivered', chipIcon: 'document' }) });
         const TURN_TIMEOUT_MS = parseInt(process.env.CC_TIMEOUT_MS || '300000', 10);
         const timeout = setTimeout(() => {
             ccProcess.kill('SIGTERM');
@@ -3774,7 +3787,7 @@ If you find yourself writing prose before making a tool call, STOP and make the 
                 firstChunkEmitted = true;
                 const folderDisplayName = folder?.name || folder?.id || '';
                 const workingChipText = folderDisplayName ? `Working in /${folderDisplayName}...` : 'Agent working...';
-                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: workingChipText }) });
+                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: workingChipText, chipIcon: 'agent' }) });
             }
             console.log(`[CC spawn] stdout chunk bytes=${chunk.length} userId=${userId}`);
             ccStdoutBuffer += chunk.toString();
@@ -3810,7 +3823,7 @@ If you find yourself writing prose before making a tool call, STOP and make the 
                                 consecutiveLabelCount = 1;
                             }
                             if (consecutiveLabelCount <= 3) {
-                                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: label }) });
+                                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: label, chipIcon: resolveProgressIcon(block.name) }) });
                             }
                         }
                     }

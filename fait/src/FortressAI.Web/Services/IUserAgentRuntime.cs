@@ -110,7 +110,8 @@ public record TaskProgressPayload(
     [property: JsonPropertyName("step")] string? Step,            // "start" | "tool_use" | "tool_result" | "done" | "error"
     [property: JsonPropertyName("toolName")] string? ToolName,    // null for non-tool steps
     [property: JsonPropertyName("status")] string? Status,        // "starting" | "calling" | "done" | "error"
-    [property: JsonPropertyName("message")] string? Message       // human-readable summary
+    [property: JsonPropertyName("message")] string? Message,      // human-readable summary
+    [property: JsonPropertyName("chipIcon")] string? ChipIcon     // ADO#4809: icon hint for chip rendering
 );
 
 // ADO#3560 — folder_required SSE payload

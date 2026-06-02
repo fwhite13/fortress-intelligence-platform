@@ -181,8 +181,7 @@ else
                         <div class="tool-call-indicator @(tc.Status == "calling" ? "tool-call-active" : tc.Status == "error" ? "tool-call-error" : "tool-call-done")">
                             @if (tc.Server == "task")
                             {
-                                <MudIcon Icon="@Icons.Material.Filled.SmartToy"
-                                         Class="@("cc-agent-icon" + (tc.Status == "calling" ? " cc-agent-icon--pulse" : ""))" />
+                                <span class="tool-call-emoji @(tc.Status == "calling" ? "tool-call-emoji-spin" : "")">@GetChipIconEmoji(tc.ChipIcon, tc.ToolName)</span>
                             }
                             else
                             {
@@ -418,7 +417,7 @@ else
     private List<ToolCallEvent> _activeToolCalls = new();
     private bool _toolCallsFading = false;
     private bool _ccTaskActive = false; // ADO#4201 — true while CC task_progress is active, prevents premature chip fade
-    private record ToolCallEvent(string Server, string ToolName, string Status, string Summary, DateTime Timestamp);
+    private record ToolCallEvent(string Server, string ToolName, string Status, string Summary, DateTime Timestamp, string? ChipIcon = null, Guid Id = default);
     // Attachment state
     private List<ChatAttachment> _pendingAttachments = new();
     private bool _isDragOver = false;
@@ -742,7 +741,7 @@ else
         }
 
         // Cold start resumption brief — fires once after agent becomes ready
-        if (_wasColdStart && _agentReady && !_resumptionBriefSent)
+        if (_wasColdStart && _agentReady && !_resumptionBriefSent && ConversationId.HasValue && ConversationId.Value != Guid.Empty)
         {
             _resumptionBriefSent = true;
             _wasColdStart = false;
@@ -1059,7 +1058,7 @@ else
                 else if (evt.Type == "mode_switch")
                 {
                     _taskModeActive = true;
-                    StateHasChanged();
+                    await InvokeAsync(StateHasChanged);
                 }
                 else if (evt.Type == "artifact")
                 {
@@ -1161,10 +1160,34 @@ else
                                 ?? GetToolLabel(progressPayload.ToolName ?? "cc", "task", null);
                             var toolName = progressPayload.ToolName ?? "cc";
                             var isFinal = progressPayload.Step == "done" || progressPayload.Status == "done";
-                            _activeToolCalls.Add(new ToolCallEvent("task", toolName, isFinal ? "done" : "calling", stepMessage, DateTime.UtcNow));
+
+                            // ADO#4810 — cap at 3 calling task chips; remove oldest if at limit
+                            if (!isFinal && _activeToolCalls.Count(c => c.Server == "task" && c.Status == "calling") >= 3)
+                                _activeToolCalls.RemoveAll(c => c.Server == "task" && c.Status == "calling" && _activeToolCalls.IndexOf(c) == _activeToolCalls.FindIndex(x => x.Server == "task" && x.Status == "calling"));
+
+                            var newChip = new ToolCallEvent("task", toolName, isFinal ? "done" : "calling", stepMessage, DateTime.UtcNow, progressPayload.ChipIcon, Guid.NewGuid());
+                            _activeToolCalls.Add(newChip);
                             if (isFinal)
                                 _ccTaskActive = false;
                             StateHasChanged();
+
+                            // ADO#4810 — auto-dismiss non-final chips after 2s (fade then remove)
+                            if (!isFinal)
+                            {
+                                var chipId = newChip.Id;
+                                _ = Task.Delay(2000).ContinueWith(_ => InvokeAsync(async () =>
+                                {
+                                    var idx = _activeToolCalls.FindIndex(c => c.Id == chipId);
+                                    if (idx >= 0)
+                                    {
+                                        _activeToolCalls[idx] = _activeToolCalls[idx] with { Status = "done" };
+                                        StateHasChanged();
+                                    }
+                                    await Task.Delay(300);
+                                    _activeToolCalls.RemoveAll(c => c.Id == chipId);
+                                    StateHasChanged();
+                                }));
+                            }
                         }
                     }
                     catch (Exception ex)
@@ -1519,6 +1542,16 @@ else
         if (t.Contains("search") && !t.Contains("kb")) return "🔍";
         return "⚙️";
     }
+
+    private static string GetChipIconEmoji(string? chipIcon, string toolName) => chipIcon switch
+    {
+        "search" => "🔍",
+        "document" => "📄",
+        "agent" => "🤖",
+        "code" => "</>",
+        "sync" => "🔄",
+        _ => GetToolEmoji(toolName, "task")
+    };
 
     // ADO#4249 — Truncate chip label for display safety
     private static string TruncChip(string? s, int max = 60) =>
