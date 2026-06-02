@@ -1038,7 +1038,7 @@ else
                     }
                     fullResponse.Append(evt.Content ?? "");
                     streamingMessage.Content = fullResponse.ToString();
-                    StateHasChanged();
+                    await InvokeAsync(StateHasChanged);
                     await ScrollToBottom();
                 }
                 else if (evt.Type == "done")
@@ -1053,7 +1053,7 @@ else
                     fullResponse.Append($"\n\n⚠️ {evt.ErrorMessage ?? "An error occurred."}");
                     streamingMessage.Content = fullResponse.ToString();
                     _taskModeActive = false;
-                    StateHasChanged();
+                    await InvokeAsync(StateHasChanged);
                 }
                 else if (evt.Type == "mode_switch")
                 {
@@ -1072,7 +1072,7 @@ else
                             _pendingArtifact = await WorkspaceFileSvc.SaveArtifactAsync(
                                 Session.UserId, conversation.Id, null, artifactPayload);
                             _conversationArtifacts.Add(_pendingArtifact);
-                            StateHasChanged();
+                            await InvokeAsync(StateHasChanged);
                         }
                     }
                     catch (Exception ex)
@@ -1104,7 +1104,7 @@ else
                                 }
                             }
                             _lastKbResult = result;
-                            StateHasChanged();
+                            await InvokeAsync(StateHasChanged);
                         }
                     }
                     catch (Exception ex)
@@ -1117,7 +1117,7 @@ else
                     // ADO#4717 — ephemeral chip from Bedrock tool calls
                     var chipText = evt.Content ?? "Working...";
                     _activeToolCalls.Add(new ToolCallEvent("bedrock", "chip", "calling", chipText, DateTime.UtcNow));
-                    StateHasChanged();
+                    await InvokeAsync(StateHasChanged);
                 }
                 else if (evt.Type == "tool_call")
                 {
@@ -1128,7 +1128,7 @@ else
                         if (toolCallPayload != null)
                         {
                             HandleToolCallEvent(toolCallPayload);
-                            StateHasChanged();
+                            await InvokeAsync(StateHasChanged);
                         }
                     }
                     catch (Exception ex)
@@ -1169,24 +1169,37 @@ else
                             _activeToolCalls.Add(newChip);
                             if (isFinal)
                                 _ccTaskActive = false;
-                            StateHasChanged();
+                            await InvokeAsync(StateHasChanged);
 
                             // ADO#4810 — auto-dismiss non-final chips after 2s (fade then remove)
                             if (!isFinal)
                             {
                                 var chipId = newChip.Id;
-                                _ = Task.Delay(2000).ContinueWith(_ => InvokeAsync(async () =>
+                                var cts = streamingCts; // capture reference before async gap
+                                _ = Task.Delay(2000, cts?.Token ?? CancellationToken.None).ContinueWith(async t =>
                                 {
-                                    var idx = _activeToolCalls.FindIndex(c => c.Id == chipId);
-                                    if (idx >= 0)
+                                    if (t.IsCanceled) return;
+                                    try
                                     {
-                                        _activeToolCalls[idx] = _activeToolCalls[idx] with { Status = "done" };
-                                        StateHasChanged();
+                                        await InvokeAsync(() =>
+                                        {
+                                            var idx = _activeToolCalls.FindIndex(c => c.Id == chipId);
+                                            if (idx >= 0)
+                                            {
+                                                _activeToolCalls[idx] = _activeToolCalls[idx] with { Status = "done" };
+                                                StateHasChanged();
+                                            }
+                                        });
+                                        await Task.Delay(300, cts?.Token ?? CancellationToken.None);
+                                        await InvokeAsync(() =>
+                                        {
+                                            _activeToolCalls.RemoveAll(c => c.Id == chipId);
+                                            StateHasChanged();
+                                        });
                                     }
-                                    await Task.Delay(300);
-                                    _activeToolCalls.RemoveAll(c => c.Id == chipId);
-                                    StateHasChanged();
-                                }));
+                                    catch (ObjectDisposedException) { }
+                                    catch (TaskCanceledException) { }
+                                }, TaskScheduler.Default);
                             }
                         }
                     }
@@ -1235,7 +1248,7 @@ else
                         {
                             // Dialog cancelled — disable task mode (equivalent to task_hold)
                             _taskMode = false;
-                            StateHasChanged();
+                            await InvokeAsync(StateHasChanged);
                         }
                     }
                     catch (Exception ex)
@@ -1257,7 +1270,7 @@ else
                             {
                                 _conversationArtifacts = await WorkspaceFileSvc.GetConversationArtifactsAsync(conversation.Id);
                             }
-                            StateHasChanged();
+                            await InvokeAsync(StateHasChanged);
                         }
                     }
                     catch (Exception ex)
@@ -1269,14 +1282,14 @@ else
                 {
                     // ADO#3576 — 9.2: gate returned TASK_HOLD; deselect Task toggle
                     _taskMode = false;
-                    StateHasChanged();
+                    await InvokeAsync(StateHasChanged);
                 }
                 else if (evt.Type == "task_resume")
                 {
                     // ADO#3923: model signaled requirements are now clear — re-enable task mode
                     _taskResumedThisTurn = true;
                     _taskMode = true;
-                    StateHasChanged();
+                    await InvokeAsync(StateHasChanged);
                 }
                 else if (evt.Type == "task_ready")
                 {
@@ -1284,7 +1297,7 @@ else
                     _taskMode = true;
                     _taskReadyPending = true;
                     _taskResumedThisTurn = true; // prevent finally from resetting _taskMode
-                    StateHasChanged();
+                    await InvokeAsync(StateHasChanged);
                 }
                 // "log" events: swallow silently
             }
@@ -1548,7 +1561,7 @@ else
         "search" => "🔍",
         "document" => "📄",
         "agent" => "🤖",
-        "code" => "</>",
+        "code" => "💻",
         "sync" => "🔄",
         _ => GetToolEmoji(toolName, "task")
     };
@@ -2125,6 +2138,10 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 .tool-call-emoji-spin {
     display: inline-block;
     animation: spin 1.5s linear infinite;
+}
+.tool-call-done {
+    opacity: 0.3;
+    transition: opacity 280ms ease-out;
 }
 .cc-agent-icon {
     font-size: 0.875rem;
