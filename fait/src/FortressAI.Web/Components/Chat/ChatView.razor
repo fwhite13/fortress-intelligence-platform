@@ -1238,11 +1238,13 @@ else
                             BackdropClick = false
                         };
                         var dialog = await DialogService.ShowAsync<FolderPicker>("Select working folder", parameters, options);
+                        await InvokeAsync(StateHasChanged);
                         var result = await dialog.Result;
 
                         if (result != null && !result.Canceled && result.Data is FolderPicker.FolderConfirmedArgs confirmedArgs)
                         {
                             HandleFolderConfirmed(confirmedArgs);
+                            await InvokeAsync(StateHasChanged);
                         }
                         else
                         {

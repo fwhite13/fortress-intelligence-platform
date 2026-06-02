@@ -286,6 +286,8 @@
                 Logger.LogWarning(parseEx, "[FolderPicker] ADO#4202: could not parse folderId from /turn/folder-confirm response — falling back");
             }
 
+            _submitting = false;
+            _confirming = false;
             MudDialog.Close(DialogResult.Ok(new FolderConfirmedArgs(
                 resolvedFolderId,
                 resolvedFolderName,
