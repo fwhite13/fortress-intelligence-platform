@@ -270,8 +270,30 @@ function chipTrunc(str, max = 57) {
 function resolveProgressLabel(toolName, toolInput) {
     try {
         const input = typeof toolInput === 'string' ? JSON.parse(toolInput || '{}') : (toolInput || {});
-        const rawStr = JSON.stringify(input).toLowerCase();
 
+        if (toolName === 'web_search') {
+            const query = input.query || input.q || '';
+            return query ? `Searching: "${chipTrunc(query, 40)}"` : 'Searching web...';
+        }
+        if (toolName === 'web_fetch') {
+            const url = input.url || input.uri || '';
+            let domain = '';
+            if (url) {
+                try { domain = new URL(url).hostname; } catch { domain = url.split('/')[0]; }
+            }
+            return domain ? `Fetching: ${chipTrunc(domain, 40)}` : 'Fetching web content...';
+        }
+        if (toolName === 'read_memory' || toolName === 'search_memory') {
+            const slug = input.slug || input.key || input.id || input.query || '';
+            return slug ? `Reading memory: ${chipTrunc(slug, 40)}` : 'Reading memory...';
+        }
+        if (toolName === 'write_memory') {
+            const title = input.title || input.slug || input.key || '';
+            return title ? `Saving memory: ${chipTrunc(title, 40)}` : 'Saving to memory...';
+        }
+        if (toolName === 'update_user_profile') {
+            return 'Updating profile';
+        }
         if (toolName === 'bash' || toolName === 'computer') {
             const cmd = input.command || input.cmd || '';
             if (cmd) {
@@ -283,50 +305,70 @@ function resolveProgressLabel(toolName, toolInput) {
                 const preview = chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40);
                 return `Running: ${preview}`;
             }
-            if (rawStr.includes('pip install') || rawStr.includes('pip3 install')) return 'Installing dependencies...';
-            if (rawStr.match(/\.xlsx|openpyxl|xlrd/)) return 'Building spreadsheet...';
-            if (rawStr.includes('pptx')) return 'Building presentation...';
-            if (rawStr.includes('docx')) return 'Building document...';
-            if (rawStr.match(/python3? /) || rawStr.match(/\.py\b/)) return 'Running Python script...';
-            if (rawStr.match(/\b(ls|find|cat|head|tail|grep)\b/)) return 'Reading files...';
-            if (rawStr.includes('curl ') || rawStr.includes('wget ') || rawStr.includes('requests')) return 'Fetching data...';
             return 'Running command...';
         }
-        if (toolName === 'str_replace_based_edit_tool' || toolName === 'str_replace_editor') {
+        if (toolName === 'str_replace_based_edit_tool' || toolName === 'str_replace_editor' || toolName === 'edit') {
             const fp = input.path || input.filename || '';
             const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Editing: ${chipTrunc(fname)}` : 'Editing file...';
+            return fname ? `Editing: ${chipTrunc(fname, 40)}` : 'Editing file...';
         }
-        if (toolName === 'write_file') {
+        if (toolName === 'write_file' || toolName === 'create_document') {
             const fp = input.path || input.filename || '';
             const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Saving: ${chipTrunc(fname)}` : 'Saving file...';
+            return fname ? `Saving: ${chipTrunc(fname, 40)}` : 'Saving file...';
         }
         if (toolName === 'read_file') {
             const fp = input.path || input.filename || '';
             const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Reading: ${chipTrunc(fname)}` : 'Reading file...';
+            return fname ? `Reading: ${chipTrunc(fname, 40)}` : 'Reading file...';
         }
-        if (toolName === 'list_files') return 'Listing files...';
+        if (toolName === 'list_workspace_files' || toolName === 'list_files') {
+            return 'Browsing workspace';
+        }
+        if (toolName === 'search_knowledge_base' || toolName === 'retrieve_kb' || toolName === 'search_kb') {
+            const query = input.query || '';
+            return query ? `Searching KB: "${chipTrunc(query, 35)}"` : 'Searching knowledge base...';
+        }
+        // ADO tools
+        if (toolName.startsWith('ado_') || toolName.includes('work_item')) {
+            const title = input.title || '';
+            if (toolName === 'ado_create_work_item' && title) return `Filing WI: ${chipTrunc(title, 40)}`;
+            const suffix = toolName.startsWith('ado_') ? toolName.slice(4).replace(/_/g, ' ') : toolName.replace(/_/g, ' ');
+            return `ADO: ${chipTrunc(suffix, 40)}`;
+        }
         return 'Working...';
     } catch {
-        const rawStr = (typeof toolInput === 'string' ? toolInput : JSON.stringify(toolInput || '')).toLowerCase();
-        if (rawStr.includes('pip install')) return 'Installing dependencies...';
         return 'Working...';
     }
 }
 
 function resolveProgressIcon(toolName) {
     const t = (toolName || '').toLowerCase();
-    if (t === 'web_search' || t.includes('search')) return 'search';
+    // Agent dispatch
+    if (t.includes('agent') || t.includes('spawn') || t === 'task') return 'agent';
+    // Web search / fetch
+    if (t === 'web_search' || (t.includes('search') && !t.includes('kb') && !t.includes('knowledge') && !t.includes('memory'))) return 'search';
     if (t === 'web_fetch' || t.includes('fetch') || t.includes('url') || t.includes('browser') || t.includes('web')) return 'search';
-    if (t === 'bash' || t === 'computer' || t.includes('exec') || t.includes('run') || t.includes('shell') || t.includes('python')) return 'code';
-    if (t.includes('write') || t.includes('save') || t.includes('create') || t.includes('str_replace') || t.includes('edit_tool') || t === 'edit') return 'document';
-    if (t.includes('read') || t.includes('list')) return 'document';
-    if (t.includes('agent') || t.includes('spawn') || t.includes('claude') || t.includes('subagent')) return 'agent';
+    // Memory
+    if (t === 'read_memory' || t === 'write_memory' || t === 'search_memory' || t === 'update_user_profile' || t.includes('memory')) return 'memory';
+    // File write / document creation
+    if (t === 'write_file' || t === 'create_document' || t.includes('str_replace') || t.includes('edit_tool') || t === 'edit' || (t.includes('write') && !t.includes('memory'))) return 'document';
+    // File read / workspace browse
+    if (t === 'read_file' || t === 'list_workspace_files' || t === 'list_files' || (t.includes('read') && !t.includes('memory')) || t.includes('list')) return 'file';
+    // Code / shell execution
+    if (t === 'bash' || t === 'computer' || t.includes('exec') || t.includes('shell') || t.includes('python') || t.includes('run')) return 'code';
+    // Calendar
+    if (t.includes('calendar') || t.includes('event')) return 'calendar';
+    // Email
+    if (t.includes('email') || t.includes('mail')) return 'email';
+    // ADO / devops
+    if (t.includes('ado') || t.includes('devops') || t.includes('work_item') || t.includes('pipeline')) return 'devops';
+    // KB
+    if (t.includes('kb') || t.includes('knowledge')) return 'kb';
+    // Sync
     if (t === 'sync' || t.includes('sync')) return 'sync';
-    if (t === 'document') return 'document';
-    return 'agent';
+    // Default fallback
+    return 'tool';
 }
 
 function extractFilename(toolInput) {
@@ -3364,7 +3406,8 @@ Do not ask the user about output paths, filenames, or where to save files. The u
             if (folder && folder.name) {
                 sendEvent({ type: 'task_progress', payload: JSON.stringify({
                     step: 'tool_use', toolName: 'folder', status: 'calling',
-                    message: `Working in: /${chipTrunc(folder.name, 40)}`
+                    message: `Working in: /${chipTrunc(folder.name, 40)}`,
+                    chipIcon: 'task'
                 }) });
             }
         } catch (folderErr) {
@@ -3790,7 +3833,7 @@ Do NOT ask the user where to save output files — write all output to the worki
                 firstChunkEmitted = true;
                 const folderDisplayName = folder?.name || folder?.id || '';
                 const workingChipText = folderDisplayName ? `Working in /${folderDisplayName}...` : 'Agent working...';
-                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: workingChipText, chipIcon: 'agent' }) });
+                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: workingChipText, chipIcon: 'task' }) });
             }
             console.log(`[CC spawn] stdout chunk bytes=${chunk.length} userId=${userId}`);
             ccStdoutBuffer += chunk.toString();

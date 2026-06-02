@@ -1,0 +1,354 @@
+{
+    "schemaVersion": "1.0",
+    "sourceType": "quote",
+    "extractedAt": "2025-01-31T00:00:00Z",
+    "policy": {
+        "policyNumber": null,
+        "quoteNumber": null,
+        "binderNumber": null,
+        "status": null,
+        "transactionType": "new_business",
+        "effectiveDate": "2026-05-28",
+        "expirationDate": "2027-05-28",
+        "quoteExpirationDate": null,
+        "policyType": "commercial",
+        "isAdmitted": null,
+        "isSurplusLines": null,
+        "carrierName": "Builders Association of Western Nevada Self-Insured Group",
+        "carrierNaic": null,
+        "totalPremium": null,
+        "billingMethod": null,
+        "paymentPlan": null,
+        "namedInsured": "Integrity Roofing",
+        "mailingAddress": {
+            "street1": "5681 Golestan Ct.",
+            "street2": null,
+            "city": "Las Vegas",
+            "state": "NV",
+            "zip": "89149"
+        },
+        "fein": null,
+        "entityType": "LLC"
+    },
+    "coverageParts": [
+        {
+            "premium": 44024,
+            "coverages": [
+                {
+                    "name": "Workers Compensation",
+                    "rate": null,
+                    "limits": [
+                        {
+                            "amount": 1000000,
+                            "limitType": "per_accident",
+                            "aggregateType": null
+                        },
+                        {
+                            "amount": 1000000,
+                            "limitType": "aggregate",
+                            "aggregateType": null
+                        },
+                        {
+                            "amount": 1000000,
+                            "limitType": "per_person",
+                            "aggregateType": null
+                        }
+                    ],
+                    "premium": 44024,
+                    "classCode": null,
+                    "attributes": [
+                        {
+                            "key": "el_each_accident",
+                            "value": "1000000",
+                            "dataType": "decimal"
+                        },
+                        {
+                            "key": "el_disease_policy_limit",
+                            "value": "1000000",
+                            "dataType": "decimal"
+                        },
+                        {
+                            "key": "el_disease_each_employee",
+                            "value": "1000000",
+                            "dataType": "decimal"
+                        }
+                    ],
+                    "isIncluded": true,
+                    "causeOfLoss": null,
+                    "deductibles": [],
+                    "description": null,
+                    "premiumBasis": null,
+                    "scheduleItems": [
+                        {
+                            "limits": [],
+                            "itemType": "employee_class",
+                            "attributes": [
+                                {
+                                    "key": "state",
+                                    "value": "NV",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "class_code",
+                                    "value": "5551",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "class_description",
+                                    "value": "Roofing--All Kinds & Drivers",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "payroll",
+                                    "value": "275000",
+                                    "dataType": "decimal"
+                                },
+                                {
+                                    "key": "employee_count",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "employees_full_time",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "employees_part_time",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "rate_per_hundred",
+                                    "value": "11.694",
+                                    "dataType": "decimal"
+                                },
+                                {
+                                    "key": "estimated_premium",
+                                    "value": "32158.50",
+                                    "dataType": "decimal"
+                                }
+                            ],
+                            "itemNumber": null,
+                            "deductibles": [],
+                            "description": null
+                        },
+                        {
+                            "limits": [],
+                            "itemType": "employee_class",
+                            "attributes": [
+                                {
+                                    "key": "state",
+                                    "value": "NV",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "class_code",
+                                    "value": "5551",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "class_description",
+                                    "value": "Roofing-LLC Member\/Manager",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "payroll",
+                                    "value": "36000",
+                                    "dataType": "decimal"
+                                },
+                                {
+                                    "key": "employee_count",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "employees_full_time",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "employees_part_time",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "rate_per_hundred",
+                                    "value": "11.694",
+                                    "dataType": "decimal"
+                                },
+                                {
+                                    "key": "estimated_premium",
+                                    "value": "4209.84",
+                                    "dataType": "decimal"
+                                }
+                            ],
+                            "itemNumber": null,
+                            "deductibles": [],
+                            "description": null
+                        },
+                        {
+                            "limits": [],
+                            "itemType": "employee_class",
+                            "attributes": [
+                                {
+                                    "key": "state",
+                                    "value": "NV",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "class_code",
+                                    "value": "5551",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "class_description",
+                                    "value": "Roofing-Foreman",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "payroll",
+                                    "value": "36000",
+                                    "dataType": "decimal"
+                                },
+                                {
+                                    "key": "employee_count",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "employees_full_time",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "employees_part_time",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "rate_per_hundred",
+                                    "value": "11.694",
+                                    "dataType": "decimal"
+                                },
+                                {
+                                    "key": "estimated_premium",
+                                    "value": "4209.84",
+                                    "dataType": "decimal"
+                                }
+                            ],
+                            "itemNumber": null,
+                            "deductibles": [],
+                            "description": null
+                        },
+                        {
+                            "limits": [],
+                            "itemType": "employee_class",
+                            "attributes": [
+                                {
+                                    "key": "state",
+                                    "value": "NV",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "class_code",
+                                    "value": "8742",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "class_description",
+                                    "value": "Outside Sales",
+                                    "dataType": "string"
+                                },
+                                {
+                                    "key": "payroll",
+                                    "value": "36000",
+                                    "dataType": "decimal"
+                                },
+                                {
+                                    "key": "employee_count",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "employees_full_time",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "employees_part_time",
+                                    "value": null,
+                                    "dataType": "int"
+                                },
+                                {
+                                    "key": "rate_per_hundred",
+                                    "value": "0.624",
+                                    "dataType": "decimal"
+                                },
+                                {
+                                    "key": "estimated_premium",
+                                    "value": "224.64",
+                                    "dataType": "decimal"
+                                }
+                            ],
+                            "itemNumber": null,
+                            "deductibles": [],
+                            "description": null
+                        }
+                    ],
+                    "coinsurancePct": null,
+                    "classCodeSystem": null,
+                    "valuationMethod": null,
+                    "estimatedExposure": null,
+                    "blanketOrScheduled": null
+                }
+            ],
+            "attributes": [
+                {
+                    "key": "emr",
+                    "value": "0.95",
+                    "dataType": "decimal"
+                },
+                {
+                    "key": "ncci_risk_id",
+                    "value": null,
+                    "dataType": "string"
+                },
+                {
+                    "key": "interstate_risk",
+                    "value": "false",
+                    "dataType": "boolean"
+                },
+                {
+                    "key": "uslh",
+                    "value": "false",
+                    "dataType": "boolean"
+                },
+                {
+                    "key": "waiver_of_subrogation_blanket",
+                    "value": null,
+                    "dataType": "boolean"
+                },
+                {
+                    "key": "states_covered",
+                    "value": "NV",
+                    "dataType": "string"
+                }
+            ],
+            "triggerType": "occurrence",
+            "lineOfBusiness": "workers_comp",
+            "retroactiveDate": null
+        }
+    ],
+    "layers": [],
+    "extractionMetadata": {
+        "catalogerVersion": null,
+        "extractorVersion": null,
+        "linesDetected": [
+            "workers_comp"
+        ],
+        "extractionGaps": [],
+        "overallConfidence": "high",
+        "illegiblePages": []
+    }
+}

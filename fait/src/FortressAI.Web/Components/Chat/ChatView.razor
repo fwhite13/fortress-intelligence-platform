@@ -179,14 +179,9 @@ else
                     @foreach (var tc in _activeToolCalls)
                     {
                         <div class="tool-call-indicator @(tc.Status == "calling" ? "tool-call-active" : tc.Status == "error" ? "tool-call-error" : "tool-call-done")">
-                            @if (tc.Server == "task")
-                            {
-                                <span class="tool-call-emoji @(tc.Status == "calling" ? "tool-call-emoji-spin" : "")">@GetChipIconEmoji(tc.ChipIcon, tc.ToolName)</span>
-                            }
-                            else
-                            {
-                                <span class="tool-call-emoji @(tc.Status == "calling" ? "tool-call-emoji-spin" : "")">@GetToolEmoji(tc.ToolName, tc.Server)</span>
-                            }
+                            <MudIcon Icon="@ChipIconToMudIcon(tc.ChipIcon ?? GetChipIconKeyFromToolName(tc.ToolName))"
+                                     Class="@("tool-call-mud-icon" + (tc.Status == "calling" ? " tool-call-mud-icon-pulse" : ""))"
+                                     Style="width: 16px; height: 16px; flex-shrink: 0;" />
                             <span class="tool-call-summary">@TruncChip(GetToolLabel(tc.ToolName, tc.Server, tc.Summary))</span>
                         </div>
                     }
@@ -1165,6 +1160,7 @@ else
                             if (!isFinal && _activeToolCalls.Count(c => c.Server == "task" && c.Status == "calling") >= 3)
                                 _activeToolCalls.RemoveAll(c => c.Server == "task" && c.Status == "calling" && _activeToolCalls.IndexOf(c) == _activeToolCalls.FindIndex(x => x.Server == "task" && x.Status == "calling"));
 
+                            Logger.LogInformation("[Chip] Path=harness Tool={Tool} ChipIcon={ChipIcon}", toolName, progressPayload.ChipIcon ?? "(null)");
                             var newChip = new ToolCallEvent("task", toolName, isFinal ? "done" : "calling", stepMessage, DateTime.UtcNow, progressPayload.ChipIcon, Guid.NewGuid());
                             _activeToolCalls.Add(newChip);
                             if (isFinal)
@@ -1176,9 +1172,9 @@ else
                             {
                                 var chipId = newChip.Id;
                                 var cts = streamingCts; // capture reference before async gap
-                                _ = Task.Delay(2000, cts?.Token ?? CancellationToken.None).ContinueWith(async t =>
+                                _ = Task.Delay(2000).ContinueWith(async t =>
                                 {
-                                    if (t.IsCanceled) return;
+                                    if (t.IsFaulted || t.IsCanceled) return;
                                     try
                                     {
                                         await InvokeAsync(() =>
@@ -1190,7 +1186,7 @@ else
                                                 StateHasChanged();
                                             }
                                         });
-                                        await Task.Delay(300, cts?.Token ?? CancellationToken.None);
+                                        await Task.Delay(300);
                                         await InvokeAsync(() =>
                                         {
                                             _activeToolCalls.RemoveAll(c => c.Id == chipId);
@@ -1538,35 +1534,41 @@ else
         await HandleSend(string.IsNullOrWhiteSpace(text) ? "(see attached files)" : text);
     }
 
-    private static string GetToolEmoji(string toolName, string server)
+    private static string ChipIconToMudIcon(string? chipIcon) => chipIcon switch
+    {
+        "agent"    => Icons.Material.Outlined.SmartToy,
+        "search"   => Icons.Material.Outlined.TravelExplore,
+        "memory"   => Icons.Material.Outlined.Psychology,
+        "document" => Icons.Material.Outlined.NoteAlt,
+        "file"     => Icons.Material.Outlined.FolderOpen,
+        "code"     => Icons.Material.Outlined.Terminal,
+        "calendar" => Icons.Material.Outlined.CalendarMonth,
+        "email"    => Icons.Material.Outlined.Email,
+        "devops"   => Icons.Material.Outlined.BugReport,
+        "sync"     => Icons.Material.Outlined.Sync,
+        "kb"       => Icons.Material.Outlined.LibraryBooks,
+        "task"     => Icons.Material.Outlined.Checklist,
+        _          => Icons.Material.Outlined.Build,
+    };
+
+    // Resolve chipIcon key from a Bedrock tool name (mirrors resolveProgressIcon in harness-server.js)
+    private static string GetChipIconKeyFromToolName(string toolName)
     {
         var t = (toolName ?? "").ToLowerInvariant();
-        if (t.Contains("memory") || t.Contains("remember")) return "🧠";
-        if (t.Contains("kb") || t.Contains("knowledge") || t.Contains("search_kb")) return "📚";
-        if (t.Contains("browser")) return "🌐";
-        if (t.Contains("web") || t.Contains("browse") || t.Contains("fetch") || t.Contains("url")) return "🌐";
-        if (t.Contains("email") || t.Contains("mail")) return "📧";
-        if (t.Contains("calendar")) return "📅";
-        if (t.Contains("devops") || t.Contains("work_item") || t.Contains("pipeline")) return "🛠️";
-        if (t.Contains("str_replace") || t.Contains("edit_tool") || t == "edit") return "✏️";
-        if (t.Contains("exec") || t.Contains("shell") || t.Contains("run") || t == "bash" || t.Contains("computer")) return "⚙️";
-        if (t.Contains("python") || t.Contains("pip") || t.Contains("install") || t.Contains("package")) return "📦";
-        if (t.Contains("file") || t.Contains("write") || t.Contains("read") || t.Contains("list_files")) return "📄";
-        if (t.Contains("workspace") || t.Contains("folder")) return "📁";
-        if (t.Contains("subagent") || t.Contains("spawn") || t.Contains("claude")) return "🧑‍🔬";
-        if (t.Contains("search") && !t.Contains("kb")) return "🔍";
-        return "⚙️";
+        if (t.Contains("agent") || t.Contains("spawn")) return "agent";
+        if (t == "web_search" || (t.Contains("search") && !t.Contains("kb") && !t.Contains("knowledge") && !t.Contains("memory"))) return "search";
+        if (t == "web_fetch" || t.Contains("fetch") || t.Contains("url") || t.Contains("browse")) return "search";
+        if (t == "read_memory" || t == "write_memory" || t == "search_memory" || t == "update_user_profile" || t.Contains("memory")) return "memory";
+        if (t == "write_file" || t == "create_document" || t.Contains("str_replace") || t.Contains("edit_tool") || t == "edit" || (t.Contains("write") && !t.Contains("memory"))) return "document";
+        if (t == "read_file" || t == "list_workspace_files" || t == "list_files" || (t.Contains("read") && !t.Contains("memory")) || t.Contains("list")) return "file";
+        if (t == "bash" || t == "computer" || t.Contains("exec") || t.Contains("shell") || t.Contains("python")) return "code";
+        if (t.Contains("calendar") || t.Contains("event")) return "calendar";
+        if (t.Contains("email") || t.Contains("mail")) return "email";
+        if (t.Contains("ado") || t.Contains("devops") || t.Contains("work_item")) return "devops";
+        if (t.Contains("kb") || t.Contains("knowledge")) return "kb";
+        if (t.Contains("sync")) return "sync";
+        return "tool";
     }
-
-    private static string GetChipIconEmoji(string? chipIcon, string toolName) => chipIcon switch
-    {
-        "search" => "🔍",
-        "document" => "📄",
-        "agent" => "🤖",
-        "code" => "💻",
-        "sync" => "🔄",
-        _ => GetToolEmoji(toolName, "task")
-    };
 
     // ADO#4249 — Truncate chip label for display safety
     private static string TruncChip(string? s, int max = 60) =>
@@ -1648,7 +1650,9 @@ else
 
         if (status == "calling")
         {
-            _activeToolCalls.Add(new ToolCallEvent(server, toolName, "calling", summary, DateTime.UtcNow));
+            var bedrockChipIcon = GetChipIconKeyFromToolName(toolName);
+            Logger.LogInformation("[Chip] Path=bedrock Tool={Tool} ChipIcon={ChipIcon}", toolName, bedrockChipIcon);
+            _activeToolCalls.Add(new ToolCallEvent(server, toolName, "calling", summary, DateTime.UtcNow, bedrockChipIcon, Guid.NewGuid()));
         }
         else if (status is "done" or "error")
         {
@@ -1656,11 +1660,12 @@ else
             if (idx >= 0)
             {
                 var startTime = _activeToolCalls[idx].Timestamp;
+                var existingChipIcon = _activeToolCalls[idx].ChipIcon;
                 var elapsed = (DateTime.UtcNow - startTime).TotalMilliseconds;
                 var delay = Math.Max(0, ToolChipMinDisplayMs - elapsed);
 
                 var capturedIdx = idx;
-                var updatedEvent = new ToolCallEvent(server, toolName, status, summary, startTime);
+                var updatedEvent = new ToolCallEvent(server, toolName, status, summary, startTime, existingChipIcon, _activeToolCalls[idx].Id);
 
                 if (delay <= 0)
                 {
@@ -2116,8 +2121,9 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     margin: 0 auto;
     padding-left: calc(36px + 1rem);
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
     padding-bottom: 4px;
     transition: height 200ms ease-out, padding 200ms ease-out, margin 200ms ease-out;
     overflow: hidden;
@@ -2125,21 +2131,23 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 .tool-call-indicator {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     font-size: 0.8125rem;
     color: var(--color-text-secondary);
     background: var(--color-surface-sunken);
     border-radius: var(--radius-pill, 9999px);
-    padding: 2px 8px;
+    padding: 3px 10px 3px 8px;
     white-space: nowrap;
+    max-width: 360px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.tool-call-emoji {
-    font-size: 0.875rem;
-    line-height: 1;
+.tool-call-mud-icon {
+    color: var(--color-accent, #6366f1);
+    flex-shrink: 0;
 }
-.tool-call-emoji-spin {
-    display: inline-block;
-    animation: spin 1.5s linear infinite;
+.tool-call-mud-icon-pulse {
+    animation: pulse 1.5s ease-in-out infinite;
 }
 .tool-call-done {
     opacity: 0.3;
