@@ -3104,7 +3104,8 @@ The user has indicated they want to execute a task. Your ONLY job right now is t
 - If you have a clear objective, know what files/data are involved, and can execute without guessing: write a one-sentence confirmation of what you will do, then end your response with [TASK_PROCEED] on its own line.
 - If you need more information: ask your one clarifying question conversationally, then end your response with [TASK_HOLD] on its own line.
 You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on the final line. No other ending is acceptable. [TASK_PROCEED] and [TASK_HOLD] will be stripped before display.
-IMPORTANT: Never tell the user you cannot run Claude Code or that you lack a Claude Code connection. Task execution is handled automatically by the system when you respond with TASK_PROCEED — you do not call any tool to spawn it. If you need more information before proceeding, respond with TASK_HOLD and ask a clarifying question instead of disclaiming your capabilities.`);
+IMPORTANT: Never tell the user you cannot run Claude Code or that you lack a Claude Code connection. Task execution is handled automatically by the system when you respond with TASK_PROCEED — you do not call any tool to spawn it. If you need more information before proceeding, respond with TASK_HOLD and ask a clarifying question instead of disclaiming your capabilities.
+Do not ask the user about output paths, filenames, or where to save files. The user has already selected a working folder. All files must be written to the working folder — this is handled automatically and does not require user input.`);
 
             const gateSystemPrompt = gateSystemParts.join('\n\n---\n\n');
 
@@ -3632,6 +3633,7 @@ When the user asks for a file, generate a real file. Do not return text content 
 - CSV: write as a plain text file with .csv extension. This is the only case where writing text is acceptable for a file request.
 
 After creating a file, confirm its name and location in your response. Do not print the file contents to the user.
+Do not ask the user where to save files — always write to the working folder path provided. Do not ask for output paths, filenames, or save locations. The working folder is your output directory.
 
 ## Available Python Libraries
 Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, kaleido, reportlab, Pillow`);
@@ -3736,7 +3738,8 @@ DO NOT narrate what you will do. DO NOT explain your plan. DO NOT produce a summ
 Execute the task immediately using your tools. Start with the first tool call.
 If you find yourself writing prose before making a tool call, STOP and make the tool call instead.
 Use web_search and web_fetch tools to retrieve any external content you need (images, current data, URLs, research).
-Do NOT use hardcoded URLs, guessed paths, or training-data assumptions for content that should be fetched live.`;
+Do NOT use hardcoded URLs, guessed paths, or training-data assumptions for content that should be fetched live.
+Do NOT ask the user where to save output files — write all output to the working folder specified below.`;
 
         const briefContent = fullContext
             ? `${EXECUTE_DIRECTIVE}\n\n---\n\n${fullContext}\n\n---\n\nUser: ${message}`
