@@ -1,0 +1,4 @@
+# CC brief files — never commit temp pipeline briefs
+brief-*.md
+brief-ado*.md
+/tmp/cc-brief*.md

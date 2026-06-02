@@ -93,7 +93,10 @@ public class ArtifactPreviewService
         if (upload != null && !string.IsNullOrEmpty(upload.PreviewS3Key))
             return upload.PreviewS3Key;
 
-        var converterBase = _config["CONVERTER_BASE_URL"] ?? "http://localhost:3001";
+        var converterBaseRaw = _config["CONVERTER_BASE_URL"];
+        if (string.IsNullOrEmpty(converterBaseRaw))
+            _logger.LogWarning("[ArtifactPreview] CONVERTER_BASE_URL not set — falling back to localhost. PPTX conversion may fail in production.");
+        var converterBase = converterBaseRaw ?? "http://localhost:3001";
         var converterApiKey = _config["CONVERTER_API_KEY"];
         using var client = httpClientFactory.CreateClient("HarnessClient");
         if (!string.IsNullOrEmpty(converterApiKey))

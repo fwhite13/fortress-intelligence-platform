@@ -1158,9 +1158,39 @@ else
                 else if (evt.Type == "chip")
                 {
                     // ADO#4717 — ephemeral chip from Bedrock tool calls
+                    // ADO#4810 — assign unique Id so auto-dismiss only removes this chip
                     var chipText = evt.Content ?? "Working...";
-                    _activeToolCalls.Add(new ToolCallEvent("bedrock", "chip", "calling", chipText, DateTime.UtcNow));
+                    var chipIcon = GetChipIconKeyFromToolName("chip");
+                    var legacyChip = new ToolCallEvent("bedrock", "chip", "calling", chipText, DateTime.UtcNow, chipIcon, Guid.NewGuid());
+                    _activeToolCalls.Add(legacyChip);
                     await InvokeAsync(StateHasChanged);
+
+                    // ADO#4810 — auto-dismiss legacy chip after 2s (fade then remove), same pattern as task_progress
+                    var chipId = legacyChip.Id;
+                    _ = Task.Delay(2000).ContinueWith(async t =>
+                    {
+                        if (t.IsFaulted || t.IsCanceled) return;
+                        try
+                        {
+                            await InvokeAsync(() =>
+                            {
+                                var idx = _activeToolCalls.FindIndex(c => c.Id == chipId);
+                                if (idx >= 0)
+                                {
+                                    _activeToolCalls[idx] = _activeToolCalls[idx] with { Status = "done" };
+                                    StateHasChanged();
+                                }
+                            });
+                            await Task.Delay(300);
+                            await InvokeAsync(() =>
+                            {
+                                _activeToolCalls.RemoveAll(c => c.Id == chipId);
+                                StateHasChanged();
+                            });
+                        }
+                        catch (ObjectDisposedException) { }
+                        catch (TaskCanceledException) { }
+                    }, TaskScheduler.Default);
                 }
                 else if (evt.Type == "tool_call")
                 {

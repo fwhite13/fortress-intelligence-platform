@@ -266,6 +266,15 @@ function chipTrunc(str, max = 57) {
     return str.length > max ? str.substring(0, max) + '...' : str;
 }
 
+function extractDomain(url) {
+    if (!url) return '';
+    try {
+        return new URL(url).hostname || url;
+    } catch {
+        return url.length > 30 ? url.slice(0, 30) + '…' : url;
+    }
+}
+
 // ADO#3577 — Human-readable CC progress labels
 function resolveProgressLabel(toolName, toolInput) {
     try {
@@ -277,10 +286,7 @@ function resolveProgressLabel(toolName, toolInput) {
         }
         if (toolName === 'web_fetch') {
             const url = input.url || input.uri || '';
-            let domain = '';
-            if (url) {
-                try { domain = new URL(url).hostname; } catch { domain = url.split('/')[0]; }
-            }
+            const domain = extractDomain(url);
             return domain ? `Fetching: ${chipTrunc(domain, 40)}` : 'Fetching web content...';
         }
         if (toolName === 'read_memory' || toolName === 'search_memory') {
@@ -3965,7 +3971,12 @@ Do NOT ask the user where to save output files — write all output to the worki
             try {
                 if (folder) {
                     const postSyncSnapshot = buildLocalSnapshot(folderLocalDir);
-                    const dirtyFiles = findDirtyFiles(preSyncSnapshot, postSyncSnapshot);
+                    let dirtyFiles = findDirtyFiles(preSyncSnapshot, postSyncSnapshot);
+                    const MAX_DIRTY_FILES = 50;
+                    if (dirtyFiles.length > MAX_DIRTY_FILES) {
+                        console.warn(`[harness] dirty-file sync: ${dirtyFiles.length} files detected, capping at ${MAX_DIRTY_FILES}`);
+                        dirtyFiles = dirtyFiles.slice(0, MAX_DIRTY_FILES);
+                    }
                     const uploadedFiles = [];
                     for (const relPath of dirtyFiles) {
                         const localPath = path.join(folderLocalDir, relPath);

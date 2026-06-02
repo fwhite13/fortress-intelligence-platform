@@ -137,7 +137,10 @@ public class ArtifactPreviewController : ControllerBase
             return Ok(new { previewS3Key = artifact.PreviewS3Key });
 
         // Call dedicated converter service
-        var converterBase = _config["CONVERTER_BASE_URL"] ?? "http://localhost:3001";
+        var converterBaseRaw = _config["CONVERTER_BASE_URL"];
+        if (string.IsNullOrEmpty(converterBaseRaw))
+            _logger.LogWarning("[ArtifactPreview] CONVERTER_BASE_URL not set — falling back to localhost. PPTX conversion may fail in production.");
+        var converterBase = converterBaseRaw ?? "http://localhost:3001";
         var converterApiKey = _config["CONVERTER_API_KEY"];
         using var client = _httpClientFactory.CreateClient("HarnessClient"); // reuse 10-min timeout client
         if (!string.IsNullOrEmpty(converterApiKey))
