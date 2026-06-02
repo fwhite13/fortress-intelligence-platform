@@ -2715,7 +2715,11 @@ function firePreferenceWrite(userId, message) {
 // ─── ADO#3559: Task folder model helpers ──────────────────────────────────
 
 // ADO#4834 — exclusion patterns for CC internals and Python cache
-const SYNC_EXCLUDE_DIRS = new Set(['.claude', '.git', '__pycache__', 'node_modules', '.env']);
+const SYNC_EXCLUDE_DIRS = new Set([
+    '__pycache__', '.claude', '.git', '.svn', 'node_modules',
+    '.pytest_cache', '.mypy_cache', '.ruff_cache', '.venv', 'venv', 'env',
+    'dist', 'build', '.tox', '.eggs',
+]);
 const SYNC_EXCLUDE_EXTS = new Set(['.pyc', '.pyo', '.pyd']);
 
 function buildLocalSnapshot(dir) {
@@ -2733,9 +2737,12 @@ function buildLocalSnapshot(dir) {
                 }
                 walk(path.join(current, entry.name), base);
             } else {
-                // ADO#4834 — skip excluded file extensions
+                // ADO#4834 — skip excluded file patterns
                 const ext = path.extname(entry.name).toLowerCase();
                 if (SYNC_EXCLUDE_EXTS.has(ext)) continue;
+                if (entry.name === '.DS_Store') continue;
+                if (entry.name.endsWith('~')) continue;
+                if (entry.name.startsWith('.#')) continue;
                 const full = path.join(current, entry.name);
                 const rel = path.relative(base, full);
                 const stat = fs.statSync(full);
@@ -3964,8 +3971,13 @@ Do NOT ask the user where to save output files — write all output to the worki
                         const localPath = path.join(folderLocalDir, relPath);
                         // ADO#3561 — guard: never upload files from read-only folders
                         if (localPath.startsWith(`${WORKSPACE_DIR}/${userId}/readonly/`)) continue;
-                        const s3Key = `${folder.s3_prefix}${relPath}`;
                         const fileSize = (() => { try { return fs.statSync(localPath).size; } catch { return null; } })();
+                        // ADO#4834 — skip very large files unlikely to be intentional task outputs
+                        if (fileSize !== null && fileSize > 100 * 1024 * 1024) {
+                            console.warn(`[harness] post-sync skipping large file (>100MB): ${relPath} size=${fileSize} userId=${userId}`);
+                            continue;
+                        }
+                        const s3Key = `${folder.s3_prefix}${relPath}`;
                         await s3Client.send(new PutObjectCommand({
                             Bucket: S3_BUCKET,
                             Key: s3Key,
