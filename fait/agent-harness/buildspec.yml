@@ -22,39 +22,26 @@ phases:
       - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-v2-agent-harness:$IMAGE_TAG
       - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-v2-agent-harness:harness-latest
 
-      # ADO#4865 — Register new ECS task definition with updated image
+      # ADO#4865 - Register new ECS task definition with updated image
       - echo Registering harness ECS task definition...
       - |
-        CURRENT_TASK_DEF=$(aws ecs describe-task-definition \
-          --task-definition fait-v2-agent-harness \
-          --region $AWS_DEFAULT_REGION \
-          --query 'taskDefinition' \
-          --output json)
-
+        set -e
+        CURRENT_TASK_DEF=$(aws ecs describe-task-definition --task-definition fait-v2-agent-harness --region $AWS_DEFAULT_REGION --query taskDefinition --output json)
         NEW_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fait-v2-agent-harness:$IMAGE_TAG"
-
-        # Strip ECS-managed fields, update image
-        NEW_TASK_DEF=$(echo $CURRENT_TASK_DEF | python3 -c "
-import json, sys
-td = json.load(sys.stdin)
-# Remove ECS-managed readonly fields
-for k in ['taskDefinitionArn','revision','status','requiresAttributes','placementConstraints','compatibilities','registeredAt','registeredBy']:
-    td.pop(k, None)
-# Update container image
-for c in td.get('containerDefinitions', []):
-    if 'fait-v2-agent-harness' in c.get('image',''):
-        c['image'] = sys.argv[1]
-print(json.dumps(td))
-" "$NEW_IMAGE")
-
-        NEW_REVISION=$(aws ecs register-task-definition \
-          --region $AWS_DEFAULT_REGION \
-          --cli-input-json "$NEW_TASK_DEF" \
-          --query 'taskDefinition.revision' \
-          --output text)
-
+        cat > /tmp/patch_harness_taskdef.py << 'PYEOF'
+        import json, sys
+        td = json.load(sys.stdin)
+        for k in ['taskDefinitionArn','revision','status','requiresAttributes','placementConstraints','compatibilities','registeredAt','registeredBy']:
+            td.pop(k, None)
+        for c in td.get('containerDefinitions', []):
+            if 'fait-v2-agent-harness' in c.get('image', ''):
+                c['image'] = sys.argv[1]
+        print(json.dumps(td))
+        PYEOF
+        NEW_TASK_DEF=$(echo "$CURRENT_TASK_DEF" | python3 /tmp/patch_harness_taskdef.py "$NEW_IMAGE")
+        NEW_REVISION=$(aws ecs register-task-definition --region $AWS_DEFAULT_REGION --cli-input-json "$NEW_TASK_DEF" --query taskDefinition.revision --output text)
         echo "Registered fait-v2-agent-harness:$NEW_REVISION"
-        echo "HARNESS_REVISION=$NEW_REVISION" >> harness-revision.txt
+        echo "HARNESS_REVISION=$NEW_REVISION" > harness-revision.txt
       - echo Harness task definition registered.
 
 env:

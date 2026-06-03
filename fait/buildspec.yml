@@ -22,50 +22,36 @@ phases:
       - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fred-chat:kb-latest
       - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fred-chat:$IMAGE_TAG
 
-      # ADO#4865 — Register updated fred-dev task definition before updating service
+      # ADO#4865 - Register updated fred-dev task definition before updating service
       - echo Registering fred-dev task definition...
       - |
-        CURRENT_TASK_DEF=$(aws ecs describe-task-definition \
-          --task-definition fred-dev \
-          --region $AWS_DEFAULT_REGION \
-          --query 'taskDefinition' \
-          --output json)
-
+        set -e
+        CURRENT_TASK_DEF=$(aws ecs describe-task-definition --task-definition fred-dev --region $AWS_DEFAULT_REGION --query taskDefinition --output json)
         NEW_BLAZOR_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/fred-chat:$IMAGE_TAG"
-
-        # Read harness revision from env var or detect latest registered
         if [ -z "$HARNESS_REVISION" ]; then
-          HARNESS_REVISION=$(aws ecs describe-task-definition \
-            --task-definition fait-v2-agent-harness \
-            --region $AWS_DEFAULT_REGION \
-            --query 'taskDefinition.revision' \
-            --output text)
+          HARNESS_REVISION=$(aws ecs describe-task-definition --task-definition fait-v2-agent-harness --region $AWS_DEFAULT_REGION --query taskDefinition.revision --output text)
           echo "HARNESS_REVISION not in env, using latest registered: $HARNESS_REVISION"
         fi
-
-        NEW_TASK_DEF=$(echo $CURRENT_TASK_DEF | python3 -c "
-import json, sys
-td = json.load(sys.stdin)
-for k in ['taskDefinitionArn','revision','status','requiresAttributes','placementConstraints','compatibilities','registeredAt','registeredBy']:
-    td.pop(k, None)
-blazer_image, harness_rev = sys.argv[1], sys.argv[2]
-for c in td.get('containerDefinitions', []):
-    if 'fred-chat' in c.get('image',''):
-        c['image'] = blazer_image
-    # Update Fargate__TaskDefinition env var
-    for env in c.get('environment', []):
-        if env['name'] == 'Fargate__TaskDefinition':
-            env['value'] = f'fait-v2-agent-harness:{harness_rev}'
-print(json.dumps(td))
-" "$NEW_BLAZOR_IMAGE" "$HARNESS_REVISION")
-
-        NEW_FRED_DEV_REVISION=$(aws ecs register-task-definition \
-          --region $AWS_DEFAULT_REGION \
-          --cli-input-json "$NEW_TASK_DEF" \
-          --query 'taskDefinition.revision' \
-          --output text)
-
+        cat > /tmp/patch_taskdef.py << 'PYEOF'
+        import json, sys
+        td = json.load(sys.stdin)
+        for k in ['taskDefinitionArn','revision','status','requiresAttributes','placementConstraints','compatibilities','registeredAt','registeredBy']:
+            td.pop(k, None)
+        blazor_image = sys.argv[1]
+        harness_rev = sys.argv[2]
+        for c in td.get('containerDefinitions', []):
+            if 'fred-chat' in c.get('image', ''):
+                c['image'] = blazor_image
+            for env in c.get('environment', []):
+                if env['name'] == 'Fargate__TaskDefinition':
+                    env['value'] = 'fait-v2-agent-harness:' + harness_rev
+        print(json.dumps(td))
+        PYEOF
+        NEW_TASK_DEF=$(echo "$CURRENT_TASK_DEF" | python3 /tmp/patch_taskdef.py "$NEW_BLAZOR_IMAGE" "$HARNESS_REVISION")
+        NEW_FRED_DEV_REVISION=$(aws ecs register-task-definition --region $AWS_DEFAULT_REGION --cli-input-json "$NEW_TASK_DEF" --query taskDefinition.revision --output text)
         echo "Registered fred-dev:$NEW_FRED_DEV_REVISION"
+        echo "NEW_FRED_DEV_REVISION=$NEW_FRED_DEV_REVISION" > /tmp/fred_dev_revision.txt
+      - NEW_FRED_DEV_REVISION=$(cat /tmp/fred_dev_revision.txt | cut -d= -f2)
       - echo Updating ECS service to fred-dev:$NEW_FRED_DEV_REVISION...
       - aws ecs update-service --cluster fortress-tools-cluster --service fred-dev --task-definition fred-dev:$NEW_FRED_DEV_REVISION --force-new-deployment --region $AWS_DEFAULT_REGION
       - echo Deploy triggered
