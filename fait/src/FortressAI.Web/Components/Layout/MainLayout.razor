@@ -26,7 +26,8 @@
                      HiddenModules="@_hiddenModules"
                      OnMenuClick="ToggleDrawer"
                      OnSignOut="Logout"
-                     IsDev="@HostEnv.IsDevelopment()" />
+                     IsDev="@HostEnv.IsDevelopment()"
+                     OnDevBannerClick="@(() => _debugInfoDialogOpen = true)" />
 
         <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
             <div style="display: flex; flex-direction: column; height: 100%;">
@@ -73,6 +74,28 @@
                 @Body
             </CascadingValue>
         </MudMainContent>
+        @* ADO#4857 — Dev banner debug info dialog *@
+        @if (_debugInfoDialogOpen)
+        {
+            <MudDialog @bind-IsVisible="_debugInfoDialogOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true })">
+                <TitleContent><MudText Typo="Typo.h6">Dev Environment Info</MudText></TitleContent>
+                <DialogContent>
+                    <MudStack Spacing="2">
+                        <div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Environment</MudText>
+                            <MudText Typo="Typo.body2" Style="font-family: monospace;">@(HostEnv.EnvironmentName)</MudText>
+                        </div>
+                        <div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">Version</MudText>
+                            <MudText Typo="Typo.body2" Style="font-family: monospace;">@(Configuration["BUILD_VERSION"] ?? Configuration["ASPNETCORE_ENVIRONMENT"] ?? "dev")</MudText>
+                        </div>
+                    </MudStack>
+                </DialogContent>
+                <DialogActions>
+                    <MudButton OnClick="@(() => _debugInfoDialogOpen = false)" Color="Color.Primary">Close</MudButton>
+                </DialogActions>
+            </MudDialog>
+        }
         <HelpDrawer @ref="_helpDrawer" />
 </MudLayout>
 
@@ -90,6 +113,7 @@
     private bool _nameNagShown = false;
     private HashSet<FipModule>? _hiddenModules;
     private MudTheme _theme = FipTheme.Create();
+    private bool _debugInfoDialogOpen = false;
 
     protected override async Task OnInitializedAsync()
     {

@@ -784,7 +784,8 @@ else
 
         // Cold start resumption brief — fires once after agent becomes ready
         if (_wasColdStart && _agentReady && !_resumptionBriefSent && ConversationId.HasValue && ConversationId.Value != Guid.Empty
-            && messages.Any(m => !m.IsResumptionBrief))
+            && messages.Any(m => !m.IsResumptionBrief)
+            && !_conversationCreatedThisSession) // ADO#4813 — new conversation = no resumption brief
         {
             _resumptionBriefSent = true;
             _wasColdStart = false;
@@ -1164,6 +1165,7 @@ else
                     var legacyChip = new ToolCallEvent("bedrock", "chip", "calling", chipText, DateTime.UtcNow, chipIcon, Guid.NewGuid());
                     _activeToolCalls.Add(legacyChip);
                     await InvokeAsync(StateHasChanged);
+                    await ScrollToBottom(); // ADO#4862 — scroll to keep chip visible
 
                     // ADO#4810 — auto-dismiss legacy chip after 2s (fade then remove), same pattern as task_progress
                     var chipId = legacyChip.Id;
@@ -1181,7 +1183,7 @@ else
                                     StateHasChanged();
                                 }
                             });
-                            await Task.Delay(300);
+                            await Task.Delay(500); // ADO#4861 — 500ms covers fade (200ms) + height collapse (300ms + 200ms delay)
                             await InvokeAsync(() =>
                             {
                                 _activeToolCalls.RemoveAll(c => c.Id == chipId);
@@ -1202,6 +1204,7 @@ else
                         {
                             HandleToolCallEvent(toolCallPayload);
                             await InvokeAsync(StateHasChanged);
+                            await ScrollToBottom(); // ADO#4862 — scroll to keep chip visible
                         }
                     }
                     catch (Exception ex)
@@ -1219,7 +1222,9 @@ else
                         {
                             if (progressPayload.Step == "start")
                             {
+                                _taskModeActive = true; // ADO#4808,4859 — activate indicator immediately on task start
                                 _ccTaskActive = true;
+                                await InvokeAsync(StateHasChanged); // ADO#4808,4859 — force render immediately
                                 _taskStartTime = DateTime.UtcNow;
                                 _elapsedTimer?.Dispose();
                                 _elapsedTimer = null;
@@ -1244,6 +1249,7 @@ else
                             if (isFinal)
                                 _ccTaskActive = false;
                             await InvokeAsync(StateHasChanged);
+                            await ScrollToBottom(); // ADO#4862 — scroll to keep chip visible
 
                             // ADO#4810 — auto-dismiss non-final chips after 2s (fade then remove)
                             if (!isFinal)
@@ -1264,7 +1270,7 @@ else
                                                 StateHasChanged();
                                             }
                                         });
-                                        await Task.Delay(300);
+                                        await Task.Delay(500); // ADO#4861 — 500ms covers fade (200ms) + height collapse (300ms + 200ms delay)
                                         await InvokeAsync(() =>
                                         {
                                             _activeToolCalls.RemoveAll(c => c.Id == chipId);
@@ -1314,6 +1320,13 @@ else
                         var dialog = await DialogService.ShowAsync<FolderPicker>("Select working folder", parameters, options);
                         await InvokeAsync(StateHasChanged);
                         var result = await dialog.Result;
+
+                        // ADO#4858,4859 — force task mode indicator active immediately after folder confirmation
+                        if (_taskMode)
+                        {
+                            _taskModeActive = true;
+                            await InvokeAsync(StateHasChanged);
+                        }
 
                         if (result != null && !result.Canceled && result.Data is FolderPicker.FolderConfirmedArgs confirmedArgs)
                         {
@@ -2232,6 +2245,8 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     max-width: 360px;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-height: 40px; /* ADO#4861 — needed for height collapse animation */
+    transition: opacity 280ms ease-out, max-height 300ms ease-out, margin 300ms ease-out, padding 300ms ease-out;
 }
 .tool-call-mud-icon {
     color: var(--color-accent, #6366f1);
@@ -2241,8 +2256,13 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     animation: pulse 1.5s ease-in-out infinite;
 }
 .tool-call-done {
-    opacity: 0.3;
-    transition: opacity 280ms ease-out;
+    opacity: 0; /* ADO#4861 — fade to invisible, then height collapses */
+    max-height: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    transition: opacity 200ms ease-out, max-height 300ms ease-out 200ms, margin 300ms ease-out 200ms, padding 300ms ease-out 200ms;
 }
 .cc-agent-icon {
     font-size: 0.875rem;

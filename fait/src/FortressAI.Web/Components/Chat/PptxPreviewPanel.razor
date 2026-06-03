@@ -2,9 +2,9 @@
 @inject FortressAI.Web.Services.UserSessionService Session
 @inject IJSRuntime JSRuntime
 @inject IHttpClientFactory HttpClientFactory
-@inject NavigationManager NavManager
+@inject Amazon.S3.IAmazonS3 S3Client
+@inject IConfiguration Configuration
 @using FortressAI.Web.Services
-@using System.Net.Http.Json
 @implements IAsyncDisposable
 
 <div class="pptx-preview-panel">
@@ -104,14 +104,20 @@
                 return;
             }
 
-            // Step 2: Generate HMAC token and fetch PDF bytes from unauthenticated preview endpoint
-            var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
-            var previewUrl = NavManager.ToAbsoluteUri(
-                $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}&preview=true"
-            ).ToString();
-
-            using var http = HttpClientFactory.CreateClient();
-            _pendingBytes = await http.GetByteArrayAsync(previewUrl);
+            // ADO#4863 — Direct S3 fetch (avoid hairpin NAT issue with internal→ALB→internal)
+            var bucket = Configuration["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
+            Console.WriteLine($"[pptx-preview] ADO#4863: direct S3 fetch bucket={bucket} key={previewS3Key} userId={userId}");
+            using var s3Resp = await S3Client.GetObjectAsync(bucket, previewS3Key);
+            using var ms = new System.IO.MemoryStream();
+            await s3Resp.ResponseStream.CopyToAsync(ms);
+            _pendingBytes = ms.ToArray();
+            _loading = false;
+            StateHasChanged();
+        }
+        catch (Amazon.S3.AmazonS3Exception s3Ex)
+        {
+            Console.Error.WriteLine($"[pptx-preview] S3 fetch failed: {s3Ex.ErrorCode} — {s3Ex.Message}");
+            _error = "Failed to load presentation preview. Try downloading the file.";
             _loading = false;
             StateHasChanged();
         }

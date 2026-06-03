@@ -2961,6 +2961,7 @@ app.post('/turn/folder-confirm', async (req, res) => {
         folderConfirmMap.delete(conversationId);
         markConfirmResolved(conversationId);  // ADO#3566: track for grace window
         resolve({ folderId: resolvedFolderId, readOnlyFolderIds: roIds });
+        console.log(`[folder-confirm] ADO#4858: resolved immediately, returning HTTP ACK before task execution folderId=${resolvedFolderId}`);
         res.json({ ok: true, folderId: resolvedFolderId });
     } catch (err) {
         console.error(`[harness] /turn/folder-confirm error: ${err.message}`);
@@ -3186,13 +3187,14 @@ app.post('/turn', async (req, res) => {
 
             // Inject task gate instructions at end of system prompt
             gateSystemParts.push(`[TASK GATE — read carefully]
+CRITICAL: Do NOT tell the user you cannot spawn a Claude Code session, cannot run code, or lack a CC connection. These capabilities are managed by the system automatically. When you respond with TASK_PROCEED, CC executes without any action from you. If information is missing, respond with TASK_HOLD and ask a clarifying question. Never disclaim capabilities.
 You are the FAIT assistant. When Task mode is active, you have the ability to launch Claude Code CLI to execute coding tasks on the user's behalf.
 The user has indicated they want to execute a task. Your ONLY job right now is to assess whether you have sufficient requirements to proceed. Do NOT discuss or question your own capabilities.
 - If you have a clear objective, know what files/data are involved, and can execute without guessing: write a one-sentence confirmation of what you will do, then end your response with [TASK_PROCEED] on its own line.
 - If you need more information: ask your one clarifying question conversationally, then end your response with [TASK_HOLD] on its own line.
 You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on the final line. No other ending is acceptable. [TASK_PROCEED] and [TASK_HOLD] will be stripped before display.
-IMPORTANT: Never tell the user you cannot run Claude Code or that you lack a Claude Code connection. Task execution is handled automatically by the system when you respond with TASK_PROCEED — you do not call any tool to spawn it. If you need more information before proceeding, respond with TASK_HOLD and ask a clarifying question instead of disclaiming your capabilities.
 Do not ask the user about output paths, filenames, or where to save files. The user has already selected a working folder. All files must be written to the working folder — this is handled automatically and does not require user input.`);
+            console.log('[gate-prompt] gate system prompt: CC disclaimer instruction present');
 
             const gateSystemPrompt = gateSystemParts.join('\n\n---\n\n');
 
@@ -3398,6 +3400,7 @@ Do not ask the user about output paths, filenames, or where to save files. The u
                 }
 
                 console.log(`[harness] ADO#3918 folder_required: folderCount=${folders.length} lastFolderId=${lastFolderId} conversationId=${conversationId}`);
+                console.log(`[folder-picker] emitting folder_required (no pinned folder for this conversation) userId=${userId}`);
                 sendEvent({ type: 'folder_required', folders, lastFolderId, conversationId });
                 console.log(`[harness] ADO#3560 holding for folder-confirm: conversationId=${conversationId} userId=${userId}`);
 
@@ -3475,7 +3478,13 @@ Do not ask the user about output paths, filenames, or where to save files. The u
         }
         if (userEmail) contextParts.push(`## User Identity\nEmail: ${userEmail}`);
         contextParts.push(`## Session Identifiers\nuserId: ${userId}`);
-        if (userMd) contextParts.push(`## About the User\n${userMd}`);
+        if (userMd) {
+            contextParts.push(`## About the User\n${userMd}`);
+            console.log(`[brief-context] user context injected: ${userMd.length} chars for userId=${userId}`);
+        } else {
+            contextParts.push(`## About the User\nNo personal profile found for this user.`);
+            console.log(`[brief-context] user context: null (no USER.md) for userId=${userId}`);
+        }
         // ADO#3564 — rewrite user message for retrieval optimization
         const retrievalQuery = await rewriteQueryForRetrieval(message, userId);
         // ADO#3397 — semantic memory injection (replaces MEMORY.md for vectorized users)
@@ -3827,7 +3836,8 @@ Execute the task immediately using your tools. Start with the first tool call.
 If you find yourself writing prose before making a tool call, STOP and make the tool call instead.
 Use web_search and web_fetch tools to retrieve any external content you need (images, current data, URLs, research).
 Do NOT use hardcoded URLs, guessed paths, or training-data assumptions for content that should be fetched live.
-Do NOT ask the user where to save output files — write all output to the working folder specified below.`;
+Do NOT ask the user where to save output files — write all output to the working folder specified below.
+If creating personalized content, reference the user profile and context provided in this brief — do not invent or guess personal details.`;
 
         const briefContent = fullContext
             ? `${EXECUTE_DIRECTIVE}\n\n---\n\n${fullContext}\n\n---\n\nUser: ${message}`
@@ -3903,7 +3913,7 @@ Do NOT ask the user where to save output files — write all output to the worki
                             // Co-located narration (with tool_use) was already suppressed; now suppress standalone narration too.
                             console.debug(`[CC spawn] narration suppressed (assistant message text block, ${block.text.length} chars) userId=${userId}`);
                         } else if (block.type === 'tool_use') {
-                            toolUseMap.set(block.id, block.name || 'tool');
+                            toolUseMap.set(block.id, { name: block.name || 'tool', input: block.input || {} }); // ADO#4860 — store input for descriptive tool_result labels
                             const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
                             console.log(`[CC spawn] tool_use: ${block.name}(${inputSummary}) userId=${userId}`);
                             const label = resolveProgressLabel(block.name, block.input);
@@ -3921,9 +3931,15 @@ Do NOT ask the user where to save output files — write all output to the worki
                 } else if (evtType === 'user' && Array.isArray(parsed.message?.content)) {
                     for (const block of parsed.message.content) {
                         if (block.type === 'tool_result') {
-                            const toolName = toolUseMap.get(block.tool_use_id) || block.tool_use_id || 'tool';
+                            const toolEntry = toolUseMap.get(block.tool_use_id);
+                            const toolName = (typeof toolEntry === 'object' ? toolEntry?.name : toolEntry) || block.tool_use_id || 'tool';
+                            const toolInput = (typeof toolEntry === 'object' ? toolEntry?.input : {}) || {};
+                            const doneLabel = resolveProgressLabel(toolName, toolInput);
+                            const chipLabel = (doneLabel && doneLabel !== 'Working...') ? doneLabel : `${toolName} done`; // ADO#4860 — descriptive done label
+                            console.log(`[chip-label] ADO#4860: tool_result toolName=${toolName} label=${chipLabel}`);
                             sendEvent({ type: 'task_progress', payload: JSON.stringify({
-                                step: 'tool_result', toolName, status: 'done', message: `${toolName} completed`
+                                step: 'tool_result', toolName, status: 'done', message: chipLabel,
+                                chipIcon: resolveProgressIcon(toolName)
                             }) });
                         }
                     }
