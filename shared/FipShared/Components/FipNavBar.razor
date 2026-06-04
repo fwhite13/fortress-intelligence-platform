@@ -1,6 +1,10 @@
 @using FipShared.Models
 @using MudBlazor
+@using Microsoft.AspNetCore.Hosting
+@using Microsoft.Extensions.Configuration
 @namespace FipShared.Components
+@inject IWebHostEnvironment HostEnv
+@inject IConfiguration Configuration
 
 <div class="fip-navbar">
     <div class="fip-navbar__left">
@@ -58,7 +62,28 @@
 
 @if (IsDev)
 {
-    <div class="fip-dev-banner" @onclick="HandleDevBannerClick" style="cursor: pointer;" title="Click for debug info">⚠ Development Environment</div>
+    <div class="fip-dev-banner" @onclick="@(() => _debugDialogOpen = true)" style="cursor: pointer;" title="Click for debug info">⚠ Development Environment</div>
+    @if (_debugDialogOpen)
+    {
+        <MudDialog @bind-IsVisible="_debugDialogOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true })">
+            <TitleContent><MudText Typo="Typo.h6">Dev Environment Info</MudText></TitleContent>
+            <DialogContent>
+                <MudStack Spacing="2">
+                    <div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Environment</MudText>
+                        <MudText Typo="Typo.body2" Style="font-family: monospace;">@(HostEnv.EnvironmentName)</MudText>
+                    </div>
+                    <div>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Version</MudText>
+                        <MudText Typo="Typo.body2" Style="font-family: monospace;">@(Configuration["BUILD_VERSION"] ?? Configuration["ASPNETCORE_ENVIRONMENT"] ?? "dev")</MudText>
+                    </div>
+                </MudStack>
+            </DialogContent>
+            <DialogActions>
+                <MudButton OnClick="@(() => _debugDialogOpen = false)" Color="Color.Primary">Close</MudButton>
+            </DialogActions>
+        </MudDialog>
+    }
 }
 
 @code {
@@ -71,7 +96,8 @@
     [Parameter] public EventCallback OnMenuClick { get; set; }
     [Parameter] public EventCallback OnSignOut { get; set; }
     [Parameter] public bool IsDev { get; set; } = false;
-    [Parameter] public EventCallback OnDevBannerClick { get; set; }
+
+    private bool _debugDialogOpen = false;
 
     private bool IsVisible(FipModule module) =>
         module == ActiveModule || HiddenModules == null || !HiddenModules.Contains(module);
@@ -79,11 +105,5 @@
     private async Task HandleSignOut()
     {
         await OnSignOut.InvokeAsync();
-    }
-
-    private async Task HandleDevBannerClick()
-    {
-        if (OnDevBannerClick.HasDelegate)
-            await OnDevBannerClick.InvokeAsync();
     }
 }
