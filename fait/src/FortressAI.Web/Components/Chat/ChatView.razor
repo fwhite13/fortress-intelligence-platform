@@ -210,10 +210,6 @@ else
                     🔍 @(_currentToolName ?? "Calling tool")...
                 </MudAlert>
             }
-            @if (isStreaming)
-            {
-                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
-            }
             @if (_activeToolCalls.Any() || _toolCallsFading)
             {
                 <div class="tool-call-indicator-list @(_toolCallsFading ? "tool-call-list-fading" : "")">
@@ -227,6 +223,10 @@ else
                         </div>
                     }
                 </div>
+            }
+            @if (isStreaming)
+            {
+                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
             }
 
             @if (_currentFileSummary != null && _currentFileSummary.Files.Count > 0)
@@ -362,7 +362,7 @@ else
                     Style="@GetMicButtonStyle()"
                     Size="Size.Medium" />
             }
-            <button class="btn-task-mode @(_taskMode ? "btn-task-mode--active" : "")"
+            <button class="btn-task-mode @((_taskMode || _taskModeActive) ? "btn-task-mode--active" : "")"
                     @onclick="ToggleTaskMode"
                     title="@(_taskMode ? "Task mode on — click to disable" : "Enable task mode")"
                     disabled="@(isStreaming || _isBriefStreaming)">
@@ -1102,6 +1102,7 @@ else
                 else if (evt.Type == "mode_switch")
                 {
                     _taskModeActive = true;
+                    _taskMode = true;  // ADO#4912 — sync pill with task mode indicator
                     await InvokeAsync(StateHasChanged);
                 }
                 else if (evt.Type == "artifact")

@@ -342,6 +342,47 @@ function resolveProgressLabel(toolName, toolInput) {
             const suffix = toolName.startsWith('ado_') ? toolName.slice(4).replace(/_/g, ' ') : toolName.replace(/_/g, ' ');
             return `ADO: ${chipTrunc(suffix, 40)}`;
         }
+        // CC-native PascalCase tool names (ADO#4911)
+        if (toolName === 'Read') {
+            const fp = input.file_path || input.path || '';
+            const fname = fp ? fp.split('/').pop() : '';
+            return fname ? `Reading: ${chipTrunc(fname, 40)}` : 'Reading file...';
+        }
+        if (toolName === 'Write') {
+            const fp = input.file_path || input.path || '';
+            const fname = fp ? fp.split('/').pop() : '';
+            return fname ? `Writing: ${chipTrunc(fname, 40)}` : 'Writing file...';
+        }
+        if (toolName === 'Glob') {
+            const pat = input.pattern || '';
+            return pat ? `Finding: ${chipTrunc(pat, 40)}` : 'Finding files...';
+        }
+        if (toolName === 'LS') {
+            const dir = input.path || '';
+            const dirname = dir ? dir.split('/').pop() || dir : '';
+            return dirname ? `Listing: ${chipTrunc(dirname, 40)}` : 'Listing files...';
+        }
+        if (toolName === 'Grep') {
+            const pat = input.pattern || '';
+            return pat ? `Searching: "${chipTrunc(pat, 35)}"` : 'Searching files...';
+        }
+        if (toolName === 'Task') {
+            const desc = input.description || input.prompt || '';
+            return desc ? `Delegating: ${chipTrunc(desc, 40)}` : 'Delegating to agent...';
+        }
+        if (toolName === 'TodoWrite' || toolName === 'TodoRead') {
+            return toolName === 'TodoWrite' ? 'Updating task list' : 'Checking task list';
+        }
+        if (toolName === 'NotebookRead') {
+            const fp = input.notebook_path || '';
+            const fname = fp ? fp.split('/').pop() : '';
+            return fname ? `Reading notebook: ${fname}` : 'Reading notebook...';
+        }
+        if (toolName === 'NotebookEdit') {
+            const fp = input.notebook_path || '';
+            const fname = fp ? fp.split('/').pop() : '';
+            return fname ? `Editing notebook: ${fname}` : 'Editing notebook...';
+        }
         return 'Working...';
     } catch {
         return 'Working...';
@@ -373,6 +414,13 @@ function resolveProgressIcon(toolName) {
     if (t.includes('kb') || t.includes('knowledge')) return 'kb';
     // Sync
     if (t === 'sync' || t.includes('sync')) return 'sync';
+    // CC-native PascalCase tool names (ADO#4911)
+    if (t === 'read') return 'file';
+    if (t === 'write') return 'document';
+    if (t === 'glob' || t === 'ls' || t === 'grep') return 'file';
+    if (t === 'task') return 'agent';
+    if (t === 'todowrite' || t === 'todoread') return 'task';
+    if (t === 'notebookread' || t === 'notebookedit') return 'document';
     // Default fallback
     return 'tool';
 }
@@ -3526,14 +3574,15 @@ You have access to the user's workspace files and memory topics. When the user a
         try {
             const headers = { 'Content-Type': 'application/json' };
             if (INTERNAL_API_TOKEN) headers['X-Internal-Token'] = INTERNAL_API_TOKEN;
-            const briefResp = await fetch(`${FAIT_BASE_URL}/api/workspace/files?type=generated&limit=3&userId=${encodeURIComponent(userId)}`, { headers });
+            const folderParam = taskFolderIdResolved ? `&folderId=${encodeURIComponent(taskFolderIdResolved)}` : '';
+            const briefResp = await fetch(`${FAIT_BASE_URL}/api/workspace/files?type=generated&limit=10&userId=${encodeURIComponent(userId)}${folderParam}`, { headers });
             if (briefResp.ok) {
                 const briefData = await briefResp.json();
                 const files = briefData?.files ?? briefData ?? [];
                 if (Array.isArray(files) && files.length > 0) {
                     const fileList = files.map(f => `${f.filename || f.Filename} (${new Date(f.createdAt || f.CreatedAt).toLocaleDateString()})`).join(', ');
-                    contextParts.push(`## Recent Workspace Artifacts\nRecent assistant-created files: ${fileList}`);
-                    console.log(`[harness] workspace brief injected: ${files.length} files for userId=${userId}`);
+                    contextParts.push(`## Existing Files in This Folder\nThese files already exist in the working folder from prior sessions. They are reference material — NOT evidence that the current task completed. Execute the user's request fresh:\n${fileList}`);
+                    console.log(`[harness] workspace brief injected: ${files.length} files for userId=${userId} folderId=${taskFolderIdResolved || 'none'}`);
                 }
             }
         } catch (briefErr) {
@@ -3837,7 +3886,8 @@ If you find yourself writing prose before making a tool call, STOP and make the 
 Use web_search and web_fetch tools to retrieve any external content you need (images, current data, URLs, research).
 Do NOT use hardcoded URLs, guessed paths, or training-data assumptions for content that should be fetched live.
 Do NOT ask the user where to save output files — write all output to the working folder specified below.
-If creating personalized content, reference the user profile and context provided in this brief — do not invent or guess personal details.`;
+If creating personalized content, reference the user profile and context provided in this brief — do not invent or guess personal details.
+DO NOT assume a prior artifact means this task is already done. Prior files in the folder are from PREVIOUS sessions. Execute the user's current request now.`;
 
         const briefContent = fullContext
             ? `${EXECUTE_DIRECTIVE}\n\n---\n\n${fullContext}\n\n---\n\nUser: ${message}`
@@ -3880,8 +3930,6 @@ If creating personalized content, reference the user profile and context provide
         let ccFilesUploaded = 0;
         let firstChunkEmitted = false;
         const toolUseMap = new Map(); // track tool_use id → name for tool_result correlation
-        let lastEmittedLabel = '';
-        let consecutiveLabelCount = 0;
         ccProcess.stdout.on('data', (chunk) => {
             // ADO#4799 — chip 4: first CC stdout — agent working
             if (!firstChunkEmitted) {
@@ -3917,15 +3965,7 @@ If creating personalized content, reference the user profile and context provide
                             const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
                             console.log(`[CC spawn] tool_use: ${block.name}(${inputSummary}) userId=${userId}`);
                             const label = resolveProgressLabel(block.name, block.input);
-                            if (label === lastEmittedLabel) {
-                                consecutiveLabelCount++;
-                            } else {
-                                lastEmittedLabel = label;
-                                consecutiveLabelCount = 1;
-                            }
-                            if (consecutiveLabelCount <= 3) {
-                                sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: label, chipIcon: resolveProgressIcon(block.name) }) });
-                            }
+                            sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: label, chipIcon: resolveProgressIcon(block.name) }) });
                         }
                     }
                 } else if (evtType === 'user' && Array.isArray(parsed.message?.content)) {
