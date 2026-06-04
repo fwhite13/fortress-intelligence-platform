@@ -28,6 +28,8 @@ public class VpBotService
         var securityGroupId = _config["Firm:VpBotSecurityGroupId"];
         var firmApiUrl = _config["Firm:ApiUrl"] ?? "";
         var botSecret = _config["Firm:BotCallbackSecret"] ?? "";
+        var containerName = _config["Firm:VpBotContainerName"] ?? "firm-vpbot";
+        var botDisplayName = _config["Branding:ModuleName"] ?? "Fortress Notetaker";
 
         if (string.IsNullOrEmpty(taskDef) || string.IsNullOrEmpty(cluster))
         {
@@ -58,13 +60,13 @@ public class VpBotService
                     {
                         new ContainerOverride
                         {
-                            Name = "firm-vpbot",
+                            Name = containerName,
                             Environment = new List<Amazon.ECS.Model.KeyValuePair>
                             {
                                 new() { Name = "FIRM_API_URL", Value = firmApiUrl },
                                 new() { Name = "MEETING_ID", Value = meetingId.ToString() },
                                 new() { Name = "MEETING_URL", Value = meetingUrl },
-                                new() { Name = "BOT_DISPLAY_NAME", Value = "Fortress Notetaker" },
+                                new() { Name = "BOT_DISPLAY_NAME", Value = botDisplayName },
                                 new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret },
                                 new() { Name = "MEETING_PLATFORM", Value = platform },
                                 new() { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },

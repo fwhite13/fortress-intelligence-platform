@@ -67,7 +67,8 @@
         {
             var bytes = _pendingBytes;
             _pendingBytes = null;
-            await JSRuntime.InvokeVoidAsync("docxPreviewInterop.render", bytes, _containerId);
+            var base64 = Convert.ToBase64String(bytes);
+            await JSRuntime.InvokeVoidAsync("docxPreviewInterop.render", base64, _containerId);
         }
     }
 

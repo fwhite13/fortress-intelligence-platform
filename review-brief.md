@@ -1,107 +1,139 @@
-# ADO#2834 Review Brief — Adversarial Code Review
+# R2 Verification Review — FAIT Sprint 3 (commit d8996aa6)
 
-You are performing an adversarial code review for ADO#2834. Your job is to find what is WRONG with this code.
+You are performing a targeted verification review for cycle 2 of code review. R1 found 2 Important issues (I1 and I2) that needed fixing. Commit d8996aa6 is Tony's fix. Your job is to verify each fix is correct and complete.
 
-## Context
+## Files changed in d8996aa6
 
-ADO#2834 has two changes:
-1. 1-liner fix in FAIT `KnowledgeBaseService.cs` — removes `GetFileNameWithoutExtension` wrapper
-2. New tool `list_kb_files.js` in fip-mcp — lists S3 objects in a user's KB
+1. `fait/src/FortressAI.Web/Components/Chat/ChatView.razor` — I1 fix (legacy chip SSE path)
+2. `fait/agent-harness/harness-server.js` — I2 fix (dirty-file cap) + N4 fix (extractDomain)
+3. `fait/.gitignore` — N1 fix
+4. `fait/src/FortressAI.Web/Services/ArtifactPreviewService.cs` — N2 fix
+5. `fait/src/FortressAI.Web/Controllers/ArtifactPreviewController.cs` — N2 fix
+6. `docs/rn-org-context-seed.json` — stray file (verify harmless)
 
-The project root is `/home/fredw/projects/fip/`.
+---
 
-## Files to Read
+## Verification Task 1: I1 — ADO#4810 Legacy Chip SSE Path (ChatView.razor)
 
-Read these files in full:
+R1 finding: The `evt.Type == "chip"` handler used `Guid.Empty` (default) for chip Id and had no auto-dismiss timer.
 
-1. `/home/fredw/projects/fip/fait/src/FortressAI.Web/Services/KnowledgeBaseService.cs` — check line 323 specifically
-2. `/home/fredw/projects/fip/services/fip-mcp/src/tools/list_kb_files.js` — new file, full review
-3. `/home/fredw/projects/fip/services/fip-mcp/src/server.js` — verify only import + registration added, no other changes
-4. `/home/fredw/projects/fip/services/fip-mcp/package.json` — verify @aws-sdk/client-s3 added correctly
-5. `/home/fredw/projects/fip/services/fip-mcp/src/auth.js` — read the user object structure (what fields are set on req.user)
-6. `/home/fredw/projects/fip/fait/src/FortressAI.Shared/Models/AppUser.cs` — read AppUser model
-7. `/home/fredw/projects/fip/fait/src/FortressAI.Web/Services/KbDocumentService.cs` — check what userId is used for S3 prefix `kb-docs/personal/{userId}/` (lines ~54-90, ~386-400)
-8. `/home/fredw/projects/fip/services/fip-mcp/src/tools/search_kb.js` — check how user.user_id is used for personal KB scoping
-9. `/home/fredw/projects/fip/services/fip-mcp/src/config/kb-inventory.js` — check KB_TYPE enum values and KB_INVENTORY structure
+Required fix:
+- Each legacy chip must get `Guid.NewGuid()`
+- Must wire the same 2s-fade/300ms-remove auto-dismiss pattern as the `task_progress` path
+- `RemoveAll(c => c.Id == chipId)` must now correctly remove only the intended chip
 
-## Critical Investigation: user_id Identity Mismatch
+**Read the file:** `fait/src/FortressAI.Web/Components/Chat/ChatView.razor`
 
-This is the most important thing to verify:
+Find the `evt.Type == "chip"` handler (search for "ADO#4717" or "ADO#4810"). Verify:
 
-**In auth.js:** `user.user_id = payload.oid` (Entra Object ID — a GUID string like "a1b2c3d4-...")
+1. Is `Guid.NewGuid()` used when constructing the new `ToolCallEvent`? (Not `default`, not `Guid.Empty`, not omitted)
+2. Is `chipId` captured from `legacyChip.Id` BEFORE the `Task.Delay` lambda? (Avoid closure capture of the chip object)
+3. Does the auto-dismiss timer:
+   a. Use `Task.Delay(2000).ContinueWith(...)` with `TaskScheduler.Default`?
+   b. Check `t.IsFaulted || t.IsCanceled` at the start?
+   c. Use `InvokeAsync` for the status mutation (thread-safe)?
+   d. Set `Status = "done"` first, call `StateHasChanged()`, then `Task.Delay(300)`, then `RemoveAll`?
+   e. Catch `ObjectDisposedException` and `TaskCanceledException`?
+4. Does the `RemoveAll(c => c.Id == chipId)` predicate match only the specific chip?
+5. Is `GetChipIconKeyFromToolName("chip")` called or a direct icon key used? What does it return for the input "chip"? Search for `GetChipIconKeyFromToolName` definition and trace what it returns for "chip" as the tool name.
 
-**In FAIT KbDocumentService:** `UploadDocumentAsync(... Guid userId ...)` stores to `kb-docs/personal/{userId}/` where `userId` comes from `Session.UserId` which is `AppUser.Id` — the FAIT internal database GUID.
+Now find the `task_progress` chip path for comparison (search for "task_progress" in the file). Compare the auto-dismiss structure — do they match exactly or are there meaningful differences?
 
-**AppUser model has TWO identity fields:**
-- `AppUser.Id` — FAIT-generated internal GUID (used for S3 paths)
-- `AppUser.EntraOid` — Entra OID (stored as string, added in ADO#1240)
+ALSO: Read lines around the chip handler to check if the `async` lambda is declared as `async Task` or `async void`. `async void` with `ContinueWith` is unsafe — it should be `async Task` or the lambda captured properly.
 
-**THE QUESTION:** Does `auth.js` `user.user_id = payload.oid` (Entra OID) match the `AppUser.Id` GUID that FAIT uses for S3 paths? Or are these different GUIDs?
+Report any deviations from the required pattern.
 
-Specifically:
-- For Entra-provisioned users, is `AppUser.Id` set to the Entra OID, or is it a separate randomly generated GUID?
-- Check how FAIT provisions Entra users — does it set `AppUser.Id = Guid.Parse(oidClaim)` or does it generate a new Guid?
+---
 
-Look at: `/home/fredw/projects/fip/fait/src/FortressAI.Web/Controllers/ExcelAddinController.cs` (lines around 60-90 for Entra user provisioning) and any other controller that creates AppUser records for Entra sign-ins.
+## Verification Task 2: I2 — ADO#4834 Dirty-File Count Cap (harness-server.js)
 
-Also check: `/home/fredw/projects/fip/fait/src/FortressAI.Web/Controllers/AccountController.cs` or equivalent for how Entra users get their AppUser.Id assigned.
+R1 finding: The upload loop had no file count limit — all dirty files would be uploaded regardless of count.
 
-## Review Checklist
+Required fix:
+- `MAX_DIRTY_FILES = 50` constant declared
+- `console.warn` emitted when capped
+- `.slice()` truncation applied BEFORE the upload loop
+- `dirtyFiles` must be declared with `let` (not `const`) to allow reassignment
 
-### 1. KnowledgeBaseService.cs line 323
-- Is the fix exactly `chunk.Source.Split('/').Last()`?
-- No `GetFileNameWithoutExtension` wrapper?
-- Any other changes on nearby lines (should be 1-line-only change)?
-- Are there other places in the same file where the same pattern might still be wrong?
+**Read the file:** `fait/agent-harness/harness-server.js`
 
-### 2. list_kb_files.js — Full Review
-- **Entitlement check**: Is `getEntitlements` called BEFORE the S3 call? (Must be yes — auth failure before data exposure)
-- **Sidecar exclusions**: Are BOTH `.metadata.json` AND `-bda-text.txt` correctly excluded?
-- **Empty filename guard**: Is `if (!filename) continue;` present?
-- **Pagination**: Is the `do...while (continuationToken)` loop correct?
-- **Error handling**: What happens if S3 call throws? Is it caught or does it bubble up?
-- **Team KB**: Is `team_id` validation present before S3 call?
-- **Corp KB prefix**: Is `kb-docs/fortress/` the correct prefix? (Verify against KbDocumentService)
-- **Project KB**: Is it handled or explicitly rejected?
-- **user.user_id identity**: Does `user.user_id` (Entra OID from auth.js) match what FAIT uses for S3 paths?
+Search for "MAX_DIRTY_FILES" and "findDirtyFiles". Verify:
 
-### 3. server.js
-- Is the import line for `listKbFiles` added correctly?
-- Is the tool registration following the same pattern as other tools?
-- Are there ANY other changes beyond import + tool registration?
-- Is the tool schema correct (kb_id required, team_id optional)?
+1. Is `MAX_DIRTY_FILES` a `const` set to `50`?
+2. Is the cap check placed BEFORE the `for (const relPath of dirtyFiles)` loop? (Not inside, not after)
+3. Is `dirtyFiles` changed from `const` to `let` at its declaration site (where `findDirtyFiles` is called)?
+4. Does the warn log include: the actual count (`dirtyFiles.length`), the limit (`MAX_DIRTY_FILES`)?
+5. Is `dirtyFiles = dirtyFiles.slice(0, MAX_DIRTY_FILES)` the truncation method?
+6. Is the cap check inside the `if (folder)` block, at the right scope level? (Not outside the try block, not in a nested loop)
 
-### 4. package.json
-- Is `@aws-sdk/client-s3: "^3.0.0"` present in dependencies?
-- Was it already there (check other aws-sdk deps for version consistency)?
+Report the exact lines where these are placed.
 
-### 5. Pipeline docs (Tony note)
-- Tony said CC also staged ADO2834-PLAN.md and some ADO2833 pipeline files
-- Verify these are documentation only, not application code
-- Check what was actually staged: look at `services/fip-mcp/pipeline/` directory
+---
 
-## Pass/Fail Criteria
+## Verification Task 3: N4 — extractDomain() helper (harness-server.js)
 
-**FAIL if:**
-- `user.user_id` (Entra OID) doesn't match the userId used by FAIT for S3 paths — this means `list_kb_files` will return 0 results for all personal KBs
-- Entitlement check missing or happens AFTER S3 call
-- Critical security issues
+R1 finding: The inline URL parsing in `resolveProgressLabel` was unguarded and used `url.split('/')[0]` as fallback (which for bare paths like `report.xlsx` returns `report.xlsx` — acceptable but worth extracting).
 
-**NEEDS-CHANGES if:**
-- Minor issues, missing edge case handling, style problems
+Required fix: `extractDomain()` helper with try/catch for safe URL parsing.
 
-**PASS if:**
-- user_id matches (or there's a clear mechanism making them equivalent)
-- All checklist items pass
-- Only docs in the extra staged files
+**In the same harness-server.js file**, search for `extractDomain`. Verify:
 
-## Output Format
+1. Is the function defined? Does it have a `try/catch` block?
+2. Does it handle `!url` (null/empty) by returning `''`?
+3. Does the `catch` block truncate long non-URL strings (e.g., `url.length > 30` check)?
+4. Is `resolveProgressLabel` updated to call `extractDomain(url)` instead of the inline try/catch?
+5. Does the catch return something sensible (not throw, not return null)?
 
-Report findings in this format:
-1. **user_id identity verdict** — MATCH or MISMATCH, with evidence
-2. **KnowledgeBaseService.cs** — PASS or issue
-3. **list_kb_files.js** — findings list
-4. **server.js** — PASS or issue  
-5. **package.json** — PASS or issue
-6. **Pipeline docs** — docs-only confirmed or not
-7. **Overall recommendation** — PASS / NEEDS-CHANGES / FAIL with reasoning
+---
+
+## Verification Task 4: N1 — fait/.gitignore
+
+R1 finding: No `.gitignore` in `fait/` — `brief-ado*.md` files were accumulating.
+
+**Read the file:** `fait/.gitignore`
+
+Verify:
+1. Does `brief-*.md` pattern exist?
+2. Does `brief-ado*.md` pattern exist?
+3. Are there any obviously wrong patterns (e.g., accidentally ignoring source files)?
+4. Note: Already-committed brief files won't be un-tracked — that's acceptable. Future files will be ignored.
+
+---
+
+## Verification Task 5: N2 — CONVERTER_BASE_URL warning
+
+R1 finding: Silent localhost fallback with no log — ECS misconfiguration would cause silent PPTX failures.
+
+**Read both files:**
+- `fait/src/FortressAI.Web/Services/ArtifactPreviewService.cs`
+- `fait/src/FortressAI.Web/Controllers/ArtifactPreviewController.cs`
+
+Verify:
+1. Is `_logger.LogWarning(...)` present in BOTH files?
+2. Does the warning message clearly indicate `CONVERTER_BASE_URL` is not set?
+3. Is the warning fired BEFORE the fallback assignment (not after)?
+4. Is the fallback `?? "http://localhost:3001"` still present (don't want a throw here, just a warn)?
+
+---
+
+## Verification Task 6: Stray File — docs/rn-org-context-seed.json
+
+Read: `docs/rn-org-context-seed.json`
+
+Verify:
+1. Is it just a list of name/title pairs (org chart seed data)?
+2. Does it contain any credentials, API keys, tokens, connection strings, or PII beyond names/titles?
+3. Is it a JSON array of objects with only `term` and `description` fields?
+4. Is there anything in it that would be sensitive to expose in a public repo?
+
+Note: The file being committed is a nitpick (unrelated to the sprint). We are only checking for harm. Names+titles in an internal repo are low sensitivity.
+
+---
+
+## Verdict Criteria
+
+**PASS:** All 5 fixes (I1, I2, N1, N2, N4) are correctly implemented. Stray file is harmless.
+
+**NEEDS-CHANGES:** Any fix is incomplete, incorrect, or introduces a new bug.
+
+Report your findings per task. Be specific: quote the relevant code, line numbers if available. For each task: VERIFIED or ISSUE FOUND (with details).

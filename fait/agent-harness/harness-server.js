@@ -383,6 +383,20 @@ function resolveProgressLabel(toolName, toolInput) {
             const fname = fp ? fp.split('/').pop() : '';
             return fname ? `Editing notebook: ${fname}` : 'Editing notebook...';
         }
+        if (toolName === 'Bash') {
+            const cmd = input.command || '';
+            if (cmd) {
+                if (/pip\s*install|pip3\s*install/.test(cmd)) return 'Installing dependencies...';
+                const preview = chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40);
+                return `Running: ${preview}`;
+            }
+            return 'Running command...';
+        }
+        if (toolName === 'Edit') {
+            const fp = input.new_path || input.path || '';
+            const fname = fp ? fp.split('/').pop() : '';
+            return fname ? `Editing: ${chipTrunc(fname, 40)}` : 'Editing file...';
+        }
         return 'Working...';
     } catch {
         return 'Working...';
@@ -391,6 +405,8 @@ function resolveProgressLabel(toolName, toolInput) {
 
 function resolveProgressIcon(toolName) {
     const t = (toolName || '').toLowerCase();
+    // todowrite/todoread must come before generic includes() patterns
+    if (t === 'todowrite' || t === 'todoread') return 'task';
     // Agent dispatch
     if (t.includes('agent') || t.includes('spawn') || t === 'task') return 'agent';
     // Web search / fetch
@@ -419,7 +435,6 @@ function resolveProgressIcon(toolName) {
     if (t === 'write') return 'document';
     if (t === 'glob' || t === 'ls' || t === 'grep') return 'file';
     if (t === 'task') return 'agent';
-    if (t === 'todowrite' || t === 'todoread') return 'task';
     if (t === 'notebookread' || t === 'notebookedit') return 'document';
     // Default fallback
     return 'tool';
