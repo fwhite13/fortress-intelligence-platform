@@ -8,6 +8,7 @@
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
 @using System.IO
+@using Markdig
 @implements IAsyncDisposable
 
 <div class="artifact-sidebar">
@@ -28,9 +29,14 @@
         {
             <MudIconButton Icon="@Icons.Material.Outlined.ArrowBack"
                            Size="Size.Small"
-                           OnClick="@(() => { _selectedArtifact = null; _previewUrl = null; _previewError = null; _textPreviewContent = null; })"
+                           OnClick="@(() => { _selectedArtifact = null; _previewUrl = null; _previewError = null; _textPreviewContent = null; _markdownHtml = null; })"
                            Title="Back to list" />
             <MudText Typo="Typo.subtitle2" Class="artifact-sidebar__title artifact-sidebar__title--detail">@_selectedArtifact.Filename</MudText>
+            <MudIconButton Icon="@Icons.Material.Outlined.Download"
+                           Size="Size.Small"
+                           Title="Download"
+                           Disabled="@_downloadLoading"
+                           OnClick="DownloadAsync" />
             <MudIconButton Icon="@(_isMaximized ? Icons.Material.Outlined.CloseFullscreen : Icons.Material.Outlined.OpenInFull)"
                            Size="Size.Small"
                            Title="@(_isMaximized ? "Restore" : "Maximize")"
@@ -75,9 +81,18 @@
                     }
                     else if (_textPreviewContent != null)
                     {
-                        <div class="artifact-sidebar__text-preview">
-                            <pre><code class="@GetHighlightClass(_selectedArtifact.Filename)">@_textPreviewContent</code></pre>
-                        </div>
+                        @if (_markdownHtml != null)
+                        {
+                            <div class="artifact-sidebar__text-preview artifact-sidebar__markdown-preview">
+                                @((MarkupString)_markdownHtml)
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="artifact-sidebar__text-preview">
+                                <pre><code class="@GetHighlightClass(_selectedArtifact.Filename)">@_textPreviewContent</code></pre>
+                            </div>
+                        }
                     }
                     else if (IsDocxType(_selectedArtifact))
                     {
@@ -163,10 +178,15 @@
     [Parameter] public int PanelWidth { get; set; } = 320;
     [Parameter] public EventCallback<int> OnWidthChanged { get; set; }
 
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
     private WorkspaceUpload? _selectedArtifact;
     private string? _previewUrl;
     private string? _previewError;
     private string? _textPreviewContent;
+    private string? _markdownHtml;
     private bool _previewLoading;
     private bool _downloadLoading;
     private bool _isMaximized = false;
@@ -228,6 +248,7 @@
         _previewUrl = null;
         _previewError = null;
         _textPreviewContent = null;
+        _markdownHtml = null;
 
         if (IsPreviewable(artifact))
         {
@@ -270,6 +291,21 @@
                         _textPreviewContent = content.Length > 200_000
                             ? content[..200_000] + "\n\n[... truncated at 200KB ...]"
                             : content;
+                        if (IsMarkdownFile(artifact))
+                        {
+                            try
+                            {
+                                _markdownHtml = Markdig.Markdown.ToHtml(_textPreviewContent, Pipeline);
+                            }
+                            catch
+                            {
+                                _markdownHtml = null;
+                            }
+                        }
+                        else
+                        {
+                            _markdownHtml = null;
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -341,6 +377,13 @@
         ".html", ".xml", ".yaml", ".yml", ".sh", ".bash", ".sql",
         ".css", ".scss", ".java", ".rb", ".go", ".rs", ".toml", ".ini", ".cfg"
     };
+
+    private static bool IsMarkdownFile(WorkspaceUpload artifact)
+    {
+        var ext = Path.GetExtension(artifact.Filename);
+        return ext.Equals(".md", StringComparison.OrdinalIgnoreCase)
+            || artifact.MimeType == "text/markdown";
+    }
 
     private static bool IsPreviewable(WorkspaceUpload artifact)
     {
@@ -567,5 +610,74 @@
     font-size: 12px;
     font-family: 'Consolas', 'Courier New', monospace;
     line-height: 1.5;
+}
+
+.artifact-sidebar__markdown-preview {
+    padding: 16px;
+    overflow-y: auto;
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.artifact-sidebar__markdown-preview h1,
+.artifact-sidebar__markdown-preview h2,
+.artifact-sidebar__markdown-preview h3,
+.artifact-sidebar__markdown-preview h4 {
+    margin-top: 16px;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.artifact-sidebar__markdown-preview p {
+    margin: 0 0 12px;
+}
+
+.artifact-sidebar__markdown-preview code {
+    background: var(--mud-palette-background-grey, #f0f0f0);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: 'JetBrains Mono', 'Consolas', monospace;
+    font-size: 12px;
+}
+
+.artifact-sidebar__markdown-preview pre {
+    background: #0d1117;
+    color: #e6edf3;
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 8px 0;
+}
+
+.artifact-sidebar__markdown-preview pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+    font-size: 12px;
+}
+
+.artifact-sidebar__markdown-preview ul,
+.artifact-sidebar__markdown-preview ol {
+    padding-left: 20px;
+    margin-bottom: 12px;
+}
+
+.artifact-sidebar__markdown-preview blockquote {
+    border-left: 3px solid var(--color-border);
+    padding-left: 12px;
+    margin: 8px 0;
+    color: var(--color-text-secondary);
+}
+
+.artifact-sidebar__markdown-preview a {
+    color: var(--color-primary, #1976d2);
+    text-decoration: none;
+}
+
+.artifact-sidebar__markdown-preview a:hover {
+    text-decoration: underline;
 }
 </style>

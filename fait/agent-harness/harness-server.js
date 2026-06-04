@@ -4037,9 +4037,10 @@ If creating personalized content, reference the user profile and context provide
                                 // Updated file
                                 const nextVersion = (existRows[0].current_version || 1) + 1;
                                 await connProv.execute(
-                                    'UPDATE user_workspace_uploads SET current_version = ?, conversation_id = ? WHERE id = ?',
-                                    [nextVersion, conversationId ?? null, existRows[0].id]
+                                    'UPDATE user_workspace_uploads SET current_version = ?, conversation_id = ?, source = ? WHERE id = ?',
+                                    [nextVersion, conversationId ?? null, 'cc', existRows[0].id]
                                 );
+                                console.log(`[harness] post-sync: updated artifact source to cc for file ${path.basename(relPath)} userId=${userId}`);
                                 await connProv.execute(
                                     'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by, conversation_id, turn_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                                     [crypto.randomUUID(), existRows[0].id, nextVersion, s3Key, fileSize ?? null, new Date(), 'cc', conversationId ?? null, turnIndex ?? null]
