@@ -4,6 +4,8 @@
 @inject IHttpClientFactory HttpClientFactory
 @inject Amazon.S3.IAmazonS3 S3Client
 @inject IConfiguration Configuration
+@inject IWorkspaceFileService WorkspaceFileSvc
+@inject ISnackbar Snackbar
 @using FortressAI.Web.Services
 @implements IAsyncDisposable
 
@@ -20,6 +22,18 @@
         <div class="pptx-preview-panel__error">
             <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Size="Size.Large" />
             <MudText Typo="Typo.body2" Color="Color.Secondary">@_error</MudText>
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Default"
+                       StartIcon="@Icons.Material.Outlined.Download"
+                       Disabled="@_downloadLoading"
+                       OnClick="DownloadAsync"
+                       Class="mt-2">
+                @if (_downloadLoading)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                }
+                Download presentation
+            </MudButton>
         </div>
     }
     else
@@ -57,6 +71,29 @@
     private string _containerId = $"pptx-{Guid.NewGuid():N}";
     private int _currentPage = 1;
     private int _totalPages = 0;
+    private bool _downloadLoading = false;
+
+    private async Task DownloadAsync()
+    {
+        _downloadLoading = true;
+        StateHasChanged();
+        try
+        {
+            Console.WriteLine($"[preview] [pptx] Download fallback requested for artifact {ArtifactId}, S3Key={S3Key}");
+            var url = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(S3Key);
+            await JSRuntime.InvokeVoidAsync("open", url, "_blank");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[preview] [pptx] Download fallback failed: {ex.Message}");
+            Snackbar.Add("Download failed.", Severity.Error);
+        }
+        finally
+        {
+            _downloadLoading = false;
+            StateHasChanged();
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -80,6 +117,7 @@
     {
         try
         {
+            Console.WriteLine($"[preview] [pptx] Starting fetch/convert for artifact {ArtifactId}, S3Key={S3Key}");
             var userId = Session.UserId;
             if (userId == Guid.Empty)
             {

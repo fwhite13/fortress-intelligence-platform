@@ -1,26 +1,30 @@
-function base64ToUint8Array(base64) {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-}
-
 window.xlsxPreviewInterop = {
-    getSheetNames: function(base64) {
-        const data = base64ToUint8Array(base64);
-        const workbook = XLSX.read(data, { type: 'array' });
-        return workbook.SheetNames;
+    getSheetNames: function (base64) {
+        try {
+            // Blazor Server passes byte[] as base64 string via JSInterop;
+            // SheetJS reads base64 directly with { type: 'base64' }
+            const workbook = XLSX.read(base64, { type: 'base64' });
+            return workbook.SheetNames;
+        } catch (e) {
+            console.error('[xlsxPreview] getSheetNames failed:', e);
+            throw e;
+        }
     },
-    renderSheet: function(base64, sheetName, containerId) {
-        const data = base64ToUint8Array(base64);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const worksheet = workbook.Sheets[sheetName];
-        const html = XLSX.utils.sheet_to_html(worksheet, { editable: false });
-        const container = document.getElementById(containerId);
-        if (container) {
-            container.innerHTML = html;
+    renderSheet: function (base64, sheetName, containerId) {
+        try {
+            const workbook = XLSX.read(base64, { type: 'base64' });
+            const worksheet = workbook.Sheets[sheetName];
+            const html = XLSX.utils.sheet_to_html(worksheet, { editable: false });
+            const container = document.getElementById(containerId);
+            if (container) {
+                container.innerHTML = html;
+                console.log('[xlsxPreview] Rendered sheet', sheetName, 'in', containerId);
+            } else {
+                console.error('[xlsxPreview] Container not found:', containerId);
+            }
+        } catch (e) {
+            console.error('[xlsxPreview] renderSheet failed:', e);
+            throw e;
         }
     }
 };

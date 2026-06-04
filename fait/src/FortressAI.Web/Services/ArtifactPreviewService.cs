@@ -99,6 +99,7 @@ public class ArtifactPreviewService
         var converterBase = converterBaseRaw ?? "http://localhost:3001";
         var converterApiKey = _config["CONVERTER_API_KEY"];
         using var client = httpClientFactory.CreateClient("HarnessClient");
+        client.Timeout = TimeSpan.FromSeconds(90); // ADO#4908: cap converter wait to avoid indefinite spin
         if (!string.IsNullOrEmpty(converterApiKey))
             client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
@@ -113,7 +114,8 @@ public class ArtifactPreviewService
         var resp = await client.PostAsJsonAsync($"{converterBase}/convert", body);
         if (!resp.IsSuccessStatusCode)
         {
-            _logger.LogWarning("[ArtifactPreview] PPTX converter returned {Status} for artifact {Id}", resp.StatusCode, artifactId);
+            var errBody = await resp.Content.ReadAsStringAsync();
+            _logger.LogWarning("[preview] [pptx] PPTX converter returned {Status} for artifact {Id}: {Body}", resp.StatusCode, artifactId, errBody);
             return null;
         }
 
