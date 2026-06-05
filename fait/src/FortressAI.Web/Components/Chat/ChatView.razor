@@ -1164,17 +1164,14 @@ else
                     var chipText = evt.Content ?? "Working...";
                     var chipIcon = GetChipIconKeyFromToolName(evt.ToolName ?? "chip");
                     Logger.LogInformation("[Chip] Path=bedrock-chip Tool={Tool} ChipIcon={ChipIcon}", evt.ToolName ?? "chip", chipIcon);
-                    var chipAddedAt = DateTime.UtcNow;
-                    var legacyChip = new ToolCallEvent("bedrock", "chip", "calling", chipText, chipAddedAt, chipIcon, Guid.NewGuid());
+                    var legacyChip = new ToolCallEvent("bedrock", "chip", "calling", chipText, DateTime.UtcNow, chipIcon, Guid.NewGuid());
                     _activeToolCalls.Add(legacyChip);
                     await InvokeAsync(StateHasChanged);
                     await ScrollToBottom(); // ADO#4862 — scroll to keep chip visible
 
-                    // ADO#4810,4919 — auto-dismiss legacy chip respecting ToolChipMinDisplayMs from add time
+                    // ADO#4810 — auto-dismiss legacy chip after 2s (fade then remove), same pattern as task_progress
                     var chipId = legacyChip.Id;
-                    var chipElapsed = (DateTime.UtcNow - chipAddedAt).TotalMilliseconds;
-                    var chipDismissDelay = (int)Math.Max(0, ToolChipMinDisplayMs - chipElapsed);
-                    _ = Task.Delay(chipDismissDelay).ContinueWith(async t =>
+                    _ = Task.Delay(2000).ContinueWith(async t =>
                     {
                         if (t.IsFaulted || t.IsCanceled) return;
                         try
