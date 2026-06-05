@@ -62,7 +62,7 @@
 
 @if (IsDev)
 {
-    <div class="fip-dev-banner" @onclick="@(() => _debugDialogOpen = true)" style="cursor: pointer;" title="Click for debug info">⚠ Development Environment</div>
+    <div class="fip-dev-banner" @onclick="OpenDebugDialog" style="cursor: pointer;" title="Click for debug info">⚠ Development Environment</div>
     @if (_debugDialogOpen)
     {
         <MudDialog @bind-IsVisible="_debugDialogOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true })">
@@ -98,6 +98,12 @@
     [Parameter] public bool IsDev { get; set; } = false;
 
     private bool _debugDialogOpen = false;
+
+    private void OpenDebugDialog()
+    {
+        _debugDialogOpen = true;
+        StateHasChanged();
+    }
 
     private bool IsVisible(FipModule module) =>
         module == ActiveModule || HiddenModules == null || !HiddenModules.Contains(module);
