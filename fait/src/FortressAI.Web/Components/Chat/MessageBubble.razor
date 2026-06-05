@@ -44,7 +44,7 @@
             }
             else
             {
-                <p>@Message.Content</p>
+                <p style="white-space: pre-wrap; word-break: break-word; margin: 0;">@Message.Content</p>
             }
         </div>
         @if (!IsStreaming && Message.Role == "assistant" && (Message.TokensIn > 0 || Message.TokensOut > 0))
