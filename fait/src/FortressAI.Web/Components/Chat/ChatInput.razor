@@ -24,10 +24,12 @@
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && !e.ShiftKey)
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey))
         {
             await Send();
         }
+        // Enter alone (no modifier) inserts newline — browser textarea default behavior handles this
+        // ShiftKey + Enter also inserts newline — no special handling needed
     }
 
     private async Task Send()
