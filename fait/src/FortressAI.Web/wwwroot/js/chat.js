@@ -3,12 +3,12 @@ window.fortressChat = {
     _dotNetRef: null,
 
     scrollToBottom: function () {
-        const container = document.getElementById('chat-messages');
-        if (container) {
+        requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-                container.scrollTop = container.scrollHeight;
+                const el = document.getElementById('chat-messages');
+                if (el) el.scrollTop = el.scrollHeight;
             });
-        }
+        });
     },
 
     initScrollListener: function (dotNetRef) {
