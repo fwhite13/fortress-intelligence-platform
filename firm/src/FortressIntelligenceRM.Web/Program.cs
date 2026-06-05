@@ -12,6 +12,7 @@ using Microsoft.Bot.Builder.Integration.AspNet.Core;
 using Amazon.Batch;
 using Amazon.ECS;
 using Amazon.S3;
+using Amazon.Scheduler;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -81,6 +82,8 @@ builder.Services.AddSingleton(branding);
 // Application services
 builder.Services.AddScoped<MeetingService>();
 builder.Services.AddScoped<VpBotService>();
+builder.Services.AddScoped<AutoJoinSchedulerService>();
+builder.Services.AddAWSService<IAmazonScheduler>();
 builder.Services.AddSingleton<S3Service>();
 builder.Services.AddScoped<FirmKbService>();
 builder.Services.AddScoped<CalendarService>();

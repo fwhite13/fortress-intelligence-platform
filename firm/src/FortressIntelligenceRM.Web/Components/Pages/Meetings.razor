@@ -7,6 +7,7 @@
 @inject IDialogService DialogService
 @inject ILogger<Meetings> Logger
 @inject VpBotService VpBotService
+@inject AutoJoinSchedulerService AutoJoinScheduler
 @inject BrandingConfig Branding
 
 @inject CalendarService CalendarService
@@ -518,6 +519,7 @@
         if (startDatetime.HasValue && startDatetime.Value.ToUniversalTime() > DateTime.UtcNow.AddMinutes(5))
         {
             await MeetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
+            await AutoJoinScheduler.CreateScheduleAsync(meeting.Id, meetingUrl, startDatetime.Value.ToUniversalTime());
             Snackbar.Add("Meeting scheduled!", Severity.Success);
         }
         else
@@ -621,6 +623,7 @@
             var (success, error) = await MeetingService.RemoveMeetingAsync(meetingId, Guid.Parse(_userId!));
             if (success)
             {
+                await AutoJoinScheduler.DeleteScheduleAsync(meetingId);
                 await LoadMeetings();
                 Snackbar.Add("Meeting removed.", Severity.Success);
             }
