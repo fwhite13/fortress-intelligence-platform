@@ -3110,7 +3110,11 @@ app.post('/turn', async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
 
     const sendEvent = (data) => {
-        console.log(`[harness] /turn: sendEvent type=${data.type}, contentLen=${data.content?.length ?? 0}, errorMessage=${data.errorMessage ?? ''}`);
+        const payloadLen = data.payload ? data.payload.length : 0;
+        console.log(`[harness] /turn: sendEvent type=${data.type}, contentLen=${data.content?.length ?? 0}, payloadLen=${payloadLen}, errorMessage=${data.errorMessage ?? ''}`);
+        if (data.type === 'task_progress') {
+            console.log('[harness] task_progress emit', { step: data.payload ? JSON.parse(data.payload).step : null, tool: data.payload ? JSON.parse(data.payload).toolName : null, message: data.payload ? JSON.parse(data.payload).message : null, icon: data.payload ? JSON.parse(data.payload).chipIcon : null, payloadLen });
+        }
         res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
 

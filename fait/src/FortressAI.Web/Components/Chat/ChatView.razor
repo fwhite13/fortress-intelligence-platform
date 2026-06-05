@@ -1221,6 +1221,7 @@ else
                             evt.Payload ?? "{}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                         if (progressPayload != null)
                         {
+                            Console.WriteLine($"[ChatView] chip received Step={progressPayload.Step} Tool={progressPayload.ToolName} Message={progressPayload.Message} Icon={progressPayload.ChipIcon}");
                             if (progressPayload.Step == "start")
                             {
                                 _taskModeActive = true; // ADO#4808,4859 — activate indicator immediately on task start
