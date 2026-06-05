@@ -44,7 +44,7 @@
             }
             else
             {
-                <p>@Message.Content</p>
+                <span class="message-user-content">@Message.Content</span>
             }
         </div>
         @if (!IsStreaming && Message.Role == "assistant" && (Message.TokensIn > 0 || Message.TokensOut > 0))
@@ -236,5 +236,11 @@
         height: var(--avatar-size-sm, 28px);
         border-radius: var(--radius-full, 50%);
         object-fit: cover;
+    }
+
+    .message-user-content {
+        white-space: pre-wrap;
+        word-break: break-word;
+        display: block;
     }
 </style>
