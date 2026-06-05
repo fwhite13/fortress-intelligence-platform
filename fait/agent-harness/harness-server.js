@@ -3949,14 +3949,50 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
         let ccFilesUploaded = 0;
         let firstChunkEmitted = false;
         const toolUseMap = new Map(); // track tool_use id → name for tool_result correlation
+        // ADO#4926 — keepalive chip: rotate labels, fire if silence > 8s
+        const KEEPALIVE_LABELS = ["Thinking...", "Still working...", "Just a bit longer...", "Analyzing...", "One moment..."];
+        let keepaliveLabelIdx = 0;
+        let lastProgressAt = Date.now();
+        let keepaliveInterval = null;
+
+        const keepaliveStart = () => {
+            if (keepaliveInterval) return;
+            keepaliveInterval = setInterval(() => {
+                if (Date.now() - lastProgressAt > 8000) {
+                    const label = KEEPALIVE_LABELS[keepaliveLabelIdx % KEEPALIVE_LABELS.length];
+                    keepaliveLabelIdx++;
+                    sendEvent({ type: 'task_progress', payload: JSON.stringify({
+                        step: 'keepalive',
+                        toolName: 'agent',
+                        status: 'calling',
+                        message: label,
+                        chipIcon: 'sync',
+                        isFinal: false
+                    }) });
+                    lastProgressAt = Date.now();
+                    console.log(`[CC spawn] keepalive chip emitted: "${label}" userId=${userId}`);
+                }
+            }, 8000);
+        };
+
+        const keepaliveStop = () => {
+            if (keepaliveInterval) {
+                clearInterval(keepaliveInterval);
+                keepaliveInterval = null;
+            }
+        };
+
         ccProcess.stdout.on('data', (chunk) => {
             // ADO#4799 — chip 4: first CC stdout — agent working
             if (!firstChunkEmitted) {
                 firstChunkEmitted = true;
+                keepaliveStart(); // ADO#4926 — start keepalive timer on first CC stdout
                 const folderDisplayName = folder?.name || folder?.id || '';
                 const workingChipText = folderDisplayName ? `Working in /${folderDisplayName}...` : 'Agent working...';
                 sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: workingChipText, chipIcon: 'task' }) });
             }
+            // ADO#4926 — reset progress timer on any stdout activity
+            lastProgressAt = Date.now();
             console.log(`[CC spawn] stdout chunk bytes=${chunk.length} userId=${userId}`);
             ccStdoutBuffer += chunk.toString();
             const lines = ccStdoutBuffer.split('\n');
@@ -3985,6 +4021,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                             console.log(`[CC spawn] tool_use: ${block.name}(${inputSummary}) userId=${userId}`);
                             const label = resolveProgressLabel(block.name, block.input);
                             sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: label, chipIcon: resolveProgressIcon(block.name) }) });
+                            lastProgressAt = Date.now(); // ADO#4926 — reset keepalive timer
                         }
                     }
                 } else if (evtType === 'user' && Array.isArray(parsed.message?.content)) {
@@ -4000,6 +4037,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                                 step: 'tool_result', toolName, status: 'done', message: chipLabel,
                                 chipIcon: resolveProgressIcon(toolName)
                             }) });
+                            lastProgressAt = Date.now(); // ADO#4926 — reset keepalive timer
                         }
                     }
                 } else if (evtType === 'result') {
@@ -4023,6 +4061,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
         });
         ccProcess.on('close', async (code) => {
             clearTimeout(timeout);
+            keepaliveStop(); // ADO#4926 — stop keepalive on process close
             toolUseMap.clear();
             // ADO#3289 — log exit code and silent-exit warning
             console.log(`[CC spawn] process exited code=${code} userId=${userId} ccTextEmitted=${ccTextEmitted}`);
@@ -4167,7 +4206,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                 endResponse({ type: 'done', exitCode: code });
             }
         });
-        ccProcess.on('error', (err) => { clearTimeout(timeout); endResponse({ type: 'error', errorMessage: scrubSecrets(err.message) }); });
+        ccProcess.on('error', (err) => { clearTimeout(timeout); keepaliveStop(); endResponse({ type: 'error', errorMessage: scrubSecrets(err.message) }); });
     } else {
         // ── Bedrock ConverseStream path ───────────────────────────────────
         console.log(`[harness] /turn: taskMode=false — entering Bedrock ConverseStream path for userId=${userId}`);
