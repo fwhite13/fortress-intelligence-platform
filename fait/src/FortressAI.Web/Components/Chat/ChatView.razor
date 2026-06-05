@@ -1336,8 +1336,13 @@ else
                         }
                         else
                         {
-                            // Dialog cancelled — disable task mode (equivalent to task_hold)
+                            // ADO#4925: Dialog cancelled — clear all task mode state cleanly
+                            Logger.LogInformation("[ChatView] ADO#4925: Folder picker cancelled — resetting task mode state userId={UserId}", Session.UserId);
                             _taskMode = false;
+                            _taskModeActive = false;
+                            _ccTaskActive = false;
+                            _pendingTaskMessage = "";
+                            _activeToolCalls.Clear();
                             await InvokeAsync(StateHasChanged);
                         }
                     }
