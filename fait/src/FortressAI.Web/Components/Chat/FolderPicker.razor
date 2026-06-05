@@ -72,6 +72,9 @@
         }
     </DialogContent>
     <DialogActions>
+        <MudButton OnClick="HandleCancel"
+                   Disabled="@(_submitting)"
+                   Class="folder-picker__cancel-btn">Cancel</MudButton>
         <MudButton Variant="Variant.Filled" Color="Color.Primary"
                    OnClick="OnStartTask"
                    Disabled="@(_submitting || _confirming)"
@@ -301,6 +304,11 @@
             _confirming = false;  // allow retry (ADO#3566)
             StateHasChanged();
         }
+    }
+
+    private void HandleCancel()
+    {
+        MudDialog.Cancel();
     }
 
     public record FolderConfirmedArgs(string? FolderId, string? FolderName, string[] ReadOnlyFolderIds);

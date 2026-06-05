@@ -1345,8 +1345,13 @@ else
                         }
                         else
                         {
-                            // Dialog cancelled — disable task mode (equivalent to task_hold)
+                            // Dialog cancelled — clear ALL task state
                             _taskMode = false;
+                            _taskModeActive = false;
+                            _ccTaskActive = false;
+                            _pendingTaskMessage = "";
+                            _activeToolCalls.Clear();
+                            Logger.LogInformation("[ChatView] FolderPicker cancelled — task state cleared");
                             await InvokeAsync(StateHasChanged);
                         }
                     }
