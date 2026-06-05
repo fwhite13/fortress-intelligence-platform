@@ -220,6 +220,16 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+// Forwarded headers — required behind ALB so scheme/host are correct (fixes http:// redirect loop)
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                     | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto,
+};
+forwardedHeadersOptions.KnownNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
+
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
@@ -229,8 +239,8 @@ app.UseAntiforgery();
 // Redirect unauthenticated users to FAIT for login — pass returnUrl so FAIT can redirect back
 app.MapGet("/auth/redirect-to-login", (HttpContext ctx, IConfiguration config) =>
 {
-    var fipUrl = config["FIP__LoginUrl"]?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
-    var firmCallbackUrl = config["FIP__FirmCallbackUrl"]?.TrimEnd('/')
+    var fipUrl = config["FIP:LoginUrl"]?.TrimEnd('/') ?? "https://fip.dev.fortressam.ai";
+    var firmCallbackUrl = config["FIP:FirmCallbackUrl"]?.TrimEnd('/')
         ?? "https://firm.dev.fortressam.ai/auth/firm-session";
     var redirectUrl = $"{fipUrl}/auth/firm-callback?returnUrl={Uri.EscapeDataString(firmCallbackUrl)}";
     return Results.Redirect(redirectUrl);
