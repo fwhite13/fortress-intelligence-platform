@@ -6,7 +6,9 @@ window.fortressChat = {
         const container = document.getElementById('chat-messages');
         if (container) {
             requestAnimationFrame(() => {
-                container.scrollTop = container.scrollHeight;
+                requestAnimationFrame(() => {
+                    container.scrollTop = container.scrollHeight;
+                });
             });
         }
     },
