@@ -306,9 +306,9 @@
         }
     }
 
-    private void HandleCancel()
+    private async Task HandleCancel()
     {
-        MudDialog.Cancel();
+        await InvokeAsync(() => MudDialog.Cancel());
     }
 
     public record FolderConfirmedArgs(string? FolderId, string? FolderName, string[] ReadOnlyFolderIds);

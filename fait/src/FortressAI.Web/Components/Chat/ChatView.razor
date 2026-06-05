@@ -1352,6 +1352,7 @@ else
                             _pendingTaskMessage = "";
                             _activeToolCalls.Clear();
                             Logger.LogInformation("[ChatView] FolderPicker cancelled — task state cleared");
+                            try { dialog.Close(DialogResult.Cancel()); } catch (Exception) { /* already closed */ }
                             await InvokeAsync(StateHasChanged);
                         }
                     }
