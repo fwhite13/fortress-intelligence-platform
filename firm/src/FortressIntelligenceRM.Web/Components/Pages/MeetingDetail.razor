@@ -9,6 +9,7 @@
 @inject IJSRuntime JS
 @inject IConfiguration Configuration
 @inject IMindmapService MindmapService
+@inject BrandingConfig Branding
 @inject IFaitV2IntegrationService FaitV2Service
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
@@ -16,7 +17,7 @@
 @using System.Text.Json
 @using System.Text.Json.Serialization
 
-<PageTitle>@(_meeting?.Title ?? "Meeting") — FIRM</PageTitle>
+<PageTitle>@(_meeting?.Title ?? "Meeting") — @Branding.ModuleName</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-6">
     <MudButton StartIcon="@Icons.Material.Filled.ArrowBack"

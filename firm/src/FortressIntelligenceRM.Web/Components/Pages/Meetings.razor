@@ -7,6 +7,7 @@
 @inject IDialogService DialogService
 @inject ILogger<Meetings> Logger
 @inject VpBotService VpBotService
+@inject BrandingConfig Branding
 
 @inject CalendarService CalendarService
 @inject IJSRuntime JS
@@ -16,7 +17,7 @@
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
 
-<PageTitle>Meetings — FIRM</PageTitle>
+<PageTitle>Meetings — @Branding.ModuleName</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-6">
     <MudStack Row AlignItems="AlignItems.Center" Class="mb-6">

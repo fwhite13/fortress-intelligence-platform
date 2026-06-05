@@ -36,7 +36,8 @@
                    UserEmail="@_userEmail"
                    OnMenuClick="ToggleDrawer"
                    OnSignOut="@(() => _nav.NavigateTo("/auth/logout", forceLoad: true))"
-                   IsDev="@HostEnv.IsDevelopment()" />
+                   IsDev="@HostEnv.IsDevelopment()"
+                   WaffleOverride="@(Branding.SuiteName == "RISE" ? RiseWaffleItems() : null)" />
 
     <MudDrawer @bind-Open="_drawerOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Md" ClipMode="DrawerClipMode.Always" Elevation="2">
         <div style="display: flex; flex-direction: column; height: 100%;">
@@ -101,6 +102,22 @@
             }
         }
     }
+
+    private RenderFragment RiseWaffleItems() =>
+        @<text>
+            <MudMenuItem Href="@Branding.PortalUrl">
+                <div class="fip-waffle-item">
+                    <MudText Typo="Typo.body1">RN</MudText>
+                    <MudText Typo="Typo.caption" Class="fip-waffle-sublabel">Refuge Notetaker</MudText>
+                </div>
+            </MudMenuItem>
+            <MudMenuItem Href="https://rooms.refugems.ai">
+                <div class="fip-waffle-item">
+                    <MudText Typo="Typo.body1">CR</MudText>
+                    <MudText Typo="Typo.caption" Class="fip-waffle-sublabel">Conference Room Scheduler</MudText>
+                </div>
+            </MudMenuItem>
+        </text>;
 
     private void ToggleDrawer()
     {

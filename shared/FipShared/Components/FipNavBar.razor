@@ -28,16 +28,23 @@
                  AnchorOrigin="Origin.BottomRight"
                  TransformOrigin="Origin.TopRight"
                  aria-label="Switch app">
-            @foreach (var module in Enum.GetValues<FipModule>())
+            @if (WaffleOverride != null)
             {
-                if (IsVisible(module))
+                @WaffleOverride
+            }
+            else
+            {
+                @foreach (var module in Enum.GetValues<FipModule>())
                 {
-                    <MudMenuItem Href="@module.Url()">
-                        <div class="fip-waffle-item">
-                            <MudText Typo="Typo.body1">@module.ShortName()</MudText>
-                            <MudText Typo="Typo.caption" Class="fip-waffle-sublabel">@module.FullName()</MudText>
-                        </div>
-                    </MudMenuItem>
+                    if (IsVisible(module))
+                    {
+                        <MudMenuItem Href="@module.Url()">
+                            <div class="fip-waffle-item">
+                                <MudText Typo="Typo.body1">@module.ShortName()</MudText>
+                                <MudText Typo="Typo.caption" Class="fip-waffle-sublabel">@module.FullName()</MudText>
+                            </div>
+                        </MudMenuItem>
+                    }
                 }
             }
         </MudMenu>
@@ -93,6 +100,7 @@
     [Parameter] public string UserName { get; set; } = string.Empty;
     [Parameter] public string UserEmail { get; set; } = string.Empty;
     [Parameter] public IEnumerable<FipModule>? HiddenModules { get; set; }
+    [Parameter] public RenderFragment? WaffleOverride { get; set; }
     [Parameter] public EventCallback OnMenuClick { get; set; }
     [Parameter] public EventCallback OnSignOut { get; set; }
     [Parameter] public bool IsDev { get; set; } = false;
