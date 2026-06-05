@@ -3934,21 +3934,6 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
         ccProcess.stdin.end();
         // ADO#4799 — chip 3: brief delivered
         sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'document', status: 'calling', message: 'Task brief delivered', chipIcon: 'document' }) });
-        // ADO#4926 — keepalive chip: emit periodic "Thinking..." chip during silent gaps > 8s
-        const KEEPALIVE_LABELS = ['Thinking...', 'Still working...', 'Just a bit longer...', 'Cogitating...', 'Ruminating...'];
-        let keepaliveIndex = 0;
-        let lastProgressAt = Date.now();
-        const keepaliveInterval = setInterval(() => {
-            if (Date.now() - lastProgressAt >= 8000) {
-                const label = KEEPALIVE_LABELS[keepaliveIndex % KEEPALIVE_LABELS.length];
-                keepaliveIndex++;
-                console.log(`[CC spawn] [ADO#4926] keepalive chip: "${label}" gap=${Date.now() - lastProgressAt}ms userId=${userId}`);
-                sendEvent({ type: 'task_progress', payload: JSON.stringify({
-                    step: 'tool_use', toolName: 'agent', status: 'calling', message: label, chipIcon: 'sync'
-                }) });
-                lastProgressAt = Date.now();
-            }
-        }, 8000);
         const TURN_TIMEOUT_MS = parseInt(process.env.CC_TIMEOUT_MS || '300000', 10);
         const timeout = setTimeout(() => {
             ccProcess.kill('SIGTERM');
@@ -3967,7 +3952,6 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                 const folderDisplayName = folder?.name || folder?.id || '';
                 const workingChipText = folderDisplayName ? `Working in /${folderDisplayName}...` : 'Agent working...';
                 sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'agent', status: 'calling', message: workingChipText, chipIcon: 'task' }) });
-                lastProgressAt = Date.now();
             }
             console.log(`[CC spawn] stdout chunk bytes=${chunk.length} userId=${userId}`);
             ccStdoutBuffer += chunk.toString();
@@ -3997,7 +3981,6 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                             console.log(`[CC spawn] tool_use: ${block.name}(${inputSummary}) userId=${userId}`);
                             const label = resolveProgressLabel(block.name, block.input);
                             sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: label, chipIcon: resolveProgressIcon(block.name) }) });
-                            lastProgressAt = Date.now();
                         }
                     }
                 } else if (evtType === 'user' && Array.isArray(parsed.message?.content)) {
@@ -4013,7 +3996,6 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                                 step: 'tool_result', toolName, status: 'done', message: chipLabel,
                                 chipIcon: resolveProgressIcon(toolName)
                             }) });
-                            lastProgressAt = Date.now();
                         }
                     }
                 } else if (evtType === 'result') {
@@ -4037,7 +4019,6 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
         });
         ccProcess.on('close', async (code) => {
             clearTimeout(timeout);
-            clearInterval(keepaliveInterval); // ADO#4926: stop keepalive on process exit
             toolUseMap.clear();
             // ADO#3289 — log exit code and silent-exit warning
             console.log(`[CC spawn] process exited code=${code} userId=${userId} ccTextEmitted=${ccTextEmitted}`);
@@ -4182,7 +4163,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                 endResponse({ type: 'done', exitCode: code });
             }
         });
-        ccProcess.on('error', (err) => { clearTimeout(timeout); clearInterval(keepaliveInterval); endResponse({ type: 'error', errorMessage: scrubSecrets(err.message) }); });
+        ccProcess.on('error', (err) => { clearTimeout(timeout); endResponse({ type: 'error', errorMessage: scrubSecrets(err.message) }); });
     } else {
         // ── Bedrock ConverseStream path ───────────────────────────────────
         console.log(`[harness] /turn: taskMode=false — entering Bedrock ConverseStream path for userId=${userId}`);
