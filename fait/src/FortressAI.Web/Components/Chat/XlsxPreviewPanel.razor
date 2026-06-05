@@ -2,7 +2,6 @@
 @inject UserSessionService Session
 @inject IJSRuntime JSRuntime
 @inject IHttpClientFactory HttpClientFactory
-@inject NavigationManager NavManager
 @using FortressAI.Web.Services
 @implements IDisposable
 
@@ -106,11 +105,10 @@
 
             var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
             var relativeUrl = $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
-            var absoluteUrl = NavManager.ToAbsoluteUri(relativeUrl).ToString();
-            Console.WriteLine($"[XlsxPreview] LoadAndRenderAsync: url={absoluteUrl}");
-            using var http = HttpClientFactory.CreateClient();
-            using var response = await http.GetAsync(absoluteUrl);
-            Console.WriteLine($"[XlsxPreview] HTTP {(int)response.StatusCode} {response.StatusCode} for {absoluteUrl}");
+            Console.WriteLine($"[XlsxPreview] LoadAndRenderAsync: url={relativeUrl}");
+            using var http = HttpClientFactory.CreateClient("InternalPreview");
+            using var response = await http.GetAsync(relativeUrl);
+            Console.WriteLine($"[XlsxPreview] HTTP {(int)response.StatusCode} {response.StatusCode} for {relativeUrl}");
             if (!response.IsSuccessStatusCode)
             {
                 _error = $"Preview failed ({(int)response.StatusCode}). Try downloading.";
