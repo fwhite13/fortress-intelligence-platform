@@ -62,7 +62,7 @@
 
 @if (IsDev)
 {
-    <div class="fip-dev-banner" @onclick="OpenDebugDialog" @onclick:stopPropagation="true" style="cursor: pointer;" title="Click for debug info">⚠ Development Environment</div>
+    <div class="fip-dev-banner" @onclick="OpenDebugDialog" style="cursor: pointer;" title="Click for debug info">⚠ Development Environment</div>
     @if (_debugDialogOpen)
     {
         <MudDialog @bind-IsVisible="_debugDialogOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true })">
