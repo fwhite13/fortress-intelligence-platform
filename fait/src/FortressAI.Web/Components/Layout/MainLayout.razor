@@ -209,16 +209,6 @@
         Nav.NavigateTo("/auth/logout", forceLoad: true);
     }
 
-    private async Task OpenDevInfoDialog()
-    {
-        await DialogService.ShowAsync<DevInfoDialog>("Dev Environment Info", new DialogOptions
-        {
-            CloseOnEscapeKey = true,
-            CloseButton = true,
-            MaxWidth = MaxWidth.Small
-        });
-    }
-
     public void Dispose()
     {
         Session.OnAuthStateChanged -= StateHasChanged;
