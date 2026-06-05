@@ -1625,7 +1625,7 @@ else
 
     private async Task HandleInputKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && !e.ShiftKey)
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey))
         {
             await HandleSendFromInput();
         }

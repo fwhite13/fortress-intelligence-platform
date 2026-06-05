@@ -3940,6 +3940,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
         sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'document', status: 'calling', message: 'Task brief delivered', chipIcon: 'document' }) });
         const TURN_TIMEOUT_MS = parseInt(process.env.CC_TIMEOUT_MS || '300000', 10);
         const timeout = setTimeout(() => {
+            keepaliveStop(); // ADO#4926 — stop keepalive before closing response
             ccProcess.kill('SIGTERM');
             endResponse({ type: 'error', errorMessage: 'Turn timed out after 5 minutes' });
         }, TURN_TIMEOUT_MS);
