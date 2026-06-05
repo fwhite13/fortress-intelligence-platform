@@ -2,7 +2,6 @@
 @inject UserSessionService Session
 @inject IJSRuntime JSRuntime
 @inject IHttpClientFactory HttpClientFactory
-@inject NavigationManager NavManager
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
 @implements IDisposable
@@ -90,11 +89,10 @@
             }
             var (token, expires) = PreviewSvc.GenerateToken(Artifact.Id, userId);
             var relativeUrl = $"/api/artifacts/{Artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
-            var absoluteUrl = NavManager.ToAbsoluteUri(relativeUrl).ToString();
-            Console.WriteLine($"[DocxPreview] FetchBytesAsync: token generated, url={absoluteUrl}");
-            using var http = HttpClientFactory.CreateClient();
-            using var response = await http.GetAsync(absoluteUrl);
-            Console.WriteLine($"[DocxPreview] HTTP {(int)response.StatusCode} {response.StatusCode} for {absoluteUrl}");
+            Console.WriteLine($"[DocxPreview] FetchBytesAsync: token generated, url={relativeUrl}");
+            using var http = HttpClientFactory.CreateClient("InternalPreview");
+            using var response = await http.GetAsync(relativeUrl);
+            Console.WriteLine($"[DocxPreview] HTTP {(int)response.StatusCode} {response.StatusCode} for {relativeUrl}");
             if (!response.IsSuccessStatusCode)
             {
                 _error = $"Preview failed ({(int)response.StatusCode}). Try downloading.";
