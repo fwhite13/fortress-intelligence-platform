@@ -37,23 +37,23 @@ FIRM has its own CodeBuild project (`firm-web-build`) — or deploy manually via
 
 ### Tasks
 
-- [ ] **S1-1** Inspect current `SharePanel.razor` — locate KB section and Teams section blocks
-- [ ] **S1-2** Inspect current `MeetingDetail.razor` — locate `CanSendToFaitV2` block and SharePanel usage
-- [ ] **S1-3** Add `ShowKbSection` + `ShowTeamsPost` params to `SharePanel.razor`; wrap each section in `@if`
-- [ ] **S1-4** In `MeetingDetail.razor`: remove `CanSendToFaitV2` block; update `<SharePanel>` call with flags:
+- [x] **S1-1** Inspect current `SharePanel.razor` — locate KB section and Teams section blocks
+- [x] **S1-2** Inspect current `MeetingDetail.razor` — locate `CanSendToFaitV2` block and SharePanel usage
+- [x] **S1-3** Add `ShowKbSection` + `ShowTeamsPost` params to `SharePanel.razor`; wrap each section in `@if`
+- [x] **S1-4** In `MeetingDetail.razor`: remove `CanSendToFaitV2` block; update `<SharePanel>` call with flags:
   ```razor
   <SharePanel MeetingId="@_meeting.Id"
               ShowKbSection="@(Branding.SuiteName != "RISE")"
               ShowTeamsPost="false" />
   ```
   If both flags are false (RN), suppress the outer `MudPaper` wrapper entirely.
-- [ ] **S1-5** Local build verify — `dotnet build` passes clean
-- [ ] **S1-6** Commit + push to main → triggers RN CodeBuild automatically
-- [ ] **S1-7** Trigger FIRM CodeBuild (or manual task def update) → deploy to FIRM
+- [x] **S1-5** Local build verify — `dotnet build` passes clean
+- [x] **S1-6** Commit + push to main → triggers RN CodeBuild automatically
+- [x] **S1-7** Trigger FIRM CodeBuild (or manual task def update) → deploy to FIRM
 - [ ] **S1-8** Verify FIRM: MeetingDetail shows KB section, no Teams, no FAIT button
 - [ ] **S1-9** Verify RN: MeetingDetail shows neither KB, Teams, nor FAIT button
 
-**Status:** ⬜ Not started
+**Status:** 🔄 Builds deploying — RN: rn-web-build:c69074a1 | FIRM: fip-firm-build:ec09c00e
 
 ---
 
