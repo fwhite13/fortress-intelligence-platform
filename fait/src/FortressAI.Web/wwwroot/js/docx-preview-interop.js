@@ -1,10 +1,12 @@
 window.docxPreviewInterop = {
     render: async function (base64, containerId) {
+        console.log('[docxPreview] render called containerId=', containerId);
         const container = document.getElementById(containerId);
         if (!container) {
             console.error('[docxPreview] Container not found:', containerId);
             return;
         }
+        console.log('[docxPreview] container element found, rendering...');
         try {
             // Blazor Server passes byte[] as base64 string via JSInterop
             const binary = atob(base64);

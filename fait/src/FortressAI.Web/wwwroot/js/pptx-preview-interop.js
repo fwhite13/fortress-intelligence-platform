@@ -4,6 +4,7 @@ window.pptxPreviewInterop = {
     _currentPage: 1,
 
     render: async function(base64, containerId) {
+        console.log('[pptxPreview] render called containerId=', containerId);
         function base64ToUint8Array(b64) {
             const binary = atob(b64);
             const bytes = new Uint8Array(binary.length);
@@ -31,7 +32,10 @@ window.pptxPreviewInterop = {
 
     _renderPage: async function(containerId, pageNum) {
         const container = document.getElementById(containerId);
-        if (!container) return;
+        if (!container) {
+            console.error('[pptxPreview] Container not found:', containerId);
+            return;
+        }
         const page = await this._pdfDoc.getPage(pageNum);
         const viewport = page.getViewport({ scale: 1.5 });
         let canvas = container.querySelector('canvas');

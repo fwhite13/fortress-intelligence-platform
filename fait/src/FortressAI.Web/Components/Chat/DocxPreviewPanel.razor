@@ -33,7 +33,6 @@
 
     private bool _loading = true;
     private string? _error;
-    private byte[]? _pendingBytes;
     private string _containerId = $"docx-{Guid.NewGuid():N}";
 
     protected override void OnInitialized()
@@ -46,11 +45,7 @@
         // Session just populated — if we haven't loaded yet, kick off the fetch
         if (_loading && Session.UserId != Guid.Empty)
         {
-            InvokeAsync(async () =>
-            {
-                await FetchBytesAsync();
-                StateHasChanged();
-            });
+            InvokeAsync(FetchBytesAsync);
         }
     }
 
@@ -59,16 +54,6 @@
         if (firstRender)
         {
             await FetchBytesAsync();
-            return;
-        }
-
-        // Second pass: bytes are ready and container div is now in DOM
-        if (_pendingBytes != null)
-        {
-            var bytes = _pendingBytes;
-            _pendingBytes = null;
-            var base64 = Convert.ToBase64String(bytes);
-            await JSRuntime.InvokeVoidAsync("docxPreviewInterop.render", base64, _containerId);
         }
     }
 
@@ -76,6 +61,7 @@
     {
         try
         {
+            Console.WriteLine($"[preview][docx] FetchBytesAsync start: ArtifactId={Artifact.Id} UserId={Session.UserId}");
             var userId = Session.UserId;
             if (userId == Guid.Empty)
             {
@@ -86,12 +72,16 @@
             var relativeUrl = $"/api/artifacts/{Artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
             var absoluteUrl = NavManager.ToAbsoluteUri(relativeUrl).ToString();
             using var http = HttpClientFactory.CreateClient();
-            _pendingBytes = await http.GetByteArrayAsync(absoluteUrl);
+            var bytes = await http.GetByteArrayAsync(absoluteUrl);
             _loading = false;
-            StateHasChanged(); // triggers second OnAfterRenderAsync pass
+            StateHasChanged();
+            await Task.Yield(); // let DOM re-render so container div is present before JS call
+            var base64 = Convert.ToBase64String(bytes);
+            await JSRuntime.InvokeVoidAsync("docxPreviewInterop.render", base64, _containerId);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"[preview][docx] FetchBytesAsync failed: {ex.Message}");
             _error = "Failed to load document preview. Try downloading the file.";
             _loading = false;
             StateHasChanged();

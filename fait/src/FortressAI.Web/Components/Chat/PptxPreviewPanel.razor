@@ -67,7 +67,6 @@
 
     private bool _loading = true;
     private string? _error;
-    private byte[]? _pendingBytes;
     private string _containerId = $"pptx-{Guid.NewGuid():N}";
     private int _currentPage = 1;
     private int _totalPages = 0;
@@ -100,16 +99,6 @@
         if (firstRender)
         {
             await FetchAndConvertAsync();
-            return;
-        }
-
-        if (_pendingBytes != null)
-        {
-            var bytes = _pendingBytes;
-            _pendingBytes = null;
-            var base64 = Convert.ToBase64String(bytes);
-            _totalPages = await JSRuntime.InvokeAsync<int>("pptxPreviewInterop.render", base64, _containerId);
-            StateHasChanged();
         }
     }
 
@@ -117,7 +106,7 @@
     {
         try
         {
-            Console.WriteLine($"[preview] [pptx] Starting fetch/convert for artifact {ArtifactId}, S3Key={S3Key}");
+            Console.WriteLine($"[preview][pptx] FetchAndConvertAsync start: ArtifactId={ArtifactId} S3Key={S3Key} UserId={Session.UserId}");
             var userId = Session.UserId;
             if (userId == Guid.Empty)
             {
@@ -144,12 +133,16 @@
 
             // ADO#4863 — Direct S3 fetch (avoid hairpin NAT issue with internal→ALB→internal)
             var bucket = Configuration["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
-            Console.WriteLine($"[pptx-preview] ADO#4863: direct S3 fetch bucket={bucket} key={previewS3Key} userId={userId}");
+            Console.WriteLine($"[preview][pptx] ADO#4863: direct S3 fetch bucket={bucket} key={previewS3Key} userId={userId}");
             using var s3Resp = await S3Client.GetObjectAsync(bucket, previewS3Key);
             using var ms = new System.IO.MemoryStream();
             await s3Resp.ResponseStream.CopyToAsync(ms);
-            _pendingBytes = ms.ToArray();
+            var bytes = ms.ToArray();
             _loading = false;
+            StateHasChanged();
+            await Task.Yield(); // let DOM re-render so container div is present before JS call
+            var base64 = Convert.ToBase64String(bytes);
+            _totalPages = await JSRuntime.InvokeAsync<int>("pptxPreviewInterop.render", base64, _containerId);
             StateHasChanged();
         }
         catch (Amazon.S3.AmazonS3Exception s3Ex)
