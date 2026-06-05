@@ -1171,11 +1171,15 @@ else
 
                     // ADO#4810 — auto-dismiss legacy chip after 2s (fade then remove), same pattern as task_progress
                     var chipId = legacyChip.Id;
-                    _ = Task.Delay(2000).ContinueWith(async t =>
+                    var chipAddedAt = legacyChip.Timestamp;
+                    _ = Task.Run(async () =>
                     {
-                        if (t.IsFaulted || t.IsCanceled) return;
                         try
                         {
+                            var elapsed = (DateTime.UtcNow - chipAddedAt).TotalMilliseconds;
+                            var remaining = ToolChipMinDisplayMs - (int)elapsed;
+                            if (remaining > 0) await Task.Delay(remaining);
+                            else await Task.Delay(200);
                             await InvokeAsync(() =>
                             {
                                 var idx = _activeToolCalls.FindIndex(c => c.Id == chipId);
@@ -1185,7 +1189,7 @@ else
                                     StateHasChanged();
                                 }
                             });
-                            await Task.Delay(500); // ADO#4861 — 500ms covers fade (200ms) + height collapse (300ms + 200ms delay)
+                            await Task.Delay(500);
                             await InvokeAsync(() =>
                             {
                                 _activeToolCalls.RemoveAll(c => c.Id == chipId);
@@ -1194,7 +1198,7 @@ else
                         }
                         catch (ObjectDisposedException) { }
                         catch (TaskCanceledException) { }
-                    }, TaskScheduler.Default);
+                    });
                 }
                 else if (evt.Type == "tool_call")
                 {
@@ -1258,12 +1262,15 @@ else
                             if (!isFinal)
                             {
                                 var chipId = newChip.Id;
-                                var cts = streamingCts; // capture reference before async gap
-                                _ = Task.Delay(2000).ContinueWith(async t =>
+                                var chipAddedAt2 = newChip.Timestamp;
+                                _ = Task.Run(async () =>
                                 {
-                                    if (t.IsFaulted || t.IsCanceled) return;
                                     try
                                     {
+                                        var elapsed2 = (DateTime.UtcNow - chipAddedAt2).TotalMilliseconds;
+                                        var remaining2 = ToolChipMinDisplayMs - (int)elapsed2;
+                                        if (remaining2 > 0) await Task.Delay(remaining2);
+                                        else await Task.Delay(200);
                                         await InvokeAsync(() =>
                                         {
                                             var idx = _activeToolCalls.FindIndex(c => c.Id == chipId);
@@ -1273,7 +1280,7 @@ else
                                                 StateHasChanged();
                                             }
                                         });
-                                        await Task.Delay(500); // ADO#4861 — 500ms covers fade (200ms) + height collapse (300ms + 200ms delay)
+                                        await Task.Delay(500);
                                         await InvokeAsync(() =>
                                         {
                                             _activeToolCalls.RemoveAll(c => c.Id == chipId);
@@ -1282,7 +1289,7 @@ else
                                     }
                                     catch (ObjectDisposedException) { }
                                     catch (TaskCanceledException) { }
-                                }, TaskScheduler.Default);
+                                });
                             }
                         }
                     }
