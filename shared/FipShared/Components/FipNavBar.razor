@@ -2,10 +2,12 @@
 @using MudBlazor
 @using Microsoft.AspNetCore.Hosting
 @using Microsoft.Extensions.Configuration
+@using Microsoft.Extensions.Logging
 @namespace FipShared.Components
 @inject IWebHostEnvironment HostEnv
 @inject IConfiguration Configuration
 @inject IDialogService DialogService
+@inject ILogger<FipNavBar> Logger
 
 <div class="fip-navbar">
     <div class="fip-navbar__left">
@@ -70,7 +72,7 @@
 
 @if (IsDev)
 {
-    <div class="fip-dev-banner" @onclick="async () => await OpenDebugDialog()" @onclick:stopPropagation="true" style="cursor: pointer;" title="Click for debug info">⚠ Development Environment</div>
+    <MudButton Variant="Variant.Text" Class="fip-dev-banner" OnClick="OpenDebugDialog" Style="cursor:pointer;width:100%;text-transform:none;" title="Click for debug info">⚠ Development Environment</MudButton>
 }
 
 @code {
@@ -87,7 +89,7 @@
 
     private async Task OpenDebugDialog()
     {
-        Console.WriteLine("[FipNavBar] OpenDebugDialog() called");
+        Logger.LogInformation("[FipNavBar] OpenDebugDialog() called");
         try
         {
             await DialogService.ShowAsync<DevInfoDialog>("Dev Environment Info", new DialogOptions
@@ -97,22 +99,22 @@
                 CloseOnEscapeKey = true,
                 CloseButton = true
             });
-            Console.WriteLine("[FipNavBar] OpenDebugDialog() ShowAsync returned");
+            Logger.LogInformation("[FipNavBar] OpenDebugDialog() ShowAsync returned");
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[FipNavBar] OpenDebugDialog() EXCEPTION: {ex}");
+            Logger.LogError(ex, "[FipNavBar] OpenDebugDialog() EXCEPTION");
         }
     }
 
     protected override void OnInitialized()
     {
-        Console.WriteLine($"[FipNavBar] OnInitialized: IsDev={IsDev}");
+        Logger.LogDebug("[FipNavBar] OnInitialized: IsDev={IsDev}", IsDev);
     }
 
     protected override void OnParametersSet()
     {
-        Console.WriteLine($"[FipNavBar] OnParametersSet: IsDev={IsDev}");
+        Logger.LogDebug("[FipNavBar] OnParametersSet: IsDev={IsDev}", IsDev);
     }
 
     private bool IsVisible(FipModule module) =>
