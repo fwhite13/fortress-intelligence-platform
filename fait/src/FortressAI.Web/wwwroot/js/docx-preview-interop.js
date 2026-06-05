@@ -1,5 +1,6 @@
 window.docxPreviewInterop = {
     render: async function (base64, containerId) {
+        console.log('[docxPreview] render: typeof docx=', typeof docx, 'containerId=', containerId);
         const container = document.getElementById(containerId);
         console.log('[docx-preview] render called, containerId=', containerId, 'base64 length=', base64 ? base64.length : 0);
         if (!container) {

@@ -5,6 +5,7 @@
 @namespace FipShared.Components
 @inject IWebHostEnvironment HostEnv
 @inject IConfiguration Configuration
+@inject IDialogService DialogService
 
 <div class="fip-navbar">
     <div class="fip-navbar__left">
@@ -69,28 +70,7 @@
 
 @if (IsDev)
 {
-    <div class="fip-dev-banner" @onclick="OpenDebugDialog" @onclick:stopPropagation="true" style="cursor: pointer;" title="Click for debug info">⚠ Development Environment</div>
-    @if (_debugDialogOpen)
-    {
-        <MudDialog @bind-IsVisible="_debugDialogOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseOnEscapeKey = true, CloseButton = true })">
-            <TitleContent><MudText Typo="Typo.h6">Dev Environment Info</MudText></TitleContent>
-            <DialogContent>
-                <MudStack Spacing="2">
-                    <div>
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">Environment</MudText>
-                        <MudText Typo="Typo.body2" Style="font-family: monospace;">@(HostEnv.EnvironmentName)</MudText>
-                    </div>
-                    <div>
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">Version</MudText>
-                        <MudText Typo="Typo.body2" Style="font-family: monospace;">@(Configuration["BUILD_VERSION"] ?? Configuration["ASPNETCORE_ENVIRONMENT"] ?? "dev")</MudText>
-                    </div>
-                </MudStack>
-            </DialogContent>
-            <DialogActions>
-                <MudButton OnClick="@(() => _debugDialogOpen = false)" Color="Color.Primary">Close</MudButton>
-            </DialogActions>
-        </MudDialog>
-    }
+    <div class="fip-dev-banner" @onclick="async () => await OpenDebugDialog()" @onclick:stopPropagation="true" style="cursor: pointer;" title="Click for debug info">⚠ Development Environment</div>
 }
 
 @code {
@@ -105,12 +85,34 @@
     [Parameter] public EventCallback OnSignOut { get; set; }
     [Parameter] public bool IsDev { get; set; } = false;
 
-    private bool _debugDialogOpen = false;
-
-    private void OpenDebugDialog()
+    private async Task OpenDebugDialog()
     {
-        _debugDialogOpen = true;
-        StateHasChanged();
+        Console.WriteLine("[FipNavBar] OpenDebugDialog() called");
+        try
+        {
+            await DialogService.ShowAsync<DevInfoDialog>("Dev Environment Info", new DialogOptions
+            {
+                MaxWidth = MaxWidth.Small,
+                FullWidth = true,
+                CloseOnEscapeKey = true,
+                CloseButton = true
+            });
+            Console.WriteLine("[FipNavBar] OpenDebugDialog() ShowAsync returned");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[FipNavBar] OpenDebugDialog() EXCEPTION: {ex}");
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Console.WriteLine($"[FipNavBar] OnInitialized: IsDev={IsDev}");
+    }
+
+    protected override void OnParametersSet()
+    {
+        Console.WriteLine($"[FipNavBar] OnParametersSet: IsDev={IsDev}");
     }
 
     private bool IsVisible(FipModule module) =>

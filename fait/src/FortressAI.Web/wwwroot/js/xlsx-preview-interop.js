@@ -1,5 +1,6 @@
 window.xlsxPreviewInterop = {
     getSheetNames: function (base64) {
+        console.log('[xlsxPreview] getSheetNames: typeof XLSX=', typeof XLSX, 'base64 length=', base64 ? base64.length : 0);
         try {
             // Blazor Server passes byte[] as base64 string via JSInterop;
             // SheetJS reads base64 directly with { type: 'base64' }

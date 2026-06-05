@@ -38,11 +38,13 @@
 
     protected override void OnInitialized()
     {
+        Console.WriteLine($"[DocxPreview] OnInitialized: ArtifactId={Artifact.Id} Filename={Artifact.Filename}");
         Session.OnAuthStateChanged += HandleAuthStateChanged;
     }
 
     private void HandleAuthStateChanged()
     {
+        Console.WriteLine($"[DocxPreview] HandleAuthStateChanged: _loading={_loading} UserId={Session.UserId}");
         // Session just populated — if we haven't loaded yet, kick off the fetch
         if (_loading && Session.UserId != Guid.Empty)
         {
@@ -56,6 +58,7 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        Console.WriteLine($"[DocxPreview] OnAfterRenderAsync firstRender={firstRender} _pendingBytes={(_pendingBytes != null ? _pendingBytes.Length : -1)}");
         if (firstRender)
         {
             await FetchBytesAsync();
@@ -68,7 +71,9 @@
             var bytes = _pendingBytes;
             _pendingBytes = null;
             var base64 = Convert.ToBase64String(bytes);
+            Console.WriteLine($"[DocxPreview] OnAfterRenderAsync: rendering bytes to containerId={_containerId}");
             await JSRuntime.InvokeVoidAsync("docxPreviewInterop.render", base64, _containerId);
+            Console.WriteLine("[DocxPreview] JSInterop render complete");
         }
     }
 
@@ -80,14 +85,25 @@
             var userId = Session.UserId;
             if (userId == Guid.Empty)
             {
-                // Session not yet initialized — OnAuthStateChanged will re-trigger
+                Console.WriteLine("[DocxPreview] FetchBytesAsync: UserId empty, waiting for auth");
                 return;
             }
             var (token, expires) = PreviewSvc.GenerateToken(Artifact.Id, userId);
             var relativeUrl = $"/api/artifacts/{Artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
             var absoluteUrl = NavManager.ToAbsoluteUri(relativeUrl).ToString();
+            Console.WriteLine($"[DocxPreview] FetchBytesAsync: token generated, url={absoluteUrl}");
             using var http = HttpClientFactory.CreateClient();
-            _pendingBytes = await http.GetByteArrayAsync(absoluteUrl);
+            using var response = await http.GetAsync(absoluteUrl);
+            Console.WriteLine($"[DocxPreview] HTTP {(int)response.StatusCode} {response.StatusCode} for {absoluteUrl}");
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = $"Preview failed ({(int)response.StatusCode}). Try downloading.";
+                _loading = false;
+                StateHasChanged();
+                return;
+            }
+            _pendingBytes = await response.Content.ReadAsByteArrayAsync();
+            Console.WriteLine($"[DocxPreview] FetchBytesAsync success: {_pendingBytes.Length} bytes, calling StateHasChanged");
             _loading = false;
             StateHasChanged(); // triggers second OnAfterRenderAsync pass
         }
@@ -102,6 +118,7 @@
 
     public void Dispose()
     {
+        Console.WriteLine("[DocxPreview] Dispose");
         Session.OnAuthStateChanged -= HandleAuthStateChanged;
     }
 }

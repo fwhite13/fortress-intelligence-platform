@@ -249,6 +249,7 @@
         _previewError = null;
         _textPreviewContent = null;
         _markdownHtml = null;
+        Console.WriteLine($"[ArtifactSidebar] SelectArtifact: {artifact.Filename} mime={artifact.MimeType} ext={Path.GetExtension(artifact.Filename)} IsPreviewable={IsPreviewable(artifact)} IsDocx={IsDocxType(artifact)} IsXlsx={IsXlsxType(artifact)}");
 
         if (IsPreviewable(artifact))
         {
@@ -258,6 +259,7 @@
             {
                 if (IsXlsxType(artifact))
                 {
+                    Console.WriteLine("[ArtifactSidebar] Branch: IsXlsx — delegating to XlsxPreviewPanel");
                     // XlsxPreviewPanel handles its own loading
                     _previewLoading = false;
                     StateHasChanged();
@@ -266,6 +268,7 @@
 
                 if (IsDocxType(artifact))
                 {
+                    Console.WriteLine("[ArtifactSidebar] Branch: IsDocx — delegating to DocxPreviewPanel");
                     // DocxPreviewPanel handles its own loading — no presign needed
                     _previewLoading = false;
                     StateHasChanged();
@@ -274,6 +277,7 @@
 
                 if (IsPptxType(artifact))
                 {
+                    Console.WriteLine("[ArtifactSidebar] Branch: IsPptx — delegating to PptxPreviewPanel");
                     // PptxPreviewPanel handles its own loading — no presign needed
                     _previewLoading = false;
                     StateHasChanged();

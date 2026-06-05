@@ -1,0 +1,17 @@
+@inject IWebHostEnvironment HostEnv
+@inject IConfiguration Configuration
+@using Microsoft.AspNetCore.Hosting
+@using Microsoft.Extensions.Configuration
+@using MudBlazor
+@namespace FipShared.Components
+
+<MudStack Spacing="2" Class="pa-2">
+    <div>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Environment</MudText>
+        <MudText Typo="Typo.body2" Style="font-family: monospace;">@HostEnv.EnvironmentName</MudText>
+    </div>
+    <div>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Version</MudText>
+        <MudText Typo="Typo.body2" Style="font-family: monospace;">@(Configuration["BUILD_VERSION"] ?? Configuration["ASPNETCORE_ENVIRONMENT"] ?? "dev")</MudText>
+    </div>
+</MudStack>

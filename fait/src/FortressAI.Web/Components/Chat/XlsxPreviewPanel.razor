@@ -55,11 +55,13 @@
 
     protected override void OnInitialized()
     {
+        Console.WriteLine($"[XlsxPreview] OnInitialized: ArtifactId={ArtifactId} Filename={Filename}");
         Session.OnAuthStateChanged += HandleAuthStateChanged;
     }
 
     private void HandleAuthStateChanged()
     {
+        Console.WriteLine($"[XlsxPreview] HandleAuthStateChanged: _loading={_loading} UserId={Session.UserId}");
         // Session just populated — if we haven't loaded yet, kick off the load
         if (_loading && Session.UserId != Guid.Empty)
         {
@@ -73,12 +75,14 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        Console.WriteLine("[XlsxPreview] OnAfterRenderAsync firstRender=true");
         if (!firstRender) return;
         await LoadAndRenderAsync();
     }
 
     private async Task OnTabChanged(int index)
     {
+        Console.WriteLine($"[XlsxPreview] Tab changed to {index}");
         _activeSheet = index;
         StateHasChanged();
         await Task.Yield(); // wait for tab panel to render before invoking JS
@@ -96,19 +100,30 @@
             var userId = Session.UserId;
             if (userId == Guid.Empty)
             {
-                // Session not yet initialized — OnAuthStateChanged will re-trigger
+                Console.WriteLine("[XlsxPreview] LoadAndRenderAsync: UserId empty, waiting for auth");
                 return;
             }
 
             var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
             var relativeUrl = $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
             var absoluteUrl = NavManager.ToAbsoluteUri(relativeUrl).ToString();
+            Console.WriteLine($"[XlsxPreview] LoadAndRenderAsync: url={absoluteUrl}");
             using var http = HttpClientFactory.CreateClient();
-            _fileBytes = await http.GetByteArrayAsync(absoluteUrl);
+            using var response = await http.GetAsync(absoluteUrl);
+            Console.WriteLine($"[XlsxPreview] HTTP {(int)response.StatusCode} {response.StatusCode} for {absoluteUrl}");
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = $"Preview failed ({(int)response.StatusCode}). Try downloading.";
+                _loading = false;
+                StateHasChanged();
+                return;
+            }
+            _fileBytes = await response.Content.ReadAsByteArrayAsync();
 
             // Get sheet names via JS interop
             var names = await JSRuntime.InvokeAsync<string[]>("xlsxPreviewInterop.getSheetNames", _fileBytes);
             _sheetNames = names?.ToList() ?? new List<string>();
+            Console.WriteLine($"[XlsxPreview] getSheetNames: {_sheetNames.Count} sheets: {string.Join(", ", _sheetNames)}");
 
             if (_sheetNames.Count == 0)
             {
@@ -123,6 +138,7 @@
             await Task.Yield(); // let render flush so container div exists in DOM
 
             // Render first sheet after DOM update
+            Console.WriteLine("[XlsxPreview] Rendering sheet 0");
             await RenderSheetAsync(0);
         }
         catch (Exception ex)
@@ -144,6 +160,7 @@
 
     public void Dispose()
     {
+        Console.WriteLine("[XlsxPreview] Dispose");
         Session.OnAuthStateChanged -= HandleAuthStateChanged;
     }
 }
