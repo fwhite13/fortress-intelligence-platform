@@ -77,7 +77,7 @@ builder.Services.AddScoped<UserProvisioningService>();
 builder.Services.AddScoped<BriefingService>();
 builder.Services.AddScoped<BriefingGenerationService>();
 builder.Services.AddHttpClient();
-builder.Services.AddHttpClient("InternalPreview", c => { c.BaseAddress = new Uri("http://localhost/"); });
+builder.Services.AddHttpClient("InternalPreview", c => { c.BaseAddress = new Uri("http://localhost:8080/"); });
 builder.Services.AddScoped<MicrosoftTokenService>();
 builder.Services.AddScoped<DevOpsConnectionService>();
 builder.Services.AddScoped<DevOpsToolService>();
