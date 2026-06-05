@@ -5,10 +5,14 @@
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 
+@if (ShowKbSection || ShowTeamsPost)
+{
 <MudPaper Class="pa-4 mb-4" Elevation="1">
     <MudText Typo="Typo.h6" Class="mb-3">Share Meeting</MudText>
 
     @* KB Section *@
+    @if (ShowKbSection)
+    {
     <MudText Typo="Typo.subtitle1" Class="mb-2">Push to Knowledge Base</MudText>
     @if (_kbLoading)
     {
@@ -37,10 +41,16 @@
             @(_kbPushing ? "Pushing..." : "Push to Selected KBs")
         </MudButton>
     }
+    }
 
-    <MudDivider Class="my-4" />
+    @if (ShowKbSection && ShowTeamsPost)
+    {
+        <MudDivider Class="my-4" />
+    }
 
     @* Channel Section *@
+    @if (ShowTeamsPost)
+    {
     <MudText Typo="Typo.subtitle1" Class="mb-2">Post to Teams Channel</MudText>
     @foreach (var row in _channelRows)
     {
@@ -94,10 +104,14 @@
             <MudText Typo="Typo.caption">• @h.ChannelName (@h.TeamName) — @h.DocType — @h.PostedAt.ToString("g")</MudText>
         }
     }
+    }
 </MudPaper>
+}
 
 @code {
     [Parameter] public long MeetingId { get; set; }
+    [Parameter] public bool ShowKbSection { get; set; } = true;
+    [Parameter] public bool ShowTeamsPost { get; set; } = true;
 
     // KB state
     private List<KbRowState> _kbRows = new();

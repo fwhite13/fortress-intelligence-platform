@@ -10,7 +10,6 @@
 @inject IConfiguration Configuration
 @inject IMindmapService MindmapService
 @inject BrandingConfig Branding
-@inject IFaitV2IntegrationService FaitV2Service
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
@@ -107,26 +106,9 @@
                 {
                     <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_retranscribeError</MudAlert>
                 }
-                @if (CanSendToFaitV2)
-                {
-                    <div class="mt-3">
-                        <MudButton Variant="Variant.Outlined"
-                                   Color="Color.Primary"
-                                   StartIcon="@Icons.Material.Outlined.Send"
-                                   OnClick="SendToFaitV2"
-                                   Disabled="_isSending">
-                            @(_isSending ? "Sending..." : "Send to FAIT v2 Assistant")
-                        </MudButton>
-                        @if (_sendResult != null)
-                        {
-                            <MudAlert Severity="@(_sendSuccess ? Severity.Success : Severity.Error)"
-                                      Dense="true" Class="mt-2">
-                                @_sendResult
-                            </MudAlert>
-                        }
-                    </div>
-                }
-                <SharePanel MeetingId="@_meeting.Id" />
+                <SharePanel MeetingId="@_meeting.Id"
+                            ShowKbSection="@(Branding.SuiteName != "RISE")"
+                            ShowTeamsPost="false" />
             }
         </MudPaper>
 
@@ -328,16 +310,6 @@
     // KB push status (loaded from /kb-status on init)
     private HashSet<string> _transcriptPushedTo = new();
     private HashSet<string> _summaryPushedTo = new();
-
-    // FAIT v2 push state
-    private bool _isSending = false;
-    private string? _sendResult;
-    private bool _sendSuccess;
-
-    private bool CanSendToFaitV2 =>
-        _meeting?.Status == MeetingStatus.Complete &&
-        (_isAdmin || (_user != null && _meeting?.CreatorEntraOid != null &&
-            string.Equals(_meeting.CreatorEntraOid, _user.EntraOid, StringComparison.OrdinalIgnoreCase)));
 
     // KB selection state
     private bool _transcriptSelectPersonal = true;
@@ -560,53 +532,6 @@
             Snackbar.Add($"Error pushing summary: {ex.Message}", Severity.Error);
         }
         finally { _pushingSummary = false; StateHasChanged(); }
-    }
-
-    private async Task SendToFaitV2()
-    {
-        if (_isSending || _meeting == null) return;
-        _isSending = true;
-        _sendResult = null;
-        StateHasChanged();
-
-        try
-        {
-            var summaryText = _meeting.Summary?.SummaryText ?? "No summary available";
-            var transcriptExcerpt = _meeting.Transcripts.Any()
-                ? string.Join("\n", _meeting.Transcripts
-                    .OrderBy(t => t.StartTimeMs)
-                    .Select(t => $"[{TimeSpan.FromMilliseconds(t.StartTimeMs ?? 0):hh\\:mm\\:ss}] {t.SpeakerName ?? t.SpeakerLabel ?? "Unknown"}: {t.Text}"))
-                : null;
-
-            if (transcriptExcerpt?.Length > 2000)
-                transcriptExcerpt = transcriptExcerpt[..2000] + "...";
-
-            var content = string.IsNullOrEmpty(transcriptExcerpt)
-                ? summaryText
-                : $"{summaryText}\n\n--- Transcript ---\n{transcriptExcerpt}";
-
-            await FaitV2Service.SendTranscriptAsync(
-                entraOid: _user?.EntraOid ?? "",
-                meetingId: _meeting.Id.ToString(),
-                transcript: content,
-                title: _meeting.Title ?? $"Meeting {_meeting.Id}");
-
-            Snackbar.Add("Meeting context sent to your assistant", Severity.Success);
-            _sendResult = null;
-            _sendSuccess = true;
-        }
-        catch (Exception ex)
-        {
-            _sendSuccess = false;
-            _sendResult = "Failed to send to assistant";
-            Snackbar.Add("Failed to send to assistant", Severity.Error);
-            Logger.LogError(ex, "FIRM MeetingDetail: SendToFaitV2 failed for meeting {MeetingId}", _meeting?.Id);
-        }
-        finally
-        {
-            _isSending = false;
-            StateHasChanged();
-        }
     }
 
     private static string FormatDuration(int? seconds)
