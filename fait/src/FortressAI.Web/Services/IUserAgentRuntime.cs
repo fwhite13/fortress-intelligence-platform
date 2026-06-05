@@ -84,8 +84,7 @@ public record HarnessEvent(
     [property: JsonPropertyName("errorMessage")] string? ErrorMessage = null,
     [property: JsonPropertyName("inputTokens")] int? InputTokens = null,
     [property: JsonPropertyName("outputTokens")] int? OutputTokens = null,
-    [property: JsonPropertyName("payload")] string? Payload = null,  // JSON payload for mode_switch and future event types
-    [property: JsonPropertyName("toolName")] string? ToolName = null // ADO#4918: tool name for Bedrock chip icon resolution
+    [property: JsonPropertyName("payload")] string? Payload = null   // JSON payload for mode_switch and future event types
 );
 
 // ADO#3241 — KB sources SSE payload
