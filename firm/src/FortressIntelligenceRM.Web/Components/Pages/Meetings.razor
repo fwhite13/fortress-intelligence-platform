@@ -618,6 +618,22 @@
 
     private async Task RemoveMeeting(long meetingId)
     {
+        var options = new DialogOptions
+        {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.ExtraSmall,
+            FullWidth = true
+        };
+        var parameters = new DialogParameters
+        {
+            { "ContentText", "Are you sure? This will permanently delete the recording, transcript, and summary of this meeting." },
+            { "ButtonText", "Delete" },
+            { "Color", Color.Error }
+        };
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Delete Meeting", parameters, options);
+        var result = await dialog.Result;
+        if (result == null || result.Canceled) return;
+
         try
         {
             var (success, error) = await MeetingService.RemoveMeetingAsync(meetingId, Guid.Parse(_userId!));

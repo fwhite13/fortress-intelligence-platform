@@ -8,6 +8,7 @@
 @inject IConfiguration Configuration
 @inject IDialogService DialogService
 @inject ILogger<FipNavBar> Logger
+@inject NavigationManager NavManager
 
 <div class="fip-navbar">
     <div class="fip-navbar__left">
@@ -41,7 +42,8 @@
                 {
                     if (IsVisible(module))
                     {
-                        <MudMenuItem Href="@module.Url()">
+                        var url = module.Url();
+                        <MudMenuItem OnClick="@(() => NavManager.NavigateTo(url, forceLoad: true))">
                             <div class="fip-waffle-item">
                                 <MudText Typo="Typo.body1">@module.ShortName()</MudText>
                                 <MudText Typo="Typo.caption" Class="fip-waffle-sublabel">@module.FullName()</MudText>

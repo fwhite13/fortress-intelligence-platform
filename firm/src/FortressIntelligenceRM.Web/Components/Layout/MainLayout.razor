@@ -103,15 +103,20 @@
         }
     }
 
+    private const string ConferenceRoomUrl = "https://rooms.refugems.ai";
+
+    private void NavigateToPortal() => _nav.NavigateTo(Branding.PortalUrl, forceLoad: true);
+    private void NavigateToConferenceRoom() => _nav.NavigateTo(ConferenceRoomUrl, forceLoad: true);
+
     private RenderFragment RiseWaffleItems() =>
         @<text>
-            <MudMenuItem Href="@Branding.PortalUrl">
+            <MudMenuItem OnClick="NavigateToPortal">
                 <div class="fip-waffle-item">
                     <MudText Typo="Typo.body1">RN</MudText>
                     <MudText Typo="Typo.caption" Class="fip-waffle-sublabel">Refuge Notetaker</MudText>
                 </div>
             </MudMenuItem>
-            <MudMenuItem Href="https://rooms.refugems.ai">
+            <MudMenuItem OnClick="NavigateToConferenceRoom">
                 <div class="fip-waffle-item">
                     <MudText Typo="Typo.body1">CR</MudText>
                     <MudText Typo="Typo.caption" Class="fip-waffle-sublabel">Conference Room Scheduler</MudText>
