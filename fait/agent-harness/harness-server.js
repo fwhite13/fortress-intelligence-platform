@@ -3110,7 +3110,7 @@ app.post('/turn', async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
 
     const sendEvent = (data) => {
-        console.log(`[harness] /turn: sendEvent type=${data.type}, contentLen=${data.content?.length ?? 0}, errorMessage=${data.errorMessage ?? ''}`);
+        console.log(`[harness] /turn: sendEvent type=${data.type}, contentLen=${data.content?.length ?? 0}, payloadLen=${data.payload?.length ?? 0}, errorMessage=${data.errorMessage ?? ''}`);
         res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
 
