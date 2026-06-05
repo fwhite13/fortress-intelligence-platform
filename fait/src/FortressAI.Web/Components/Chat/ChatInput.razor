@@ -24,7 +24,8 @@
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && !e.ShiftKey)
+        // ADO#4922: Enter inserts newline; Ctrl+Enter or Cmd+Enter sends
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey))
         {
             await Send();
         }

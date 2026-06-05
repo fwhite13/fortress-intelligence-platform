@@ -1611,10 +1611,13 @@ else
 
     private async Task HandleInputKeyDown(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && !e.ShiftKey)
+        // ADO#4922: Enter inserts newline; Ctrl+Enter or Cmd+Enter sends (power-user shortcut)
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey))
         {
+            Logger.LogInformation("[chat] [ADO#4922] Ctrl/Cmd+Enter send shortcut triggered userId={UserId}", Session.UserId);
             await HandleSendFromInput();
         }
+        // Plain Enter: browser textarea handles newline insertion natively — no action needed here
     }
 
     private async Task HandleSendFromInput()
