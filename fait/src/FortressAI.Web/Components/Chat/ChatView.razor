@@ -1300,7 +1300,6 @@ else
                 }
                 else if (evt.Type == "folder_required")
                 {
-                    // ADO#4003 — folder_required: open MudDialog instead of inline picker
                     try
                     {
                         var folderPayload = System.Text.Json.JsonSerializer.Deserialize<FolderRequiredPayload>(
@@ -1327,34 +1326,47 @@ else
                             CloseOnEscapeKey = false,
                             BackdropClick = false
                         };
+
                         var dialog = await DialogService.ShowAsync<FolderPicker>("Select working folder", parameters, options);
                         await InvokeAsync(StateHasChanged);
-                        var result = await dialog.Result;
 
-                        // ADO#4858,4859 — force task mode indicator active immediately after folder confirmation
-                        if (_taskMode)
+                        // ADO#4925 — DEADLOCK FIX: do NOT await dialog.Result here.
+                        // The SSE loop is blocking the Blazor circuit; awaiting dialog.Result inside it
+                        // prevents MudDialog.Cancel() from being dispatched. Use ContinueWith to handle
+                        // the result asynchronously outside this execution context.
+                        _ = dialog.Result.ContinueWith(async resultTask =>
                         {
-                            _taskModeActive = true;
-                            await InvokeAsync(StateHasChanged);
-                        }
+                            var result = resultTask.IsCompletedSuccessfully ? resultTask.Result : null;
+                            if (result != null && !result.Canceled && result.Data is FolderPicker.FolderConfirmedArgs confirmedArgs)
+                            {
+                                await InvokeAsync(() =>
+                                {
+                                    if (_taskMode)
+                                    {
+                                        _taskModeActive = true;
+                                    }
+                                    HandleFolderConfirmed(confirmedArgs);
+                                    StateHasChanged();
+                                });
+                            }
+                            else
+                            {
+                                // Cancelled — clear ALL task state
+                                await InvokeAsync(() =>
+                                {
+                                    _taskMode = false;
+                                    _taskModeActive = false;
+                                    _ccTaskActive = false;
+                                    _pendingTaskMessage = "";
+                                    _activeToolCalls.Clear();
+                                    Logger.LogInformation("[ChatView] FolderPicker cancelled — task state cleared");
+                                    StateHasChanged();
+                                });
+                            }
+                        });
 
-                        if (result != null && !result.Canceled && result.Data is FolderPicker.FolderConfirmedArgs confirmedArgs)
-                        {
-                            HandleFolderConfirmed(confirmedArgs);
-                            await InvokeAsync(StateHasChanged);
-                        }
-                        else
-                        {
-                            // Dialog cancelled — clear ALL task state
-                            _taskMode = false;
-                            _taskModeActive = false;
-                            _ccTaskActive = false;
-                            _pendingTaskMessage = "";
-                            _activeToolCalls.Clear();
-                            Logger.LogInformation("[ChatView] FolderPicker cancelled — task state cleared");
-                            try { dialog.Close(DialogResult.Cancel()); } catch (Exception) { /* already closed */ }
-                            await InvokeAsync(StateHasChanged);
-                        }
+                        // Break SSE loop — harness is paused awaiting folder-confirm, no more events coming
+                        break;
                     }
                     catch (Exception ex)
                     {
