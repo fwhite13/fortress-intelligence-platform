@@ -11,6 +11,7 @@ window.xlsxPreviewInterop = {
         }
     },
     renderSheet: function (base64, sheetName, containerId) {
+        console.log('[xlsx-preview] renderSheet called, sheetName=', sheetName, 'containerId=', containerId);
         try {
             const workbook = XLSX.read(base64, { type: 'base64' });
             const worksheet = workbook.Sheets[sheetName];

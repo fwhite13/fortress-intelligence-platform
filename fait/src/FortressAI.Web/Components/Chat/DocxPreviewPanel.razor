@@ -74,6 +74,7 @@
 
     private async Task FetchBytesAsync()
     {
+        Console.WriteLine($"[DocxPreview] FetchBytesAsync start: ArtifactId={Artifact.Id} UserId={Session.UserId}");
         try
         {
             var userId = Session.UserId;
@@ -90,8 +91,9 @@
             _loading = false;
             StateHasChanged(); // triggers second OnAfterRenderAsync pass
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"[DocxPreview] FetchBytesAsync failed: ArtifactId={Artifact.Id} Error={ex.GetType().Name}: {ex.Message}");
             _error = "Failed to load document preview. Try downloading the file.";
             _loading = false;
             StateHasChanged();

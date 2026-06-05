@@ -95,6 +95,23 @@
         }
     }
 
+    protected override void OnInitialized()
+    {
+        Session.OnAuthStateChanged += HandleAuthStateChanged;
+    }
+
+    private void HandleAuthStateChanged()
+    {
+        if (_loading && Session.UserId != Guid.Empty)
+        {
+            InvokeAsync(async () =>
+            {
+                await FetchAndConvertAsync();
+                StateHasChanged();
+            });
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -121,9 +138,8 @@
             var userId = Session.UserId;
             if (userId == Guid.Empty)
             {
-                _error = "Authentication error. Please refresh.";
-                _loading = false;
-                StateHasChanged();
+                Console.WriteLine($"[PptxPreview] FetchAndConvertAsync: userId empty, staying in loading state — OnAuthStateChanged will retry");
+                // Stay in loading state — HandleAuthStateChanged will trigger retry when session is ready
                 return;
             }
 
@@ -184,7 +200,11 @@
         StateHasChanged();
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync()
+    {
+        Session.OnAuthStateChanged -= HandleAuthStateChanged;
+        return ValueTask.CompletedTask;
+    }
 }
 
 <style>

@@ -4,6 +4,7 @@ window.pptxPreviewInterop = {
     _currentPage: 1,
 
     render: async function(base64, containerId) {
+        console.log('[pptx-preview] render called, containerId=', containerId, 'base64 length=', base64 ? base64.length : 0);
         function base64ToUint8Array(b64) {
             const binary = atob(b64);
             const bytes = new Uint8Array(binary.length);

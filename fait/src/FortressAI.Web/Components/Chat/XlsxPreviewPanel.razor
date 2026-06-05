@@ -90,6 +90,7 @@
 
     private async Task LoadAndRenderAsync()
     {
+        Console.WriteLine($"[XlsxPreview] LoadAndRenderAsync start: ArtifactId={ArtifactId} Filename={Filename} UserId={Session.UserId}");
         try
         {
             var userId = Session.UserId;
@@ -124,8 +125,9 @@
             // Render first sheet after DOM update
             await RenderSheetAsync(0);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"[XlsxPreview] LoadAndRenderAsync failed: ArtifactId={ArtifactId} Error={ex.GetType().Name}: {ex.Message}");
             _error = "Failed to load spreadsheet preview. Try downloading the file.";
             _loading = false;
             StateHasChanged();
