@@ -1162,8 +1162,9 @@ else
                     // ADO#4717 — ephemeral chip from Bedrock tool calls
                     // ADO#4810 — assign unique Id so auto-dismiss only removes this chip
                     var chipText = evt.Content ?? "Working...";
-                    var chipIcon = GetChipIconKeyFromToolName("chip");
-                    var legacyChip = new ToolCallEvent("bedrock", "chip", "calling", chipText, DateTime.UtcNow, chipIcon, Guid.NewGuid());
+                    var resolvedToolName = !string.IsNullOrEmpty(evt.ToolName) ? evt.ToolName : "chip";
+                    var chipIcon = GetChipIconKeyFromToolName(resolvedToolName);
+                    var legacyChip = new ToolCallEvent("bedrock", resolvedToolName, "calling", chipText, DateTime.UtcNow, chipIcon, Guid.NewGuid());
                     _activeToolCalls.Add(legacyChip);
                     await InvokeAsync(StateHasChanged);
                     await ScrollToBottom(); // ADO#4862 — scroll to keep chip visible
