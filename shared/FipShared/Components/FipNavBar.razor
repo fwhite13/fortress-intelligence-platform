@@ -6,7 +6,6 @@
 @namespace FipShared.Components
 @inject IWebHostEnvironment HostEnv
 @inject IConfiguration Configuration
-@inject IDialogService DialogService
 @inject ILogger<FipNavBar> Logger
 @inject NavigationManager NavManager
 
@@ -74,9 +73,7 @@
 
 @if (IsDev)
 {
-    <div class="fip-dev-banner">
-        <button type="button" style="all:unset;cursor:pointer;width:100%;display:block;text-align:center;" title="Click for debug info" @onclick="OpenDebugDialog" @onclick:stopPropagation="true">⚠ Development Environment</button>
-    </div>
+    <div class="fip-dev-banner">⚠ Development Environment</div>
 }
 
 @code {
@@ -90,26 +87,6 @@
     [Parameter] public EventCallback OnMenuClick { get; set; }
     [Parameter] public EventCallback OnSignOut { get; set; }
     [Parameter] public bool IsDev { get; set; } = false;
-
-    private async Task OpenDebugDialog()
-    {
-        Logger.LogInformation("[FipNavBar] OpenDebugDialog() called");
-        try
-        {
-            await DialogService.ShowAsync<DevInfoDialog>("Dev Environment Info", new DialogOptions
-            {
-                MaxWidth = MaxWidth.Small,
-                FullWidth = true,
-                CloseOnEscapeKey = true,
-                CloseButton = true
-            });
-            Logger.LogInformation("[FipNavBar] OpenDebugDialog() ShowAsync returned");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "[FipNavBar] OpenDebugDialog() EXCEPTION");
-        }
-    }
 
     protected override void OnInitialized()
     {

@@ -63,7 +63,16 @@
                     <SidebarContent />
                 </div>
                 <div class="fip-drawer-footer">
-                    <MudText Typo="Typo.caption">Fortress Intelligence Platform</MudText>
+                    @if (HostEnv.IsDevelopment())
+                    {
+                        <button type="button" style="all:unset;cursor:pointer;" @onclick="OpenDevInfoDialog">
+                            <MudText Typo="Typo.caption">Fortress Intelligence Platform</MudText>
+                        </button>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption">Fortress Intelligence Platform</MudText>
+                    }
                 </div>
             </div>
         </MudDrawer>
@@ -184,10 +193,30 @@
         _drawerOpen = !_drawerOpen;
     }
 
+    private async Task OpenDevInfoDialog()
+    {
+        await DialogService.ShowAsync<DevInfoDialog>("Dev Environment Info", new DialogOptions
+        {
+            CloseOnEscapeKey = true,
+            CloseButton = true,
+            MaxWidth = MaxWidth.Small
+        });
+    }
+
     private void Logout()
     {
         Session.Logout();
         Nav.NavigateTo("/auth/logout", forceLoad: true);
+    }
+
+    private async Task OpenDevInfoDialog()
+    {
+        await DialogService.ShowAsync<DevInfoDialog>("Dev Environment Info", new DialogOptions
+        {
+            CloseOnEscapeKey = true,
+            CloseButton = true,
+            MaxWidth = MaxWidth.Small
+        });
     }
 
     public void Dispose()

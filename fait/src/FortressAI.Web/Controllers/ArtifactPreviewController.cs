@@ -39,6 +39,7 @@ public class ArtifactPreviewController : ControllerBase
     }
 
     [HttpGet("{id:guid}/preview")]
+    [AllowAnonymous]
     public async Task<IActionResult> Preview(
         Guid id,
         [FromQuery] string token,
