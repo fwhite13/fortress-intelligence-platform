@@ -72,7 +72,9 @@
 
 @if (IsDev)
 {
-    <MudButton Variant="Variant.Text" Class="fip-dev-banner" OnClick="OpenDebugDialog" Style="cursor:pointer;width:100%;text-transform:none;" title="Click for debug info">⚠ Development Environment</MudButton>
+    <div class="fip-dev-banner">
+        <button type="button" style="all:unset;cursor:pointer;width:100%;display:block;text-align:center;" title="Click for debug info" @onclick="OpenDebugDialog" @onclick:stopPropagation="true">⚠ Development Environment</button>
+    </div>
 }
 
 @code {
