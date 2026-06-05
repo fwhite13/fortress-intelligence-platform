@@ -1,6 +1,5 @@
 window.xlsxPreviewInterop = {
     getSheetNames: function (base64) {
-        console.log('[xlsxPreview] getSheetNames called');
         try {
             // Blazor Server passes byte[] as base64 string via JSInterop;
             // SheetJS reads base64 directly with { type: 'base64' }
@@ -12,7 +11,6 @@ window.xlsxPreviewInterop = {
         }
     },
     renderSheet: function (base64, sheetName, containerId) {
-        console.log('[xlsxPreview] renderSheet called sheetName=', sheetName, 'containerId=', containerId);
         try {
             const workbook = XLSX.read(base64, { type: 'base64' });
             const worksheet = workbook.Sheets[sheetName];
