@@ -54,6 +54,8 @@
     // Prevents concurrent invocations from OnAfterRenderAsync(firstRender=true) and HandleAuthStateChanged.
     // Reset to false only when UserId is empty so HandleAuthStateChanged can retry after auth populates.
     private bool _loadStarted = false;
+    private bool _jsRenderPending = false;
+    private bool _jsRenderInFlight = false;
 
     protected override void OnInitialized()
     {
@@ -64,12 +66,12 @@
     private void HandleAuthStateChanged()
     {
         Console.WriteLine($"[XlsxPreview] HandleAuthStateChanged: _loading={_loading} UserId={Session.UserId}");
-        // Session just populated — if we haven't loaded yet, kick off the load
+        // Session just populated — if we haven't loaded yet, kick off the fetch
         if (_loading && Session.UserId != Guid.Empty)
         {
             InvokeAsync(async () =>
             {
-                await LoadAndRenderAsync();
+                await FetchBytesAsync();
                 StateHasChanged();
             });
         }
@@ -77,9 +79,33 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        Console.WriteLine("[XlsxPreview] OnAfterRenderAsync firstRender=true");
-        if (!firstRender) return;
-        await LoadAndRenderAsync();
+        Console.WriteLine($"[XlsxPreview] OnAfterRenderAsync firstRender={firstRender} _jsRenderPending={_jsRenderPending} _jsRenderInFlight={_jsRenderInFlight}");
+        if (firstRender)
+        {
+            await FetchBytesAsync();
+            return;
+        }
+
+        // Second pass: bytes are ready and container div is now in DOM
+        if (_jsRenderPending && !_jsRenderInFlight)
+        {
+            _jsRenderPending = false;
+            _jsRenderInFlight = true;
+            try
+            {
+                await RenderSheetAsync(0);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ERROR] [xlsx-preview] Render phase failed: {ex.Message}");
+                _error = "Failed to load spreadsheet preview. Try downloading the file.";
+                StateHasChanged();
+            }
+            finally
+            {
+                _jsRenderInFlight = false;
+            }
+        }
     }
 
     private async Task OnTabChanged(int index)
@@ -94,24 +120,24 @@
         }
     }
 
-    private async Task LoadAndRenderAsync()
+    private async Task FetchBytesAsync()
     {
         if (_loadStarted) return;
         _loadStarted = true;
-        Console.WriteLine($"[XlsxPreview] LoadAndRenderAsync start: ArtifactId={ArtifactId} Filename={Filename} UserId={Session.UserId}");
+        Console.WriteLine($"[XlsxPreview] FetchBytesAsync start: ArtifactId={ArtifactId} Filename={Filename} UserId={Session.UserId}");
         try
         {
             var userId = Session.UserId;
             if (userId == Guid.Empty)
             {
-                Console.WriteLine("[XlsxPreview] LoadAndRenderAsync: UserId empty, waiting for auth");
+                Console.WriteLine("[XlsxPreview] FetchBytesAsync: UserId empty, waiting for auth");
                 _loadStarted = false; // allow HandleAuthStateChanged to retry once session populates
                 return;
             }
 
             var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
             var relativeUrl = $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
-            Console.WriteLine($"[XlsxPreview] LoadAndRenderAsync: url={relativeUrl}");
+            Console.WriteLine($"[XlsxPreview] FetchBytesAsync: url={relativeUrl}");
             using var http = HttpClientFactory.CreateClient("InternalPreview");
             using var response = await http.GetAsync(relativeUrl);
             Console.WriteLine($"[XlsxPreview] HTTP {(int)response.StatusCode} {response.StatusCode} for {relativeUrl}");
@@ -124,7 +150,8 @@
             }
             _fileBytes = await response.Content.ReadAsByteArrayAsync();
 
-            // Get sheet names via JS interop
+            // Get sheet names via JS interop — safe in fetch phase (no DOM container needed)
+            Console.WriteLine($"[INFO] [xlsx-preview] calling getSheetNames for ArtifactId={ArtifactId}");
             var names = await JSRuntime.InvokeAsync<string[]>("xlsxPreviewInterop.getSheetNames", _fileBytes);
             _sheetNames = names?.ToList() ?? new List<string>();
             Console.WriteLine($"[XlsxPreview] getSheetNames: {_sheetNames.Count} sheets: {string.Join(", ", _sheetNames)}");
@@ -138,16 +165,13 @@
             }
 
             _loading = false;
-            StateHasChanged();
-            await Task.Yield(); // let render flush so container div exists in DOM
-
-            // Render first sheet after DOM update
-            Console.WriteLine("[XlsxPreview] Rendering sheet 0");
-            await RenderSheetAsync(0);
+            _jsRenderPending = true;
+            Console.WriteLine("[XlsxPreview] FetchBytesAsync success — _jsRenderPending=true, calling StateHasChanged");
+            StateHasChanged(); // triggers second OnAfterRenderAsync pass with container div in DOM
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[XlsxPreview] LoadAndRenderAsync failed: ArtifactId={ArtifactId} Error={ex.GetType().Name}: {ex.Message}");
+            Console.Error.WriteLine($"[XlsxPreview] FetchBytesAsync failed: ArtifactId={ArtifactId} Error={ex.GetType().Name}: {ex.Message}");
             _error = "Failed to load spreadsheet preview. Try downloading the file.";
             _loading = false;
             StateHasChanged();
