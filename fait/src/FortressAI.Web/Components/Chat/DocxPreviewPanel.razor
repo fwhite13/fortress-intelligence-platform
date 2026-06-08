@@ -34,6 +34,13 @@
     private string? _error;
     private byte[]? _pendingBytes;
     private string _containerId = $"docx-{Guid.NewGuid():N}";
+    // _loadStarted: prevents double-fetch from OnAfterRenderAsync(firstRender=true) + HandleAuthStateChanged racing.
+    // Reset to false only when UserId is empty so HandleAuthStateChanged can retry after auth populates.
+    private bool _loadStarted = false;
+    // _jsRenderPending: set when bytes are ready; only cleared after JSInterop completes or errors.
+    // _jsRenderInFlight: set while JSInterop is running; prevents re-entry during the await suspension.
+    private bool _jsRenderPending = false;
+    private bool _jsRenderInFlight = false;
 
     protected override void OnInitialized()
     {
@@ -44,7 +51,6 @@
     private void HandleAuthStateChanged()
     {
         Console.WriteLine($"[DocxPreview] HandleAuthStateChanged: _loading={_loading} UserId={Session.UserId}");
-        // Session just populated — if we haven't loaded yet, kick off the fetch
         if (_loading && Session.UserId != Guid.Empty)
         {
             InvokeAsync(async () =>
@@ -57,27 +63,47 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        Console.WriteLine($"[DocxPreview] OnAfterRenderAsync firstRender={firstRender} _pendingBytes={(_pendingBytes != null ? _pendingBytes.Length : -1)}");
+        Console.WriteLine($"[DocxPreview] OnAfterRenderAsync firstRender={firstRender} _pendingBytes={(_pendingBytes != null ? _pendingBytes.Length : -1)} _jsRenderPending={_jsRenderPending} _jsRenderInFlight={_jsRenderInFlight}");
         if (firstRender)
         {
             await FetchBytesAsync();
             return;
         }
 
-        // Second pass: bytes are ready and container div is now in DOM
-        if (_pendingBytes != null)
+        // Guard: skip if no render is needed, or one is already in progress.
+        // _jsRenderInFlight stays true during the JSInterop await so concurrent OnAfterRenderAsync
+        // calls triggered by the ChatView render loop cannot enter this block simultaneously.
+        if (!_jsRenderPending || _jsRenderInFlight || _pendingBytes == null)
+            return;
+
+        _jsRenderInFlight = true;
+        var bytes = _pendingBytes;
+        var base64 = Convert.ToBase64String(bytes);
+        Console.WriteLine($"[INFO] [docx-preview] rendering to containerId={_containerId}");
+        try
         {
-            var bytes = _pendingBytes;
-            _pendingBytes = null;
-            var base64 = Convert.ToBase64String(bytes);
-            Console.WriteLine($"[DocxPreview] OnAfterRenderAsync: rendering bytes to containerId={_containerId}");
             await JSRuntime.InvokeVoidAsync("docxPreviewInterop.render", base64, _containerId);
-            Console.WriteLine("[DocxPreview] JSInterop render complete");
+            Console.WriteLine("[INFO] [docx-preview] JSInterop render complete");
+            _jsRenderPending = false;
+            _pendingBytes = null;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ERROR] [docx-preview] JSInterop render failed: {ex.Message}");
+            _jsRenderPending = false;
+            _error = "Document preview failed. Please download the file.";
+            StateHasChanged();
+        }
+        finally
+        {
+            _jsRenderInFlight = false;
         }
     }
 
     private async Task FetchBytesAsync()
     {
+        if (_loadStarted) return;
+        _loadStarted = true;
         Console.WriteLine($"[DocxPreview] FetchBytesAsync start: ArtifactId={Artifact.Id} UserId={Session.UserId}");
         try
         {
@@ -85,6 +111,7 @@
             if (userId == Guid.Empty)
             {
                 Console.WriteLine("[DocxPreview] FetchBytesAsync: UserId empty, waiting for auth");
+                _loadStarted = false; // allow HandleAuthStateChanged to retry once session populates
                 return;
             }
             var (token, expires) = PreviewSvc.GenerateToken(Artifact.Id, userId);
@@ -101,9 +128,10 @@
                 return;
             }
             _pendingBytes = await response.Content.ReadAsByteArrayAsync();
-            Console.WriteLine($"[DocxPreview] FetchBytesAsync success: {_pendingBytes.Length} bytes, calling StateHasChanged");
+            Console.WriteLine($"[DocxPreview] FetchBytesAsync success: {_pendingBytes.Length} bytes, signalling JS render");
             _loading = false;
-            StateHasChanged(); // triggers second OnAfterRenderAsync pass
+            _jsRenderPending = true;
+            StateHasChanged();
         }
         catch (Exception ex)
         {

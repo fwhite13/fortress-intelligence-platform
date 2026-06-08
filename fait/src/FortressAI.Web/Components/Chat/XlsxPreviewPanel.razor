@@ -51,6 +51,9 @@
     private int _activeSheet = 0;
     private string _containerId = $"xlsx-{Guid.NewGuid():N}";
     private byte[]? _fileBytes;
+    // Prevents concurrent invocations from OnAfterRenderAsync(firstRender=true) and HandleAuthStateChanged.
+    // Reset to false only when UserId is empty so HandleAuthStateChanged can retry after auth populates.
+    private bool _loadStarted = false;
 
     protected override void OnInitialized()
     {
@@ -93,6 +96,8 @@
 
     private async Task LoadAndRenderAsync()
     {
+        if (_loadStarted) return;
+        _loadStarted = true;
         Console.WriteLine($"[XlsxPreview] LoadAndRenderAsync start: ArtifactId={ArtifactId} Filename={Filename} UserId={Session.UserId}");
         try
         {
@@ -100,6 +105,7 @@
             if (userId == Guid.Empty)
             {
                 Console.WriteLine("[XlsxPreview] LoadAndRenderAsync: UserId empty, waiting for auth");
+                _loadStarted = false; // allow HandleAuthStateChanged to retry once session populates
                 return;
             }
 
