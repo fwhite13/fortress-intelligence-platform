@@ -133,6 +133,15 @@ Feature flag: `Firm:AutoJoinEnabled` (default `false`) — infra goes in first, 
 
 ---
 
+## Bug Fixes (shipped with next build)
+
+- [x] **BF-1** Waffle menu items don't navigate — `MudMenuItem Href` doesn't work in MudBlazor v7; switched to `OnClick NavigateTo(forceLoad:true)` in both `FipNavBar.razor` (FIRM default path) and `MainLayout.razor` `RiseWaffleItems()` (RN override)
+- [x] **BF-2** Remove button on meetings list now shows confirmation dialog before DELETE: "Are you sure? This will permanently delete the recording, transcript, and summary of this meeting." — added `ConfirmDialog.razor` + wired into `RemoveMeeting()`
+
+**Commit:** `53287376` | pushed `fred-dev → main` 2026-06-05
+
+---
+
 ## Deployment Order
 
 ```

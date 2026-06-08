@@ -209,7 +209,12 @@
 
     public async ValueTask DisposeAsync()
     {
-        await JSRuntime.InvokeVoidAsync("fortressChat.disposeSidebarResize", _dragHandle);
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("fortressChat.disposeSidebarResize", _dragHandle);
+        }
+        catch (JSDisconnectedException) { /* expected during circuit disposal */ }
+        catch (TaskCanceledException) { /* expected during circuit disposal */ }
         _dotNetRef?.Dispose();
     }
 
