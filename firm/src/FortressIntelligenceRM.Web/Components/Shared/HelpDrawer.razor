@@ -1,0 +1,42 @@
+@* Slide-in help drawer anchored to the right. Usage:
+   <HelpDrawer @bind-IsOpen="_helpOpen" Title="My Page — Help">
+       <SomeHelpContent />
+   </HelpDrawer>
+*@
+
+<MudDrawer Open="IsOpen"
+           OpenChanged="OnOpenChanged"
+           Anchor="Anchor.End"
+           Variant="DrawerVariant.Temporary"
+           Elevation="4"
+           ClipMode="DrawerClipMode.Never"
+           Width="min(400px, 100vw)">
+    <div class="help-drawer-header">
+        <MudText Typo="Typo.subtitle1" Style="font-weight:600; color:white;">@Title</MudText>
+        <MudIconButton Icon="@Icons.Material.Filled.Close"
+                       Color="Color.Inherit"
+                       Size="Size.Small"
+                       OnClick="Close"
+                       aria-label="Close help" />
+    </div>
+    <div class="help-drawer-body">
+        @ChildContent
+    </div>
+</MudDrawer>
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public EventCallback<bool> IsOpenChanged { get; set; }
+    [Parameter] public string Title { get; set; } = "Help";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private async Task Close()
+    {
+        await IsOpenChanged.InvokeAsync(false);
+    }
+
+    private async Task OnOpenChanged(bool open)
+    {
+        await IsOpenChanged.InvokeAsync(open);
+    }
+}

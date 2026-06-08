@@ -33,6 +33,12 @@
         <MudButton Variant="Variant.Outlined" Style="border-color: #d4af37; color: #d4af37;" OnClick="OpenAddMeetingDialog">
             Add a Meeting
         </MudButton>
+        <MudIconButton Icon="@Icons.Material.Outlined.HelpOutline"
+                       Style="color: #d4af37;"
+                       Size="Size.Medium"
+                       Title="Help"
+                       OnClick="() => _helpOpen = true"
+                       aria-label="Help" />
     </MudStack>
 
     @if (!_calendarLoading && _upcomingMeetings?.Count > 0)
@@ -170,10 +176,14 @@
     }
 </MudContainer>
 
+<HelpDrawer @bind-IsOpen="_helpOpen" Title="My Meetings — Help">
+    <MeetingsHelpContent />
+</HelpDrawer>
 
 @code {
     private List<FirmMeeting> _meetings = new();
     private bool _loading = true;
+    private bool _helpOpen = false;
     private bool _joining = false;
     private int _page = 1;
     private const int _pageSize = 20;

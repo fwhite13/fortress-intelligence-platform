@@ -13,9 +13,16 @@
 <PageTitle>My Wiki — @Branding.ModuleName</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
-    <MudText Typo="Typo.h5" Class="mb-2 org-context-title">
-        My Wiki
-    </MudText>
+    <MudStack Row AlignItems="AlignItems.Center" Class="mb-2">
+        <MudText Typo="Typo.h5" Class="org-context-title">My Wiki</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Outlined.HelpOutline"
+                       Style="color: var(--color-accent, #d4af37);"
+                       Size="Size.Medium"
+                       Title="Help"
+                       OnClick="() => _helpOpen = true"
+                       aria-label="Help" />
+    </MudStack>
     <MudText Typo="Typo.body2" Class="mb-4 org-context-subtitle">
         Your personal knowledge base. Add terms, names, acronyms, and context that are specific to your work. These entries help the AI produce more accurate transcriptions and summaries for your meetings.
     </MudText>
@@ -92,10 +99,15 @@
     }
 </MudContainer>
 
+<HelpDrawer @bind-IsOpen="_helpOpen" Title="My Wiki — Help">
+    <MyWikiHelpContent />
+</HelpDrawer>
+
 @code {
     private List<OrgContextEntry> _entries = [];
     private DateTime? _updatedAt;
     private bool _loading = true;
+    private bool _helpOpen = false;
     private bool _saving;
 
     private string _entraOid = "";

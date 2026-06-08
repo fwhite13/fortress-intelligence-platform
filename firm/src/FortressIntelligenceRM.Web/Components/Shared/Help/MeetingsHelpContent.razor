@@ -1,0 +1,73 @@
+<MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-1 mb-1">Overview</MudText>
+<MudText Typo="Typo.body2">
+    This page is your meeting intelligence hub. It shows upcoming meetings pulled from your calendar,
+    your active recordings, and your full meeting history with transcripts and summaries.
+</MudText>
+
+<MudDivider Class="my-2" />
+
+<MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-3 mb-1">Upcoming Meetings</MudText>
+<MudText Typo="Typo.body2">
+    When you have Teams meetings scheduled in your Outlook calendar in the next 7 days, they appear here automatically.
+    Click <strong>Add to Notetaker</strong> on any card to schedule the bot to join and record that meeting.
+    The bot joins automatically at the meeting start time — you don't need to do anything else.
+</MudText>
+
+<MudDivider Class="my-2" />
+
+<MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-3 mb-1">Join a Meeting manually</MudText>
+<MudText Typo="Typo.body2">
+    Click <strong>Join Meeting</strong> to paste a Teams meeting URL directly. Use this for meetings
+    that are starting now or that aren't in your Outlook calendar. The bot joins immediately.
+</MudText>
+
+<MudDivider Class="my-2" />
+
+<MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-3 mb-1">Active Recordings</MudText>
+<MudText Typo="Typo.body2">
+    Meetings currently being recorded appear at the top with a live indicator. Click <strong>Stop</strong>
+    to end a recording early. Once stopped, the meeting moves to processing automatically.
+</MudText>
+
+<MudDivider Class="my-2" />
+
+<MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-3 mb-1">Meeting statuses</MudText>
+
+<div style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;">
+    <div class="d-flex align-center gap-2">
+        <MudChip T="string" Size="Size.Small" Color="Color.Default" Style="pointer-events:none;">Scheduled</MudChip>
+        <MudText Typo="Typo.body2">Bot is scheduled to join at the meeting start time</MudText>
+    </div>
+    <div class="d-flex align-center gap-2">
+        <MudChip T="string" Size="Size.Small" Color="Color.Error" Style="pointer-events:none;">🔴 Recording</MudChip>
+        <MudText Typo="Typo.body2">Bot is in the meeting and actively recording</MudText>
+    </div>
+    <div class="d-flex align-center gap-2">
+        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Style="pointer-events:none;">🟡 Transcribing</MudChip>
+        <MudText Typo="Typo.body2">Audio is being converted to text</MudText>
+    </div>
+    <div class="d-flex align-center gap-2">
+        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Style="pointer-events:none;">🟡 Summarizing</MudChip>
+        <MudText Typo="Typo.body2">AI is generating the summary and action items</MudText>
+    </div>
+    <div class="d-flex align-center gap-2">
+        <MudChip T="string" Size="Size.Small" Color="Color.Success" Style="pointer-events:none;">🟢 Complete</MudChip>
+        <MudText Typo="Typo.body2">Transcript and summary are ready to view</MudText>
+    </div>
+</div>
+
+<MudDivider Class="my-2" />
+
+<MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-3 mb-1">Viewing results</MudText>
+<MudText Typo="Typo.body2">
+    Click any completed meeting row to open the detail view, where you'll find the full transcript,
+    AI-generated summary, key decisions, and action items.
+</MudText>
+
+<MudDivider Class="my-2" />
+
+<MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-3 mb-1">Calendar warning badge</MudText>
+<MudText Typo="Typo.body2">
+    If a scheduled meeting shows a <strong>⚠️ Removed from calendar</strong> badge, it means the event
+    was deleted or cancelled in Outlook after you added it here. You can remove it from the list manually.
+</MudText>
