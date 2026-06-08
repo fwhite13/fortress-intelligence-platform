@@ -152,7 +152,8 @@
 
             // Get sheet names via JS interop — safe in fetch phase (no DOM container needed)
             Console.WriteLine($"[INFO] [xlsx-preview] calling getSheetNames for ArtifactId={ArtifactId}");
-            var names = await JSRuntime.InvokeAsync<string[]>("xlsxPreviewInterop.getSheetNames", _fileBytes);
+            var base64Bytes = Convert.ToBase64String(_fileBytes);
+            var names = await JSRuntime.InvokeAsync<string[]>("xlsxPreviewInterop.getSheetNames", base64Bytes);
             _sheetNames = names?.ToList() ?? new List<string>();
             Console.WriteLine($"[XlsxPreview] getSheetNames: {_sheetNames.Count} sheets: {string.Join(", ", _sheetNames)}");
 
@@ -183,7 +184,8 @@
         if (_fileBytes == null || index >= _sheetNames.Count) return;
         var sheetName = _sheetNames[index];
         var containerId = _sheetNames.Count == 1 ? _containerId : $"{_containerId}-{index}";
-        await JSRuntime.InvokeVoidAsync("xlsxPreviewInterop.renderSheet", _fileBytes, sheetName, containerId);
+        var base64Sheet = Convert.ToBase64String(_fileBytes);
+        await JSRuntime.InvokeVoidAsync("xlsxPreviewInterop.renderSheet", base64Sheet, sheetName, containerId);
     }
 
     public void Dispose()
