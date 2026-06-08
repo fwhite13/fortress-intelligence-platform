@@ -2,6 +2,7 @@ using FortressIntelligenceRM.Web.Data;
 using FortressIntelligenceRM.Web.Models;
 using FortressIntelligenceRM.Web.Services;
 using Markdig;
+using Markdig.Extensions.Tables;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -673,6 +674,40 @@ public class MeetingsApiController : ControllerBase
                             case Markdig.Syntax.ThematicBreakBlock:
                                 col.Item().PaddingVertical(6).LineHorizontal(0.5f).LineColor(Colors.Grey.Lighten2);
                                 break;
+                            case Table mdTable:
+                            {
+                                var rows = mdTable.OfType<TableRow>().ToList();
+                                if (!rows.Any()) break;
+                                var colCount = rows.Max(r => r.Count);
+                                if (colCount == 0) break;
+                                col.Item().PaddingBottom(8).Table(tbl =>
+                                {
+                                    tbl.ColumnsDefinition(cols =>
+                                    {
+                                        for (int c = 0; c < colCount; c++)
+                                            cols.RelativeColumn();
+                                    });
+                                    foreach (var row in rows)
+                                    {
+                                        var isHeader = row.IsHeader;
+                                        foreach (var cell in row.OfType<TableCell>())
+                                        {
+                                            var cellText = string.Join(" ",
+                                                cell.OfType<Markdig.Syntax.ParagraphBlock>()
+                                                    .Select(p => ExtractInlineText(p.Inline)));
+                                            var cellItem = tbl.Cell()
+                                                .Border(0.5f).BorderColor(Colors.Grey.Lighten2)
+                                                .Background(isHeader ? Color.FromHex("EAF2F5") : Colors.White)
+                                                .Padding(5);
+                                            if (isHeader)
+                                                cellItem.Text(cellText).FontSize(10).Bold().FontColor(Color.FromHex("194C5C"));
+                                            else
+                                                cellItem.Text(cellText).FontSize(10).FontColor(Color.FromHex("413f39"));
+                                        }
+                                    }
+                                });
+                                break;
+                            }
                         }
                     }
                 });
