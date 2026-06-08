@@ -1,9 +1,13 @@
 using FortressIntelligenceRM.Web.Data;
 using FortressIntelligenceRM.Web.Models;
 using FortressIntelligenceRM.Web.Services;
+using Markdig;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -494,22 +498,27 @@ public class MeetingsApiController : ControllerBase
 
     [HttpGet("/api/meetings/{id}/summary/download")]
     [Authorize]
-    public async Task<IActionResult> DownloadSummary(long id)
+    public async Task<IActionResult> DownloadSummary(long id, [FromQuery] string format = "md")
     {
         var (meeting, error) = await ResolveOwnedMeeting(id);
         if (error != null) return error;
 
+        var slug = Regex.Replace(
+            (meeting!.Title ?? $"meeting-{id}").ToLowerInvariant(),
+            @"[^a-z0-9]+", "-").Trim('-');
+
+        string markdownText;
+
         if (!string.IsNullOrEmpty(meeting!.TranscriptS3Key))
         {
-            // Try S3 summary key (same prefix, different filename)
             var summaryKey = meeting.TranscriptS3Key.Replace("transcript.json", "summary.md");
-            var text = await _s3Service.GetSummaryTextAsync(summaryKey);
-            if (!string.IsNullOrEmpty(text))
+            var s3Text = await _s3Service.GetSummaryTextAsync(summaryKey);
+            if (!string.IsNullOrEmpty(s3Text))
             {
-                var slugS3 = Regex.Replace(
-                    (meeting!.Title ?? $"meeting-{id}").ToLowerInvariant(),
-                    @"[^a-z0-9]+", "-").Trim('-');
-                return File(Encoding.UTF8.GetBytes(text), "text/markdown; charset=utf-8", $"{slugS3}-summary.md");
+                markdownText = s3Text;
+                if (format.Equals("pdf", StringComparison.OrdinalIgnoreCase))
+                    return BuildPdfResult(markdownText, meeting.Title ?? $"Meeting {id}", $"{slug}-summary.pdf");
+                return File(Encoding.UTF8.GetBytes(markdownText), "text/markdown; charset=utf-8", $"{slug}-summary.md");
             }
         }
 
@@ -517,15 +526,13 @@ public class MeetingsApiController : ControllerBase
         var summary = await db.Summaries.FirstOrDefaultAsync(s => s.MeetingId == id);
         if (summary == null) return NotFound(new { error = "Summary not available" });
 
-        // Build markdown summary from stored data
+        // Build markdown from stored structured data
         var mdSb = new StringBuilder();
         if (!string.IsNullOrEmpty(summary.SummaryText))
         {
             mdSb.AppendLine(summary.SummaryText);
             mdSb.AppendLine();
         }
-
-        // Always append structured sections
         if (!string.IsNullOrEmpty(summary.KeyDecisionsJson))
         {
             try
@@ -538,7 +545,7 @@ public class MeetingsApiController : ControllerBase
                     mdSb.AppendLine();
                 }
             }
-            catch { /* Non-fatal — skip section if JSON is malformed */ }
+            catch { /* Non-fatal */ }
         }
         if (!string.IsNullOrEmpty(summary.ActionItemsJson))
         {
@@ -552,7 +559,7 @@ public class MeetingsApiController : ControllerBase
                     mdSb.AppendLine();
                 }
             }
-            catch { /* Non-fatal — skip section if JSON is malformed */ }
+            catch { /* Non-fatal */ }
         }
         if (!string.IsNullOrEmpty(summary.FollowUpsJson))
         {
@@ -566,9 +573,8 @@ public class MeetingsApiController : ControllerBase
                     mdSb.AppendLine();
                 }
             }
-            catch { /* Non-fatal — skip section if JSON is malformed */ }
+            catch { /* Non-fatal */ }
         }
-
         if (!string.IsNullOrEmpty(summary.OpenQuestionsJson))
         {
             try
@@ -581,16 +587,148 @@ public class MeetingsApiController : ControllerBase
                     mdSb.AppendLine();
                 }
             }
-            catch { /* Non-fatal — skip section if JSON is malformed */ }
+            catch { /* Non-fatal */ }
         }
 
-        // Generate slug from meeting title for filename
-        var slug = Regex.Replace(
-            (meeting!.Title ?? $"meeting-{id}").ToLowerInvariant(),
-            @"[^a-z0-9]+", "-").Trim('-');
-        var filename = $"{slug}-summary.md";
+        markdownText = mdSb.ToString();
 
-        return File(Encoding.UTF8.GetBytes(mdSb.ToString()), "text/markdown; charset=utf-8", filename);
+        if (format.Equals("pdf", StringComparison.OrdinalIgnoreCase))
+            return BuildPdfResult(markdownText, meeting!.Title ?? $"Meeting {id}", $"{slug}-summary.pdf");
+
+        return File(Encoding.UTF8.GetBytes(markdownText), "text/markdown; charset=utf-8", $"{slug}-summary.md");
+    }
+
+    /// <summary>
+    /// Converts a markdown string to a clean PDF using QuestPDF.
+    /// Parses the markdown into block elements (headings, paragraphs, bullets)
+    /// and renders them with appropriate typography.
+    /// </summary>
+    private static FileContentResult BuildPdfResult(string markdown, string title, string filename)
+    {
+        QuestPDF.Settings.License = LicenseType.Community;
+
+        var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
+        var doc = Markdig.Markdown.Parse(markdown, pipeline);
+
+        var pdfBytes = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.Margin(40);
+                page.DefaultTextStyle(x => x.FontSize(11).FontFamily(Fonts.Arial));
+
+                page.Header().PaddingBottom(8).BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Column(col =>
+                {
+                    col.Item().Text(title).FontSize(14).Bold().FontColor(Color.FromHex("194C5C"));
+                    col.Item().Text($"Generated {DateTime.UtcNow:yyyy-MM-dd}").FontSize(9).FontColor(Colors.Grey.Darken1);
+                });
+
+                page.Content().PaddingTop(12).Column(col =>
+                {
+                    foreach (var block in doc)
+                    {
+                        switch (block)
+                        {
+                            case Markdig.Syntax.HeadingBlock h:
+                            {
+                                var text = ExtractInlineText(h.Inline);
+                                var (size, bold) = h.Level switch
+                                {
+                                    1 => (16f, true),
+                                    2 => (13f, true),
+                                    _ => (11f, true)
+                                };
+                                col.Item().PaddingTop(h.Level <= 2 ? 14 : 8).PaddingBottom(4)
+                                    .Text(text).FontSize(size).Bold().FontColor(Color.FromHex("194C5C"));
+                                break;
+                            }
+                            case Markdig.Syntax.ParagraphBlock p:
+                            {
+                                col.Item().PaddingBottom(6).Text(txt =>
+                                {
+                                    RenderInlines(txt, p.Inline);
+                                });
+                                break;
+                            }
+                            case Markdig.Syntax.ListBlock list:
+                            {
+                                foreach (var listItem in list.OfType<Markdig.Syntax.ListItemBlock>())
+                                {
+                                    foreach (var child in listItem.OfType<Markdig.Syntax.ParagraphBlock>())
+                                    {
+                                        col.Item().PaddingLeft(16).PaddingBottom(3).Row(row =>
+                                        {
+                                            row.ConstantItem(12).Text("•").FontColor(Color.FromHex("194C5C"));
+                                            row.RelativeItem().Text(txt =>
+                                            {
+                                                RenderInlines(txt, child.Inline);
+                                            });
+                                        });
+                                    }
+                                }
+                                col.Item().PaddingBottom(4);
+                                break;
+                            }
+                            case Markdig.Syntax.ThematicBreakBlock:
+                                col.Item().PaddingVertical(6).LineHorizontal(0.5f).LineColor(Colors.Grey.Lighten2);
+                                break;
+                        }
+                    }
+                });
+
+                page.Footer().AlignCenter().Text(txt =>
+                {
+                    txt.Span("Page ").FontSize(9).FontColor(Colors.Grey.Darken1);
+                    txt.CurrentPageNumber().FontSize(9).FontColor(Colors.Grey.Darken1);
+                    txt.Span(" of ").FontSize(9).FontColor(Colors.Grey.Darken1);
+                    txt.TotalPages().FontSize(9).FontColor(Colors.Grey.Darken1);
+                });
+            });
+        }).GeneratePdf();
+
+        return new FileContentResult(pdfBytes, "application/pdf")
+        {
+            FileDownloadName = filename
+        };
+    }
+
+    private static string ExtractInlineText(Markdig.Syntax.Inlines.ContainerInline? inlines)
+    {
+        if (inlines == null) return string.Empty;
+        var sb = new StringBuilder();
+        foreach (var inline in inlines)
+        {
+            if (inline is Markdig.Syntax.Inlines.LiteralInline lit) sb.Append(lit.Content.ToString());
+            else if (inline is Markdig.Syntax.Inlines.EmphasisInline emp) sb.Append(ExtractInlineText(emp));
+            else if (inline is Markdig.Syntax.Inlines.ContainerInline ci) sb.Append(ExtractInlineText(ci));
+        }
+        return sb.ToString();
+    }
+
+    private static void RenderInlines(TextDescriptor txt, Markdig.Syntax.Inlines.ContainerInline? inlines)
+    {
+        if (inlines == null) return;
+        foreach (var inline in inlines)
+        {
+            switch (inline)
+            {
+                case Markdig.Syntax.Inlines.LiteralInline lit:
+                    txt.Span(lit.Content.ToString());
+                    break;
+                case Markdig.Syntax.Inlines.EmphasisInline emp:
+                    var empText = ExtractInlineText(emp);
+                    if (emp.DelimiterCount == 2) txt.Span(empText).Bold();
+                    else txt.Span(empText).Italic();
+                    break;
+                case Markdig.Syntax.Inlines.LineBreakInline:
+                    txt.Span("\n");
+                    break;
+                case Markdig.Syntax.Inlines.ContainerInline ci:
+                    RenderInlines(txt, ci);
+                    break;
+            }
+        }
     }
 
     [HttpGet("/api/meetings/{id}/audio")]

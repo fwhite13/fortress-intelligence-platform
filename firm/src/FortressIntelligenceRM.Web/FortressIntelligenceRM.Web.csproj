@@ -9,6 +9,7 @@
     <PackageReference Include="AWSSDK.Batch" Version="3.7.400.4" />
     <PackageReference Include="AWSSDK.Scheduler" Version="3.*" />
     <PackageReference Include="Markdig" Version="1.1.2" />
+    <PackageReference Include="QuestPDF" Version="2024.*" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.*" />
     <ProjectReference Include="..\..\..\shared\FipShared\FipShared.csproj" />
     <PackageReference Include="MudBlazor" Version="7.*" />

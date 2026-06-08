@@ -15,3 +15,32 @@
     background-color: #ffffff;
     color: #413f39;
 }
+
+/* Force light-theme text inside the help drawer body regardless of MudBlazor theme vars */
+.help-drawer-body h1,
+.help-drawer-body h2,
+.help-drawer-body h3,
+.help-drawer-body h4,
+.help-drawer-body h5,
+.help-drawer-body h6 {
+    color: #194C5C !important;
+}
+
+.help-drawer-body .mud-typography {
+    color: inherit;
+}
+
+.help-drawer-body .mud-typography-subtitle1,
+.help-drawer-body .mud-typography-subtitle2 {
+    color: #194C5C !important;
+}
+
+.help-drawer-body .mud-typography-body1,
+.help-drawer-body .mud-typography-body2 {
+    color: #413f39 !important;
+}
+
+/* Chip labels inside help drawer — force readable text */
+.help-drawer-body .mud-chip .mud-chip-content {
+    color: #ffffff !important;
+}

@@ -19,10 +19,22 @@
 <PageTitle>@(_meeting?.Title ?? "Meeting") — @Branding.ModuleName</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-6">
-    <MudButton StartIcon="@Icons.Material.Filled.ArrowBack"
-               Href="/meetings" Style="color: var(--color-text-secondary);" Class="mb-4">
-        Back to Meetings
-    </MudButton>
+    <MudStack Row AlignItems="AlignItems.Center" Class="mb-4">
+        <MudButton StartIcon="@Icons.Material.Filled.ArrowBack"
+                   Href="/meetings" Style="color: var(--color-text-secondary);">
+            Back to Meetings
+        </MudButton>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Outlined.HelpOutline"
+                       Size="Size.Small"
+                       Style="color: var(--color-text-secondary);"
+                       OnClick="@(() => _helpOpen = true)"
+                       aria-label="Help" />
+    </MudStack>
+
+    <HelpDrawer @bind-IsOpen="_helpOpen" Title="Meeting Detail — Help">
+        <MeetingDetailHelpContent />
+    </HelpDrawer>
 
     @if (_loading)
     {
@@ -78,11 +90,16 @@
                                Href="@($"/api/meetings/{_meeting.Id}/transcript/download")">
                         Transcript
                     </MudButton>
-                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download"
-                               Style="border-color: var(--color-gold); color: var(--color-gold);"
-                               Href="@($"/api/meetings/{_meeting.Id}/summary/download")">
-                        Summary
-                    </MudButton>
+                    <MudMenu Label="Summary" StartIcon="@Icons.Material.Filled.Download"
+                             Variant="Variant.Outlined"
+                             Style="border-color: var(--color-gold); color: var(--color-gold);">
+                        <MudMenuItem Href="@($"/api/meetings/{_meeting.Id}/summary/download?format=md")">
+                            <MudIcon Icon="@Icons.Material.Outlined.Description" Size="Size.Small" Class="mr-2" />Markdown (.md)
+                        </MudMenuItem>
+                        <MudMenuItem Href="@($"/api/meetings/{_meeting.Id}/summary/download?format=pdf")">
+                            <MudIcon Icon="@Icons.Material.Outlined.PictureAsPdf" Size="Size.Small" Class="mr-2" />PDF
+                        </MudMenuItem>
+                    </MudMenu>
                     @if (!string.IsNullOrEmpty(_meeting.AudioS3Key))
                     {
                         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AudioFile"
@@ -306,6 +323,7 @@
     private string? _mindmapError = null;
     private bool _mindmapTabOpened = false;
     private FortressIntelligenceRM.Web.Models.FirmUser? _user;
+    private bool _helpOpen = false;
 
     // KB push status (loaded from /kb-status on init)
     private HashSet<string> _transcriptPushedTo = new();
