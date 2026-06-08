@@ -24,6 +24,7 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApp(options =>
     {
         builder.Configuration.Bind("AzureAd", options);
+        options.ResponseType = "code"; // auth code flow — required to get access + refresh tokens
         options.SaveTokens = true;
         options.Scope.Add("offline_access");
         options.Scope.Add("OnlineMeetings.Read");
