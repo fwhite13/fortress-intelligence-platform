@@ -1,3 +1,5 @@
+@inject FortressIntelligenceRM.Web.Services.BrandingConfig Branding
+
 <MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-1 mb-1">Overview</MudText>
 <MudText Typo="Typo.body2">
     This page shows everything captured for a single meeting: the AI-generated summary, the full
@@ -49,20 +51,14 @@
     <strong>Audio</strong> — downloads the original meeting recording if one was captured.
 </MudText>
 
-<MudDivider Class="my-2" />
+@if (Branding.SuiteName != "RISE")
+{
+    <MudDivider Class="my-2" />
 
-<MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-3 mb-1">Knowledge Base</MudText>
-<MudText Typo="Typo.body2">
-    The Share panel lets you push the transcript or summary directly into your Personal KB or your
-    Team KB in FAIT. Once pushed, the content becomes searchable and available for AI chat.
-    A document can only be pushed to each KB once.
-</MudText>
-
-<MudDivider Class="my-2" />
-
-<MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-3 mb-1">Retranscribe (admin)</MudText>
-<MudText Typo="Typo.body2">
-    Admins see a <strong>Retranscribe</strong> button. Use it if the transcript quality was poor or
-    if something went wrong during processing. This overwrites the existing transcript and summary
-    and re-runs the full pipeline.
-</MudText>
+    <MudText Typo="Typo.subtitle1" Color="Color.Primary" Class="mt-3 mb-1">Knowledge Base</MudText>
+    <MudText Typo="Typo.body2">
+        The Share panel lets you push the transcript or summary directly into your Personal KB or your
+        Team KB in FAIT. Once pushed, the content becomes searchable and available for AI chat.
+        A document can only be pushed to each KB once.
+    </MudText>
+}
