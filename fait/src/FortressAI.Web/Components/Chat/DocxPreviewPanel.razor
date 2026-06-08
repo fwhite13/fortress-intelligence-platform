@@ -29,6 +29,8 @@
 
 @code {
     [Parameter, EditorRequired] public WorkspaceUpload Artifact { get; set; } = default!;
+    [Parameter] public EventCallback OnPreviewSuccess { get; set; }
+    [Parameter] public EventCallback<string> OnPreviewError { get; set; }
 
     private bool _loading = true;
     private string? _error;
@@ -70,9 +72,20 @@
             var bytes = _pendingBytes;
             _pendingBytes = null;
             var base64 = Convert.ToBase64String(bytes);
-            Console.WriteLine($"[DocxPreview] OnAfterRenderAsync: rendering bytes to containerId={_containerId}");
-            await JSRuntime.InvokeVoidAsync("docxPreviewInterop.render", base64, _containerId);
-            Console.WriteLine("[DocxPreview] JSInterop render complete");
+            Console.WriteLine($"[INFO] [docx-preview] rendering to containerId={_containerId}");
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("docxPreviewInterop.render", base64, _containerId);
+                Console.WriteLine("[INFO] [docx-preview] JSInterop render complete");
+                await OnPreviewSuccess.InvokeAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ERROR] [docx-preview] JSInterop render failed: {ex.Message}");
+                _error = "Document preview failed. Please download the file.";
+                StateHasChanged();
+                await OnPreviewError.InvokeAsync(_error);
+            }
         }
     }
 

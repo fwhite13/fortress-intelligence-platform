@@ -119,6 +119,7 @@
             _fileBytes = await response.Content.ReadAsByteArrayAsync();
 
             // Get sheet names via JS interop
+            Console.WriteLine($"[INFO] [xlsx-preview] calling getSheetNames for ArtifactId={ArtifactId}");
             var names = await JSRuntime.InvokeAsync<string[]>("xlsxPreviewInterop.getSheetNames", _fileBytes);
             _sheetNames = names?.ToList() ?? new List<string>();
             Console.WriteLine($"[XlsxPreview] getSheetNames: {_sheetNames.Count} sheets: {string.Join(", ", _sheetNames)}");
@@ -153,7 +154,17 @@
         if (_fileBytes == null || index >= _sheetNames.Count) return;
         var sheetName = _sheetNames[index];
         var containerId = _sheetNames.Count == 1 ? _containerId : $"{_containerId}-{index}";
-        await JSRuntime.InvokeVoidAsync("xlsxPreviewInterop.renderSheet", _fileBytes, sheetName, containerId);
+        Console.WriteLine($"[INFO] [xlsx-preview] rendering sheet={sheetName} to containerId={containerId}");
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("xlsxPreviewInterop.renderSheet", _fileBytes, sheetName, containerId);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[ERROR] [xlsx-preview] JSInterop renderSheet failed: sheet={sheetName} error={ex.Message}");
+            _error = "Spreadsheet rendering failed. Please download the file.";
+            StateHasChanged();
+        }
     }
 
     public void Dispose()

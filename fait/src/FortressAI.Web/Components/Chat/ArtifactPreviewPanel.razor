@@ -36,6 +36,16 @@
                 <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Large" />
                 <MudText Color="Color.Error">@_error</MudText>
                 <MudButton Variant="Variant.Outlined" OnClick="LoadPreview">Retry</MudButton>
+                @if (!string.IsNullOrEmpty(_rawPresignedUrl))
+                {
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Download"
+                               Href="@_rawPresignedUrl"
+                               Target="_blank">
+                        Download File
+                    </MudButton>
+                }
             </div>
         }
         else if (LayoutState.CurrentArtifact != null && IsXlsxType(LayoutState.CurrentArtifact.Filename, LayoutState.CurrentArtifact.MimeType))
@@ -61,7 +71,9 @@
         }
         else if (_isDocx && _currentArtifactUpload != null)
         {
-            <DocxPreviewPanel Artifact="@_currentArtifactUpload" />
+            <DocxPreviewPanel Artifact="@_currentArtifactUpload"
+                              OnPreviewSuccess="HandleDocxSuccess"
+                              OnPreviewError="HandleDocxError" />
         }
         else if (_isPptx && _currentPptxUpload != null)
         {
@@ -236,5 +248,19 @@
     public void Dispose()
     {
         LayoutState.OnChange -= OnLayoutStateChanged;
+    }
+
+    private void HandleDocxSuccess()
+    {
+        Console.WriteLine("[INFO] [artifact-preview] DocxPreview signalled success");
+    }
+
+    private void HandleDocxError(string msg)
+    {
+        Console.Error.WriteLine($"[ERROR] [artifact-preview] DocxPreview signalled error: {msg}");
+        _error = msg;
+        _isDocx = false;
+        _currentArtifactUpload = null;
+        StateHasChanged();
     }
 }
