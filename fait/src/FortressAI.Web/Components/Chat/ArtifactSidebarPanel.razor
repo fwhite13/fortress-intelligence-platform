@@ -215,7 +215,10 @@
         }
         catch (JSDisconnectedException) { /* expected during circuit disposal */ }
         catch (TaskCanceledException) { /* expected during circuit disposal */ }
-        _dotNetRef?.Dispose();
+        finally
+        {
+            _dotNetRef?.Dispose();
+        }
     }
 
     [JSInvokable]
