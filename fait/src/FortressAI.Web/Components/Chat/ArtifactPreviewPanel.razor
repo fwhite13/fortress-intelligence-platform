@@ -38,9 +38,9 @@
                 <MudButton Variant="Variant.Outlined" OnClick="LoadPreview">Retry</MudButton>
             </div>
         }
-        else if (LayoutState.CurrentArtifact != null && IsXlsxType(LayoutState.CurrentArtifact.Filename, LayoutState.CurrentArtifact.MimeType))
+        else if (_isOffice && _currentOfficeUpload != null)
         {
-            <XlsxPreviewPanel ArtifactId="@LayoutState.CurrentArtifact.Id" Filename="@LayoutState.CurrentArtifact.Filename" MimeType="@LayoutState.CurrentArtifact.MimeType" />
+            <OfficePreviewPanel Artifact="@_currentOfficeUpload" OnPreviewError="HandleOfficeError" />
         }
         else if (!_canPreview)
         {
@@ -58,10 +58,6 @@
                     </MudButton>
                 }
             </div>
-        }
-        else if (_isDocx && _currentArtifactUpload != null)
-        {
-            <DocxPreviewPanel Artifact="@_currentArtifactUpload" OnPreviewError="HandleDocxError" />
         }
         else if (_isPptx && _currentPptxUpload != null)
         {
@@ -105,8 +101,8 @@
     private bool _loading = true;
     private string? _error;
     private ArtifactRef? _loadedFor;
-    private bool _isDocx;
-    private WorkspaceUpload? _currentArtifactUpload;
+    private bool _isOffice;
+    private WorkspaceUpload? _currentOfficeUpload;
     private bool _isPptx;
     private WorkspaceUpload? _currentPptxUpload;
 
@@ -137,8 +133,8 @@
         _presignedUrl = null;
         _rawPresignedUrl = null;
         _canPreview = false;
-        _isDocx = false;
-        _currentArtifactUpload = null;
+        _isOffice = false;
+        _currentOfficeUpload = null;
         _isPptx = false;
         _currentPptxUpload = null;
         StateHasChanged();
@@ -147,9 +143,9 @@
         {
             if (IsXlsxType(artifact.Filename, artifact.MimeType))
             {
-                // XlsxPreviewPanel handles its own loading
+                _isOffice = true;
+                _currentOfficeUpload = new WorkspaceUpload { Id = artifact.Id, S3Key = artifact.S3Key, Filename = artifact.Filename, MimeType = artifact.MimeType };
                 _canPreview = true;
-                _presignedUrl = null;
                 _loading = false;
                 _loadedFor = artifact;
                 StateHasChanged();
@@ -180,13 +176,12 @@
             _rawPresignedUrl = rawUrl;
 
             var ext = Path.GetExtension(artifact.Filename);
-            _isDocx = ext.Equals(".docx", StringComparison.OrdinalIgnoreCase)
+            _isOffice = ext.Equals(".docx", StringComparison.OrdinalIgnoreCase)
                 || artifact.MimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-            if (_isDocx)
+            if (_isOffice)
             {
-                // Build a WorkspaceUpload-like object for DocxPreviewPanel
-                _currentArtifactUpload = new WorkspaceUpload
+                _currentOfficeUpload = new WorkspaceUpload
                 {
                     Id = artifact.Id,
                     S3Key = artifact.S3Key,
@@ -198,10 +193,10 @@
             else
             {
                 _canPreview = PreviewableExtensions.Contains(ext);
-                _currentArtifactUpload = null;
+                _currentOfficeUpload = null;
             }
 
-            if (_canPreview && !_isDocx)
+            if (_canPreview && !_isOffice)
             {
                 if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
@@ -231,11 +226,11 @@
         return $"/api/artifacts/{artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
     }
 
-    private Task HandleDocxError(string message)
+    private Task HandleOfficeError(string message)
     {
         _error = message;
-        _isDocx = false;
-        _currentArtifactUpload = null;
+        _isOffice = false;
+        _currentOfficeUpload = null;
         StateHasChanged();
         return Task.CompletedTask;
     }

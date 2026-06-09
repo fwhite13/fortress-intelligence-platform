@@ -69,11 +69,7 @@
             <div class="artifact-sidebar__preview">
                 @if (IsPreviewable(_selectedArtifact))
                 {
-                    @if (IsXlsxType(_selectedArtifact))
-                    {
-                        <XlsxPreviewPanel ArtifactId="@_selectedArtifact.Id" Filename="@_selectedArtifact.Filename" MimeType="@_selectedArtifact.MimeType" />
-                    }
-                    else if (_previewLoading)
+                    @if (_previewLoading)
                     {
                         <div class="artifact-sidebar__preview-loading">
                             <MudProgressCircular Indeterminate="true" />
@@ -94,9 +90,9 @@
                             </div>
                         }
                     }
-                    else if (IsDocxType(_selectedArtifact) && !_isDocxPreviewFailed)
+                    else if ((IsDocxType(_selectedArtifact) || IsXlsxType(_selectedArtifact)) && !_isOfficePreviewFailed)
                     {
-                        <DocxPreviewPanel Artifact="@_selectedArtifact" OnPreviewError="HandleDocxPreviewError" />
+                        <OfficePreviewPanel Artifact="@_selectedArtifact" OnPreviewError="HandleOfficePreviewError" />
                     }
                     else if (IsPptxType(_selectedArtifact))
                     {
@@ -187,7 +183,7 @@
     private string? _previewError;
     private string? _textPreviewContent;
     private string? _markdownHtml;
-    private bool _isDocxPreviewFailed = false;
+    private bool _isOfficePreviewFailed = false;
     private bool _previewLoading;
     private bool _downloadLoading;
     private bool _isMaximized = false;
@@ -250,7 +246,7 @@
         _previewError = null;
         _textPreviewContent = null;
         _markdownHtml = null;
-        _isDocxPreviewFailed = false;
+        _isOfficePreviewFailed = false;
         Console.WriteLine($"[ArtifactSidebar] SelectArtifact: {artifact.Filename} mime={artifact.MimeType} ext={Path.GetExtension(artifact.Filename)} IsPreviewable={IsPreviewable(artifact)} IsDocx={IsDocxType(artifact)} IsXlsx={IsXlsxType(artifact)}");
 
         if (IsPreviewable(artifact))
@@ -259,19 +255,9 @@
             StateHasChanged();
             try
             {
-                if (IsXlsxType(artifact))
+                if (IsDocxType(artifact) || IsXlsxType(artifact))
                 {
-                    Console.WriteLine("[ArtifactSidebar] Branch: IsXlsx — delegating to XlsxPreviewPanel");
-                    // XlsxPreviewPanel handles its own loading
-                    _previewLoading = false;
-                    StateHasChanged();
-                    return;
-                }
-
-                if (IsDocxType(artifact))
-                {
-                    Console.WriteLine("[ArtifactSidebar] Branch: IsDocx — delegating to DocxPreviewPanel");
-                    // DocxPreviewPanel handles its own loading — no presign needed
+                    Console.WriteLine("[ArtifactSidebar] Branch: IsOffice — delegating to OfficePreviewPanel");
                     _previewLoading = false;
                     StateHasChanged();
                     return;
@@ -343,10 +329,10 @@
         }
     }
 
-    private Task HandleDocxPreviewError(string message)
+    private Task HandleOfficePreviewError(string message)
     {
         _previewError = message;
-        _isDocxPreviewFailed = true;
+        _isOfficePreviewFailed = true;
         StateHasChanged();
         return Task.CompletedTask;
     }
