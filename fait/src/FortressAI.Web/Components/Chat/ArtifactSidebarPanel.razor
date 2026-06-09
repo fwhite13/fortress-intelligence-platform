@@ -96,7 +96,7 @@
                     }
                     else if (IsDocxType(_selectedArtifact))
                     {
-                        <DocxPreviewPanel Artifact="@_selectedArtifact" />
+                        <DocxPreviewPanel Artifact="@_selectedArtifact" OnPreviewError="HandleDocxPreviewError" />
                     }
                     else if (IsPptxType(_selectedArtifact))
                     {
@@ -339,6 +339,13 @@
                 StateHasChanged();
             }
         }
+    }
+
+    private Task HandleDocxPreviewError(string message)
+    {
+        _previewError = message;
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     private async Task DownloadAsync()

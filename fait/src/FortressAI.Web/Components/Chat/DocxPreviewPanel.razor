@@ -29,6 +29,7 @@
 
 @code {
     [Parameter, EditorRequired] public WorkspaceUpload Artifact { get; set; } = default!;
+    [Parameter] public EventCallback<string> OnPreviewError { get; set; }
 
     private bool _loading = true;
     private string? _error;
@@ -92,6 +93,7 @@
             Console.Error.WriteLine($"[ERROR] [docx-preview] JSInterop render failed: {ex.Message}");
             _jsRenderPending = false;
             _error = "Document preview failed. Please download the file.";
+            await OnPreviewError.InvokeAsync(_error);
             StateHasChanged();
         }
         finally
@@ -124,6 +126,7 @@
             {
                 _error = $"Preview failed ({(int)response.StatusCode}). Try downloading.";
                 _loading = false;
+                await OnPreviewError.InvokeAsync(_error);
                 StateHasChanged();
                 return;
             }
@@ -138,6 +141,7 @@
             Console.Error.WriteLine($"[DocxPreview] FetchBytesAsync failed: ArtifactId={Artifact.Id} Error={ex.GetType().Name}: {ex.Message}");
             _error = "Failed to load document preview. Try downloading the file.";
             _loading = false;
+            await OnPreviewError.InvokeAsync(_error);
             StateHasChanged();
         }
     }

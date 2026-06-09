@@ -61,7 +61,7 @@
         }
         else if (_isDocx && _currentArtifactUpload != null)
         {
-            <DocxPreviewPanel Artifact="@_currentArtifactUpload" />
+            <DocxPreviewPanel Artifact="@_currentArtifactUpload" OnPreviewError="HandleDocxError" />
         }
         else if (_isPptx && _currentPptxUpload != null)
         {
@@ -229,6 +229,15 @@
         if (!Guid.TryParse(userIdStr, out var userId)) return null;
         var (token, expires) = PreviewSvc.GenerateToken(artifact.Id, userId);
         return $"/api/artifacts/{artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
+    }
+
+    private Task HandleDocxError(string message)
+    {
+        _error = message;
+        _isDocx = false;
+        _currentArtifactUpload = null;
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     private void Close() => LayoutState.CloseArtifactPreview();
