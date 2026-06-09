@@ -10,6 +10,7 @@ public class ChatLayoutState
 
     public void OpenArtifactPreview(ArtifactRef artifact)
     {
+        if (ArtifactPanelOpen && CurrentArtifact?.Id == artifact.Id) return;
         ArtifactPanelOpen = true;
         CurrentArtifact = artifact;
         OnChange?.Invoke();
@@ -17,6 +18,7 @@ public class ChatLayoutState
 
     public void CloseArtifactPreview()
     {
+        if (!ArtifactPanelOpen && CurrentArtifact == null) return;
         ArtifactPanelOpen = false;
         CurrentArtifact = null;
         OnChange?.Invoke();
@@ -26,12 +28,14 @@ public class ChatLayoutState
 
     public void OpenArtifactSidebar()
     {
+        if (ArtifactSidebarOpen) return;
         ArtifactSidebarOpen = true;
         OnChange?.Invoke();
     }
 
     public void CloseArtifactSidebar()
     {
+        if (!ArtifactSidebarOpen) return;
         ArtifactSidebarOpen = false;
         OnChange?.Invoke();
     }

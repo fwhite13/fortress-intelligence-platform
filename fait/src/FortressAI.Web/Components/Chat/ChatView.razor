@@ -459,8 +459,8 @@ else
     private bool _isDragOver = false;
     // KB retrieval result for UI indicator (set per-message)
     private KbRetrievalResult? _lastKbResult;
-    private static int _chatRenderCount = 0;
-    private static int _afterRenderNoFirstCount = 0;
+    private int _chatRenderCount = 0;
+    private int _afterRenderNoFirstCount = 0;
 
     // Task mode state
     private bool _taskMode = false;
@@ -592,7 +592,7 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        var cycle = System.Threading.Interlocked.Increment(ref _chatRenderCount);
+        var cycle = ++_chatRenderCount;
         Logger.LogInformation("[ChatView] OnParametersSetAsync START — cycle={Cycle} ConversationId={ConversationId} lastConversationId={LastConversationId}",
             cycle, ConversationId, _lastConversationId);
 
@@ -727,7 +727,7 @@ else
                 if (!string.IsNullOrEmpty(previewIdStr) && Guid.TryParse(previewIdStr, out var previewId))
                 {
                     var artifact = _conversationArtifacts.FirstOrDefault(a => a.Id == previewId);
-                    if (artifact != null)
+                    if (artifact != null && LayoutState.CurrentArtifact?.Id != artifact.Id)
                     {
                         // Mutual exclusion: close sidebar before opening preview panel
                         if (LayoutState.ArtifactSidebarOpen)
@@ -746,7 +746,7 @@ else
     {
         if (!firstRender)
         {
-            var count = System.Threading.Interlocked.Increment(ref _afterRenderNoFirstCount);
+            var count = ++_afterRenderNoFirstCount;
             if (count % 10 == 0)
                 Logger.LogWarning("[ChatView] OnAfterRenderAsync non-firstRender loop count={Count}", count);
         }
