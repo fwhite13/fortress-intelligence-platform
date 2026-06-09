@@ -122,6 +122,10 @@ public class ArtifactPreviewController : ControllerBase
 
     private record ConvertPptxResult([property: JsonPropertyName("previewS3Key")] string? PreviewS3Key);
 
+    private record ConvertXlsxResult(
+        [property: JsonPropertyName("previewS3Key")] string? PreviewS3Key,
+        [property: JsonPropertyName("sheetNames")] string[]? SheetNames);
+
     [HttpPost("{id:guid}/convert-pptx")]
     [Authorize]
     public async Task<IActionResult> ConvertPptx(Guid id)
@@ -168,6 +172,54 @@ public class ArtifactPreviewController : ControllerBase
         }
 
         return Ok(new { previewS3Key = result?.PreviewS3Key });
+    }
+
+    [HttpPost("{id:guid}/convert-xlsx")]
+    [Authorize]
+    public async Task<IActionResult> ConvertXlsx(Guid id)
+    {
+        _logger.LogInformation("[convert-xlsx] Starting conversion for artifact {Id}", id);
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var artifact = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == id);
+        if (artifact == null) return NotFound();
+
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (artifact.UserId.ToString() != userId) return Forbid();
+
+        // Return cached key if already converted
+        if (!string.IsNullOrEmpty(artifact.PreviewS3Key))
+            return Ok(new { previewS3Key = artifact.PreviewS3Key, sheetNames = Array.Empty<string>() });
+
+        var converterBaseRaw = _config["CONVERTER_BASE_URL"];
+        if (string.IsNullOrEmpty(converterBaseRaw))
+            _logger.LogWarning("[convert-xlsx] CONVERTER_BASE_URL not set — falling back to localhost.");
+        var converterBase = converterBaseRaw ?? "http://localhost:3001";
+        var converterApiKey = _config["CONVERTER_API_KEY"];
+        using var client = _httpClientFactory.CreateClient("HarnessClient");
+        if (!string.IsNullOrEmpty(converterApiKey))
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
+        var body = new
+        {
+            artifactId = id.ToString(),
+            s3Key = artifact.S3Key,
+            userId = artifact.UserId.ToString(),
+            outputBucket = _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces"
+        };
+        var resp = await client.PostAsJsonAsync($"{converterBase}/convert-xlsx", body);
+        if (!resp.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("[convert-xlsx] Converter returned {status}", resp.StatusCode);
+            return StatusCode(502, new { error = "Conversion failed" });
+        }
+
+        var result = await resp.Content.ReadFromJsonAsync<ConvertXlsxResult>();
+        if (result?.PreviewS3Key != null)
+        {
+            artifact.PreviewS3Key = result.PreviewS3Key;
+            await db.SaveChangesAsync();
+        }
+
+        return Ok(new { previewS3Key = result?.PreviewS3Key, sheetNames = result?.SheetNames ?? Array.Empty<string>() });
     }
 
     [HttpGet("{id:guid}/preview-status")]

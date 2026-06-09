@@ -1,16 +1,21 @@
 @inject ArtifactPreviewService PreviewSvc
-@inject UserSessionService Session
+@inject FortressAI.Web.Services.UserSessionService Session
 @inject IJSRuntime JSRuntime
 @inject IHttpClientFactory HttpClientFactory
+@inject Amazon.S3.IAmazonS3 S3Client
+@inject IConfiguration Configuration
+@inject IWorkspaceFileService WorkspaceFileSvc
+@inject ISnackbar Snackbar
 @using FortressAI.Web.Services
-@implements IDisposable
+@using System.Net.Http.Json
+@implements IAsyncDisposable
 
 <div class="xlsx-preview-panel">
     @if (_loading)
     {
         <div class="xlsx-preview-panel__loading">
             <MudProgressCircular Indeterminate="true" />
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">Loading spreadsheet...</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">Generating preview… this may take a moment.</MudText>
         </div>
     }
     else if (_error != null)
@@ -18,55 +23,102 @@
         <div class="xlsx-preview-panel__error">
             <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Size="Size.Large" />
             <MudText Typo="Typo.body2" Color="Color.Secondary">@_error</MudText>
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Default"
+                       StartIcon="@Icons.Material.Outlined.Download"
+                       Disabled="@_downloadLoading"
+                       OnClick="DownloadAsync"
+                       Class="mt-2">
+                @if (_downloadLoading)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                }
+                Download spreadsheet
+            </MudButton>
         </div>
     }
-    else if (_sheetNames.Count > 0)
+    else
     {
-        @if (_sheetNames.Count == 1)
-        {
-            <div id="@_containerId" class="xlsx-preview-panel__table-container"></div>
-        }
-        else
-        {
-            <MudTabs ActivePanelIndex="@_activeSheet" ActivePanelIndexChanged="OnTabChanged" Class="xlsx-preview-panel__tabs">
-                @foreach (var (name, index) in _sheetNames.Select((n, i) => (n, i)))
-                {
-                    <MudTabPanel Text="@name">
-                        <div id="@($"{_containerId}-{index}")" class="xlsx-preview-panel__table-container"></div>
-                    </MudTabPanel>
-                }
-            </MudTabs>
-        }
+        <div class="xlsx-preview-panel__viewer">
+            <div id="@_containerId" class="xlsx-preview-panel__canvas-container"></div>
+            @if (_totalPages > 1)
+            {
+                <div class="xlsx-preview-panel__nav">
+                    <MudIconButton Icon="@Icons.Material.Outlined.ChevronLeft"
+                                   Size="Size.Small"
+                                   Disabled="@(_currentPage <= 1)"
+                                   OnClick="PrevPage" />
+                    <MudText Typo="Typo.body2" Class="xlsx-preview-panel__page-label">
+                        @PageLabel
+                    </MudText>
+                    <MudIconButton Icon="@Icons.Material.Outlined.ChevronRight"
+                                   Size="Size.Small"
+                                   Disabled="@(_currentPage >= _totalPages)"
+                                   OnClick="NextPage" />
+                </div>
+            }
+        </div>
     }
 </div>
 
 @code {
     [Parameter, EditorRequired] public Guid ArtifactId { get; set; }
-    [Parameter, EditorRequired] public string Filename { get; set; } = "";
-    [Parameter, EditorRequired] public string MimeType { get; set; } = "";
+    [Parameter, EditorRequired] public string S3Key { get; set; } = "";
+    [Parameter] public string? ExistingPreviewS3Key { get; set; }
 
     private bool _loading = true;
     private string? _error;
-    private List<string> _sheetNames = new();
-    private int _activeSheet = 0;
+    private byte[]? _pendingBytes;
     private string _containerId = $"xlsx-{Guid.NewGuid():N}";
-    private byte[]? _fileBytes;
+    private int _currentPage = 1;
+    private int _totalPages = 0;
+    private string[] _sheetNames = Array.Empty<string>();
+    private bool _downloadLoading = false;
+
+    private string PageLabel
+    {
+        get
+        {
+            if (_sheetNames.Length > 0 && _currentPage >= 1 && _currentPage <= _sheetNames.Length)
+                return $"{_sheetNames[_currentPage - 1]} — {_currentPage} of {_totalPages}";
+            return $"{_currentPage} of {_totalPages}";
+        }
+    }
+
+    private async Task DownloadAsync()
+    {
+        _downloadLoading = true;
+        StateHasChanged();
+        try
+        {
+            Console.WriteLine($"[preview] [xlsx] Download fallback requested for artifact {ArtifactId}, S3Key={S3Key}");
+            var url = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(S3Key);
+            await JSRuntime.InvokeVoidAsync("open", url, "_blank");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[preview] [xlsx] Download fallback failed: {ex.Message}");
+            Snackbar.Add("Download failed.", Severity.Error);
+        }
+        finally
+        {
+            _downloadLoading = false;
+            StateHasChanged();
+        }
+    }
 
     protected override void OnInitialized()
     {
-        Console.WriteLine($"[XlsxPreview] OnInitialized: ArtifactId={ArtifactId} Filename={Filename}");
         Session.OnAuthStateChanged += HandleAuthStateChanged;
     }
 
     private void HandleAuthStateChanged()
     {
-        Console.WriteLine($"[XlsxPreview] HandleAuthStateChanged: _loading={_loading} UserId={Session.UserId}");
-        // Session just populated — if we haven't loaded yet, kick off the load
         if (_loading && Session.UserId != Guid.Empty)
         {
             InvokeAsync(async () =>
             {
-                await LoadAndRenderAsync();
+                await FetchAndConvertAsync();
                 StateHasChanged();
             });
         }
@@ -74,103 +126,129 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        Console.WriteLine("[XlsxPreview] OnAfterRenderAsync firstRender=true");
-        if (!firstRender) return;
-        await LoadAndRenderAsync();
-    }
-
-    private async Task OnTabChanged(int index)
-    {
-        Console.WriteLine($"[XlsxPreview] Tab changed to {index}");
-        _activeSheet = index;
-        StateHasChanged();
-        await Task.Yield(); // wait for tab panel to render before invoking JS
-        if (_fileBytes != null && index < _sheetNames.Count)
+        if (firstRender)
         {
-            await RenderSheetAsync(index);
+            await FetchAndConvertAsync();
+            return;
+        }
+
+        if (_pendingBytes != null)
+        {
+            var bytes = _pendingBytes;
+            _pendingBytes = null;
+            var base64 = Convert.ToBase64String(bytes);
+            _totalPages = await JSRuntime.InvokeAsync<int>("pdfPreviewInterop.renderPdf", base64, _containerId);
+            StateHasChanged();
         }
     }
 
-    private async Task LoadAndRenderAsync()
+    private async Task FetchAndConvertAsync()
     {
-        Console.WriteLine($"[XlsxPreview] LoadAndRenderAsync start: ArtifactId={ArtifactId} Filename={Filename} UserId={Session.UserId}");
         try
         {
+            Console.WriteLine($"[preview] [xlsx] Starting fetch/convert for artifact {ArtifactId}, S3Key={S3Key}");
             var userId = Session.UserId;
             if (userId == Guid.Empty)
             {
-                Console.WriteLine("[XlsxPreview] LoadAndRenderAsync: UserId empty, waiting for auth");
+                Console.WriteLine($"[preview] [xlsx] userId empty, staying in loading state — OnAuthStateChanged will retry");
                 return;
             }
 
-            var (token, expires) = PreviewSvc.GenerateToken(ArtifactId, userId);
-            var relativeUrl = $"/api/artifacts/{ArtifactId}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
-            Console.WriteLine($"[XlsxPreview] LoadAndRenderAsync: url={relativeUrl}");
-            using var http = HttpClientFactory.CreateClient("InternalPreview");
-            using var response = await http.GetAsync(relativeUrl);
-            Console.WriteLine($"[XlsxPreview] HTTP {(int)response.StatusCode} {response.StatusCode} for {relativeUrl}");
-            if (!response.IsSuccessStatusCode)
+            // Step 1: Get cached preview key or trigger conversion
+            string? previewS3Key = ExistingPreviewS3Key;
+            if (string.IsNullOrEmpty(previewS3Key))
             {
-                _error = $"Preview failed ({(int)response.StatusCode}). Try downloading.";
+                Console.WriteLine($"[preview] [xlsx] No cached preview — calling convert-xlsx for {ArtifactId}");
+                var converterBaseRaw = Configuration["CONVERTER_BASE_URL"] ?? "http://localhost:3001";
+                var converterApiKey = Configuration["CONVERTER_API_KEY"];
+                using var client = HttpClientFactory.CreateClient("HarnessClient");
+                client.Timeout = TimeSpan.FromSeconds(90);
+                if (!string.IsNullOrEmpty(converterApiKey))
+                    client.DefaultRequestHeaders.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
+
+                var body = new
+                {
+                    artifactId = ArtifactId.ToString(),
+                    s3Key = S3Key,
+                    userId = userId.ToString(),
+                    outputBucket = Configuration["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces"
+                };
+                var resp = await client.PostAsJsonAsync($"{converterBaseRaw}/convert-xlsx", body);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var errBody = await resp.Content.ReadAsStringAsync();
+                    Console.Error.WriteLine($"[preview] [xlsx] Converter returned {(int)resp.StatusCode}: {errBody}");
+                    _error = "Preview conversion failed. Try downloading the file.";
+                    _loading = false;
+                    StateHasChanged();
+                    return;
+                }
+                var result = await resp.Content.ReadFromJsonAsync<ConvertXlsxResponse>();
+                previewS3Key = result?.PreviewS3Key;
+                if (result?.SheetNames != null)
+                    _sheetNames = result.SheetNames;
+                Console.WriteLine($"[preview] [xlsx] Conversion done: previewS3Key={previewS3Key} sheets=[{string.Join(", ", _sheetNames)}]");
+            }
+
+            if (string.IsNullOrEmpty(previewS3Key))
+            {
+                _error = "Conversion produced no output. Try downloading the file.";
                 _loading = false;
                 StateHasChanged();
                 return;
             }
-            _fileBytes = await response.Content.ReadAsByteArrayAsync();
 
-            // Get sheet names via JS interop
-            Console.WriteLine($"[INFO] [xlsx-preview] calling getSheetNames for ArtifactId={ArtifactId}");
-            var names = await JSRuntime.InvokeAsync<string[]>("xlsxPreviewInterop.getSheetNames", _fileBytes);
-            _sheetNames = names?.ToList() ?? new List<string>();
-            Console.WriteLine($"[XlsxPreview] getSheetNames: {_sheetNames.Count} sheets: {string.Join(", ", _sheetNames)}");
-
-            if (_sheetNames.Count == 0)
-            {
-                _error = "No sheets found in this spreadsheet.";
-                _loading = false;
-                StateHasChanged();
-                return;
-            }
-
+            // Step 2: Fetch PDF from S3 directly
+            var bucket = Configuration["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
+            Console.WriteLine($"[preview] [xlsx] Direct S3 fetch bucket={bucket} key={previewS3Key} userId={userId}");
+            using var s3Resp = await S3Client.GetObjectAsync(bucket, previewS3Key);
+            using var ms = new System.IO.MemoryStream();
+            await s3Resp.ResponseStream.CopyToAsync(ms);
+            _pendingBytes = ms.ToArray();
             _loading = false;
             StateHasChanged();
-            await Task.Yield(); // let render flush so container div exists in DOM
-
-            // Render first sheet after DOM update
-            Console.WriteLine("[XlsxPreview] Rendering sheet 0");
-            await RenderSheetAsync(0);
+        }
+        catch (Amazon.S3.AmazonS3Exception s3Ex)
+        {
+            Console.Error.WriteLine($"[preview] [xlsx] S3 fetch failed: {s3Ex.ErrorCode} — {s3Ex.Message}");
+            _error = "Failed to load spreadsheet preview. Try downloading the file.";
+            _loading = false;
+            StateHasChanged();
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[XlsxPreview] LoadAndRenderAsync failed: ArtifactId={ArtifactId} Error={ex.GetType().Name}: {ex.Message}");
+            Console.Error.WriteLine($"[preview] [xlsx] FetchAndConvertAsync failed: {ex.Message}");
             _error = "Failed to load spreadsheet preview. Try downloading the file.";
             _loading = false;
             StateHasChanged();
         }
     }
 
-    private async Task RenderSheetAsync(int index)
+    private async Task PrevPage()
     {
-        if (_fileBytes == null || index >= _sheetNames.Count) return;
-        var sheetName = _sheetNames[index];
-        var containerId = _sheetNames.Count == 1 ? _containerId : $"{_containerId}-{index}";
-        Console.WriteLine($"[INFO] [xlsx-preview] rendering sheet={sheetName} to containerId={containerId}");
-        try
-        {
-            await JSRuntime.InvokeVoidAsync("xlsxPreviewInterop.renderSheet", _fileBytes, sheetName, containerId);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[ERROR] [xlsx-preview] JSInterop renderSheet failed: sheet={sheetName} error={ex.Message}");
-            _error = "Spreadsheet rendering failed. Please download the file.";
-            StateHasChanged();
-        }
+        if (_currentPage <= 1) return;
+        _currentPage--;
+        await JSRuntime.InvokeVoidAsync("pdfPreviewInterop.renderPage", _containerId, _currentPage);
+        StateHasChanged();
     }
 
-    public void Dispose()
+    private async Task NextPage()
     {
-        Console.WriteLine("[XlsxPreview] Dispose");
+        if (_currentPage >= _totalPages) return;
+        _currentPage++;
+        await JSRuntime.InvokeVoidAsync("pdfPreviewInterop.renderPage", _containerId, _currentPage);
+        StateHasChanged();
+    }
+
+    private record ConvertXlsxResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("previewS3Key")] string? PreviewS3Key,
+        [property: System.Text.Json.Serialization.JsonPropertyName("sheetNames")] string[]? SheetNames);
+
+    public ValueTask DisposeAsync()
+    {
         Session.OnAuthStateChanged -= HandleAuthStateChanged;
+        return ValueTask.CompletedTask;
     }
 }
 
@@ -178,9 +256,7 @@
 .xlsx-preview-panel {
     width: 100%;
     height: 100%;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    overflow: auto;
 }
 .xlsx-preview-panel__loading,
 .xlsx-preview-panel__error {
@@ -194,32 +270,35 @@
     text-align: center;
     color: var(--color-text-secondary);
 }
-.xlsx-preview-panel__tabs {
-    flex: 1;
-    overflow: hidden;
+.xlsx-preview-panel__viewer {
     display: flex;
     flex-direction: column;
+    height: 100%;
 }
-.xlsx-preview-panel__table-container {
-    max-height: 60vh;
-    overflow-y: auto;
-    overflow-x: auto;
-    padding: 8px;
-    background: white;
+.xlsx-preview-panel__canvas-container {
+    flex: 1;
+    overflow: auto;
+    background: var(--color-surface-sunken, #f5f5f5);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 16px;
 }
-.xlsx-preview-panel__table-container table {
-    border-collapse: collapse;
-    font-size: 12px;
-    font-family: 'Consolas', monospace;
+.xlsx-preview-panel__canvas-container canvas {
+    max-width: 100%;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
-.xlsx-preview-panel__table-container td,
-.xlsx-preview-panel__table-container th {
-    border: 1px solid #e0e0e0;
-    padding: 4px 8px;
-    white-space: nowrap;
+.xlsx-preview-panel__nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-top: 1px solid var(--color-border);
+    flex-shrink: 0;
 }
-.xlsx-preview-panel__table-container th {
-    background: #f5f5f5;
-    font-weight: 600;
+.xlsx-preview-panel__page-label {
+    min-width: 200px;
+    text-align: center;
 }
 </style>

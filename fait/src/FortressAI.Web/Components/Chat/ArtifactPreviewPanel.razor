@@ -48,9 +48,11 @@
                 }
             </div>
         }
-        else if (LayoutState.CurrentArtifact != null && IsXlsxType(LayoutState.CurrentArtifact.Filename, LayoutState.CurrentArtifact.MimeType))
+        else if (_isXlsx && _currentXlsxUpload != null)
         {
-            <XlsxPreviewPanel ArtifactId="@LayoutState.CurrentArtifact.Id" Filename="@LayoutState.CurrentArtifact.Filename" MimeType="@LayoutState.CurrentArtifact.MimeType" />
+            <XlsxPreviewPanel ArtifactId="@_currentXlsxUpload.Id"
+                              S3Key="@_currentXlsxUpload.S3Key"
+                              ExistingPreviewS3Key="@_currentXlsxUpload.PreviewS3Key" />
         }
         else if (!_canPreview)
         {
@@ -121,6 +123,8 @@
     private WorkspaceUpload? _currentArtifactUpload;
     private bool _isPptx;
     private WorkspaceUpload? _currentPptxUpload;
+    private bool _isXlsx;
+    private WorkspaceUpload? _currentXlsxUpload;
 
     protected override async Task OnInitializedAsync()
     {
@@ -153,13 +157,24 @@
         _currentArtifactUpload = null;
         _isPptx = false;
         _currentPptxUpload = null;
+        _isXlsx = false;
+        _currentXlsxUpload = null;
         StateHasChanged();
 
         try
         {
             if (IsXlsxType(artifact.Filename, artifact.MimeType))
             {
-                // XlsxPreviewPanel handles its own loading
+                // XlsxPreviewPanel handles its own loading via LibreOffice PDF conversion
+                _isXlsx = true;
+                _currentXlsxUpload = new WorkspaceUpload
+                {
+                    Id = artifact.Id,
+                    S3Key = artifact.S3Key,
+                    Filename = artifact.Filename,
+                    MimeType = artifact.MimeType,
+                    PreviewS3Key = artifact.PreviewS3Key
+                };
                 _canPreview = true;
                 _presignedUrl = null;
                 _loading = false;
