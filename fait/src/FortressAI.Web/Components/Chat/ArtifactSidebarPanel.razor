@@ -241,6 +241,7 @@
 
     private async Task SelectArtifact(WorkspaceUpload artifact)
     {
+        if (_selectedArtifact == artifact) return;
         _selectedArtifact = artifact;
         _previewUrl = null;
         _previewError = null;
