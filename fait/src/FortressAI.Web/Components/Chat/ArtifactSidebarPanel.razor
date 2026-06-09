@@ -94,7 +94,7 @@
                             </div>
                         }
                     }
-                    else if (IsDocxType(_selectedArtifact))
+                    else if (IsDocxType(_selectedArtifact) && !_isDocxPreviewFailed)
                     {
                         <DocxPreviewPanel Artifact="@_selectedArtifact" OnPreviewError="HandleDocxPreviewError" />
                     }
@@ -187,6 +187,7 @@
     private string? _previewError;
     private string? _textPreviewContent;
     private string? _markdownHtml;
+    private bool _isDocxPreviewFailed = false;
     private bool _previewLoading;
     private bool _downloadLoading;
     private bool _isMaximized = false;
@@ -249,6 +250,7 @@
         _previewError = null;
         _textPreviewContent = null;
         _markdownHtml = null;
+        _isDocxPreviewFailed = false;
         Console.WriteLine($"[ArtifactSidebar] SelectArtifact: {artifact.Filename} mime={artifact.MimeType} ext={Path.GetExtension(artifact.Filename)} IsPreviewable={IsPreviewable(artifact)} IsDocx={IsDocxType(artifact)} IsXlsx={IsXlsxType(artifact)}");
 
         if (IsPreviewable(artifact))
@@ -344,6 +346,7 @@
     private Task HandleDocxPreviewError(string message)
     {
         _previewError = message;
+        _isDocxPreviewFailed = true;
         StateHasChanged();
         return Task.CompletedTask;
     }
