@@ -130,6 +130,60 @@ public class ArtifactPreviewService
 
     private record ConvertPptxResult([property: System.Text.Json.Serialization.JsonPropertyName("previewS3Key")] string? PreviewS3Key);
 
+    private record ConvertXlsxResult(
+        [property: System.Text.Json.Serialization.JsonPropertyName("previewS3Key")] string? PreviewS3Key,
+        [property: System.Text.Json.Serialization.JsonPropertyName("sheetNames")] string[]? SheetNames);
+
+    /// <summary>
+    /// Triggers XLSX → PDF conversion via the converter service, or returns the cached key and sheet names.
+    /// Accepts IHttpClientFactory as a parameter to avoid a constructor dependency.
+    /// </summary>
+    public async Task<(string? previewS3Key, string[] sheetNames)> ConvertXlsxAsync(Guid artifactId, string s3Key, Guid userId, IHttpClientFactory httpClientFactory)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var upload = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == artifactId && u.UserId == userId);
+
+        if (upload != null && !string.IsNullOrEmpty(upload.PreviewS3Key))
+            return (upload.PreviewS3Key, Array.Empty<string>());
+
+        if (upload == null)
+            return (null, Array.Empty<string>());
+
+        var converterBaseRaw = _config["CONVERTER_BASE_URL"];
+        if (string.IsNullOrEmpty(converterBaseRaw))
+            _logger.LogWarning("[ArtifactPreview] CONVERTER_BASE_URL not set — falling back to localhost. XLSX conversion may fail in production.");
+        var converterBase = converterBaseRaw ?? "http://localhost:3001";
+        var converterApiKey = _config["CONVERTER_API_KEY"];
+        using var client = httpClientFactory.CreateClient("HarnessClient");
+        client.Timeout = TimeSpan.FromSeconds(90); // ADO#4908: cap converter wait to avoid indefinite spin
+        if (!string.IsNullOrEmpty(converterApiKey))
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
+
+        var body = new
+        {
+            artifactId = artifactId.ToString(),
+            s3Key,
+            userId = userId.ToString(),
+            outputBucket = _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces"
+        };
+        var resp = await client.PostAsJsonAsync($"{converterBase}/convert-xlsx", body);
+        if (!resp.IsSuccessStatusCode)
+        {
+            var errBody = await resp.Content.ReadAsStringAsync();
+            _logger.LogWarning("[preview] [xlsx] XLSX converter returned {Status} for artifact {Id}: {Body}", resp.StatusCode, artifactId, errBody);
+            return (null, Array.Empty<string>());
+        }
+
+        var result = await resp.Content.ReadFromJsonAsync<ConvertXlsxResult>();
+        if (result?.PreviewS3Key != null)
+        {
+            upload.PreviewS3Key = result.PreviewS3Key;
+            await db.SaveChangesAsync();
+        }
+        return (result?.PreviewS3Key, result?.SheetNames ?? Array.Empty<string>());
+    }
+
     private string ComputeHmac(string payload)
     {
         var keyBytes = Encoding.UTF8.GetBytes(_secret);

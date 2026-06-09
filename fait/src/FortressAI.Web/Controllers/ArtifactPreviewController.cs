@@ -174,6 +174,9 @@ public class ArtifactPreviewController : ControllerBase
         return Ok(new { previewS3Key = result?.PreviewS3Key });
     }
 
+    /// <summary>
+    /// XLSX → PDF conversion for external API callers. Blazor components use ArtifactPreviewService.ConvertXlsxAsync() instead.
+    /// </summary>
     [HttpPost("{id:guid}/convert-xlsx")]
     [Authorize]
     public async Task<IActionResult> ConvertXlsx(Guid id)

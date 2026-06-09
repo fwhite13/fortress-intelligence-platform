@@ -158,37 +158,19 @@
             string? previewS3Key = ExistingPreviewS3Key;
             if (string.IsNullOrEmpty(previewS3Key))
             {
-                Console.WriteLine($"[preview] [xlsx] No cached preview — calling convert-xlsx for {ArtifactId}");
-                var converterBaseRaw = Configuration["CONVERTER_BASE_URL"] ?? "http://localhost:3001";
-                var converterApiKey = Configuration["CONVERTER_API_KEY"];
-                using var client = HttpClientFactory.CreateClient("HarnessClient");
-                client.Timeout = TimeSpan.FromSeconds(90);
-                if (!string.IsNullOrEmpty(converterApiKey))
-                    client.DefaultRequestHeaders.Authorization =
-                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
-
-                var body = new
+                Console.WriteLine($"[preview] [xlsx] No cached preview — calling ConvertXlsxAsync for {ArtifactId}");
+                var (convertedKey, sheetNames) = await PreviewSvc.ConvertXlsxAsync(
+                    ArtifactId, S3Key, userId, HttpClientFactory);
+                previewS3Key = convertedKey;
+                _sheetNames = sheetNames;
+                Console.WriteLine($"[preview] [xlsx] Conversion done: previewS3Key={previewS3Key} sheets=[{string.Join(", ", _sheetNames)}]");
+                if (string.IsNullOrEmpty(previewS3Key))
                 {
-                    artifactId = ArtifactId.ToString(),
-                    s3Key = S3Key,
-                    userId = userId.ToString(),
-                    outputBucket = Configuration["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces"
-                };
-                var resp = await client.PostAsJsonAsync($"{converterBaseRaw}/convert-xlsx", body);
-                if (!resp.IsSuccessStatusCode)
-                {
-                    var errBody = await resp.Content.ReadAsStringAsync();
-                    Console.Error.WriteLine($"[preview] [xlsx] Converter returned {(int)resp.StatusCode}: {errBody}");
                     _error = "Preview conversion failed. Try downloading the file.";
                     _loading = false;
                     StateHasChanged();
                     return;
                 }
-                var result = await resp.Content.ReadFromJsonAsync<ConvertXlsxResponse>();
-                previewS3Key = result?.PreviewS3Key;
-                if (result?.SheetNames != null)
-                    _sheetNames = result.SheetNames;
-                Console.WriteLine($"[preview] [xlsx] Conversion done: previewS3Key={previewS3Key} sheets=[{string.Join(", ", _sheetNames)}]");
             }
 
             if (string.IsNullOrEmpty(previewS3Key))
@@ -240,10 +222,6 @@
         await JSRuntime.InvokeVoidAsync("pptxPreviewInterop.renderPage", _containerId, _currentPage);
         StateHasChanged();
     }
-
-    private record ConvertXlsxResponse(
-        [property: System.Text.Json.Serialization.JsonPropertyName("previewS3Key")] string? PreviewS3Key,
-        [property: System.Text.Json.Serialization.JsonPropertyName("sheetNames")] string[]? SheetNames);
 
     public ValueTask DisposeAsync()
     {
