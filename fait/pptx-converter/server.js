@@ -256,6 +256,7 @@ app.post('/convert-xlsx', authMiddleware, async (req, res) => {
         try { fs.unlinkSync(xlsxPath); } catch (_) {}
         try { fs.unlinkSync(presizedPath); } catch (_) {}
         try { fs.unlinkSync(pdfPath); } catch (_) {}
+        try { fs.unlinkSync(`/tmp/${artifactId}-pagesized.pdf`); } catch (_) {} // in case rename failed
         try { fs.rmSync(`/tmp/lo-profile-${artifactId}`, { recursive: true, force: true }); } catch (_) {}
     }
 });

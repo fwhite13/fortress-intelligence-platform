@@ -137,7 +137,7 @@
             var bytes = _pendingBytes;
             _pendingBytes = null;
             var base64 = Convert.ToBase64String(bytes);
-            _totalPages = await JSRuntime.InvokeAsync<int>("pdfPreviewInterop.renderPdf", base64, _containerId);
+            _totalPages = await JSRuntime.InvokeAsync<int>("pptxPreviewInterop.render", base64, _containerId);
             StateHasChanged();
         }
     }
@@ -229,7 +229,7 @@
     {
         if (_currentPage <= 1) return;
         _currentPage--;
-        await JSRuntime.InvokeVoidAsync("pdfPreviewInterop.renderPage", _containerId, _currentPage);
+        await JSRuntime.InvokeVoidAsync("pptxPreviewInterop.renderPage", _containerId, _currentPage);
         StateHasChanged();
     }
 
@@ -237,7 +237,7 @@
     {
         if (_currentPage >= _totalPages) return;
         _currentPage++;
-        await JSRuntime.InvokeVoidAsync("pdfPreviewInterop.renderPage", _containerId, _currentPage);
+        await JSRuntime.InvokeVoidAsync("pptxPreviewInterop.renderPage", _containerId, _currentPage);
         StateHasChanged();
     }
 
