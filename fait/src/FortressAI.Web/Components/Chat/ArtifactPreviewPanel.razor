@@ -38,6 +38,12 @@
                 <MudButton Variant="Variant.Outlined" OnClick="LoadPreview">Retry</MudButton>
             </div>
         }
+        else if (_isXlsx && _currentXlsxUpload != null)
+        {
+            <XlsxPreviewPanel ArtifactId="@_currentXlsxUpload.Id"
+                              S3Key="@_currentXlsxUpload.S3Key"
+                              ExistingPreviewS3Key="@_currentXlsxUpload.PreviewS3Key" />
+        }
         else if (_isOffice && _currentOfficeUpload != null)
         {
             <OfficePreviewPanel Artifact="@_currentOfficeUpload" OnPreviewError="HandleOfficeError" />
@@ -105,6 +111,8 @@
     private WorkspaceUpload? _currentOfficeUpload;
     private bool _isPptx;
     private WorkspaceUpload? _currentPptxUpload;
+    private bool _isXlsx;
+    private WorkspaceUpload? _currentXlsxUpload;
 
     protected override async Task OnInitializedAsync()
     {
@@ -137,14 +145,18 @@
         _currentOfficeUpload = null;
         _isPptx = false;
         _currentPptxUpload = null;
+        _isXlsx = false;
+        _currentXlsxUpload = null;
         StateHasChanged();
 
         try
         {
             if (IsXlsxType(artifact.Filename, artifact.MimeType))
             {
-                _isOffice = true;
-                _currentOfficeUpload = new WorkspaceUpload { Id = artifact.Id, S3Key = artifact.S3Key, Filename = artifact.Filename, MimeType = artifact.MimeType };
+                // XlsxPreviewPanel handles conversion + iframe rendering via LibreOffice PDF
+                Console.WriteLine($"[preview] [xlsx] Routing artifact {artifact.Id} to XlsxPreviewPanel");
+                _isXlsx = true;
+                _currentXlsxUpload = new WorkspaceUpload { Id = artifact.Id, S3Key = artifact.S3Key, Filename = artifact.Filename, MimeType = artifact.MimeType, PreviewS3Key = artifact.PreviewS3Key };
                 _canPreview = true;
                 _loading = false;
                 _loadedFor = artifact;

@@ -30,14 +30,6 @@
     <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.7/dist/docx-preview.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="js/office-preview-interop.js"></script>
-    <!-- PDF.js for PPTX preview (ADO#4569) -->
-    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.js"></script>
-    <script>
-        if (typeof pdfjsLib !== 'undefined') {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.js';
-        }
-    </script>
-    <script src="js/pptx-preview-interop.js"></script>
     <script src="js/workspace-upload-interop.js"></script>
 </body>
 </html>
