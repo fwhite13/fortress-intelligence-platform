@@ -72,15 +72,16 @@ app.post('/convert', async (req, res) => {
             s3Resp.Body.on('error', reject);
         });
 
+        const loProfileDir = `/tmp/lo-profile-${artifactId}`;
+        fs.mkdirSync(loProfileDir, { recursive: true });
         console.log(`[convert] Running LibreOffice for artifactId=${artifactId}`);
         await new Promise((resolve, reject) => {
             const lo = spawn('libreoffice', [
                 '--headless',
-                `--env:UserInstallation=file:///tmp/lo-profile-${artifactId}`,
                 '--convert-to', 'pdf',
                 '--outdir', '/tmp',
                 pptxPath
-            ]);
+            ], { env: { ...process.env, HOME: loProfileDir } });
 
             lo.stdout.on('data', (data) => {
                 data.toString().split('\n').filter(Boolean).forEach(line =>
@@ -178,15 +179,16 @@ app.post('/convert-xlsx', async (req, res) => {
         const sheetNames = await presizeWorkbook(xlsxPath, pagesizedPath);
         console.log(`[convert-xlsx] Pre-sized ${sheetNames.length} sheets: ${sheetNames.join(', ')}`);
 
+        const loProfileDir = `/tmp/lo-profile-${artifactId}`;
+        fs.mkdirSync(loProfileDir, { recursive: true });
         console.log(`[convert-xlsx] Running LibreOffice for artifactId=${artifactId}`);
         await new Promise((resolve, reject) => {
             const lo = spawn('libreoffice', [
                 '--headless',
-                `--env:UserInstallation=file:///tmp/lo-profile-${artifactId}`,
                 '--convert-to', 'pdf',
                 '--outdir', '/tmp',
                 pagesizedPath
-            ]);
+            ], { env: { ...process.env, HOME: loProfileDir } });
 
             lo.stdout.on('data', (data) => {
                 data.toString().split('\n').filter(Boolean).forEach(line =>
