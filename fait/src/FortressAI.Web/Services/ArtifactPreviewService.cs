@@ -97,12 +97,8 @@ public class ArtifactPreviewService
         if (string.IsNullOrEmpty(converterBaseRaw))
             _logger.LogWarning("[ArtifactPreview] CONVERTER_BASE_URL not set — falling back to localhost. PPTX conversion may fail in production.");
         var converterBase = converterBaseRaw ?? "http://localhost:3001";
-        var converterApiKey = _config["CONVERTER_API_KEY"];
         using var client = httpClientFactory.CreateClient("HarnessClient");
         client.Timeout = TimeSpan.FromSeconds(90); // ADO#4908: cap converter wait to avoid indefinite spin
-        if (!string.IsNullOrEmpty(converterApiKey))
-            client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
 
         var body = new
         {
@@ -153,12 +149,8 @@ public class ArtifactPreviewService
         if (string.IsNullOrEmpty(converterBaseRaw))
             _logger.LogWarning("[ArtifactPreview] CONVERTER_BASE_URL not set — falling back to localhost. XLSX conversion may fail in production.");
         var converterBase = converterBaseRaw ?? "http://localhost:3001";
-        var converterApiKey = _config["CONVERTER_API_KEY"];
         using var client = httpClientFactory.CreateClient("HarnessClient");
         client.Timeout = TimeSpan.FromSeconds(90);
-        if (!string.IsNullOrEmpty(converterApiKey))
-            client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
 
         var body = new
         {
@@ -167,7 +159,7 @@ public class ArtifactPreviewService
             userId = userId.ToString(),
             outputBucket = _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces"
         };
-        var resp = await client.PostAsJsonAsync($"{converterBase}/convert", body);
+        var resp = await client.PostAsJsonAsync($"{converterBase}/convert-xlsx", body);
         if (!resp.IsSuccessStatusCode)
         {
             var errBody = await resp.Content.ReadAsStringAsync();

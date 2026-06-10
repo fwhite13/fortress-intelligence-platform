@@ -164,7 +164,16 @@
         else
         {
             Console.WriteLine($"[office-preview] Triggering conversion for artifact {Artifact.Id}");
-            previewS3Key = await PreviewSvc.ConvertPptxAsync(Artifact.Id, Artifact.S3Key, userId, HttpClientFactory);
+            var ext = System.IO.Path.GetExtension(Artifact.Filename).ToLowerInvariant();
+            if (ext == ".xlsx")
+            {
+                var (xlsxKey, _) = await PreviewSvc.ConvertXlsxAsync(Artifact.Id, Artifact.S3Key, userId, HttpClientFactory);
+                previewS3Key = xlsxKey;
+            }
+            else
+            {
+                previewS3Key = await PreviewSvc.ConvertPptxAsync(Artifact.Id, Artifact.S3Key, userId, HttpClientFactory);
+            }
             if (string.IsNullOrEmpty(previewS3Key))
             {
                 Console.Error.WriteLine($"[office-preview] Conversion returned no output for artifact {Artifact.Id}");
