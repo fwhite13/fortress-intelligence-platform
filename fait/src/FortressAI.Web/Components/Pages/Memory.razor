@@ -192,13 +192,13 @@ else
     @if (_showImportDialog)
     {
         <MudOverlay Visible="true" DarkBackground="true" ZIndex="1200">
-            <MudCard Style="min-width: 500px; max-width: 700px; padding: 16px;">
+            <MudCard Style="min-width: 500px; max-width: 700px; max-height: 90vh; padding: 16px; display: flex; flex-direction: column;">
                 <MudCardHeader>
                     <CardHeaderContent>
                         <MudText Typo="Typo.h6">Import Memory</MudText>
                     </CardHeaderContent>
                 </MudCardHeader>
-                <MudCardContent>
+                <MudCardContent Style="flex: 1; overflow-y: auto; min-height: 0;">
                     @if (_importStep == 1)
                     {
                         <MudText Typo="Typo.body2" Class="mb-3">
@@ -224,7 +224,6 @@ else
                                       Variant="Variant.Outlined"
                                       Lines="12"
                                       FullWidth="true"
-                                      AutoGrow="true"
                                       Disabled="@_importLoading" />
                         @if (_importError != null)
                         {
