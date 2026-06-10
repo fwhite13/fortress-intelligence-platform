@@ -9,25 +9,15 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
-const CONVERTER_API_KEY = process.env.CONVERTER_API_KEY || '';
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 
 const s3 = new S3Client({ region: AWS_REGION });
-
-function authMiddleware(req, res, next) {
-    if (!CONVERTER_API_KEY) return next(); // dev mode — skip auth
-    const authHeader = req.headers['authorization'] || '';
-    if (authHeader !== `Bearer ${CONVERTER_API_KEY}`) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-    next();
-}
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
 });
 
-app.post('/convert', authMiddleware, async (req, res) => {
+app.post('/convert', async (req, res) => {
     const { artifactId, s3Key, userId, outputBucket } = req.body || {};
     if (!artifactId || !s3Key || !userId || !outputBucket) {
         return res.status(400).json({ error: 'Missing required fields: artifactId, s3Key, userId, outputBucket' });

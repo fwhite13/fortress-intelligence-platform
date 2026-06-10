@@ -325,31 +325,31 @@ else
     private bool _importLoading = false;
     private bool _importPromptCopied = false;
     private string? _importError = null;
-    private const string _importPrompt = @"Export all of my stored memories and any context you've learned about me from past conversations. Preserve my words verbatim where possible, especially for instructions and preferences.
+    private const string _importPrompt = @"I'm migrating my context to a new AI system. Please export everything you know about me and how to work with me, organized into the following sections. Be thorough — the goal is to fully reconstruct our working relationship in the new system.
 
-## Categories (output in this order):
+## 1. How to work with me
+Everything you've learned about how I prefer to interact: communication style, response format, tone, pace, what I find helpful vs. annoying, how I delegate, how I give feedback. Include both things I've explicitly stated and things you've inferred from our interactions. This is the most important section — don't be brief.
 
-1. **Instructions**: Rules I've explicitly asked you to follow going forward — tone, format, style, ""always do X"", ""never do Y"", and corrections to your behavior. Only include rules from stored memories, not from conversations.
+## 2. Rules and corrections
+Explicit instructions I've given you: always do X, never do Y, corrections to your behavior, format requirements, things I've pushed back on. Preserve my words verbatim where possible.
 
-2. **Identity**: Name, age, location, education, family, relationships, languages, and personal interests.
+## 3. About me — personal
+Name, location, family, relationships, background, personal interests, lifestyle facts.
 
-3. **Career**: Current and past roles, companies, and general skill areas.
+## 4. About me — professional
+Current role, employer, skills, career history, how I work day-to-day.
 
-4. **Projects**: Projects I meaningfully built or committed to. Ideally ONE entry per project. Include what it does, current status, and any key decisions. Use the project name or a short descriptor as the first words of the entry.
+## 5. Projects and work
+Everything you know about projects I've worked on or described. For each: what it is, current status, key decisions, my involvement. One entry per project, enough detail to be useful.
 
-5. **Preferences**: Opinions, tastes, and working-style preferences that apply broadly.
+## 6. Preferences and opinions
+Tastes, opinions, working-style preferences, tools I use, things I like or dislike.
 
-## Format:
+## 7. Anything else
+Anything that doesn't fit above but that you'd want a new AI assistant to know about me.
 
-Use section headers for each category. Within each category, list one entry per line, sorted by oldest date first. Format each line as:
-
-[YYYY-MM-DD] - Entry content here.
-
-If no date is known, use [unknown] instead.
-
-## Output:
-- Wrap the entire export in a single code block for easy copying.
-- After the code block, state whether this is the complete set or if more remain.";
+## Format
+Output each section with a markdown header. Within each section, use bullet points. Preserve my exact words for rules and instructions. Wrap the entire output in a single code block. After the code block, confirm whether this is complete or if anything was omitted.";
 
     protected override async Task OnInitializedAsync()
     {
