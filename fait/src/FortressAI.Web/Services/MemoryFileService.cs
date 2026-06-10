@@ -252,7 +252,7 @@ public class MemoryFileService : IMemoryFileService
         if (content.Length > MaxContentChars)
             throw new ArgumentException($"Content too large (max {MaxContentChars} chars).");
 
-        // Strip wrapper formats (code fences and banner lines)
+        // Strip wrapper formats (code fences and banner lines) from input
         var stripped = content.Trim();
         if (stripped.StartsWith("```"))
         {
@@ -263,28 +263,81 @@ public class MemoryFileService : IMemoryFileService
         }
         stripped = Regex.Replace(stripped, @"^={5,}.*$", "", RegexOptions.Multiline).Trim();
 
-        // Bedrock 4-bucket classification
-        var modelId = _config["BEDROCK_MODEL_ID"] ?? "us.anthropic.claude-haiku-4-5-20251001-v1:0";
-        const string systemPrompt = @"You are a memory routing classifier. Given imported content from another AI system, classify it into four categories. Be thorough — don't leave content unrouted if it fits a category.
+        // Fetch all existing user memory files so Bedrock can merge with full context
+        var existingFiles = new Dictionary<string, string>();
 
-1. soulMd: How the AI should behave with this user. Tone, communication style, response format, what the user finds helpful vs. annoying, inferred working preferences, things the AI learned about how to interact with this person. This is behavioral/persona guidance — what a new AI assistant needs to know to behave correctly with this user.
+        foreach (var filename in new[] { "SOUL.md", "USER.md", "AGENTS.md" })
+            existingFiles[$"assistants/{filename}"] = await ReadAssistantFileAsync(userId, filename, ct) ?? "";
 
-2. agentsMd: Explicit rules and corrections. Things the user explicitly told the AI to always do or never do. Corrections to AI behavior. Format requirements. Constraints. Preserve the user's exact words where possible.
+        try
+        {
+            var idxResp = await _s3.GetObjectAsync(BucketName, IndexKey(userId), ct);
+            using var idxReader = new StreamReader(idxResp.ResponseStream);
+            existingFiles["memory/MEMORY.md"] = await idxReader.ReadToEndAsync(ct);
+        }
+        catch (AmazonS3Exception ex) when (ex.ErrorCode == "NoSuchKey") { existingFiles["memory/MEMORY.md"] = ""; }
 
-3. userMd: Personal facts about the user themselves. Name, role, employer, family, location, background, personal interests, lifestyle facts. Facts that apply across all conversations.
+        var topicListReq = new ListObjectsV2Request { BucketName = BucketName, Prefix = $"workspaces/{userId}/memory/" };
+        ListObjectsV2Response topicListResp;
+        do
+        {
+            topicListResp = await _s3.ListObjectsV2Async(topicListReq, ct);
+            foreach (var obj in topicListResp.S3Objects)
+            {
+                if (!obj.Key.EndsWith(".md")) continue;
+                var fname = obj.Key.Split('/').Last();
+                if (fname.Equals("MEMORY.md", StringComparison.OrdinalIgnoreCase)) continue;
+                try
+                {
+                    var topicResp = await _s3.GetObjectAsync(BucketName, obj.Key, ct);
+                    using var rdr = new StreamReader(topicResp.ResponseStream);
+                    var slug = fname.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ? fname[..^3] : fname;
+                    existingFiles[$"memory/topics/{slug}.md"] = await rdr.ReadToEndAsync(ct);
+                }
+                catch (AmazonS3Exception ex) when (ex.ErrorCode is "NoSuchKey" or "AccessDenied")
+                {
+                    _logger.LogWarning("[MemoryImport] Skipping {Key}: {ErrorCode}", obj.Key, ex.ErrorCode);
+                }
+            }
+            topicListReq.ContinuationToken = topicListResp.NextContinuationToken;
+        } while (topicListResp.IsTruncated);
 
-4. topics: An array of { topic: string, content: string } for everything else — knowledge, notes, projects, domain information, technical facts. Each topic should have a short descriptive slug (e.g. ""project-fait"", ""meeting-notes-may-2026"", ""recipe-ideas"").
+        // Build user message with all existing file context
+        var msgSb = new StringBuilder();
+        msgSb.AppendLine("## Existing memory files");
+        msgSb.AppendLine();
+        foreach (var (path, fileContent) in existingFiles)
+        {
+            msgSb.AppendLine($"### {path}");
+            msgSb.AppendLine(string.IsNullOrWhiteSpace(fileContent) ? "(empty — file does not exist yet)" : fileContent);
+            msgSb.AppendLine();
+        }
+        msgSb.AppendLine("## Imported content to merge");
+        msgSb.AppendLine();
+        msgSb.Append(stripped);
 
-Respond with ONLY valid JSON in this exact shape:
+        var modelId = _config["BEDROCK_MODEL_ID"] ?? "us.anthropic.claude-sonnet-4-5-20251001-v1:0";
+        const string systemPrompt = @"You are a memory integration specialist. You will be given:
+1. A set of existing memory files for a user's AI assistant
+2. New content imported from another AI system
+
+Your job is to intelligently merge the imported content into the existing files. Follow these rules:
+
+- SOUL.md: Update with any behavioral guidance, tone preferences, communication style, or assistant persona instructions found in the imported content. Preserve all existing content — only add or refine.
+- USER.md: Update with any personal facts, professional info, preferences, or identity information found in the imported content. Preserve all existing content — only add or refine.
+- AGENTS.md: Update with any explicit rules, always/never instructions, behavioral constraints, or corrections found in the imported content. Preserve all existing content — only add or refine. Create this file if it doesn't exist and there is relevant content.
+- MEMORY.md: Update the index if you create any new topic files. Preserve all existing index entries.
+- Topic files: For content that doesn't belong in the above files (projects, domain knowledge, notes, etc.), either add it to the most appropriate existing topic file or create a new topic file. Use short descriptive slugs (e.g. projects.md, career.md, family.md). Only create a new topic file if no existing one is a good fit.
+
+Return ONLY a JSON object in this exact shape — no other text, no code fences, no explanation:
 {
-  ""soulMd"": ""<markdown string, or null if none>"",
-  ""agentsMd"": ""<markdown string, or null if none>"",
-  ""userMd"": ""<markdown string, or null if none>"",
-  ""topics"": [{ ""topic"": ""<slug>"", ""content"": ""<markdown content>"" }]
+  ""files"": [
+    { ""path"": ""assistants/SOUL.md"", ""content"": ""<complete updated file content>"" },
+    { ""path"": ""memory/topics/projects.md"", ""content"": ""<complete updated file content>"" }
+  ]
 }
 
-If no content fits a category, set it to null (soulMd/agentsMd/userMd) or empty array (topics).
-Do not include any text outside the JSON.";
+Include ONLY files that have changed or been newly created. If a file does not need to change, omit it entirely. File content should be the complete updated content of the file, not a diff.";
 
         var invokeRequest = new InvokeModelRequest
         {
@@ -296,72 +349,82 @@ Do not include any text outside the JSON.";
                 anthropic_version = "bedrock-2023-05-31",
                 max_tokens = 8192,
                 system = systemPrompt,
-                messages = new[] { new { role = "user", content = $"Classify this imported content:\n\n{stripped}" } }
+                messages = new[] { new { role = "user", content = msgSb.ToString() } }
             })))
         };
 
         var bedrockResponse = await _bedrock.InvokeModelAsync(invokeRequest, ct);
         var responseBody = await new StreamReader(bedrockResponse.Body).ReadToEndAsync(ct);
 
-        ImportClassification routing;
+        string classifyText;
         try
         {
             using var doc = JsonDocument.Parse(responseBody);
-            var classifyText = doc.RootElement
+            classifyText = doc.RootElement
                 .GetProperty("content")[0]
                 .GetProperty("text")
                 .GetString()?.Trim() ?? "";
-            routing = JsonSerializer.Deserialize<ImportClassification>(classifyText)
-                ?? new ImportClassification(null, null, null, []);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[MemoryImport] Failed to parse Bedrock response envelope — falling back to single topic");
+            await WriteTopicAsync(userId, "imported-memory", "Imported Memory", stripped, ct);
+            return new ImportMemoryResult(1);
+        }
+
+        _logger.LogDebug("[MemoryImport] Raw Bedrock response: {Response}", classifyText);
+
+        // Strip code fences from Bedrock response before JSON parse
+        var parsableText = classifyText.Trim();
+        if (parsableText.StartsWith("```"))
+        {
+            var firstNewline = parsableText.IndexOf('\n');
+            var lastFence = parsableText.LastIndexOf("```");
+            if (firstNewline >= 0 && lastFence > firstNewline)
+                parsableText = parsableText[(firstNewline + 1)..lastFence].Trim();
+        }
+
+        ImportMergeResponse mergeResponse;
+        try
+        {
+            mergeResponse = JsonSerializer.Deserialize<ImportMergeResponse>(parsableText)
+                ?? new ImportMergeResponse(null);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[MemoryImport] Classification parse failed — falling back to single topic");
-            routing = new ImportClassification(null, null, null,
-                [new TopicEntry("imported-memory", stripped)]);
+            await WriteTopicAsync(userId, "imported-memory", "Imported Memory", stripped, ct);
+            return new ImportMemoryResult(1);
         }
 
-        var dateHeader = $"\n\n## Imported from AI export — {DateTime.UtcNow:yyyy-MM-dd}\n\n";
-
-        if (!string.IsNullOrWhiteSpace(routing.SoulMd))
+        int filesWritten = 0;
+        foreach (var file in mergeResponse.Files ?? [])
         {
-            var existing = await ReadAssistantFileAsync(userId, "SOUL.md", ct) ?? "";
-            await WriteAssistantFileAsync(userId, "SOUL.md", existing.TrimEnd() + dateHeader + routing.SoulMd, ct);
-            _logger.LogDebug("[MemoryImport] Updated SOUL.md for user {UserId}", userId);
-        }
-
-        if (!string.IsNullOrWhiteSpace(routing.AgentsMd))
-        {
-            var existing = await ReadAssistantFileAsync(userId, "AGENTS.md", ct) ?? "";
-            await WriteAssistantFileAsync(userId, "AGENTS.md", existing.TrimEnd() + dateHeader + routing.AgentsMd, ct);
-            _logger.LogDebug("[MemoryImport] Updated AGENTS.md for user {UserId}", userId);
-        }
-
-        if (!string.IsNullOrWhiteSpace(routing.UserMd))
-        {
-            var existing = await ReadAssistantFileAsync(userId, "USER.md", ct) ?? "";
-            await WriteAssistantFileAsync(userId, "USER.md", existing.TrimEnd() + "\n\n" + routing.UserMd, ct);
-            _logger.LogDebug("[MemoryImport] Updated USER.md for user {UserId}", userId);
-        }
-
-        int totalChunks = 0;
-        foreach (var topic in routing.Topics ?? [])
-        {
-            if (string.IsNullOrWhiteSpace(topic.Topic) || string.IsNullOrWhiteSpace(topic.Content))
+            if (string.IsNullOrWhiteSpace(file.Path) || string.IsNullOrWhiteSpace(file.Content))
                 continue;
-            var title = char.ToUpper(topic.Topic[0]) + topic.Topic[1..].Replace("-", " ");
-            await WriteTopicAsync(userId, topic.Topic, title, topic.Content, ct);
 
-            // Count chunks using same sizing as harness (500 char, 50 overlap)
-            const int chunkSize = 500, chunkOverlap = 50;
-            for (int i = 0; i < topic.Content.Length; i += chunkSize - chunkOverlap)
+            _logger.LogInformation("[MemoryImport] Writing {Path} for user {UserId}", file.Path, userId);
+
+            if (file.Path.StartsWith("assistants/"))
             {
-                totalChunks++;
-                if (i + chunkSize >= topic.Content.Length) break;
+                var filename = file.Path["assistants/".Length..];
+                await WriteAssistantFileAsync(userId, filename, file.Content, ct);
+                filesWritten++;
             }
+            else if (file.Path.StartsWith("memory/topics/"))
+            {
+                var fname = file.Path["memory/topics/".Length..];
+                var slug = fname.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ? fname[..^3] : fname;
+                if (string.IsNullOrWhiteSpace(slug)) continue;
+                var title = System.Globalization.CultureInfo.InvariantCulture.TextInfo
+                    .ToTitleCase(slug.Replace("-", " "));
+                await WriteTopicAsync(userId, slug, title, file.Content, ct);
+                filesWritten++;
+            }
+            // memory/MEMORY.md is rebuilt automatically by WriteTopicAsync — skip if returned
         }
 
-        return new ImportMemoryResult(totalChunks);
+        return new ImportMemoryResult(filesWritten);
     }
 
     private async Task<string?> ReadAssistantFileAsync(Guid userId, string filename, CancellationToken ct)
@@ -389,15 +452,12 @@ Do not include any text outside the JSON.";
         }, ct);
     }
 
-    private record ImportClassification(
-        [property: JsonPropertyName("soulMd")] string? SoulMd,
-        [property: JsonPropertyName("agentsMd")] string? AgentsMd,
-        [property: JsonPropertyName("userMd")] string? UserMd,
-        [property: JsonPropertyName("topics")] List<TopicEntry>? Topics
+    private record ImportMergeResponse(
+        [property: JsonPropertyName("files")] List<ImportFileEntry>? Files
     );
 
-    private record TopicEntry(
-        [property: JsonPropertyName("topic")] string Topic,
+    private record ImportFileEntry(
+        [property: JsonPropertyName("path")] string Path,
         [property: JsonPropertyName("content")] string Content
     );
 }
