@@ -316,7 +316,7 @@ public class MemoryFileService : IMemoryFileService
         msgSb.AppendLine();
         msgSb.Append(stripped);
 
-        var modelId = _config["BEDROCK_MODEL_ID"] ?? "us.anthropic.claude-sonnet-4-5-20251001-v1:0";
+        var modelId = _config["BEDROCK_MODEL_ID"] ?? "us.anthropic.claude-sonnet-4-6";
         const string systemPrompt = @"You are a memory integration specialist. You will be given:
 1. A set of existing memory files for a user's AI assistant
 2. New content imported from another AI system
