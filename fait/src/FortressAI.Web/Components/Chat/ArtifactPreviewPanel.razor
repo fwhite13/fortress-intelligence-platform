@@ -38,12 +38,6 @@
                 <MudButton Variant="Variant.Outlined" OnClick="LoadPreview">Retry</MudButton>
             </div>
         }
-        else if (_isXlsx && _currentXlsxUpload != null)
-        {
-            <XlsxPreviewPanel ArtifactId="@_currentXlsxUpload.Id"
-                              S3Key="@_currentXlsxUpload.S3Key"
-                              ExistingPreviewS3Key="@_currentXlsxUpload.PreviewS3Key" />
-        }
         else if (_isOffice && _currentOfficeUpload != null)
         {
             <OfficePreviewPanel Artifact="@_currentOfficeUpload" OnPreviewError="HandleOfficeError" />
@@ -65,12 +59,6 @@
                 }
             </div>
         }
-        else if (_isPptx && _currentPptxUpload != null)
-        {
-            <PptxPreviewPanel ArtifactId="@_currentPptxUpload.Id"
-                              S3Key="@_currentPptxUpload.S3Key"
-                              ExistingPreviewS3Key="@_currentPptxUpload.PreviewS3Key" />
-        }
         else if (_presignedUrl != null)
         {
             <iframe src="@_presignedUrl"
@@ -84,20 +72,17 @@
 @code {
     private static readonly HashSet<string> PreviewableExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".pdf", ".xlsx"
+        ".pdf"
     };
 
-    private static bool IsXlsxType(string filename, string mimeType)
+    private static bool IsOfficeType(string filename, string mimeType)
     {
         var ext = Path.GetExtension(filename);
-        return ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase)
-            || mimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    }
-
-    private static bool IsPptxType(string filename, string mimeType)
-    {
-        var ext = Path.GetExtension(filename);
-        return ext.Equals(".pptx", StringComparison.OrdinalIgnoreCase)
+        return ext.Equals(".docx", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".pptx", StringComparison.OrdinalIgnoreCase)
+            || mimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            || mimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             || mimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation";
     }
 
@@ -109,10 +94,6 @@
     private ArtifactRef? _loadedFor;
     private bool _isOffice;
     private WorkspaceUpload? _currentOfficeUpload;
-    private bool _isPptx;
-    private WorkspaceUpload? _currentPptxUpload;
-    private bool _isXlsx;
-    private WorkspaceUpload? _currentXlsxUpload;
 
     protected override async Task OnInitializedAsync()
     {
@@ -143,32 +124,15 @@
         _canPreview = false;
         _isOffice = false;
         _currentOfficeUpload = null;
-        _isPptx = false;
-        _currentPptxUpload = null;
-        _isXlsx = false;
-        _currentXlsxUpload = null;
         StateHasChanged();
 
         try
         {
-            if (IsXlsxType(artifact.Filename, artifact.MimeType))
+            if (IsOfficeType(artifact.Filename, artifact.MimeType))
             {
-                // XlsxPreviewPanel handles conversion + iframe rendering via LibreOffice PDF
-                Console.WriteLine($"[preview] [xlsx] Routing artifact {artifact.Id} to XlsxPreviewPanel");
-                _isXlsx = true;
-                _currentXlsxUpload = new WorkspaceUpload { Id = artifact.Id, S3Key = artifact.S3Key, Filename = artifact.Filename, MimeType = artifact.MimeType, PreviewS3Key = artifact.PreviewS3Key };
-                _canPreview = true;
-                _loading = false;
-                _loadedFor = artifact;
-                StateHasChanged();
-                return;
-            }
-
-            if (IsPptxType(artifact.Filename, artifact.MimeType))
-            {
-                // PptxPreviewPanel handles its own loading
-                _isPptx = true;
-                _currentPptxUpload = new WorkspaceUpload
+                Console.WriteLine($"[preview] Routing artifact {artifact.Id} ({artifact.Filename}) to OfficePreviewPanel");
+                _isOffice = true;
+                _currentOfficeUpload = new WorkspaceUpload
                 {
                     Id = artifact.Id,
                     S3Key = artifact.S3Key,
@@ -177,7 +141,6 @@
                     PreviewS3Key = artifact.PreviewS3Key
                 };
                 _canPreview = true;
-                _presignedUrl = null;
                 _loading = false;
                 _loadedFor = artifact;
                 StateHasChanged();
@@ -188,32 +151,11 @@
             _rawPresignedUrl = rawUrl;
 
             var ext = Path.GetExtension(artifact.Filename);
-            _isOffice = ext.Equals(".docx", StringComparison.OrdinalIgnoreCase)
-                || artifact.MimeType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            _canPreview = PreviewableExtensions.Contains(ext);
 
-            if (_isOffice)
+            if (_canPreview && ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
             {
-                _currentOfficeUpload = new WorkspaceUpload
-                {
-                    Id = artifact.Id,
-                    S3Key = artifact.S3Key,
-                    Filename = artifact.Filename,
-                    MimeType = artifact.MimeType
-                };
-                _canPreview = true;
-            }
-            else
-            {
-                _canPreview = PreviewableExtensions.Contains(ext);
-                _currentOfficeUpload = null;
-            }
-
-            if (_canPreview && !_isOffice)
-            {
-                if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
-                {
-                    _presignedUrl = await GetProxyPreviewUrlAsync(artifact);
-                }
+                _presignedUrl = await GetProxyPreviewUrlAsync(artifact);
             }
 
             _loadedFor = artifact;

@@ -167,7 +167,7 @@ public class ArtifactPreviewService
             userId = userId.ToString(),
             outputBucket = _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces"
         };
-        var resp = await client.PostAsJsonAsync($"{converterBase}/convert-xlsx", body);
+        var resp = await client.PostAsJsonAsync($"{converterBase}/convert", body);
         if (!resp.IsSuccessStatusCode)
         {
             var errBody = await resp.Content.ReadAsStringAsync();

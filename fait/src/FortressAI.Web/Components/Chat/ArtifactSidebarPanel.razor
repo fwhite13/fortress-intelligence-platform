@@ -90,15 +90,9 @@
                             </div>
                         }
                     }
-                    else if ((IsDocxType(_selectedArtifact) || IsXlsxType(_selectedArtifact)) && !_isOfficePreviewFailed)
+                    else if ((IsDocxType(_selectedArtifact) || IsXlsxType(_selectedArtifact) || IsPptxType(_selectedArtifact)) && !_isOfficePreviewFailed)
                     {
                         <OfficePreviewPanel Artifact="@_selectedArtifact" OnPreviewError="HandleOfficePreviewError" />
-                    }
-                    else if (IsPptxType(_selectedArtifact))
-                    {
-                        <PptxPreviewPanel ArtifactId="@_selectedArtifact.Id"
-                                          S3Key="@_selectedArtifact.S3Key"
-                                          ExistingPreviewS3Key="@_selectedArtifact.PreviewS3Key" />
                     }
                     else if (_previewUrl != null)
                     {
@@ -256,18 +250,9 @@
             StateHasChanged();
             try
             {
-                if (IsDocxType(artifact) || IsXlsxType(artifact))
+                if (IsDocxType(artifact) || IsXlsxType(artifact) || IsPptxType(artifact))
                 {
-                    Console.WriteLine("[ArtifactSidebar] Branch: IsOffice — delegating to OfficePreviewPanel");
-                    _previewLoading = false;
-                    StateHasChanged();
-                    return;
-                }
-
-                if (IsPptxType(artifact))
-                {
-                    Console.WriteLine("[ArtifactSidebar] Branch: IsPptx — delegating to PptxPreviewPanel");
-                    // PptxPreviewPanel handles its own loading — no presign needed
+                    Console.WriteLine($"[ArtifactSidebar] Branch: office type ({artifact.Filename}) — delegating to OfficePreviewPanel");
                     _previewLoading = false;
                     StateHasChanged();
                     return;

@@ -2,6 +2,8 @@
 @inject UserSessionService Session
 @inject IJSRuntime JSRuntime
 @inject IHttpClientFactory HttpClientFactory
+@inject IWorkspaceFileService WorkspaceFileSvc
+@inject ISnackbar Snackbar
 @using FortressAI.Shared.Models
 @using FortressAI.Web.Services
 @implements IDisposable
@@ -11,9 +13,7 @@
     {
         <div class="office-preview-panel__loading">
             <MudProgressCircular Indeterminate="true" />
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">
-                @(IsXlsx() ? "Loading spreadsheet..." : "Loading document...")
-            </MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">@_loadingMessage</MudText>
         </div>
     }
     else if (_error != null)
@@ -21,25 +21,26 @@
         <div class="office-preview-panel__error">
             <MudIcon Icon="@Icons.Material.Outlined.ErrorOutline" Size="Size.Large" />
             <MudText Typo="Typo.body2" Color="Color.Secondary">@_error</MudText>
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Default"
+                       StartIcon="@Icons.Material.Outlined.Download"
+                       Disabled="@_downloadLoading"
+                       OnClick="DownloadAsync"
+                       Class="mt-2">
+                @if (_downloadLoading)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-1" />
+                }
+                Download file
+            </MudButton>
         </div>
     }
-    else if (IsXlsx() && _sheetNames.Count > 0)
+    else if (_proxyUrl != null)
     {
-        @if (_sheetNames.Count == 1)
-        {
-            <div id="@_containerId" class="office-preview-panel__table-container"></div>
-        }
-        else
-        {
-            <MudTabs ActivePanelIndex="@_activeSheet" ActivePanelIndexChanged="OnTabChanged" Class="office-preview-panel__tabs">
-                @foreach (var (name, index) in _sheetNames.Select((n, i) => (n, i)))
-                {
-                    <MudTabPanel Text="@name">
-                        <div id="@($"{_containerId}-{index}")" class="office-preview-panel__table-container"></div>
-                    </MudTabPanel>
-                }
-            </MudTabs>
-        }
+        <iframe src="@_proxyUrl"
+                style="width: 100%; height: 100%; border: none;"
+                title="Document preview"
+                sandbox="allow-scripts allow-popups allow-forms" />
     }
     else
     {
@@ -52,20 +53,22 @@
     [Parameter] public EventCallback<string> OnPreviewError { get; set; }
 
     private bool _loading = true;
+    private string _loadingMessage = "Loading document...";
     private string? _error;
+    private string? _proxyUrl;
     private byte[]? _pendingBytes;
     private string _containerId = $"office-{Guid.NewGuid():N}";
     private bool _loadStarted = false;
     private bool _jsRenderPending = false;
     private bool _jsRenderInFlight = false;
-    private List<string> _sheetNames = new();
-    private int _activeSheet = 0;
-    private bool _sheetNamesLoaded = false;
+    private bool _downloadLoading = false;
 
-    private bool IsXlsx()
+    private bool IsConverterType()
     {
         var ext = System.IO.Path.GetExtension(Artifact.Filename);
-        return ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase)
+        return ext.Equals(".pptx", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".xlsx", StringComparison.OrdinalIgnoreCase)
+            || Artifact.MimeType == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
             || Artifact.MimeType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     }
 
@@ -73,6 +76,7 @@
     {
         Console.WriteLine($"[office-preview] OnInitialized: ArtifactId={Artifact.Id} Filename={Artifact.Filename}");
         Session.OnAuthStateChanged += HandleAuthStateChanged;
+        _loadingMessage = IsConverterType() ? "Generating preview… this may take a moment." : "Loading document...";
     }
 
     private void HandleAuthStateChanged()
@@ -82,7 +86,7 @@
         {
             InvokeAsync(async () =>
             {
-                await FetchBytesAsync();
+                await LoadAsync();
                 StateHasChanged();
             });
         }
@@ -92,7 +96,7 @@
     {
         if (firstRender)
         {
-            await FetchBytesAsync();
+            await LoadAsync();
             return;
         }
 
@@ -104,37 +108,12 @@
         try
         {
             var base64 = Convert.ToBase64String(_pendingBytes);
-            if (IsXlsx())
-            {
-                if (!_sheetNamesLoaded)
-                {
-                    var names = await JSRuntime.InvokeAsync<string[]>("officePreviewInterop.getSheetNames", base64);
-                    _sheetNames = names?.ToList() ?? new();
-                    _sheetNamesLoaded = true;
-                    if (_sheetNames.Count == 0)
-                    {
-                        _error = "No sheets found in this spreadsheet.";
-                        await OnPreviewError.InvokeAsync(_error);
-                        StateHasChanged();
-                        return;
-                    }
-                    _jsRenderPending = true;
-                    StateHasChanged();
-                }
-                else
-                {
-                    await RenderSheetAsync(_activeSheet, base64);
-                }
-            }
-            else
-            {
-                await JSRuntime.InvokeVoidAsync("officePreviewInterop.render", base64, "docx", _containerId, null);
-            }
+            await JSRuntime.InvokeVoidAsync("officePreviewInterop.render", base64, "docx", _containerId, null);
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[office-preview] OnAfterRenderAsync failed: {ex.Message}");
-            _error = IsXlsx() ? "Failed to load spreadsheet preview." : "Document preview failed.";
+            Console.Error.WriteLine($"[office-preview] JS render failed: {ex.Message}");
+            _error = "Document preview failed.";
             await OnPreviewError.InvokeAsync(_error);
             StateHasChanged();
         }
@@ -144,66 +123,109 @@
         }
     }
 
-    private async Task FetchBytesAsync()
+    private async Task LoadAsync()
     {
         if (_loadStarted) return;
         _loadStarted = true;
-        Console.WriteLine($"[office-preview] FetchBytesAsync start: ArtifactId={Artifact.Id} UserId={Session.UserId}");
+
+        var userId = Session.UserId;
+        if (userId == Guid.Empty)
+        {
+            Console.WriteLine($"[office-preview] LoadAsync: UserId empty for artifact {Artifact.Id}, waiting for auth");
+            _loadStarted = false;
+            return;
+        }
+
+        Console.WriteLine($"[office-preview] LoadAsync start: ArtifactId={Artifact.Id} Filename={Artifact.Filename}");
         try
         {
-            var userId = Session.UserId;
-            if (userId == Guid.Empty)
-            {
-                Console.WriteLine("[office-preview] FetchBytesAsync: UserId empty, waiting for auth");
-                _loadStarted = false;
-                return;
-            }
-            var (token, expires) = PreviewSvc.GenerateToken(Artifact.Id, userId);
-            var relativeUrl = $"/api/artifacts/{Artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
-            Console.WriteLine($"[office-preview] FetchBytesAsync: token generated, url={relativeUrl}");
-            using var http = HttpClientFactory.CreateClient("InternalPreview");
-            using var response = await http.GetAsync(relativeUrl);
-            Console.WriteLine($"[office-preview] HTTP {(int)response.StatusCode} {response.StatusCode} for {relativeUrl}");
-            if (!response.IsSuccessStatusCode)
-            {
-                _error = $"Preview failed ({(int)response.StatusCode}). Try downloading.";
-                _loading = false;
-                await OnPreviewError.InvokeAsync(_error);
-                StateHasChanged();
-                return;
-            }
-            _pendingBytes = await response.Content.ReadAsByteArrayAsync();
-            Console.WriteLine($"[office-preview] FetchBytesAsync success: {_pendingBytes.Length} bytes, signalling JS render");
-            _loading = false;
-            _jsRenderPending = true;
-            StateHasChanged();
+            if (IsConverterType())
+                await LoadConverterPreviewAsync(userId);
+            else
+                await FetchDocxBytesAsync(userId);
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[office-preview] FetchBytesAsync failed: ArtifactId={Artifact.Id} Error={ex.GetType().Name}: {ex.Message}");
-            _error = "Failed to load document preview. Try downloading the file.";
+            Console.Error.WriteLine($"[office-preview] LoadAsync failed: {ex.GetType().Name}: {ex.Message}");
+            _error = "Failed to load preview. Try downloading the file.";
             _loading = false;
             await OnPreviewError.InvokeAsync(_error);
             StateHasChanged();
         }
     }
 
-    private async Task RenderSheetAsync(int index, string? base64 = null)
+    private async Task LoadConverterPreviewAsync(Guid userId)
     {
-        if (_pendingBytes == null || index >= _sheetNames.Count) return;
-        base64 ??= Convert.ToBase64String(_pendingBytes);
-        var sheetName = _sheetNames[index];
-        var containerId = _sheetNames.Count == 1 ? _containerId : $"{_containerId}-{index}";
-        await JSRuntime.InvokeVoidAsync("officePreviewInterop.renderSheet", base64, sheetName, containerId);
+        string? previewS3Key = Artifact.PreviewS3Key;
+        if (!string.IsNullOrEmpty(previewS3Key))
+        {
+            Console.WriteLine($"[office-preview] Cache hit for artifact {Artifact.Id} — skipping conversion");
+        }
+        else
+        {
+            Console.WriteLine($"[office-preview] Triggering conversion for artifact {Artifact.Id}");
+            previewS3Key = await PreviewSvc.ConvertPptxAsync(Artifact.Id, Artifact.S3Key, userId, HttpClientFactory);
+            if (string.IsNullOrEmpty(previewS3Key))
+            {
+                Console.Error.WriteLine($"[office-preview] Conversion returned no output for artifact {Artifact.Id}");
+                _error = "Preview conversion failed. Try downloading the file.";
+                _loading = false;
+                await OnPreviewError.InvokeAsync(_error);
+                StateHasChanged();
+                return;
+            }
+            Console.WriteLine($"[office-preview] Conversion success for artifact {Artifact.Id}: key={previewS3Key}");
+        }
+
+        var (token, expires) = PreviewSvc.GenerateToken(Artifact.Id, userId);
+        _proxyUrl = $"/api/artifacts/{Artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}&preview=true";
+        Console.WriteLine($"[office-preview] Proxy URL ready for artifact {Artifact.Id}");
+        _loading = false;
+        StateHasChanged();
     }
 
-    private async Task OnTabChanged(int index)
+    private async Task FetchDocxBytesAsync(Guid userId)
     {
-        _activeSheet = index;
+        Console.WriteLine($"[office-preview] FetchDocxBytesAsync: ArtifactId={Artifact.Id}");
+        var (token, expires) = PreviewSvc.GenerateToken(Artifact.Id, userId);
+        var relativeUrl = $"/api/artifacts/{Artifact.Id}/preview?token={Uri.EscapeDataString(token)}&expires={expires}";
+        using var http = HttpClientFactory.CreateClient("InternalPreview");
+        using var response = await http.GetAsync(relativeUrl);
+        Console.WriteLine($"[office-preview] HTTP {(int)response.StatusCode} for {relativeUrl}");
+        if (!response.IsSuccessStatusCode)
+        {
+            _error = $"Preview failed ({(int)response.StatusCode}). Try downloading.";
+            _loading = false;
+            await OnPreviewError.InvokeAsync(_error);
+            StateHasChanged();
+            return;
+        }
+        _pendingBytes = await response.Content.ReadAsByteArrayAsync();
+        Console.WriteLine($"[office-preview] FetchDocxBytesAsync success: {_pendingBytes.Length} bytes");
+        _loading = false;
+        _jsRenderPending = true;
         StateHasChanged();
-        await Task.Yield();
-        if (_pendingBytes != null && index < _sheetNames.Count)
-            await RenderSheetAsync(index);
+    }
+
+    private async Task DownloadAsync()
+    {
+        _downloadLoading = true;
+        StateHasChanged();
+        try
+        {
+            var url = await WorkspaceFileSvc.GetPresignedDownloadUrlAsync(Artifact.S3Key);
+            await JSRuntime.InvokeVoidAsync("open", url, "_blank");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[office-preview] Download failed: {ex.Message}");
+            Snackbar.Add("Download failed.", Severity.Error);
+        }
+        finally
+        {
+            _downloadLoading = false;
+            StateHasChanged();
+        }
     }
 
     public void Dispose()
@@ -238,33 +260,5 @@
     background: white;
     min-height: 100%;
     overflow: auto;
-}
-.office-preview-panel__tabs {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-}
-.office-preview-panel__table-container {
-    max-height: 60vh;
-    overflow-y: auto;
-    overflow-x: auto;
-    padding: 8px;
-    background: white;
-}
-.office-preview-panel__table-container table {
-    border-collapse: collapse;
-    font-size: 12px;
-    font-family: 'Consolas', monospace;
-}
-.office-preview-panel__table-container td,
-.office-preview-panel__table-container th {
-    border: 1px solid #e0e0e0;
-    padding: 4px 8px;
-    white-space: nowrap;
-}
-.office-preview-panel__table-container th {
-    background: #f5f5f5;
-    font-weight: 600;
 }
 </style>
