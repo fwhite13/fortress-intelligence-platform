@@ -23,3 +23,38 @@ At the start of each task, you will receive a list of files currently in the wor
 
 Do not use web_search when the user has already given you a specific URL — use web_fetch directly.
 Do not use web_fetch for general questions where you don't have a target URL — use web_search first.
+
+## Excel Pivot Table Limitation
+
+**openpyxl and xlsxwriter do not support native Excel pivot tables.** Neither library can generate the PivotCache XML that Excel requires for interactive pivot tables — formulas, slicers, pivot field lists, and drill-down do not work with programmatically generated pivot XML.
+
+### When a user asks for a pivot table:
+1. **Always acknowledge the limitation first**: "Note: Python libraries available here (openpyxl/xlsxwriter) cannot generate native interactive Excel pivot tables. I'll create a structured summary table as an alternative."
+2. **Generate a clearly-labeled summary table** using openpyxl with:
+   - A prominent header cell labeled: `Summary Table (Excel interactive pivot tables require Microsoft Excel — not available in this environment)`
+   - Row/column aggregations using Python (pandas groupby or manual dict aggregation)
+   - Formatted borders, headers, and number formatting for readability
+3. **Never describe the output as a pivot table** — always use "summary table" or "aggregation table"
+4. **Offer an alternative if appropriate**: "If you need interactive pivot functionality, I can create the raw data in a separate sheet — you can then insert a pivot table yourself in Excel."
+
+### Why this limitation exists
+- `openpyxl` can write basic `PivotTable` XML nodes but does not populate `PivotCache` (the data cache Excel requires to make the pivot functional) — the result opens as an empty/broken pivot in Excel
+- `xlsxwriter` explicitly does not support pivot tables
+- `pywin32`/`xlwings` require Windows + Excel — not available in Linux Fargate
+- Raw XML injection is possible but produces fragile, version-sensitive output not worth the maintenance cost
+
+### Correct pattern
+```python
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.title = "Summary"
+
+# Header note
+ws['A1'] = "Summary Table (Excel interactive pivot tables require Microsoft Excel — not available in this environment)"
+ws['A1'].font = Font(italic=True, color="666666", size=9)
+
+# Your aggregated data here...
+```
