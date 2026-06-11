@@ -26,16 +26,24 @@ async function presizeWorkbook(inputPath, outputPath) {
     const sheetNames = [];
     workbook.eachSheet((worksheet) => {
         sheetNames.push(worksheet.name);
+        // Skip chart sheets — they have no columns/rows to page-size
+        if (!worksheet.columns || typeof worksheet.columns.forEach !== 'function') {
+            console.log(`[convert-xlsx] Skipping chart sheet: ${worksheet.name}`);
+            return;
+        }
         let totalColMm = 0;
         worksheet.columns.forEach(col => {
-            totalColMm += (col.width || DEFAULT_COL_WIDTH) * CHARS_TO_MM;
+            if (col && col.width !== undefined) {
+                totalColMm += (col.width || DEFAULT_COL_WIDTH) * CHARS_TO_MM;
+            }
         });
         let totalRowMm = 0;
         worksheet.eachRow((row) => {
             totalRowMm += (row.height || DEFAULT_ROW_HEIGHT) * PT_TO_MM;
         });
-        const widthMm = totalColMm + MARGIN_MM * 2;
-        const heightMm = totalRowMm + MARGIN_MM * 2;
+        // ADO#5113: use A4 minimum to avoid LibreOffice producing blank output from zero-column sheets
+        const widthMm = Math.max(totalColMm + MARGIN_MM * 2, 210);
+        const heightMm = Math.max(totalRowMm + MARGIN_MM * 2, 297);
         worksheet.pageSetup.paperWidth = `${Math.round(widthMm)}mm`;
         worksheet.pageSetup.paperHeight = `${Math.round(heightMm)}mm`;
         worksheet.pageSetup.fitToPage = true;
@@ -83,13 +91,16 @@ app.post('/convert', async (req, res) => {
                 pptxPath
             ], { env: { ...process.env, HOME: loProfileDir } });
 
+            let stderrBuf = '';
             lo.stdout.on('data', (data) => {
                 data.toString().split('\n').filter(Boolean).forEach(line =>
                     console.log(`[lo-stdout] ${line}`)
                 );
             });
             lo.stderr.on('data', (data) => {
-                data.toString().split('\n').filter(Boolean).forEach(line =>
+                const text = data.toString();
+                stderrBuf += text;
+                text.split('\n').filter(Boolean).forEach(line =>
                     console.log(`[lo-stderr] ${line}`)
                 );
             });
@@ -105,7 +116,7 @@ app.post('/convert', async (req, res) => {
                 if (code === 0) {
                     resolve();
                 } else {
-                    reject(new Error(`LibreOffice exited with code ${code}`));
+                    reject(new Error(`LibreOffice exited with code ${code}${stderrBuf ? ': ' + stderrBuf.trim() : ''}`));
                 }
             });
 
@@ -190,13 +201,16 @@ app.post('/convert-xlsx', async (req, res) => {
                 pagesizedPath
             ], { env: { ...process.env, HOME: loProfileDir } });
 
+            let stderrBuf = '';
             lo.stdout.on('data', (data) => {
                 data.toString().split('\n').filter(Boolean).forEach(line =>
                     console.log(`[lo-stdout] ${line}`)
                 );
             });
             lo.stderr.on('data', (data) => {
-                data.toString().split('\n').filter(Boolean).forEach(line =>
+                const text = data.toString();
+                stderrBuf += text;
+                text.split('\n').filter(Boolean).forEach(line =>
                     console.log(`[lo-stderr] ${line}`)
                 );
             });
@@ -212,7 +226,7 @@ app.post('/convert-xlsx', async (req, res) => {
                 if (code === 0) {
                     resolve();
                 } else {
-                    reject(new Error(`LibreOffice exited with code ${code}`));
+                    reject(new Error(`LibreOffice exited with code ${code}${stderrBuf ? ': ' + stderrBuf.trim() : ''}`));
                 }
             });
 
