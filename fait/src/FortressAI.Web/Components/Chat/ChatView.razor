@@ -210,6 +210,10 @@ else
                     🔍 @(_currentToolName ?? "Calling tool")...
                 </MudAlert>
             }
+            @if (isStreaming)
+            {
+                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
+            }
             @if (_activeToolCalls.Any() || _toolCallsFading)
             {
                 <div class="tool-call-indicator-list @(_toolCallsFading ? "tool-call-list-fading" : "")">
@@ -223,10 +227,6 @@ else
                         </div>
                     }
                 </div>
-            }
-            @if (isStreaming)
-            {
-                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
             }
 
             @if (_currentFileSummary != null && _currentFileSummary.Files.Count > 0)
@@ -468,7 +468,7 @@ else
     private bool _taskResumedThisTurn = false; // ADO#3923: guard finally from undoing task_resume
     private bool _taskReadyPending = false; // ADO#4004: set by task_ready SSE, triggers re-submit after turn completes
     private bool _taskReadyResubmit = false; // ADO#4032: prevents HandleSend from resetting _taskModeActive on TASK_READY re-submit
-    private bool _awaitingFolderConfirm = false; // ADO#5112: true while harness is paused for folder-confirm — suppresses finally teardown
+    private bool _folderPickerCancelled = false; // ADO#5112: set in folder-cancel ContinueWith to suppress OperationCanceledException error message
     private string? _activeTaskFolderName = null;
     private Guid? _persistedWorkingFolderId = null;   // ADO#4144 — persisted working folder for this conversation
     private string? _persistedWorkingFolderName = null; // display name for the persisted folder
@@ -1342,7 +1342,6 @@ else
                             {
                                 await InvokeAsync(() =>
                                 {
-                                    _awaitingFolderConfirm = false; // ADO#5112: folder confirmed — re-enable normal teardown
                                     if (_taskMode)
                                     {
                                         _taskModeActive = true;
@@ -1353,27 +1352,26 @@ else
                             }
                             else
                             {
-                                // Cancelled — clear ALL task state
+                                // Cancelled — clear ALL task state and abort the SSE loop
                                 await InvokeAsync(() =>
                                 {
-                                    _awaitingFolderConfirm = false; // ADO#5112: folder cancelled — finally won't run cleanup, do it here
+                                    _folderPickerCancelled = true; // ADO#5112: suppress OperationCanceledException error in catch
                                     _taskMode = false;
                                     _taskModeActive = false;
                                     _ccTaskActive = false;
                                     _pendingTaskMessage = "";
                                     _activeToolCalls.Clear();
-                                    isStreaming = false;
-                                    streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
-                                    Logger.LogInformation("[ChatView] FolderPicker cancelled — task state cleared");
+                                    Logger.LogInformation("[ChatView] FolderPicker cancelled — task state cleared, aborting SSE loop");
+                                    streamingCts?.Cancel(); // ADO#5112: abort the waiting ReadLineAsync
                                     StateHasChanged();
                                 });
                             }
                         });
 
-                        // Break SSE loop — harness is paused awaiting folder-confirm, no more events coming
-                        _awaitingFolderConfirm = true; // ADO#5112: suppress finally teardown until folder-confirm resolves
-                        Logger.LogInformation("[ChatView] ADO#5112: awaiting folder confirm — skipping task teardown in finally");
-                        break;
+                        // ADO#5112: do NOT break — harness holds the SSE connection open while awaiting folder-confirm.
+                        // After /turn/folder-confirm is posted, the harness resumes and streams remaining events
+                        // (task_progress, files_updated, task_resume, done) on this same connection.
+                        // Breaking here would close the TCP stream and lose all post-confirm output.
                     }
                     catch (Exception ex)
                     {

@@ -1595,6 +1595,7 @@ a:hover {
     flex-direction: column;
     gap: 0.25rem;
     margin-bottom: 0.5rem;
+    min-height: 28px;
 }
 
 .tool-call-indicator {
@@ -1606,6 +1607,8 @@ a:hover {
     font-size: 0.75rem;
     color: var(--color-text-secondary, #6b7280);
     background: var(--color-surface-sunken, rgba(0,0,0,0.03));
+    min-height: 28px;
+    flex-shrink: 0;
 }
 
 .tool-call-active {

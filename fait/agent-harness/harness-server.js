@@ -387,6 +387,16 @@ function resolveProgressLabel(toolName, toolInput) {
             const cmd = input.command || '';
             if (cmd) {
                 if (/pip\s*install|pip3\s*install/.test(cmd)) return 'Installing dependencies...';
+                if (/openpyxl|\.xlsx|xlrd|xlwt|xlsxwriter/.test(cmd)) return 'Building spreadsheet...';
+                if (/pptx|python-pptx/.test(cmd)) return 'Building presentation...';
+                if (/docx|python-docx/.test(cmd)) return 'Building document...';
+                if (/generate.*report|report.*generate/i.test(cmd)) return 'Generating report...';
+                if (/create.*excel|make.*xlsx/i.test(cmd)) return 'Creating Excel file...';
+                if (/python3?\s+.*generate/i.test(cmd)) return 'Generating output...';
+                if (/python3?\s+\S+\.py/.test(cmd)) return 'Running Python script...';
+                if (/^cat\s+/.test(cmd)) return 'Reading file...';
+                if (/^ls\s|^find\s/.test(cmd)) return 'Scanning files...';
+                if (/>|>>/.test(cmd) && !/grep/.test(cmd)) return 'Writing output file...';
                 const preview = chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40);
                 return `Running: ${preview}`;
             }
