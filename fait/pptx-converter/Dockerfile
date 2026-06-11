@@ -5,9 +5,40 @@ FROM public.ecr.aws/docker/library/node:20
 
 # Install LibreOffice from TDF archive — Debian bookworm apt ships 7.x which does not
 # correctly honour custom paperWidth/paperHeight from XLSX pageSetup. TDF ships 24.x.
+# Install all system libs LO 24.8 needs — node:20 is not a desktop image so
+# X11/dbus/cups/pango/gtk libs are absent. Install them explicitly.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     ca-certificates \
+    libdbus-1-3 \
+    libxinerama1 \
+    libx11-6 \
+    libxext6 \
+    libxrender1 \
+    libxrandr2 \
+    libxcursor1 \
+    libxi6 \
+    libxtst6 \
+    libxcb1 \
+    libice6 \
+    libsm6 \
+    libfontconfig1 \
+    libfreetype6 \
+    libcairo2 \
+    libcairo-gobject2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libpangoft2-1.0-0 \
+    libglib2.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libatk1.0-0 \
+    libgl1 \
+    libglu1-mesa \
+    libssl3 \
+    libnss3 \
+    libnspr4 \
+    libcups2 \
+    libepoxy0 \
     && rm -rf /var/lib/apt/lists/* \
     && wget -q https://downloadarchive.documentfoundation.org/libreoffice/old/24.8.5.2/deb/x86_64/LibreOffice_24.8.5.2_Linux_x86-64_deb.tar.gz -O /tmp/lo.tar.gz \
     && tar -xzf /tmp/lo.tar.gz -C /tmp \
