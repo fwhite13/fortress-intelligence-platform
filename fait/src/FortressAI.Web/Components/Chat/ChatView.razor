@@ -1446,37 +1446,32 @@ else
                 });
             }
         }
+        catch (OperationCanceledException) when (_folderPickerCancelled)
+        {
+            // ADO#5112: folder picker was cancelled — streamingCts was cancelled deliberately; no error message
+            _folderPickerCancelled = false;
+        }
         catch (Exception ex)
         {
             streamingMessage.Content += $"\n\n⚠️ Error: {ex.Message}";
         }
         finally
         {
-            if (_awaitingFolderConfirm)
-            {
-                // ADO#5112: harness paused for folder-confirm — skip teardown, minimal reset only
-                isStreaming = false;
-                streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
-                StateHasChanged();
-            }
-            else
-            {
-                isStreaming = false;
-                _taskMode = _taskResumedThisTurn;   // ADO#3923: preserve if task_resume fired this turn
-                _taskResumedThisTurn = false;        // always reset the guard flag
-                _elapsedTimer?.Dispose();
-                _elapsedTimer = null;
-                _taskTimerCts?.Cancel();
-                _taskTimerCts = null;
-                _ = JS.InvokeVoidAsync("fortressChat.stopTaskTimer"); // ADO#4200
-                _taskModeActive = false;
-                _activeTaskFolderName = null;  // ADO#3560
-                _activeToolCalls.Clear();    // ADO#3455 — ensure cleared on turn end
-                _ccTaskActive = false;
-                _toolCallsFading = false;    // ADO#3455
-                streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
-                StateHasChanged();
-            }
+            isStreaming = false;
+            _taskMode = _taskResumedThisTurn;   // ADO#3923: preserve if task_resume fired this turn
+            _taskResumedThisTurn = false;        // always reset the guard flag
+            _elapsedTimer?.Dispose();
+            _elapsedTimer = null;
+            _taskTimerCts?.Cancel();
+            _taskTimerCts = null;
+            _ = JS.InvokeVoidAsync("fortressChat.stopTaskTimer"); // ADO#4200
+            _taskModeActive = false;
+            _activeTaskFolderName = null;  // ADO#3560
+            _activeToolCalls.Clear();    // ADO#3455 — ensure cleared on turn end
+            _ccTaskActive = false;
+            _toolCallsFading = false;    // ADO#3455
+            streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
+            StateHasChanged();
         }
 
         // ADO#4004: if task_ready was received, re-submit the message with task mode on

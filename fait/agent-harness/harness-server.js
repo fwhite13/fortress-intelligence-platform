@@ -308,8 +308,12 @@ function resolveProgressLabel(toolName, toolInput) {
                 if (/pptx|python-pptx/.test(cmd)) return 'Building presentation...';
                 if (/docx|python-docx/.test(cmd)) return 'Building document...';
                 if (/python3?\s+\S+\.py/.test(cmd)) return 'Running Python script...';
-                const preview = chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40);
-                return `Running: ${preview}`;
+                if (/\.(xlsx|xls)/.test(cmd) || /openpyxl|xlsxwriter/.test(cmd)) return 'Generating Excel file...';
+                if (/\.pptx/.test(cmd) || /python-pptx/.test(cmd)) return 'Generating presentation...';
+                if (/generate|create|build/.test(cmd)) return 'Generating output...';
+                if (/cat\s+.*\.(md|txt|json|csv)/.test(cmd)) return 'Reading document...';
+                if (/ls\s+|find\s+/.test(cmd)) return 'Scanning files...';
+                return 'Processing...';
             }
             return 'Running command...';
         }
@@ -397,8 +401,12 @@ function resolveProgressLabel(toolName, toolInput) {
                 if (/^cat\s+/.test(cmd)) return 'Reading file...';
                 if (/^ls\s|^find\s/.test(cmd)) return 'Scanning files...';
                 if (/>|>>/.test(cmd) && !/grep/.test(cmd)) return 'Writing output file...';
-                const preview = chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40);
-                return `Running: ${preview}`;
+                if (/\.(xlsx|xls)/.test(cmd) || /openpyxl|xlsxwriter/.test(cmd)) return 'Generating Excel file...';
+                if (/\.pptx/.test(cmd) || /python-pptx/.test(cmd)) return 'Generating presentation...';
+                if (/generate|create|build/.test(cmd)) return 'Generating output...';
+                if (/cat\s+.*\.(md|txt|json|csv)/.test(cmd)) return 'Reading document...';
+                if (/ls\s+|find\s+/.test(cmd)) return 'Scanning files...';
+                return 'Processing...';
             }
             return 'Running command...';
         }
