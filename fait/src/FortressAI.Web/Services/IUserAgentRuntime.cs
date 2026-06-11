@@ -62,7 +62,8 @@ public record TurnRequest(
     List<string>? EnabledMcpSlugs = null,
     KbFlags? KbFlags = null,
     string? Model = null,   // ADO#3395 — per-turn model override; null = use harness default
-    string? PersistedWorkingFolderId = null   // ADO#4144 — conversation's persisted working folder; harness uses to skip picker
+    string? PersistedWorkingFolderId = null,   // ADO#4144 — conversation's persisted working folder; harness uses to skip picker
+    string? CompletionCondition = null   // ADO#5116 — /goal condition; if set, CC is invoked with /goal <condition>
 );
 
 // ADO#3241 — KB flags passed to harness for harness-side KB retrieval
@@ -87,6 +88,17 @@ public record HarnessEvent(
     [property: JsonPropertyName("payload")] string? Payload = null,   // JSON payload for mode_switch and future event types
     [property: JsonPropertyName("toolName")] string? ToolName = null
 );
+
+// ADO#5116 — workflow phase event payload (CC /goal + workflow_phase stream events)
+public record WorkflowPhasePayload(
+    [property: JsonPropertyName("phase")] string? Phase,
+    [property: JsonPropertyName("step")] int Step = 0,
+    [property: JsonPropertyName("total")] int Total = 0);
+
+// ADO#5116 — goal eval event payload (CC /goal evaluation result)
+public record GoalEvalPayload(
+    [property: JsonPropertyName("achieved")] bool Achieved,
+    [property: JsonPropertyName("reason")] string? Reason);
 
 // ADO#3241 — KB sources SSE payload
 public record KbSourcesPayload(

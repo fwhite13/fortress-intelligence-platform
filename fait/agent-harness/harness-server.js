@@ -2941,7 +2941,8 @@ app.post('/turn', async (req, res) => {
     const userEmail       = rawBody.UserEmail       ?? rawBody.userEmail       ?? null;
     const isScheduledTask = rawBody.IsScheduledTask ?? rawBody.isScheduledTask ?? false;
     const kbWriteAllowed  = rawBody.KbWriteAllowed  ?? rawBody.kbWriteAllowed  ?? true;
-    const taskFolderId    = rawBody.TaskFolderId    ?? rawBody.taskFolderId    ?? null;
+    const taskFolderId        = rawBody.TaskFolderId        ?? rawBody.taskFolderId        ?? null;
+    const completionCondition = rawBody.CompletionCondition ?? rawBody.completionCondition ?? null;
     // ADO#3395 — per-turn model override; null falls back to MODEL_ID env constant
     const modelId = rawBody.Model ?? rawBody.model ?? process.env.MODEL_ID ?? MODEL_ID;
 
@@ -3795,11 +3796,13 @@ Do NOT ask the user where to save output files — write all output to the worki
 If creating personalized content, reference the user profile and context provided in this brief — do not invent or guess personal details.
 DO NOT assume a prior artifact means this task is already done. Prior files in the folder are from PREVIOUS sessions. Execute the user's current request now.`;
 
+        const goalPrefix = completionCondition ? `/goal ${completionCondition}\n\n` : '';
         const briefContent = fullContext
-            ? `${EXECUTE_DIRECTIVE}\n\n---\n\n${fullContext}\n\n---\n\nUser: ${message}`
-            : `${EXECUTE_DIRECTIVE}\n\n---\n\n${message}`;
+            ? `${goalPrefix}${EXECUTE_DIRECTIVE}\n\n---\n\n${fullContext}\n\n---\n\nUser: ${message}`
+            : `${goalPrefix}${EXECUTE_DIRECTIVE}\n\n---\n\n${message}`;
 
         // ADO#3289 — log the exact command being spawned
+        if (completionCondition) console.log(`[CC spawn] /goal condition: ${completionCondition.slice(0, 200)}`);
         const ccArgs = [
             '--model', process.env.CC_MODEL || 'sonnet',
             '--print',
@@ -3821,7 +3824,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
             },
             stdio: ['pipe', 'pipe', 'pipe']
         });
-        ccProcess.stdin.write(briefContent);
+        ccProcess.stdin.write(completionCondition ? '/goal ' + completionCondition + '\n\n' + briefContent : briefContent);
         ccProcess.stdin.end();
         // ADO#4799 — chip 3: brief delivered
         sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'document', status: 'calling', message: 'Task brief delivered', chipIcon: 'document' }) });
@@ -3938,6 +3941,16 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                         console.log(`[CC spawn] result text (first 500 chars): ${resultText.slice(0, 500)} userId=${userId}`);
                     }
                     // result.is_error is handled by the close event exit code
+                } else if (evtType === 'workflow_phase' || evtType === 'workflowPhase') {
+                    const phase = parsed.phase || parsed.name || 'Working...';
+                    console.log('[workflow] phase=' + phase + ' userId=' + userId);
+                    sendEvent({ type: 'workflow_phase', payload: JSON.stringify({ phase, step: parsed.step || 0, total: parsed.total || 0 }) });
+                    lastProgressAt = Date.now();
+                } else if (evtType === 'goal_eval' || evtType === 'goalEval') {
+                    const achieved = parsed.achieved ?? false, reason = parsed.reason || '';
+                    console.log('[goal] achieved=' + achieved + ' reason=' + reason.slice(0, 80) + ' userId=' + userId);
+                    sendEvent({ type: 'goal_eval', payload: JSON.stringify({ achieved, reason }) });
+                    lastProgressAt = Date.now();
                 }
                 // system, init, and other types: skip silently
             }

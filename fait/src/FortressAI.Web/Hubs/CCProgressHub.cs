@@ -25,4 +25,10 @@ public class CCProgressHub : Hub
             throw new HubException("Cannot leave another user's group.");
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"cc-user-{userId}");
     }
+
+    public static Task BroadcastProgressAsync(
+        IHubContext<CCProgressHub> hubContext,
+        string userId,
+        object progressEvent)
+        => hubContext.Clients.Group($"cc-user-{userId}").SendAsync("OnProgressEvent", progressEvent);
 }

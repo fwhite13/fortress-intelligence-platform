@@ -29,6 +29,7 @@
 @implements IAsyncDisposable
 @using FortressAI.Web.Services
 @using FortressAI.Web.Services.Mcp
+@using Microsoft.AspNetCore.SignalR.Client
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.Extensions.DependencyInjection
 @using FortressAI.Shared.Models
@@ -213,6 +214,13 @@ else
             @if (isStreaming)
             {
                 <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
+            }
+            @if (isStreaming && !string.IsNullOrEmpty(_workflowPhase))
+            {
+                <div class="workflow-phase-indicator">
+                    <MudIcon Icon="@Icons.Material.Outlined.AccountTree" Style="width: 13px; height: 13px; flex-shrink: 0;" />
+                    <span>@_workflowPhase</span>
+                </div>
             }
             @if (_activeToolCalls.Any() || _toolCallsFading)
             {
@@ -473,6 +481,11 @@ else
     private Guid? _persistedWorkingFolderId = null;   // ADO#4144 — persisted working folder for this conversation
     private string? _persistedWorkingFolderName = null; // display name for the persisted folder
     private string _pendingTaskMessage = "";
+
+    // ADO#5116 — workflow phase + goal eval state (from CC /goal + workflow_phase events)
+    private string? _workflowPhase = null;
+    private string? _goalEvalReason = null;
+    private HubConnection? _progressHubConnection;
 
     // Task Progress Timeline state (ADO#3244)
     private DateTime? _taskStartTime;
@@ -775,6 +788,32 @@ else
                 await JS.InvokeVoidAsync("window.fortressChat.setupDragDrop", "chat-input-drop-zone", _dotNetRef);
             }
             catch { /* JS interop can fail during prerender */ }
+
+            // ADO#5116 — subscribe to CCProgressHub for out-of-band workflow_phase / goal_eval events
+            if (Session.IsAuthenticated)
+            {
+                try
+                {
+                    _progressHubConnection = new HubConnectionBuilder()
+                        .WithUrl(Nav.ToAbsoluteUri("/hubs/cc-progress"))
+                        .WithAutomaticReconnect()
+                        .Build();
+                    _progressHubConnection.On<TaskProgressPayload>("OnProgressEvent", async (payload) =>
+                    {
+                        if (payload.Step == "workflow_phase")
+                            _workflowPhase = payload.Message;
+                        else if (payload.Step == "goal_eval")
+                            _goalEvalReason = payload.Message;
+                        await InvokeAsync(StateHasChanged);
+                    });
+                    await _progressHubConnection.StartAsync();
+                    await _progressHubConnection.InvokeAsync("JoinUserGroup", Session.UserId.ToString());
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "[ChatView] ADO#5116: Failed to connect to CCProgressHub — non-fatal");
+                }
+            }
         }
 
         if (_needsScroll)
@@ -858,6 +897,8 @@ else
         _currentFileSummary = null;
         _activeToolCalls.Clear();  // ADO#3241 — Reset tool call indicators
         _ccTaskActive = false;
+        _workflowPhase = null;  // ADO#5116
+        _goalEvalReason = null; // ADO#5116
         if (!_taskReadyResubmit)
             _taskModeActive = false; // Reset — will be set by mode_switch event in this turn
         _taskReadyResubmit = false;  // ADO#4032: clear after consuming
@@ -1219,6 +1260,39 @@ else
                         Logger.LogWarning(ex, "[ChatView] Failed to parse tool_call payload");
                     }
                 }
+                else if (evt.Type == "workflow_phase")
+                {
+                    try
+                    {
+                        var p = System.Text.Json.JsonSerializer.Deserialize<WorkflowPhasePayload>(evt.Payload ?? "{}");
+                        var lbl = (p?.Phase ?? "Working...") + (p?.Total > 0 ? $" ({p.Step}/{p.Total})" : "");
+                        _activeToolCalls.RemoveAll(c => c.Server == "workflow");
+                        _activeToolCalls.Add(new ToolCallEvent("workflow", "workflow_phase", "calling", lbl, DateTime.UtcNow, "agent", Guid.NewGuid()));
+                        await InvokeAsync(StateHasChanged);
+                        await ScrollToBottom();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[ChatView] workflow_phase");
+                    }
+                }
+                else if (evt.Type == "goal_eval")
+                {
+                    try
+                    {
+                        var g = System.Text.Json.JsonSerializer.Deserialize<GoalEvalPayload>(evt.Payload ?? "{}");
+                        if (g != null && !g.Achieved && !string.IsNullOrEmpty(g.Reason))
+                        {
+                            _activeToolCalls.RemoveAll(c => c.Server == "goal");
+                            _activeToolCalls.Add(new ToolCallEvent("goal", "goal_eval", "calling", TruncChip("Goal: " + g.Reason, 55), DateTime.UtcNow, "task", Guid.NewGuid()));
+                            await InvokeAsync(StateHasChanged);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[ChatView] goal_eval");
+                    }
+                }
                 else if (evt.Type == "task_progress")
                 {
                     try
@@ -1242,6 +1316,12 @@ else
                                 var startMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                                 _ = JS.InvokeVoidAsync("fortressChat.startTaskTimer", startMs);
                             }
+                            // ADO#5116 — capture workflow phase and goal eval state
+                            if (progressPayload.Step == "workflow_phase")
+                                _workflowPhase = progressPayload.Message;
+                            else if (progressPayload.Step == "goal_eval")
+                                _goalEvalReason = progressPayload.Message;
+
                             var stepMessage = progressPayload.Message
                                 ?? GetToolLabel(progressPayload.ToolName ?? "cc", "task", null);
                             var toolName = progressPayload.ToolName ?? "cc";
@@ -2008,6 +2088,8 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
         if (_layoutStateChangeHandler != null)
             LayoutState.OnChange -= _layoutStateChangeHandler;
         _dotNetRef?.Dispose();
+        if (_progressHubConnection is not null)
+            await _progressHubConnection.DisposeAsync();
     }
 
     private async Task SendResumptionBrief()
@@ -2486,5 +2568,21 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     padding: 8px;
     min-width: 200px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+/* ADO#5116 — workflow phase indicator shown near chips during streaming */
+.workflow-phase-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 2px 0 2px calc(36px + 1rem);
+    font-size: 0.75rem;
+    font-family: var(--font-primary);
+    color: var(--color-accent);
+    font-style: italic;
+    opacity: 0.85;
+    box-sizing: border-box;
 }
 </style>
