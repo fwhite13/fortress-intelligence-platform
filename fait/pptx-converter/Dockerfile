@@ -1,23 +1,13 @@
-FROM public.ecr.aws/docker/library/node:20-slim
+# node:20 (full bookworm) instead of node:20-slim — LO 24.8 has deep system lib deps
+# (libdbus-1, libcups2, libx11, libpango, libgtk, etc.) that slim strips out.
+# Easier to start full than chase missing libs one build at a time.
+FROM public.ecr.aws/docker/library/node:20
 
-# Install LibreOffice from TDF apt repo — Debian bookworm apt ships 7.x which does not
-# correctly honour custom paperWidth/paperHeight from XLSX pageSetup. TDF repo ships 25.x+.
+# Install LibreOffice from TDF archive — Debian bookworm apt ships 7.x which does not
+# correctly honour custom paperWidth/paperHeight from XLSX pageSetup. TDF ships 24.x.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
-    gnupg \
     ca-certificates \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxrender1 \
-    libxext6 \
-    libxinerama1 \
-    libfontconfig1 \
-    libfreetype6 \
-    libcairo2 \
-    libssl3 \
-    libnss3 \
-    libnspr4 \
     && rm -rf /var/lib/apt/lists/* \
     && wget -q https://downloadarchive.documentfoundation.org/libreoffice/old/24.8.5.2/deb/x86_64/LibreOffice_24.8.5.2_Linux_x86-64_deb.tar.gz -O /tmp/lo.tar.gz \
     && tar -xzf /tmp/lo.tar.gz -C /tmp \
