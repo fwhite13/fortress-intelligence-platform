@@ -468,6 +468,7 @@ else
     private bool _taskResumedThisTurn = false; // ADO#3923: guard finally from undoing task_resume
     private bool _taskReadyPending = false; // ADO#4004: set by task_ready SSE, triggers re-submit after turn completes
     private bool _taskReadyResubmit = false; // ADO#4032: prevents HandleSend from resetting _taskModeActive on TASK_READY re-submit
+    private bool _awaitingFolderConfirm = false; // ADO#5112: true while harness is paused for folder-confirm — suppresses finally teardown
     private string? _activeTaskFolderName = null;
     private Guid? _persistedWorkingFolderId = null;   // ADO#4144 — persisted working folder for this conversation
     private string? _persistedWorkingFolderName = null; // display name for the persisted folder
@@ -1341,6 +1342,7 @@ else
                             {
                                 await InvokeAsync(() =>
                                 {
+                                    _awaitingFolderConfirm = false; // ADO#5112: folder confirmed — re-enable normal teardown
                                     if (_taskMode)
                                     {
                                         _taskModeActive = true;
@@ -1354,11 +1356,14 @@ else
                                 // Cancelled — clear ALL task state
                                 await InvokeAsync(() =>
                                 {
+                                    _awaitingFolderConfirm = false; // ADO#5112: folder cancelled — finally won't run cleanup, do it here
                                     _taskMode = false;
                                     _taskModeActive = false;
                                     _ccTaskActive = false;
                                     _pendingTaskMessage = "";
                                     _activeToolCalls.Clear();
+                                    isStreaming = false;
+                                    streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
                                     Logger.LogInformation("[ChatView] FolderPicker cancelled — task state cleared");
                                     StateHasChanged();
                                 });
@@ -1366,6 +1371,8 @@ else
                         });
 
                         // Break SSE loop — harness is paused awaiting folder-confirm, no more events coming
+                        _awaitingFolderConfirm = true; // ADO#5112: suppress finally teardown until folder-confirm resolves
+                        Logger.LogInformation("[ChatView] ADO#5112: awaiting folder confirm — skipping task teardown in finally");
                         break;
                     }
                     catch (Exception ex)
@@ -1447,21 +1454,31 @@ else
         }
         finally
         {
-            isStreaming = false;
-            _taskMode = _taskResumedThisTurn;   // ADO#3923: preserve if task_resume fired this turn
-            _taskResumedThisTurn = false;        // always reset the guard flag
-            _elapsedTimer?.Dispose();
-            _elapsedTimer = null;
-            _taskTimerCts?.Cancel();
-            _taskTimerCts = null;
-            _ = JS.InvokeVoidAsync("fortressChat.stopTaskTimer"); // ADO#4200
-            _taskModeActive = false;
-            _activeTaskFolderName = null;  // ADO#3560
-            _activeToolCalls.Clear();    // ADO#3455 — ensure cleared on turn end
-            _ccTaskActive = false;
-            _toolCallsFading = false;    // ADO#3455
-            streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
-            StateHasChanged();
+            if (_awaitingFolderConfirm)
+            {
+                // ADO#5112: harness paused for folder-confirm — skip teardown, minimal reset only
+                isStreaming = false;
+                streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
+                StateHasChanged();
+            }
+            else
+            {
+                isStreaming = false;
+                _taskMode = _taskResumedThisTurn;   // ADO#3923: preserve if task_resume fired this turn
+                _taskResumedThisTurn = false;        // always reset the guard flag
+                _elapsedTimer?.Dispose();
+                _elapsedTimer = null;
+                _taskTimerCts?.Cancel();
+                _taskTimerCts = null;
+                _ = JS.InvokeVoidAsync("fortressChat.stopTaskTimer"); // ADO#4200
+                _taskModeActive = false;
+                _activeTaskFolderName = null;  // ADO#3560
+                _activeToolCalls.Clear();    // ADO#3455 — ensure cleared on turn end
+                _ccTaskActive = false;
+                _toolCallsFading = false;    // ADO#3455
+                streamingMessage = new ChatMessage { Role = "assistant", Content = "" };
+                StateHasChanged();
+            }
         }
 
         // ADO#4004: if task_ready was received, re-submit the message with task mode on
