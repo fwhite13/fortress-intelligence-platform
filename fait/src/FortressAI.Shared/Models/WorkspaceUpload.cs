@@ -51,4 +51,7 @@ public class WorkspaceUpload
     [Column("preview_s3_key")]
     [MaxLength(500)]
     public string? PreviewS3Key { get; set; }
+
+    [Column("preview_version")]
+    public int? PreviewVersion { get; set; }
 }

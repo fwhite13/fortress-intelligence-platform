@@ -131,9 +131,13 @@ public class ArtifactPreviewController : ControllerBase
         var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (artifact.UserId.ToString() != userId) return Forbid();
 
-        // Return cached key if already converted
-        if (!string.IsNullOrEmpty(artifact.PreviewS3Key))
+        // Return cached key if already converted for this version
+        if (!string.IsNullOrEmpty(artifact.PreviewS3Key) && artifact.PreviewVersion == artifact.CurrentVersion)
+        {
+            _logger.LogInformation("[preview] [pptx] Cache hit for artifact {Id} v{Version}", id, artifact.CurrentVersion);
             return Ok(new { previewS3Key = artifact.PreviewS3Key });
+        }
+        _logger.LogInformation("[preview] [pptx] Cache miss for artifact {Id} v{Version} — converting", id, artifact.CurrentVersion);
 
         // Call dedicated converter service
         var converterBaseRaw = _config["CONVERTER_BASE_URL"];
@@ -162,6 +166,7 @@ public class ArtifactPreviewController : ControllerBase
         if (result?.PreviewS3Key != null)
         {
             artifact.PreviewS3Key = result.PreviewS3Key;
+            artifact.PreviewVersion = artifact.CurrentVersion;
             await db.SaveChangesAsync();
         }
 

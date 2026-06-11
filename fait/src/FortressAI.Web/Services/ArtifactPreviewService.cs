@@ -90,8 +90,12 @@ public class ArtifactPreviewService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var upload = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == artifactId && u.UserId == userId);
 
-        if (upload != null && !string.IsNullOrEmpty(upload.PreviewS3Key))
+        if (upload != null && !string.IsNullOrEmpty(upload.PreviewS3Key) && upload.PreviewVersion == upload.CurrentVersion)
+        {
+            _logger.LogInformation("[preview] [pptx] Cache hit for artifact {Id} v{Version}", artifactId, upload.CurrentVersion);
             return upload.PreviewS3Key;
+        }
+        _logger.LogInformation("[preview] [pptx] Cache miss for artifact {Id} v{Version} — converting", artifactId, upload?.CurrentVersion ?? 0);
 
         var converterBaseRaw = _config["CONVERTER_BASE_URL"];
         if (string.IsNullOrEmpty(converterBaseRaw))
@@ -119,6 +123,7 @@ public class ArtifactPreviewService
         if (result?.PreviewS3Key != null && upload != null)
         {
             upload.PreviewS3Key = result.PreviewS3Key;
+            upload.PreviewVersion = upload.CurrentVersion;
             await db.SaveChangesAsync();
         }
         return result?.PreviewS3Key;
@@ -139,11 +144,16 @@ public class ArtifactPreviewService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var upload = await db.WorkspaceUploads.FirstOrDefaultAsync(u => u.Id == artifactId && u.UserId == userId);
 
-        if (upload != null && !string.IsNullOrEmpty(upload.PreviewS3Key))
+        if (upload != null && !string.IsNullOrEmpty(upload.PreviewS3Key) && upload.PreviewVersion == upload.CurrentVersion)
+        {
+            _logger.LogInformation("[preview] [xlsx] Cache hit for artifact {Id} v{Version}", artifactId, upload.CurrentVersion);
             return (upload.PreviewS3Key, Array.Empty<string>());
+        }
 
         if (upload == null)
             return (null, Array.Empty<string>());
+
+        _logger.LogInformation("[preview] [xlsx] Cache miss for artifact {Id} v{Version} — converting", artifactId, upload.CurrentVersion);
 
         var converterBaseRaw = _config["CONVERTER_BASE_URL"];
         if (string.IsNullOrEmpty(converterBaseRaw))
@@ -171,6 +181,7 @@ public class ArtifactPreviewService
         if (result?.PreviewS3Key != null)
         {
             upload.PreviewS3Key = result.PreviewS3Key;
+            upload.PreviewVersion = upload.CurrentVersion;
             await db.SaveChangesAsync();
         }
         return (result?.PreviewS3Key, result?.SheetNames ?? Array.Empty<string>());

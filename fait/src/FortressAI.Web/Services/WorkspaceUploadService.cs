@@ -287,6 +287,8 @@ public class WorkspaceUploadService : IWorkspaceUploadService
             existingFile.SizeBytes = sizeBytes;
             existingFile.CurrentVersion = versionNumber;
             existingFile.Source = "user";
+            existingFile.PreviewS3Key = null;    // invalidate stale preview on new version
+            existingFile.PreviewVersion = null;
             versionRow.FileId = existingFile.Id;
             upload = existingFile;
         }
@@ -480,6 +482,8 @@ public class WorkspaceUploadService : IWorkspaceUploadService
         file.S3Key = version.S3Key;
         file.CurrentVersion = newVersionNumber;
         file.SizeBytes = version.SizeBytes;
+        file.PreviewS3Key = null;    // invalidate stale preview on rollback
+        file.PreviewVersion = null;
 
         await db.SaveChangesAsync();
         return file;

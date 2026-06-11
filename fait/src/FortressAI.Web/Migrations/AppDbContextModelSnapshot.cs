@@ -1626,6 +1626,10 @@ namespace FortressAI.Web.Migrations
                         .HasColumnType("varchar(500)")
                         .HasColumnName("preview_s3_key");
 
+                    b.Property<int?>("PreviewVersion")
+                        .HasColumnType("int")
+                        .HasColumnName("preview_version");
+
                     b.HasKey("Id");
 
                     b.HasIndex("FolderId")
