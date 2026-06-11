@@ -3824,7 +3824,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
             },
             stdio: ['pipe', 'pipe', 'pipe']
         });
-        ccProcess.stdin.write(completionCondition ? '/goal ' + completionCondition + '\n\n' + briefContent : briefContent);
+        ccProcess.stdin.write(briefContent); // ADO#5116: /goal already prepended via goalPrefix in briefContent construction above
         ccProcess.stdin.end();
         // ADO#4799 — chip 3: brief delivered
         sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: 'document', status: 'calling', message: 'Task brief delivered', chipIcon: 'document' }) });
