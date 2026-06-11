@@ -77,17 +77,17 @@ public class ArtifactPreviewController : ControllerBase
 
         try
         {
-            var s3KeyToFetch = preview && !string.IsNullOrEmpty(artifact.PreviewS3Key)
-                ? artifact.PreviewS3Key
-                : artifact.S3Key;
+            var previewReady = preview && !string.IsNullOrEmpty(artifact.PreviewS3Key)
+                && artifact.PreviewVersion == artifact.CurrentVersion;
+            var s3KeyToFetch = previewReady ? artifact.PreviewS3Key! : artifact.S3Key;
             var s3Response = await _s3.GetObjectAsync(_bucket, s3KeyToFetch);
 
             // Stream directly to response — no buffering
-            Response.ContentType = preview && !string.IsNullOrEmpty(artifact.PreviewS3Key)
+            Response.ContentType = previewReady
                 ? "application/pdf"
                 : (!string.IsNullOrEmpty(artifact.MimeType) ? artifact.MimeType : "application/octet-stream");
             Response.Headers["X-Content-Type-Options"] = "nosniff";
-            Response.ContentLength = (preview && !string.IsNullOrEmpty(artifact.PreviewS3Key))
+            Response.ContentLength = previewReady
                 ? s3Response.ContentLength
                 : (artifact.SizeBytes > 0 ? artifact.SizeBytes : null);
             Response.Headers["Content-Disposition"] = "inline";
@@ -184,7 +184,7 @@ public class ArtifactPreviewController : ControllerBase
         var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (artifact.UserId.ToString() != userId) return Forbid();
 
-        if (string.IsNullOrEmpty(artifact.PreviewS3Key))
+        if (string.IsNullOrEmpty(artifact.PreviewS3Key) || artifact.PreviewVersion != artifact.CurrentVersion)
             return Ok(new { status = "pending" });
 
         // Generate HMAC token for preview URL

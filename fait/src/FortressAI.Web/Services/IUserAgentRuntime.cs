@@ -63,6 +63,13 @@ public record TurnRequest(
     KbFlags? KbFlags = null,
     string? Model = null,   // ADO#3395 — per-turn model override; null = use harness default
     string? PersistedWorkingFolderId = null,   // ADO#4144 — conversation's persisted working folder; harness uses to skip picker
+    /// <summary>
+    /// Optional /goal condition prepended to the CC session prompt.
+    /// ADO#5116: Foundation WI — field is wired in harness but not yet set by any caller.
+    /// Callers (chat UI, scheduled tasks) will set this in a follow-up WI when the /goal
+    /// feature is surfaced in the chat task modal.
+    /// Always include "or stop after N turns" clause to prevent infinite loops.
+    /// </summary>
     string? CompletionCondition = null   // ADO#5116 — /goal condition; if set, CC is invoked with /goal <condition>
 );
 

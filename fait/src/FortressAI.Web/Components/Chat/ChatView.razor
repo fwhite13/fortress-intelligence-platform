@@ -789,6 +789,10 @@ else
             }
             catch { /* JS interop can fail during prerender */ }
 
+            // ADO#5116: CCProgressHub subscriptions for workflow_phase/goal_eval are forward infrastructure.
+            // The harness emits these event types via SSE only (sendEvent). The hub broadcast path
+            // (BroadcastProgressAsync) is not yet wired — these handlers will fire when a future WI
+            // adds hub broadcast as a reconnect fallback for long-running tasks. Not dead code — planned.
             // ADO#5116 — subscribe to CCProgressHub for out-of-band workflow_phase / goal_eval events
             if (Session.IsAuthenticated)
             {
@@ -798,12 +802,21 @@ else
                         .WithUrl(Nav.ToAbsoluteUri("/hubs/cc-progress"))
                         .WithAutomaticReconnect()
                         .Build();
-                    _progressHubConnection.On<TaskProgressPayload>("OnProgressEvent", async (payload) =>
+                    _progressHubConnection.On<System.Text.Json.JsonElement>("OnProgressEvent", async (evt) =>
                     {
-                        if (payload.Step == "workflow_phase")
-                            _workflowPhase = payload.Message;
-                        else if (payload.Step == "goal_eval")
-                            _goalEvalReason = payload.Message;
+                        try
+                        {
+                            var type = evt.TryGetProperty("type", out var t) ? t.GetString() : null;
+                            if (type == "workflow_phase" && evt.TryGetProperty("phase", out var ph))
+                                _workflowPhase = ph.GetString();
+                            else if (type == "goal_eval" && evt.TryGetProperty("reason", out var r))
+                                _goalEvalReason = r.GetString();
+                            // also handle task_progress step-based workflow_phase for backwards compat
+                            else if (evt.TryGetProperty("step", out var s) && s.GetString() == "workflow_phase"
+                                     && evt.TryGetProperty("message", out var m))
+                                _workflowPhase = m.GetString();
+                        }
+                        catch { }
                         await InvokeAsync(StateHasChanged);
                     });
                     await _progressHubConnection.StartAsync();
@@ -1500,6 +1513,42 @@ else
                     _taskReadyPending = true;
                     _taskResumedThisTurn = true; // prevent finally from resetting _taskMode
                     await InvokeAsync(StateHasChanged);
+                }
+                else if (evt.Type == "workflow_phase")
+                {
+                    // ADO#5116 — CC /goal workflow phase (distinct SSE type emitted by harness NDJSON handler)
+                    try
+                    {
+                        var phasePayload = System.Text.Json.JsonSerializer.Deserialize<WorkflowPhasePayload>(
+                            evt.Payload ?? "{}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (!string.IsNullOrWhiteSpace(phasePayload?.Phase))
+                        {
+                            _workflowPhase = phasePayload.Phase;
+                            await InvokeAsync(StateHasChanged);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[ChatView] ADO#5116: Failed to parse workflow_phase payload");
+                    }
+                }
+                else if (evt.Type == "goal_eval")
+                {
+                    // ADO#5116 — CC /goal evaluation result (distinct SSE type emitted by harness NDJSON handler)
+                    try
+                    {
+                        var evalPayload = System.Text.Json.JsonSerializer.Deserialize<GoalEvalPayload>(
+                            evt.Payload ?? "{}", new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (evalPayload != null)
+                        {
+                            _goalEvalReason = evalPayload.Reason;
+                            await InvokeAsync(StateHasChanged);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[ChatView] ADO#5116: Failed to parse goal_eval payload");
+                    }
                 }
                 // "log" events: swallow silently
             }
