@@ -90,9 +90,7 @@ public class ArtifactPreviewController : ControllerBase
             Response.ContentLength = (preview && !string.IsNullOrEmpty(artifact.PreviewS3Key))
                 ? s3Response.ContentLength
                 : (artifact.SizeBytes > 0 ? artifact.SizeBytes : null);
-            var cd = new System.Net.Http.Headers.ContentDispositionHeaderValue("inline");
-            cd.FileNameStar = artifact.Filename;
-            Response.Headers["Content-Disposition"] = cd.ToString();
+            Response.Headers["Content-Disposition"] = "inline";
             // Prevent caching of sensitive preview content
             Response.Headers["Cache-Control"] = "private, no-store";
 
