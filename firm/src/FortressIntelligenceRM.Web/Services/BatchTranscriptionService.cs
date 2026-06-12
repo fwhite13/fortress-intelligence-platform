@@ -72,6 +72,7 @@ public class BatchTranscriptionService : IBatchTranscriptionService
             new Amazon.Batch.Model.KeyValuePair { Name = "FIRM_CALLBACK_URL", Value = _config["Firm:CallbackUrl"] ?? "http://firm.fip.internal:8080/api/vp/callback" },
             new Amazon.Batch.Model.KeyValuePair { Name = "MEETING_DATE", Value = meetingDate?.ToString("yyyy-MM-dd") ?? "" },
             new Amazon.Batch.Model.KeyValuePair { Name = "PYANNOTE_CACHE", Value = "/app/.cache/huggingface/hub" },
+            new Amazon.Batch.Model.KeyValuePair { Name = "BEDROCK_MODEL_ID", Value = _config["Firm:BedrockModelId"] ?? "us.anthropic.claude-sonnet-4-6" },
         };
 
         if (wikiJson != null)

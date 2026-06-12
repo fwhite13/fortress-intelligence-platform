@@ -40,7 +40,7 @@ def main():
     bot_secret = os.environ.get("BOT_CALLBACK_SECRET", "")
     hf_token = os.environ.get("HF_TOKEN", "")
     aws_region = os.environ.get("AWS_REGION", "us-east-1")
-    bedrock_model_id = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+    bedrock_model_id = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
     meeting_date = os.environ.get("MEETING_DATE", "")
 
     org_wiki_json = os.environ.get("ORG_WIKI_JSON", "")
@@ -158,6 +158,22 @@ def main():
             "transcriptS3Key": transcript_key,
             "segments": result
         })
+
+        # Guard: skip summarization if no speech was detected
+        if not result:
+            print(f"[Transcriber] No speech segments detected — skipping Bedrock summarization")
+            post_callback(callback_url, bot_secret, {
+                "meetingId": meeting_id,
+                "status": "summary_complete",
+                "summary": {
+                    "summaryText": "# No Speech Detected\n\nNo transcribable audio was found in this recording. The meeting may have been silent, very short, or recorded with no active microphone.",
+                    "KeyDecisionsJson": "[]",
+                    "ActionItemsJson": "[]",
+                    "FollowUpsJson": "[]",
+                    "ModelUsed": bedrock_model_id
+                }
+            })
+            return
 
         # Bedrock summarization
         try:
