@@ -1,0 +1,27 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 637131561301.dkr.ecr.us-east-1.amazonaws.com
+  build:
+    commands:
+      - echo Cloning source...
+      - git clone --depth 1 https://github.com/fwhite13/fortress-intelligence-platform.git /src
+      - cd /src && echo "Building commit:" && git log -1 --oneline
+      - echo Building RN transcriber...
+      - cd /src && docker build -f meetings/transcriber/Dockerfile --build-arg HF_TOKEN=$HF_TOKEN -t rn-transcriber:latest meetings/transcriber/
+      - docker tag rn-transcriber:latest 637131561301.dkr.ecr.us-east-1.amazonaws.com/rn-transcriber:latest
+  post_build:
+    commands:
+      - docker push 637131561301.dkr.ecr.us-east-1.amazonaws.com/rn-transcriber:latest
+      - |
+        JOB_DEF=$(aws batch describe-job-definitions --job-definition-name rn-transcription-job --status ACTIVE \
+          --query "jobDefinitions | sort_by(@, &revision) | [-1]" --output json)
+        CONTAINER_PROPS=$(echo $JOB_DEF | python3 -c "import json,sys; d=json.load(sys.stdin); d['image']='637131561301.dkr.ecr.us-east-1.amazonaws.com/rn-transcriber:latest'; print(json.dumps(d))")
+        aws batch register-job-definition --job-definition-name rn-transcription-job \
+          --type container \
+          --container-properties "$CONTAINER_PROPS" \
+          --region us-east-1
+      - echo "RN transcriber build and deploy complete."

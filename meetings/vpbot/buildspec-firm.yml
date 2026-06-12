@@ -1,0 +1,28 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
+      - echo "Building commit $IMAGE_TAG"
+  build:
+    commands:
+      - echo Build started on `date`
+      - docker build -f meetings/vpbot/Dockerfile -t firm-vpbot:$IMAGE_TAG meetings/vpbot/
+      - docker tag firm-vpbot:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/firm-vpbot:latest
+      - docker tag firm-vpbot:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/firm-vpbot:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Pushing Docker image...
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/firm-vpbot:latest
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/firm-vpbot:$IMAGE_TAG
+      - echo Updating ECS service...
+      - aws ecs update-service --cluster fortress-tools-cluster --service meetings-vpbot-dev --force-new-deployment --region $AWS_DEFAULT_REGION
+      - echo Deploy complete.
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_ACCOUNT_ID: "742932328420"

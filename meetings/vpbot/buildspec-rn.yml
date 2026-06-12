@@ -1,0 +1,19 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 637131561301.dkr.ecr.us-east-1.amazonaws.com
+  build:
+    commands:
+      - echo Cloning source...
+      - git clone --depth 1 https://github.com/fwhite13/fortress-intelligence-platform.git /src
+      - cd /src && echo "Building commit:" && git log -1 --oneline
+      - echo Building RN vpbot...
+      - cd /src && docker build -f meetings/vpbot/Dockerfile -t rn-vpbot:latest meetings/vpbot/
+      - docker tag rn-vpbot:latest 637131561301.dkr.ecr.us-east-1.amazonaws.com/rn-vpbot:latest
+  post_build:
+    commands:
+      - docker push 637131561301.dkr.ecr.us-east-1.amazonaws.com/rn-vpbot:latest
+      - echo "RN vpbot build and deploy complete."
