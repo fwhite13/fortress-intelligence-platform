@@ -9,7 +9,7 @@ Environment variables (injected by Batch):
   BOT_CALLBACK_SECRET - secret for callback auth
   HF_TOKEN           - HuggingFace token for pyannote
   AWS_REGION         - us-east-1
-  BEDROCK_MODEL_ID   - us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  BEDROCK_MODEL_ID   - us.anthropic.claude-sonnet-4-6
 """
 
 import os
