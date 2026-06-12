@@ -1,0 +1,1 @@
+{"model":"claude-sonnet-4-6","permissions":{"allow":["Read","Write(/workspace/**)","Bash(python3 *)","Bash(pip install *)"],"deny":["Bash(curl *)","Bash(wget *)","Bash(ssh *)","mcp__network__*"]}}
