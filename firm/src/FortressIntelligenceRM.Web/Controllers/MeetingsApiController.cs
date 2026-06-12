@@ -33,6 +33,7 @@ public class MeetingsApiController : ControllerBase
     private readonly TeamsGraphService _teamsGraphService;
     private readonly IOrgContextService _orgContextService;
     private readonly IMindmapService _mindmapService;
+    private readonly BrandingConfig _branding;
 
     public MeetingsApiController(
         MeetingService meetingService,
@@ -46,7 +47,8 @@ public class MeetingsApiController : ControllerBase
         IFirmBotService firmBotService,
         TeamsGraphService teamsGraphService,
         IOrgContextService orgContextService,
-        IMindmapService mindmapService)
+        IMindmapService mindmapService,
+        BrandingConfig branding)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
@@ -60,6 +62,7 @@ public class MeetingsApiController : ControllerBase
         _teamsGraphService = teamsGraphService;
         _orgContextService = orgContextService;
         _mindmapService = mindmapService;
+        _branding = branding;
     }
 
 [HttpPost("/api/meetings/join")]
@@ -518,7 +521,7 @@ public class MeetingsApiController : ControllerBase
             {
                 markdownText = s3Text;
                 if (format.Equals("pdf", StringComparison.OrdinalIgnoreCase))
-                    return BuildPdfResult(markdownText, meeting.Title ?? $"Meeting {id}", $"{slug}-summary.pdf");
+                    return BuildPdfResult(markdownText, meeting.Title ?? $"Meeting {id}", $"{slug}-summary.pdf", _branding.PrimaryColor);
                 return File(Encoding.UTF8.GetBytes(markdownText), "text/markdown; charset=utf-8", $"{slug}-summary.md");
             }
         }
@@ -594,7 +597,7 @@ public class MeetingsApiController : ControllerBase
         markdownText = mdSb.ToString();
 
         if (format.Equals("pdf", StringComparison.OrdinalIgnoreCase))
-            return BuildPdfResult(markdownText, meeting!.Title ?? $"Meeting {id}", $"{slug}-summary.pdf");
+            return BuildPdfResult(markdownText, meeting!.Title ?? $"Meeting {id}", $"{slug}-summary.pdf", _branding.PrimaryColor);
 
         return File(Encoding.UTF8.GetBytes(markdownText), "text/markdown; charset=utf-8", $"{slug}-summary.md");
     }
@@ -604,9 +607,12 @@ public class MeetingsApiController : ControllerBase
     /// Parses the markdown into block elements (headings, paragraphs, bullets)
     /// and renders them with appropriate typography.
     /// </summary>
-    private static FileContentResult BuildPdfResult(string markdown, string title, string filename)
+    private static FileContentResult BuildPdfResult(string markdown, string title, string filename, string primaryColor = "#1a2332")
     {
         QuestPDF.Settings.License = LicenseType.Community;
+
+        // Normalize color: strip leading '#' for QuestPDF's Color.FromHex
+        var brandHex = primaryColor.TrimStart('#');
 
         var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
         var doc = Markdig.Markdown.Parse(markdown, pipeline);
@@ -621,7 +627,7 @@ public class MeetingsApiController : ControllerBase
 
                 page.Header().PaddingBottom(8).BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Column(col =>
                 {
-                    col.Item().Text(title).FontSize(14).Bold().FontColor(Color.FromHex("194C5C"));
+                    col.Item().Text(title).FontSize(14).Bold().FontColor(Color.FromHex(brandHex));
                     col.Item().Text($"Generated {DateTime.UtcNow:yyyy-MM-dd}").FontSize(9).FontColor(Colors.Grey.Darken1);
                 });
 
@@ -641,7 +647,7 @@ public class MeetingsApiController : ControllerBase
                                     _ => (11f, true)
                                 };
                                 col.Item().PaddingTop(h.Level <= 2 ? 14 : 8).PaddingBottom(4)
-                                    .Text(text).FontSize(size).Bold().FontColor(Color.FromHex("194C5C"));
+                                    .Text(text).FontSize(size).Bold().FontColor(Color.FromHex(brandHex));
                                 break;
                             }
                             case Markdig.Syntax.ParagraphBlock p:
@@ -660,7 +666,7 @@ public class MeetingsApiController : ControllerBase
                                     {
                                         col.Item().PaddingLeft(16).PaddingBottom(3).Row(row =>
                                         {
-                                            row.ConstantItem(12).Text("•").FontColor(Color.FromHex("194C5C"));
+                                            row.ConstantItem(12).Text("•").FontColor(Color.FromHex(brandHex));
                                             row.RelativeItem().Text(txt =>
                                             {
                                                 RenderInlines(txt, child.Inline);
@@ -697,12 +703,12 @@ public class MeetingsApiController : ControllerBase
                                                     .Select(p => ExtractInlineText(p.Inline)));
                                             var cellItem = tbl.Cell()
                                                 .Border(0.5f).BorderColor(Colors.Grey.Lighten2)
-                                                .Background(isHeader ? Color.FromHex("EAF2F5") : Colors.White)
+                                                .Background(isHeader ? Colors.Grey.Lighten4 : Colors.White)
                                                 .Padding(5);
                                             if (isHeader)
-                                                cellItem.Text(cellText).FontSize(10).Bold().FontColor(Color.FromHex("194C5C"));
+                                                cellItem.Text(cellText).FontSize(10).Bold().FontColor(Color.FromHex(brandHex));
                                             else
-                                                cellItem.Text(cellText).FontSize(10).FontColor(Color.FromHex("413f39"));
+                                                cellItem.Text(cellText).FontSize(10).FontColor(Colors.Grey.Darken3);
                                         }
                                     }
                                 });
