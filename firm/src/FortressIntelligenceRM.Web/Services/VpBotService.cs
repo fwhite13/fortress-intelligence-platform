@@ -11,13 +11,15 @@ public class VpBotService
     private readonly IConfiguration _config;
     private readonly ILogger<VpBotService> _logger;
     private readonly MeetingService _meetingService;
+    private readonly BrandingConfig _branding;
 
-    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService)
+    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, IOptions<BrandingConfig> branding)
     {
         _ecs = ecs;
         _config = config;
         _logger = logger;
         _meetingService = meetingService;
+        _branding = branding.Value;
     }
 
     public async Task<string?> TriggerBotAsync(long meetingId, string meetingUrl, string platform = "teams")
@@ -29,7 +31,7 @@ public class VpBotService
         var firmApiUrl = _config["Firm:ApiUrl"] ?? "";
         var botSecret = _config["Firm:BotCallbackSecret"] ?? "";
         var containerName = _config["Firm:VpBotContainerName"] ?? "firm-vpbot";
-        var botDisplayName = _config["Branding:ModuleName"] ?? "Fortress Notetaker";
+        var botDisplayName = _branding.NotetakerName;
 
         if (string.IsNullOrEmpty(taskDef) || string.IsNullOrEmpty(cluster))
         {
