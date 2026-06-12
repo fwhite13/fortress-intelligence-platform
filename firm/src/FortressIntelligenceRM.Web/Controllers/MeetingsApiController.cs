@@ -998,18 +998,7 @@ public class MeetingsApiController : ControllerBase
         if (meeting.Status != MeetingStatus.Scheduled)
             return Conflict(new { error = "Meeting is not in Scheduled state" });
 
-        // Mode A: Teams — no bot, transition to WaitingTranscript
-        if (meeting.Platform == "teams")
-        {
-            await _meetingService.UpdateStatusAsync(id, MeetingStatus.WaitingTranscript);
-            return Ok(new {
-                meetingId = id,
-                status = "waiting_transcript",
-                message = "Mode A meeting — start the Teams meeting when ready. FIRM will capture the transcript automatically."
-            });
-        }
-
-        // Mode B: Zoom/Meet/other — dispatch bot
+        // Mode A is mothballed (Firm__EnableModeA=false). Always dispatch bot (Mode B).
         _ = _vpBotService.TriggerBotAsync(id, meeting.MeetingUrl ?? "");
         await _meetingService.UpdateStatusAsync(id, MeetingStatus.Pending);
         return Ok(new { meetingId = id, status = "pending" });

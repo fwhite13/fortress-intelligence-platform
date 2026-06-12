@@ -11,45 +11,15 @@
                       Style="color: var(--color-text-primary);" Variant="Variant.Outlined"
                       Placeholder="https://teams.microsoft.com/l/meetup-join/..."
                       Required Class="mb-3"
-                      Immediate="true"
-                      @bind-Value:after="OnUrlChanged" />
+                      Immediate="true" />
 
         @if (!string.IsNullOrWhiteSpace(MeetingUrl))
         {
             @if (DetectPlatform(MeetingUrl) == "teams")
             {
-                <MudAlert Severity="Severity.Info" Class="mb-2" Dense="true" Icon="@Icons.Material.Filled.Videocam">
-                    Teams meeting detected.
+                <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true" Icon="@Icons.Material.Filled.Videocam">
+                    Teams meeting detected — @Branding.NotetakerName will join to record.
                 </MudAlert>
-                @if (_showHostToggle)
-                {
-                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2" Icon="@Icons.Material.Filled.Business">
-                        @Branding.OrgName-hosted meeting detected.
-                    </MudAlert>
-                    <div class="d-flex align-center gap-3 mb-3">
-                        <MudText Typo="Typo.body2" Style="color: var(--color-text-primary);">Are you the host?</MudText>
-                        <MudToggleGroup T="string" @bind-Value="_isHostValue" SelectionMode="SelectionMode.SingleSelection">
-                            <MudToggleItem Value="@("yes")" Text="Yes" />
-                            <MudToggleItem Value="@("no")" Text="No" />
-                        </MudToggleGroup>
-                    </div>
-                    <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);" Class="mb-2">
-                        @if (_isHostValue == "yes")
-                        {
-                            <span>Mode A — @Branding.ModuleName captures transcript directly (no bot).</span>
-                        }
-                        else
-                        {
-                            <span>Mode B — @Branding.NotetakerName will join.</span>
-                        }
-                    </MudText>
-                }
-                else
-                {
-                    <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);" Class="mb-3">
-                        @Branding.NotetakerName will join to record.
-                    </MudText>
-                }
             }
             else if (DetectPlatform(MeetingUrl) == "zoom")
             {
@@ -69,23 +39,6 @@
                     Platform not recognized — please verify the meeting link.
                 </MudAlert>
             }
-        }
-
-        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _showOverride = !_showOverride)"
-                   Style="color: var(--color-text-secondary);" Class="mb-2">
-            @(_showOverride ? "Hide Override ▲" : "Override ▾")
-        </MudButton>
-
-        @if (_showOverride)
-        {
-            <MudSelect @bind-Value="_platformOverride" Label="Platform Override" Variant="Variant.Outlined"
-                       Class="mb-3" Style="color: var(--color-text-primary);">
-                <MudSelectItem Value="@("auto")">Auto-detect</MudSelectItem>
-                <MudSelectItem Value="@("teams-native")">Teams — native transcript (Mode A)</MudSelectItem>
-                <MudSelectItem Value="@("teams-bot")">Teams — @Branding.NotetakerName (Mode B)</MudSelectItem>
-                <MudSelectItem Value="@("zoom")">Zoom — @Branding.NotetakerName</MudSelectItem>
-                <MudSelectItem Value="@("meet")" Disabled="true">Google Meet (coming soon)</MudSelectItem>
-            </MudSelect>
         }
 
         <MudTextField @bind-Value="MeetingTitle" Label="Meeting Title (optional)"
@@ -114,21 +67,7 @@
         if (!string.IsNullOrEmpty(PrefilledUrl) && string.IsNullOrEmpty(MeetingUrl))
         {
             MeetingUrl = PrefilledUrl;
-            OnUrlChanged();
         }
-    }
-
-    private bool _showOverride = false;
-    private string _platformOverride = "auto";
-    private bool _showHostToggle = false;
-    private string _isHostValue = "no";
-
-    private void OnUrlChanged()
-    {
-        var tenantId = CalendarService.ExtractTenantIdFromUrl(MeetingUrl);
-        _showHostToggle = !string.IsNullOrEmpty(tenantId) && Branding.IsHomeTenant(tenantId)
-                          && MeetingUrl.Contains("teams.microsoft.com");
-        if (!_showHostToggle) _isHostValue = "no";
     }
 
     private string DetectPlatform(string url)
@@ -142,29 +81,11 @@
 
     private void Submit()
     {
-        string effectivePlatform;
-        string? effectiveMode;
+        var platform = DetectPlatform(MeetingUrl);
+        // Mode B always — Mode A is mothballed
+        string? effectiveMode = platform == "unknown" ? null : "B";
 
-        if (_platformOverride != "auto")
-        {
-            effectivePlatform = _platformOverride.Replace("teams-native", "teams").Replace("teams-bot", "teams");
-            effectiveMode = _platformOverride == "teams-native" ? "A" : "B";
-        }
-        else
-        {
-            effectivePlatform = DetectPlatform(MeetingUrl);
-            if (effectivePlatform == "teams")
-            {
-                var tenantId = CalendarService.ExtractTenantIdFromUrl(MeetingUrl);
-                effectiveMode = (Branding.IsHomeTenant(tenantId) && _isHostValue == "yes") ? "A" : "B";
-            }
-            else
-            {
-                effectiveMode = effectivePlatform == "unknown" ? null : "B";
-            }
-        }
-
-        MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle, effectivePlatform, effectiveMode)));
+        MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle, platform, effectiveMode)));
     }
 
     private void Cancel() => MudDialog.Cancel();

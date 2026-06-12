@@ -66,11 +66,6 @@
                             <MudText Typo="Typo.caption" Class="mb-2" Style="color: var(--color-text-secondary);">
                                 @(_localStartTimes.TryGetValue(upcomingCard.CalendarEventId, out var st) ? st : upcomingCard.StartDateTime) – @(_localEndTimes.TryGetValue(upcomingCard.CalendarEventId, out var et) ? et : upcomingCard.EndDateTime)
                             </MudText>
-                            <MudChip T="string"
-                                     Color="@(upcomingCard.Platform == "teams" ? Color.Info : Color.Warning)"
-                                     Size="Size.Small" Class="mb-1">
-                                @upcomingCard.ModeText
-                            </MudChip>
                         </MudCardContent>
                         <MudCardActions>
                             <MudButton Variant="Variant.Filled"
@@ -599,23 +594,15 @@
                 return;
             }
 
-            if (meeting.Platform == "teams")
+            var taskArn = await VpBotService.TriggerBotAsync(meetingId, meeting.MeetingUrl ?? "");
+            if (taskArn == null)
             {
-                await MeetingService.UpdateStatusAsync(meetingId, MeetingStatus.WaitingTranscript);
-                Snackbar.Add("Mode A meeting — start the Teams meeting when ready. FIRM will capture the transcript automatically.", Severity.Info);
+                // TriggerBotAsync returned null — ECS launch failed (it logged internally)
+                Snackbar.Add("Failed to launch recording bot. Please try again.", Severity.Error);
+                return;
             }
-            else
-            {
-                var taskArn = await VpBotService.TriggerBotAsync(meetingId, meeting.MeetingUrl ?? "");
-                if (taskArn == null)
-                {
-                    // TriggerBotAsync returned null — ECS launch failed (it logged internally)
-                    Snackbar.Add("Failed to launch recording bot. Please try again.", Severity.Error);
-                    return;
-                }
-                await MeetingService.UpdateStatusAsync(meetingId, MeetingStatus.Pending);
-                Snackbar.Add("Bot is joining!", Severity.Success);
-            }
+            await MeetingService.UpdateStatusAsync(meetingId, MeetingStatus.Pending);
+            Snackbar.Add("Bot is joining!", Severity.Success);
 
             await LoadMeetings();
         }
