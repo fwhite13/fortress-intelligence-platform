@@ -2,7 +2,7 @@
 # Multi-stage build for production deployment
 
 # Stage 1: Build
-FROM node:20-slim AS builder
+FROM public.ecr.aws/docker/library/node:20-slim AS builder
 
 WORKDIR /app
 
@@ -17,7 +17,7 @@ RUN npm run build
 
 # Stage 2: Production runtime
 # Using Docker Hub Ubuntu + manual Playwright install (MCR unreachable from this host)
-FROM ubuntu:24.04
+FROM public.ecr.aws/docker/library/ubuntu:24.04
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
