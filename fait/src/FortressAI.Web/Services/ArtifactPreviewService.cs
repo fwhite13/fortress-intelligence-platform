@@ -1,6 +1,8 @@
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using Amazon.S3;
+using Amazon.S3.Model;
 using FortressAI.Web.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,14 +21,18 @@ public class ArtifactPreviewService
     private readonly ILogger<ArtifactPreviewService> _logger;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IConfiguration _config;
+    private readonly IAmazonS3 _s3;
+    private readonly IXlsxPresizerService _xlsxPresizerService;
     private const int TokenValiditySeconds = 900; // 15 minutes
 
-    public ArtifactPreviewService(IConfiguration config, ILogger<ArtifactPreviewService> logger, IDbContextFactory<AppDbContext> dbFactory)
+    public ArtifactPreviewService(IConfiguration config, ILogger<ArtifactPreviewService> logger, IDbContextFactory<AppDbContext> dbFactory, IAmazonS3 s3, IXlsxPresizerService xlsxPresizerService)
     {
         _secret = config["PREVIEW_TOKEN_SECRET"] ?? "";
         _logger = logger;
         _dbFactory = dbFactory;
         _config = config;
+        _s3 = s3;
+        _xlsxPresizerService = xlsxPresizerService;
         if (string.IsNullOrWhiteSpace(_secret))
             throw new InvalidOperationException(
                 "PREVIEW_TOKEN_SECRET is not configured. This setting is required. " +
@@ -130,12 +136,8 @@ public class ArtifactPreviewService
 
     private record ConvertPptxResult([property: System.Text.Json.Serialization.JsonPropertyName("previewS3Key")] string? PreviewS3Key);
 
-    private record ConvertXlsxResult(
-        [property: System.Text.Json.Serialization.JsonPropertyName("previewS3Key")] string? PreviewS3Key,
-        [property: System.Text.Json.Serialization.JsonPropertyName("sheetNames")] string[]? SheetNames);
-
     /// <summary>
-    /// Triggers XLSX → PDF conversion via the converter service, or returns the cached key and sheet names.
+    /// Triggers XLSX → PDF conversion via the presizer pipeline + converter service, or returns the cached key and sheet names.
     /// Accepts IHttpClientFactory as a parameter to avoid a constructor dependency.
     /// </summary>
     public async Task<(string? previewS3Key, string[] sheetNames)> ConvertXlsxAsync(Guid artifactId, string s3Key, Guid userId, IHttpClientFactory httpClientFactory)
@@ -149,39 +151,84 @@ public class ArtifactPreviewService
         if (upload == null)
             return (null, Array.Empty<string>());
 
-        var converterBaseRaw = _config["CONVERTER_BASE_URL"];
-        if (string.IsNullOrEmpty(converterBaseRaw))
-            _logger.LogWarning("[ArtifactPreview] CONVERTER_BASE_URL not set — falling back to localhost. XLSX conversion may fail in production.");
-        var converterBase = converterBaseRaw ?? "http://localhost:3001";
-        var converterApiKey = _config["CONVERTER_API_KEY"];
-        using var client = httpClientFactory.CreateClient("HarnessClient");
-        client.Timeout = TimeSpan.FromSeconds(90); // ADO#4908: cap converter wait to avoid indefinite spin
-        if (!string.IsNullOrEmpty(converterApiKey))
-            client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
+        var bucket = _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces";
 
-        var body = new
+        try
         {
-            artifactId = artifactId.ToString(),
-            s3Key,
-            userId = userId.ToString(),
-            outputBucket = _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces"
-        };
-        var resp = await client.PostAsJsonAsync($"{converterBase}/convert-xlsx", body);
-        if (!resp.IsSuccessStatusCode)
+            // Step 1: Download XLSX from S3
+            _logger.LogInformation("[preview] [xlsx] Downloading XLSX from S3 key={Key} for artifact {Id}", s3Key, artifactId);
+            var s3Response = await _s3.GetObjectAsync(bucket, s3Key);
+            using var xlsxStream = new MemoryStream();
+            await s3Response.ResponseStream.CopyToAsync(xlsxStream);
+            xlsxStream.Position = 0;
+
+            // Step 2: Presize in-process via XlsxPresizerService
+            _logger.LogInformation("[preview] [xlsx] Presizing XLSX for artifact {Id}", artifactId);
+            var presizeResult = await _xlsxPresizerService.PresizeAsync(xlsxStream);
+            _logger.LogInformation("[preview] [xlsx] Presized — {SheetCount} sheet(s): {Names}",
+                presizeResult.SheetNames.Length, string.Join(", ", presizeResult.SheetNames));
+
+            // Step 3: Upload presized XLSX to temp S3 key
+            var presizedKey = $"previews/tmp/{artifactId}-presized.xlsx";
+            _logger.LogInformation("[preview] [xlsx] Uploading presized XLSX to s3://{Bucket}/{Key}", bucket, presizedKey);
+            using var presizedStream = new MemoryStream(presizeResult.Bytes);
+            await _s3.PutObjectAsync(new PutObjectRequest
+            {
+                BucketName = bucket,
+                Key = presizedKey,
+                InputStream = presizedStream,
+                ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            });
+
+            // Step 4: Call pptx-converter /convert with presized XLSX
+            var converterBaseRaw = _config["CONVERTER_BASE_URL"];
+            if (string.IsNullOrEmpty(converterBaseRaw))
+                _logger.LogWarning("[preview] [xlsx] CONVERTER_BASE_URL not set — falling back to localhost. XLSX conversion may fail in production.");
+            var converterBase = converterBaseRaw ?? "http://localhost:3001";
+            var converterApiKey = _config["CONVERTER_API_KEY"];
+            using var client = httpClientFactory.CreateClient("HarnessClient");
+            client.Timeout = TimeSpan.FromSeconds(90);
+            if (!string.IsNullOrEmpty(converterApiKey))
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
+
+            var body = new
+            {
+                artifactId = artifactId.ToString(),
+                s3Key = presizedKey,
+                userId = userId.ToString(),
+                outputBucket = bucket
+            };
+
+            _logger.LogInformation("[preview] [xlsx] Calling pptx-converter /convert for artifact {Id}", artifactId);
+            var resp = await client.PostAsJsonAsync($"{converterBase}/convert", body);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var errBody = await resp.Content.ReadAsStringAsync();
+                _logger.LogWarning("[preview] [xlsx] Converter returned {Status} for artifact {Id}: {Body}", resp.StatusCode, artifactId, errBody);
+                return (null, Array.Empty<string>());
+            }
+
+            var result = await resp.Content.ReadFromJsonAsync<ConvertPptxResult>();
+            if (result?.PreviewS3Key != null)
+            {
+                upload.PreviewS3Key = result.PreviewS3Key;
+                await db.SaveChangesAsync();
+                _logger.LogInformation("[preview] [xlsx] Done — previewS3Key={Key} for artifact {Id}", result.PreviewS3Key, artifactId);
+            }
+
+            return (result?.PreviewS3Key, presizeResult.SheetNames);
+        }
+        catch (Amazon.S3.AmazonS3Exception s3Ex)
         {
-            var errBody = await resp.Content.ReadAsStringAsync();
-            _logger.LogWarning("[preview] [xlsx] XLSX converter returned {Status} for artifact {Id}: {Body}", resp.StatusCode, artifactId, errBody);
+            _logger.LogError(s3Ex, "[preview] [xlsx] S3 error for artifact {Id}: {Code}", artifactId, s3Ex.ErrorCode);
             return (null, Array.Empty<string>());
         }
-
-        var result = await resp.Content.ReadFromJsonAsync<ConvertXlsxResult>();
-        if (result?.PreviewS3Key != null)
+        catch (Exception ex)
         {
-            upload.PreviewS3Key = result.PreviewS3Key;
-            await db.SaveChangesAsync();
+            _logger.LogError(ex, "[preview] [xlsx] Unexpected error for artifact {Id}", artifactId);
+            return (null, Array.Empty<string>());
         }
-        return (result?.PreviewS3Key, result?.SheetNames ?? Array.Empty<string>());
     }
 
     private string ComputeHmac(string payload)

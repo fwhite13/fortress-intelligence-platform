@@ -70,8 +70,8 @@ public class XlsxPresizerService : IXlsxPresizerService
                 ? rowsUsed.Sum(row => (row.Height > 0 ? row.Height : DefaultRowHeightPt) * PtToMm)
                 : DefaultRowHeightPt * PtToMm; // fallback for empty sheets
 
-            double widthMm  = totalColMm + MarginMm * 2;
-            double heightMm = totalRowMm + MarginMm * 2;
+            double widthMm  = Math.Max(totalColMm + MarginMm * 2, 210.0);
+            double heightMm = Math.Max(totalRowMm + MarginMm * 2, 297.0);
 
             dimensions[ws.Name] = (widthMm, heightMm);
             _logger.LogInformation("[xlsx-presize] Sheet '{SheetName}': {WidthMm:F0}mm x {HeightMm:F0}mm",

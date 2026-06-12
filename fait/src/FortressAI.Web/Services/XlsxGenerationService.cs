@@ -106,6 +106,10 @@ public class XlsxGenerationService : IXlsxGenerationService
                             case System.Text.Json.JsonValueKind.False:
                                 cell.Value = false;
                                 break;
+                            case System.Text.Json.JsonValueKind.Object:
+                            case System.Text.Json.JsonValueKind.Array:
+                                cell.Value = je.GetRawText(); // serialize to string rather than crash
+                                break;
                             default:
                                 cell.Value = je.GetString() ?? string.Empty;
                                 break;

@@ -128,10 +128,6 @@ public class ArtifactPreviewController : ControllerBase
 
     private record ConvertPptxResult([property: JsonPropertyName("previewS3Key")] string? PreviewS3Key);
 
-    private record ConvertXlsxResult(
-        [property: JsonPropertyName("previewS3Key")] string? PreviewS3Key,
-        [property: JsonPropertyName("sheetNames")] string[]? SheetNames);
-
     [HttpPost("{id:guid}/convert-pptx")]
     [Authorize]
     public async Task<IActionResult> ConvertPptx(Guid id)
