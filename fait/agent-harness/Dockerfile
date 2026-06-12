@@ -53,6 +53,8 @@ RUN npm install --production
 RUN npm install -g stitch-mcp
 COPY harness-server.js ./
 COPY CLAUDE.md ./
+# ADO#5116: COPY .claude settings into container (workspace-template for Fargate sessions)
+COPY workspace-template/.claude/ /app/workspace-template/.claude/
 
 # Create non-root user for Claude Code CLI compatibility (refuses to run as root)
 RUN groupadd -r harness && useradd -r -g harness -m -d /home/harness harness

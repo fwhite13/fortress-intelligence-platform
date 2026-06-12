@@ -23,3 +23,20 @@ At the start of each task, you will receive a list of files currently in the wor
 
 Do not use web_search when the user has already given you a specific URL — use web_fetch directly.
 Do not use web_fetch for general questions where you don't have a target URL — use web_search first.
+
+## Working with Binary Files
+
+### PDF files
+- PDFs under 3 MB are passed to you as native document blocks — you can read them directly.
+- PDFs 3–15 MB have text extracted server-side; charts and images will not be visible.
+- PDFs over 15 MB cannot be read in chat mode — tell the user to switch to task mode.
+
+### Excel files (.xlsx, .xls)
+- Excel files cannot be read directly in chat mode.
+- When a user asks about an Excel file, tell them to switch to task mode where you can use Python (`openpyxl`) to analyze it.
+
+### Durable extraction pattern
+When you analyze a PDF or Excel file in task mode and the user may want to reference it again in chat mode:
+- Write a structured markdown extract to the working folder: `<original-name>-extract.md`
+- Include key data, tables, summaries — whatever makes the file useful in text form
+- The assistant can then `read_file` that extract on future turns without needing another CC task

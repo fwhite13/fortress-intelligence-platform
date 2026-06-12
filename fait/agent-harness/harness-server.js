@@ -98,6 +98,13 @@ const FAIT_BASE_URL = process.env.FAIT_BASE_URL || 'http://localhost:8080';
 const HARNESS_INTERNAL_SECRET = process.env.HARNESS_INTERNAL_SECRET || ''; // legacy — unused
 const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN || '';
 
+// ADO#5154 — Binary file reading thresholds
+// PDF_NATIVE_MAX_BYTES: PDFs below this size are passed as native Bedrock document blocks (Claude reads directly)
+// PDF_EXTRACT_MAX_BYTES: PDFs below this size are extracted via pdf-parse; above this, redirect to task mode
+// Thresholds match CC's own source behavior (validated via research 2026-06-12)
+const PDF_NATIVE_MAX_BYTES = 3 * 1024 * 1024;   // 3 MB — native Bedrock doc block
+const PDF_EXTRACT_MAX_BYTES = 15 * 1024 * 1024;  // 15 MB — pdf-parse extraction ceiling
+
 // ─── Intervention hold-for-approval ───────────────────────────────────────
 const pendingInterventions = new Map(); // interventionId → { resolve, reject }
 
@@ -1844,6 +1851,90 @@ app.post('/tools/read_file', async (req, res) => {
         const textMimeTypes = ['text/', 'application/json', 'application/xml', 'application/javascript',
                                'application/x-yaml', 'application/yaml', 'application/csv'];
         const isText = textMimeTypes.some(t => mime_type.startsWith(t)) || mime_type === '';
+
+        // ADO#5154 — Binary file handling: PDF three-tier strategy + XLSX redirect
+        // pdf-parse caveat: text-only, scanned/image-only PDFs may produce empty extraction.
+        // XLSX redirect (not extraction) is intentional — SheetJS degrades on complex workbooks;
+        // Python in CC (openpyxl) is the correct tool for Excel analysis.
+
+        // XLSX / XLS redirect
+        const isXlsx = mime_type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            || mime_type === 'application/vnd.ms-excel'
+            || /\.(xlsx|xls)$/i.test(filename);
+        if (isXlsx) {
+            console.log(`[read_file] XLSX redirect: filename=${filename} mime=${mime_type} userId=${userId}`);
+            return res.json({ content: "Excel files can't be read directly in chat mode. Switch to task mode — CC can open and analyze the file with Python." });
+        }
+
+        // PDF three-tier strategy
+        const isPdf = mime_type === 'application/pdf' || /\.pdf$/i.test(filename);
+        if (isPdf) {
+            console.log(`[read_file] PDF detected: filename=${filename} mime=${mime_type} userId=${userId} — fetching bytes for size routing`);
+
+            // Fetch full PDF bytes (up to PDF_EXTRACT_MAX_BYTES + 1 to detect over-limit)
+            const s3PdfResp = await s3Client.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3_key }));
+            const pdfChunks = [];
+            let pdfTotalBytes = 0;
+            let pdfOverLimit = false;
+            for await (const chunk of s3PdfResp.Body) {
+                if (pdfTotalBytes + chunk.length > PDF_EXTRACT_MAX_BYTES) {
+                    pdfOverLimit = true;
+                    break;
+                }
+                pdfChunks.push(chunk);
+                pdfTotalBytes += chunk.length;
+            }
+
+            // Over 15 MB — redirect to task mode
+            if (pdfOverLimit) {
+                console.log(`[read_file] PDF over-limit: filename=${filename} size=${pdfTotalBytes}+ bytes userId=${userId}`);
+                return res.json({ content: 'This PDF is too large for the assistant to read directly (over 15 MB). Switch to task mode — CC can work with it using Python tools.' });
+            }
+
+            const pdfBuffer = Buffer.concat(pdfChunks);
+
+            // Magic byte guard: verify %PDF- header before any Bedrock call
+            // Prevents corrupt/misnamed files from poisoning conversation history with cascading 400 errors
+            const pdfHeader = pdfBuffer.slice(0, 5).toString('ascii');
+            if (pdfHeader !== '%PDF-') {
+                console.warn(`[read_file] PDF magic byte mismatch: filename=${filename} header=${JSON.stringify(pdfHeader)} userId=${userId}`);
+                return res.json({ content: 'This file does not appear to be a valid PDF. It may be corrupt or misnamed.' });
+            }
+
+            // Under 3 MB — native Bedrock document block
+            if (pdfTotalBytes < PDF_NATIVE_MAX_BYTES) {
+                console.log(`[read_file] PDF native doc block: filename=${filename} size=${pdfTotalBytes} bytes userId=${userId}`);
+                const base64Pdf = pdfBuffer.toString('base64');
+                return res.json({
+                    content: null,
+                    document: {
+                        name: filename,
+                        format: 'pdf',
+                        source: { bytes: base64Pdf }
+                    }
+                });
+            }
+
+            // 3–15 MB — server-side text extraction via pdf-parse
+            // pdf-parse is text-only: charts, images, and scanned PDFs produce empty or near-empty extraction
+            console.log(`[read_file] PDF text extraction: filename=${filename} size=${pdfTotalBytes} bytes userId=${userId}`);
+            try {
+                const pdfParse = require('pdf-parse');
+                const pdfData = await pdfParse(pdfBuffer);
+                const extractedText = (pdfData.text || '').trim();
+                console.log(`[read_file] PDF extracted ${extractedText.length} chars from ${filename} userId=${userId}`);
+
+                let content = `[PDF text extraction — charts and images not included]\n\n${extractedText}`;
+                if (extractedText.length < 200) {
+                    content += '\n\n[Note: This PDF appears to contain mostly images or scanned content. Charts and images are not accessible in chat mode — switch to task mode for full analysis.]';
+                }
+                return res.json({ content });
+            } catch (pdfErr) {
+                console.error(`[read_file] pdf-parse error: filename=${filename} userId=${userId} err=${pdfErr.message}`);
+                return res.json({ content: `Unable to extract text from this PDF: ${pdfErr.message}` });
+            }
+        }
+
         if (!isText) {
             return res.json({ content: 'Binary file — cannot read as text. Use download instead.' });
         }
@@ -4658,6 +4749,7 @@ Do NOT emit [TASK_READY] if:
                         console.log(`[harness] /turn: toolUse complete: name=${toolUseAccumulator.name}, input=${toolUseAccumulator.inputJson}`);
                         const toolInput = JSON.parse(toolUseAccumulator.inputJson || '{}');
                         let toolResultText = '';
+                        let toolResultDocument = null; // ADO#5154 — for native PDF doc blocks
                         let isError = false;
 
                         if (toolUseAccumulator.name === 'list_workspace_files') {
@@ -4780,7 +4872,18 @@ Do NOT emit [TASK_READY] if:
                                     body: JSON.stringify({ userId, ...toolInput })
                                 });
                                 const rfData = await rfRes.json();
-                                toolResultText = rfData.content || rfData.error || 'No content returned.';
+                                // ADO#5154 — Handle native PDF document block (< 3 MB path)
+                                // When read_file returns { document: ... }, store for Bedrock document block injection
+                                if (rfData.document) {
+                                    console.log(`[harness] /turn: read_file returned native PDF doc block: name=${rfData.document.name} userId=${userId}`);
+                                    toolResultDocument = {
+                                        name: rfData.document.name,
+                                        format: rfData.document.format,
+                                        bytes: rfData.document.source.bytes
+                                    };
+                                } else {
+                                    toolResultText = rfData.content || rfData.error || 'No content returned.';
+                                }
                                 emitToolCall(res, 'builtin', toolUseAccumulator.name, 'done', `${toolUseAccumulator.name} complete`);
                             } catch (rfErr) {
                                 toolResultText = `Error reading file: ${rfErr.message}`;
@@ -4909,6 +5012,7 @@ Do NOT emit [TASK_READY] if:
                         pendingToolResults.push({
                             toolUseId: toolUseAccumulator.toolUseId,
                             toolResultText,
+                            toolResultDocument, // ADO#5154 — native PDF doc block (null for non-PDF paths)
                             isError
                         });
                         toolUseAccumulator = null;
@@ -4976,7 +5080,16 @@ Do NOT emit [TASK_READY] if:
                         content: pendingToolResults.map(r => ({
                             toolResult: {
                                 toolUseId: r.toolUseId,
-                                content: [{ text: r.toolResultText }],
+                                // ADO#5154 — native PDF doc block: inject as Bedrock document content block
+                                content: r.toolResultDocument
+                                    ? [{
+                                        document: {
+                                            name: r.toolResultDocument.name,
+                                            format: r.toolResultDocument.format,
+                                            source: { bytes: Buffer.from(r.toolResultDocument.bytes, 'base64') }
+                                        }
+                                    }]
+                                    : [{ text: r.toolResultText }],
                                 status: r.isError ? 'error' : 'success'
                             }
                         }))
