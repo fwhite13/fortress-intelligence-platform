@@ -16,8 +16,10 @@ public class FipTokenService
     {
         _dbFactory = dbFactory;
         _logger = logger;
-        _clientId = config["AzureAd:ClientId"] ?? "";
-        _clientSecret = config["AzureAd:ClientSecret"] ?? "";
+        // FIP portal credentials must be used for refresh — refresh tokens are bound to the portal's Entra app.
+        // FIP:ClientId/Secret are set to the FIP portal's app registration; fall back to AzureAd: for backward compat.
+        _clientId = config["FIP:ClientId"] ?? config["AzureAd:ClientId"] ?? "";
+        _clientSecret = config["FIP:ClientSecret"] ?? config["AzureAd:ClientSecret"] ?? "";
         _tenantId = (config["AzureAd:TenantId"] ?? "").Trim().TrimEnd('/');
     }
 
