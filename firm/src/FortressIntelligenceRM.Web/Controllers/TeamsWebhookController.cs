@@ -37,12 +37,21 @@ public class TeamsWebhookController : ControllerBase
     }
 
     /// <summary>
-    /// Graph webhook notification — validate clientState, fire-and-forget, return 202 within 3 seconds
+    /// Graph webhook notification — validate clientState, fire-and-forget, return 202 within 3 seconds.
+    /// Gated by Firm__EnableModeA feature flag (mothballed by default).
     /// </summary>
     [HttpPost("webhook")]
     [AllowAnonymous]
     public IActionResult HandleNotification([FromBody] GraphNotificationEnvelope? envelope)
     {
+        // Mode A mothball guard — silently accept but do not process when disabled
+        var modeAEnabled = _config.GetValue<bool>("Firm:EnableModeA", false);
+        if (!modeAEnabled)
+        {
+            _logger.LogDebug("[TeamsWebhook] Mode A disabled (Firm__EnableModeA=false) — ignoring notification");
+            return Accepted(new { accepted = true });
+        }
+
         if (envelope?.Value == null || envelope.Value.Count == 0)
             return Accepted(new { accepted = true });
 
