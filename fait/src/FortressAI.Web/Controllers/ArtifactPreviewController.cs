@@ -20,6 +20,8 @@ public class ArtifactPreviewController : ControllerBase
     private readonly ILogger<ArtifactPreviewController> _logger;
     private readonly IConfiguration _config;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IXlsxGenerationService _xlsxGenerationService;
+    private readonly IXlsxPresizerService _xlsxPresizerService;
 
     public ArtifactPreviewController(
         ArtifactPreviewService previewService,
@@ -27,7 +29,9 @@ public class ArtifactPreviewController : ControllerBase
         IAmazonS3 s3,
         IConfiguration config,
         ILogger<ArtifactPreviewController> logger,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IXlsxGenerationService xlsxGenerationService,
+        IXlsxPresizerService xlsxPresizerService)
     {
         _previewService = previewService;
         _dbFactory = dbFactory;
@@ -36,6 +40,8 @@ public class ArtifactPreviewController : ControllerBase
         _logger = logger;
         _config = config;
         _httpClientFactory = httpClientFactory;
+        _xlsxGenerationService = xlsxGenerationService;
+        _xlsxPresizerService = xlsxPresizerService;
     }
 
     [HttpGet("{id:guid}/preview")]
@@ -191,38 +197,123 @@ public class ArtifactPreviewController : ControllerBase
 
         // Return cached key if already converted
         if (!string.IsNullOrEmpty(artifact.PreviewS3Key))
+        {
+            _logger.LogInformation("[convert-xlsx] Cache hit for artifact {Id}", id);
             return Ok(new { previewS3Key = artifact.PreviewS3Key, sheetNames = Array.Empty<string>() });
-
-        var converterBaseRaw = _config["CONVERTER_BASE_URL"];
-        if (string.IsNullOrEmpty(converterBaseRaw))
-            _logger.LogWarning("[convert-xlsx] CONVERTER_BASE_URL not set — falling back to localhost.");
-        var converterBase = converterBaseRaw ?? "http://localhost:3001";
-        var converterApiKey = _config["CONVERTER_API_KEY"];
-        using var client = _httpClientFactory.CreateClient("HarnessClient");
-        if (!string.IsNullOrEmpty(converterApiKey))
-            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
-        var body = new
-        {
-            artifactId = id.ToString(),
-            s3Key = artifact.S3Key,
-            userId = artifact.UserId.ToString(),
-            outputBucket = _config["WORKSPACE_S3_BUCKET"] ?? "fortress-user-workspaces"
-        };
-        var resp = await client.PostAsJsonAsync($"{converterBase}/convert-xlsx", body);
-        if (!resp.IsSuccessStatusCode)
-        {
-            _logger.LogWarning("[convert-xlsx] Converter returned {status}", resp.StatusCode);
-            return StatusCode(502, new { error = "Conversion failed" });
         }
 
-        var result = await resp.Content.ReadFromJsonAsync<ConvertXlsxResult>();
-        if (result?.PreviewS3Key != null)
+        try
         {
-            artifact.PreviewS3Key = result.PreviewS3Key;
-            await db.SaveChangesAsync();
-        }
+            // Step 1: Download XLSX bytes from S3
+            _logger.LogInformation("[convert-xlsx] Downloading XLSX from S3 key={Key}", artifact.S3Key);
+            var s3Response = await _s3.GetObjectAsync(_bucket, artifact.S3Key);
+            using var xlsxStream = new MemoryStream();
+            await s3Response.ResponseStream.CopyToAsync(xlsxStream);
+            xlsxStream.Position = 0;
 
-        return Ok(new { previewS3Key = result?.PreviewS3Key, sheetNames = result?.SheetNames ?? Array.Empty<string>() });
+            // Step 2: Presize in-process via XlsxPresizerService (replaces ExcelJS presizeWorkbook)
+            _logger.LogInformation("[convert-xlsx] Presizing XLSX for artifact {Id}", id);
+            var presizeResult = await _xlsxPresizerService.PresizeAsync(xlsxStream);
+            _logger.LogInformation("[convert-xlsx] Presized — {SheetCount} sheet(s): {Names}",
+                presizeResult.SheetNames.Length, string.Join(", ", presizeResult.SheetNames));
+
+            // Step 3: Upload presized XLSX to temp S3 key
+            var presizedKey = $"previews/tmp/{id}-presized.xlsx";
+            _logger.LogInformation("[convert-xlsx] Uploading presized XLSX to s3://{Bucket}/{Key}", _bucket, presizedKey);
+            using var presizedStream = new MemoryStream(presizeResult.Bytes);
+            await _s3.PutObjectAsync(new Amazon.S3.Model.PutObjectRequest
+            {
+                BucketName = _bucket,
+                Key = presizedKey,
+                InputStream = presizedStream,
+                ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            });
+
+            // Step 4: Call pptx-converter /convert with presized XLSX
+            // LibreOffice handles XLSX → PDF just like PPTX
+            var converterBaseRaw = _config["CONVERTER_BASE_URL"];
+            if (string.IsNullOrEmpty(converterBaseRaw))
+                _logger.LogWarning("[convert-xlsx] CONVERTER_BASE_URL not set — falling back to localhost.");
+            var converterBase = converterBaseRaw ?? "http://localhost:3001";
+            var converterApiKey = _config["CONVERTER_API_KEY"];
+            using var client = _httpClientFactory.CreateClient("HarnessClient");
+            if (!string.IsNullOrEmpty(converterApiKey))
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", converterApiKey);
+
+            var body = new
+            {
+                artifactId = id.ToString(),
+                s3Key = presizedKey,
+                userId = artifact.UserId.ToString(),
+                outputBucket = _bucket
+            };
+
+            _logger.LogInformation("[convert-xlsx] Calling pptx-converter /convert for artifact {Id}", id);
+            var resp = await client.PostAsJsonAsync($"{converterBase}/convert", body);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var errBody = await resp.Content.ReadAsStringAsync();
+                _logger.LogWarning("[convert-xlsx] Converter returned {Status} for artifact {Id}: {Body}",
+                    resp.StatusCode, id, errBody);
+                return StatusCode(502, new { error = "Conversion failed" });
+            }
+
+            var result = await resp.Content.ReadFromJsonAsync<ConvertPptxResult>();
+            if (result?.PreviewS3Key != null)
+            {
+                artifact.PreviewS3Key = result.PreviewS3Key;
+                await db.SaveChangesAsync();
+                _logger.LogInformation("[convert-xlsx] Done — previewS3Key={Key} for artifact {Id}",
+                    result.PreviewS3Key, id);
+            }
+
+            return Ok(new { previewS3Key = result?.PreviewS3Key, sheetNames = presizeResult.SheetNames });
+        }
+        catch (Amazon.S3.AmazonS3Exception s3Ex)
+        {
+            _logger.LogError(s3Ex, "[convert-xlsx] S3 error for artifact {Id}: {Code}", id, s3Ex.ErrorCode);
+            return StatusCode(502, new { error = "File unavailable" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[convert-xlsx] Unexpected error for artifact {Id}", id);
+            return StatusCode(500, new { error = "Internal error" });
+        }
+    }
+
+    /// <summary>
+    /// Generates an XLSX workbook with optional pivot table using ClosedXML.
+    /// Single endpoint for all XLSX output — plain tables, multi-sheet workbooks, pivot tables.
+    /// </summary>
+    [HttpPost("generate-xlsx")]
+    [Authorize]
+    public async Task<IActionResult> GenerateXlsx([FromBody] XlsxGenerationRequest request)
+    {
+        if (request?.Sheets == null || request.Sheets.Count == 0)
+            return BadRequest(new { error = "sheets is required and must not be empty" });
+
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId)) return Unauthorized();
+
+        _logger.LogInformation("[xlsx-gen] GenerateXlsx called by user {UserId} — title='{Title}', sheets={Count}, pivot={HasPivot}",
+            userId, request.Title, request.Sheets.Count, request.Pivot != null);
+
+        try
+        {
+            var result = await _xlsxGenerationService.GenerateAsync(request, userId);
+            return Ok(new { artifactId = result.ArtifactId, s3Key = result.S3Key });
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning("[xlsx-gen] Bad request from user {UserId}: {Message}", userId, ex.Message);
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[xlsx-gen] Unexpected error for user {UserId}", userId);
+            return StatusCode(500, new { error = "Internal error" });
+        }
     }
 
     [HttpGet("{id:guid}/preview-status")]

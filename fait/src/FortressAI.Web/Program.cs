@@ -92,6 +92,8 @@ builder.Services.AddScoped<IMemoryFileService, MemoryFileService>();
 builder.Services.AddScoped<IWorkspaceFileService, WorkspaceFileService>();
 builder.Services.AddScoped<IWorkspaceUploadService, WorkspaceUploadService>();
 builder.Services.AddScoped<ArtifactPreviewService>();
+builder.Services.AddScoped<IXlsxGenerationService, XlsxGenerationService>();
+builder.Services.AddScoped<IXlsxPresizerService, XlsxPresizerService>();
 builder.Services.AddScoped<ChatLayoutState>();
 builder.Services.AddSingleton<IDocumentGeneratorService, WordDocumentGenerator>();
 builder.Services.AddScoped<FeedbackDispatcher>();

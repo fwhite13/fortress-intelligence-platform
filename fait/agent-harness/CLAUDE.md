@@ -24,6 +24,22 @@ At the start of each task, you will receive a list of files currently in the wor
 Do not use web_search when the user has already given you a specific URL — use web_fetch directly.
 Do not use web_fetch for general questions where you don't have a target URL — use web_search first.
 
+## XLSX Generation
+
+**One tool, always:** Use `POST /api/artifacts/generate-xlsx` for any XLSX output — plain tables, multi-sheet workbooks, and pivot tables all go through the same endpoint.
+
+**Request format:**
+- `title` — workbook title (string)
+- `sheets` — array of `{ name, columns: [string], rows: [[values]] }` (1 or more)
+- `pivot` — optional; include when a pivot table is needed:
+  - `sourceSheet`, `pivotSheetName`, `rowLabels`, `columnLabels`, `valueField`, `summaryFormula`, `reportFilters`
+
+**Pivot tables:** Include the `pivot` config block — ClosedXML handles it natively. No special-casing needed.
+
+**Never create a standalone chart sheet.** Charts must be embedded in a data sheet alongside their source data. A tab whose only content is a chart is silently excluded from PDF rendering by LibreOffice.
+
+**For pivot output:** Tell the user: "Open in Microsoft Excel for the interactive pivot table — other viewers may show a blank pivot sheet."
+
 ## Working with Binary Files
 
 ### PDF files
