@@ -503,6 +503,8 @@ else
         _taskTimerCts = null;
         _ = JS.InvokeVoidAsync("fortressChat.stopTaskTimer"); // ADO#4200
         _taskModeActive = false;
+        _taskMode = false;           // ADO#5168-C2: prevent next message from silently re-entering task mode
+        _pendingTaskMessage = "";    // ADO#5168-C2: clear pending message on hard cancel
         _activeToolCalls.Clear();
         _ccTaskActive = false;
         _pendingTaskAfterCancel = false;  // ADO#5168
@@ -1463,9 +1465,12 @@ else
                                     else
                                     {
                                         // First cancel — preserve task state, set re-trigger flag
+                                        // Hide the task mode header chip (Option A: one chip visible at a time).
+                                        // _taskMode stays true so task continues if user re-selects a folder.
+                                        // _pendingTaskMessage and _taskMode intentionally preserved; _taskModeActive cleared (Option A dual-× fix)
                                         _pendingTaskAfterCancel = true;
                                         _pendingTaskMessageForCancel = _pendingTaskMessage;
-                                        // Do NOT clear _pendingTaskMessage, _taskMode, or _taskModeActive
+                                        _taskModeActive = false;  // ADO#5168-C2: hide header chip — re-trigger chip is the sole UX affordance after cancel
                                         Logger.LogInformation("[ChatView] FolderPicker cancelled — task state preserved, awaiting re-trigger (ADO#5168)");
                                     }
                                     StateHasChanged();
