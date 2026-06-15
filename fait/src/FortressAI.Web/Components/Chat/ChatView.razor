@@ -25,6 +25,7 @@
 @using Amazon.S3.Model
 @inject IAmazonS3 S3
 @inject IConfiguration Config
+@inject DevContextService DevContext
 @inject Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage.ProtectedSessionStorage SessionStorage
 @implements IAsyncDisposable
 @using FortressAI.Web.Services
@@ -110,11 +111,11 @@ else
                     <span>@_conversationArtifacts.Count</span>
                 </button>
             }
-            <button class="chat-feedback-btn chat-feedback-btn--desktop" @onclick="OpenFeedbackModal" title="Report a Bug or Suggest a Feature">
+            <button class="chat-feedback-btn chat-feedback-btn--desktop" @onclick="OpenFeedbackModal" title="Submit Feedback">
                 <i class="fas fa-bug"></i>
-                <span class="chat-feedback-btn__label">Report a Bug</span>
+                <span class="chat-feedback-btn__label">Submit Feedback</span>
             </button>
-            <button class="chat-feedback-btn chat-feedback-btn--mobile" @onclick="OpenFeedbackModal" title="Report a Bug or Suggest a Feature">
+            <button class="chat-feedback-btn chat-feedback-btn--mobile" @onclick="OpenFeedbackModal" title="Submit Feedback">
                 <i class="fas fa-bug"></i>
             </button>
         </div>
@@ -770,6 +771,8 @@ else
             Logger.LogInformation("[ChatView] ConversationId changed — old={OldId} new={NewId} (cycle={Cycle})",
                 _lastConversationId, ConversationId, cycle);
             _lastConversationId = ConversationId;
+            DevContext.ConversationId = ConversationId;
+            DevContext.HarnessSessionId = null; // will be re-set when harness starts
             _needsScroll = true;
             // Reset resumption brief state for new conversation
             _briefContent = new System.Text.StringBuilder();
@@ -802,6 +805,7 @@ else
                     var session = await AgentRuntime.GetSessionAsync(Session.UserId.ToString());
                     if (session?.SessionId != null)
                         _currentHarnessSessionId = session.SessionId;
+                    DevContext.HarnessSessionId = _currentHarnessSessionId;
                 }
                 catch (Exception ex)
                 {

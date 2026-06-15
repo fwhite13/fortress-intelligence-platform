@@ -15,9 +15,7 @@
 
 <MudDialog @bind-Visible="_isOpen" Options="_dialogOptions">
     <TitleContent>
-        <MudText Typo="Typo.h6">
-            @(_type == "bug" ? "Report a Bug" : "Suggest a Feature")
-        </MudText>
+        <MudText Typo="Typo.h6">Submit Feedback</MudText>
     </TitleContent>
     <DialogContent>
         <MudToggleGroup T="string" @bind-Value="_type" SelectionMode="SelectionMode.SingleSelection" Class="feedback-modal__toggle">

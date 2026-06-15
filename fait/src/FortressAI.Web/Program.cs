@@ -86,6 +86,7 @@ builder.Services.AddScoped<GraphCalendarService>();
 builder.Services.AddScoped<PreMeetingBriefService>();
 builder.Services.AddScoped<PostMeetingService>();
 builder.Services.AddScoped<IScheduledTaskService, ScheduledTaskService>();
+builder.Services.AddScoped<DevContextService>();
 builder.Services.AddHostedService<ScheduledTaskBackgroundService>();
 builder.Services.AddScoped<ITaskNotificationService, TaskNotificationService>();
 builder.Services.AddScoped<IMemoryFileService, MemoryFileService>();
