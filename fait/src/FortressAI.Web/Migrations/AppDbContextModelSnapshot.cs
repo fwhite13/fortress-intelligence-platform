@@ -1707,7 +1707,8 @@ namespace FortressAI.Web.Migrations
                         .HasColumnName("fargate_status");
 
                     b.Property<string>("HarnessVersion")
-                        .HasColumnType("varchar(20)")
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
                         .HasColumnName("harness_version");
 
                     b.Property<DateTime>("LastActiveAt")
