@@ -86,6 +86,19 @@ else
                     </button>
                 </div>
             }
+            @if (_pendingTaskAfterCancel)
+            {
+                <div class="chat-folder-retrigger">
+                    <MudIcon Icon="@Icons.Material.Filled.FolderOpen" Style="width: 16px; height: 16px; color: var(--color-gold);" />
+                    <span>Folder required to continue task —</span>
+                    <button class="chat-folder-retrigger__btn" @onclick="@(async () => await ReTriggerFolderPickerAsync())">
+                        Pick a folder
+                    </button>
+                    <button class="chat-folder-retrigger__cancel" @onclick="CancelTask" title="Cancel task">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            }
         </div>
         <div class="chat-header-actions">
             @if (_conversationArtifacts.Any())
@@ -472,6 +485,8 @@ else
     private Guid? _persistedWorkingFolderId = null;   // ADO#4144 — persisted working folder for this conversation
     private string? _persistedWorkingFolderName = null; // display name for the persisted folder
     private string _pendingTaskMessage = "";
+    private bool _pendingTaskAfterCancel = false;  // ADO#5168: set when folder picker cancelled, clears on folder re-select or double-cancel
+    private string? _pendingTaskMessageForCancel = null; // ADO#5168: preserved _pendingTaskMessage from cancelled folder pick
 
     // Task Progress Timeline state (ADO#3244)
     private DateTime? _taskStartTime;
@@ -490,7 +505,85 @@ else
         _taskModeActive = false;
         _activeToolCalls.Clear();
         _ccTaskActive = false;
+        _pendingTaskAfterCancel = false;  // ADO#5168
+        _pendingTaskMessageForCancel = null; // ADO#5168
         StateHasChanged();
+    }
+
+    private async Task ReTriggerFolderPickerAsync()
+    {
+        // ADO#5168: Re-opens the folder picker for the same conversationId after a cancel.
+        // On confirm: clears _pendingTaskAfterCancel, calls HandleFolderConfirmed.
+        // On cancel again: double-cancel → abort task.
+        if (!_pendingTaskAfterCancel) return;
+
+        var conversationId = conversation?.Id.ToString() ?? "";
+        var folders = new List<FolderInfo>();
+        try
+        {
+            var rawFolders = await UploadSvc.GetFoldersAsync(Session.UserId, null);
+            if (rawFolders != null)
+                folders = rawFolders.Select(f => new FolderInfo(f.Id.ToString(), f.Name, f.LastUsedAt)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[ChatView] ADO#5168: Failed to load folders for re-trigger");
+        }
+
+        var parameters = new DialogParameters
+        {
+            [nameof(FolderPicker.Folders)] = folders,
+            [nameof(FolderPicker.LastFolderId)] = _persistedWorkingFolderId?.ToString(),
+            [nameof(FolderPicker.ConversationId)] = conversationId,
+            [nameof(FolderPicker.TaskMessage)] = _pendingTaskMessageForCancel ?? _pendingTaskMessage
+        };
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseOnEscapeKey = false,
+            BackdropClick = false
+        };
+
+        var dialog = await DialogService.ShowAsync<FolderPicker>("Select working folder", parameters, options);
+        await InvokeAsync(StateHasChanged);
+
+        _ = dialog.Result.ContinueWith(async resultTask =>
+        {
+            var result = resultTask.IsCompletedSuccessfully ? resultTask.Result : null;
+            if (result != null && !result.Canceled && result.Data is FolderPicker.FolderConfirmedArgs confirmedArgs)
+            {
+                // Folder selected — clear re-trigger flag, continue task
+                await InvokeAsync(() =>
+                {
+                    _pendingTaskAfterCancel = false;
+                    _pendingTaskMessageForCancel = null;
+                    if (_taskMode)
+                    {
+                        _taskModeActive = true;
+                    }
+                    HandleFolderConfirmed(confirmedArgs);
+                    Logger.LogInformation("[ChatView] ADO#5168: Folder re-selected after cancel — task continuing");
+                    StateHasChanged();
+                });
+            }
+            else
+            {
+                // Second cancel — abort task cleanly
+                await InvokeAsync(() =>
+                {
+                    _pendingTaskAfterCancel = false;
+                    _pendingTaskMessageForCancel = null;
+                    _taskMode = false;
+                    _taskModeActive = false;
+                    _ccTaskActive = false;
+                    _pendingTaskMessage = "";
+                    _activeToolCalls.Clear();
+                    Logger.LogInformation("[ChatView] ADO#5168: Folder picker cancelled on re-trigger — task aborted");
+                    StateHasChanged();
+                });
+            }
+        });
     }
 
     private void ToggleTaskMode()
@@ -1351,15 +1444,30 @@ else
                             }
                             else
                             {
-                                // Cancelled — clear ALL task state
+                                // ADO#5168: Cancel — preserve task state; set re-trigger flag so user can pick again.
+                                // If _pendingTaskAfterCancel is already true (second cancel / double-cancel), abort cleanly.
                                 await InvokeAsync(() =>
                                 {
-                                    _taskMode = false;
-                                    _taskModeActive = false;
-                                    _ccTaskActive = false;
-                                    _pendingTaskMessage = "";
-                                    _activeToolCalls.Clear();
-                                    Logger.LogInformation("[ChatView] FolderPicker cancelled — task state cleared");
+                                    if (_pendingTaskAfterCancel)
+                                    {
+                                        // Double-cancel — abort task cleanly
+                                        _pendingTaskAfterCancel = false;
+                                        _pendingTaskMessageForCancel = null;
+                                        _taskMode = false;
+                                        _taskModeActive = false;
+                                        _ccTaskActive = false;
+                                        _pendingTaskMessage = "";
+                                        _activeToolCalls.Clear();
+                                        Logger.LogInformation("[ChatView] FolderPicker double-cancelled — task state aborted (ADO#5168)");
+                                    }
+                                    else
+                                    {
+                                        // First cancel — preserve task state, set re-trigger flag
+                                        _pendingTaskAfterCancel = true;
+                                        _pendingTaskMessageForCancel = _pendingTaskMessage;
+                                        // Do NOT clear _pendingTaskMessage, _taskMode, or _taskModeActive
+                                        Logger.LogInformation("[ChatView] FolderPicker cancelled — task state preserved, awaiting re-trigger (ADO#5168)");
+                                    }
                                     StateHasChanged();
                                 });
                             }
@@ -2359,6 +2467,49 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 }
 .chat-task-indicator__cancel:hover {
     color: var(--color-error);
+}
+/* ADO#5168 — folder re-trigger affordance */
+.chat-folder-retrigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--color-surface-elevated, #1e1e2e);
+    border: 1px solid var(--color-gold, #c9a227);
+    border-radius: var(--radius-full, 9999px);
+    padding: 4px 10px;
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+}
+
+.chat-folder-retrigger__btn {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--color-gold, #c9a227);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.chat-folder-retrigger__btn:hover {
+    color: var(--color-gold-light, #e0b84e);
+}
+
+.chat-folder-retrigger__cancel {
+    background: none;
+    border: none;
+    padding: 0 2px;
+    color: var(--color-text-tertiary);
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+}
+
+.chat-folder-retrigger__cancel:hover {
+    color: var(--color-text-primary);
 }
 .resumption-brief-card {
     margin: var(--space-3, 0.75rem) var(--space-4, 1rem);
