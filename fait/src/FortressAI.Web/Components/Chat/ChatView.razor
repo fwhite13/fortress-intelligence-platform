@@ -224,10 +224,6 @@ else
                     🔍 @(_currentToolName ?? "Calling tool")...
                 </MudAlert>
             }
-            @if (isStreaming)
-            {
-                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
-            }
             @if (_activeToolCalls.Any() || _toolCallsFading)
             {
                 <div class="tool-call-indicator-list @(_toolCallsFading ? "tool-call-list-fading" : "")">
@@ -241,6 +237,10 @@ else
                         </div>
                     }
                 </div>
+            }
+            @if (isStreaming)
+            {
+                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
             }
 
             @if (_currentFileSummary != null && _currentFileSummary.Files.Count > 0)
@@ -1352,6 +1352,7 @@ else
                             Logger.LogInformation("[Chip] Path=harness Tool={Tool} ChipIcon={ChipIcon}", toolName, progressPayload.ChipIcon ?? "(null)");
                             var newChip = new ToolCallEvent("task", toolName, isFinal ? "done" : "calling", stepMessage, DateTime.UtcNow, progressPayload.ChipIcon, Guid.NewGuid());
                             _activeToolCalls.Add(newChip);
+                            Logger.LogDebug("[ChatView] chip added: toolName={ToolName} status={Status} count={Count} (ADO#5176)", newChip.ToolName, newChip.Status, _activeToolCalls.Count);
                             if (isFinal)
                                 _ccTaskActive = false;
                             await InvokeAsync(StateHasChanged);
@@ -1429,61 +1430,70 @@ else
                         var dialog = await DialogService.ShowAsync<FolderPicker>("Select working folder", parameters, options);
                         await InvokeAsync(StateHasChanged);
 
-                        // ADO#4925 — DEADLOCK FIX: do NOT await dialog.Result here.
-                        // The SSE loop is blocking the Blazor circuit; awaiting dialog.Result inside it
-                        // prevents MudDialog.Cancel() from being dispatched. Use ContinueWith to handle
-                        // the result asynchronously outside this execution context.
-                        _ = dialog.Result.ContinueWith(async resultTask =>
+                        // ADO#5177 — TCS FIX: Replace ContinueWith+break with TaskCompletionSource.
+                        // ADO#4925 issue: await dialog.Result inside SSE loop deadlocks because the loop holds the Blazor circuit.
+                        // ADO#5177 issue: break causes finally to fire, clearing task state before harness events arrive.
+                        // TCS fix: ContinueWith (runs on thread pool, no circuit needed) completes the TCS.
+                        //          await folderConfirmTcs.Task suspends the loop iteration and RELEASES the circuit.
+                        //          No deadlock, no break, no premature finally.
+                        var folderConfirmTcs = new TaskCompletionSource<FolderPicker.FolderConfirmedArgs?>(
+                            TaskCreationOptions.RunContinuationsAsynchronously);
+
+                        _ = dialog.Result.ContinueWith(resultTask =>
                         {
                             var result = resultTask.IsCompletedSuccessfully ? resultTask.Result : null;
                             if (result != null && !result.Canceled && result.Data is FolderPicker.FolderConfirmedArgs confirmedArgs)
-                            {
-                                await InvokeAsync(() =>
-                                {
-                                    if (_taskMode)
-                                    {
-                                        _taskModeActive = true;
-                                    }
-                                    HandleFolderConfirmed(confirmedArgs);
-                                    StateHasChanged();
-                                });
-                            }
+                                folderConfirmTcs.TrySetResult(confirmedArgs);
                             else
-                            {
-                                // ADO#5168: Cancel — preserve task state; set re-trigger flag so user can pick again.
-                                // If _pendingTaskAfterCancel is already true (second cancel / double-cancel), abort cleanly.
-                                await InvokeAsync(() =>
-                                {
-                                    if (_pendingTaskAfterCancel)
-                                    {
-                                        // Double-cancel — abort task cleanly
-                                        _pendingTaskAfterCancel = false;
-                                        _pendingTaskMessageForCancel = null;
-                                        _taskMode = false;
-                                        _taskModeActive = false;
-                                        _ccTaskActive = false;
-                                        _pendingTaskMessage = "";
-                                        _activeToolCalls.Clear();
-                                        Logger.LogInformation("[ChatView] FolderPicker double-cancelled — task state aborted (ADO#5168)");
-                                    }
-                                    else
-                                    {
-                                        // First cancel — preserve task state, set re-trigger flag
-                                        // Hide the task mode header chip (Option A: one chip visible at a time).
-                                        // _taskMode stays true so task continues if user re-selects a folder.
-                                        // _pendingTaskMessage and _taskMode intentionally preserved; _taskModeActive cleared (Option A dual-× fix)
-                                        _pendingTaskAfterCancel = true;
-                                        _pendingTaskMessageForCancel = _pendingTaskMessage;
-                                        _taskModeActive = false;  // ADO#5168-C2: hide header chip — re-trigger chip is the sole UX affordance after cancel
-                                        Logger.LogInformation("[ChatView] FolderPicker cancelled — task state preserved, awaiting re-trigger (ADO#5168)");
-                                    }
-                                    StateHasChanged();
-                                });
-                            }
+                                folderConfirmTcs.TrySetResult(null);
                         });
 
-                        // Break SSE loop — harness is paused awaiting folder-confirm, no more events coming
-                        break;
+                        var folderResult = await folderConfirmTcs.Task;
+
+                        if (folderResult != null)
+                        {
+                            // Confirm path — task state preserved, continue SSE loop
+                            Logger.LogInformation("[ChatView] FolderPicker confirmed — folderId={FolderId} resuming SSE loop (ADO#5177)", folderResult.FolderId);
+                            if (_taskMode)
+                            {
+                                _taskModeActive = true;
+                            }
+                            HandleFolderConfirmed(folderResult);
+                            await InvokeAsync(StateHasChanged);
+                        }
+                        else
+                        {
+                            // ADO#5168: Cancel — preserve task state; set re-trigger flag so user can pick again.
+                            // If _pendingTaskAfterCancel is already true (second cancel / double-cancel), abort cleanly.
+                            await InvokeAsync(() =>
+                            {
+                                if (_pendingTaskAfterCancel)
+                                {
+                                    // Double-cancel — abort task cleanly
+                                    _pendingTaskAfterCancel = false;
+                                    _pendingTaskMessageForCancel = null;
+                                    _taskMode = false;
+                                    _taskModeActive = false;
+                                    _ccTaskActive = false;
+                                    _pendingTaskMessage = "";
+                                    _activeToolCalls.Clear();
+                                    Logger.LogInformation("[ChatView] FolderPicker double-cancelled — task state aborted (ADO#5168)");
+                                }
+                                else
+                                {
+                                    // First cancel — preserve task state, set re-trigger flag
+                                    // Hide the task mode header chip (Option A: one chip visible at a time).
+                                    // _taskMode stays true so task continues if user re-selects a folder.
+                                    // _pendingTaskMessage and _taskMode intentionally preserved; _taskModeActive cleared (Option A dual-× fix)
+                                    _pendingTaskAfterCancel = true;
+                                    _pendingTaskMessageForCancel = _pendingTaskMessage;
+                                    _taskModeActive = false;  // ADO#5168-C2: hide header chip — re-trigger chip is the sole UX affordance after cancel
+                                    Logger.LogInformation("[ChatView] FolderPicker cancelled — task state preserved, awaiting re-trigger (ADO#5168)");
+                                }
+                                StateHasChanged();
+                            });
+                        }
+                        // DO NOT break — SSE loop continues to receive subsequent harness events (ADO#5177)
                     }
                     catch (Exception ex)
                     {
@@ -2393,6 +2403,21 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     text-overflow: ellipsis;
     max-height: 40px; /* ADO#4861 — needed for height collapse animation */
     transition: opacity 280ms ease-out, max-height 300ms ease-out, margin 300ms ease-out, padding 300ms ease-out;
+}
+/* ADO#5176 — Chip state styles (removed from fortress.css in #5167, restored inline) */
+.tool-call-active {
+    background: var(--mud-palette-primary-lighten, rgba(99, 102, 241, 0.15));
+    color: var(--mud-palette-primary, #6366f1);
+}
+.tool-call-error {
+    background: var(--mud-palette-error-lighten, rgba(239, 68, 68, 0.15));
+    color: var(--mud-palette-error, #ef4444);
+}
+.tool-call-summary {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .tool-call-mud-icon {
     color: var(--color-accent, #6366f1);
