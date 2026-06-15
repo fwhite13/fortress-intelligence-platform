@@ -14,6 +14,15 @@ const crypto = require('crypto');
 let pgPool = null;
 const pgProvisionedUsers = new Set();
 
+// ─── Logger ───────────────────────────────────────────────────────────────
+const LOG_LEVEL = process.env.LOG_LEVEL || 'dev'; // default dev (verbose); set LOG_LEVEL=prod in ECS task def
+const logger = {
+    debug: (...args) => { if (LOG_LEVEL === 'dev') console.log('[DEBUG]', ...args); },
+    info:  (...args) => console.log('[INFO]', ...args),
+    warn:  (...args) => console.warn('[WARN]', ...args),
+    error: (...args) => console.error('[ERROR]', ...args),
+};
+
 const bedrockClient = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
 const bedrockAgentClient = new BedrockAgentRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
@@ -38,11 +47,11 @@ async function getUserTokens(userId) {
     try {
         const base = FAIT_BASE_URL;
         const secret = INTERNAL_API_TOKEN;
-        if (!secret) console.warn('[harness] INTERNAL_API_TOKEN not set — /api/internal/user-tokens will return 401');
+        if (!secret) logger.warn('[harness] INTERNAL_API_TOKEN not set — /api/internal/user-tokens will return 401');
         // ADO#3286 — normalize userId to lowercase guid format for consistent Blazor endpoint lookup
         const normalizedUserId = (userId || '').trim().toLowerCase();
         if (!normalizedUserId) {
-            console.warn('[harness] getUserTokens: empty userId — skipping token lookup');
+            logger.warn('[harness] getUserTokens: empty userId — skipping token lookup');
             return { ms365: null, ado: null };
         }
         const headers = { 'Content-Type': 'application/json' };
@@ -53,12 +62,12 @@ async function getUserTokens(userId) {
         let responseBody;
         try { responseBody = await res.text(); } catch { responseBody = '(unreadable)'; }
         if (!res.ok) {
-            console.warn(`[getUserTokens] status=${res.status} userId=${normalizedUserId} body=${responseBody}`);
+            logger.warn(`[getUserTokens] status=${res.status} userId=${normalizedUserId} body=${responseBody}`);
             return { ms365: null, ado: null };
         }
         let data;
         try { data = JSON.parse(responseBody); } catch (parseErr) {
-            console.error(`[getUserTokens] JSON parse failed status=${res.status} userId=${normalizedUserId} body=${responseBody}`);
+            logger.error(`[getUserTokens] JSON parse failed status=${res.status} userId=${normalizedUserId} body=${responseBody}`);
             return { ms365: null, ado: null };
         }
         return {
@@ -66,7 +75,7 @@ async function getUserTokens(userId) {
             ado: data.adoPersonalAccessToken ?? null
         };
     } catch (err) {
-        console.error('[harness] getUserTokens error:', err.message);
+        logger.error('[harness] getUserTokens error:', err.message);
         return { ms365: null, ado: null };
     }
 }
@@ -83,12 +92,12 @@ async function fetchKbAccess(userId) {
             }
         });
         if (!res.ok) {
-            console.warn(`[harness] fetchKbAccess: HTTP ${res.status} for userId=${userId}`);
+            logger.warn(`[harness] fetchKbAccess: HTTP ${res.status} for userId=${userId}`);
             return null;
         }
         return await res.json(); // { corpEnabled, personalUserId, authorizedTeamIds }
     } catch (err) {
-        console.error(`[harness] fetchKbAccess error:`, err.message);
+        logger.error(`[harness] fetchKbAccess error:`, err.message);
         return null;
     }
 }
@@ -131,7 +140,7 @@ async function requireApproval(userId, actionType, actionSummary, actionDetails)
                 })
             });
         } catch (err) {
-            console.error('[harness] G7 requireApproval: failed to store approval request:', err.message);
+            logger.error('[harness] G7 requireApproval: failed to store approval request:', err.message);
         }
         // Immediately return denied — CC continues without waiting
         return false;
@@ -147,7 +156,7 @@ async function requireApproval(userId, actionType, actionSummary, actionDetails)
             body: JSON.stringify({ userId, interventionId, actionType, actionSummary, actionDetails })
         });
     } catch (err) {
-        console.error('[harness] requireApproval: failed to send intervention request:', err.message);
+        logger.error('[harness] requireApproval: failed to send intervention request:', err.message);
         throw new Error('Could not reach Blazor to request approval — action cancelled');
     }
 
@@ -209,12 +218,12 @@ async function rewriteQueryForRetrieval(userMessage, userId) {
         const parsed = JSON.parse(Buffer.from(response.body).toString('utf-8'));
         const rewritten = parsed?.content?.[0]?.text?.trim();
         if (rewritten) {
-            console.log(`[harness] query rewrite: original="${userMessage.slice(0, 100)}" rewritten="${rewritten}" userId=${userId}`);
+            logger.debug(`[harness] query rewrite: original="${userMessage.slice(0, 100)}" rewritten="${rewritten}" userId=${userId}`);
             return rewritten;
         }
         return userMessage;
     } catch (err) {
-        console.warn(`[harness] query rewrite failed (non-fatal), using raw message: ${err.message} userId=${userId}`);
+        logger.warn(`[harness] query rewrite failed (non-fatal), using raw message: ${err.message} userId=${userId}`);
         return userMessage;
     }
 }
@@ -564,7 +573,7 @@ async function fetchS3File(key) {
         for await (const chunk of resp.Body) chunks.push(chunk);
         return Buffer.concat(chunks).toString('utf-8');
     } catch (err) {
-        console.warn(`[harness] Could not fetch ${key}: ${err.message}`);
+        logger.warn(`[harness] Could not fetch ${key}: ${err.message}`);
         return null;
     }
 }
@@ -581,7 +590,7 @@ async function getSecret(secretArn) {
 async function initPgVector() {
     const secretArn = process.env.PGVECTOR_SECRET_ARN;
     if (!secretArn) {
-        console.warn('[pgvector] PGVECTOR_SECRET_ARN not set — pgvector disabled');
+        logger.warn('[pgvector] PGVECTOR_SECRET_ARN not set — pgvector disabled');
         pgPool = null;
         return;
     }
@@ -598,9 +607,9 @@ async function initPgVector() {
             max: 5
         });
         await pgPool.query('SELECT 1');
-        console.log('[pgvector] connected to fortress_ai PostgreSQL');
+        logger.info('[pgvector] connected to fortress_ai PostgreSQL');
     } catch (err) {
-        console.warn('[pgvector] connection failed — falling back to md-file memory:', err.message);
+        logger.warn('[pgvector] connection failed — falling back to md-file memory:', err.message);
         pgPool = null;
     }
 }
@@ -629,12 +638,12 @@ async function provisionUserSchema(userId) {
         const countResult = await pgPool.query(`SELECT COUNT(*) FROM "${schemaName}".memory_chunks`);
         const chunkCount = parseInt(countResult.rows[0].count);
         if (chunkCount === 0) {
-            console.log(`[pgvector] no chunks for userId=${userId} — lazy migration will run on next write_memory call`);
+            logger.info(`[pgvector] no chunks for userId=${userId} — lazy migration will run on next write_memory call`);
         }
     } catch (countErr) {
-        console.warn(`[pgvector] chunk count check failed (non-fatal): ${countErr.message}`);
+        logger.warn(`[pgvector] chunk count check failed (non-fatal): ${countErr.message}`);
     }
-    console.log(`[pgvector] schema provisioned for userId=${userId}`);
+    logger.info(`[pgvector] schema provisioned for userId=${userId}`);
 }
 
 async function embedText(text) {
@@ -678,12 +687,13 @@ async function upsertMemoryChunks(userId, sourceFile, content) {
             [sourceFile, i, chunks[i], JSON.stringify(embedding)]
         );
     }
-    console.log(`[pgvector] upserted ${chunks.length} chunks for userId=${userId} sourceFile=${sourceFile}`);
+    logger.debug(`[pgvector] upserted ${chunks.length} chunks for userId=${userId} sourceFile=${sourceFile}`);
 }
 
 async function searchMemoryChunks(userId, query, topK = 5, threshold = 0.7) {
     if (!pgPool) return null;
     const schemaName = `user_${userId.replace(/-/g, '_')}`;
+    logger.debug(`[pgvector] search: userId=${userId} query="${query.slice(0,60)}" topK=${topK} threshold=${threshold}`);
     try {
         const embedding = await embedText(query);
         const result = await pgPool.query(
@@ -694,9 +704,10 @@ async function searchMemoryChunks(userId, query, topK = 5, threshold = 0.7) {
              LIMIT $3`,
             [JSON.stringify(embedding), threshold, topK]
         );
+        logger.debug(`[pgvector] search result: userId=${userId} count=${result.rows.length} query="${query.slice(0,60)}"`);
         return result.rows;
     } catch (err) {
-        console.warn(`[pgvector] search failed for userId=${userId}:`, err.message);
+        logger.warn(`[pgvector] search failed for userId=${userId}:`, err.message);
         return null;
     }
 }
@@ -710,23 +721,23 @@ async function bootstrapGcpCredentials() {
 
         const secretValue = response.SecretString;
         if (!secretValue) {
-            console.warn('[harness] GCP secret is binary or empty — Stitch will be unavailable');
+            logger.warn('[harness] GCP secret is binary or empty — Stitch will be unavailable');
             return;
         }
         // Validate it's parseable JSON (GCP SA keys are JSON objects)
         try {
             JSON.parse(secretValue);
         } catch {
-            console.warn('[harness] GCP secret is not valid JSON — Stitch will be unavailable');
+            logger.warn('[harness] GCP secret is not valid JSON — Stitch will be unavailable');
             return;
         }
 
         const credPath = '/tmp/gcp-service-account.json';
         writeFileSync(credPath, secretValue, { mode: 0o600 });
         process.env.GOOGLE_APPLICATION_CREDENTIALS = credPath;
-        console.log('[harness] GCP credentials bootstrapped');
+        logger.info('[harness] GCP credentials bootstrapped');
     } catch (err) {
-        console.warn('[harness] GCP credentials not available — Stitch will be unavailable:', err.message);
+        logger.warn('[harness] GCP credentials not available — Stitch will be unavailable:', err.message);
     }
 }
 
@@ -787,7 +798,7 @@ async function invokeStitchTool(toolName, args, timeoutMs = 30000) {
             }
         });
 
-        proc.stderr.on('data', (d) => console.error('[stitch-mcp stderr]', d.toString()));
+        proc.stderr.on('data', (d) => logger.error('[stitch-mcp stderr]', d.toString()));
         proc.on('exit', (code) => {
             clearTimeout(timer);
             if (!initDone) reject(new Error(`stitch-mcp exited ${code} before initialize response`));
@@ -1068,7 +1079,7 @@ app.post('/tools/graph_list_emails', async (req, res) => {
         }));
         res.json({ result: emails });
     } catch (err) {
-        console.error('[harness] graph_list_emails error:', err.message);
+        logger.error('[harness] graph_list_emails error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1093,7 +1104,7 @@ app.post('/tools/graph_get_email', async (req, res) => {
             }
         });
     } catch (err) {
-        console.error('[harness] graph_get_email error:', err.message);
+        logger.error('[harness] graph_get_email error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1119,7 +1130,7 @@ app.post('/tools/graph_list_calendar_events', async (req, res) => {
         }));
         res.json({ result: events });
     } catch (err) {
-        console.error('[harness] graph_list_calendar_events error:', err.message);
+        logger.error('[harness] graph_list_calendar_events error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1160,7 +1171,7 @@ app.post('/tools/graph_send_email', async (req, res) => {
         await graphRequest(token, 'POST', '/me/sendMail', payload);
         res.json({ result: { sent: true } });
     } catch (err) {
-        console.error('[harness] graph_send_email error:', err.message);
+        logger.error('[harness] graph_send_email error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1226,7 +1237,7 @@ app.post('/tools/ado_list_work_items', async (req, res) => {
         }));
         res.json({ result: items });
     } catch (err) {
-        console.error('[harness] ado_list_work_items error:', err.message);
+        logger.error('[harness] ado_list_work_items error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1252,7 +1263,7 @@ app.post('/tools/ado_get_work_item', async (req, res) => {
             }
         });
     } catch (err) {
-        console.error('[harness] ado_get_work_item error:', err.message);
+        logger.error('[harness] ado_get_work_item error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1304,7 +1315,7 @@ app.post('/tools/ado_update_work_item', async (req, res) => {
         }
         res.json({ result: { updated: true, id } });
     } catch (err) {
-        console.error('[harness] ado_update_work_item error:', err.message);
+        logger.error('[harness] ado_update_work_item error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1362,7 +1373,7 @@ app.post('/tools/ado_create_work_item', async (req, res) => {
             }
         });
     } catch (err) {
-        console.error('[harness] ado_create_work_item error:', err.message);
+        logger.error('[harness] ado_create_work_item error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1392,7 +1403,7 @@ app.post('/tools/search_memory', async (req, res) => {
         const results = await resp.json();
         res.json({ results });
     } catch (err) {
-        console.error('[harness] search_memory error:', err.message);
+        logger.error('[harness] search_memory error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1425,19 +1436,21 @@ app.post('/tools/read_memory', async (req, res) => {
         let mdContent = result.found ? result.content : `Topic '${slug}' not found in memory.`;
         // ADO#3397 — augment read_memory with semantic search
         if (pgPool && result.found) {
+            logger.debug(`[pgvector] read_memory augment: userId=${userId} slug="${slug}" pgPool=${!!pgPool} found=${result.found}`);
             try {
                 const semanticChunks = await searchMemoryChunks(userId, slug + ' ' + (req.body.query || ''), 3, 0.6);
+                logger.debug(`[pgvector] read_memory augment result: userId=${userId} slug="${slug}" chunkCount=${semanticChunks?.length ?? 0}`);
                 if (semanticChunks && semanticChunks.length > 0) {
                     const semanticContext = semanticChunks.map(c => c.content).join('\n\n');
                     mdContent = `[Semantically relevant]\n${semanticContext}\n\n---\n\n[Full topic]\n${mdContent}`;
                 }
             } catch (augmentErr) {
-                console.warn(`[pgvector] read_memory augment failed: ${augmentErr.message}`);
+                logger.warn(`[pgvector] read_memory augment failed: ${augmentErr.message}`);
             }
         }
         res.json({ content: mdContent });
     } catch (err) {
-        console.error('[harness] read_memory error:', err.message);
+        logger.error('[harness] read_memory error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1471,11 +1484,11 @@ app.post('/tools/write_memory', async (req, res) => {
         try {
             await upsertMemoryChunks(userId, `memory/${slug}.md`, content);
         } catch (embedErr) {
-            console.warn(`[pgvector] embed on write failed (non-fatal): ${embedErr.message}`);
+            logger.warn(`[pgvector] embed on write failed (non-fatal): ${embedErr.message}`);
         }
         res.json({ success: true });
     } catch (err) {
-        console.error('[harness] write_memory error:', err.message);
+        logger.error('[harness] write_memory error:', err.message);
         // Best-effort — return success:false on error, do not crash
         res.json({ success: false, error: err.message });
     }
@@ -1518,7 +1531,7 @@ app.post('/tools/update_user_profile', async (req, res) => {
         }));
         res.json({ success: true });
     } catch (err) {
-        console.error('[update_user_profile] error:', err);
+        logger.error('[update_user_profile] error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1592,7 +1605,7 @@ If no userMd content is found, set userMd to null. If no topic content is found,
             routing = JSON.parse(classifyText);
         } catch (e) {
             // Fallback: treat entire content as single imported-memory topic
-            console.warn('[import-memory] Classification parse failed, using fallback topic');
+            logger.warn('[import-memory] Classification parse failed, using fallback topic');
             routing = { userMd: null, topics: [{ topic: 'imported-memory', content: strippedContent }] };
         }
 
@@ -1634,7 +1647,7 @@ If no userMd content is found, set userMd to null. If no topic content is found,
             try {
                 await upsertMemoryChunks(userId, `memory/${slug}.md`, topicContent);
             } catch (pgErr) {
-                console.error(`[harness] import-memory pgvector upsert failed for "${slug}" (non-fatal):`, pgErr.message);
+                logger.error(`[harness] import-memory pgvector upsert failed for "${slug}" (non-fatal):`, pgErr.message);
             }
 
             // Count chunks
@@ -1649,7 +1662,7 @@ If no userMd content is found, set userMd to null. If no topic content is found,
 
         res.json({ success: true, chunks: totalChunks });
     } catch (err) {
-        console.error('[harness] import-memory error:', err.message);
+        logger.error('[harness] import-memory error:', err.message);
         res.json({ success: false, error: err.message });
     }
 });
@@ -1748,7 +1761,7 @@ app.post('/tools/create_document', async (req, res) => {
 
         res.json({ success: true, filename, s3Key, sizeBytes });
     } catch (err) {
-        console.error('[harness] create_document error:', err.message);
+        logger.error('[harness] create_document error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1802,7 +1815,7 @@ app.post('/tools/list_files', async (req, res) => {
             await conn.end();
         }
     } catch (err) {
-        console.error('[harness] list_files error:', err.message);
+        logger.error('[harness] list_files error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1862,14 +1875,14 @@ app.post('/tools/read_file', async (req, res) => {
             || mime_type === 'application/vnd.ms-excel'
             || /\.(xlsx|xls)$/i.test(filename);
         if (isXlsx) {
-            console.log(`[read_file] XLSX redirect: filename=${filename} mime=${mime_type} userId=${userId}`);
+            logger.debug(`[read_file] XLSX redirect: filename=${filename} mime=${mime_type} userId=${userId}`);
             return res.json({ content: "Excel files can't be read directly in chat mode. Switch to task mode — CC can open and analyze the file with Python." });
         }
 
         // PDF three-tier strategy
         const isPdf = mime_type === 'application/pdf' || /\.pdf$/i.test(filename);
         if (isPdf) {
-            console.log(`[read_file] PDF detected: filename=${filename} mime=${mime_type} userId=${userId} — fetching bytes for size routing`);
+            logger.debug(`[read_file] PDF detected: filename=${filename} mime=${mime_type} userId=${userId} — fetching bytes for size routing`);
 
             // Fetch full PDF bytes (up to PDF_EXTRACT_MAX_BYTES + 1 to detect over-limit)
             const s3PdfResp = await s3Client.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3_key }));
@@ -1887,7 +1900,7 @@ app.post('/tools/read_file', async (req, res) => {
 
             // Over 15 MB — redirect to task mode
             if (pdfOverLimit) {
-                console.log(`[read_file] PDF over-limit: filename=${filename} size=${pdfTotalBytes}+ bytes userId=${userId}`);
+                logger.debug(`[read_file] PDF over-limit: filename=${filename} size=${pdfTotalBytes}+ bytes userId=${userId}`);
                 return res.json({ content: 'This PDF is too large for the assistant to read directly (over 15 MB). Switch to task mode — CC can work with it using Python tools.' });
             }
 
@@ -1897,13 +1910,13 @@ app.post('/tools/read_file', async (req, res) => {
             // Prevents corrupt/misnamed files from poisoning conversation history with cascading 400 errors
             const pdfHeader = pdfBuffer.slice(0, 5).toString('ascii');
             if (pdfHeader !== '%PDF-') {
-                console.warn(`[read_file] PDF magic byte mismatch: filename=${filename} header=${JSON.stringify(pdfHeader)} userId=${userId}`);
+                logger.warn(`[read_file] PDF magic byte mismatch: filename=${filename} header=${JSON.stringify(pdfHeader)} userId=${userId}`);
                 return res.json({ content: 'This file does not appear to be a valid PDF. It may be corrupt or misnamed.' });
             }
 
             // Under 3 MB — native Bedrock document block
             if (pdfTotalBytes < PDF_NATIVE_MAX_BYTES) {
-                console.log(`[read_file] PDF native doc block: filename=${filename} size=${pdfTotalBytes} bytes userId=${userId}`);
+                logger.debug(`[read_file] PDF native doc block: filename=${filename} size=${pdfTotalBytes} bytes userId=${userId}`);
                 const base64Pdf = pdfBuffer.toString('base64');
                 return res.json({
                     content: null,
@@ -1917,12 +1930,12 @@ app.post('/tools/read_file', async (req, res) => {
 
             // 3–15 MB — server-side text extraction via pdf-parse
             // pdf-parse is text-only: charts, images, and scanned PDFs produce empty or near-empty extraction
-            console.log(`[read_file] PDF text extraction: filename=${filename} size=${pdfTotalBytes} bytes userId=${userId}`);
+            logger.debug(`[read_file] PDF text extraction: filename=${filename} size=${pdfTotalBytes} bytes userId=${userId}`);
             try {
                 const pdfParse = require('pdf-parse');
                 const pdfData = await pdfParse(pdfBuffer);
                 const extractedText = (pdfData.text || '').trim();
-                console.log(`[read_file] PDF extracted ${extractedText.length} chars from ${filename} userId=${userId}`);
+                logger.debug(`[read_file] PDF extracted ${extractedText.length} chars from ${filename} userId=${userId}`);
 
                 let content = `[PDF text extraction — charts and images not included]\n\n${extractedText}`;
                 if (extractedText.length < 200) {
@@ -1930,7 +1943,7 @@ app.post('/tools/read_file', async (req, res) => {
                 }
                 return res.json({ content });
             } catch (pdfErr) {
-                console.error(`[read_file] pdf-parse error: filename=${filename} userId=${userId} err=${pdfErr.message}`);
+                logger.error(`[read_file] pdf-parse error: filename=${filename} userId=${userId} err=${pdfErr.message}`);
                 return res.json({ content: `Unable to extract text from this PDF: ${pdfErr.message}` });
             }
         }
@@ -1960,7 +1973,7 @@ app.post('/tools/read_file', async (req, res) => {
 
         res.json({ content });
     } catch (err) {
-        console.error('[harness] read_file error:', err.message);
+        logger.error('[harness] read_file error:', err.message);
         res.status(500).json({ error: err.message });
     } finally {
         if (conn) await conn.end();
@@ -2077,7 +2090,7 @@ app.post('/tools/write_file', async (req, res) => {
                     'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                     [versionId, existingId, newVersion, s3Key, sizeBytes, now, 'assistant', conversationId ?? null]
                 );
-                console.log(`[harness] write_file: versioned ${filename} → v${newVersion} in folderId=${folderId} (${sizeBytes} bytes)`);
+                logger.debug(`[harness] write_file: versioned ${filename} → v${newVersion} in folderId=${folderId} (${sizeBytes} bytes)`);
                 res.json({ success: true, filename, s3Key, sizeBytes, mimeType, version: newVersion, updated: true });
 
             } else {
@@ -2107,7 +2120,7 @@ app.post('/tools/write_file', async (req, res) => {
                     'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by, conversation_id) VALUES (?, ?, 1, ?, ?, ?, ?, ?)',
                     [versionId, fileId, s3Key, sizeBytes, now, 'assistant', conversationId ?? null]
                 );
-                console.log(`[harness] write_file: created ${filename} in folderId=${folderId} (${sizeBytes} bytes)`);
+                logger.debug(`[harness] write_file: created ${filename} in folderId=${folderId} (${sizeBytes} bytes)`);
                 res.json({ success: true, filename, s3Key, sizeBytes, mimeType, version: 1 });
             }
         } finally {
@@ -2115,7 +2128,7 @@ app.post('/tools/write_file', async (req, res) => {
         }
 
     } catch (err) {
-        console.error('[harness] write_file error:', err.message);
+        logger.error('[harness] write_file error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2198,7 +2211,7 @@ app.post('/tools/read_workspace_file', async (req, res) => {
         res.json({ filename, mimeType, s3Key, content, sizeBytes: content.length });
 
     } catch (err) {
-        console.error('[harness] read_workspace_file error:', err.message);
+        logger.error('[harness] read_workspace_file error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2231,7 +2244,7 @@ app.post('/tools/stitch_generate_screen', async (req, res) => {
             projectId: parsed.projectId || parsed.project_id || null,
         });
     } catch (err) {
-        console.error('[harness] stitch_generate_screen error:', err.message);
+        logger.error('[harness] stitch_generate_screen error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2260,7 +2273,7 @@ app.post('/tools/stitch_refine_screen', async (req, res) => {
             projectId: parsed.projectId || parsed.project_id || null,
         });
     } catch (err) {
-        console.error('[harness] stitch_refine_screen error:', err.message);
+        logger.error('[harness] stitch_refine_screen error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2275,7 +2288,7 @@ app.post('/tools/stitch_extract_design_dna', async (req, res) => {
         const result = await invokeStitchTool('extract_design_context', { content });
         res.json(result);
     } catch (err) {
-        console.error('[harness] stitch_extract_design_dna error:', err.message);
+        logger.error('[harness] stitch_extract_design_dna error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2335,7 +2348,7 @@ app.post('/tools/list_workspace_files', async (req, res) => {
 
         res.json({ files, count: files.length, type });
     } catch (err) {
-        console.error('[harness] list_workspace_files error:', err.message);
+        logger.error('[harness] list_workspace_files error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2380,7 +2393,7 @@ app.post('/tools/web_search', async (req, res) => {
         }
         res.json({ result: text });
     } catch (err) {
-        console.error('[harness] web_search error:', err.message);
+        logger.error('[harness] web_search error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2422,7 +2435,7 @@ app.post('/tools/web_fetch', async (req, res) => {
         }
         res.json({ result: text });
     } catch (err) {
-        console.error('[harness] web_fetch error:', err.message);
+        logger.error('[harness] web_fetch error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2450,7 +2463,7 @@ app.post('/tools/:toolName', async (req, res) => {
     // ── ADO#3106: KB write enforcement ──────────────────────────────────
     if (reqPluginAgentId && isKbWriteTool(toolName)) {
         if (!reqKbWriteAllowed) {
-            console.warn(`[harness] KB write blocked: tool=${toolName}, pluginAgentId=${reqPluginAgentId}`);
+            logger.warn(`[harness] KB write blocked: tool=${toolName}, pluginAgentId=${reqPluginAgentId}`);
             return res.status(403).json({ error: 'KB write not permitted for this agent' });
         }
     }
@@ -2472,11 +2485,11 @@ app.post('/tools/:toolName', async (req, res) => {
         if (serverId) {
             const perm = permissions.find(p => p.serverId === serverId);
             if (!perm) {
-                console.warn(`[harness] MCP tool blocked: server ${serverId} not in allowed list for pluginAgentId=${reqPluginAgentId}`);
+                logger.warn(`[harness] MCP tool blocked: server ${serverId} not in allowed list for pluginAgentId=${reqPluginAgentId}`);
                 return res.status(403).json({ error: 'MCP server not allowed for this agent' });
             }
             if (!perm.write && isWriteTool(toolName)) {
-                console.warn(`[harness] MCP write blocked: tool=${toolName}, server=${serverId}, pluginAgentId=${reqPluginAgentId}`);
+                logger.warn(`[harness] MCP write blocked: tool=${toolName}, server=${serverId}, pluginAgentId=${reqPluginAgentId}`);
                 return res.status(403).json({ error: 'Write access not allowed for this MCP server' });
             }
         }
@@ -2484,7 +2497,7 @@ app.post('/tools/:toolName', async (req, res) => {
 
     // ── G4: MCP Tool Allowlist check (ADO#3109) ───────────────────────────
     if (!isToolAllowed(toolName)) {
-        console.warn(`[harness] /tools/${toolName}: rejected — not in MCP_TOOL_ALLOWLIST`);
+        logger.warn(`[harness] /tools/${toolName}: rejected — not in MCP_TOOL_ALLOWLIST`);
         return res.status(403).json({ error: `Tool '${toolName}' is not in the allowed tool list` });
     }
 
@@ -2497,7 +2510,7 @@ app.post('/tools/:toolName', async (req, res) => {
         const result = await invokeStitchTool(toolName, args);
         res.json({ result });
     } catch (err) {
-        console.error(`[harness] Tool ${toolName} error:`, err.message);
+        logger.error(`[harness] Tool ${toolName} error:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2508,51 +2521,51 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
         if (kbType === 'corp') {
             const corpEnabled = kbFlags.CorpKbEnabled ?? kbFlags.corpKbEnabled ?? null;
             if (corpEnabled === false) {
-                console.warn(`[harness] executeKbSearch: corp KB disabled in user preferences for userId=${userId}`);
+                logger.warn(`[harness] executeKbSearch: corp KB disabled in user preferences for userId=${userId}`);
                 return { text: 'Knowledge base access not authorized.', sources: [] };
             }
         }
         if (kbType === 'personal') {
             const personalEnabled = kbFlags.PersonalKbEnabled ?? kbFlags.personalKbEnabled ?? null;
             if (personalEnabled === false) {
-                console.warn(`[harness] executeKbSearch: personal KB disabled in user preferences for userId=${userId}`);
+                logger.warn(`[harness] executeKbSearch: personal KB disabled in user preferences for userId=${userId}`);
                 return { text: 'Knowledge base access not authorized.', sources: [] };
             }
         }
         if (kbType === 'team') {
             const teamEnabled = kbFlags.TeamKbEnabled ?? kbFlags.teamKbEnabled ?? null;
             if (teamEnabled === false) {
-                console.warn(`[harness] executeKbSearch: team KB disabled in user preferences for userId=${userId}`);
+                logger.warn(`[harness] executeKbSearch: team KB disabled in user preferences for userId=${userId}`);
                 return { text: 'Knowledge base access not authorized.', sources: [] };
             }
         }
     } else {
         // kbFlags is null/undefined — ADO#3350: fail-CLOSED for personal/team, fail-open for corp
         if (kbType === 'personal') {
-            console.warn(`[harness] executeKbSearch: kbFlags null — blocking personal KB for userId=${userId}`);
+            logger.warn(`[harness] executeKbSearch: kbFlags null — blocking personal KB for userId=${userId}`);
             return { text: 'Knowledge base access not authorized.', sources: [] };
         }
         if (kbType === 'team') {
-            console.warn(`[harness] executeKbSearch: kbFlags null — blocking team KB for userId=${userId}`);
+            logger.warn(`[harness] executeKbSearch: kbFlags null — blocking team KB for userId=${userId}`);
             return { text: 'Knowledge base access not authorized.', sources: [] };
         }
         // corp: fail-open acceptable — shared resource, no per-user filter
-        console.debug(`[harness] executeKbSearch: kbFlags null — allowing corp KB for userId=${userId}`);
+        logger.debug(`[harness] executeKbSearch: kbFlags null — allowing corp KB for userId=${userId}`);
     }
 
     // ADO#3309 — Access enforcement: verify user is entitled to the requested kbType
     if (kbAccess) {
         if (kbType === 'corp' && !kbAccess.corpEnabled) {
-            console.warn(`[harness] executeKbSearch: corp KB not authorized for userId=${userId}`);
+            logger.warn(`[harness] executeKbSearch: corp KB not authorized for userId=${userId}`);
             return { text: 'Knowledge base access not authorized.', sources: [] };
         }
         if (kbType === 'personal' && (!kbAccess.personalUserId || kbAccess.personalUserId !== userId)) {
-            console.warn(`[harness] executeKbSearch: personal KB userId mismatch for userId=${userId}`);
+            logger.warn(`[harness] executeKbSearch: personal KB userId mismatch for userId=${userId}`);
             return { text: 'Knowledge base access not authorized.', sources: [] };
         }
         if (kbType === 'team') {
             if (!kbAccess.authorizedTeamIds || kbAccess.authorizedTeamIds.length === 0) {
-                console.warn(`[harness] executeKbSearch: no authorized teams for userId=${userId}`);
+                logger.warn(`[harness] executeKbSearch: no authorized teams for userId=${userId}`);
                 return { text: 'Knowledge base access not authorized.', sources: [] };
             }
         }
@@ -2560,7 +2573,7 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
         // fail-open is ONLY safe for corp (no per-user filter needed)
         // personal/team require verified entitlements — deny if unavailable
         if (kbType === 'personal' || kbType === 'team') {
-            console.warn(`[harness] executeKbSearch: kbAccess unavailable — denying ${kbType} KB access for userId=${userId}`);
+            logger.warn(`[harness] executeKbSearch: kbAccess unavailable — denying ${kbType} KB access for userId=${userId}`);
             return { text: 'Knowledge base access verification unavailable. Please try again.', sources: [] };
         }
         // corp falls through to unfiltered retrieve (corp KB is org-wide, no per-user filter needed)
@@ -2574,11 +2587,11 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
         const effectiveTeamIds = selectedTeamIds && selectedTeamIds.length > 0
             ? kbAccess.authorizedTeamIds.filter(id => selectedTeamIds.includes(id))
             : kbAccess.authorizedTeamIds; // fall back to all authorized if no selection (teamKbEnabled=true, teamIds=null)
-        console.log(`[harness] executeKbSearch: team KB effectiveTeamIds=${JSON.stringify(effectiveTeamIds)} (selected=${JSON.stringify(selectedTeamIds)}, authorized=${JSON.stringify(kbAccess.authorizedTeamIds)}) for userId=${userId}`);
+        logger.debug(`[harness] executeKbSearch: team KB effectiveTeamIds=${JSON.stringify(effectiveTeamIds)} (selected=${JSON.stringify(selectedTeamIds)}, authorized=${JSON.stringify(kbAccess.authorizedTeamIds)}) for userId=${userId}`);
         // Retrieve from each authorized team and merge results
         const kbId = process.env.TEAM_KB_ID;
         if (!kbId) {
-            console.warn(`[harness] KB search: no TEAM_KB_ID configured`);
+            logger.warn(`[harness] KB search: no TEAM_KB_ID configured`);
             return { text: 'No knowledge base configured for type: team', sources: [] };
         }
         try {
@@ -2595,7 +2608,7 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
             }));
             return { text, sources };
         } catch (err) {
-            console.error(`[harness] KB search error (team):`, err.message);
+            logger.error(`[harness] KB search error (team):`, err.message);
             return { text: `KB search failed: ${err.message}`, sources: [] };
         }
     }
@@ -2603,7 +2616,7 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
     if (kbType === 'personal' && kbAccess?.personalUserId) {
         const kbId = process.env.PERSONAL_KB_ID;
         if (!kbId) {
-            console.warn(`[harness] KB search: no PERSONAL_KB_ID configured`);
+            logger.warn(`[harness] KB search: no PERSONAL_KB_ID configured`);
             return { text: 'No knowledge base configured for type: personal', sources: [] };
         }
         try {
@@ -2616,7 +2629,7 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
             }));
             return { text, sources };
         } catch (err) {
-            console.error(`[harness] KB search error (personal):`, err.message);
+            logger.error(`[harness] KB search error (personal):`, err.message);
             return { text: `KB search failed: ${err.message}`, sources: [] };
         }
     }
@@ -2627,7 +2640,7 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
                : process.env.PERSONAL_KB_ID;
 
     if (!kbId) {
-        console.warn(`[harness] KB search: no KB ID configured for type ${kbType}`);
+        logger.warn(`[harness] KB search: no KB ID configured for type ${kbType}`);
         return { text: `No knowledge base configured for type: ${kbType}`, sources: [] };
     }
 
@@ -2649,7 +2662,7 @@ async function executeKbSearch(query, kbType, userId, kbAccess, kbFlags) {
         }));
         return { text, sources };
     } catch (err) {
-        console.error(`[harness] KB search error:`, err.message);
+        logger.error(`[harness] KB search error:`, err.message);
         return { text: `KB search failed: ${err.message}`, sources: [] };
     }
 }
@@ -2729,10 +2742,10 @@ async function scanAndUploadArtifacts(userId, workspaceDir, conversationId) {
             conn.end();
         }
     } catch (dbErr) {
-        console.error('[harness] scanAndUploadArtifacts DB insert failed (non-fatal):', dbErr.message);
+        logger.error('[harness] scanAndUploadArtifacts DB insert failed (non-fatal):', dbErr.message);
     }
 
-    console.log(`[harness] Uploaded artifact ${latestFile.name} to s3://${S3_BUCKET}/${s3Key}`);
+    logger.info(`[harness] Uploaded artifact ${latestFile.name} to s3://${S3_BUCKET}/${s3Key}`);
     return {
         s3Key,
         fileName: latestFile.name,
@@ -2869,7 +2882,7 @@ function firePreferenceWrite(userId, message) {
             content: message,
             source: 'preference-detection',
         }),
-    }).catch(err => console.error('[harness] preference-write error:', err.message));
+    }).catch(err => logger.error('[harness] preference-write error:', err.message));
 }
 
 // ─── ADO#3559: Task folder model helpers ──────────────────────────────────
@@ -2892,7 +2905,7 @@ function buildLocalSnapshot(dir) {
             // ADO#4834 — skip excluded directories
             if (entry.isDirectory()) {
                 if (SYNC_EXCLUDE_DIRS.has(entry.name)) {
-                    console.log(`[harness] buildLocalSnapshot: excluding directory ${entry.name} at ${current}`);
+                    logger.debug(`[harness] buildLocalSnapshot: excluding directory ${entry.name} at ${current}`);
                     continue;
                 }
                 walk(path.join(current, entry.name), base);
@@ -2984,11 +2997,11 @@ async function resolveTaskFolder(userId, taskFolderId) {
                 [taskFolderId, userId]
             );
             if (rows.length > 0) {
-                console.log(`[harness] resolveTaskFolder: found folder id=${taskFolderId} name=${rows[0].name}`);
+                logger.debug(`[harness] resolveTaskFolder: found folder id=${taskFolderId} name=${rows[0].name}`);
                 const r0 = rows[0];
                 return { id: String(r0.id), name: String(r0.name), s3_prefix: normalizeS3Prefix(r0.s3_prefix || '', userId) };
             }
-            console.warn(`[harness] resolveTaskFolder: taskFolderId=${taskFolderId} not found for userId=${userId}, falling back`);
+            logger.warn(`[harness] resolveTaskFolder: taskFolderId=${taskFolderId} not found for userId=${userId}, falling back`);
         } finally {
             conn.end();
         }
@@ -3008,7 +3021,7 @@ async function resolveTaskFolder(userId, taskFolderId) {
                     [lastFolderId, userId]
                 );
                 if (folderRows.length > 0) {
-                    console.log(`[harness] resolveTaskFolder: using last_task_folder_id=${lastFolderId} name=${folderRows[0].name}`);
+                    logger.debug(`[harness] resolveTaskFolder: using last_task_folder_id=${lastFolderId} name=${folderRows[0].name}`);
                     const r1 = folderRows[0];
                     return { id: String(r1.id), name: String(r1.name), s3_prefix: normalizeS3Prefix(r1.s3_prefix || '', userId) };
                 }
@@ -3026,7 +3039,7 @@ async function resolveTaskFolder(userId, taskFolderId) {
                 [userId]
             );
             if (existing.length > 0) {
-                console.log(`[harness] resolveTaskFolder: using existing general folder id=${existing[0].id}`);
+                logger.debug(`[harness] resolveTaskFolder: using existing general folder id=${existing[0].id}`);
                 const r2 = existing[0];
                 return { id: String(r2.id), name: String(r2.name), s3_prefix: normalizeS3Prefix(r2.s3_prefix || '', userId) };
             }
@@ -3037,7 +3050,7 @@ async function resolveTaskFolder(userId, taskFolderId) {
                 'INSERT INTO workspace_folders (id, user_id, name, s3_prefix, created_at) VALUES (?, ?, ?, ?, NOW(6))',
                 [newId, userId, 'general', s3Prefix]
             );
-            console.log(`[harness] resolveTaskFolder: created general folder id=${newId} for userId=${userId}`);
+            logger.debug(`[harness] resolveTaskFolder: created general folder id=${newId} for userId=${userId}`);
             return { id: newId, name: 'general', s3_prefix: normalizeS3Prefix(s3Prefix, userId) };
         } finally {
             conn.end();
@@ -3059,7 +3072,7 @@ async function getWorkspaceManifest(userId) {
             conn.end();
         }
     } catch (err) {
-        console.warn(`[harness] getWorkspaceManifest failed (non-fatal): ${err.message}`);
+        logger.warn(`[harness] getWorkspaceManifest failed (non-fatal): ${err.message}`);
         return null;
     }
 }
@@ -3068,7 +3081,7 @@ async function getWorkspaceManifest(userId) {
 app.post('/turn/folder-confirm', async (req, res) => {
     const { conversationId, folderId, newFolderName, readOnlyFolderIds } = req.body || {};
     const roIds = Array.isArray(readOnlyFolderIds) ? readOnlyFolderIds : [];
-    console.log(`[harness] /turn/folder-confirm: conversationId=${conversationId}, folderId=${folderId}, newFolderName=${newFolderName}, readOnlyFolderIds=${JSON.stringify(roIds)}`);
+    logger.debug(`[harness] /turn/folder-confirm: conversationId=${conversationId}, folderId=${folderId}, newFolderName=${newFolderName}, readOnlyFolderIds=${JSON.stringify(roIds)}`);
 
     if (!conversationId) {
         return res.status(400).json({ error: 'conversationId required' });
@@ -3079,7 +3092,7 @@ app.post('/turn/folder-confirm', async (req, res) => {
         // ADO#3566 — grace window: if this was recently resolved (within 5s), accept as duplicate gracefully
         const resolvedAt = _recentlyResolvedConfirms.get(conversationId);
         if (resolvedAt && (Date.now() - resolvedAt) < FOLDER_CONFIRM_GRACE_MS) {
-            console.warn(`[harness] /turn/folder-confirm: late/duplicate confirm for conversationId=${conversationId} (resolved ${Date.now() - resolvedAt}ms ago) — returning already_resolved`);
+            logger.warn(`[harness] /turn/folder-confirm: late/duplicate confirm for conversationId=${conversationId} (resolved ${Date.now() - resolvedAt}ms ago) — returning already_resolved`);
             return res.json({ ok: true, status: 'already_resolved' });
         }
         return res.status(404).json({ error: 'No pending folder selection for this conversation' });
@@ -3105,7 +3118,7 @@ app.post('/turn/folder-confirm', async (req, res) => {
                 conn.end();
             }
             resolvedFolderId = newId;
-            console.log(`[harness] /turn/folder-confirm: created new folder id=${newId} name=${newFolderName} for userId=${pendingUserId}`);
+            logger.debug(`[harness] /turn/folder-confirm: created new folder id=${newId} name=${newFolderName} for userId=${pendingUserId}`);
         }
 
         if (!resolvedFolderId) {
@@ -3115,10 +3128,10 @@ app.post('/turn/folder-confirm', async (req, res) => {
         folderConfirmMap.delete(conversationId);
         markConfirmResolved(conversationId);  // ADO#3566: track for grace window
         resolve({ folderId: resolvedFolderId, readOnlyFolderIds: roIds });
-        console.log(`[folder-confirm] ADO#4858: resolved immediately, returning HTTP ACK before task execution folderId=${resolvedFolderId}`);
+        logger.debug(`[folder-confirm] ADO#4858: resolved immediately, returning HTTP ACK before task execution folderId=${resolvedFolderId}`);
         res.json({ ok: true, folderId: resolvedFolderId });
     } catch (err) {
-        console.error(`[harness] /turn/folder-confirm error: ${err.message}`);
+        logger.error(`[harness] /turn/folder-confirm error: ${err.message}`);
         folderConfirmMap.delete(conversationId);
         markConfirmResolved(conversationId);  // ADO#3566: track for grace window even on error
         reject(err);
@@ -3127,11 +3140,11 @@ app.post('/turn/folder-confirm', async (req, res) => {
 });
 
 app.post('/turn', async (req, res) => {
-    console.log('[harness] /turn received: userId=%s, hasMessage=%s, taskMode=%s',
+    logger.debug('[harness] /turn received: userId=%s, hasMessage=%s, taskMode=%s',
         req.body?.UserId ?? '(none)', !!req.body?.Message, req.body?.TaskMode ?? false);
-    console.log(`[harness] /turn: request received. body keys=${Object.keys(req.body || {}).join(',')}, contentType=${req.headers['content-type']}`);
+    logger.debug(`[harness] /turn: request received. body keys=${Object.keys(req.body || {}).join(',')}, contentType=${req.headers['content-type']}`);
     const rawBody = req.body || {};
-    console.log(`[harness] /turn: raw body dump: ${scrubSecrets(JSON.stringify(rawBody).substring(0, 500))}`);
+    logger.debug(`[harness] /turn: raw body dump: ${scrubSecrets(JSON.stringify(rawBody).substring(0, 500))}`);
 
     // Support both PascalCase (legacy) and camelCase (JsonContent.Create default) field names
     const sessionId   = rawBody.SessionId   ?? rawBody.sessionId;
@@ -3176,16 +3189,16 @@ app.post('/turn', async (req, res) => {
     } else if (userId) {
         scheduledTaskUsers.delete(userId);
     }
-    console.log(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, forceTaskMode=${forceTaskMode}, classifiedTaskMode=${taskMode}, isScheduledTask=${isScheduledTask}, enabledMcpSlugs=[${enabledMcpSlugs.join(',')}], hasMcpTools=${hasMcpTools}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
+    logger.debug(`[harness] /turn: destructured: userId=${userId}, messageLen=${message?.length}, forceTaskMode=${forceTaskMode}, classifiedTaskMode=${taskMode}, isScheduledTask=${isScheduledTask}, enabledMcpSlugs=[${enabledMcpSlugs.join(',')}], hasMcpTools=${hasMcpTools}, historyLen=${Array.isArray(history) ? history.length : 'n/a'}, sessionId=${sessionId}`);
 
     if (!userId || !message) {
-        console.warn(`[harness] /turn: 400 — userId=${userId}, message=${!!message} — 'userId and message required'`);
+        logger.warn(`[harness] /turn: 400 — userId=${userId}, message=${!!message} — 'userId and message required'`);
         return res.status(400).json({ error: 'userId and message required' });
     }
     if (typeof userId !== 'string' ||
         userId.includes('..') || userId.includes('/') || userId.includes('\\') ||
         !/^[a-zA-Z0-9_-]{1,64}$/.test(userId)) {
-        console.warn(`[harness] /turn: 400 — userId failed validation: '${userId}'`);
+        logger.warn(`[harness] /turn: 400 — userId failed validation: '${userId}'`);
         return res.status(400).json({ error: 'Invalid userId' });
     }
 
@@ -3193,18 +3206,18 @@ app.post('/turn', async (req, res) => {
     // ADO#3299 — getUserTokens must be called unconditionally on every /turn
     const normalizedUserId = (userId || '').trim().toLowerCase();
     const userTokens = await getUserTokens(normalizedUserId);
-    console.log(`[harness] /turn: getUserTokens success for userId=${normalizedUserId}, ms365=${!!userTokens?.ms365}, ado=${!!userTokens?.ado}`);
+    logger.debug(`[harness] /turn: getUserTokens success for userId=${normalizedUserId}, ms365=${!!userTokens?.ms365}, ado=${!!userTokens?.ado}`);
 
-    console.log(`[harness] /turn: validation passed for userId=${normalizedUserId}, starting SSE response`);
+    logger.debug(`[harness] /turn: validation passed for userId=${normalizedUserId}, starting SSE response`);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
     const sendEvent = (data) => {
         const payloadLen = data.payload ? data.payload.length : 0;
-        console.log(`[harness] /turn: sendEvent type=${data.type}, contentLen=${data.content?.length ?? 0}, payloadLen=${payloadLen}, errorMessage=${data.errorMessage ?? ''}`);
+        logger.debug(`[harness] /turn: sendEvent type=${data.type}, contentLen=${data.content?.length ?? 0}, payloadLen=${payloadLen}, errorMessage=${data.errorMessage ?? ''}`);
         if (data.type === 'task_progress') {
-            console.log('[harness] task_progress emit', { step: data.payload ? JSON.parse(data.payload).step : null, tool: data.payload ? JSON.parse(data.payload).toolName : null, message: data.payload ? JSON.parse(data.payload).message : null, icon: data.payload ? JSON.parse(data.payload).chipIcon : null, payloadLen });
+            logger.debug('[harness] task_progress emit', { step: data.payload ? JSON.parse(data.payload).step : null, tool: data.payload ? JSON.parse(data.payload).toolName : null, message: data.payload ? JSON.parse(data.payload).message : null, icon: data.payload ? JSON.parse(data.payload).chipIcon : null, payloadLen });
         }
         res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
@@ -3220,16 +3233,16 @@ app.post('/turn', async (req, res) => {
                 const soulData = await soulResp.json();
                 if (soulData?.content) pluginAgentSoul = soulData.content;
             } else {
-                console.warn(`[harness] /turn: could not load soul for pluginAgentId=${pluginAgentId} — status=${soulResp.status}`);
+                logger.warn(`[harness] /turn: could not load soul for pluginAgentId=${pluginAgentId} — status=${soulResp.status}`);
             }
         } catch (soulErr) {
-            console.warn(`[harness] /turn: pluginAgentId soul fetch failed: ${soulErr.message}`);
+            logger.warn(`[harness] /turn: pluginAgentId soul fetch failed: ${soulErr.message}`);
         }
     }
 
     // ─── Resumption brief ─────────────────────────────────────────────────────
     if (message === '__resumption_brief__') {
-        console.log(`[harness] /turn: resumption brief requested for userId=${userId}`);
+        logger.debug(`[harness] /turn: resumption brief requested for userId=${userId}`);
         try {
             // Get MEMORY.md last-modified timestamp from S3
             let memoryTimestamp = null;
@@ -3244,7 +3257,7 @@ app.post('/turn', async (req, res) => {
             // Skip brief entirely if no history (ADO#4827 — MEMORY.md alone is not sufficient to resume)
             const hasHistory = Array.isArray(history) && history.length > 0;
             if (!hasHistory) {
-                console.log(`[harness] resumption brief: no history for userId=${userId} — skipping brief (memoryTimestamp=${memoryTimestamp})`);
+                logger.debug(`[harness] resumption brief: no history for userId=${userId} — skipping brief (memoryTimestamp=${memoryTimestamp})`);
                 sendEvent({ type: 'done', exitCode: 0 });
                 res.end();
                 return;
@@ -3281,7 +3294,7 @@ app.post('/turn', async (req, res) => {
                         sendEvent({ type: 'text', content: summaryText + '\n' });
                     }
                 } catch (summaryErr) {
-                    console.warn(`[harness] resumption brief: Bedrock summary failed — ${summaryErr.message}`);
+                    logger.warn(`[harness] resumption brief: Bedrock summary failed — ${summaryErr.message}`);
                     // Fallback: echo last user message truncated
                     const lastUserTurn = [...history].reverse().find(h => h.Role === 'user' || h.role === 'user');
                     if (lastUserTurn) {
@@ -3299,7 +3312,7 @@ app.post('/turn', async (req, res) => {
 
             sendEvent({ type: 'done', exitCode: 0 });
         } catch (briefErr) {
-            console.error(`[harness] resumption brief error: ${briefErr.message}`);
+            logger.error(`[harness] resumption brief error: ${briefErr.message}`);
             sendEvent({ type: 'error', errorMessage: 'Could not load resumption brief.' });
         }
         res.end();
@@ -3308,7 +3321,7 @@ app.post('/turn', async (req, res) => {
     // ─── End resumption brief ──────────────────────────────────────────────────
 
     if (taskMode) {
-        console.log(`[harness] /turn: taskMode=true — entering CC spawn path for userId=${userId}`);
+        logger.info(`[harness] /turn: taskMode=true — entering CC spawn path for userId=${userId}`);
         sendEvent({ type: 'mode_switch', payload: JSON.stringify({ reason: 'task_mode' }) });
         sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'start', status: 'starting', message: 'Starting task...' }) });
         let ended = false;
@@ -3322,7 +3335,7 @@ app.post('/turn', async (req, res) => {
         // ADO#3576 — 9.2 Pre-Task Confirmation Gate
         // ADO#3913: fires for all taskMode=true turns (explicit ForceTaskMode OR auto-classified), except scheduled tasks
         if (taskMode === true && isScheduledTask !== true) {
-            console.log(`[harness] ADO#3576: task gate firing for userId=${userId}, taskMode=${taskMode}`);
+            logger.debug(`[harness] ADO#3576: task gate firing for userId=${userId}, taskMode=${taskMode}`);
 
             // Load S3 context for gate assessment (same files as regular Bedrock path)
             const gatePrefix = S3_PREFIX || `workspaces/${userId}/`;
@@ -3352,7 +3365,7 @@ The user has indicated they want to execute a task. Your ONLY job right now is t
 - If you need more information: ask your one clarifying question conversationally, then end your response with [TASK_HOLD] on its own line.
 You MUST end every response with exactly one of [TASK_PROCEED] or [TASK_HOLD] on the final line. No other ending is acceptable. [TASK_PROCEED] and [TASK_HOLD] will be stripped before display.
 Do not ask the user about output paths, filenames, or where to save files. The user has already selected a working folder. All files must be written to the working folder — this is handled automatically and does not require user input.`);
-            console.log('[gate-prompt] gate system prompt: CC disclaimer instruction present');
+            logger.debug('[gate-prompt] gate system prompt: CC disclaimer instruction present');
 
             const gateSystemPrompt = gateSystemParts.join('\n\n---\n\n');
 
@@ -3385,7 +3398,7 @@ Do not ask the user about output paths, filenames, or where to save files. The u
 
             let gateResponseText = '';
             try {
-                console.log(`[harness] ADO#3924: calling Bedrock gate assessment, modelId=${resolvedModelId}, messages=${coalescedGateMessages.length}`);
+                logger.debug(`[harness] ADO#3924: calling Bedrock gate assessment, modelId=${resolvedModelId}, messages=${coalescedGateMessages.length}`);
                 const gateCmd = new ConverseStreamCommand({
                     modelId: resolvedModelId,
                     messages: coalescedGateMessages,
@@ -3398,10 +3411,10 @@ Do not ask the user about output paths, filenames, or where to save files. The u
                         gateResponseText += event.contentBlockDelta.delta.text;
                     }
                 }
-                console.log(`[harness] ADO#3924: gate response (len=${gateResponseText.length}): ${gateResponseText.substring(0, 200)}`);
+                logger.debug(`[harness] ADO#3924: gate response (len=${gateResponseText.length}): ${gateResponseText.substring(0, 200)}`);
             } catch (gateErr) {
                 // Gate call failed — default to HOLD for safety
-                console.error(`[harness] ADO#3924: gate assessment failed, defaulting to task_hold: ${gateErr.message}`);
+                logger.error(`[harness] ADO#3924: gate assessment failed, defaulting to task_hold: ${gateErr.message}`);
                 gateResponseText = '[TASK_HOLD]';
             }
 
@@ -3413,10 +3426,10 @@ Do not ask the user about output paths, filenames, or where to save files. The u
 
             if (hasTaskHold) {
                 if (hasTaskProceed) {
-                    console.warn(`[harness] ADO#3924: gate → both TASK_HOLD and TASK_PROCEED detected, TASK_HOLD takes priority. Raw: ${gateResponseText.substring(0, 200)}`);
+                    logger.warn(`[harness] ADO#3924: gate → both TASK_HOLD and TASK_PROCEED detected, TASK_HOLD takes priority. Raw: ${gateResponseText.substring(0, 200)}`);
                 }
                 // TASK_HOLD path — model explicitly requested more info
-                console.log(`[harness] ADO#3924: gate → TASK_HOLD for userId=${userId}`);
+                logger.debug(`[harness] ADO#3924: gate → TASK_HOLD for userId=${userId}`);
 
                 // Stream the clean response to user
                 if (cleanGateResponse) {
@@ -3434,7 +3447,7 @@ Do not ask the user about output paths, filenames, or where to save files. The u
                 // No sentinel — model did not follow the required format.
                 // Safe default: TASK_HOLD. Never silently proceed on ambiguous gate output.
                 // ADO#4002: clarifying questions without sentinel should hold, not spawn CC.
-                console.warn(`[harness] ADO#4002: gate → no sentinel detected, defaulting to TASK_HOLD. Raw gate response: ${gateResponseText}`);
+                logger.warn(`[harness] ADO#4002: gate → no sentinel detected, defaulting to TASK_HOLD. Raw gate response: ${gateResponseText}`);
 
                 // Send whatever the model said as a conversational response (may be a clarifying question)
                 if (cleanGateResponse) {
@@ -3447,7 +3460,7 @@ Do not ask the user about output paths, filenames, or where to save files. The u
             }
 
             // TASK_PROCEED path — confirmed by explicit [TASK_PROCEED] sentinel
-            console.log(`[harness] ADO#3924: gate → TASK_PROCEED for userId=${userId}`);
+            logger.debug(`[harness] ADO#3924: gate → TASK_PROCEED for userId=${userId}`);
             if (cleanGateResponse) {
                 sendEvent({ type: 'text', content: cleanGateResponse });
             }
@@ -3470,7 +3483,7 @@ Do not ask the user about output paths, filenames, or where to save files. The u
             if (persistedWorkingFolderId && !taskFolderIdResolved) {
                 useFastPath = true;
                 taskFolderIdResolved = persistedWorkingFolderId.toString();
-                console.log(`[harness] ADO#4144: using persisted working folder from conversation DB: folderId=${taskFolderIdResolved} userId=${userId}`);
+                logger.debug(`[harness] ADO#4144: using persisted working folder from conversation DB: folderId=${taskFolderIdResolved} userId=${userId}`);
             }
 
             if (!useFastPath && isAutoClassified) {
@@ -3485,13 +3498,13 @@ Do not ask the user about output paths, filenames, or where to save files. The u
                             [userId]
                         );
                         if (fastRows.length > 0 && fastRows[0].last_task_folder_id) {
-                            console.log(`[harness] ADO#4812: last_task_folder_id=${fastRows[0].last_task_folder_id} found but NOT using as fast-path (no pinned folder for this conversation) userId=${userId}`);
+                            logger.debug(`[harness] ADO#4812: last_task_folder_id=${fastRows[0].last_task_folder_id} found but NOT using as fast-path (no pinned folder for this conversation) userId=${userId}`);
                         }
                     } finally {
                         connFast.end();
                     }
                 } catch (fastErr) {
-                    console.warn(`[harness] ADO#3560 fast-path DB check failed (non-fatal): ${fastErr.message}`);
+                    logger.warn(`[harness] ADO#3560 fast-path DB check failed (non-fatal): ${fastErr.message}`);
                 }
             }
 
@@ -3521,7 +3534,7 @@ Do not ask the user about output paths, filenames, or where to save files. The u
                         connFolders.end();
                     }
                 } catch (folderFetchErr) {
-                    console.warn(`[harness] ADO#3560 folder fetch failed (non-fatal): ${folderFetchErr.message}`);
+                    logger.warn(`[harness] ADO#3560 folder fetch failed (non-fatal): ${folderFetchErr.message}`);
                 }
 
                 // Auto-create /general/ if no folders exist yet (Candidate E fix)
@@ -3547,27 +3560,27 @@ Do not ask the user about output paths, filenames, or where to save files. The u
                                 );
                                 folders = [{ id: newGeneralId, name: 'general', lastUsedAt: null }];
                                 lastFolderId = newGeneralId;
-                                console.log(`[harness] ADO#3565: auto-created /general/ folder id=${newGeneralId} for userId=${userId}`);
+                                logger.debug(`[harness] ADO#3565: auto-created /general/ folder id=${newGeneralId} for userId=${userId}`);
                             }
                         } finally {
                             connCreate.end();
                         }
                     } catch (autoCreateErr) {
-                        console.warn(`[harness] ADO#3565: auto-create /general/ failed (non-fatal): ${autoCreateErr.message}`);
+                        logger.warn(`[harness] ADO#3565: auto-create /general/ failed (non-fatal): ${autoCreateErr.message}`);
                     }
                 }
 
-                console.log(`[harness] ADO#3918 folder_required: folderCount=${folders.length} lastFolderId=${lastFolderId} conversationId=${conversationId}`);
-                console.log(`[folder-picker] emitting folder_required (no pinned folder for this conversation) userId=${userId}`);
+                logger.debug(`[harness] ADO#3918 folder_required: folderCount=${folders.length} lastFolderId=${lastFolderId} conversationId=${conversationId}`);
+                logger.debug(`[folder-picker] emitting folder_required (no pinned folder for this conversation) userId=${userId}`);
                 sendEvent({ type: 'folder_required', folders, lastFolderId, conversationId });
-                console.log(`[harness] ADO#3560 holding for folder-confirm: conversationId=${conversationId} userId=${userId}`);
+                logger.debug(`[harness] ADO#3560 holding for folder-confirm: conversationId=${conversationId} userId=${userId}`);
 
                 try {
                     const folderConfirmResult = await new Promise((resolve, reject) => {
                         // ADO#3569: expire any stale entry for the same userId with a different conversationId
                         for (const [existingConvId, existingEntry] of folderConfirmMap.entries()) {
                             if (existingEntry.userId === userId && existingConvId !== conversationId) {
-                                console.warn(`[harness] /turn: expiring stale folderConfirmMap entry for userId=${userId} (old conversationId=${existingConvId})`);
+                                logger.warn(`[harness] /turn: expiring stale folderConfirmMap entry for userId=${userId} (old conversationId=${existingConvId})`);
                                 folderConfirmMap.delete(existingConvId);
                                 markConfirmResolved(existingConvId);
                                 if (existingEntry.reject) existingEntry.reject(new Error('Superseded by new turn'));
@@ -3585,9 +3598,9 @@ Do not ask the user about output paths, filenames, or where to save files. The u
                     taskFolderIdResolved = folderConfirmResult.folderId;
                     const readOnlyFolderIdsFromPicker = folderConfirmResult.readOnlyFolderIds || [];
                     readOnlyFolderIdsConfirmed = readOnlyFolderIdsFromPicker;
-                    console.log(`[harness] ADO#3561 folder confirmed: folderId=${taskFolderIdResolved} readOnlyFolderIds=${JSON.stringify(readOnlyFolderIdsFromPicker)} conversationId=${conversationId}`);
+                    logger.debug(`[harness] ADO#3561 folder confirmed: folderId=${taskFolderIdResolved} readOnlyFolderIds=${JSON.stringify(readOnlyFolderIdsFromPicker)} conversationId=${conversationId}`);
                 } catch (timeoutErr) {
-                    console.warn(`[harness] ADO#3560 folder confirm error: ${timeoutErr.message}`);
+                    logger.warn(`[harness] ADO#3560 folder confirm error: ${timeoutErr.message}`);
                     endResponse({ type: 'error', errorMessage: 'Folder selection timed out. Please try again.' });
                     return;
                 }
@@ -3617,7 +3630,7 @@ Do not ask the user about output paths, filenames, or where to save files. The u
                 }) });
             }
         } catch (folderErr) {
-            console.warn(`[harness] folder resolution failed (non-fatal), using userWorkspaceDir: ${folderErr.message}`);
+            logger.warn(`[harness] folder resolution failed (non-fatal), using userWorkspaceDir: ${folderErr.message}`);
         }
         // Always load S3 context for task mode
         const prefix = S3_PREFIX || `workspaces/${userId}/`;
@@ -3638,23 +3651,27 @@ Do not ask the user about output paths, filenames, or where to save files. The u
         contextParts.push(`## Session Identifiers\nuserId: ${userId}`);
         if (userMd) {
             contextParts.push(`## About the User\n${userMd}`);
-            console.log(`[brief-context] user context injected: ${userMd.length} chars for userId=${userId}`);
+            logger.debug(`[brief-context] user context injected: ${userMd.length} chars for userId=${userId}`);
         } else {
             contextParts.push(`## About the User\nNo personal profile found for this user.`);
-            console.log(`[brief-context] user context: null (no USER.md) for userId=${userId}`);
+            logger.debug(`[brief-context] user context: null (no USER.md) for userId=${userId}`);
         }
         // ADO#3564 — rewrite user message for retrieval optimization
         const retrievalQuery = await rewriteQueryForRetrieval(message, userId);
         // ADO#3397 — semantic memory injection (replaces MEMORY.md for vectorized users)
         if (pgPool) {
+            logger.debug(`[pgvector] CC autoRecall: userId=${userId} query="${retrievalQuery.slice(0,60)}"`);
             const semanticChunks = await searchMemoryChunks(userId, retrievalQuery, 5, 0.7);
             if (semanticChunks && semanticChunks.length > 0) {
                 const semanticContext = semanticChunks
                     .map(c => `[${c.source_file}] ${c.content}`)
                     .join('\n\n');
                 contextParts.push(`## Relevant Memory\n${semanticContext}`);
-                console.log(`[pgvector] injected ${semanticChunks.length} semantic chunks for userId=${userId} (CC path)`);
+                logger.debug(`[pgvector] injected ${semanticChunks.length} semantic chunks for userId=${userId} (CC path)`);
             } else {
+                if (semanticChunks && semanticChunks.length === 0) {
+                    logger.debug(`[pgvector] CC autoRecall: userId=${userId} 0 chunks above threshold`);
+                }
                 if (memoryMd) contextParts.push(`## Long-Term Memory\n${memoryMd}`);
             }
         } else {
@@ -3692,11 +3709,11 @@ You have access to the user's workspace files and memory topics. When the user a
                 if (Array.isArray(files) && files.length > 0) {
                     const fileList = files.map(f => `${f.filename || f.Filename} (${new Date(f.createdAt || f.CreatedAt).toLocaleDateString()})`).join(', ');
                     contextParts.push(`## Existing Files in This Folder\nThese files already exist in the working folder from prior sessions. They are reference material — NOT evidence that the current task completed. Execute the user's request fresh:\n${fileList}`);
-                    console.log(`[harness] workspace brief injected: ${files.length} files for userId=${userId} folderId=${taskFolderIdResolved || 'none'}`);
+                    logger.debug(`[harness] workspace brief injected: ${files.length} files for userId=${userId} folderId=${taskFolderIdResolved || 'none'}`);
                 }
             }
         } catch (briefErr) {
-            console.warn(`[harness] workspace brief injection failed (non-fatal): ${briefErr.message}`);
+            logger.warn(`[harness] workspace brief injection failed (non-fatal): ${briefErr.message}`);
         }
 
         // ADO#3398 7.7-B — memory topic keyword pre-fetch stub
@@ -3709,10 +3726,10 @@ You have access to the user's workspace files and memory topics. When the user a
                     const topicContent = await fetchS3File(`${S3_PREFIX || `workspaces/${userId}/`}memory/${matchedSlug}.md`);
                     if (topicContent) {
                         contextParts.push(`## Pre-fetched Memory: ${matchedSlug}\n${topicContent}`);
-                        console.log(`[harness] pre-fetched memory topic '${matchedSlug}' for userId=${userId}`);
+                        logger.debug(`[harness] pre-fetched memory topic '${matchedSlug}' for userId=${userId}`);
                     }
                 } catch (prefetchErr) {
-                    console.warn(`[harness] memory pre-fetch failed for slug '${matchedSlug}': ${prefetchErr.message}`);
+                    logger.warn(`[harness] memory pre-fetch failed for slug '${matchedSlug}': ${prefetchErr.message}`);
                 }
             }
         }
@@ -3759,12 +3776,12 @@ Be concise and specific. Output only the brief, no preamble.${filesSection}`;
 
                 const brief = response.output?.message?.content?.[0]?.text?.trim();
                 if (brief && brief.length > 50) {
-                    console.log(`[CC spawn] task brief generated (len=${brief.length})`);
+                    logger.debug(`[CC spawn] task brief generated (len=${brief.length})`);
                     return brief;
                 }
                 return null;
             } catch (err) {
-                console.warn('[CC spawn] task brief generation failed, using fallback:', err.message);
+                logger.warn('[CC spawn] task brief generation failed, using fallback:', err.message);
                 return null;
             }
         }
@@ -3786,7 +3803,7 @@ Be concise and specific. Output only the brief, no preamble.${filesSection}`;
             const generatedBrief = await generateTaskBrief(history, bedrockClient, haiku3575ModelId, briefWorkspaceFiles);
             if (generatedBrief) {
                 contextParts.push(`## Task Brief (Generated)\n${generatedBrief}`);
-                console.log(`[harness] /turn: injected Haiku-generated task brief (len=${generatedBrief.length}) into CC context`);
+                logger.debug(`[harness] /turn: injected Haiku-generated task brief (len=${generatedBrief.length}) into CC context`);
             } else {
                 // Fallback: original truncated recap (ADO#3089)
                 const MAX_RECAP_CHARS = 2000;
@@ -3810,7 +3827,7 @@ Be concise and specific. Output only the brief, no preamble.${filesSection}`;
                     recap = recap.substring(0, MAX_RECAP_CHARS) + '\n[... recap truncated]';
                 }
                 contextParts.push(recap);
-                console.log(`[harness] /turn: injected session recap fallback (${recap.length} chars, ${recentMessages.length} messages) into CC context`);
+                logger.debug(`[harness] /turn: injected session recap fallback (${recap.length} chars, ${recentMessages.length} messages) into CC context`);
             }
         }
 
@@ -3840,7 +3857,7 @@ Be concise and specific. Output only the brief, no preamble.${filesSection}`;
                                     const text = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
                                     ccKbParts.push(`## Knowledge Base Context\nThe following information was retrieved from the organization's knowledge base:\n\n${text}`);
                                 }
-                            }).catch(err => console.error('[harness] CC KB corp retrieval error:', err.message))
+                            }).catch(err => logger.error('[harness] CC KB corp retrieval error:', err.message))
                     );
                 }
                 if ((kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled) && !alreadyHasPersonalKb && personalKbUserId && process.env.PERSONAL_KB_ID) {
@@ -3851,10 +3868,10 @@ Be concise and specific. Output only the brief, no preamble.${filesSection}`;
                                     const text = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
                                     ccKbParts.push(`## Personal/Team Knowledge Base Context\nThe following information was retrieved from the user's knowledge base:\n\n${text}`);
                                 }
-                            }).catch(err => console.error('[harness] CC KB personal retrieval error:', err.message))
+                            }).catch(err => logger.error('[harness] CC KB personal retrieval error:', err.message))
                     );
                 } else if ((kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled) && !alreadyHasPersonalKb && !personalKbUserId) {
-                    console.warn('[harness] CC KB: PersonalKbEnabled but no personalKbUserId — skipping for security');
+                    logger.warn('[harness] CC KB: PersonalKbEnabled but no personalKbUserId — skipping for security');
                 }
                 if ((kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled) && !alreadyHasTeamKb && teamIds && teamIds.length > 0 && process.env.TEAM_KB_ID) {
                     for (const teamId of teamIds) {
@@ -3865,7 +3882,7 @@ Be concise and specific. Output only the brief, no preamble.${filesSection}`;
                                         const text = results.map((r, i) => `[${i+1}] ${(r.content?.text || '').substring(0, 2000)}`).join('\n\n');
                                         ccKbParts.push(`## Personal/Team Knowledge Base Context (Team ${teamId})\nThe following information was retrieved from the team's knowledge base:\n\n${text}`);
                                     }
-                                }).catch(err => console.error(`[harness] CC KB team ${teamId} retrieval error:`, err.message))
+                                }).catch(err => logger.error(`[harness] CC KB team ${teamId} retrieval error:`, err.message))
                         );
                     }
                 }
@@ -3874,7 +3891,7 @@ Be concise and specific. Output only the brief, no preamble.${filesSection}`;
         }
         if (ccKbParts.length > 0) {
             contextParts.push(...ccKbParts);
-            console.log(`[harness] CC spawn: injected ${ccKbParts.length} KB section(s) into contextParts for userId=${userId}`);
+            logger.debug(`[harness] CC spawn: injected ${ccKbParts.length} KB section(s) into contextParts for userId=${userId}`);
         }
 
         // Artifact generation instructions — injected on every CC task turn (ADO#3563)
@@ -3904,7 +3921,7 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                     `aws s3 sync s3://${S3_BUCKET}/${folder.s3_prefix} ${folderLocalDir}/ --quiet`,
                     { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
                 );
-                console.log(`[harness] folder-scoped S3 sync complete: folder=${folder.name} folderId=${folder.id} userId=${userId}`);
+                logger.info(`[harness] folder-scoped S3 sync complete: folder=${folder.name} folderId=${folder.id} userId=${userId}`);
 
                 // Record pre-sync snapshot for dirty detection (after S3 sync, so we capture S3 state)
                 preSyncSnapshot = buildLocalSnapshot(folderLocalDir);
@@ -3915,13 +3932,13 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                     await connUpdate.execute('UPDATE users SET last_task_folder_id = ? WHERE id = ?', [folder.id, userId]);
                     connUpdate.end();
                 } catch (updateErr) {
-                    console.warn(`[harness] failed to update last_task_folder_id (non-fatal): ${updateErr.message}`);
+                    logger.warn(`[harness] failed to update last_task_folder_id (non-fatal): ${updateErr.message}`);
                 }
             } else {
-                console.warn(`[harness] no folder resolved — skipping folder-scoped S3 pre-sync userId=${userId}`);
+                logger.warn(`[harness] no folder resolved — skipping folder-scoped S3 pre-sync userId=${userId}`);
             }
         } catch (syncErr) {
-            console.warn(`[harness] pre-run folder sync failed (non-fatal): ${syncErr.message}`);
+            logger.warn(`[harness] pre-run folder sync failed (non-fatal): ${syncErr.message}`);
             // Never block — continue with whatever is already local
         }
 
@@ -3938,10 +3955,10 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
                         `aws s3 sync s3://${S3_BUCKET}/${roFolder.s3_prefix} ${roLocalDir}/ --delete --quiet`,
                         { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] }
                     );
-                    console.log(`[harness] ADO#3561 read-only sync complete: folder=${roFolder.name} folderId=${roFolder.id} localDir=${roLocalDir} userId=${userId}`);
+                    logger.info(`[harness] ADO#3561 read-only sync complete: folder=${roFolder.name} folderId=${roFolder.id} localDir=${roLocalDir} userId=${userId}`);
                     resolvedReadOnlyFolders.push({ folder: roFolder, localDir: roLocalDir });
                 } catch (roSyncErr) {
-                    console.warn(`[harness] ADO#3561 read-only folder sync failed for folderId=${roFolderId} (non-fatal): ${roSyncErr.message}`);
+                    logger.warn(`[harness] ADO#3561 read-only folder sync failed for folderId=${roFolderId} (non-fatal): ${roSyncErr.message}`);
                 }
             }
         }
@@ -4011,7 +4028,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
             '--verbose',
             '--dangerously-skip-permissions'
         ];
-        console.log(`[CC spawn] command=claude ${ccArgs.join(' ')} cwd=${folderLocalDir} userId=${userId} briefLen=${briefContent?.length ?? 0}`);
+        logger.debug(`[CC spawn] command=claude ${ccArgs.join(' ')} cwd=${folderLocalDir} userId=${userId} briefLen=${briefContent?.length ?? 0}`);
         const ccProcess = spawn('claude', ccArgs, {
             cwd: folderLocalDir,
             env: {
@@ -4062,7 +4079,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                         isFinal: false
                     }) });
                     lastProgressAt = Date.now();
-                    console.log(`[CC spawn] keepalive chip emitted: "${label}" userId=${userId}`);
+                    logger.debug(`[CC spawn] keepalive chip emitted: "${label}" userId=${userId}`);
                 }
             }, 8000);
         };
@@ -4085,7 +4102,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
             }
             // ADO#4926 — reset progress timer on any stdout activity
             lastProgressAt = Date.now();
-            console.log(`[CC spawn] stdout chunk bytes=${chunk.length} userId=${userId}`);
+            logger.debug(`[CC spawn] stdout chunk bytes=${chunk.length} userId=${userId}`);
             ccStdoutBuffer += chunk.toString();
             const lines = ccStdoutBuffer.split('\n');
             ccStdoutBuffer = lines.pop(); // keep incomplete last line
@@ -4094,7 +4111,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                 let parsed;
                 try { parsed = JSON.parse(line); } catch {
                     // Non-JSON line — suppress during CC execution (ADO#4100), log only
-                    console.debug(`[CC spawn] non-JSON line suppressed: ${line.slice(0, 200)} userId=${userId}`);
+                    logger.debug(`[CC spawn] non-JSON line suppressed: ${line.slice(0, 200)} userId=${userId}`);
                     continue;
                 }
                 const evtType = parsed.type;
@@ -4106,11 +4123,11 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                             // ADO#4100 — suppress ALL text blocks from assistant messages during CC execution.
                             // Only the final `result` event should emit to the token stream.
                             // Co-located narration (with tool_use) was already suppressed; now suppress standalone narration too.
-                            console.debug(`[CC spawn] narration suppressed (assistant message text block, ${block.text.length} chars) userId=${userId}`);
+                            logger.debug(`[CC spawn] narration suppressed (assistant message text block, ${block.text.length} chars) userId=${userId}`);
                         } else if (block.type === 'tool_use') {
                             toolUseMap.set(block.id, { name: block.name || 'tool', input: block.input || {} }); // ADO#4860 — store input for descriptive tool_result labels
                             const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
-                            console.log(`[CC spawn] tool_use: ${block.name}(${inputSummary}) userId=${userId}`);
+                            logger.debug(`[CC spawn] tool_use: ${block.name}(${inputSummary}) userId=${userId}`);
                             const label = resolveProgressLabel(block.name, block.input);
                             sendEvent({ type: 'task_progress', payload: JSON.stringify({ step: 'tool_use', toolName: block.name, status: 'calling', message: label, chipIcon: resolveProgressIcon(block.name) }) });
                             lastProgressAt = Date.now(); // ADO#4926 — reset keepalive timer
@@ -4124,7 +4141,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                             const toolInput = (typeof toolEntry === 'object' ? toolEntry?.input : {}) || {};
                             const doneLabel = resolveProgressLabel(toolName, toolInput);
                             const chipLabel = (doneLabel && doneLabel !== 'Working...') ? doneLabel : `${toolName} done`; // ADO#4860 — descriptive done label
-                            console.log(`[chip-label] ADO#4860: tool_result toolName=${toolName} label=${chipLabel}`);
+                            logger.debug(`[chip-label] ADO#4860: tool_result toolName=${toolName} label=${chipLabel}`);
                             sendEvent({ type: 'task_progress', payload: JSON.stringify({
                                 step: 'tool_result', toolName, status: 'done', message: chipLabel,
                                 chipIcon: resolveProgressIcon(toolName)
@@ -4139,7 +4156,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                     }
                     const resultText = parsed.result || '';
                     if (resultText) {
-                        console.log(`[CC spawn] result text (first 500 chars): ${resultText.slice(0, 500)} userId=${userId}`);
+                        logger.debug(`[CC spawn] result text (first 500 chars): ${resultText.slice(0, 500)} userId=${userId}`);
                     }
                     // result.is_error is handled by the close event exit code
                 }
@@ -4148,7 +4165,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
         });
         ccProcess.stderr.on('data', (chunk) => {
             const stderrText = chunk.toString();
-            console.log(`[CC spawn] stderr bytes=${chunk.length} userId=${userId} text=${stderrText.trim().slice(0, 500)}`);
+            logger.debug(`[CC spawn] stderr bytes=${chunk.length} userId=${userId} text=${stderrText.trim().slice(0, 500)}`);
             sendEvent({ type: 'log', content: scrubSecrets(stderrText) });
         });
         ccProcess.on('close', async (code) => {
@@ -4156,12 +4173,12 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
             keepaliveStop(); // ADO#4926 — stop keepalive on process close
             toolUseMap.clear();
             // ADO#3289 — log exit code and silent-exit warning
-            console.log(`[CC spawn] process exited code=${code} userId=${userId} ccTextEmitted=${ccTextEmitted}`);
+            logger.debug(`[CC spawn] process exited code=${code} userId=${userId} ccTextEmitted=${ccTextEmitted}`);
             if (code === 0 && !ccTextEmitted) {
-                console.warn(`[CC spawn] Process exited 0 but produced no output — possible silent failure userId=${userId}`);
+                logger.warn(`[CC spawn] Process exited 0 but produced no output — possible silent failure userId=${userId}`);
             }
             if (code !== 0) {
-                console.warn(`[CC spawn] Process exited with non-zero code=${code} userId=${userId}`);
+                logger.warn(`[CC spawn] Process exited with non-zero code=${code} userId=${userId}`);
             }
             // §G7 — clean up scheduled task context
             if (userId) scheduledTaskUsers.delete(userId);
@@ -4169,7 +4186,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
             try {
                 artifact = await scanAndUploadArtifacts(userId, folderLocalDir, conversationId);
             } catch (err) {
-                console.error('[harness] artifact upload failed:', err.message);
+                logger.error('[harness] artifact upload failed:', err.message);
             }
 
             // ADO#3559 — dirty-only post-task sync (upload only new/changed files)
@@ -4180,7 +4197,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                     let dirtyFiles = findDirtyFiles(preSyncSnapshot, postSyncSnapshot);
                     const MAX_DIRTY_FILES = 50;
                     if (dirtyFiles.length > MAX_DIRTY_FILES) {
-                        console.warn(`[harness] dirty-file sync: ${dirtyFiles.length} files detected, capping at ${MAX_DIRTY_FILES}`);
+                        logger.warn(`[harness] dirty-file sync: ${dirtyFiles.length} files detected, capping at ${MAX_DIRTY_FILES}`);
                         dirtyFiles = dirtyFiles.slice(0, MAX_DIRTY_FILES);
                     }
                     const uploadedFiles = [];
@@ -4191,7 +4208,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                         const fileSize = (() => { try { return fs.statSync(localPath).size; } catch { return null; } })();
                         // ADO#4834 — skip very large files unlikely to be intentional task outputs
                         if (fileSize !== null && fileSize > 100 * 1024 * 1024) {
-                            console.warn(`[harness] post-sync skipping large file (>100MB): ${relPath} size=${fileSize} userId=${userId}`);
+                            logger.warn(`[harness] post-sync skipping large file (>100MB): ${relPath} size=${fileSize} userId=${userId}`);
                             continue;
                         }
                         const s3Key = `${folder.s3_prefix}${relPath}`;
@@ -4200,7 +4217,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                             Key: s3Key,
                             Body: fs.createReadStream(localPath),
                         }));
-                        console.log(`[harness] post-sync uploaded: ${relPath} → s3://${S3_BUCKET}/${s3Key} userId=${userId}`);
+                        logger.debug(`[harness] post-sync uploaded: ${relPath} → s3://${S3_BUCKET}/${s3Key} userId=${userId}`);
                         ccFilesUploaded++; // ADO#4797: increment after confirmed S3 PUT, before DB work
 
                         // ADO#3562 — write provenance row
@@ -4230,7 +4247,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                                     'UPDATE user_workspace_uploads SET current_version = ?, conversation_id = ?, source = ? WHERE id = ?',
                                     [nextVersion, conversationId ?? null, 'cc', existRows[0].id]
                                 );
-                                console.log(`[harness] post-sync: updated artifact source to cc for file ${path.basename(relPath)} userId=${userId}`);
+                                logger.debug(`[harness] post-sync: updated artifact source to cc for file ${path.basename(relPath)} userId=${userId}`);
                                 await connProv.execute(
                                     'INSERT INTO workspace_file_versions (id, file_id, version_number, s3_key, size_bytes, created_at, created_by, conversation_id, turn_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                                     [crypto.randomUUID(), existRows[0].id, nextVersion, s3Key, fileSize ?? null, new Date(), 'cc', conversationId ?? null, turnIndex ?? null]
@@ -4238,12 +4255,12 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                                 uploadedFiles.push({ filename: path.basename(relPath), fileId: existRows[0].id, version: nextVersion, action: 'updated', s3Key });
                             }
                         } catch (provErr) {
-                            console.warn(`[harness] post-sync provenance error (non-fatal): ${provErr.message}`);
+                            logger.warn(`[harness] post-sync provenance error (non-fatal): ${provErr.message}`);
                         } finally {
                             connProv.end();
                         }
                     }
-                    console.log(`[harness] post-sync complete: ${dirtyFiles.length} file(s) uploaded userId=${userId}`);
+                    logger.info(`[harness] post-sync complete: ${dirtyFiles.length} file(s) uploaded userId=${userId}`);
 
                     // ADO#3562 — emit files_updated SSE event with presigned URLs
                     if (uploadedFiles.length > 0) {
@@ -4267,22 +4284,22 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                                     }))
                                 })
                             });
-                            console.log(`[harness] files_updated event emitted: ${uploadedFiles.length} file(s) userId=${userId}`);
+                            logger.debug(`[harness] files_updated event emitted: ${uploadedFiles.length} file(s) userId=${userId}`);
                         } catch (presignErr) {
-                            console.warn(`[harness] files_updated presign error (non-fatal): ${presignErr.message}`);
+                            logger.warn(`[harness] files_updated presign error (non-fatal): ${presignErr.message}`);
                         }
                     }
                 } else {
                     // fallback: no folder resolved, skip post-sync
-                    console.warn(`[harness] post-sync skipped: no folder resolved for userId=${userId}`);
+                    logger.warn(`[harness] post-sync skipped: no folder resolved for userId=${userId}`);
                 }
             } catch (syncErr) {
-                console.warn(`[harness] post-run S3 sync failed (non-fatal): ${syncErr.message}`);
+                logger.warn(`[harness] post-run S3 sync failed (non-fatal): ${syncErr.message}`);
             }
 
             // ADO#4797 — narration-only exit detection: warn if CC produced text but made no file changes
             if (code === 0 && ccTextEmitted && ccFilesUploaded === 0 && !artifact) {
-                console.warn(`[CC spawn] ADO#4797: narration-only exit detected — ccTextEmitted=true ccFilesUploaded=0 artifact=null userId=${userId}`);
+                logger.warn(`[CC spawn] ADO#4797: narration-only exit detected — ccTextEmitted=true ccFilesUploaded=0 artifact=null userId=${userId}`);
                 sendEvent({ type: 'task_hold', payload: JSON.stringify({ reason: 'narration_only', message: 'Task may not have executed — agent produced text output but made no file changes. Review the response and retry if needed.' }) });
                 endResponse({ type: 'done', exitCode: code });
             } else if (artifact) {
@@ -4301,17 +4318,17 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
         ccProcess.on('error', (err) => { clearTimeout(timeout); keepaliveStop(); endResponse({ type: 'error', errorMessage: scrubSecrets(err.message) }); });
     } else {
         // ── Bedrock ConverseStream path ───────────────────────────────────
-        console.log(`[harness] /turn: taskMode=false — entering Bedrock ConverseStream path for userId=${userId}`);
+        logger.debug(`[harness] /turn: taskMode=false — entering Bedrock ConverseStream path for userId=${userId}`);
         try {
             // Load user memory files from S3
             const prefix = S3_PREFIX || `workspaces/${userId}/`;
-            console.log(`[harness] /turn: fetching S3 context files from prefix=${prefix}`);
+            logger.debug(`[harness] /turn: fetching S3 context files from prefix=${prefix}`);
             const [soulMd, userMd, memoryMd] = await Promise.all([
                 fetchS3File(`${prefix}assistants/SOUL.md`),
                 fetchS3File(`${prefix}assistants/USER.md`),
                 fetchS3File(`${prefix}memory/MEMORY.md`),
             ]);
-            console.log(`[harness] /turn: S3 fetch complete — soulMd=${soulMd ? soulMd.length + ' chars' : 'null'}, userMd=${userMd ? userMd.length + ' chars' : 'null'}, memoryMd=${memoryMd ? memoryMd.length + ' chars' : 'null'}`);
+            logger.debug(`[harness] /turn: S3 fetch complete — soulMd=${soulMd ? soulMd.length + ' chars' : 'null'}, userMd=${userMd ? userMd.length + ' chars' : 'null'}, memoryMd=${memoryMd ? memoryMd.length + ' chars' : 'null'}`);
 
             const systemParts = [];
             if (pluginAgentSoul) {
@@ -4326,14 +4343,18 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
             const retrievalQuery = await rewriteQueryForRetrieval(message, userId);
             // ADO#3397 — semantic memory injection (replaces MEMORY.md for vectorized users)
             if (pgPool) {
+                logger.debug(`[pgvector] Bedrock autoRecall: userId=${userId} query="${retrievalQuery.slice(0,60)}"`);
                 const semanticChunks = await searchMemoryChunks(userId, retrievalQuery, 5, 0.7);
                 if (semanticChunks && semanticChunks.length > 0) {
                     const semanticContext = semanticChunks
                         .map(c => `[${c.source_file}] ${c.content}`)
                         .join('\n\n');
                     systemParts.push(`## Relevant Memory\n${semanticContext}`);
-                    console.log(`[pgvector] injected ${semanticChunks.length} semantic chunks for userId=${userId} (Bedrock path)`);
+                    logger.debug(`[pgvector] injected ${semanticChunks.length} semantic chunks for userId=${userId} (Bedrock path)`);
                 } else {
+                    if (semanticChunks && semanticChunks.length === 0) {
+                        logger.debug(`[pgvector] Bedrock autoRecall: userId=${userId} 0 chunks above threshold`);
+                    }
                     if (memoryMd) systemParts.push(`## Long-Term Memory\n${memoryMd}`);
                 }
             } else {
@@ -4393,11 +4414,11 @@ Do NOT emit [TASK_READY] if:
                     if (Array.isArray(files) && files.length > 0) {
                         const fileList = files.map(f => `${f.filename || f.Filename} (${new Date(f.createdAt || f.CreatedAt).toLocaleDateString()})`).join(', ');
                         systemParts.push(`## Recent Workspace Artifacts\nRecent assistant-created files: ${fileList}`);
-                        console.log(`[harness] workspace brief injected: ${files.length} files for userId=${userId}`);
+                        logger.debug(`[harness] workspace brief injected: ${files.length} files for userId=${userId}`);
                     }
                 }
             } catch (briefErr) {
-                console.warn(`[harness] workspace brief injection failed (non-fatal): ${briefErr.message}`);
+                logger.warn(`[harness] workspace brief injection failed (non-fatal): ${briefErr.message}`);
             }
 
             // ADO#3398 7.7-B — memory topic keyword pre-fetch stub
@@ -4411,10 +4432,10 @@ Do NOT emit [TASK_READY] if:
                         const topicContent = await fetchS3File(`${prefix}memory/${matchedSlug}.md`);
                         if (topicContent) {
                             systemParts.push(`## Pre-fetched Memory: ${matchedSlug}\n${topicContent}`);
-                            console.log(`[harness] pre-fetched memory topic '${matchedSlug}' for userId=${userId}`);
+                            logger.debug(`[harness] pre-fetched memory topic '${matchedSlug}' for userId=${userId}`);
                         }
                     } catch (prefetchErr) {
-                        console.warn(`[harness] memory pre-fetch failed for slug '${matchedSlug}': ${prefetchErr.message}`);
+                        logger.warn(`[harness] memory pre-fetch failed for slug '${matchedSlug}': ${prefetchErr.message}`);
                     }
                 }
             }
@@ -4423,18 +4444,18 @@ Do NOT emit [TASK_READY] if:
                 systemParts.push('You are a helpful AI assistant.');
             }
             let fullSystemPrompt = systemParts.join('\n\n---\n\n');
-            console.log(`[harness] /turn: system prompt built, totalLen=${fullSystemPrompt.length}`);
+            logger.debug(`[harness] /turn: system prompt built, totalLen=${fullSystemPrompt.length}`);
 
             // ADO#3241 — Harness-side KB retrieval
             const kbFlags = rawBody.KbFlags ?? rawBody.kbFlags ?? null;
-            console.log(`[harness] /turn: kbFlags extracted — value=${JSON.stringify(kbFlags)} userId=${rawBody.UserId ?? rawBody.userId}`);
+            logger.debug(`[harness] /turn: kbFlags extracted — value=${JSON.stringify(kbFlags)} userId=${rawBody.UserId ?? rawBody.userId}`);
             if (kbFlags) {
                 const kbEnabled = kbFlags.CorpKbEnabled || kbFlags.corpKbEnabled ||
                                   kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled ||
                                   kbFlags.TeamKbEnabled || kbFlags.teamKbEnabled;
 
                 if (kbEnabled) {
-                    console.log(`[harness] /turn: KB retrieval — flags=${JSON.stringify(kbFlags)}`);
+                    logger.debug(`[harness] /turn: KB retrieval — flags=${JSON.stringify(kbFlags)}`);
                     const kbSources = [];
 
                     // ADO#3278 — KB retrieval with data isolation filters
@@ -4443,7 +4464,7 @@ Do NOT emit [TASK_READY] if:
 
                     async function doKbRetrieval(kbId, kbName, query, filterKey, filterValue) {
                         if (!kbId) {
-                            console.warn(`[harness] KB retrieval: no KB ID for ${kbName}`);
+                            logger.warn(`[harness] KB retrieval: no KB ID for ${kbName}`);
                             return;
                         }
                         try {
@@ -4466,7 +4487,7 @@ Do NOT emit [TASK_READY] if:
                                 systemParts.push(section);
                             }
                         } catch (err) {
-                            console.error(`[harness] KB retrieval error for ${kbName}:`, err.message);
+                            logger.error(`[harness] KB retrieval error for ${kbName}:`, err.message);
                         }
                     }
 
@@ -4478,7 +4499,7 @@ Do NOT emit [TASK_READY] if:
                     if (kbFlags.PersonalKbEnabled || kbFlags.personalKbEnabled) {
                         // Personal KB: filter by ownerId = user's GUID
                         if (!personalKbUserId) {
-                            console.warn(`[harness] /turn: Personal KB requested but no PersonalKbUserId in kbFlags — skipping for security`);
+                            logger.warn(`[harness] /turn: Personal KB requested but no PersonalKbUserId in kbFlags — skipping for security`);
                         } else {
                             kbPromises.push(doKbRetrieval(process.env.PERSONAL_KB_ID, 'Personal KB', retrievalQuery, 'ownerId', personalKbUserId));
                         }
@@ -4487,7 +4508,7 @@ Do NOT emit [TASK_READY] if:
                         // Team KB: one retrieval per team ID, each filtered by teamId
                         const effectiveTeamIds = teamIds && teamIds.length > 0 ? teamIds : null;
                         if (!effectiveTeamIds) {
-                            console.warn(`[harness] /turn: Team KB requested but no TeamIds in kbFlags — skipping for security`);
+                            logger.warn(`[harness] /turn: Team KB requested but no TeamIds in kbFlags — skipping for security`);
                         } else {
                             for (const teamId of effectiveTeamIds) {
                                 kbPromises.push(doKbRetrieval(process.env.TEAM_KB_ID, `Team KB (${teamId})`, retrievalQuery, 'teamId', teamId));
@@ -4499,14 +4520,14 @@ Do NOT emit [TASK_READY] if:
                     // Emit kb_sources event (only when results exist — ADO#3278)
                     if (kbSources.length > 0) {
                         res.write(`event: kb_sources\ndata: ${JSON.stringify({ sources: kbSources })}\n\n`);
-                        console.log(`[harness] /turn: emitted kb_sources — ${kbSources.length} KB(s) with results`);
+                        logger.debug(`[harness] /turn: emitted kb_sources — ${kbSources.length} KB(s) with results`);
                     } else {
-                        console.log(`[harness] /turn: KB searched — no results found, skipping kb_sources event`);
+                        logger.debug(`[harness] /turn: KB searched — no results found, skipping kb_sources event`);
                     }
 
                     // Rebuild system prompt after KB context injection
                     fullSystemPrompt = systemParts.join('\n\n---\n\n');
-                    console.log(`[harness] /turn: system prompt rebuilt after KB retrieval, totalLen=${fullSystemPrompt.length}`);
+                    logger.debug(`[harness] /turn: system prompt rebuilt after KB retrieval, totalLen=${fullSystemPrompt.length}`);
                 }
             }
 
@@ -4523,7 +4544,7 @@ Do NOT emit [TASK_READY] if:
                 }
             }
             messages.push({ role: 'user', content: [{ text: message }] });
-            console.log(`[harness] /turn: message array built, count=${messages.length} (including current user message)`);
+            logger.debug(`[harness] /turn: message array built, count=${messages.length} (including current user message)`);
 
             // ADO#3218 — Dynamic toolConfig: built-ins always present + MCP tools for enabled slugs
             const BUILTIN_TOOL_SPECS = [
@@ -4682,16 +4703,16 @@ Do NOT emit [TASK_READY] if:
             for (const slug of enabledMcpSlugs) {
                 if (MCP_TOOL_SPECS[slug]) {
                     allTools.push(...MCP_TOOL_SPECS[slug]);
-                    console.log(`[harness] /turn: toolConfig — added ${MCP_TOOL_SPECS[slug].length} tools for slug=${slug}`);
+                    logger.debug(`[harness] /turn: toolConfig — added ${MCP_TOOL_SPECS[slug].length} tools for slug=${slug}`);
                 } else {
                     // ADO#3249 — log unknown slugs so mismatches are caught early
-                    console.warn(`[harness] /turn: toolConfig — no MCP_TOOL_SPECS entry for slug=${slug} (known: ${Object.keys(MCP_TOOL_SPECS).join(',')})`);
+                    logger.warn(`[harness] /turn: toolConfig — no MCP_TOOL_SPECS entry for slug=${slug} (known: ${Object.keys(MCP_TOOL_SPECS).join(',')})`);
                 }
             }
             const toolConfig = { tools: allTools, toolChoice: { auto: {} } };
-            console.log(`[harness] /turn: toolConfig built — totalTools=${allTools.length}, toolNames=[${allTools.map(t => t.toolSpec?.name).join(',')}]`);
+            logger.debug(`[harness] /turn: toolConfig built — totalTools=${allTools.length}, toolNames=[${allTools.map(t => t.toolSpec?.name).join(',')}]`);
 
-            console.log(`[harness] /turn: calling bedrockClient.send for userId=${userId}, modelId=${modelId}`);
+            logger.info(`[harness] /turn: calling bedrockClient.send for userId=${userId}, modelId=${modelId}`);
             let tokenCount = 0;
             let inputTokens = 0;
             let outputTokens = 0;
@@ -4704,7 +4725,7 @@ Do NOT emit [TASK_READY] if:
             if (userId) {
                 kbAccessForTurn = await fetchKbAccess(userId);
                 if (!kbAccessForTurn) {
-                    console.warn(`[harness] /turn: fetchKbAccess returned null for userId=${userId} — personal/team KB will be denied`);
+                    logger.warn(`[harness] /turn: fetchKbAccess returned null for userId=${userId} — personal/team KB will be denied`);
                 }
             }
 
@@ -4728,9 +4749,9 @@ Do NOT emit [TASK_READY] if:
                     toolConfig
                 });
 
-                console.log(`[harness] /turn: agentic loop iteration ${toolIterations}, messages.length=${messages.length}`);
+                logger.debug(`[harness] /turn: agentic loop iteration ${toolIterations}, messages.length=${messages.length}`);
                 const response = await bedrockClient.send(cmd);
-                console.log(`[harness] /turn: Bedrock stream opened, beginning event iteration`);
+                logger.debug(`[harness] /turn: Bedrock stream opened, beginning event iteration`);
 
                 for await (const event of response.stream) {
                     if (event.contentBlockStart?.start?.toolUse) {
@@ -4739,14 +4760,14 @@ Do NOT emit [TASK_READY] if:
                             name: event.contentBlockStart.start.toolUse.name,
                             inputJson: ''
                         };
-                        console.log(`[harness] /turn: toolUse start: name=${toolUseAccumulator.name}, id=${toolUseAccumulator.toolUseId}`);
+                        logger.debug(`[harness] /turn: toolUse start: name=${toolUseAccumulator.name}, id=${toolUseAccumulator.toolUseId}`);
                     } else if (event.contentBlockDelta?.delta?.toolUse) {
                         if (toolUseAccumulator) {
                             toolUseAccumulator.inputJson += event.contentBlockDelta.delta.toolUse.input || '';
                         }
                     } else if (event.contentBlockStop && toolUseAccumulator) {
                         // Tool call complete — execute it
-                        console.log(`[harness] /turn: toolUse complete: name=${toolUseAccumulator.name}, input=${toolUseAccumulator.inputJson}`);
+                        logger.debug(`[harness] /turn: toolUse complete: name=${toolUseAccumulator.name}, input=${toolUseAccumulator.inputJson}`);
                         const toolInput = JSON.parse(toolUseAccumulator.inputJson || '{}');
                         let toolResultText = '';
                         let toolResultDocument = null; // ADO#5154 — for native PDF doc blocks
@@ -4875,7 +4896,7 @@ Do NOT emit [TASK_READY] if:
                                 // ADO#5154 — Handle native PDF document block (< 3 MB path)
                                 // When read_file returns { document: ... }, store for Bedrock document block injection
                                 if (rfData.document) {
-                                    console.log(`[harness] /turn: read_file returned native PDF doc block: name=${rfData.document.name} userId=${userId}`);
+                                    logger.debug(`[harness] /turn: read_file returned native PDF doc block: name=${rfData.document.name} userId=${userId}`);
                                     toolResultDocument = {
                                         name: rfData.document.name,
                                         format: rfData.document.format,
@@ -5024,15 +5045,15 @@ Do NOT emit [TASK_READY] if:
                         // ADO#3151: metadata arrives after messageStop — must NOT break before capturing this
                         inputTokens += event.metadata.usage.inputTokens || 0;
                         outputTokens += event.metadata.usage.outputTokens || 0;
-                        console.log(`[harness] /turn: metadata captured — inputTokens=${inputTokens}, outputTokens=${outputTokens}`);
+                        logger.debug(`[harness] /turn: metadata captured — inputTokens=${inputTokens}, outputTokens=${outputTokens}`);
                         if (messageStopSeen) break;
                     } else if (event.messageStop) {
                         stopReason = event.messageStop.stopReason;
-                        console.log(`[harness] /turn: messageStop received after ${tokenCount} text events, stopReason=${stopReason}`);
+                        logger.debug(`[harness] /turn: messageStop received after ${tokenCount} text events, stopReason=${stopReason}`);
                         messageStopSeen = true;
                         // Do NOT break here — metadata event with usage arrives after messageStop
                     } else {
-                        console.log(`[harness] /turn: stream event (non-text): ${JSON.stringify(Object.keys(event))}`);
+                        logger.debug(`[harness] /turn: stream event (non-text): ${JSON.stringify(Object.keys(event))}`);
                     }
                 }
 
@@ -5054,7 +5075,7 @@ Do NOT emit [TASK_READY] if:
                         assistantContent[lastTextIdx].text = assistantContent[lastTextIdx].text
                             .replace(/\[TASK_RESUME\]\s*$/, '').trimEnd();
                     }
-                    console.log(`[harness] ADO#3923: TASK_RESUME detected, emitting task_resume SSE for userId=${userId}`);
+                    logger.debug(`[harness] ADO#3923: TASK_RESUME detected, emitting task_resume SSE for userId=${userId}`);
                     sendEvent({ type: 'task_resume' });
                 }
 
@@ -5068,7 +5089,7 @@ Do NOT emit [TASK_READY] if:
                         assistantContent[lastTextIdx].text = assistantContent[lastTextIdx].text
                             .replace(/\[TASK_READY\]\s*$/, '').trimEnd();
                     }
-                    console.log(`[harness] ADO#4004: TASK_READY detected in non-task-mode response for userId=${userId} — escalating to task mode`);
+                    logger.debug(`[harness] ADO#4004: TASK_READY detected in non-task-mode response for userId=${userId} — escalating to task mode`);
                     sendEvent({ type: 'task_ready' });
                 }
 
@@ -5096,28 +5117,28 @@ Do NOT emit [TASK_READY] if:
                     });
                     pendingToolResults.length = 0;
                     continueLoop = true;
-                    console.log(`[harness] /turn: tool result(s) fed back to Bedrock, looping (iteration ${toolIterations}/${MAX_TOOL_ITERATIONS})`);
+                    logger.debug(`[harness] /turn: tool result(s) fed back to Bedrock, looping (iteration ${toolIterations}/${MAX_TOOL_ITERATIONS})`);
                 } else {
                     // end_turn with no tool call — done
                     continueLoop = false;
-                    console.log(`[harness] /turn: end_turn with no tool call, exiting agentic loop after ${toolIterations} iteration(s)`);
+                    logger.debug(`[harness] /turn: end_turn with no tool call, exiting agentic loop after ${toolIterations} iteration(s)`);
                 }
             }
             if (toolIterations >= MAX_TOOL_ITERATIONS) {
-                console.warn(`[harness] /turn: MAX_TOOL_ITERATIONS (${MAX_TOOL_ITERATIONS}) reached — agentic loop capped`);
+                logger.warn(`[harness] /turn: MAX_TOOL_ITERATIONS (${MAX_TOOL_ITERATIONS}) reached — agentic loop capped`);
             }
-            console.log(`[harness] /turn: stream complete, sending done event for userId=${userId}`);
+            logger.info(`[harness] /turn: stream complete, sending done event for userId=${userId}`);
             // ADO#3093 — fire-and-forget preference detection write
             if (hasPreferenceSignal(message)) {
                 firePreferenceWrite(userId, message);
             }
-            console.log(`[harness] /turn: done event — inputTokens=${inputTokens}, outputTokens=${outputTokens}`);
+            logger.info(`[harness] /turn: done event — inputTokens=${inputTokens}, outputTokens=${outputTokens}`);
             sendEvent({ type: 'done', inputTokens, outputTokens });
             // §G7 — clean up scheduled task context
             if (userId) scheduledTaskUsers.delete(userId);
             res.end();
         } catch (err) {
-            console.error(`[harness] /turn: Bedrock ConverseStream error for userId=${userId}: ${err.message}`, err.stack);
+            logger.error(`[harness] /turn: Bedrock ConverseStream error for userId=${userId}: ${err.message}`, err.stack);
             sendEvent({ type: 'error', errorMessage: scrubSecrets(err.message) });
             // §G7 — clean up scheduled task context
             if (userId) scheduledTaskUsers.delete(userId);
@@ -5139,7 +5160,7 @@ app.post('/convert-pptx-preview', async (req, res) => {
     if (previewS3Key) {
         try {
             await s3Client.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: previewS3Key }));
-            console.log(`[pptx-preview] Cache hit for ${artifactId}`);
+            logger.debug(`[pptx-preview] Cache hit for ${artifactId}`);
             return res.json({ previewS3Key });
         } catch {
             // Not cached — fall through to conversion
@@ -5184,10 +5205,10 @@ app.post('/convert-pptx-preview', async (req, res) => {
             ContentType: 'application/pdf'
         }));
 
-        console.log(`[pptx-preview] Converted ${artifactId} → ${outPreviewKey}`);
+        logger.debug(`[pptx-preview] Converted ${artifactId} → ${outPreviewKey}`);
         res.json({ previewS3Key: outPreviewKey });
     } catch (err) {
-        console.error(`[pptx-preview] Conversion failed for ${artifactId}:`, err.message);
+        logger.error(`[pptx-preview] Conversion failed for ${artifactId}:`, err.message);
         res.status(500).json({ error: err.message });
     } finally {
         try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
@@ -5202,7 +5223,7 @@ app.post('/intervention/respond', (req, res) => {
         pendingInterventions.delete(interventionId);
         pending.resolve(approved === true);
     } else {
-        console.warn('[harness] /intervention/respond: no pending intervention for id', interventionId);
+        logger.warn('[harness] /intervention/respond: no pending intervention for id', interventionId);
     }
     res.json({ ok: true });
 });
@@ -5220,19 +5241,19 @@ app.get('/session', (req, res) => {
 // Bootstrap GCP credentials then start server
 (async () => {
     if (!INTERNAL_API_TOKEN) {
-        console.warn('[harness] WARNING: INTERNAL_API_TOKEN not set — preference writes will fail with 401');
+        logger.warn('[harness] WARNING: INTERNAL_API_TOKEN not set — preference writes will fail with 401');
     }
     // ADO#3289 — startup check: verify claude CLI is available
     try {
         const { execSync } = require('child_process');
         const claudeVersion = execSync('claude --version', { timeout: 10000, encoding: 'utf8' }).trim();
-        console.log(`[harness] startup: claude CLI found — ${claudeVersion}`);
+        logger.info(`[harness] startup: claude CLI found — ${claudeVersion}`);
     } catch (claudeErr) {
-        console.error(`[harness] startup: claude CLI NOT found or failed — task mode will fail. Error: ${claudeErr.message}`);
+        logger.error(`[harness] startup: claude CLI NOT found or failed — task mode will fail. Error: ${claudeErr.message}`);
     }
     await initPgVector();
     await bootstrapGcpCredentials();
     app.listen(PORT, '0.0.0.0', () => {
-        console.log(`FAIT v2 agent harness listening on port ${PORT}`);
+        logger.info(`FAIT v2 agent harness listening on port ${PORT}`);
     });
 })();
