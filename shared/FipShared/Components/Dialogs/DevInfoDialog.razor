@@ -1,7 +1,5 @@
 @inject IWebHostEnvironment HostEnv
-@inject IConfiguration Configuration
 @using Microsoft.AspNetCore.Hosting
-@using Microsoft.Extensions.Configuration
 @using MudBlazor
 @namespace FipShared.Components
 
@@ -12,6 +10,25 @@
     </div>
     <div>
         <MudText Typo="Typo.caption" Color="Color.Secondary">Version</MudText>
-        <MudText Typo="Typo.body2" Style="font-family: monospace;">@(Configuration["BUILD_VERSION"] ?? Configuration["ASPNETCORE_ENVIRONMENT"] ?? "dev")</MudText>
+        <MudText Typo="Typo.body2" Style="font-family: monospace;">@BuildVersion</MudText>
+    </div>
+    <div>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">User ID</MudText>
+        <MudText Typo="Typo.body2" Style="font-family: monospace;">@(UserId != Guid.Empty ? UserId.ToString() : "n/a")</MudText>
+    </div>
+    <div>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Conversation ID</MudText>
+        <MudText Typo="Typo.body2" Style="font-family: monospace;">@(ConversationId.HasValue ? ConversationId.Value.ToString() : "n/a (open a chat first)")</MudText>
+    </div>
+    <div>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">Harness Session ID</MudText>
+        <MudText Typo="Typo.body2" Style="font-family: monospace;">@(HarnessSessionId ?? "n/a (open a chat first)")</MudText>
     </div>
 </MudStack>
+
+@code {
+    [Parameter] public string BuildVersion { get; set; } = "unknown";
+    [Parameter] public Guid UserId { get; set; }
+    [Parameter] public Guid? ConversationId { get; set; }
+    [Parameter] public string? HarnessSessionId { get; set; }
+}

@@ -10,6 +10,7 @@
 @inject IDbContextFactory<FortressAI.Web.Data.AppDbContext> ContextFactory
 @inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider AuthStateProvider
 @inject IDialogService DialogService
+@inject DevContextService DevContext
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment HostEnv
 @implements IDisposable
 
@@ -193,9 +194,22 @@
         _drawerOpen = !_drawerOpen;
     }
 
+    private static string BuildVersion =>
+        (System.Reflection.Assembly.GetExecutingAssembly()
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .FirstOrDefault() as System.Reflection.AssemblyInformationalVersionAttribute)
+            ?.InformationalVersion ?? "unknown";
+
     private async Task OpenDevInfoDialog()
     {
-        await DialogService.ShowAsync<DevInfoDialog>("Dev Environment Info", new DialogOptions
+        var parameters = new DialogParameters
+        {
+            [nameof(DevInfoDialog.BuildVersion)] = BuildVersion,
+            [nameof(DevInfoDialog.UserId)] = Session.UserId,
+            [nameof(DevInfoDialog.ConversationId)] = DevContext.ConversationId,
+            [nameof(DevInfoDialog.HarnessSessionId)] = DevContext.HarnessSessionId
+        };
+        await DialogService.ShowAsync<DevInfoDialog>("Dev Environment Info", parameters, new DialogOptions
         {
             CloseOnEscapeKey = true,
             CloseButton = true,
