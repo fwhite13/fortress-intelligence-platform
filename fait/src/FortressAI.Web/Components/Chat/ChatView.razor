@@ -210,6 +210,10 @@ else
                     🔍 @(_currentToolName ?? "Calling tool")...
                 </MudAlert>
             }
+            @if (isStreaming)
+            {
+                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
+            }
             @if (_activeToolCalls.Any() || _toolCallsFading)
             {
                 <div class="tool-call-indicator-list @(_toolCallsFading ? "tool-call-list-fading" : "")">
@@ -223,10 +227,6 @@ else
                         </div>
                     }
                 </div>
-            }
-            @if (isStreaming)
-            {
-                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
             }
 
             @if (_currentFileSummary != null && _currentFileSummary.Files.Count > 0)

@@ -1589,44 +1589,6 @@ a:hover {
   font-size: 0.7rem;
 }
 
-/* Tool call indicator — ADO#3241 */
-.tool-call-indicator-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    margin-bottom: 0.5rem;
-}
-
-.tool-call-indicator {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: var(--radius-sm, 4px);
-    font-size: 0.75rem;
-    color: var(--color-text-secondary, #6b7280);
-    background: var(--color-surface-sunken, rgba(0,0,0,0.03));
-}
-
-.tool-call-active {
-    color: var(--color-info);
-    background: var(--color-info-bg);
-}
-
-.tool-call-done {
-    color: var(--color-success);
-    opacity: 0.7;
-}
-
-.tool-call-error {
-    color: var(--color-error);
-    background: var(--color-error-bg);
-}
-
-.tool-call-summary {
-    flex: 1;
-}
-
 /* Chat List Page */
 .chat-list-page {
     max-width: 800px;
