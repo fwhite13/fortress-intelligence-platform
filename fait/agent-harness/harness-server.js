@@ -3788,6 +3788,7 @@ Be concise and specific. Output only the brief, no preamble.${filesSection}`;
 
         // ADO#3089 / ADO#3575 — inject session context recap on cold-start CC turns with existing history
         // ADO#3575: first try Haiku-generated task brief; fall back to truncated recap on failure
+        let generatedBrief = null;
         const hasHistory = Array.isArray(history) && history.length > 0;
         if (hasHistory) {
             const haiku3575ModelId = BEDROCK_MODEL_MAP['haiku'] || 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
@@ -3800,7 +3801,7 @@ Be concise and specific. Output only the brief, no preamble.${filesSection}`;
             } catch (_wfErr) {
                 // non-fatal
             }
-            const generatedBrief = await generateTaskBrief(history, bedrockClient, haiku3575ModelId, briefWorkspaceFiles);
+            generatedBrief = await generateTaskBrief(history, bedrockClient, haiku3575ModelId, briefWorkspaceFiles);
             if (generatedBrief) {
                 contextParts.push(`## Task Brief (Generated)\n${generatedBrief}`);
                 logger.debug(`[harness] /turn: injected Haiku-generated task brief (len=${generatedBrief.length}) into CC context`);
