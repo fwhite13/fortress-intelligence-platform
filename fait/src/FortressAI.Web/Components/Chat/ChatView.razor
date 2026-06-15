@@ -1441,11 +1441,18 @@ else
 
                         _ = dialog.Result.ContinueWith(resultTask =>
                         {
-                            var result = resultTask.IsCompletedSuccessfully ? resultTask.Result : null;
-                            if (result != null && !result.Canceled && result.Data is FolderPicker.FolderConfirmedArgs confirmedArgs)
-                                folderConfirmTcs.TrySetResult(confirmedArgs);
-                            else
-                                folderConfirmTcs.TrySetResult(null);
+                            try
+                            {
+                                var result = resultTask.IsCompletedSuccessfully ? resultTask.Result : null;
+                                if (result != null && !result.Canceled && result.Data is FolderPicker.FolderConfirmedArgs confirmedArgs)
+                                    folderConfirmTcs.TrySetResult(confirmedArgs);
+                                else
+                                    folderConfirmTcs.TrySetResult(null);
+                            }
+                            catch
+                            {
+                                folderConfirmTcs.TrySetResult(null); // ADO#5177: ensure TCS always completes
+                            }
                         });
 
                         var folderResult = await folderConfirmTcs.Task;
