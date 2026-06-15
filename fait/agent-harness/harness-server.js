@@ -4016,9 +4016,12 @@ Do NOT ask the user where to save output files — write all output to the worki
 If creating personalized content, reference the user profile and context provided in this brief — do not invent or guess personal details.
 DO NOT assume a prior artifact means this task is already done. Prior files in the folder are from PREVIOUS sessions. Execute the user's current request now.`;
 
-        const briefContent = fullContext
-            ? `${EXECUTE_DIRECTIVE}\n\n---\n\n${fullContext}\n\n---\n\nUser: ${message}`
-            : `${EXECUTE_DIRECTIVE}\n\n---\n\n${message}`;
+        const briefContent = generatedBrief
+            ? `${EXECUTE_DIRECTIVE}\n\n---\n\n${fullContext}`
+            : (fullContext
+                ? `${EXECUTE_DIRECTIVE}\n\n---\n\n${fullContext}\n\n---\n\nUser: ${message}`
+                : `${EXECUTE_DIRECTIVE}\n\n---\n\n${message}`);
+        logger.debug(`[CC spawn] briefContent mode=${generatedBrief ? 'brief-no-user-msg' : 'fallback-with-user-msg'} messageLen=${message?.length ?? 0}`);
 
         // ADO#3289 — log the exact command being spawned
         const ccArgs = [
