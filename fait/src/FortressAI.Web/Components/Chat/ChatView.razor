@@ -2271,6 +2271,7 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
                 }
 
                 _currentHarnessSessionId = currentSessionId;
+                DevContext.HarnessSessionId = _currentHarnessSessionId;
                 // ADO#4827 — only set cold-start if there is prior conversation history to resume
                 _wasColdStart = messages.Any(m => !m.IsResumptionBrief);
                 Logger.LogInformation("[ChatView] HandleAgentReady: setting _wasColdStart={WasColdStart} (messageCount={Count})", _wasColdStart, messages.Count(m => !m.IsResumptionBrief));
