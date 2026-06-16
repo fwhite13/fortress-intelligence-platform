@@ -305,6 +305,11 @@ public class KbDocumentService
             });
             return response.IngestionJob?.Status?.Value ?? "UNKNOWN";
         }
+        catch (Amazon.BedrockAgent.Model.ResourceNotFoundException ex)
+        {
+            _logger.LogWarning(ex, "[KbSync] Job {JobId} not found in Bedrock (ResourceNotFoundException) — returning NOT_FOUND", jobId);
+            return "NOT_FOUND";
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to poll ingestion job {JobId}", jobId);

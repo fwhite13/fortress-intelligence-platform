@@ -101,6 +101,12 @@ public class KbSyncRetryService : BackgroundService
                             _logger.LogWarning("[KbSync] Job {JobId} expired (>2h) with UNKNOWN status — dropping", jobId);
                         }
                     }
+                    else if (status == "NOT_FOUND")
+                    {
+                        _logger.LogWarning("[KbSync] Job {JobId} not found in Bedrock — removing from queue as permanent failure", jobId);
+                        // Do NOT re-enqueue. This is a permanent failure — the job ID no longer exists.
+                        // This prevents an infinite retry loop for orphaned or stale job IDs.
+                    }
                     else
                     {
                         // Still in progress: STARTING, IN_PROGRESS — re-enqueue unless job is too old
