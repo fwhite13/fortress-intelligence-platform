@@ -71,7 +71,7 @@
                 {
                     @if (IsXlsxType(_selectedArtifact))
                     {
-                        <XlsxPreviewPanel ArtifactId="@_selectedArtifact.Id" Filename="@_selectedArtifact.Filename" MimeType="@_selectedArtifact.MimeType" />
+                        <XlsxPreviewPanel ArtifactId="@_selectedArtifact.Id" S3Key="@_selectedArtifact.S3Key" ExistingPreviewS3Key="@_selectedArtifact.PreviewS3Key" />
                     }
                     else if (_previewLoading)
                     {

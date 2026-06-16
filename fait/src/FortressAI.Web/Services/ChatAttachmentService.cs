@@ -24,6 +24,10 @@ public class ChatAttachmentService
     {
         ".png", ".jpg", ".jpeg", ".gif", ".webp"
     };
+    private static readonly HashSet<string> OfficeExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".xlsx", ".xls", ".docx", ".doc", ".pptx", ".ppt"
+    };
 
     public ChatAttachmentService(
         IDbContextFactory<AppDbContext> contextFactory,
@@ -82,6 +86,10 @@ public class ChatAttachmentService
         else if (ext == ".pdf")
         {
             tokenEstimate = (int)(fileSize / 500); // rough estimate
+        }
+        else if (OfficeExtensions.Contains(ext))
+        {
+            tokenEstimate = (int)(fileSize / 1000);
         }
 
         var attachment = new ChatAttachment
@@ -179,6 +187,10 @@ public class ChatAttachmentService
                 var base64 = Convert.ToBase64String(ms.ToArray());
                 return $"data:application/pdf;base64,{base64}";
             }
+            else if (OfficeExtensions.Contains(ext))
+            {
+                return $"[Attached file: {attachment.Filename} — binary Office document, {FormatFileSize(attachment.SizeBytes)}. Content cannot be shown inline.]";
+            }
         }
         catch (Exception ex)
         {
@@ -217,7 +229,7 @@ public class ChatAttachmentService
     public static bool IsSupportedFile(string filename)
     {
         var ext = Path.GetExtension(filename).ToLowerInvariant();
-        return TextExtensions.Contains(ext) || ImageExtensions.Contains(ext) || ext == ".pdf";
+        return TextExtensions.Contains(ext) || ImageExtensions.Contains(ext) || ext == ".pdf" || OfficeExtensions.Contains(ext);
     }
 
     public static string FormatFileSize(long bytes)

@@ -93,7 +93,7 @@
             <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;">
                 @foreach (var att in Attachments)
                 {
-                    <div style="display: inline-flex; align-items: center; gap: 4px; background: var(--color-surface-elevated, #1e1e2e); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 3px 6px; font-size: var(--text-xs); color: var(--color-text-tertiary);">
+                    <div style="display: inline-flex; align-items: center; gap: 4px; background: var(--color-surface-elevated, #1e1e2e); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 3px 6px; font-size: var(--text-xs); color: var(--color-text-primary);">
                         <MudIcon Icon="@Icons.Material.Filled.AttachFile" Style="width: 12px; height: 12px;" />
                         <span>@att.Filename</span>
                     </div>
@@ -306,7 +306,7 @@
     align-items: center;
     gap: 6px;
     font-size: 0.8125rem;
-    color: var(--mud-palette-text-secondary);
+    color: var(--color-text-primary);
     background: var(--color-surface-sunken);
     border-radius: var(--radius-pill, 9999px);
     padding: 3px 10px 3px 8px;

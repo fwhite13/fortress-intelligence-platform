@@ -333,7 +333,7 @@ else
         <!-- Input row -->
         <div class="chat-input-wrapper @(_isDragOver ? "drag-over" : "")" id="chat-input-drop-zone">
             <!-- Hidden file input -->
-            <InputFile id="chat-file-input" OnChange="HandleFileSelected" multiple accept=".txt,.md,.csv,.json,.xml,.html,.py,.cs,.js,.ts,.yaml,.yml,.png,.jpg,.jpeg,.gif,.pdf" style="display:none;" />
+            <InputFile id="chat-file-input" OnChange="HandleFileSelected" multiple accept=".txt,.md,.csv,.json,.xml,.html,.py,.cs,.js,.ts,.yaml,.yml,.png,.jpg,.jpeg,.gif,.pdf,.xlsx,.xls,.docx,.doc,.pptx,.ppt" style="display:none;" />
             <MudIconButton Icon="@Icons.Material.Filled.AttachFile"
                 Disabled="@(isStreaming || _isBriefStreaming)"
                 OnClick="TriggerFileInput"
@@ -504,6 +504,7 @@ else
         // ADO#5168: Re-opens the folder picker for the same conversationId after a cancel.
         // On confirm: clears _pendingTaskAfterCancel, calls HandleFolderConfirmed.
         // On cancel again: double-cancel → abort task.
+        Console.WriteLine("[ChatView] ReTriggerFolderPickerAsync called, _pendingTaskAfterCancel={0}", _pendingTaskAfterCancel);
         if (!_pendingTaskAfterCancel) return;
 
         var conversationId = conversation?.Id.ToString() ?? "";
@@ -779,6 +780,8 @@ else
             _isBriefStreaming = false;
             _activeToolCalls.Clear();  // ADO#3241
             _ccTaskActive = false;
+            _pendingTaskAfterCancel = false;  // ADO#5187: clear stale re-trigger state on conversation switch
+            _pendingTaskMessageForCancel = null;
             LayoutState.CloseArtifactSidebar(); // ADO#3456 — reset sidebar on conversation switch
 
             // ADO#3308 — refresh harness session ID for warm cross-chat navigation
@@ -1079,6 +1082,16 @@ else
                         Console.WriteLine($"[ATTACH] Failed to extract content from {att.Filename}: {ex.Message}");
                     }
                 }
+                // ADO#5191: inject Office file handling rules if any Office files are attached
+                var officeExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".xlsx", ".xls", ".docx", ".doc", ".pptx", ".ppt" };
+                if (attachmentsSnapshot.Any(a => officeExts.Contains(Path.GetExtension(a.Filename))))
+                {
+                    attachmentContextBuilder.AppendLine("## Office File Handling Rules");
+                    attachmentContextBuilder.AppendLine("The attached Office files (.xlsx, .docx, .pptx, etc.) are binary formats. You cannot read their content directly.");
+                    attachmentContextBuilder.AppendLine("Acknowledge the file(s) by name, describe what type of document they are, and offer to help the user work with them (e.g., guide them to extract data, suggest analysis steps, or use available tools if applicable).");
+                    attachmentContextBuilder.AppendLine();
+                }
+
                 var attachmentContext = attachmentContextBuilder.ToString();
                 effectiveSystemPrompt = string.IsNullOrEmpty(effectiveSystemPrompt)
                     ? attachmentContext
@@ -1330,6 +1343,8 @@ else
                                 ?? GetToolLabel(progressPayload.ToolName ?? "cc", "task", null);
                             var toolName = progressPayload.ToolName ?? "cc";
                             var isFinal = progressPayload.Step == "done" || progressPayload.Status == "done";
+                            // ADO#5188: override raw/non-descriptive messages with friendly labels
+                            stepMessage = GetFriendlyChipLabel(toolName, stepMessage, isFinal);
 
                             // ADO#4810 — cap at 3 calling task chips; remove oldest if at limit
                             if (!isFinal && _activeToolCalls.Count(c => c.Server == "task" && c.Status == "calling") >= 3)
@@ -1397,6 +1412,13 @@ else
                         var lastFolderId = folderPayload?.LastFolderId;
                         var conversationId = folderPayload?.ConversationId ?? conversation?.Id.ToString() ?? "";
                         var taskMessage = _pendingTaskMessage;
+
+                        // ADO#5187: Guard — only open folder picker if this SSE event is for the active conversation
+                        if (!string.IsNullOrEmpty(conversationId) && conversationId != conversation?.Id.ToString())
+                        {
+                            Logger.LogWarning("[ChatView] folder_required fired for stale conversation {StaleId} — ignoring (current: {CurrentId})", conversationId, conversation?.Id);
+                            break;
+                        }
 
                         var parameters = new DialogParameters
                         {
@@ -1813,6 +1835,26 @@ else
     private static string TruncChip(string? s, int max = 60) =>
         s == null ? "" : s.Length > max ? s[..57] + "..." : s;
 
+    // ADO#5188 — friendly chip labels for task_progress events
+    private static string GetFriendlyChipLabel(string toolName, string rawMessage, bool isFinal)
+    {
+        var t = (toolName ?? "").ToLowerInvariant();
+
+        // Bash/shell/computer: never show raw commands
+        if (t == "bash" || t == "computer" || t.Contains("bash") || t.Contains("shell") || t.Contains("exec"))
+            return isFinal ? "Script complete" : "Running script...";
+
+        // ToolSearch/web search: replace generic "Working..."
+        if (t == "toolsearch" || t == "tool_search" || t == "websearch" || t == "web_search")
+            return isFinal ? "Search complete" : "Searching the web...";
+
+        // If message is null, whitespace, or a known generic placeholder, fall back to tool label
+        if (string.IsNullOrWhiteSpace(rawMessage) || rawMessage == "Working..." || rawMessage == "Done")
+            return GetToolLabel(toolName, "task", null);
+
+        return rawMessage;
+    }
+
     // ADO#4056 — human-readable labels for tool chips (raw CC tool names → readable text)
     private static string GetToolLabel(string toolName, string server, string? summary = null)
     {
@@ -1835,7 +1877,7 @@ else
             "graph_list_calendar_events" => "Checking calendar...",
             "create_document" => "Creating document...",
             "str_replace_based_edit_tool" or "str_replace_editor" => "Editing file...",
-            "bash" or "computer" => "Running command...",
+            "bash" or "computer" => "Running script...",
             var t when t.Contains("search") => "Searching...",
             var t when t.Contains("read") || t.Contains("get") => "Reading...",
             var t when t.Contains("write") || t.Contains("save") || t.Contains("create") => "Saving...",
@@ -2431,7 +2473,7 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
     border-radius: var(--radius-full, 9999px);
     padding: 4px 10px;
     font-size: var(--text-xs);
-    color: var(--color-text-secondary);
+    color: var(--color-text-primary);
 }
 
 .chat-folder-retrigger__btn {

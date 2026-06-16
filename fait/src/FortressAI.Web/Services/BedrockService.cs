@@ -451,8 +451,8 @@ public class BedrockService : IDisposable
                     var imgBytes = Convert.FromBase64String(base64Data);
                     // mediaType is e.g. "image/png" — extract the sub-type for ImageFormat
                     var formatStr = mediaType.Contains('/') ? mediaType.Split('/')[1] : mediaType;
-                    var imageFormat = Amazon.BedrockRuntime.ImageFormat.FindValue(formatStr)
-                        ?? Amazon.BedrockRuntime.ImageFormat.Png;
+                    var imageFormat = ParseImageFormat(formatStr);
+                    Console.WriteLine($"[BedrockAPI] Injecting image attachment: mediaType={mediaType}, base64Length={base64Data.Length}");
                     extraBlocks.Add(new ContentBlock
                     {
                         Image = new ImageBlock
@@ -774,6 +774,15 @@ public class BedrockService : IDisposable
         using var doc = JsonDocument.Parse(json);
         return JsonElementToDocument(doc.RootElement.Clone());
     }
+
+    private static Amazon.BedrockRuntime.ImageFormat ParseImageFormat(string formatStr) => formatStr?.ToLowerInvariant() switch
+    {
+        "png" => Amazon.BedrockRuntime.ImageFormat.Png,
+        "jpeg" or "jpg" => Amazon.BedrockRuntime.ImageFormat.Jpeg,
+        "gif" => Amazon.BedrockRuntime.ImageFormat.Gif,
+        "webp" => Amazon.BedrockRuntime.ImageFormat.Webp,
+        _ => Amazon.BedrockRuntime.ImageFormat.Png
+    };
 
     public void Dispose()
     {
