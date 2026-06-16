@@ -33,6 +33,20 @@
         }
     </div>
     <div class="message-body">
+        @if ((ActiveToolChips?.Any() == true || ToolCallsFading) && Message.Role == "assistant" && string.IsNullOrWhiteSpace(Message.Content))
+        {
+            <div class="tool-call-indicator-list tool-chips-leading @(ToolCallsFading ? "tool-call-list-fading" : "")">
+                @foreach (var chip in (ActiveToolChips ?? new List<ToolChipData>()))
+                {
+                    <div class="tool-call-indicator @(chip.Status == "calling" ? "tool-call-active" : chip.Status == "error" ? "tool-call-error" : "tool-call-done")">
+                        <MudIcon Icon="@chip.MudIconName"
+                                 Class="@("tool-call-mud-icon" + (chip.Status == "calling" ? " tool-call-mud-icon-pulse" : ""))"
+                                 Style="width: 16px; height: 16px; flex-shrink: 0;" />
+                        <span class="tool-call-summary">@chip.Label</span>
+                    </div>
+                }
+            </div>
+        }
         <div class="message-content">
             @if (Message.Role == "assistant")
             {
@@ -47,6 +61,20 @@
                 <p style="white-space: pre-wrap; word-break: break-word; margin: 0;">@Message.Content</p>
             }
         </div>
+        @if ((ActiveToolChips?.Any() == true || ToolCallsFading) && Message.Role == "assistant" && !string.IsNullOrWhiteSpace(Message.Content))
+        {
+            <div class="tool-call-indicator-list tool-chips-trailing @(ToolCallsFading ? "tool-call-list-fading" : "")">
+                @foreach (var chip in (ActiveToolChips ?? new List<ToolChipData>()))
+                {
+                    <div class="tool-call-indicator @(chip.Status == "calling" ? "tool-call-active" : chip.Status == "error" ? "tool-call-error" : "tool-call-done")">
+                        <MudIcon Icon="@chip.MudIconName"
+                                 Class="@("tool-call-mud-icon" + (chip.Status == "calling" ? " tool-call-mud-icon-pulse" : ""))"
+                                 Style="width: 16px; height: 16px; flex-shrink: 0;" />
+                        <span class="tool-call-summary">@chip.Label</span>
+                    </div>
+                }
+            </div>
+        }
         @if (!IsStreaming && Message.Role == "assistant" && (Message.TokensIn > 0 || Message.TokensOut > 0))
         {
             <div class="message-meta">
@@ -82,6 +110,10 @@
     [Parameter] public UserAssistantConfig? AssistantConfig { get; set; }
     [Parameter] public string? AvatarPreviewUrl { get; set; }
     [Parameter] public string? UserInitial { get; set; }
+    [Parameter] public List<ToolChipData>? ActiveToolChips { get; set; }
+    [Parameter] public bool ToolCallsFading { get; set; } = false;
+
+    public record ToolChipData(string MudIconName, string Label, string Status, Guid Id);
 
     private static string GetAvatarIcon(string? avatarId) => avatarId switch
     {
@@ -237,4 +269,93 @@
         border-radius: var(--radius-full, 50%);
         object-fit: cover;
     }
+
+/* ADO#5184 — Tool call chip styles (moved from ChatView into MessageBubble) */
+.tool-call-list-fading {
+    opacity: 0;
+    transition: opacity 200ms ease-out;
+    height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    overflow: hidden !important;
+}
+
+.tool-call-indicator-list {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding-bottom: 4px;
+    transition: height 200ms ease-out, padding 200ms ease-out, margin 200ms ease-out;
+    overflow: hidden;
+}
+
+.tool-chips-leading {
+    margin-bottom: 0;
+    padding-top: 2px;
+}
+
+.tool-chips-trailing {
+    margin-top: 6px;
+}
+
+.tool-call-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8125rem;
+    color: var(--mud-palette-text-secondary);
+    background: var(--color-surface-sunken);
+    border-radius: var(--radius-pill, 9999px);
+    padding: 3px 10px 3px 8px;
+    white-space: nowrap;
+    max-width: 360px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-height: 40px;
+    transition: opacity 280ms ease-out, max-height 300ms ease-out, margin 300ms ease-out, padding 300ms ease-out;
+}
+
+.tool-call-active {
+    background: var(--mud-palette-primary-lighten, rgba(99, 102, 241, 0.15));
+    color: var(--mud-palette-primary, #6366f1);
+}
+
+.tool-call-error {
+    background: var(--mud-palette-error-lighten, rgba(239, 68, 68, 0.15));
+    color: var(--mud-palette-error, #ef4444);
+}
+
+.tool-call-summary {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tool-call-mud-icon {
+    color: var(--color-accent, #6366f1);
+    flex-shrink: 0;
+}
+
+.tool-call-mud-icon-pulse {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.tool-call-done {
+    opacity: 0;
+    max-height: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    transition: opacity 200ms ease-out, max-height 300ms ease-out 200ms, margin 300ms ease-out 200ms, padding 300ms ease-out 200ms;
+}
+
+@@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
 </style>

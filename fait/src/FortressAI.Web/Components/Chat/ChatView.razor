@@ -218,29 +218,10 @@ else
                 }
             }
 
-            @if (_toolCallInProgress)
-            {
-                <MudAlert Severity="Severity.Info" Dense="true" Class="my-1" Style="max-width: 600px; margin: 8px auto;">
-                    🔍 @(_currentToolName ?? "Calling tool")...
-                </MudAlert>
-            }
-            @if (_activeToolCalls.Any() || _toolCallsFading)
-            {
-                <div class="tool-call-indicator-list @(_toolCallsFading ? "tool-call-list-fading" : "")">
-                    @foreach (var tc in _activeToolCalls)
-                    {
-                        <div class="tool-call-indicator @(tc.Status == "calling" ? "tool-call-active" : tc.Status == "error" ? "tool-call-error" : "tool-call-done")">
-                            <MudIcon Icon="@ChipIconToMudIcon(tc.ChipIcon ?? GetChipIconKeyFromToolName(tc.ToolName))"
-                                     Class="@("tool-call-mud-icon" + (tc.Status == "calling" ? " tool-call-mud-icon-pulse" : ""))"
-                                     Style="width: 16px; height: 16px; flex-shrink: 0;" />
-                            <span class="tool-call-summary">@TruncChip(GetToolLabel(tc.ToolName, tc.Server, tc.Summary))</span>
-                        </div>
-                    }
-                </div>
-            }
             @if (isStreaming)
             {
-                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial" />
+                <MessageBubble Message="@streamingMessage" IsStreaming="true" AssistantConfig="@_assistantConfig" AvatarPreviewUrl="@_avatarPreviewUrl" UserInitial="@UserInitial"
+                               ActiveToolChips="@ActiveChips" ToolCallsFading="@_toolCallsFading" />
             }
 
             @if (_currentFileSummary != null && _currentFileSummary.Files.Count > 0)
@@ -460,14 +441,19 @@ else
     private bool _teamKbPopoverOpen = false;
     private bool _hasPendingMigration = false;
     private List<McpServer> _availableToolServers = new();
-    private string? _currentToolName;
-    private bool _toolCallInProgress = false;
-
     // ADO#3241 — Tool call transparency events
     private List<ToolCallEvent> _activeToolCalls = new();
     private bool _toolCallsFading = false;
     private bool _ccTaskActive = false; // ADO#4201 — true while CC task_progress is active, prevents premature chip fade
     private record ToolCallEvent(string Server, string ToolName, string Status, string Summary, DateTime Timestamp, string? ChipIcon = null, Guid Id = default);
+
+    private List<MessageBubble.ToolChipData> ActiveChips => _activeToolCalls
+        .Select(tc => new MessageBubble.ToolChipData(
+            MudIconName: ChipIconToMudIcon(tc.ChipIcon ?? GetChipIconKeyFromToolName(tc.ToolName)),
+            Label: TruncChip(GetToolLabel(tc.ToolName, tc.Server, tc.Summary)),
+            Status: tc.Status,
+            Id: tc.Id))
+        .ToList();
     // Attachment state
     private List<ChatAttachment> _pendingAttachments = new();
     private bool _isDragOver = false;
@@ -2367,81 +2353,6 @@ IMPORTANT: You cannot save files or write to the Knowledge Base. If asked to cre
 }
 
 <style>
-/* ADO#3455 — Tool call strip fade and spin */
-.tool-call-list-fading {
-    opacity: 0;
-    transition: opacity 200ms ease-out;
-    height: 0 !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    overflow: hidden !important;
-}
-@@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-.tool-call-indicator-list {
-    max-width: 900px;
-    width: 100%;
-    margin: 0 auto;
-    padding-left: calc(36px + 1rem);
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-    padding-bottom: 4px;
-    transition: height 200ms ease-out, padding 200ms ease-out, margin 200ms ease-out;
-    overflow: hidden;
-}
-.tool-call-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.8125rem;
-    color: var(--color-text-secondary);
-    background: var(--color-surface-sunken);
-    border-radius: var(--radius-pill, 9999px);
-    padding: 3px 10px 3px 8px;
-    white-space: nowrap;
-    max-width: 360px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-height: 40px; /* ADO#4861 — needed for height collapse animation */
-    transition: opacity 280ms ease-out, max-height 300ms ease-out, margin 300ms ease-out, padding 300ms ease-out;
-}
-/* ADO#5176 — Chip state styles (removed from fortress.css in #5167, restored inline) */
-.tool-call-active {
-    background: var(--mud-palette-primary-lighten, rgba(99, 102, 241, 0.15));
-    color: var(--mud-palette-primary, #6366f1);
-}
-.tool-call-error {
-    background: var(--mud-palette-error-lighten, rgba(239, 68, 68, 0.15));
-    color: var(--mud-palette-error, #ef4444);
-}
-.tool-call-summary {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.tool-call-mud-icon {
-    color: var(--color-accent, #6366f1);
-    flex-shrink: 0;
-}
-.tool-call-mud-icon-pulse {
-    animation: pulse 1.5s ease-in-out infinite;
-}
-.tool-call-done {
-    opacity: 0; /* ADO#4861 — fade to invisible, then height collapses */
-    max-height: 0 !important;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    transition: opacity 200ms ease-out, max-height 300ms ease-out 200ms, margin 300ms ease-out 200ms, padding 300ms ease-out 200ms;
-}
 .cc-agent-icon {
     font-size: 0.875rem;
     width: 1rem;
