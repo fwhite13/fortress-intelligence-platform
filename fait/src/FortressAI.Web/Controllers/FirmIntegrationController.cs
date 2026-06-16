@@ -183,7 +183,7 @@ public class FirmIntegrationController : ControllerBase
         {
             tasks.Add(UploadToKbAsync(
                 content: payload.TranscriptText,
-                s3Key: $"kb-docs/personal/{user.Id}/firm-transcript-{payload.MeetingId}.txt",
+                filename: $"firm-transcript-{payload.MeetingId}.txt",
                 contentType: "text/plain",
                 userId: user.Id,
                 meetingId: payload.MeetingId,
@@ -193,8 +193,8 @@ public class FirmIntegrationController : ControllerBase
         if (config.FirmAutoSummary && !string.IsNullOrWhiteSpace(payload.SummaryText))
         {
             tasks.Add(UploadToKbAsync(
-                content: payload.SummaryText,
-                s3Key: $"kb-docs/personal/{user.Id}/firm-summary-{payload.MeetingId}.md",
+                content: payload.SummaryText!,
+                filename: $"firm-summary-{payload.MeetingId}.md",
                 contentType: "text/markdown",
                 userId: user.Id,
                 meetingId: payload.MeetingId,
@@ -267,30 +267,14 @@ public class FirmIntegrationController : ControllerBase
         return Ok(new { success = true });
     }
 
-    private async Task UploadToKbAsync(string content, string s3Key, string contentType, Guid userId, long meetingId, string docType)
+    private async Task UploadToKbAsync(string content, string filename, string contentType, Guid userId, long meetingId, string docType)
     {
         try
         {
-            await _s3.PutObjectAsync(new PutObjectRequest
-            {
-                BucketName = BucketName,
-                Key = s3Key,
-                ContentBody = content,
-                ContentType = contentType
-            });
+            using var stream = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+            await _kbDocumentService.UploadDocumentAsync(stream, filename, contentType, KbTier.Personal, userId);
 
-            // Write companion metadata file for KB isolation
-            var metadata = new { metadataAttributes = new Dictionary<string, object> { ["ownerId"] = userId.ToString() } };
-            var metadataJson = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });
-            await _s3.PutObjectAsync(new PutObjectRequest
-            {
-                BucketName = BucketName,
-                Key = $"{s3Key}.metadata.json",
-                ContentBody = metadataJson,
-                ContentType = "application/json"
-            });
-
-            _logger.LogInformation("FirmIntegration: Auto-uploaded {DocType} for meeting {MeetingId} to s3://{Bucket}/{Key}", docType, meetingId, BucketName, s3Key);
+            _logger.LogInformation("[FirmIntegration] Auto-uploaded {DocType} for meeting {MeetingId} — project_documents row created for user {UserId}", docType, meetingId, userId);
         }
         catch (Exception ex)
         {
