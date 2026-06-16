@@ -207,7 +207,7 @@ public class FirmIntegrationController : ControllerBase
             {
                 await Task.WhenAll(tasks);
                 // Trigger ingestion once after all uploads
-                await StartPersonalIngestionAsync(user.Id);
+                await _kbDocumentService.StartIngestionAsync(KbTier.Personal, throwOnConflict: false);
             }
             catch (Exception ex)
             {
@@ -280,28 +280,6 @@ public class FirmIntegrationController : ControllerBase
         {
             _logger.LogError(ex, "FirmIntegration: Failed to upload {DocType} for meeting {MeetingId}", docType, meetingId);
             throw;
-        }
-    }
-
-    private async Task StartPersonalIngestionAsync(Guid userId)
-    {
-        try
-        {
-            var response = await _bedrockAgent.StartIngestionJobAsync(new StartIngestionJobRequest
-            {
-                KnowledgeBaseId = PersonalKbId,
-                DataSourceId = PersonalDsId
-            });
-            _logger.LogInformation("FirmIntegration: Started personal KB ingestion job {JobId} for user {UserId}",
-                response.IngestionJob?.IngestionJobId, userId);
-        }
-        catch (Amazon.BedrockAgent.Model.ConflictException)
-        {
-            _logger.LogInformation("FirmIntegration: Personal KB ingestion already in progress for user {UserId} — will sync on next run", userId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "FirmIntegration: Failed to start KB ingestion for user {UserId} (non-fatal)", userId);
         }
     }
 
