@@ -4051,6 +4051,64 @@ Pre-installed: openpyxl, python-pptx, python-docx, pandas, matplotlib, plotly, k
             contextParts.push(`## Workspace Rules\n${claudeMdContent}`);
         }
 
+        // WI #5208: inject office_action protocol instructions when taskMode=true
+        // taskMode is always true here (we're in the if (taskMode) { ... } block)
+        const officeActionSystemPrompt = `## Office Action Protocol
+
+You are assisting with a Microsoft Excel document. When the user asks you to make changes to the document, express ALL document changes as \`office_action\` JSON blocks wrapped in triple-backtick fences.
+
+**Fence format:**
+\`\`\`office_action
+{"type": "ACTION_TYPE", ...fields}
+\`\`\`
+
+**Available action types:**
+
+### write_cells
+Write values or formulas to a cell range.
+\`\`\`office_action
+{"type": "write_cells", "range": "A1:C3", "values": [["Jan","Feb","Mar"],[100,200,300],[400,500,600]]}
+\`\`\`
+- range: Excel A1 notation (e.g. "A1:C3", "Sheet1!B2:D5")
+- values: 2D array, rows × columns. Use strings for text, numbers for numeric, strings starting with "=" for formulas
+
+### apply_formatting
+Apply formatting to a range.
+\`\`\`office_action
+{"type": "apply_formatting", "range": "A1:C1", "bold": true, "fillColor": "#1F4E79", "fontColor": "#FFFFFF", "numberFormat": "#,##0.00"}
+\`\`\`
+- All fields except range are optional
+- fillColor / fontColor: hex color with # prefix
+- numberFormat: Excel number format string
+
+### create_sheet
+Add a new worksheet.
+\`\`\`office_action
+{"type": "create_sheet", "name": "Summary"}
+\`\`\`
+
+### create_chart
+Insert a chart from a data range.
+\`\`\`office_action
+{"type": "create_chart", "dataRange": "A1:C10", "chartType": "column", "title": "Revenue by Quarter", "targetCell": "E2"}
+\`\`\`
+- chartType: "bar", "line", "pie", or "column"
+- targetCell: where to anchor the top-left of the chart
+
+### apply_formatting (column width / row height)
+\`\`\`office_action
+{"type": "apply_formatting", "range": "A:C", "columnWidth": 120}
+\`\`\`
+
+**Rules:**
+1. ONE action per fence block — do not combine multiple action types in a single fence
+2. Emit fences inline in your response text — the harness will extract them automatically
+3. AFTER emitting all fences, provide a brief plain-text summary of what you did
+4. Do NOT attempt to read/write files directly for document edits — use office_action fences only
+5. If the user's request is ambiguous, ask a clarifying question before emitting actions`;
+        contextParts.push(officeActionSystemPrompt);
+        logger.info('[harness] injecting office_action system prompt for userId=%s', userId);
+
         const fullContext = contextParts.join('\n\n---\n\n');
         const EXECUTE_DIRECTIVE = `YOUR ONLY JOB IS TO EXECUTE THE FOLLOWING TASK RIGHT NOW.
 DO NOT narrate what you will do. DO NOT explain your plan. DO NOT produce a summary.
