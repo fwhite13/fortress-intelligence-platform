@@ -378,6 +378,21 @@ if (builder.Environment.IsDevelopment())
     });
 }
 
+// CORS — allow FfO CDN origins for Office add-in communication
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("FfoCorsPolicy", policy =>
+    {
+        policy.WithOrigins(
+                "https://addins.dev.fortressam.ai",
+                "https://addins.fortressam.ai"
+            )
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials();
+    });
+});
+
 var app = builder.Build();
 
 // Fail fast on missing PREVIEW_TOKEN_SECRET — do not wait for first request
@@ -406,6 +421,7 @@ var forwardedHeadersOptions = new ForwardedHeadersOptions
 forwardedHeadersOptions.KnownNetworks.Clear();
 forwardedHeadersOptions.KnownProxies.Clear();
 app.UseForwardedHeaders(forwardedHeadersOptions);
+app.UseCors("FfoCorsPolicy");
 
 // Serve /excel-addin/ static files publicly (Office Add-in — no auth required)
 // Must use MapGet + AllowAnonymous because FallbackPolicy=DefaultPolicy intercepts UseStaticFiles
