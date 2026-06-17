@@ -456,6 +456,51 @@ function resolveProgressIcon(toolName) {
     return 'tool';
 }
 
+// WI #5207 — scan CC assistant/result text for ```office_action fences.
+// State machine (NORMAL | IN_FENCE) so split-chunk fence markers across
+// successive text blocks don't get mis-detected by naive line splitting.
+// Returns the text with fence blocks removed plus the parsed action objects.
+function extractOfficeActions(text) {
+    const lines = text.split('\n');
+    const actions = [];
+    const nonFenceLines = [];
+    let inFence = false;
+    let fenceBuffer = [];
+
+    for (const line of lines) {
+        if (!inFence && line.trim() === '```office_action') {
+            inFence = true;
+            fenceBuffer = [];
+            // Do NOT add this line to nonFenceLines
+        } else if (inFence && line.trim() === '```') {
+            inFence = false;
+            const fenceContent = fenceBuffer.join('\n').trim();
+            if (fenceContent) {
+                try {
+                    const parsed = JSON.parse(fenceContent);
+                    actions.push(parsed);
+                } catch (e) {
+                    logger.warn('[office_action] fence JSON parse error:', e.message, 'content:', fenceContent.slice(0, 200));
+                }
+            }
+            fenceBuffer = [];
+            // Do NOT add the closing ``` to nonFenceLines
+        } else if (inFence) {
+            fenceBuffer.push(line);
+            // Do NOT add fence content to nonFenceLines
+        } else {
+            nonFenceLines.push(line);
+        }
+    }
+
+    // Unclosed fence at end of block — likely split across blocks. Discard for now.
+    if (inFence && fenceBuffer.length > 0) {
+        logger.warn('[office_action] unclosed fence at end of text block — may be split across blocks');
+    }
+
+    return { textWithFencesRemoved: nonFenceLines.join('\n'), actions };
+}
+
 function extractFilename(toolInput) {
     try {
         const obj = typeof toolInput === 'string' ? JSON.parse(toolInput) : toolInput;
@@ -4124,10 +4169,18 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                     // Only the final `result` event should emit to the token stream.
                     for (const block of parsed.message.content) {
                         if (block.type === 'text' && block.text) {
+                            // WI #5207 — scan for ```office_action fences before suppressing.
+                            const { actions } = extractOfficeActions(block.text);
+                            if (actions.length > 0) {
+                                for (const action of actions) {
+                                    logger.info('[office_action] emitting action type=%s userId=%s', action.type || 'unknown', userId);
+                                    sendEvent({ type: 'office_action', payload: JSON.stringify(action) });
+                                }
+                            }
                             // ADO#4100 — suppress ALL text blocks from assistant messages during CC execution.
                             // Only the final `result` event should emit to the token stream.
                             // Co-located narration (with tool_use) was already suppressed; now suppress standalone narration too.
-                            logger.debug(`[CC spawn] narration suppressed (assistant message text block, ${block.text.length} chars) userId=${userId}`);
+                            logger.debug(`[CC spawn] narration suppressed (assistant message text block, ${block.text.length} chars, ${actions.length} office_actions extracted) userId=${userId}`);
                         } else if (block.type === 'tool_use') {
                             toolUseMap.set(block.id, { name: block.name || 'tool', input: block.input || {} }); // ADO#4860 — store input for descriptive tool_result labels
                             const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
@@ -4155,7 +4208,18 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                     }
                 } else if (evtType === 'result') {
                     if (!ccTextEmitted && parsed.result) {
-                        sendEvent({ type: 'text', content: scrubSecrets(parsed.result) });
+                        // WI #5207 — extract office_action fences from the final result text.
+                        const { textWithFencesRemoved, actions } = extractOfficeActions(parsed.result);
+                        if (actions.length > 0) {
+                            for (const action of actions) {
+                                logger.info('[office_action] emitting action type=%s userId=%s', action.type || 'unknown', userId);
+                                sendEvent({ type: 'office_action', payload: JSON.stringify(action) });
+                            }
+                        }
+                        const textToEmit = textWithFencesRemoved.trim();
+                        if (textToEmit) {
+                            sendEvent({ type: 'text', content: scrubSecrets(textToEmit) });
+                        }
                         ccTextEmitted = true;
                     }
                     const resultText = parsed.result || '';
