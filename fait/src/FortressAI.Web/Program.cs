@@ -434,6 +434,33 @@ app.MapGet("/excel-addin/{**path}", async (HttpContext ctx, string? path) =>
     return Results.File(filePath, contentType);
 }).AllowAnonymous();
 
+// Serve /ppt-addin/ static files publicly (Office Add-in — no auth required)
+// Same pattern as /excel-addin/ — FallbackPolicy intercepts UseStaticFiles
+app.MapGet("/ppt-addin/{**path}", async (HttpContext ctx, string? path) =>
+{
+    var webRoot = ctx.RequestServices.GetRequiredService<IWebHostEnvironment>().WebRootPath;
+    var filePath = string.IsNullOrEmpty(path)
+        ? Path.Combine(webRoot, "ppt-addin", "index.html")
+        : Path.Combine(webRoot, "ppt-addin", path.Replace("/", Path.DirectorySeparatorChar.ToString()));
+
+    if (!File.Exists(filePath))
+        return Results.NotFound();
+
+    var contentType = Path.GetExtension(filePath) switch
+    {
+        ".html" => "text/html",
+        ".js"   => "application/javascript",
+        ".css"  => "text/css",
+        ".png"  => "image/png",
+        ".svg"  => "image/svg+xml",
+        ".json" => "application/json",
+        ".xml"  => "application/xml",
+        _       => "application/octet-stream"
+    };
+
+    return Results.File(filePath, contentType);
+}).AllowAnonymous();
+
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
