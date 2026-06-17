@@ -177,3 +177,10 @@ These are NOT code changes. This is a prerequisite for Natasha's QA verification
 ---
 
 **Ready for Clint's review.**
+
+---
+
+## Cycle 2 Fix
+FfE commit: f8f1cff — auth-dialog.html moved to root; storage imports deduplicated; hardcoded URL removed
+fip commit: 9d033d6 — whoami authScheme added
+TS: clean

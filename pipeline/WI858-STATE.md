@@ -1,6 +1,6 @@
 # Pipeline State: WI858
 
-## Current Stage: IN-REVIEW
+## Current Stage: DEPLOY (blocked — Entra prereqs)
 ## Risk Level: high
 ## Pipeline Path: full
 ## Review Cycles: 1
@@ -10,10 +10,10 @@
 |-------|--------|-------|---------|-----------|-------|
 | PLAN | ✅ DONE | Reed Richards | — | 2026-03-17 | Spec: FFE-ENTRA-AUTH-SPEC.md (906 lines) |
 | BUILD | ✅ DONE | Tony Stark | 20:35 | 21:44 | commits 9d33305 (ffe) + 83011c0 (fip); TS clean; all gate checks pass |
-| REVIEW | ↩️ NEEDS-CHANGES | Hawkeye | 21:45 | 21:50 | C1: auth-dialog path mismatch (404); I1: whoami missing authScheme; I2: storage duplication; I3: hardcoded URL |
-| SECURITY | ⏳ PENDING | CodeSec | — | — | High risk: new auth scheme, JWT validation, token storage |
+| REVIEW | ✅ DONE | Hawkeye | 21:45 | 21:54 | PASS cycle 2 — all fixes confirmed |
+| SECURITY | ✅ DONE | Maria (inline) | 21:56 | 21:57 | PASS — public client, no secrets, JWT validation correct, fails open |
 | APPROVE | ✅ DONE | Fred | — | 20:33 | Standing approval |
-| DEPLOY | ⏳ PENDING | Rhodey | — | — | INFRA FIRST: (1) Expose FfE.Access scope on FIP app reg; (2) Add redirect URIs for authDialog.html; then CodeBuild + ECS |
+| DEPLOY | ⛔ BLOCKED | Rhodey | 21:57 | — | Waiting: Fred must add FfE.Access scope + redirect URIs in Entra portal. wwwroot prepped (aacd5bc). |
 | VERIFY | ⏳ PENDING | Natasha | — | — | Browser QA — sign-in flow in Excel Online, token storage, per-user KB scoping, whoami endpoint |
 | CONFIRM | ⏳ PENDING | Maria | — | — | |
 

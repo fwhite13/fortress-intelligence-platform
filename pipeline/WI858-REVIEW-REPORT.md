@@ -153,3 +153,29 @@ One critical blocker: the auth-dialog path mismatch (C1) will make the sign-in f
 - I2 (important): Remove storage.ts/authService.ts duplication
 - I3 (important): Replace hardcoded URL in resolveUserIdentity() with FAIT_BASE
 - N1–N5 (nitpick): Fix comment, duplicate XML element, edge cases
+
+---
+## Cycle 2 Re-review (f8f1cff / 9d033d6)
+
+| Fix | Result |
+|-----|--------|
+| auth-dialog.html at root (not src/taskpane/auth/) | ✅ |
+| Old path removed | ✅ |
+| Vite entry + authService path alignment | ✅ |
+| authScheme in whoami response | ✅ |
+| No local KEY constants in authService.ts | ✅ |
+| authService imports from ./storage | ✅ |
+| No hardcoded fortressam.ai URL | ✅ |
+| window.location.origin used | ✅ |
+| ExcelAddinAccess policy both schemes intact | ✅ |
+| TS clean | ✅ |
+
+### Notes
+
+- **Fix 1:** `auth-dialog.html` is at project root ✅. Old path (`src/taskpane/auth/auth-dialog.html`) is gone ✅. Vite entry: `'auth-dialog': 'auth-dialog.html'` → outputs `dist/auth-dialog.html`, served at `/excel-addin/auth-dialog.html`. `authService.ts` uses `${window.location.origin}/excel-addin/auth-dialog.html`. Paths align ✅.
+- **Fix 2:** `authScheme = User.Identity?.AuthenticationType ?? "unknown"` present in `ExcelAddinController.cs` line 76 ✅.
+- **Fix 3:** No local `KEY =` constants in `authService.ts`. Imports `AUTH_TOKEN_KEY`, `AUTH_EXPIRY_KEY` and others from `./storage` (line 18) ✅.
+- **Fix 4:** `fait.dev.fortressam.ai` appears only as a **comment** on line 9 — not a live URL. `DIALOG_URL_BASE` and `resolveUserIdentity()` both use `window.location.origin` ✅.
+- **Regression:** `ExcelAddinAccess` policy with both `AppKeyAuth` + `EntraBearer` schemes intact in `Program.cs` ✅. `messageParent` / `displayDialogAsync` wiring intact in `authDialog.tsx` / `authService.ts` ✅. TypeScript compiles clean ✅.
+
+## Cycle 2 Verdict: PASS

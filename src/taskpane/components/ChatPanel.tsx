@@ -35,6 +35,8 @@ import { createReportSheet } from '../services/reportBuilder';
 import type { ReportSpec } from '../services/reportBuilder';
 import { previewFormula, writeFormula, formatPreviewValue } from '../services/formulaBuilder';
 import type { FormulaSpec, FormulaPreviewResult } from '../services/formulaBuilder';
+import { exportWorkbookState } from '../services/workbookStateExporter';
+import { executeOfficeActions } from '../services/officeActionExecutor';
 import ConfirmationPanel from './ConfirmationPanel';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
@@ -171,6 +173,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const slashQuery = showSlashPicker ? inputText.slice(1) : '';
 
   const [showConfirmPanel, setShowConfirmPanel] = useState(false);
+
+  // ── WI #5212: Task mode state ─────────────────────────────────────────────
+  const [taskModeActive, setTaskModeActive] = useState(false);
 
   const {
     messages,
@@ -395,7 +400,29 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       context = context ? `${rangeBlock}\n\n${context}` : rangeBlock;
     }
 
-    await send(text, context);
+    // ── WI #5212: Task mode detection + workbook state capture ──────────────
+    const isTaskMode = text.trim().toLowerCase().startsWith('task mode:');
+    let extraBody: Record<string, unknown> | undefined;
+
+    if (isTaskMode) {
+      setTaskModeActive(true);
+      try {
+        const { stateBlock } = await exportWorkbookState();
+        // Prepend workbook state to context
+        context = context ? `${stateBlock}\n\n${context}` : stateBlock;
+        extraBody = { taskMode: true, workbookState: stateBlock };
+      } catch (err) {
+        console.warn('[FAIT] exportWorkbookState failed:', err);
+        extraBody = { taskMode: true };
+      }
+    }
+
+    await send(text, context, extraBody);
+
+    // Reset task mode indicator after send completes
+    if (isTaskMode) {
+      setTaskModeActive(false);
+    }
   };
 
   // ── Check for Issues ─────────────────────────────────────────────────────────
@@ -1242,6 +1269,35 @@ Return ONLY the JSON block.`;
           </button>
         </div>
       </div>
+
+      {/* ── WI #5212: Task mode indicator ── */}
+      {taskModeActive && (
+        <div
+          style={{
+            padding: '4px 12px',
+            borderBottom: '1px solid #1a2d3e',
+            background: '#0d1520',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              background: '#d4af37',
+              animation: 'watchPulse 1.5s ease-in-out infinite',
+            }}
+          />
+          <span style={{ fontSize: '11px', color: '#d4af37', fontWeight: '600' }}>
+            ⚡ Task mode — capturing workbook state...
+          </span>
+        </div>
+      )}
 
       {/* ── Sprint 9: Watch mode config panel ── */}
       {showWatchConfig && !watchModeOn && (
@@ -2209,10 +2265,28 @@ Return ONLY the JSON block.`;
         <ConfirmationPanel
           actions={officeActions}
           streaming={officeActionsStreaming}
-          onApplyAll={(actions) => {
-            console.log('[FAIT] Apply All:', actions.length, 'actions');
-            clearOfficeActions();
-            setShowConfirmPanel(false);
+          onApplyAll={async (actionsToApply) => {
+            try {
+              const summary = await executeOfficeActions(actionsToApply);
+              const resultMsg = summary.successCount > 0
+                ? `✅ Applied ${summary.successCount} action${summary.successCount > 1 ? 's' : ''} successfully.${summary.failureCount > 0 ? ` (${summary.failureCount} failed)` : ''}`
+                : `⚠️ All ${summary.failureCount} actions failed.`;
+              setMessages(prev => [...prev, {
+                role: 'assistant' as const,
+                content: resultMsg,
+                streaming: false,
+              }]);
+            } catch (err) {
+              const errMsg = err instanceof Error ? err.message : 'Unknown error';
+              setMessages(prev => [...prev, {
+                role: 'assistant' as const,
+                content: `⚠️ Action execution failed: ${errMsg}`,
+                streaming: false,
+              }]);
+            } finally {
+              clearOfficeActions();
+              setShowConfirmPanel(false);
+            }
           }}
           onRejectAll={() => {
             clearOfficeActions();

@@ -1,14 +1,20 @@
 # CC Memory MCP Server — Architecture Spec
 
 **Author:** Reed Richards (Software Architect)  
-**Date:** 2026-03-17  
+**Date:** 2026-03-17 (updated 2026-03-18 — AWS deployment)  
 **Status:** Ready for Implementation  
 **Users:** Rob, Len, Leslie (Claude Code on Ubuntu VMs, Bedrock backend)  
-**Goal:** Cross-session memory for CC — decisions, lessons, project context — without `CLAUDE.md` bloat
+**Goal:** Cross-session memory for CC — decisions, lessons, project context — without `CLAUDE.md` bloat  
+**Deploy target:** ECS Fargate, `fortress-tools-cluster`  
+**Dev URL:** `https://mcp.dev.fortressam.ai`  
+**Prod URL:** `https://mcp.fortressam.ai`  
+**ECR repo:** `mcp-memory`
 
 ---
 
-## 1. Architecture Decision: pgvector vs. Bedrock KB
+## 1. Architecture Decision: pgvector vs. Bedrock KB, and Database Choice
+
+### pgvector vs. Bedrock KB
 
 **Decision: pgvector only. No new Bedrock KB.**
 
@@ -16,18 +22,48 @@ Rationale:
 
 | Factor | pgvector | Bedrock KB |
 |--------|----------|------------|
-| Cost | ~$0 marginal (reuses existing RDS/container) | $0.10/GB/month + $0.0004/query |
+| Cost | ~$20/month (RDS t4g.micro PostgreSQL) | $0.10/GB/month + $0.0004/query |
 | Latency | ~10–50ms (same VPC) | 200–500ms (cold) |
 | Chunk control | Full — choose size, metadata, TTL | Fixed by Bedrock ingestion pipeline |
 | Per-user isolation | Native — `user_id` column + query filter | Requires metadata filter in retrieve call |
 | Schema flexibility | Arbitrary metadata, project tags, scopes | Limited to predefined metadata |
-| Existing infra | Already running for OpenClaw memory | New resource, new IAM role, new ingestion job |
 
 FORGE (Bedrock KB) is large-chunk, document-optimized, enterprise knowledge. Memory is small-chunk, decision-optimized, low-latency. Wrong tool for the job.
 
-The pgvector instance already running for OpenClaw's own memory is the right backend. The MCP server wraps it with auth, multi-user isolation, and project tagging.
-
 **Embedding model:** `amazon.titan-embed-text-v2:0` (1536-dim, same as FAIT's corpus KB). Use Bedrock InvokeModel API directly — not BedrockAgent. Costs ~$0.00002/1K tokens.
+
+### Database Decision: New RDS PostgreSQL Instance
+
+**The FIP Aurora cluster (`fortress-ai-cluster.cluster-c89acukue4d5.us-east-1.rds.amazonaws.com`) is Aurora MySQL.** Aurora MySQL does not support the `pgvector` extension natively. The three options:
+
+| Option | Verdict |
+|--------|---------|
+| **A — RDS PostgreSQL t4g.micro** (new, standalone) | ✅ **Recommended** |
+| B — Aurora PostgreSQL-compatible cluster (new) | ❌ Overkill — Aurora PostgreSQL costs 3–5× more than a single RDS instance for this workload |
+| C — Aurora MySQL + manual cosine similarity (JSON float arrays + application-side dot product) | ❌ Unacceptable — no index, O(N) scan, 500ms+ at scale |
+| D — OpenSearch Serverless vector store | ❌ $700+/month minimum OCU cost — far too expensive for this use case |
+
+**Decision: Option A — new `db.t4g.micro` RDS PostgreSQL 16 instance with the `pgvector` extension.**
+
+**Why not reuse OpenClaw's local pgvector container?** OpenClaw's `openclaw-rag` container runs on SteamServer (a local WSL machine), port 5433. It is not accessible from AWS VPC or the internet. Rob, Len, and Leslie on Azure Ubuntu VMs need an AWS-hosted service. SteamServer is not the right backend.
+
+**RDS PostgreSQL instance spec (Rhodey — infrastructure):**
+```
+Engine:           PostgreSQL 16
+Instance class:   db.t4g.micro (2 vCPU, 1 GB RAM) — ~$20/month
+Storage:          20 GB gp3 (auto-scaling on)
+Multi-AZ:         No (dev/prod share single instance for now; add read replica in Phase 2)
+DB name:          mcp_memory
+VPC:              Same VPC as fortress-tools-cluster
+Security group:   Allow inbound 5432 from ECS tasks sg only (not internet-exposed)
+Encryption:       At rest: yes (AWS KMS); In transit: yes (require_ssl=1)
+Backup:           7-day automated backup window
+Parameter group:  shared_preload_libraries = 'pg_vector'  ← required for pgvector
+```
+
+**Credentials:** Stored in AWS Secrets Manager as `mcp-memory/db-credentials` (JSON: `{username, password, host, port, dbname}`). ECS task IAM role gets `secretsmanager:GetSecretValue` on this secret.
+
+**Note on SteamServer deploy:** The spec previously described a `mcp-memory.service` systemd unit on SteamServer. That is a throwaway artifact — discard it. All deployment is via ECS Fargate.
 
 ---
 
@@ -81,9 +117,9 @@ CREATE INDEX idx_ccme_embedding   ON cc_memory_entries USING ivfflat (embedding 
 
 ### Runtime
 
-Node.js/TypeScript. Deployed as a separate Docker container on the existing ECS cluster (or alongside it). Exposed at `https://memory.fortressam.ai` (or `https://mcp.fortressam.ai/memory`).
+Node.js/TypeScript. Deployed as a Fargate container on `fortress-tools-cluster`. Exposed at `https://mcp.dev.fortressam.ai` (dev) and `https://mcp.fortressam.ai` (prod).
 
-**Not localhost-only** — CC on Ubuntu VMs in Azure must reach it over HTTPS. TLS termination at the ALB (same as FAIT/FIRM). No new certificate work needed.
+CC on Ubuntu VMs in Azure reaches it over public HTTPS. TLS termination at `fortress-tools-alb` (same ALB as FAIT/FIRM). No new certificate needed — the wildcard `*.fortressam.ai` cert already covers `mcp.fortressam.ai`.
 
 ### Auth
 
@@ -449,7 +485,9 @@ Automated pipelines writing to org memory introduce noise. Human-confirmed write
 
 ---
 
-## 8. MCP Server: File Structure
+## 8. MCP Server: File Structure + Dockerfile + ECS Deployment
+
+### File Structure
 
 ```
 fip/mcp-memory/
@@ -461,21 +499,206 @@ fip/mcp-memory/
 │   │   ├── add.ts         ← memory_add + org confirmation flow
 │   │   ├── list.ts        ← memory_list
 │   │   └── delete.ts      ← memory_delete
-│   ├── db.ts              ← pgvector connection (pg + pgvector)
+│   ├── db.ts              ← PostgreSQL + pgvector connection (pg + pgvector npm)
 │   ├── embed.ts           ← Titan embed via Bedrock InvokeModel
 │   └── admin.ts           ← CLI admin: add-user, reset-token, list-users
 ├── cli/
 │   └── memory.py          ← Served at /cli/memory.py for curl-install
 ├── Dockerfile
+├── buildspec.yml
 ├── package.json
 └── tsconfig.json
 ```
 
-**npm packages:** `express`, `@modelcontextprotocol/sdk` (MCP server SDK), `pg`, `pgvector`, `bcrypt`, `@aws-sdk/client-bedrock-runtime`
+**npm packages:** `express`, `@modelcontextprotocol/sdk`, `pg`, `pgvector`, `bcrypt`, `@aws-sdk/client-bedrock-runtime`, `@aws-sdk/client-secrets-manager`
 
-**Port:** 3100 (internal); ALB routes `mcp.fortressam.ai` → ECS service on 3100.
+**Port:** `8080` — matches the convention used by all other FIP services (FAIT, FIRM, FORMS). ALB routes `mcp.dev.fortressam.ai` → ECS target group on port 8080.
 
-**ECS:** New service `mcp-memory` on the existing `fortress-tools-cluster`. Single container, 256 CPU / 512 MB RAM is sufficient. IAM role: `bedrock:InvokeModel` on `amazon.titan-embed-text-v2:0`.
+### Dockerfile
+
+```dockerfile
+# fip/mcp-memory/Dockerfile
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY tsconfig.json ./
+COPY src/ ./src/
+RUN npm run build
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Install production deps only
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY --from=builder /app/dist ./dist
+COPY cli/ ./cli/
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:8080/health || exit 1
+
+EXPOSE 8080
+CMD ["node", "dist/server.js"]
+```
+
+### `src/db.ts` — RDS PostgreSQL Connection
+
+```typescript
+// Fetch DB credentials from Secrets Manager at startup
+// Falls back to env vars for local dev (no Secrets Manager needed locally)
+
+import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+import { Pool } from 'pg';
+
+let pool: Pool | null = null;
+
+async function getDbCredentials(): Promise<{
+  host: string; port: number; database: string; user: string; password: string;
+}> {
+  // Local dev: use env vars directly
+  if (process.env.PGHOST) {
+    return {
+      host:     process.env.PGHOST,
+      port:     parseInt(process.env.PGPORT ?? '5432', 10),
+      database: process.env.PGDATABASE ?? 'mcp_memory',
+      user:     process.env.PGUSER ?? 'mcp_memory',
+      password: process.env.PGPASSWORD ?? '',
+    };
+  }
+
+  // AWS: fetch from Secrets Manager
+  const sm = new SecretsManagerClient({ region: process.env.AWS_REGION ?? 'us-east-1' });
+  const secretId = process.env.DB_SECRET_ARN ?? 'mcp-memory/db-credentials';
+  const resp = await sm.send(new GetSecretValueCommand({ SecretId: secretId }));
+  return JSON.parse(resp.SecretString!) as {
+    host: string; port: number; database: string; user: string; password: string;
+  };
+}
+
+export async function getDb(): Promise<Pool> {
+  if (pool) return pool;
+  const creds = await getDbCredentials();
+  pool = new Pool({
+    host:     creds.host,
+    port:     creds.port,
+    database: creds.database,
+    user:     creds.user,
+    password: creds.password,
+    ssl:      process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false,
+    max:      5,
+    idleTimeoutMillis: 30_000,
+  });
+  // Enable pgvector extension (idempotent)
+  await pool.query('CREATE EXTENSION IF NOT EXISTS vector');
+  return pool;
+}
+```
+
+### ECS Service (Rhodey — infrastructure)
+
+**ECS Task Definition:**
+```
+Family:           mcp-memory
+CPU:              256
+Memory:           512
+Execution role:   ecsTaskExecutionRole (existing)
+Task role:        mcp-memory-task-role (new — see IAM below)
+Container name:   mcp-memory
+Image:            <account>.dkr.ecr.us-east-1.amazonaws.com/mcp-memory:latest
+Port:             8080
+Log group:        /ecs/mcp-memory
+
+Environment variables:
+  NODE_ENV=production
+  AWS_REGION=us-east-1
+  DB_SECRET_ARN=arn:aws:secretsmanager:us-east-1:<account>:secret:mcp-memory/db-credentials
+  BEDROCK_REGION=us-east-1
+```
+
+**IAM Task Role (`mcp-memory-task-role`) permissions:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel"],
+      "Resource": "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["secretsmanager:GetSecretValue"],
+      "Resource": "arn:aws:secretsmanager:us-east-1:<account>:secret:mcp-memory/db-credentials*"
+    }
+  ]
+}
+```
+
+**ECS Service:**
+```
+Cluster:          fortress-tools-cluster
+Service name:     mcp-memory
+Launch type:      FARGATE
+Desired count:    1
+Subnets:          private subnets (same as FAIT/FIRM)
+Security group:   Allow inbound 8080 from ALB sg; allow outbound 5432 to RDS sg
+```
+
+### ALB + Route53 (Rhodey — infrastructure)
+
+**Target group:**
+```
+Name:             mcp-memory-tg
+Protocol:         HTTP
+Port:             8080
+Health check:     GET /health (200 OK)
+```
+
+**ALB listener rules** (add to `fortress-tools-alb`):
+```
+Dev:  Host: mcp.dev.fortressam.ai  → Target group: mcp-memory-dev-tg
+Prod: Host: mcp.fortressam.ai      → Target group: mcp-memory-tg
+```
+
+**Route53** (hosted zone `fortressam.ai`):
+```
+mcp.dev.fortressam.ai  CNAME  fortress-tools-alb.us-east-1.elb.amazonaws.com
+mcp.fortressam.ai      CNAME  fortress-tools-alb.us-east-1.elb.amazonaws.com
+```
+
+### `buildspec.yml`
+
+```yaml
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-7)
+      - ECR_URI=$AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/mcp-memory
+  build:
+    commands:
+      - docker build -t $ECR_URI:$IMAGE_TAG -t $ECR_URI:latest .
+  post_build:
+    commands:
+      - docker push $ECR_URI:$IMAGE_TAG
+      - docker push $ECR_URI:latest
+      - aws ecs update-service --cluster fortress-tools-cluster --service mcp-memory --force-new-deployment
+      - printf '[{"name":"mcp-memory","imageUri":"%s"}]' $ECR_URI:$IMAGE_TAG > imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
+```
+
+### Health Endpoint
+
+`GET /health` returns `{"status":"ok","service":"mcp-memory","timestamp":"..."}` — no auth required. Used by ALB health check and ECS health check.
 
 ---
 
@@ -498,6 +721,8 @@ Each user configures this on their Ubuntu VM:
 ```
 
 CC discovers tools via `GET /mcp` (MCP discovery endpoint). The server returns the tool manifest. CC then calls `POST /mcp` with JSON-RPC tool invocations.
+
+**Dev env:** Use `https://mcp.dev.fortressam.ai/mcp` while testing. Switch to `https://mcp.fortressam.ai/mcp` for prod.
 
 **Note on CC version:** CC must be ≥ v1.0.0 (streamable HTTP MCP transport). The version on the Ubuntu VMs must be verified. `claude --version` to check.
 
@@ -559,15 +784,45 @@ Searching without `--project` returns all results (org + personal), ordered by r
 
 ---
 
-## 12. New WI Needed
+## 12. Local Dev Setup
 
-| WI | Title |
-|----|-------|
-| WI#? | MCP Memory Server: pgvector schema + Express server + MCP tools |
-| WI#? | MCP Memory Server: ECS deployment + ALB routing |
-| WI#? | MCP Memory Server: CLI tool (`memory.py`) + admin CLI |
-| WI#? | CC Memory: CLAUDE.md template + onboarding guide for Rob/Len/Leslie |
+For local development (Tony building the service), no Secrets Manager or ECS needed:
+
+```bash
+# Start a local pgvector container
+docker run -d --name mcp-memory-dev \
+  -e POSTGRES_USER=mcp_memory \
+  -e POSTGRES_PASSWORD=dev \
+  -e POSTGRES_DB=mcp_memory \
+  -p 5432:5432 \
+  pgvector/pgvector:pg16
+
+# .env for local dev
+PGHOST=localhost
+PGPORT=5432
+PGDATABASE=mcp_memory
+PGUSER=mcp_memory
+PGPASSWORD=dev
+NODE_ENV=development
+AWS_REGION=us-east-1
+# AWS credentials needed for Titan embed (use your local ~/.aws/credentials)
+```
+
+Run: `npm run dev` (uses `ts-node-dev src/server.ts`). Server starts on port 8080.
 
 ---
 
-_Spec by Reed Richards | No new Bedrock KB. Pure pgvector + ECS. Four MCP tools. Per-user token auth. Under 30-line CLAUDE.md._
+## 13. New WI Needed
+
+| WI | Title | Owner |
+|----|-------|-------|
+| WI#? | MCP Memory Server: RDS PostgreSQL instance + pgvector extension | Rhodey |
+| WI#? | MCP Memory Server: ECR repo + ECS service + IAM role | Rhodey |
+| WI#? | MCP Memory Server: ALB rules + Route53 CNAME for mcp.dev / mcp.prod | Rhodey |
+| WI#? | MCP Memory Server: Express server + MCP tools + Dockerfile + buildspec | Tony |
+| WI#? | MCP Memory Server: CLI tool (`memory.py`) + admin CLI | Tony |
+| WI#? | CC Memory: CLAUDE.md template + onboarding guide for Rob/Len/Leslie | Reed |
+
+---
+
+_Spec by Reed Richards (updated 2026-03-18) | AWS ECS Fargate deploy. New RDS PostgreSQL t4g.micro + pgvector (Aurora MySQL incompatible). ECR repo: `mcp-memory`. Port 8080. Dev: `mcp.dev.fortressam.ai`, Prod: `mcp.fortressam.ai`. SteamServer local container discarded._
