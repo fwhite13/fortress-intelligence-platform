@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { sendChat, sendChatStreaming } from '../services/faitApi';
+import type { OfficeAction } from '../services/faitApi';
 import { parseSuggestions, type ParsedTable } from '../services/suggestionParser';
 import type { ReportSpec } from '../services/reportBuilder';
 import type { FormulaSpec } from '../services/formulaBuilder';
@@ -14,14 +15,19 @@ export interface Message {
   formulaSpec?: FormulaSpec | null;   // Sprint 11
 }
 
+export type { OfficeAction };
+
 export interface UseChatReturn {
   messages: Message[];
   loading: boolean;
   error: string | null;
   pendingSuggestions: CellSuggestion[] | null;
-  send: (text: string, context?: string) => Promise<void>;
+  officeActions: OfficeAction[];
+  officeActionsStreaming: boolean;
+  send: (text: string, context?: string, extraBody?: Record<string, unknown>) => Promise<void>;
   clearError: () => void;
   clearPendingSuggestions: () => void;
+  clearOfficeActions: () => void;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
 }
 
@@ -36,6 +42,8 @@ export function useChat(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingSuggestions, setPendingSuggestions] = useState<CellSuggestion[] | null>(null);
+  const [officeActions, setOfficeActions] = useState<OfficeAction[]>([]);
+  const [officeActionsStreaming, setOfficeActionsStreaming] = useState(false);
 
   /** Build the kbTypes array from toggles — personal is always included. */
   const buildKbTypes = (): string[] => {
@@ -47,7 +55,7 @@ export function useChat(
     return types;
   };
 
-  const send = async (text: string, context?: string) => {
+  const send = async (text: string, context?: string, extraBody?: Record<string, unknown>) => {
     const fullMessage = context ? `${context}\n\nUser question: ${text}` : text;
 
     // Show user message immediately
@@ -76,24 +84,31 @@ export function useChat(
         await sendChatStreaming(
           fullMessage,
           authHeader,
-          (chunk) => {
-            rawText += chunk;
-            // Update the streaming message in-place
-            setMessages((prev) => {
-              const next = [...prev];
-              next[assistantIndex] = {
-                role: 'assistant',
-                content: rawText,
-                streaming: true,
-              };
-              return next;
-            });
+          {
+            onTextChunk: (chunk) => {
+              rawText += chunk;
+              setMessages((prev) => {
+                const next = [...prev];
+                next[assistantIndex] = {
+                  role: 'assistant',
+                  content: rawText,
+                  streaming: true,
+                };
+                return next;
+              });
+            },
+            onOfficeAction: (action) => {
+              setOfficeActions((prev) => [...prev, action]);
+              setOfficeActionsStreaming(true);
+            },
           },
           model,
           controller.signal,
           kbTypes,
-          projectId
+          projectId,
+          extraBody
         );
+        setOfficeActionsStreaming(false);
         clearTimeout(timeout);
       } catch (streamErr) {
         clearTimeout(timeout);
@@ -152,6 +167,7 @@ export function useChat(
 
   const clearError = () => setError(null);
   const clearPendingSuggestions = () => setPendingSuggestions(null);
+  const clearOfficeActions = () => setOfficeActions([]);
 
-  return { messages, loading, error, pendingSuggestions, send, clearError, clearPendingSuggestions, setMessages };
+  return { messages, loading, error, pendingSuggestions, officeActions, officeActionsStreaming, send, clearError, clearPendingSuggestions, clearOfficeActions, setMessages };
 }

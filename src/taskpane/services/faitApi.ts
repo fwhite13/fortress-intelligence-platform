@@ -50,20 +50,64 @@ export async function sendChat(
   }
 }
 
+export interface OfficeAction {
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface SseHandlers {
+  onTextChunk: (text: string) => void;
+  onOfficeAction?: (action: OfficeAction) => void;
+  onTaskProgress?: (progress: unknown) => void;
+  onKbSources?: (sources: unknown) => void;
+}
+
+function dispatchSseEvent(
+  eventType: string,
+  dataStr: string,
+  handlers: SseHandlers
+): void {
+  if (eventType === 'text') {
+    try {
+      const text = JSON.parse(dataStr);
+      if (typeof text === 'string') handlers.onTextChunk(text);
+    } catch {
+      if (dataStr) handlers.onTextChunk(dataStr);
+    }
+  } else if (eventType === 'office_action') {
+    try {
+      handlers.onOfficeAction?.(JSON.parse(dataStr) as OfficeAction);
+    } catch { /* ignore malformed */ }
+  } else if (eventType === 'task_progress') {
+    try {
+      handlers.onTaskProgress?.(JSON.parse(dataStr));
+    } catch { /* ignore */ }
+  } else if (eventType === 'kb_sources') {
+    try {
+      handlers.onKbSources?.(JSON.parse(dataStr));
+    } catch { /* ignore */ }
+  }
+}
+
 /**
  * SSE streaming version of sendChat.
- * Calls onChunk for each text token as it arrives.
+ * Handles named SSE events: text, office_action, task_progress, kb_sources.
+ * Accepts either a SseHandlers object or a legacy (text: string) => void callback.
  * Throws 'INVALID_KEY' on 401, 'HTTP_NNN' for other HTTP errors.
  */
 export async function sendChatStreaming(
   message: string,
   authHeader: Record<string, string>,
-  onChunk: (text: string) => void,
+  handlers: SseHandlers | ((text: string) => void),
   model: 'haiku' | 'sonnet' = 'sonnet',
   signal?: AbortSignal,
   kbTypes?: string[],
-  projectId?: string | null
+  projectId?: string | null,
+  extraBody?: Record<string, unknown>
 ): Promise<void> {
+  const resolvedHandlers: SseHandlers =
+    typeof handlers === 'function' ? { onTextChunk: handlers } : handlers;
+
   const resp = await fetch(`${FAIT_BASE}/api/haven/chat`, {
     method: 'POST',
     headers: {
@@ -76,6 +120,7 @@ export async function sendChatStreaming(
       model,
       kbTypes: kbTypes ?? undefined,
       projectId: projectId ?? undefined,
+      ...extraBody,
     }),
     signal,
   });
@@ -89,13 +134,15 @@ export async function sendChatStreaming(
   if (!contentType.includes('text/event-stream')) {
     // Non-streaming response — parse as JSON and emit full answer as one chunk
     const data: ChatResponse = await resp.json();
-    if (data.answer) onChunk(data.answer);
+    if (data.answer) resolvedHandlers.onTextChunk(data.answer);
     return;
   }
 
   const reader = resp.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let currentEventType = 'text';
+  let currentDataLines: string[] = [];
 
   while (true) {
     const { done, value } = await reader.read();
@@ -106,11 +153,17 @@ export async function sendChatStreaming(
     buffer = lines.pop() ?? '';
 
     for (const line of lines) {
-      if (line.startsWith('data: ') && line.trim() !== 'data: [DONE]') {
-        try {
-          onChunk(JSON.parse(line.slice(6)));
-        } catch {
-          /* ignore parse errors */
+      if (line === '') {
+        if (currentDataLines.length > 0) {
+          dispatchSseEvent(currentEventType, currentDataLines.join('\n'), resolvedHandlers);
+          currentDataLines = [];
+          currentEventType = 'text';
+        }
+      } else if (line.startsWith('event: ')) {
+        currentEventType = line.slice(7).trim();
+      } else if (line.startsWith('data: ')) {
+        if (line.trim() !== 'data: [DONE]') {
+          currentDataLines.push(line.slice(6));
         }
       }
     }

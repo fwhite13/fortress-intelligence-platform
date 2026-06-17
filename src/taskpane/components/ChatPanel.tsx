@@ -35,6 +35,7 @@ import { createReportSheet } from '../services/reportBuilder';
 import type { ReportSpec } from '../services/reportBuilder';
 import { previewFormula, writeFormula, formatPreviewValue } from '../services/formulaBuilder';
 import type { FormulaSpec, FormulaPreviewResult } from '../services/formulaBuilder';
+import ConfirmationPanel from './ConfirmationPanel';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import ContextIndicator from './ContextIndicator';
@@ -169,14 +170,19 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const showSlashPicker = inputText.startsWith('/');
   const slashQuery = showSlashPicker ? inputText.slice(1) : '';
 
+  const [showConfirmPanel, setShowConfirmPanel] = useState(false);
+
   const {
     messages,
     loading,
     error,
     pendingSuggestions,
+    officeActions,
+    officeActionsStreaming,
     send,
     clearError,
     clearPendingSuggestions,
+    clearOfficeActions,
     setMessages,
   } = useChat(authHeader, model, kbToggles, projectId);
 
@@ -220,6 +226,12 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       clearPendingSuggestions();
     }
   }, [pendingSuggestions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (officeActions.length > 0) {
+      setShowConfirmPanel(true);
+    }
+  }, [officeActions]);
 
   // Refresh selection info on mount and periodically
   useEffect(() => {
@@ -2191,6 +2203,26 @@ Return ONLY the JSON block.`;
           onWriteTable={handleWriteTableRequest}
         />
       </div>
+
+      {/* ConfirmationPanel — shown when office_action events are buffered */}
+      {showConfirmPanel && officeActions.length > 0 && (
+        <ConfirmationPanel
+          actions={officeActions}
+          streaming={officeActionsStreaming}
+          onApplyAll={(actions) => {
+            console.log('[FAIT] Apply All:', actions.length, 'actions');
+            clearOfficeActions();
+            setShowConfirmPanel(false);
+          }}
+          onRejectAll={() => {
+            clearOfficeActions();
+            setShowConfirmPanel(false);
+          }}
+          onReviewEach={(_actions) => {
+            // Review Each handled internally by ConfirmationPanel
+          }}
+        />
+      )}
 
       {/* Input area — positioned relatively so slash picker can anchor to it */}
       <div ref={chatInputAreaRef} style={{ position: 'relative', flexShrink: 0 }}>
