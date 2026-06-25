@@ -1,0 +1,172 @@
+@page "/admin"
+@attribute [Authorize]
+@inject IDbContextFactory<RisePortalContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Admin — RISE App Cards</PageTitle>
+
+@if (!_initialized)
+{
+    <div style="display: flex; justify-content: center; padding: 3rem;">
+        <MudProgressCircular Indeterminate="true" />
+    </div>
+}
+else
+{
+    <div style="padding: 24px; max-width: 1200px; margin: 0 auto;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+            <MudText Typo="Typo.h5" Style="color: #194C5C;">App Card Management</MudText>
+            <div style="display: flex; gap: 8px;">
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SaveOrder">
+                    Save Order
+                </MudButton>
+                <MudButton Variant="Variant.Text" Href="/admin/admins">
+                    Manage Admins
+                </MudButton>
+            </div>
+        </div>
+
+        <MudTable Items="_cards" Dense="true" Striped="true" Elevation="2">
+            <HeaderContent>
+                <MudTh>Order</MudTh>
+                <MudTh>Slug</MudTh>
+                <MudTh Style="min-width:160px">Display Name</MudTh>
+                <MudTh Style="min-width:240px">URL</MudTh>
+                <MudTh>Restricted</MudTh>
+                <MudTh>Active</MudTh>
+                <MudTh>Access</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate Context="card">
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward"
+                                   Size="Size.Small"
+                                   OnClick="@(() => MoveUp(card))"
+                                   Disabled="@(_cards.IndexOf(card) == 0)" />
+                    <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward"
+                                   Size="Size.Small"
+                                   OnClick="@(() => MoveDown(card))"
+                                   Disabled="@(_cards.IndexOf(card) == _cards.Count - 1)" />
+                </MudTd>
+                <MudTd>
+                    <MudText Typo="Typo.caption">@card.Name</MudText>
+                </MudTd>
+                <MudTd>
+                    <MudTextField T="string" @bind-Value="card.DisplayName"
+                                  Variant="Variant.Text" Margin="Margin.Dense" />
+                </MudTd>
+                <MudTd>
+                    <MudTextField T="string" @bind-Value="card.Url"
+                                  Variant="Variant.Text" Margin="Margin.Dense" />
+                </MudTd>
+                <MudTd>
+                    <MudSwitch T="bool" @bind-Value="card.Restricted" Color="Color.Warning" />
+                </MudTd>
+                <MudTd>
+                    <MudSwitch T="bool" @bind-Value="card.Active" Color="Color.Success" />
+                </MudTd>
+                <MudTd>
+                    @if (card.Restricted)
+                    {
+                        <MudLink Href="@($"/admin/cards/{card.Id}/access")">Manage</MudLink>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Style="color: #7A776E;">All users</MudText>
+                    }
+                </MudTd>
+                <MudTd>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               Size="Size.Small" OnClick="@(() => SaveCard(card))">
+                        Save
+                    </MudButton>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </div>
+}
+
+@code {
+    private List<RiseAppCard> _cards = new();
+    private bool _initialized;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var oid = authState.User
+            .FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? authState.User.FindFirst("oid")?.Value;
+
+        if (string.IsNullOrEmpty(oid))
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var isAdmin = await db.RiseAdminUsers.AnyAsync(a => a.EntraOid == oid);
+        if (!isAdmin)
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        _cards = await db.RiseAppCards.OrderBy(c => c.SortOrder).ToListAsync();
+        _initialized = true;
+    }
+
+    private void MoveUp(RiseAppCard card)
+    {
+        var idx = _cards.IndexOf(card);
+        if (idx <= 0) return;
+        _cards.RemoveAt(idx);
+        _cards.Insert(idx - 1, card);
+    }
+
+    private void MoveDown(RiseAppCard card)
+    {
+        var idx = _cards.IndexOf(card);
+        if (idx >= _cards.Count - 1) return;
+        _cards.RemoveAt(idx);
+        _cards.Insert(idx + 1, card);
+    }
+
+    private async Task SaveOrder()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            for (int i = 0; i < _cards.Count; i++)
+            {
+                var newOrder = (i + 1) * 10;
+                await db.Database.ExecuteSqlRawAsync(
+                    "UPDATE rise_app_cards SET sort_order = {0} WHERE id = {1}",
+                    newOrder, _cards[i].Id);
+                _cards[i].SortOrder = newOrder;
+            }
+            Snackbar.Add("Order saved.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SaveCard(RiseAppCard card)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await db.Database.ExecuteSqlRawAsync(
+                "UPDATE rise_app_cards SET display_name={0}, url={1}, restricted={2}, active={3} WHERE id={4}",
+                card.DisplayName ?? "", card.Url ?? "", card.Restricted, card.Active, card.Id);
+            Snackbar.Add($"'{card.Name}' saved.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Save failed: {ex.Message}", Severity.Error);
+        }
+    }
+}

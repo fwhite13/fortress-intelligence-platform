@@ -1,4 +1,6 @@
 @inject IHttpContextAccessor HttpContextAccessor
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IDbContextFactory<RisePortalContext> DbFactory
 
 <div style="display: flex; align-items: center; gap: 12px; padding-right: 12px;">
     @if (HttpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated == true)
@@ -8,9 +10,42 @@
                        ?? "User";
         <MudText Style="color: #FFFFFF; font-size: 0.85rem;">Welcome, @displayName</MudText>
     }
+    @if (_isAdmin)
+    {
+        <MudButton Variant="Variant.Text"
+                   Href="/admin"
+                   Style="color: #FFFFFF; text-transform: none; font-size: 0.85rem;">
+            Admin
+        </MudButton>
+    }
     <MudButton Variant="Variant.Text"
                Href="/auth/logout"
                Style="color: #FFFFFF; text-transform: none; font-size: 0.85rem;">
         Sign Out
     </MudButton>
 </div>
+
+@code {
+    private bool _isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var oid = authState.User
+                .FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                ?? authState.User.FindFirst("oid")?.Value;
+
+            if (!string.IsNullOrEmpty(oid))
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                _isAdmin = await db.RiseAdminUsers.AnyAsync(a => a.EntraOid == oid);
+            }
+        }
+        catch
+        {
+            _isAdmin = false;
+        }
+    }
+}

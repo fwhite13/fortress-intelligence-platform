@@ -1,69 +1,53 @@
 @page "/"
 @attribute [Authorize]
-@inject IConfiguration Configuration
+@inject IDbContextFactory<RisePortalContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
 
 <PageTitle>RISE — Refuge Intelligence Suite for Enterprise</PageTitle>
 
 <div class="portal-wrapper">
-    <!-- Header -->
     <div class="portal-header">
         <MudText Typo="Typo.h4" Class="portal-title">Your Applications</MudText>
     </div>
 
-    <!-- App Grid -->
     <MudGrid Justify="Justify.Center" Class="portal-grid">
 
-        <!-- Notetaker (active) -->
-        <MudItem xs="12" sm="6" md="5" lg="4">
-            <MudCard Class="app-tile" Elevation="2">
-                <MudCardContent Class="app-tile-content">
-                    <div class="app-icon-wrap">
-                        <MudIcon Icon="@Icons.Material.Filled.RecordVoiceOver" Style="font-size: 2.5rem; color: #A97C50;" />
-                    </div>
-                    <MudText Typo="Typo.h6" Class="app-name">Notetaker</MudText>
-                    <MudText Typo="Typo.caption" Class="app-full-name">Meeting Intelligence</MudText>
-                    <MudText Typo="Typo.body2" Class="app-description">
-                        Record, transcribe, and summarize meetings automatically.
-                    </MudText>
-                </MudCardContent>
-                <MudCardActions Class="app-tile-actions">
-                    <MudButton Variant="Variant.Outlined"
-                               Href="@(_notetakerUrl)"
-                               Target="_blank"
-                               Class="app-open-btn"
-                               FullWidth="true">
-                        Open
-                    </MudButton>
-                </MudCardActions>
-            </MudCard>
-        </MudItem>
+        @if (_cards != null && _cards.Count == 0)
+        {
+            <MudItem xs="12">
+                <MudText Typo="Typo.body1" Style="text-align: center; color: #7A776E; padding: 2rem;">
+                    No applications are available for your account.
+                </MudText>
+            </MudItem>
+        }
 
-        <!-- Conference Rooms (active) -->
-        <MudItem xs="12" sm="6" md="5" lg="4">
-            <MudCard Class="app-tile" Elevation="2">
-                <MudCardContent Class="app-tile-content">
-                    <div class="app-icon-wrap">
-                        <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" Style="font-size: 2.5rem; color: #A97C50;" />
-                    </div>
-                    <MudText Typo="Typo.h6" Class="app-name">Conference Rooms</MudText>
-                    <MudText Typo="Typo.caption" Class="app-full-name">Room Booking</MudText>
-                    <MudText Typo="Typo.body2" Class="app-description">
-                        Book and manage conference rooms across your organization.
-                    </MudText>
-                </MudCardContent>
-                <MudCardActions Class="app-tile-actions">
-                    <MudButton Variant="Variant.Outlined"
-                               Href="https://rooms.refugems.ai/MicrosoftIdentity/Account/SignIn?returnUrl=%2F"
-                               Target="_blank"
-                               Class="app-open-btn"
-                               FullWidth="true">
-                        Open
-                    </MudButton>
-                </MudCardActions>
-            </MudCard>
-        </MudItem>
+        @foreach (var card in _cards ?? new List<RiseAppCard>())
+        {
+            <MudItem xs="12" sm="6" md="5" lg="4">
+                <MudCard Class="app-tile" Elevation="2">
+                    <MudCardContent Class="app-tile-content">
+                        <div class="app-icon-wrap">
+                            <span style="font-size: 2.5rem; line-height: 1;">@card.Icon</span>
+                        </div>
+                        <MudText Typo="Typo.h6" Class="app-name">@card.DisplayName</MudText>
+                        <MudText Typo="Typo.body2" Class="app-description">
+                            @card.Description
+                        </MudText>
+                    </MudCardContent>
+                    <MudCardActions Class="app-tile-actions">
+                        <MudButton Variant="Variant.Outlined"
+                                   Href="@card.Url"
+                                   Target="_blank"
+                                   Class="app-open-btn"
+                                   FullWidth="true">
+                            Open
+                        </MudButton>
+                    </MudCardActions>
+                </MudCard>
+            </MudItem>
+        }
 
-        <!-- Coming Soon (teaser) -->
+        <!-- Coming Soon (always last, hardcoded) -->
         <MudItem xs="12" sm="6" md="5" lg="4">
             <MudCard Class="app-tile app-tile--disabled" Elevation="0">
                 <MudCardContent Class="app-tile-content">
@@ -88,7 +72,6 @@
 
     </MudGrid>
 
-    <!-- Footer -->
     <div class="portal-footer">
         <MudText Typo="Typo.caption" Style="color: #B0ADA6;">
             &copy; 2026 Refuge Intelligence Suite for Enterprise (RISE). All rights reserved.
@@ -97,10 +80,43 @@
 </div>
 
 @code {
-    private string _notetakerUrl = "https://notetaker.refugems.ai";
+    private List<RiseAppCard>? _cards;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        _notetakerUrl = Configuration["Branding:NotetakerUrl"] ?? _notetakerUrl;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userOid = authState.User
+            .FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? authState.User.FindFirst("oid")?.Value;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var allActive = await db.RiseAppCards
+                .Where(c => c.Active)
+                .OrderBy(c => c.SortOrder)
+                .ToListAsync();
+
+            if (string.IsNullOrEmpty(userOid))
+            {
+                _cards = allActive.Where(c => !c.Restricted).ToList();
+            }
+            else
+            {
+                var accessibleIds = await db.RiseAppCardAccesses
+                    .Where(a => a.EntraOid == userOid)
+                    .Select(a => a.AppCardId)
+                    .ToListAsync();
+
+                _cards = allActive
+                    .Where(c => !c.Restricted || accessibleIds.Contains(c.Id))
+                    .ToList();
+            }
+        }
+        catch
+        {
+            _cards = new List<RiseAppCard>();
+        }
     }
 }

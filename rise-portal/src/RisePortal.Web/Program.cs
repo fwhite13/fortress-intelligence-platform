@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 using MudBlazor.Services;
+using MySqlConnector;
 using RisePortal.Web.Components;
 using RisePortal.Web.Data;
 using RisePortal.Web.Services;
@@ -38,12 +39,13 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
             if (originalTokenValidated != null)
                 await originalTokenValidated(ctx);
 
+            var oid = ctx.Principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+                   ?? ctx.Principal?.FindFirst("oid")?.Value;
+
             // Capture tokens and store to MySQL
             var tokenService = ctx.HttpContext.RequestServices.GetService<TokenStorageService>();
             if (tokenService != null)
             {
-                var oid = ctx.Principal?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-                       ?? ctx.Principal?.FindFirst("oid")?.Value;
                 var accessToken = ctx.TokenEndpointResponse?.AccessToken;
                 var refreshToken = ctx.TokenEndpointResponse?.RefreshToken;
                 var expiresIn = ctx.TokenEndpointResponse?.ExpiresIn;
@@ -55,6 +57,50 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
                         int.TryParse(expiresIn, out var sec) ? sec : 3600);
 
                     await tokenService.StoreTokenAsync(oid, accessToken, refreshToken, expiresAt, scopes);
+                }
+            }
+
+            // Upsert rise_users + backfill access list on every login
+            if (!string.IsNullOrEmpty(oid))
+            {
+                var email = ctx.Principal?.FindFirst("preferred_username")?.Value
+                         ?? ctx.Principal?.FindFirst("email")?.Value;
+                var displayName = ctx.Principal?.FindFirst("name")?.Value;
+                var now = DateTime.UtcNow;
+
+                var cs = ctx.HttpContext.RequestServices.GetRequiredService<IConfiguration>()
+                             .GetConnectionString("RnFip");
+                try
+                {
+                    await using var conn = new MySqlConnection(cs);
+                    await conn.OpenAsync();
+
+                    await using var upsertCmd = new MySqlCommand(
+                        @"INSERT INTO rise_users (entra_oid, email, display_name, first_login, last_login)
+                          VALUES (@oid, @email, @displayName, @now, @now)
+                          ON DUPLICATE KEY UPDATE email=@email, display_name=@displayName, last_login=@now",
+                        conn);
+                    upsertCmd.Parameters.AddWithValue("@oid", oid);
+                    upsertCmd.Parameters.AddWithValue("@email", (object?)email ?? DBNull.Value);
+                    upsertCmd.Parameters.AddWithValue("@displayName", (object?)displayName ?? DBNull.Value);
+                    upsertCmd.Parameters.AddWithValue("@now", now);
+                    await upsertCmd.ExecuteNonQueryAsync();
+
+                    await using var backfillCmd = new MySqlCommand(
+                        @"UPDATE rise_app_card_access
+                          SET email=@email, display_name=@displayName
+                          WHERE entra_oid=@oid
+                            AND (email IS NULL OR email='' OR display_name IS NULL OR display_name='')",
+                        conn);
+                    backfillCmd.Parameters.AddWithValue("@oid", oid);
+                    backfillCmd.Parameters.AddWithValue("@email", (object?)email ?? DBNull.Value);
+                    backfillCmd.Parameters.AddWithValue("@displayName", (object?)displayName ?? DBNull.Value);
+                    await backfillCmd.ExecuteNonQueryAsync();
+                }
+                catch (Exception ex)
+                {
+                    var logger = ctx.HttpContext.RequestServices.GetService<ILogger<Program>>();
+                    logger?.LogWarning("RISE: Failed to upsert rise_users on login: {Message}", ex.Message);
                 }
             }
         };
@@ -97,6 +143,10 @@ builder.Services.AddDbContext<DataProtectionKeyContext>(options =>
 builder.Services.AddDataProtection()
     .PersistKeysToDbContext<DataProtectionKeyContext>()
     .SetApplicationName("RISE");
+
+// ── RISE Portal DbContext (EF — GuidFormat=None is in the connection string) ──
+builder.Services.AddDbContextFactory<RisePortalContext>(options =>
+    options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
 // ── App Services ──
 builder.Services.AddSingleton<TokenStorageService>();
@@ -154,7 +204,6 @@ app.MapGet("/auth/firm-callback", async (HttpContext ctx, string? returnUrl) =>
 {
     if (ctx.User?.Identity?.IsAuthenticated != true)
     {
-        // Not authenticated — challenge, then come back here
         var callbackUrl = "/auth/firm-callback" + (returnUrl != null ? "?returnUrl=" + Uri.EscapeDataString(returnUrl) : "");
         await ctx.ChallengeAsync(OpenIdConnectDefaults.AuthenticationScheme, new AuthenticationProperties
         {
@@ -162,7 +211,6 @@ app.MapGet("/auth/firm-callback", async (HttpContext ctx, string? returnUrl) =>
         });
         return;
     }
-    // Authenticated — cookie is set, redirect to module
     var target = returnUrl ?? "/";
     ctx.Response.Redirect(target);
 }).AllowAnonymous();

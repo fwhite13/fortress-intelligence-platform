@@ -1,0 +1,199 @@
+@page "/admin/admins"
+@attribute [Authorize]
+@inject IDbContextFactory<RisePortalContext> DbFactory
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Admin Users — RISE Admin</PageTitle>
+
+@if (!_initialized)
+{
+    <div style="display: flex; justify-content: center; padding: 3rem;">
+        <MudProgressCircular Indeterminate="true" />
+    </div>
+}
+else
+{
+    <div style="padding: 24px; max-width: 800px; margin: 0 auto;">
+        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+                   Href="/admin" Style="margin-bottom: 16px;">
+            Back to Cards
+        </MudButton>
+
+        <MudText Typo="Typo.h5" Style="color: #194C5C; margin-bottom: 20px;">Admin Users</MudText>
+
+        <MudTable Items="_admins" Dense="true" Striped="true" Elevation="2">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Email</MudTh>
+                <MudTh>OID</MudTh>
+                <MudTh>Added</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate Context="admin">
+                <MudTd>@(admin.DisplayName ?? "—")</MudTd>
+                <MudTd>@(admin.Email ?? "—")</MudTd>
+                <MudTd>
+                    <MudText Typo="Typo.caption">@admin.EntraOid</MudText>
+                </MudTd>
+                <MudTd>@(admin.CreatedAt?.ToString("yyyy-MM-dd") ?? "—")</MudTd>
+                <MudTd>
+                    @if (admin.EntraOid != _currentOid)
+                    {
+                        <MudButton Color="Color.Error" Variant="Variant.Outlined"
+                                   Size="Size.Small" OnClick="@(() => RemoveAdmin(admin))">
+                            Remove
+                        </MudButton>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Style="color: #7A776E;">(you)</MudText>
+                    }
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Style="padding: 1rem; color: #7A776E;">
+                    No admins configured.
+                </MudText>
+            </NoRecordsContent>
+        </MudTable>
+
+        <MudDivider Style="margin: 28px 0;" />
+
+        <MudText Typo="Typo.h6" Style="margin-bottom: 16px;">Add Admin</MudText>
+
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudAutocomplete T="RiseUser"
+                                 Label="Search by name or email"
+                                 @bind-Value="_selectedUser"
+                                 SearchFunc="SearchUsers"
+                                 ToStringFunc="@(u => u == null ? "" : $"{u.DisplayName} ({u.Email})")"
+                                 ResetValueOnEmptyText="true"
+                                 Clearable="true" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField T="string" @bind-Value="_manualOid"
+                              Label="Or enter Entra OID manually" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="AddAdmin">
+                    Add Admin
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </div>
+}
+
+@code {
+    private List<RiseAdminUser> _admins = new();
+    private bool _initialized;
+    private string? _currentOid;
+    private RiseUser? _selectedUser;
+    private string? _manualOid;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _currentOid = authState.User
+            .FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? authState.User.FindFirst("oid")?.Value;
+
+        if (string.IsNullOrEmpty(_currentOid))
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var isAdmin = await db.RiseAdminUsers.AnyAsync(a => a.EntraOid == _currentOid);
+        if (!isAdmin)
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        _admins = await db.RiseAdminUsers.OrderBy(a => a.DisplayName).ToListAsync();
+        _initialized = true;
+    }
+
+    private async Task<IEnumerable<RiseUser>> SearchUsers(string? text, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return Enumerable.Empty<RiseUser>();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        return await db.RiseUsers
+            .Where(u => (u.DisplayName != null && u.DisplayName.Contains(text))
+                     || (u.Email != null && u.Email.Contains(text)))
+            .Take(10)
+            .ToListAsync(token);
+    }
+
+    private async Task RemoveAdmin(RiseAdminUser admin)
+    {
+        if (admin.EntraOid == _currentOid)
+        {
+            Snackbar.Add("You cannot remove yourself.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM rise_admin_users WHERE id = {0}", admin.Id);
+            _admins.Remove(admin);
+            Snackbar.Add("Admin removed.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Remove failed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task AddAdmin()
+    {
+        var oidToAdd = _selectedUser?.EntraOid ?? _manualOid?.Trim();
+        if (string.IsNullOrEmpty(oidToAdd))
+        {
+            Snackbar.Add("Select a user or enter an OID.", Severity.Warning);
+            return;
+        }
+
+        if (_admins.Any(a => a.EntraOid == oidToAdd))
+        {
+            Snackbar.Add("This user is already an admin.", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var now = DateTime.UtcNow;
+            await db.Database.ExecuteSqlRawAsync(
+                @"INSERT IGNORE INTO rise_admin_users (entra_oid, email, display_name, created_at)
+                  VALUES ({0}, {1}, {2}, {3})",
+                oidToAdd,
+                _selectedUser?.Email ?? "",
+                _selectedUser?.DisplayName ?? "",
+                now);
+
+            _admins.Add(new RiseAdminUser
+            {
+                EntraOid = oidToAdd,
+                Email = _selectedUser?.Email,
+                DisplayName = _selectedUser?.DisplayName,
+                CreatedAt = now
+            });
+
+            _selectedUser = null;
+            _manualOid = null;
+            Snackbar.Add("Admin added.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Add failed: {ex.Message}", Severity.Error);
+        }
+    }
+}
