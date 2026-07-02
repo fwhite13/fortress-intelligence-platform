@@ -5,3 +5,4 @@
 **/*.user
 **/uploads
 pipeline/
+**/appsettings.Development.json

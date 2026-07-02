@@ -125,9 +125,7 @@ builder.Services.AddDataProtection()
     .DisableAutomaticKeyGeneration();
 
 // ── Default HttpClient for Blazor component API calls ──
-var internalBaseUrl = builder.Environment.IsDevelopment()
-    ? "http://localhost:5200/"
-    : "http://localhost:8080/";
+var internalBaseUrl = "http://localhost:8080/";
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(internalBaseUrl) });
 
 // ── HttpClient for Fortress API ──
@@ -384,7 +382,7 @@ app.MapRazorComponents<App>()
 
 Console.WriteLine("═══════════════════════════════════════════════════");
 Console.WriteLine("  Fortress Form Tools — Form Intelligence Platform");
-Console.WriteLine("  Running at: http://localhost:5200");
+Console.WriteLine("  Running at: http://localhost:8080 (or ASPNETCORE_URLS if set)");
 Console.WriteLine("═══════════════════════════════════════════════════");
 
 app.Run();
