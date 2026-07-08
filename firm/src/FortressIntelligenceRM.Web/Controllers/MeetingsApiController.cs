@@ -451,6 +451,45 @@ public class MeetingsApiController : ControllerBase
         return Ok();
     }
 
+    /// <summary>
+    /// Internal autojoin trigger — called by EventBridge Lambda when a scheduled meeting fires.
+    /// Atomically claims the meeting from Scheduled → Pending and launches the bot.
+    /// Shared-secret auth (same as VpCallback). Returns 409 if already claimed.
+    /// </summary>
+    [HttpPost("/api/vp/autojoin/{meetingId}")]
+    [AllowAnonymous]
+    public async Task<IActionResult> AutoJoinTrigger(long meetingId)
+    {
+        var expectedSecret = _config["Firm:BotCallbackSecret"];
+        var providedSecret = Request.Headers["X-Bot-Secret"].FirstOrDefault();
+        if (string.IsNullOrEmpty(expectedSecret) || providedSecret != expectedSecret)
+        {
+            _logger.LogWarning("FIRM: AutoJoinTrigger rejected — invalid or missing X-Bot-Secret");
+            return Unauthorized();
+        }
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.FindAsync(meetingId);
+        if (meeting == null) return NotFound(new { error = "Meeting not found" });
+
+        if (meeting.Status != MeetingStatus.Scheduled)
+        {
+            _logger.LogInformation("FIRM: AutoJoinTrigger skipped — meeting {Id} status is {Status} (not Scheduled)", meetingId, meeting.Status);
+            return Conflict(new { error = $"Meeting is not in Scheduled state (current: {meeting.Status})" });
+        }
+
+        var taskArn = await _vpBotService.TriggerBotAsync(meetingId, meeting.MeetingUrl ?? "", meeting.Platform);
+        if (taskArn == null)
+        {
+            _logger.LogError("FIRM: AutoJoinTrigger failed to launch bot for meeting {Id}", meetingId);
+            return StatusCode(500, new { error = "Failed to launch bot" });
+        }
+
+        await _meetingService.UpdateStatusAsync(meetingId, MeetingStatus.Pending);
+        _logger.LogInformation("FIRM: AutoJoinTrigger launched bot {TaskArn} for meeting {Id}", taskArn, meetingId);
+        return Ok(new { meetingId, taskArn });
+    }
+
     [HttpGet("/api/vp/org-context")]
     [AllowAnonymous]
     public async Task<IActionResult> VpGetOrgContext()
