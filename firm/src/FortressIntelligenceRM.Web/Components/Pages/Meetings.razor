@@ -351,7 +351,7 @@
         var result = await dialog.Result;
         if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?> data)
         {
-            await JoinMeetingWithParams(data.Item1, data.Item2);
+            await JoinMeetingWithParams(data.Item1, data.Item2, data.Item3);
         }
     }
 
@@ -398,18 +398,18 @@
         var result = await dialog.Result;
         if (result != null && !result.Canceled && result.Data is ValueTuple<string, string?, string, string?> data)
         {
-            await JoinMeetingWithParams(data.Item1, data.Item2);
+            await JoinMeetingWithParams(data.Item1, data.Item2, data.Item3);
         }
     }
 
-    private async Task JoinMeetingWithParams(string meetingUrl, string? meetingTitle)
+    private async Task JoinMeetingWithParams(string meetingUrl, string? meetingTitle, string? platform = null)
     {
         if (string.IsNullOrWhiteSpace(meetingUrl)) return;
         _joining = true;
         await InvokeAsync(StateHasChanged);
         try
         {
-            await JoinMeetingDirectAsync(meetingUrl, meetingTitle);
+            await JoinMeetingDirectAsync(meetingUrl, meetingTitle, platform: platform);
         }
         catch (Exception ex)
         {
@@ -509,7 +509,7 @@
         builder.CloseElement();
     };
 
-    private async Task JoinMeetingDirectAsync(string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? mode = null)
+    private async Task JoinMeetingDirectAsync(string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? mode = null, string? platform = null)
     {
         if (string.IsNullOrEmpty(_userId))
         {
@@ -517,7 +517,7 @@
             Logger.LogError("FIRM: JoinMeetingDirectAsync called with null _userId — identity not resolved at load");
             return;
         }
-        var meeting = await MeetingService.CreateMeetingAsync(Guid.Parse(_userId), meetingUrl, title, startDatetime, calendarEventId);
+        var meeting = await MeetingService.CreateMeetingAsync(Guid.Parse(_userId), meetingUrl, title, startDatetime, calendarEventId, platform);
         if (!string.IsNullOrEmpty(mode))
             await MeetingService.UpdateModeAsync(meeting.Id, mode);
 
@@ -531,7 +531,7 @@
         {
             try
             {
-                var taskArn = await VpBotService.TriggerBotAsync(meeting.Id, meetingUrl);
+                var taskArn = await VpBotService.TriggerBotAsync(meeting.Id, meetingUrl, meeting.Platform);
                 if (taskArn == null)
                 {
                     // TriggerBotAsync returned null — ECS launch failed (it logged internally)
@@ -594,7 +594,7 @@
                 return;
             }
 
-            var taskArn = await VpBotService.TriggerBotAsync(meetingId, meeting.MeetingUrl ?? "");
+            var taskArn = await VpBotService.TriggerBotAsync(meetingId, meeting.MeetingUrl ?? "", meeting.Platform);
             if (taskArn == null)
             {
                 // TriggerBotAsync returned null — ECS launch failed (it logged internally)
@@ -711,7 +711,7 @@
             {
                 try
                 {
-                    await JoinMeetingDirectAsync(card.JoinUrl, card.Subject, start, card.CalendarEventId, mode: card.Mode);
+                    await JoinMeetingDirectAsync(card.JoinUrl, card.Subject, start, card.CalendarEventId, mode: card.Mode, platform: card.Platform);
                 }
                 catch (Exception ex)
                 {

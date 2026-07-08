@@ -41,13 +41,14 @@ public class MeetingService
             .FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == userId);
     }
 
-    public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null)
+    public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? platform = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = new FirmMeeting
         {
             Title = title ?? $"Meeting — {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
             MeetingUrl = meetingUrl,
+            Platform = platform ?? DerivePlatformFromUrl(meetingUrl),
             Status = MeetingStatus.Joining,
             CreatedBy = userId,
             CreatedAt = DateTime.UtcNow,
@@ -59,6 +60,14 @@ public class MeetingService
         await db.SaveChangesAsync();
         _logger.LogInformation("FIRM: Created meeting {Id} for user {UserId}", meeting.Id, userId);
         return meeting;
+    }
+
+    private static string DerivePlatformFromUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return "teams";
+        if (url.Contains("zoom.us")) return "zoom";
+        if (url.Contains("meet.google.com")) return "meet";
+        return "teams";
     }
 
     public async Task UpdateStatusAsync(long id, MeetingStatus status, string? errorMessage = null)
