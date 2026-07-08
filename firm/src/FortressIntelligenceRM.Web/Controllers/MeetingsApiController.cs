@@ -232,6 +232,21 @@ public class MeetingsApiController : ControllerBase
             }
         }
 
+        // Bugs 2+3: recalculate DurationSeconds from actual transcript coverage once the
+        // meeting is fully summarized, rather than trusting whichever callback set EndedAt last.
+        if (payload.Status.Equals("summary_complete", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await _meetingService.RecalculateDurationFromTranscriptAsync(payload.MeetingId);
+            }
+            catch (Exception durationEx)
+            {
+                _logger.LogError(durationEx, "FIRM: Failed to recalculate duration from transcript for meeting {MeetingId}", payload.MeetingId);
+                // Non-fatal
+            }
+        }
+
         // Write participants on recording status
         if (meetingStatus == MeetingStatus.Recording && payload.Participants != null)
         {

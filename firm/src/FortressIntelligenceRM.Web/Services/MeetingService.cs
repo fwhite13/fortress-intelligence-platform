@@ -73,13 +73,42 @@ public class MeetingService
             meeting.StartedAt = DateTime.UtcNow;
         // Only set EndedAt/DurationSeconds on recording-end transitions (bot leaving the meeting)
         // Do NOT overwrite on retranscription callbacks (Summarizing, Complete)
-        if (status is MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing or MeetingStatus.Failed)
+        if (status is MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing)
         {
-            meeting.EndedAt ??= DateTime.UtcNow;
+            meeting.EndedAt = DateTime.UtcNow; // always update — allows a later retry bot's callback to win
             if (meeting.StartedAt != null)
                 meeting.DurationSeconds = (int)(meeting.EndedAt.Value - meeting.StartedAt.Value).TotalSeconds;
         }
+        // Failed: keep ??= — a subsequent retry shouldn't clear a meaningful EndedAt already set
+        if (status == MeetingStatus.Failed)
+        {
+            meeting.EndedAt ??= DateTime.UtcNow;
+        }
         await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Recalculates DurationSeconds from the max transcript segment end time (ADO bug 2+3 follow-up).
+    /// Called on summary_complete so the final duration reflects actual transcript coverage
+    /// rather than whichever bot's callback happened to set EndedAt last.
+    /// </summary>
+    public async Task RecalculateDurationFromTranscriptAsync(long meetingId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.FindAsync(meetingId);
+        if (meeting == null) return;
+
+        var maxEndMs = await db.Transcripts
+            .Where(t => t.MeetingId == meetingId)
+            .MaxAsync(t => (long?)t.EndTimeMs);
+
+        if (maxEndMs.HasValue && maxEndMs.Value > 0)
+        {
+            meeting.DurationSeconds = (int)(maxEndMs.Value / 1000);
+            meeting.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            _logger.LogInformation("FIRM: Recalculated duration for meeting {Id} from transcript: {Seconds}s", meetingId, meeting.DurationSeconds);
+        }
     }
 
     public async Task UpdateBotTaskArnAsync(long id, string? taskArn)
