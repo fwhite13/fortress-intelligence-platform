@@ -38,7 +38,7 @@ public class CalendarService
 
             var startDateTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
             var endDateTime = DateTime.UtcNow.AddDays(7).ToString("yyyy-MM-ddTHH:mm:ssZ");
-            var select = "id,subject,start,end,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,organizer";
+            var select = "id,subject,start,end,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,organizer,location";
             // Use /me/calendarview with delegated token — not /users/{entraOid}/calendarview
             var url = $"https://graph.microsoft.com/v1.0/me/calendarview" +
                       $"?startDateTime={Uri.EscapeDataString(startDateTime)}" +
@@ -75,17 +75,27 @@ public class CalendarService
             var result = new List<CalendarMeetingDto>();
             foreach (var ev in events)
             {
-                if (!ev.IsOnlineMeeting || ev.OnlineMeetingProvider != "teamsForBusiness")
-                    continue;
+                if (!ev.IsOnlineMeeting) continue;
 
-                var joinUrl = ev.OnlineMeeting?.JoinUrl ?? "";
+                // Accept teamsForBusiness, googleMeet, and unknown (potential Zoom/Meet)
+                var provider = ev.OnlineMeetingProvider ?? "";
+                var isKnownProvider = provider == "teamsForBusiness" || provider == "googleMeet";
+                var joinUrl = ExtractPlatformJoinUrl(ev) ?? "";
+
+                // Skip if provider is unrecognised and we could not extract a known join URL
+                if (!isKnownProvider && string.IsNullOrEmpty(joinUrl)) continue;
+                if (string.IsNullOrEmpty(joinUrl)) continue;
+
+                var platform = DerivePlatform(joinUrl);
+                if (platform == "unknown") continue;
+
                 var tenantId = ExtractTenantId(joinUrl);
                 var organizerEmail = ev.Organizer?.EmailAddress?.Address?.Trim().ToLower() ?? "";
                 var currentUserEmail = userEmail.Trim().ToLower();
 
-                var isFortressTenant = _branding.IsHomeTenant(tenantId);
+                // Mode A is only applicable to Teams meetings in the home tenant
+                var isFortressTenant = platform == "teams" && _branding.IsHomeTenant(tenantId);
                 var isOrganizer = !string.IsNullOrEmpty(organizerEmail) && !string.IsNullOrEmpty(currentUserEmail) && organizerEmail == currentUserEmail;
-
                 var mode = (isFortressTenant && isOrganizer) ? "A" : "B";
 
                 result.Add(new CalendarMeetingDto
@@ -95,7 +105,7 @@ public class CalendarService
                     StartDateTime = ev.Start?.DateTime ?? "",
                     EndDateTime = ev.End?.DateTime ?? "",
                     JoinUrl = joinUrl,
-                    Platform = "teams",
+                    Platform = platform,           // "teams" | "zoom" | "meet"
                     Mode = mode,
                     OrganizerEmail = organizerEmail,
                     TenantId = tenantId ?? "",
@@ -113,6 +123,35 @@ public class CalendarService
             _logger.LogError(ex, "[CalendarService] Failed to get calendar meetings for OID {Oid}", entraOid);
             return new List<CalendarMeetingDto>();
         }
+    }
+
+    private static string? ExtractPlatformJoinUrl(CalendarViewEvent ev)
+    {
+        // Teams: join URL is in onlineMeeting.joinUrl
+        if (ev.OnlineMeetingProvider == "teamsForBusiness")
+            return ev.OnlineMeeting?.JoinUrl;
+
+        // Zoom and Google Meet: join URL is carried in location.displayName
+        var locationText = ev.Location?.DisplayName ?? "";
+
+        // zoom.us/j/ or zoom.us/w/ or *.zoom.us/j/
+        var zoomMatch = Regex.Match(locationText, @"https://[a-z0-9.\-]*zoom\.us/[jw]/\S+");
+        if (zoomMatch.Success) return zoomMatch.Value.TrimEnd('.');
+
+        // meet.google.com/
+        var meetMatch = Regex.Match(locationText, @"https://meet\.google\.com/[a-z0-9\-]+");
+        if (meetMatch.Success) return meetMatch.Value.TrimEnd('.');
+
+        return null;
+    }
+
+    private static string DerivePlatform(string? joinUrl)
+    {
+        if (string.IsNullOrEmpty(joinUrl)) return "unknown";
+        if (joinUrl.Contains("teams.microsoft.com") || joinUrl.Contains("teams.live.com")) return "teams";
+        if (joinUrl.Contains("zoom.us")) return "zoom";
+        if (joinUrl.Contains("meet.google.com")) return "meet";
+        return "unknown";
     }
 
     private static string? ExtractTenantId(string joinUrl)
@@ -160,6 +199,13 @@ internal class CalendarViewEvent
     public CalendarViewDatetime? End { get; set; }
     public CalendarViewOrganizer? Organizer { get; set; }
     public CalendarViewOnlineMeeting? OnlineMeeting { get; set; }
+    public CalendarViewLocation? Location { get; set; }
+}
+
+internal class CalendarViewLocation
+{
+    public string? DisplayName { get; set; }
+    public string? UniqueId { get; set; }
 }
 
 internal class CalendarViewDatetime
