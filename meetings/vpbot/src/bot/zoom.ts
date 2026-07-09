@@ -48,43 +48,92 @@ export class ZoomHandler {
       throw new Error('[Zoom] Bot detection wall encountered on initial page load — join aborted');
     }
 
-    // Zoom often redirects to app download - look for "Join from Your Browser"
-    let clickedBrowserJoin = false;
+    // Dismiss the "Did not open Zoom Workplace app?" tooltip if present — it can
+    // overlay/intercept clicks on the real buttons underneath it.
     try {
-      const joinFromBrowser = page.locator('text="Join from Your Browser"');
-      await joinFromBrowser.waitFor({ timeout: 10000 });
-      await joinFromBrowser.click();
-      console.log('[Zoom] Clicked "Join from Your Browser"');
-      clickedBrowserJoin = true;
+      const dismissTooltip = page.locator('[aria-label="Close"], button:has-text("×")').first();
+      if (await dismissTooltip.isVisible({ timeout: 1500 })) {
+        await dismissTooltip.click();
+        console.log('[Zoom] Dismissed app-launch tooltip');
+        await page.waitForTimeout(500);
+      }
     } catch {
-      console.log('[Zoom] "Join from Your Browser" not found, trying alternatives...');
-      await this.screenshot(page, '01c-no-browser-join-link');
+      // No tooltip present, fine
+    }
 
-      // Alternative text variations
-      const alternatives = [
-        'text="join from your browser"',
-        'a:has-text("browser")',
-        'text="Join from browser"',
-      ];
+    // Zoom often redirects to app download - look for "Join from Your Browser"
+    // IMPORTANT: use precise button/link selectors, not generic "contains 'browser'"
+    // text matches — the page can contain other elements with that word (e.g. a
+    // "supported browsers" footer link) that a loose selector will match instead
+    // of the real join button, silently clicking the wrong thing.
+    let clickedBrowserJoin = false;
+    const browserJoinSelectors = [
+      'button:has-text("Join from browser")',
+      'a:has-text("Join from browser")',
+      'button:has-text("Join from Your Browser")',
+      'a:has-text("Join from Your Browser")',
+      'text="Join from Your Browser"',
+      'text="Join from browser"',
+    ];
 
-      for (const alt of alternatives) {
-        try {
-          const button = page.locator(alt).first();
-          if (await button.isVisible({ timeout: 2000 })) {
-            await button.click();
-            console.log('[Zoom] Clicked browser join alternative');
-            clickedBrowserJoin = true;
-            break;
-          }
-        } catch {
-          continue;
+    for (const sel of browserJoinSelectors) {
+      try {
+        const button = page.locator(sel).first();
+        if (await button.isVisible({ timeout: 3000 })) {
+          await button.click({ force: true });
+          console.log(`[Zoom] Clicked browser-join button via selector: ${sel}`);
+          clickedBrowserJoin = true;
+          break;
         }
+      } catch {
+        continue;
       }
     }
 
     if (!clickedBrowserJoin) {
-      await this.screenshot(page, '01d-no-browser-join-found');
-      console.log('[Zoom] Warning: could not find any browser-join link');
+      await this.screenshot(page, '01c-no-browser-join-link');
+      console.log('[Zoom] No precise browser-join selector matched');
+    } else {
+      // Verify the click actually advanced the page — the "Join meeting" chooser
+      // screen (app vs browser buttons) should disappear once the click lands.
+      // Without this check, a click that hits a decoy element (e.g. a stray link
+      // containing the word "browser") logs success but leaves the page frozen.
+      await page.waitForTimeout(1500);
+      const stillOnChooser = await page.evaluate(() => {
+        const text = document.body.innerText;
+        return text.includes('Join from Zoom Workplace app') && text.includes('Join from browser');
+      });
+      if (stillOnChooser) {
+        console.log('[Zoom] Warning: still on app-chooser screen after click — click may have missed target');
+        await this.screenshot(page, '01d-chooser-still-visible-after-click');
+        // One retry with a more targeted click, dismissing overlays again first
+        try {
+          const dismissTooltip2 = page.locator('[aria-label="Close"], button:has-text("×")').first();
+          if (await dismissTooltip2.isVisible({ timeout: 1000 })) {
+            await dismissTooltip2.click();
+            await page.waitForTimeout(500);
+          }
+          const retryButton = page.getByRole('button', { name: /join from browser/i }).first();
+          if (await retryButton.isVisible({ timeout: 2000 })) {
+            await retryButton.click({ force: true });
+            console.log('[Zoom] Retried browser-join click via role selector');
+            await page.waitForTimeout(1500);
+          }
+        } catch {
+          console.log('[Zoom] Retry click also failed');
+        }
+
+        // Final check: if we're still stuck on the chooser, abort now rather
+        // than proceeding to burn a full recording cycle on a frozen page.
+        const stillStuckAfterRetry = await page.evaluate(() => {
+          const text = document.body.innerText;
+          return text.includes('Join from Zoom Workplace app') && text.includes('Join from browser');
+        });
+        if (stillStuckAfterRetry) {
+          await this.screenshot(page, '01e-stuck-after-retry');
+          throw new Error('[Zoom] Stuck on app-chooser screen after retry — browser-join click never advanced the page');
+        }
+      }
     }
 
     // Wait for web client to load
