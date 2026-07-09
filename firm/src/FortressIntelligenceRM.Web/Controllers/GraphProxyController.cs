@@ -15,6 +15,7 @@ public class GraphProxyController : ControllerBase
     private readonly IConfiguration _config;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<GraphProxyController> _logger;
+    private readonly Services.BrandingConfig _branding;
 
     private static string? _cachedToken;
     private static DateTime _tokenExpiry = DateTime.MinValue;
@@ -23,11 +24,13 @@ public class GraphProxyController : ControllerBase
     public GraphProxyController(
         IConfiguration config,
         IHttpClientFactory httpClientFactory,
-        ILogger<GraphProxyController> logger)
+        ILogger<GraphProxyController> logger,
+        Services.BrandingConfig branding)
     {
         _config = config;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _branding = branding;
     }
 
     [HttpGet("graph/teams")]
@@ -187,7 +190,7 @@ public class GraphProxyController : ControllerBase
                 var modeHint = isOrganizer ? "A" : "B";
                 var modeText = isOrganizer
                     ? "You're the host — FIRM captures natively, no bot joins."
-                    : "Fortress Notetaker will join to record.";
+                    : $"{_branding.NotetakerName} will join to record.";
                 return new
                 {
                     e.CalendarEventId,

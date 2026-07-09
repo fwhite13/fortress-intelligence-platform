@@ -1,7 +1,6 @@
 using Amazon.ECS;
 using Amazon.ECS.Model;
 using FortressIntelligenceRM.Web.Services;
-using Microsoft.Extensions.Options;
 
 namespace FortressIntelligenceRM.Web.Services;
 
@@ -13,13 +12,20 @@ public class VpBotService
     private readonly MeetingService _meetingService;
     private readonly BrandingConfig _branding;
 
-    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, IOptions<BrandingConfig> branding)
+    // NOTE: inject the concrete BrandingConfig singleton (registered in Program.cs via
+    // builder.Services.AddSingleton(branding) after binding config section "Branding"),
+    // NOT IOptions<BrandingConfig>. Nothing ever calls .Configure<BrandingConfig>() /
+    // AddOptions<BrandingConfig>(), so IOptions<BrandingConfig>.Value silently resolves
+    // to bare class defaults (OrgName="Fortress") regardless of any env var/config —
+    // this previously made every bot join as "Fortress Notetaker" on every deployment,
+    // including RN, no matter what Branding__* env vars were set.
+    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, BrandingConfig branding)
     {
         _ecs = ecs;
         _config = config;
         _logger = logger;
         _meetingService = meetingService;
-        _branding = branding.Value;
+        _branding = branding;
     }
 
     public async Task<string?> TriggerBotAsync(long meetingId, string meetingUrl, string platform = "teams")
