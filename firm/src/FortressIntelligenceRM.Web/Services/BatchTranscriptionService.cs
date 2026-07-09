@@ -16,16 +16,18 @@ public class BatchTranscriptionService : IBatchTranscriptionService
     private readonly IConfiguration _config;
     private readonly IOrgContextService _orgContextService;
     private readonly IUserWikiService _userWikiService;
+    private readonly BrandingConfig _branding;
     private readonly ILogger<BatchTranscriptionService> _logger;
     private string JobQueue => _config["Firm:BatchJobQueue"] ?? "firm-transcription-queue";
     private string JobDefinition => _config["Firm:BatchJobDefinition"] ?? "firm-transcription-job";
 
-    public BatchTranscriptionService(IAmazonBatch batch, IConfiguration config, IOrgContextService orgContextService, IUserWikiService userWikiService, ILogger<BatchTranscriptionService> logger)
+    public BatchTranscriptionService(IAmazonBatch batch, IConfiguration config, IOrgContextService orgContextService, IUserWikiService userWikiService, BrandingConfig branding, ILogger<BatchTranscriptionService> logger)
     {
         _batch = batch;
         _config = config;
         _orgContextService = orgContextService;
         _userWikiService = userWikiService;
+        _branding = branding;
         _logger = logger;
     }
 
@@ -74,6 +76,7 @@ public class BatchTranscriptionService : IBatchTranscriptionService
             new Amazon.Batch.Model.KeyValuePair { Name = "BEDROCK_MODEL_ID", Value = _config["Firm:BedrockModelId"] ?? "us.anthropic.claude-sonnet-4-6" },
             new Amazon.Batch.Model.KeyValuePair { Name = "PYANNOTE_CACHE", Value = "/app/.cache/huggingface/hub" },
             new Amazon.Batch.Model.KeyValuePair { Name = "BEDROCK_MODEL_ID", Value = _config["Firm:BedrockModelId"] ?? "us.anthropic.claude-sonnet-4-6" },
+            new Amazon.Batch.Model.KeyValuePair { Name = "NOTETAKER_NAME", Value = _branding.NotetakerName },
         };
 
         if (wikiJson != null)
