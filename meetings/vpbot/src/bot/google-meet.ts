@@ -3,8 +3,51 @@
  */
 
 import { Page } from 'playwright';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const SCREENSHOTS_DIR = process.env.SCREENSHOTS_DIR || '/tmp/screenshots';
+if (!fs.existsSync(SCREENSHOTS_DIR)) {
+  fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+}
 
 export class GoogleMeetHandler {
+  /**
+   * Save a debug screenshot.
+   */
+  private static async screenshot(page: Page, label: string): Promise<void> {
+    try {
+      const filename = `meet-${label}-${Date.now()}.png`;
+      const filepath = path.join(SCREENSHOTS_DIR, filename);
+      await page.screenshot({ path: filepath, fullPage: true });
+      console.log(`[Google Meet] Screenshot saved: ${filename}`);
+    } catch (e) {
+      console.log(`[Google Meet] Screenshot failed: ${e}`);
+    }
+  }
+
+  /**
+   * Check the page for known Google Meet block/rejection messages.
+   * Meet doesn't publicly document a bot-detection wall the way Zoom does,
+   * but it does reject anonymous/unusual callers with explicit text —
+   * capture that here so we can tell "blocked" apart from "still waiting
+   * for host to admit".
+   */
+  private static async checkForBlock(page: Page): Promise<string | null> {
+    return await page.evaluate(() => {
+      const text = document.body.innerText;
+      const blockPhrases = [
+        "You can't join this video call",
+        'This video call cannot be joined',
+        "couldn't join",
+        'denied entry',
+        'Access denied',
+      ];
+      const match = blockPhrases.find((p) => text.includes(p));
+      return match ?? null;
+    });
+  }
+
   /**
    * Join a Google Meet meeting
    */
@@ -14,6 +57,13 @@ export class GoogleMeetHandler {
     // Wait for page to load
     await page.waitForLoadState('networkidle').catch(() => {});
     await page.waitForTimeout(2000);
+    await this.screenshot(page, '01-initial-page');
+
+    const initialBlock = await this.checkForBlock(page);
+    if (initialBlock) {
+      await this.screenshot(page, '01b-blocked');
+      throw new Error(`[Google Meet] Blocked on initial page load: "${initialBlock}"`);
+    }
 
     // Google Meet might show different screens based on login state
     // For guest access, we need to enter a name
@@ -30,10 +80,13 @@ export class GoogleMeetHandler {
       console.log('[Google Meet] Name input not found, might be logged in');
     }
 
+    await this.screenshot(page, '02-pre-join-screen');
+
     // Turn off camera and microphone before joining
     await this.turnOffDevices(page);
 
     // Look for "Ask to join" or "Join now" button
+    await this.screenshot(page, '03-before-join-click');
     try {
       const joinSelectors = [
         'button:has-text("Ask to join")',
@@ -62,12 +115,20 @@ export class GoogleMeetHandler {
         throw new Error('Could not find join button');
       }
     } catch (error) {
+      await this.screenshot(page, '03b-no-join-button');
       console.log('[Google Meet] Could not find join button');
       throw new Error('Failed to find Google Meet join button');
     }
 
     // Wait for meeting to start
     await page.waitForTimeout(5000);
+    await this.screenshot(page, '04-post-join-attempt');
+
+    const postJoinBlock = await this.checkForBlock(page);
+    if (postJoinBlock) {
+      await this.screenshot(page, '04b-blocked-post-join');
+      throw new Error(`[Google Meet] Blocked after clicking join: "${postJoinBlock}"`);
+    }
 
     // Handle waiting room / admission request
     const waitingForAdmission = await page.evaluate(() => {
@@ -77,6 +138,7 @@ export class GoogleMeetHandler {
     });
 
     if (waitingForAdmission) {
+      await this.screenshot(page, '04c-waiting-for-admission');
       console.log('[Google Meet] Waiting to be admitted...');
     }
 
@@ -84,6 +146,7 @@ export class GoogleMeetHandler {
     try {
       // Look for meeting controls
       await page.waitForSelector('[data-call-id], [data-meeting-id], [data-is-call-active]', { timeout: 60000 });
+      await this.screenshot(page, '05-in-meeting');
       console.log('[Google Meet] Successfully joined meeting');
     } catch {
       // Alternative check
@@ -95,8 +158,10 @@ export class GoogleMeetHandler {
       });
 
       if (inMeeting) {
+        await this.screenshot(page, '05-in-meeting-alt-check');
         console.log('[Google Meet] Successfully joined meeting (alternative check)');
       } else {
+        await this.screenshot(page, '05-uncertain-state');
         console.log('[Google Meet] Meeting join status uncertain, continuing...');
       }
     }

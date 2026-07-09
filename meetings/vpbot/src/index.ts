@@ -118,7 +118,12 @@ if (ONE_SHOT_MEETING_URL && ONE_SHOT_MEETING_ID) {
 
   runOneShotMeeting(ONE_SHOT_MEETING_URL, ONE_SHOT_MEETING_ID, ONE_SHOT_BOT_NAME)
     .then(() => { console.log('[OneShot] Complete — exiting.'); process.exit(0); })
-    .catch((err) => { console.error('[OneShot] Fatal:', err); process.exit(1); });
+    .catch(async (err) => {
+      console.error('[OneShot] Fatal:', err);
+      await uploadDebugScreenshots(ONE_SHOT_MEETING_ID).catch(() => {});
+      await postCallback('failed', { error: String(err?.message ?? err) }).catch(() => {});
+      process.exit(1);
+    });
 } else {
   startApiServer();
 }
@@ -502,6 +507,25 @@ function startApiServer(): void {
 
 // ---------------------------------------------------------------------------
 // processRecording — S3 upload + Batch submission (ADO#1841)
+// uploadDebugScreenshots — on fatal join failure, push /tmp/screenshots/* to S3 for post-mortem
+async function uploadDebugScreenshots(meetingId: string): Promise<void> {
+  const screenshotsDir = process.env.SCREENSHOTS_DIR || '/tmp/screenshots';
+  if (!fs.existsSync(screenshotsDir)) return;
+  const files = fs.readdirSync(screenshotsDir).filter(f => f.endsWith('.png'));
+  if (files.length === 0) { console.log('[Debug] No screenshots to upload'); return; }
+  console.log(`[Debug] Uploading ${files.length} debug screenshot(s) to S3...`);
+  for (const file of files) {
+    const localPath = path.join(screenshotsDir, file);
+    const s3Key = `debug-screenshots/${meetingId}/${file}`;
+    try {
+      await s3Service.uploadWithKey(localPath, s3Key);
+      console.log(`[Debug] Uploaded: ${s3Key}`);
+    } catch (e) {
+      console.log(`[Debug] Failed to upload ${file}: ${e}`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 async function processRecording(meeting: Meeting): Promise<void> {

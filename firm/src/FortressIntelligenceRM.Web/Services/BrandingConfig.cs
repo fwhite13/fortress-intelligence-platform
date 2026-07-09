@@ -15,7 +15,8 @@ public class BrandingConfig
     public string SidebarBg { get; set; } = "#1A2035";
     public string HeaderBg { get; set; } = "#1E293B";
 
-    public string NotetakerName => $"{OrgName} Notetaker";
+    public string? NotetakerNameOverride { get; set; }
+    public string NotetakerName => NotetakerNameOverride ?? $"{OrgName} Notetaker";
 
     public bool IsHomeTenant(string? tenantId) =>
         !string.IsNullOrEmpty(tenantId) &&
