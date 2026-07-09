@@ -13,6 +13,7 @@ Environment variables (injected by Batch):
 """
 
 import os
+import re
 import sys
 import json
 import tempfile
@@ -21,6 +22,51 @@ from botocore.config import Config
 import requests
 from faster_whisper import WhisperModel
 from pyannote.audio import Pipeline
+from json_repair import repair_json
+
+
+def extract_summary_text_field(raw_text: str) -> str | None:
+    """
+    Last-resort extraction of just the summaryText value from a malformed JSON
+    blob, without needing the whole document to parse. Handles the common
+    failure mode where the model emits an unescaped literal double-quote
+    inside a string value (e.g. quoting a phrase like \"Fortress Notetaker\"
+    verbatim from the transcript) which breaks json.loads/json_repair alike.
+
+    Strategy: find the "summaryText": " marker, then scan forward taking the
+    text up to the next occurrence of an end-of-field pattern
+    (\",\n  \"<nextKey>\":) or a trailing \"\n} at the very end of the document.
+    This does not require every quote inside the value to be escaped correctly.
+    """
+    marker = '"summaryText"'
+    idx = raw_text.find(marker)
+    if idx == -1:
+        return None
+    # Move past `"summaryText": "`
+    colon_idx = raw_text.find(':', idx)
+    if colon_idx == -1:
+        return None
+    quote_idx = raw_text.find('"', colon_idx)
+    if quote_idx == -1:
+        return None
+    start = quote_idx + 1
+
+    # End boundary: the next `",\n  "someKey":` or `",\n"someKey":` pattern,
+    # or the end of the string near a trailing `"\n}` if this is the last field.
+    end_pattern = re.compile(r'",\s*"(keyDecisionsJson|actionItemsJson|followUpsJson|openQuestionsJson|KeyDecisionsJson|ActionItemsJson|FollowUpsJson|OpenQuestionsJson)"\s*:')
+    match = end_pattern.search(raw_text, start)
+    if match:
+        end = match.start()
+    else:
+        # Fall back to the last `"` before a closing `}` at the end of the doc
+        tail_match = re.search(r'"\s*\}\s*$', raw_text.rstrip())
+        end = tail_match.start() if tail_match else len(raw_text)
+
+    value = raw_text[start:end]
+    # Unescape the standard JSON escapes we expect the model to have used
+    # for the parts that WERE escaped correctly.
+    value = value.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+    return value.strip() if value.strip() else None
 
 def post_callback(url: str, secret: str, payload: dict):
     try:
@@ -298,17 +344,61 @@ Rules:
             response_body = json.loads(response["body"].read())
             summary_text = response_body["content"][0]["text"]
 
-            # Try to parse structured JSON from response
+            # Try to parse structured JSON from response. Fallback chain:
+            # 1. Strict json.loads on the {...} block
+            # 2. On failure: manually extract just the summaryText field via regex
+            #    FIRST -- this is the most reliable recovery for the dominant
+            #    failure mode (the model quotes a phrase verbatim from the
+            #    transcript inside summaryText without escaping the inner
+            #    quotes, e.g. showing it as "Fortress Notetaker"). json_repair
+            #    was tested against this exact failure and silently truncated
+            #    summaryText at the first unescaped quote, dumping the
+            #    remainder into a spurious extra key -- it "succeeds" without
+            #    erroring but returns an incomplete summary, which is worse
+            #    than a clean failure. Manual extraction recovered the full
+            #    10.7KB summary vs json_repair's truncated 2.5KB.
+            # 3. Use json_repair only as a secondary source for the *array*
+            #    fields (keyDecisions/actionItems/etc.) which are much less
+            #    likely to contain embedded quotes than the long-form
+            #    markdown summaryText.
+            # 4. If even manual extraction finds nothing, use a clean generic
+            #    fallback message -- NEVER dump the raw model response
+            #    (including the outer JSON wrapper) into summaryText, since
+            #    that renders as literal JSON text in the UI instead of
+            #    formatted markdown.
+            json_start = summary_text.find("{")
+            json_end = summary_text.rfind("}") + 1
+            json_block = summary_text[json_start:json_end] if (json_start >= 0 and json_end > json_start) else summary_text
+
+            summary_data = None
             try:
-                # Find JSON block in response
-                json_start = summary_text.find("{")
-                json_end = summary_text.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    summary_data = json.loads(summary_text[json_start:json_end])
+                summary_data = json.loads(json_block)
+                print("[Transcriber] Summary JSON parsed on first attempt")
+            except Exception as e1:
+                print(f"[Transcriber] Strict JSON parse failed ({e1}), attempting recovery...")
+
+                extracted_summary = extract_summary_text_field(json_block)
+
+                recovered_arrays = {}
+                try:
+                    repaired = repair_json(json_block)
+                    repaired_data = json.loads(repaired)
+                    for key in ("keyDecisionsJson", "actionItemsJson", "followUpsJson", "openQuestionsJson"):
+                        if key in repaired_data:
+                            recovered_arrays[key] = repaired_data[key]
+                    print(f"[Transcriber] json_repair recovered array fields: {list(recovered_arrays.keys())}")
+                except Exception as e2:
+                    print(f"[Transcriber] json_repair array-field recovery also failed ({e2})")
+
+                if extracted_summary:
+                    print("[Transcriber] Recovered summaryText via manual field extraction")
+                    summary_data = {"summaryText": extracted_summary, **recovered_arrays}
                 else:
-                    summary_data = {"summaryText": summary_text}
-            except:
-                summary_data = {"summaryText": summary_text}
+                    print("[Transcriber] All recovery attempts failed -- using generic fallback (not raw JSON)")
+                    summary_data = {
+                        "summaryText": "# Summary Unavailable\n\nThe AI summary could not be generated in a readable format for this meeting. The transcript is still available in full under the Transcript tab.",
+                        **recovered_arrays
+                    }
 
             # Upload summary to S3
             summary_key = f"firm-transcripts/{meeting_id}/summary.json"
