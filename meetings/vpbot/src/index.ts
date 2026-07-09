@@ -201,6 +201,11 @@ async function runOneShotMeeting(meetingUrl: string, meetingId: string, botName:
       try {
         meeting.audioPath = wavPath;
         meeting.endedAt = new Date();
+        // Upload debug screenshots unconditionally, not just on hard failure —
+        // "join status uncertain, continuing" is not an exception (bot proceeds
+        // to record regardless), so this is the only place that reliably runs
+        // after every join attempt, successful or not.
+        await uploadDebugScreenshots(meetingId).catch(() => {});
         await processRecording(meeting);
         resolve();
       } catch (err) {
