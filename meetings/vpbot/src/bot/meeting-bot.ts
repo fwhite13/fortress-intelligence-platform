@@ -155,7 +155,15 @@ export class MeetingBot extends EventEmitter {
       // Navigate to meeting URL
       // For Teams, process the URL (add query hints, keep original URL — no /_#/ rewriting)
       let navUrl = this.meeting.url;
-      if (this.meeting.platform === 'teams') {
+      if (this.meeting.platform === 'zoom') {
+        // Grant mic/camera for both Zoom origins (chooser page + web client)
+        await this.context.grantPermissions(['microphone', 'camera'], {
+          origin: 'https://zoom.us'
+        });
+        await this.context.grantPermissions(['microphone', 'camera'], {
+          origin: 'https://app.zoom.us'
+        });
+      } else if (this.meeting.platform === 'teams') {
         // Grant permissions for the Teams origin specifically
         await this.context.grantPermissions(['microphone', 'camera'], { 
           origin: 'https://teams.microsoft.com' 
