@@ -2,7 +2,7 @@
  * Zoom specific join logic
  */
 
-import { Page } from 'playwright';
+import { Page, FrameLocator } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -228,11 +228,22 @@ export class ZoomHandler {
       }
     }
 
-    // Wait for web client to load
-    await page.waitForTimeout(3000);
+    // The outer page is the Zoom PWA shell (app.zoom.us React app). The
+    // actual pre-join form — name input, Join button, checkboxes — renders
+    // inside an <iframe> loaded by the PWA. page.locator() doesn't cross
+    // iframe boundaries; use page.frameLocator('iframe') for all form
+    // interactions. page.evaluate() / waitForTimeout still use the page.
+    await page.waitForTimeout(1000);
+    try {
+      await page.waitForSelector('iframe', { timeout: 15000 });
+      console.log('[Zoom] Web client iframe appeared');
+    } catch {
+      console.log('[Zoom] Warning: iframe not found within 15s');
+    }
+    const wcFrame = page.frameLocator('iframe');
     await this.screenshot(page, '02-pre-join-screen');
 
-    // Check for bot-detection block after clicking browser join
+    // Check for bot-detection block (page-level redirect — main frame)
     const isBlockedAfterBrowserJoin = await page.evaluate(() => {
       const text = document.body.innerText;
       return text.includes('Automated bots') ||
@@ -244,20 +255,29 @@ export class ZoomHandler {
       throw new Error('[Zoom] Bot detection wall encountered after browser-join click — join aborted');
     }
 
-    // Enter name
+    // Wait for the pre-join form to render inside the iframe.
+    // The iframe starts as a #wc-loading spinner; wait for an input to appear.
+    try {
+      await wcFrame.locator('input').first().waitFor({ timeout: 15000 });
+      console.log('[Zoom] Pre-join form ready in iframe');
+    } catch {
+      console.log('[Zoom] Warning: pre-join form input not found in iframe within 15s');
+      await this.screenshot(page, '02c-iframe-form-timeout');
+    }
+
+    // Enter name (inside iframe)
     try {
       const nameSelectors = [
         '#inputname',
-        'input[placeholder*="name"]',
-        'input[aria-label*="name"]',
+        'input[placeholder*="name" i]',
+        'input[aria-label*="name" i]',
         'input[type="text"]',
       ];
-
       let nameEntered = false;
       for (const selector of nameSelectors) {
         try {
-          const nameInput = page.locator(selector).first();
-          if (await nameInput.isVisible({ timeout: 2000 })) {
+          const nameInput = wcFrame.locator(selector).first();
+          if (await nameInput.isVisible({ timeout: 3000 })) {
             await nameInput.clear();
             await nameInput.fill(botName);
             console.log(`[Zoom] Entered name: ${botName}`);
@@ -269,44 +289,38 @@ export class ZoomHandler {
         }
       }
       if (!nameEntered) {
-        console.log('[Zoom] Warning: could not find name input field');
-        await this.screenshot(page, '02c-no-name-input');
+        console.log('[Zoom] Warning: could not find name input field in iframe');
+        await this.screenshot(page, '02d-no-name-input');
       }
     } catch (error) {
-      console.log('[Zoom] Could not find name input');
+      console.log('[Zoom] Could not enter name in iframe');
     }
 
-    // Handle "I agree" checkbox if present
+    // Handle "Remember my name" / "I agree" checkbox if present (inside iframe)
     try {
-      const agreeCheckbox = page.locator('input[type="checkbox"]').first();
-      if (await agreeCheckbox.isVisible({ timeout: 2000 })) {
+      const agreeCheckbox = wcFrame.locator('input[type="checkbox"]').first();
+      if (await agreeCheckbox.isVisible({ timeout: 1500 })) {
         await agreeCheckbox.check();
         console.log('[Zoom] Checked agreement checkbox');
       }
     } catch {
-      // Checkbox not present
+      // Not present
     }
 
-    // Turn off audio/video before joining
-    await this.turnOffDevices(page);
+    // Turn off audio/video before joining (inside iframe)
+    await this.turnOffDevices(wcFrame);
 
-    // Click Join button
+    // Click Join button (inside iframe)
     await this.screenshot(page, '03-before-join-click');
     let joinClicked = false;
     try {
-      // Exact-text/role matches first, then a hasText fallback that explicitly
-      // excludes "Join from Zoom Workplace app" — that button can still be present
-      // in the DOM (even if we believe we've left the chooser screen) and a bare
-      // "has-text('Join')" match grabs it first since it's earlier in the DOM,
-      // silently deep-linking to the native app instead of joining in-browser.
       const joinLocators = [
-        page.getByRole('button', { name: 'Join', exact: true }),
-        page.getByRole('button', { name: 'Join Meeting', exact: true }),
-        page.locator('#joinBtn'),
-        page.locator('button[type="submit"]'),
-        page.locator('button:has-text("Join")').filter({ hasNotText: 'Workplace app' }),
+        wcFrame.getByRole('button', { name: 'Join', exact: true }),
+        wcFrame.getByRole('button', { name: 'Join Meeting', exact: true }),
+        wcFrame.locator('#joinBtn'),
+        wcFrame.locator('button[type="submit"]'),
+        wcFrame.locator('button:has-text("Join")'),
       ];
-
       for (const joinButton of joinLocators) {
         try {
           const button = joinButton.first();
@@ -335,7 +349,7 @@ export class ZoomHandler {
     await page.waitForTimeout(5000);
     await this.screenshot(page, '04-post-join-attempt');
 
-    // Check for bot-detection block after clicking join (the key failure point)
+    // Check for bot-detection block after clicking join (main frame)
     const isBlockedAfterJoin = await page.evaluate(() => {
       const text = document.body.innerText;
       return text.includes('Automated bots') ||
@@ -347,32 +361,29 @@ export class ZoomHandler {
       throw new Error('[Zoom] Bot detection wall encountered after clicking Join — join aborted');
     }
 
-    // Handle waiting room
-    const inWaitingRoom = await page.evaluate(() => {
-      return document.body.innerText.includes('waiting room') ||
-             document.body.innerText.includes('Please wait') ||
-             document.body.innerText.includes('host will let you in');
-    });
-
+    // Handle waiting room — check iframe content
+    const wcFrameObj = page.frames().find(f => f !== page.mainFrame());
+    const waitingRoomText = wcFrameObj
+      ? await wcFrameObj.evaluate(() => document.body.innerText).catch(() => '')
+      : '';
+    const inWaitingRoom = waitingRoomText.includes('waiting room') ||
+                          waitingRoomText.includes('Please wait') ||
+                          waitingRoomText.includes('host will let you in');
     if (inWaitingRoom) {
       await this.screenshot(page, '04c-waiting-room');
       console.log('[Zoom] In waiting room, waiting to be admitted...');
     }
 
-    // Check for successful join
+    // Check for successful join — meeting controls render inside the iframe
     try {
-      // Look for meeting controls
-      await page.waitForSelector('.meeting-app, .meeting-client, [class*="meeting"]', { timeout: 60000 });
+      await wcFrame.locator('.meeting-app, .meeting-client, [class*="meeting"]').first().waitFor({ timeout: 60000 });
       await this.screenshot(page, '05-in-meeting');
       console.log('[Zoom] Successfully joined meeting');
     } catch {
-      const inMeeting = await page.evaluate(() => {
-        return document.body.innerText.includes('Mute') ||
-               document.body.innerText.includes('Leave') ||
-               document.body.innerText.includes('Participants');
-      });
-
-      if (inMeeting) {
+      const inMeetingText = wcFrameObj
+        ? await wcFrameObj.evaluate(() => document.body.innerText).catch(() => '')
+        : await page.evaluate(() => document.body.innerText);
+      if (inMeetingText.includes('Mute') || inMeetingText.includes('Leave') || inMeetingText.includes('Participants')) {
         await this.screenshot(page, '05-in-meeting-alt-check');
         console.log('[Zoom] Successfully joined meeting (alternative check)');
       } else {
@@ -383,23 +394,21 @@ export class ZoomHandler {
   }
 
   /**
-   * Turn off audio and video
+   * Turn off audio and video before joining (operates inside iframe context)
    */
-  private static async turnOffDevices(page: Page): Promise<void> {
+  private static async turnOffDevices(ctx: Page | FrameLocator): Promise<void> {
     try {
-      // Look for audio/video toggles on pre-join screen
-      const muteAudio = page.locator('button:has-text("Mute"), button[aria-label*="audio"]').first();
+      const muteAudio = ctx.locator('button:has-text("Mute"), button[aria-label*="audio" i]').first();
       if (await muteAudio.isVisible({ timeout: 1000 })) {
         await muteAudio.click();
         console.log('[Zoom] Muted audio');
       }
-
-      const stopVideo = page.locator('button:has-text("Stop Video"), button[aria-label*="video"]').first();
+      const stopVideo = ctx.locator('button:has-text("Stop Video"), button[aria-label*="video" i]').first();
       if (await stopVideo.isVisible({ timeout: 1000 })) {
         await stopVideo.click();
         console.log('[Zoom] Stopped video');
       }
-    } catch (error) {
+    } catch {
       console.log('[Zoom] Could not toggle devices');
     }
   }
