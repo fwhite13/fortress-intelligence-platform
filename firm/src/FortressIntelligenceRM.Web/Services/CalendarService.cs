@@ -197,7 +197,7 @@ public class CalendarService
     {
         var haystack = (ev.Body?.Content ?? "") + " " + (ev.Location?.DisplayName ?? "");
 
-        var zoomMatch = Regex.Match(haystack, @"https://(?:[a-z0-9-]+.)*zoom.us/(?:j|wc)/[^\s""'<>]+", RegexOptions.IgnoreCase);
+        var zoomMatch = Regex.Match(haystack, @"https://(?:[a-z0-9-]+\.)*zoom\.us/(?:j|wc)/[^\s""'<>]+", RegexOptions.IgnoreCase);
         if (zoomMatch.Success) return ("zoom", zoomMatch.Value.TrimEnd('.'));
 
         var meetMatch = Regex.Match(haystack, @"https://meet\.google\.com/[^\s""'<>]+", RegexOptions.IgnoreCase);
