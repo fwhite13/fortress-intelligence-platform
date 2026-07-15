@@ -33,6 +33,12 @@
         <MudButton Variant="Variant.Outlined" Style="border-color: #d4af37; color: #d4af37;" OnClick="OpenAddMeetingDialog">
             Add a Meeting
         </MudButton>
+        <MudIconButton Icon="@Icons.Material.Outlined.Settings"
+                       Style="color: #d4af37;"
+                       Size="Size.Medium"
+                       Title="Settings"
+                       OnClick="OpenSettingsDialog"
+                       aria-label="Settings" />
         <MudIconButton Icon="@Icons.Material.Outlined.HelpOutline"
                        Style="color: #d4af37;"
                        Size="Size.Medium"
@@ -420,6 +426,19 @@
         {
             _joining = false;
         }
+    }
+
+    private async Task OpenSettingsDialog()
+    {
+        if (string.IsNullOrEmpty(_userId)) return;
+        var parameters = new DialogParameters { { "UserId", Guid.Parse(_userId) } };
+        var options = new DialogOptions
+        {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true
+        };
+        await DialogService.ShowAsync<SettingsDialog>("Settings", parameters, options);
     }
 
     private async Task OpenAddMeetingDialog()

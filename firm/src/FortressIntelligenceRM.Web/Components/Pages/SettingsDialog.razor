@@ -1,0 +1,60 @@
+@using MudBlazor
+@using FortressIntelligenceRM.Web.Services
+@inject MeetingService MeetingService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="color: var(--color-text-primary);">Settings</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Color="Color.Warning" Indeterminate />
+        }
+        else
+        {
+            <MudSwitch @bind-Value="_autoAddCalendarMeetings" Label="Auto-Add Calendar Meetings"
+                       Color="Color.Warning" Class="mb-2" />
+            <MudSwitch @bind-Value="_autoEmailSummary" Label="Auto-Email Summary"
+                       Color="Color.Warning" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Style="color: var(--color-text-secondary);">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                   OnClick="Save" Disabled="@_loading">
+            Save
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public Guid UserId { get; set; }
+
+    private bool _loading = true;
+    private bool _autoAddCalendarMeetings;
+    private bool _autoEmailSummary;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = await MeetingService.GetUserAsync(UserId);
+        if (user != null)
+        {
+            _autoAddCalendarMeetings = user.AutoAddCalendarMeetings;
+            _autoEmailSummary = user.AutoEmailSummary;
+        }
+        _loading = false;
+    }
+
+    private async Task Save()
+    {
+        await MeetingService.UpdateUserPreferencesAsync(UserId, _autoAddCalendarMeetings, _autoEmailSummary);
+        Snackbar.Add("Settings saved.", Severity.Success);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

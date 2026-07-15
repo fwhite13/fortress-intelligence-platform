@@ -40,6 +40,8 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.FaitUserId).HasColumnName("fait_user_id").HasMaxLength(36);
             entity.Property(e => e.IsAdmin).HasColumnName("is_admin").HasDefaultValue(false);
             entity.Property(e => e.ExpoPushToken).HasColumnName("expo_push_token").HasMaxLength(200);
+            entity.Property(e => e.AutoAddCalendarMeetings).HasColumnName("auto_add_calendar_meetings").HasDefaultValue(false);
+            entity.Property(e => e.AutoEmailSummary).HasColumnName("auto_email_summary").HasDefaultValue(false);
         });
 
         modelBuilder.Entity<FirmMeeting>(entity =>

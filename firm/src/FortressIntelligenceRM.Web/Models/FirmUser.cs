@@ -19,5 +19,7 @@ public class FirmUser
     public bool IsAdmin { get; set; }
     [MaxLength(200)]
     public string? ExpoPushToken { get; set; }
+    public bool AutoAddCalendarMeetings { get; set; }
+    public bool AutoEmailSummary { get; set; }
     public ICollection<FirmMeeting> Meetings { get; set; } = new List<FirmMeeting>();
 }
