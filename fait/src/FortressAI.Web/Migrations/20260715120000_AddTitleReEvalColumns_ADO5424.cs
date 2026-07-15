@@ -1,3 +1,4 @@
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -10,29 +11,29 @@ namespace FortressAI.Web.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<DateTime>(
+                name: "title_finalized_at",
+                table: "conversations",
+                type: "datetime(6)",
+                nullable: true);
+
             migrationBuilder.AddColumn<int>(
                 name: "title_re_eval_count",
                 table: "conversations",
                 type: "int",
                 nullable: false,
                 defaultValue: 0);
-
-            migrationBuilder.AddColumn<DateTime>(
-                name: "title_finalized_at",
-                table: "conversations",
-                type: "datetime(6)",
-                nullable: true);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "title_re_eval_count",
+                name: "title_finalized_at",
                 table: "conversations");
 
             migrationBuilder.DropColumn(
-                name: "title_finalized_at",
+                name: "title_re_eval_count",
                 table: "conversations");
         }
     }
