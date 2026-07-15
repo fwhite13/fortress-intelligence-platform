@@ -182,6 +182,7 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHostedService<DatabaseInitializationService>();
+builder.Services.AddHostedService<CalendarAutoSyncService>();
 builder.Services.AddSingleton<TeamsGraphService>();
 // builder.Services.AddHostedService(sp => sp.GetRequiredService<TeamsGraphService>()); // ADO#1352: disabled — FIRM reads via FipTokenService now
 // builder.Services.AddHostedService<TranscriptPollingService>(); // ADO#1352: disabled
