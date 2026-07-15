@@ -291,128 +291,153 @@ function extractDomain(url) {
     }
 }
 
+// ADO#5688 — filename portion of a path, for chip display
+function getFilenameFromPath(path) {
+    return path ? String(path).split('/').pop() : '';
+}
+
+function bashCommandLabel(input) {
+    const cmd = input.command || input.cmd || '';
+    if (!cmd) return 'Running command...';
+    if (/pip\s*install|pip3\s*install/.test(cmd)) return 'Installing dependencies...';
+    if (/openpyxl|\.xlsx|xlrd|xlwt/.test(cmd)) return 'Building spreadsheet...';
+    if (/pptx|python-pptx/.test(cmd)) return 'Building presentation...';
+    if (/docx|python-docx/.test(cmd)) return 'Building document...';
+    if (/python3?\s+\S+\.py/.test(cmd)) return 'Running Python script...';
+    return `Running: ${chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40)}`;
+}
+
+// ADO#5688 — explicit mapping of CC tool name -> friendly chip label generator.
+// Unknown tool names are never surfaced raw; resolveProgressLabel() falls back
+// to 'Working...' for anything not listed here.
+const CC_CHIP_LABELS = {
+    // Bedrock/legacy lowercase tool names
+    web_search: (input) => {
+        const query = input.query || input.q || '';
+        return query ? `Searching: "${chipTrunc(query, 40)}"` : 'Searching web...';
+    },
+    web_fetch: (input) => {
+        const domain = extractDomain(input.url || input.uri || '');
+        return domain ? `Fetching: ${chipTrunc(domain, 40)}` : 'Fetching web content...';
+    },
+    read_memory: (input) => {
+        const slug = input.slug || input.key || input.id || input.query || '';
+        return slug ? `Reading memory: ${chipTrunc(slug, 40)}` : 'Reading memory...';
+    },
+    search_memory: (input) => {
+        const slug = input.slug || input.key || input.id || input.query || '';
+        return slug ? `Reading memory: ${chipTrunc(slug, 40)}` : 'Reading memory...';
+    },
+    write_memory: (input) => {
+        const title = input.title || input.slug || input.key || '';
+        return title ? `Saving memory: ${chipTrunc(title, 40)}` : 'Saving to memory...';
+    },
+    update_user_profile: () => 'Updating profile',
+    bash: bashCommandLabel,
+    computer: bashCommandLabel,
+    str_replace_based_edit_tool: (input) => {
+        const fname = getFilenameFromPath(input.path || input.filename || '');
+        return fname ? `Editing: ${chipTrunc(fname, 40)}` : 'Editing file...';
+    },
+    str_replace_editor: (input) => {
+        const fname = getFilenameFromPath(input.path || input.filename || '');
+        return fname ? `Editing: ${chipTrunc(fname, 40)}` : 'Editing file...';
+    },
+    edit: (input) => {
+        const fname = getFilenameFromPath(input.path || input.filename || '');
+        return fname ? `Editing: ${chipTrunc(fname, 40)}` : 'Editing file...';
+    },
+    write_file: (input) => {
+        const fname = getFilenameFromPath(input.path || input.filename || '');
+        return fname ? `Saving: ${chipTrunc(fname, 40)}` : 'Saving file...';
+    },
+    create_document: (input) => {
+        const fname = getFilenameFromPath(input.path || input.filename || '');
+        return fname ? `Saving: ${chipTrunc(fname, 40)}` : 'Saving file...';
+    },
+    read_file: (input) => {
+        const fname = getFilenameFromPath(input.path || input.filename || '');
+        return fname ? `Reading: ${chipTrunc(fname, 40)}` : 'Reading file...';
+    },
+    list_workspace_files: () => 'Browsing workspace',
+    list_files: () => 'Browsing workspace',
+    search_knowledge_base: (input) => {
+        const query = input.query || '';
+        return query ? `Searching KB: "${chipTrunc(query, 35)}"` : 'Searching knowledge base...';
+    },
+    retrieve_kb: (input) => {
+        const query = input.query || '';
+        return query ? `Searching KB: "${chipTrunc(query, 35)}"` : 'Searching knowledge base...';
+    },
+    search_kb: (input) => {
+        const query = input.query || '';
+        return query ? `Searching KB: "${chipTrunc(query, 35)}"` : 'Searching knowledge base...';
+    },
+
+    // CC-native PascalCase built-in tool names (ADO#4911)
+    Read: (input) => {
+        const fname = getFilenameFromPath(input.file_path || input.path || '');
+        return fname ? `Reading: ${chipTrunc(fname, 40)}` : 'Reading file...';
+    },
+    Write: (input) => {
+        const fname = getFilenameFromPath(input.file_path || input.path || '');
+        return fname ? `Writing: ${chipTrunc(fname, 40)}` : 'Writing file...';
+    },
+    Edit: (input) => {
+        const fname = getFilenameFromPath(input.new_path || input.path || input.file_path || '');
+        return fname ? `Editing: ${chipTrunc(fname, 40)}` : 'Editing file...';
+    },
+    Bash: (input) => {
+        const cmd = input.command || '';
+        if (!cmd) return 'Running command...';
+        if (/pip\s*install|pip3\s*install/.test(cmd)) return 'Installing dependencies...';
+        return `Running: ${chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40)}`;
+    },
+    Glob: (input) => {
+        const pat = input.pattern || '';
+        return pat ? `Finding: ${chipTrunc(pat, 40)}` : 'Finding files...';
+    },
+    LS: (input) => {
+        const dir = input.path || '';
+        const dirname = dir ? (dir.split('/').pop() || dir) : '';
+        return dirname ? `Listing: ${chipTrunc(dirname, 40)}` : 'Listing files...';
+    },
+    Grep: (input) => {
+        const pat = input.pattern || '';
+        return pat ? `Searching: "${chipTrunc(pat, 35)}"` : 'Searching files...';
+    },
+    Task: (input) => {
+        const desc = input.description || input.prompt || '';
+        return desc ? `Delegating: ${chipTrunc(desc, 40)}` : 'Delegating to agent...';
+    },
+    TodoWrite: () => 'Updating task list',
+    TodoRead: () => 'Checking task list',
+    NotebookRead: (input) => {
+        const fname = getFilenameFromPath(input.notebook_path || '');
+        return fname ? `Reading notebook: ${fname}` : 'Reading notebook...';
+    },
+    NotebookEdit: (input) => {
+        const fname = getFilenameFromPath(input.notebook_path || '');
+        return fname ? `Editing notebook: ${fname}` : 'Editing notebook...';
+    },
+};
+
 // ADO#3577 — Human-readable CC progress labels
 function resolveProgressLabel(toolName, toolInput) {
     try {
         const input = typeof toolInput === 'string' ? JSON.parse(toolInput || '{}') : (toolInput || {});
 
-        if (toolName === 'web_search') {
-            const query = input.query || input.q || '';
-            return query ? `Searching: "${chipTrunc(query, 40)}"` : 'Searching web...';
-        }
-        if (toolName === 'web_fetch') {
-            const url = input.url || input.uri || '';
-            const domain = extractDomain(url);
-            return domain ? `Fetching: ${chipTrunc(domain, 40)}` : 'Fetching web content...';
-        }
-        if (toolName === 'read_memory' || toolName === 'search_memory') {
-            const slug = input.slug || input.key || input.id || input.query || '';
-            return slug ? `Reading memory: ${chipTrunc(slug, 40)}` : 'Reading memory...';
-        }
-        if (toolName === 'write_memory') {
-            const title = input.title || input.slug || input.key || '';
-            return title ? `Saving memory: ${chipTrunc(title, 40)}` : 'Saving to memory...';
-        }
-        if (toolName === 'update_user_profile') {
-            return 'Updating profile';
-        }
-        if (toolName === 'bash' || toolName === 'computer') {
-            const cmd = input.command || input.cmd || '';
-            if (cmd) {
-                if (/pip\s*install|pip3\s*install/.test(cmd)) return 'Installing dependencies...';
-                if (/openpyxl|\.xlsx|xlrd|xlwt/.test(cmd)) return 'Building spreadsheet...';
-                if (/pptx|python-pptx/.test(cmd)) return 'Building presentation...';
-                if (/docx|python-docx/.test(cmd)) return 'Building document...';
-                if (/python3?\s+\S+\.py/.test(cmd)) return 'Running Python script...';
-                const preview = chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40);
-                return `Running: ${preview}`;
-            }
-            return 'Running command...';
-        }
-        if (toolName === 'str_replace_based_edit_tool' || toolName === 'str_replace_editor' || toolName === 'edit') {
-            const fp = input.path || input.filename || '';
-            const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Editing: ${chipTrunc(fname, 40)}` : 'Editing file...';
-        }
-        if (toolName === 'write_file' || toolName === 'create_document') {
-            const fp = input.path || input.filename || '';
-            const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Saving: ${chipTrunc(fname, 40)}` : 'Saving file...';
-        }
-        if (toolName === 'read_file') {
-            const fp = input.path || input.filename || '';
-            const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Reading: ${chipTrunc(fname, 40)}` : 'Reading file...';
-        }
-        if (toolName === 'list_workspace_files' || toolName === 'list_files') {
-            return 'Browsing workspace';
-        }
-        if (toolName === 'search_knowledge_base' || toolName === 'retrieve_kb' || toolName === 'search_kb') {
-            const query = input.query || '';
-            return query ? `Searching KB: "${chipTrunc(query, 35)}"` : 'Searching knowledge base...';
-        }
-        // ADO tools
+        const generator = CC_CHIP_LABELS[toolName];
+        if (generator) return generator(input);
+
+        // ADO tools — dynamic prefix match, not a fixed key in CC_CHIP_LABELS
         if (toolName.startsWith('ado_') || toolName.includes('work_item')) {
             const title = input.title || '';
             if (toolName === 'ado_create_work_item' && title) return `Filing WI: ${chipTrunc(title, 40)}`;
             const suffix = toolName.startsWith('ado_') ? toolName.slice(4).replace(/_/g, ' ') : toolName.replace(/_/g, ' ');
             return `ADO: ${chipTrunc(suffix, 40)}`;
         }
-        // CC-native PascalCase tool names (ADO#4911)
-        if (toolName === 'Read') {
-            const fp = input.file_path || input.path || '';
-            const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Reading: ${chipTrunc(fname, 40)}` : 'Reading file...';
-        }
-        if (toolName === 'Write') {
-            const fp = input.file_path || input.path || '';
-            const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Writing: ${chipTrunc(fname, 40)}` : 'Writing file...';
-        }
-        if (toolName === 'Glob') {
-            const pat = input.pattern || '';
-            return pat ? `Finding: ${chipTrunc(pat, 40)}` : 'Finding files...';
-        }
-        if (toolName === 'LS') {
-            const dir = input.path || '';
-            const dirname = dir ? dir.split('/').pop() || dir : '';
-            return dirname ? `Listing: ${chipTrunc(dirname, 40)}` : 'Listing files...';
-        }
-        if (toolName === 'Grep') {
-            const pat = input.pattern || '';
-            return pat ? `Searching: "${chipTrunc(pat, 35)}"` : 'Searching files...';
-        }
-        if (toolName === 'Task') {
-            const desc = input.description || input.prompt || '';
-            return desc ? `Delegating: ${chipTrunc(desc, 40)}` : 'Delegating to agent...';
-        }
-        if (toolName === 'TodoWrite' || toolName === 'TodoRead') {
-            return toolName === 'TodoWrite' ? 'Updating task list' : 'Checking task list';
-        }
-        if (toolName === 'NotebookRead') {
-            const fp = input.notebook_path || '';
-            const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Reading notebook: ${fname}` : 'Reading notebook...';
-        }
-        if (toolName === 'NotebookEdit') {
-            const fp = input.notebook_path || '';
-            const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Editing notebook: ${fname}` : 'Editing notebook...';
-        }
-        if (toolName === 'Bash') {
-            const cmd = input.command || '';
-            if (cmd) {
-                if (/pip\s*install|pip3\s*install/.test(cmd)) return 'Installing dependencies...';
-                const preview = chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40);
-                return `Running: ${preview}`;
-            }
-            return 'Running command...';
-        }
-        if (toolName === 'Edit') {
-            const fp = input.new_path || input.path || '';
-            const fname = fp ? fp.split('/').pop() : '';
-            return fname ? `Editing: ${chipTrunc(fname, 40)}` : 'Editing file...';
-        }
+
         return 'Working...';
     } catch {
         return 'Working...';
