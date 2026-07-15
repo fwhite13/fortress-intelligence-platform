@@ -315,6 +315,16 @@ namespace FortressAI.Web.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("varchar(500)");
 
+                    b.Property<DateTime?>("TitleFinalizedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("title_finalized_at");
+
+                    b.Property<int>("TitleReEvalCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("title_re_eval_count")
+                        .HasDefaultValue(0);
+
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetime(6)")

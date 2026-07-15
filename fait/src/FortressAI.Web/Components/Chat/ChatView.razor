@@ -1570,16 +1570,24 @@ else
                 currentModel, inputTokens, outputTokens);
             messages.Add(assistantMsg);
 
-            // Generate contextual title after first exchange (fire and forget)
-            if (messages.Count == 2)  // first user + first assistant
+            // ADO#5424: iterative re-titling — re-run on each of the first N turns, then lock.
+            // ChatSvc no-ops once the conversation's title is finalized, so it's safe to call every turn.
             {
                 var convId = conversation.Id;
                 var userText = text;
                 var assistantText = assistantResponseText;
                 _ = Task.Run(async () =>
                 {
-                    await ChatSvc.GenerateConversationTitleAsync(convId, userText, assistantText);
-                    await InvokeAsync(StateHasChanged);
+                    try
+                    {
+                        await ChatSvc.ReEvaluateConversationTitleAsync(convId, userText, assistantText);
+                        LayoutState.NotifyConversationTitleChanged();
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "[TitleGen] re-evaluation task failed for conversationId={ConversationId}", convId);
+                    }
                 });
             }
         }

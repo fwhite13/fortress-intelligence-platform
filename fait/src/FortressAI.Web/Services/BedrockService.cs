@@ -363,7 +363,7 @@ public class BedrockService : IDisposable
         var json = requestObj.ToJsonString();
         var request = new InvokeModelRequest
         {
-            ModelId = _config.GetValue<string>("Bedrock:TitleModelId", "us.anthropic.claude-sonnet-4-6")!,
+            ModelId = _config.GetValue<string>("Bedrock:TitleModelId", "us.anthropic.claude-haiku-4-5-20251001-v1:0")!,
             ContentType = "application/json",
             Accept = "application/json",
             Body = new MemoryStream(Encoding.UTF8.GetBytes(json))

@@ -7,6 +7,9 @@ public class ChatLayoutState
     public bool ArtifactPanelOpen { get; private set; }
     public ArtifactRef? CurrentArtifact { get; private set; }
     public event Action? OnChange;
+    public event Action? OnConversationTitleChanged;
+
+    public void NotifyConversationTitleChanged() => OnConversationTitleChanged?.Invoke();
 
     public void OpenArtifactPreview(ArtifactRef artifact)
     {

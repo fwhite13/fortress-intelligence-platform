@@ -1,0 +1,1 @@
+{"version":3,"file":"zoom.d.ts","sourceRoot":"","sources":["../../src/bot/zoom.ts"],"names":[],"mappings":"AAAA;;GAEG;AAEH,OAAO,EAAE,IAAI,EAAE,MAAM,YAAY,CAAC;AASlC,qBAAa,WAAW;IACtB;;OAEG;mBACkB,UAAU;IAW/B;;OAEG;WACU,IAAI,CAAC,IAAI,EAAE,IAAI,EAAE,OAAO,EAAE,MAAM,GAAG,OAAO,CAAC,IAAI,CAAC;IAiS7D;;OAEG;mBACkB,cAAc;CAkBpC"}

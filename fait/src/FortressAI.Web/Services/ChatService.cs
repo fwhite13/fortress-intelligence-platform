@@ -17,6 +17,7 @@ public class ChatService
     private const int ConversationBudget = TotalTokenBudget - SystemPromptReserve - ResponseReserve; // 150K for conversation
     private const int RecentMessagesToKeep = 20;
     private const string SummaryModelId = "claude-haiku-4-5";
+    private const int MaxTitleReEvaluations = 3; // ADO#5424: N=3 re-titling turns before lock
 
     public ChatService(IDbContextFactory<AppDbContext> contextFactory, BedrockService bedrockService, ILogger<ChatService> logger)
     {
@@ -364,22 +365,38 @@ public class ChatService
     }
 
     /// <summary>
-    /// Generates a contextual title for a conversation from its first user+assistant exchange.
-    /// Should only be called once per conversation (when messages.Count == 2 in ChatView).
-    /// The title guard (IsNullOrEmpty) does not prevent overwriting a previously generated title —
-    /// callers are responsible for ensuring single invocation.
+    /// ADO#5424: iterative re-titling. Re-runs title generation on each of the first
+    /// MaxTitleReEvaluations turns, then permanently locks the title (TitleFinalizedAt set)
+    /// so it is never regenerated again. Safe to call on every turn — no-ops once finalized.
     /// </summary>
-    public async Task GenerateConversationTitleAsync(Guid conversationId, string userMessage, string assistantResponse)
+    public async Task ReEvaluateConversationTitleAsync(Guid conversationId, string userMessage, string assistantResponse)
     {
         await using var db = await _contextFactory.CreateDbContextAsync();
         var conversation = await db.Conversations.FindAsync(conversationId);
-        if (conversation == null) return;
+        if (conversation == null)
+        {
+            _logger.LogWarning("[TitleGen] conversationId={ConversationId} not found — skipping re-evaluation", conversationId);
+            return;
+        }
 
-        // Only generate if title is currently set (i.e., the placeholder from AddMessageAsync was written)
-        if (string.IsNullOrEmpty(conversation.Title)) return;
+        if (conversation.TitleFinalizedAt != null)
+        {
+            // Already locked — never re-trigger.
+            return;
+        }
+
+        if (conversation.TitleReEvalCount >= MaxTitleReEvaluations)
+        {
+            conversation.TitleFinalizedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            _logger.LogInformation(
+                "[TitleGen] conversationId={ConversationId} reEvalCount={ReEvalCount} — cap reached, locking title '{Title}'",
+                conversationId, conversation.TitleReEvalCount, conversation.Title);
+            return;
+        }
 
         var prompt = $"""
-            Generate a short, descriptive title (3–6 words) for this conversation based on the first exchange.
+            Generate a short, descriptive title (3–6 words) for this conversation based on the exchange below.
             Do not use quotes. Do not use punctuation at the end. Just the title, nothing else.
 
             User: {userMessage[..Math.Min(300, userMessage.Length)]}
@@ -388,20 +405,33 @@ public class ChatService
             Title:
             """;
 
+        string? title = null;
         try
         {
-            var title = await _bedrockService.GenerateTitleAsync(prompt);
-            if (!string.IsNullOrWhiteSpace(title))
-            {
-                conversation.Title = title.Trim().TrimEnd('.', '!', '?');
-                conversation.UpdatedAt = DateTime.UtcNow;
-                await db.SaveChangesAsync();
-            }
+            title = await _bedrockService.GenerateTitleAsync(prompt);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Title generation failed for conversation {Id} — keeping raw title", conversationId);
+            _logger.LogWarning(ex, "[TitleGen] generation call threw for conversationId={ConversationId} reEvalCount={ReEvalCount}",
+                conversationId, conversation.TitleReEvalCount);
         }
+
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            conversation.Title = title.Trim().TrimEnd('.', '!', '?');
+            conversation.UpdatedAt = DateTime.UtcNow;
+        }
+
+        conversation.TitleReEvalCount++;
+        if (conversation.TitleReEvalCount >= MaxTitleReEvaluations)
+        {
+            conversation.TitleFinalizedAt = DateTime.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
+        _logger.LogInformation(
+            "[TitleGen] conversationId={ConversationId} reEvalCount={ReEvalCount} titleUpdated={TitleUpdated} finalized={Finalized}",
+            conversationId, conversation.TitleReEvalCount, !string.IsNullOrWhiteSpace(title), conversation.TitleFinalizedAt != null);
     }
 
     /// <summary>

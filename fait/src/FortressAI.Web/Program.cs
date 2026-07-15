@@ -350,7 +350,8 @@ var keyRingCsb = new MySqlConnector.MySqlConnectionStringBuilder
     Database = keyRingDbName,
     UserID = keyRingDbUser,
     Password = keyRingDbPass,
-    ConnectionTimeout = 10
+    ConnectionTimeout = 10,
+    GuidFormat = MySqlGuidFormat.None
 };
 
 builder.Services.AddDbContext<SharedKeyRingDbContext>(options =>

@@ -106,6 +106,11 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             entity.HasOne(e => e.Project).WithMany(p => p.Conversations).HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.SetNull);
             entity.Property(e => e.WorkingFolderId)
                   .HasColumnName("working_folder_id");
+            entity.Property(e => e.TitleReEvalCount)
+                  .HasColumnName("title_re_eval_count")
+                  .HasDefaultValue(0);
+            entity.Property(e => e.TitleFinalizedAt)
+                  .HasColumnName("title_finalized_at");
         });
 
         modelBuilder.Entity<ChatMessage>(entity =>

@@ -13,6 +13,8 @@ public class Conversation
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public Guid? WorkingFolderId { get; set; }
+    public int TitleReEvalCount { get; set; } = 0;
+    public DateTime? TitleFinalizedAt { get; set; }
 
     // Navigation
     public AppUser? User { get; set; }
