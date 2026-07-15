@@ -38,7 +38,7 @@ public class CalendarService
 
             var startDateTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
             var endDateTime = DateTime.UtcNow.AddDays(7).ToString("yyyy-MM-ddTHH:mm:ssZ");
-            var select = "id,subject,start,end,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,organizer,location";
+            var select = "id,subject,start,end,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,organizer,body,location";
             // Use /me/calendarview with delegated token — not /users/{entraOid}/calendarview
             var url = $"https://graph.microsoft.com/v1.0/me/calendarview" +
                       $"?startDateTime={Uri.EscapeDataString(startDateTime)}" +
@@ -115,7 +115,50 @@ public class CalendarService
                 });
             }
 
-            _logger.LogInformation("[CalendarService] Returning {Count} Teams meetings for OID {Oid}", result.Count, entraOid);
+            _logger.LogInformation("[CalendarService] Entering Zoom/Meet second pass for OID {Oid}. TotalEvents={Total}", entraOid, events.Count);
+
+            var existingIds = new HashSet<string>(result.Select(r => r.CalendarEventId));
+            var zoomMeetFound = 0;
+            var zoomMeetSkippedDedup = 0;
+
+            foreach (var ev in events)
+            {
+                var eventId = ev.Id ?? "";
+
+                var match = ExtractZoomOrMeetJoinUrl(ev);
+                if (match == null) continue;
+
+                if (existingIds.Contains(eventId))
+                {
+                    zoomMeetSkippedDedup++;
+                    _logger.LogInformation("[CalendarService] Skipping Zoom/Meet event {EventId} — already present from Teams pass. OID={Oid}", eventId, entraOid);
+                    continue;
+                }
+
+                var (platform, joinUrl) = match.Value;
+                var organizerEmail = ev.Organizer?.EmailAddress?.Address?.Trim().ToLower() ?? "";
+
+                result.Add(new CalendarMeetingDto
+                {
+                    CalendarEventId = eventId,
+                    Subject = ev.Subject ?? "(No Subject)",
+                    StartDateTime = ev.Start?.DateTime ?? "",
+                    EndDateTime = ev.End?.DateTime ?? "",
+                    JoinUrl = joinUrl,
+                    Platform = platform,           // "zoom" | "meet"
+                    Mode = "B",                     // vpbot only — no Mode A logic for non-Teams
+                    OrganizerEmail = organizerEmail,
+                    TenantId = "",
+                    ModeText = $"Mode B — {_branding.NotetakerName} will join to record"
+                });
+
+                existingIds.Add(eventId);
+                zoomMeetFound++;
+            }
+
+            _logger.LogInformation("[CalendarService] Zoom/Meet second pass complete for OID {Oid}. Found={Found} SkippedDedup={Skipped}", entraOid, zoomMeetFound, zoomMeetSkippedDedup);
+
+            _logger.LogInformation("[CalendarService] Returning {Count} meetings (Teams + Zoom/Meet) for OID {Oid}", result.Count, entraOid);
             return result;
         }
         catch (Exception ex)
@@ -141,6 +184,19 @@ public class CalendarService
         // meet.google.com/
         var meetMatch = Regex.Match(locationText, @"https://meet\.google\.com/[a-z0-9\-]+");
         if (meetMatch.Success) return meetMatch.Value.TrimEnd('.');
+
+        return null;
+    }
+
+    private static (string Platform, string JoinUrl)? ExtractZoomOrMeetJoinUrl(CalendarViewEvent ev)
+    {
+        var haystack = (ev.Body?.Content ?? "") + " " + (ev.Location?.DisplayName ?? "");
+
+        var zoomMatch = Regex.Match(haystack, @"https://[a-z0-9.\-]*zoom\.us/(?:j|wc|w)/[^\s""'<>]+", RegexOptions.IgnoreCase);
+        if (zoomMatch.Success) return ("zoom", zoomMatch.Value.TrimEnd('.'));
+
+        var meetMatch = Regex.Match(haystack, @"https://meet\.google\.com/[^\s""'<>]+", RegexOptions.IgnoreCase);
+        if (meetMatch.Success) return ("meet", meetMatch.Value.TrimEnd('.'));
 
         return null;
     }
@@ -199,7 +255,14 @@ internal class CalendarViewEvent
     public CalendarViewDatetime? End { get; set; }
     public CalendarViewOrganizer? Organizer { get; set; }
     public CalendarViewOnlineMeeting? OnlineMeeting { get; set; }
+    public CalendarViewBody? Body { get; set; }
     public CalendarViewLocation? Location { get; set; }
+}
+
+internal class CalendarViewBody
+{
+    public string? Content { get; set; }
+    public string? ContentType { get; set; }
 }
 
 internal class CalendarViewLocation
