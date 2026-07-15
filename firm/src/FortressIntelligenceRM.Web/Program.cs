@@ -13,6 +13,7 @@ using Amazon.Batch;
 using Amazon.ECS;
 using Amazon.S3;
 using Amazon.Scheduler;
+using Amazon.SimpleEmailV2;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -111,6 +112,9 @@ builder.Services.AddScoped<IBatchTranscriptionService, BatchTranscriptionService
 builder.Services.AddScoped<IMindmapService, MindmapService>();
 builder.Services.AddAWSService<Amazon.BedrockAgent.IAmazonBedrockAgent>();
 builder.Services.AddAWSService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
+builder.Services.AddAWSService<IAmazonSimpleEmailServiceV2>();
+builder.Services.AddSingleton<PdfService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
 
 // Controllers for API endpoints
 builder.Services.AddControllers();
@@ -178,6 +182,7 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHostedService<DatabaseInitializationService>();
+builder.Services.AddHostedService<CalendarAutoSyncService>();
 builder.Services.AddSingleton<TeamsGraphService>();
 // builder.Services.AddHostedService(sp => sp.GetRequiredService<TeamsGraphService>()); // ADO#1352: disabled — FIRM reads via FipTokenService now
 // builder.Services.AddHostedService<TranscriptPollingService>(); // ADO#1352: disabled

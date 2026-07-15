@@ -263,6 +263,23 @@ public class MeetingService
         await db.SaveChangesAsync();
     }
 
+    public async Task<FirmUser?> GetUserAsync(Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.Users.FindAsync(userId);
+    }
+
+    public async Task UpdateUserPreferencesAsync(Guid userId, bool autoAddCalendarMeetings, bool autoEmailSummary)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var user = await db.Users.FindAsync(userId);
+        if (user == null) return;
+        user.AutoAddCalendarMeetings = autoAddCalendarMeetings;
+        user.AutoEmailSummary = autoEmailSummary;
+        user.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>
     /// Upserts a meeting from calendar detection. Keyed on calendar_event_id to prevent duplicates.
     /// If meeting already exists for this user + calendar_event_id, returns existing meeting.

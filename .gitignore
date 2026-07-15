@@ -3,6 +3,11 @@
 **/obj/
 **/publish/
 
+# Node / Python build artifacts
+**/node_modules/
+**/dist/
+**/__pycache__/
+
 # IDE
 .vs/
 .idea/

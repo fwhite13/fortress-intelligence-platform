@@ -217,7 +217,9 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_meetings ADD COLUMN creator_entra_oid VARCHAR(128) NULL",
                 "ALTER TABLE firm_users ADD COLUMN expo_push_token VARCHAR(200) NULL",
                 "ALTER TABLE firm_meetings ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'teams'",
-                "ALTER TABLE firm_meeting_mindmaps ADD CONSTRAINT fk_fmm_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE"
+                "ALTER TABLE firm_meeting_mindmaps ADD CONSTRAINT fk_fmm_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
+                "ALTER TABLE firm_users ADD COLUMN auto_add_calendar_meetings TINYINT(1) NOT NULL DEFAULT 0",
+                "ALTER TABLE firm_users ADD COLUMN auto_email_summary TINYINT(1) NOT NULL DEFAULT 0"
             };
 
             foreach (var alterSql in alterStatements)
