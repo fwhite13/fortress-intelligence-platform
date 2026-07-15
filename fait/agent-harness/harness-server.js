@@ -310,7 +310,7 @@ function bashCommandLabel(input) {
 // ADO#5688 — explicit mapping of CC tool name -> friendly chip label generator.
 // Unknown tool names are never surfaced raw; resolveProgressLabel() falls back
 // to 'Working...' for anything not listed here.
-const CC_CHIP_LABELS = {
+const CC_CHIP_LABELS = Object.assign(Object.create(null), {
     // Bedrock/legacy lowercase tool names
     web_search: (input) => {
         const query = input.query || input.q || '';
@@ -393,34 +393,46 @@ const CC_CHIP_LABELS = {
         if (/pip\s*install|pip3\s*install/.test(cmd)) return 'Installing dependencies...';
         return `Running: ${chipTrunc(cmd.replace(/\n/g, ' ').trim(), 40)}`;
     },
-    Glob: (input) => {
-        const pat = input.pattern || '';
-        return pat ? `Finding: ${chipTrunc(pat, 40)}` : 'Finding files...';
-    },
-    LS: (input) => {
-        const dir = input.path || '';
-        const dirname = dir ? (dir.split('/').pop() || dir) : '';
-        return dirname ? `Listing: ${chipTrunc(dirname, 40)}` : 'Listing files...';
-    },
-    Grep: (input) => {
-        const pat = input.pattern || '';
-        return pat ? `Searching: "${chipTrunc(pat, 35)}"` : 'Searching files...';
-    },
     Task: (input) => {
         const desc = input.description || input.prompt || '';
         return desc ? `Delegating: ${chipTrunc(desc, 40)}` : 'Delegating to agent...';
-    },
-    TodoWrite: () => 'Updating task list',
-    TodoRead: () => 'Checking task list',
-    NotebookRead: (input) => {
-        const fname = getFilenameFromPath(input.notebook_path || '');
-        return fname ? `Reading notebook: ${fname}` : 'Reading notebook...';
     },
     NotebookEdit: (input) => {
         const fname = getFilenameFromPath(input.notebook_path || '');
         return fname ? `Editing notebook: ${fname}` : 'Editing notebook...';
     },
-};
+    // CC 2.1.198 remaining tools (24 new entries for C2 rework)
+    WebSearch: (input) => {
+        const query = input.query || '';
+        return query ? `Searching: "${chipTrunc(query, 40)}"` : 'Searching web...';
+    },
+    WebFetch: (input) => {
+        const domain = extractDomain(input.url || '');
+        return domain ? `Fetching: ${chipTrunc(domain, 40)}` : 'Fetching web content...';
+    },
+    Artifact: () => 'Creating artifact...',
+    Workflow: () => 'Running workflow...',
+    CronCreate: () => 'Scheduling task...',
+    CronDelete: () => 'Removing scheduled task...',
+    CronList: () => 'Checking scheduled tasks...',
+    ScheduleWakeup: () => 'Scheduling wakeup...',
+    Monitor: () => 'Monitoring...',
+    RemoteTrigger: () => 'Triggering remote action...',
+    TaskCreate: () => 'Creating task...',
+    TaskGet: () => 'Getting task...',
+    TaskList: () => 'Listing tasks...',
+    TaskUpdate: () => 'Updating task...',
+    TaskStop: () => 'Stopping task...',
+    TaskOutput: () => 'Reading task output...',
+    PushNotification: () => 'Sending notification...',
+    EnterWorktree: () => 'Entering worktree...',
+    ExitWorktree: () => 'Exiting worktree...',
+    DesignSync: () => 'Syncing design...',
+    SendMessage: () => 'Sending message...',
+    Skill: () => 'Running skill...',
+    ToolSearch: () => 'Searching tools...',
+    ReportFindings: () => 'Reporting findings...',
+});
 
 // ADO#3577 — Human-readable CC progress labels
 function resolveProgressLabel(toolName, toolInput) {
@@ -4280,7 +4292,7 @@ DO NOT assume a prior artifact means this task is already done. Prior files in t
                             const toolName = (typeof toolEntry === 'object' ? toolEntry?.name : toolEntry) || block.tool_use_id || 'tool';
                             const toolInput = (typeof toolEntry === 'object' ? toolEntry?.input : {}) || {};
                             const doneLabel = resolveProgressLabel(toolName, toolInput);
-                            const chipLabel = (doneLabel && doneLabel !== 'Working...') ? doneLabel : `${toolName} done`; // ADO#4860 — descriptive done label
+                            const chipLabel = (doneLabel && doneLabel !== 'Working...') ? doneLabel : 'Tool finished'; // ADO#5688 C1 — no raw tool names in fallback
                             logger.debug(`[chip-label] ADO#4860: tool_result toolName=${toolName} label=${chipLabel}`);
                             sendEvent({ type: 'task_progress', payload: JSON.stringify({
                                 step: 'tool_result', toolName, status: 'done', message: chipLabel,
