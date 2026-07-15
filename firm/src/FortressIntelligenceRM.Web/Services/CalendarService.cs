@@ -50,6 +50,7 @@ public class CalendarService
             var client = _httpClientFactory.CreateClient();
             var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            req.Headers.Add("Prefer", "outlook.body-content-type=\"text\"");
             var resp = await client.SendAsync(req, ct);
             if (!resp.IsSuccessStatusCode)
             {
@@ -115,6 +116,9 @@ public class CalendarService
                 });
             }
 
+            // Fix 2: Intentionally scanning ALL events (no isOnlineMeeting guard) — Zoom/Meet events from
+            // external organizers may not have isOnlineMeeting=true set by Graph. The Prefer text body
+            // (Fix 1 above) and tight URL regex minimize false positives.
             _logger.LogInformation("[CalendarService] Entering Zoom/Meet second pass for OID {Oid}. TotalEvents={Total}", entraOid, events.Count);
 
             var existingIds = new HashSet<string>(result.Select(r => r.CalendarEventId));
@@ -177,8 +181,9 @@ public class CalendarService
         // Zoom and Google Meet: join URL is carried in location.displayName
         var locationText = ev.Location?.DisplayName ?? "";
 
-        // zoom.us/j/ or zoom.us/w/ or *.zoom.us/j/
-        var zoomMatch = Regex.Match(locationText, @"https://[a-z0-9.\-]*zoom\.us/[jw]/\S+");
+        // Nitpick fix: zoom.us/j/ (personal meeting ID) or zoom.us/wc/ (webinar) — /w/ variant not in spec
+        // Regex anchor fixed: https://(?:[a-z0-9-]+\.)*zoom\.us/ prevents matching evilzoom.us
+        var zoomMatch = Regex.Match(locationText, @"https://(?:[a-z0-9-]+\.)*zoom\.us/(?:j|wc)/\S+");
         if (zoomMatch.Success) return zoomMatch.Value.TrimEnd('.');
 
         // meet.google.com/
@@ -192,7 +197,7 @@ public class CalendarService
     {
         var haystack = (ev.Body?.Content ?? "") + " " + (ev.Location?.DisplayName ?? "");
 
-        var zoomMatch = Regex.Match(haystack, @"https://[a-z0-9.\-]*zoom\.us/(?:j|wc|w)/[^\s""'<>]+", RegexOptions.IgnoreCase);
+        var zoomMatch = Regex.Match(haystack, @"https://(?:[a-z0-9-]+.)*zoom.us/(?:j|wc)/[^\s""'<>]+", RegexOptions.IgnoreCase);
         if (zoomMatch.Success) return ("zoom", zoomMatch.Value.TrimEnd('.'));
 
         var meetMatch = Regex.Match(haystack, @"https://meet\.google\.com/[^\s""'<>]+", RegexOptions.IgnoreCase);
