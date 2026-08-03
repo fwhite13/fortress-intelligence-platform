@@ -98,13 +98,15 @@ public class MeetingsApiController : ControllerBase
             return Ok(new { meetingId = meeting.Id, status = "scheduled" });
         }
 
-        // Trigger bot (fire and forget — don't fail the response if ECS isn't configured)
+        // Trigger bot and track status so AutoJoinTrigger / clients can see the meeting is in flight.
         // TODO (Mode A): When TeamsGraphService is implemented, detect platform here and route to
         // Mode A (native Teams transcript fetch) vs Mode B (VP bot). Mode A completion must call
         // FAIT /api/firm/meeting-complete the same way as Mode B does in VpCallback. See ADO#1232.
-        _ = _vpBotService.TriggerBotAsync(meeting.Id, request.MeetingUrl);
+        var taskArn = await _vpBotService.TriggerBotAsync(meeting.Id, request.MeetingUrl);
+        if (taskArn != null)
+            await _meetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Pending);
 
-        return Ok(new { meetingId = meeting.Id });
+        return Ok(new { meetingId = meeting.Id, status = taskArn != null ? "pending" : meeting.Status.ToString().ToLowerInvariant() });
     }
 
     [HttpPost("/api/vp/callback")]

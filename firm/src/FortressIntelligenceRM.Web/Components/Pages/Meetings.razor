@@ -563,6 +563,7 @@
                 }
                 else
                 {
+                    await MeetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Pending);
                     await InvokeAsync(() =>
                     {
                         Snackbar.Add("Bot is joining!", Severity.Success);
