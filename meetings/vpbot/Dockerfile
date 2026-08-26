@@ -102,6 +102,11 @@ sleep 2\n\
 pactl load-module module-null-sink sink_name=virtual_out sink_properties=device.description=VirtualOutput\n\
 pactl set-default-sink virtual_out\n\
 \n\
+# Dedicated silent source for mic input — prevents Chromium WebRTC from\n\
+# using virtual_out.monitor as mic and broadcasting meeting audio back to participants\n\
+pactl load-module module-null-sink sink_name=silent_mic\n\
+pactl set-default-source silent_mic.monitor\n\
+\n\
 # Verify PulseAudio is running\n\
 if pactl info >/dev/null 2>&1; then\n\
   echo "[start.sh] PulseAudio is running"\n\
