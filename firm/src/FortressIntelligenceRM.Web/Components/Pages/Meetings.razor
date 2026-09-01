@@ -117,7 +117,9 @@
                     <MudText Style="color: var(--color-text-primary);">@(context.Title ?? $"Meeting — {context.CreatedAt:yyyy-MM-dd}")</MudText>
                 </MudTd>
                 <MudTd DataLabel="Date">
-                    <MudText Style="color: var(--color-text-secondary);">@(_localCreatedTimes.TryGetValue(context.Id, out var ct) ? ct : context.CreatedAt.ToString("MMM d, yyyy h:mm tt"))</MudText>
+                    <MudText Style="color: var(--color-text-secondary);">@(context.StartDatetime != null
+                        ? (_localMeetingStartTimes.TryGetValue(context.Id, out var st) ? st : context.StartDatetime.Value.ToString("MMM d, yyyy h:mm tt"))
+                        : (_localCreatedTimes.TryGetValue(context.Id, out var ct) ? ct : context.CreatedAt.ToString("MMM d, yyyy h:mm tt")))</MudText>
                 </MudTd>
                 <MudTd DataLabel="Duration">
                     <MudText Style="color: var(--color-text-secondary);">@FormatDuration(context.DurationSeconds)</MudText>
@@ -145,7 +147,8 @@
                             <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
                                        OnClick="@(() => JoinNow(context.Id))">Join Now</MudButton>
                         }
-                        @if (context.Status is MeetingStatus.Scheduled or MeetingStatus.Complete or MeetingStatus.Failed)
+                        @if (context.Status is not (MeetingStatus.Pending or MeetingStatus.Joining or MeetingStatus.Recording
+                            or MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing or MeetingStatus.Summarizing))
                         {
                             <MudButton Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined"
                                        OnClick="@(() => RemoveMeeting(context.Id))">Remove</MudButton>
@@ -200,6 +203,7 @@
     private Dictionary<string, string> _localStartTimes = new();
     private Dictionary<string, string> _localEndTimes = new();
     private Dictionary<long, string> _localCreatedTimes = new();
+    private Dictionary<long, string> _localMeetingStartTimes = new();
     private bool _jsReady = false;
 
 
@@ -332,6 +336,16 @@
                          && !calendarEventIds.Contains(m.CalendarEventId))
                 .Select(m => m.Id)
                 .ToHashSet();
+
+            // Hide upcoming cards for meetings already in My Meetings
+            var addedCalendarIds = _meetings
+                .Where(m => !string.IsNullOrEmpty(m.CalendarEventId))
+                .Select(m => m.CalendarEventId!)
+                .ToHashSet();
+            _upcomingMeetings = _upcomingMeetings
+                .Where(c => !addedCalendarIds.Contains(c.CalendarEventId))
+                .ToList();
+
             await PreFormatMeetingTimesAsync();
         }
         catch (Exception ex)
@@ -749,10 +763,11 @@
     {
         if (!_jsReady) return;  // JS not available during pre-render
         _localCreatedTimes.Clear();
+        _localMeetingStartTimes.Clear();
         _localStartTimes.Clear();
         _localEndTimes.Clear();
 
-        // Pre-format CreatedAt for each FIRM meeting
+        // Pre-format CreatedAt (and StartDatetime, when present) for each FIRM meeting
         foreach (var m in _meetings)
         {
             try
@@ -761,6 +776,16 @@
                 _localCreatedTimes[m.Id] = await JS.InvokeAsync<string>("firmUtils.formatLocalDateTime", utcStr);
             }
             catch { _localCreatedTimes[m.Id] = m.CreatedAt.ToString("MMM d, yyyy h:mm tt"); }
+
+            if (m.StartDatetime != null)
+            {
+                try
+                {
+                    var startUtcStr = m.StartDatetime.Value.ToUniversalTime().ToString("O");
+                    _localMeetingStartTimes[m.Id] = await JS.InvokeAsync<string>("firmUtils.formatLocalDateTime", startUtcStr);
+                }
+                catch { _localMeetingStartTimes[m.Id] = m.StartDatetime.Value.ToString("MMM d, yyyy h:mm tt"); }
+            }
         }
 
         // Pre-format upcoming meeting start/end times
