@@ -302,7 +302,13 @@ public class MeetingService
         {
             Title = dto.Subject,
             MeetingUrl = dto.JoinUrl,
-            Status = MeetingStatus.Scheduled,
+            // NOTE: MeetingStatus.Scheduled == 0, which is the CLR default for the enum.
+            // EF Core's HasDefaultValue(MeetingStatus.Joining) treats Status as ValueGenerated.OnAdd,
+            // so on INSERT it compares against the CLR sentinel (0/Scheduled) and — seeing a match —
+            // omits the column entirely, letting the DB default (Joining) win. Inserting as Joining
+            // avoids the sentinel match; UpdateStatusAsync below flips it to Scheduled via UPDATE,
+            // which is not subject to the same sentinel check. Mirrors the working manual join path.
+            Status = MeetingStatus.Joining,
             Platform = dto.Platform,
             Mode = dto.Mode,
             CreatedBy = userId,
@@ -313,6 +319,7 @@ public class MeetingService
         };
         db.Meetings.Add(meeting);
         await db.SaveChangesAsync();
+        await UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
         _logger.LogInformation("FIRM: Calendar upsert created meeting {Id} Mode {Mode} for user {UserId}", meeting.Id, dto.Mode, userId);
         return meeting;
     }
