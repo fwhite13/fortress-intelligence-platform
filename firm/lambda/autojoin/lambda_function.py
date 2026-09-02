@@ -1,58 +1,38 @@
 import json
-import boto3
-import os
-
-ecs = boto3.client('ecs', region_name='us-east-1')
-
-CLUSTER         = os.environ['ECS_CLUSTER']
-TASK_DEF        = os.environ['VPBOT_TASK_DEF']
-TASK_ROLE_ARN   = os.environ['TASK_ROLE_ARN']
-EXEC_ROLE_ARN   = os.environ['EXEC_ROLE_ARN']
-SUBNETS         = os.environ['SUBNETS'].split(',')
-SECURITY_GROUPS = os.environ['SECURITY_GROUPS'].split(',')
+import urllib.request
+import urllib.error
 
 def lambda_handler(event, context):
     meeting_id  = event.get('meetingId')
-    meeting_url = event.get('meetingUrl')
+    meeting_url = event.get('meetingUrl')   # kept for logging; FIRM reads from DB now
     firm_api_url = event.get('firmApiUrl', '')
     bot_callback_secret = event.get('botCallbackSecret', '')
 
-    print(f"firm-autojoin: launching vpbot for meeting {meeting_id} url={meeting_url} apiUrl={firm_api_url}")
+    print(f"firm-autojoin: validating meeting {meeting_id} via FIRM before ECS launch")
 
-    env_overrides = [
-        {'name': 'MEETING_URL',          'value': meeting_url or ''},
-        {'name': 'MEETING_ID',           'value': str(meeting_id or '')},
-    ]
-    if firm_api_url:
-        env_overrides.append({'name': 'FIRM_API_URL', 'value': firm_api_url})
-    if bot_callback_secret:
-        env_overrides.append({'name': 'BOT_CALLBACK_SECRET', 'value': bot_callback_secret})
+    if not firm_api_url:
+        raise Exception("firmApiUrl not in payload — cannot validate meeting")
 
-    response = ecs.run_task(
-        cluster=CLUSTER,
-        taskDefinition=TASK_DEF,
-        launchType='FARGATE',
-        networkConfiguration={
-            'awsvpcConfiguration': {
-                'subnets': SUBNETS,
-                'securityGroups': SECURITY_GROUPS,
-                'assignPublicIp': 'ENABLED'
-            }
+    url = f"{firm_api_url}/api/vp/autojoin/{meeting_id}"
+    req = urllib.request.Request(
+        url,
+        method='POST',
+        headers={
+            'Content-Type': 'application/json',
+            'X-Bot-Secret': bot_callback_secret,
         },
-        overrides={
-            'taskRoleArn': TASK_ROLE_ARN,
-            'executionRoleArn': EXEC_ROLE_ARN,
-            'containerOverrides': [{
-                'name': 'firm-vpbot',
-                'environment': env_overrides
-            }]
-        }
+        data=b'{}'
     )
 
-    failures = response.get('failures', [])
-    if failures:
-        raise Exception(f"ECS RunTask failed: {failures}")
-
-    task_arn = response['tasks'][0]['taskArn']
-    print(f"firm-autojoin: launched task {task_arn}")
-    return {'taskArn': task_arn}
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode())
+            task_arn = body.get('taskArn')
+            print(f"firm-autojoin: FIRM launched task {task_arn} for meeting {meeting_id}")
+            return {'taskArn': task_arn}
+    except urllib.error.HTTPError as e:
+        if e.code in (404, 409):
+            body = e.read().decode()
+            print(f"firm-autojoin: FIRM returned {e.code} for meeting {meeting_id} — skipping ECS launch. Body: {body}")
+            return {'skipped': True, 'reason': f'HTTP {e.code}', 'meetingId': meeting_id}
+        raise
