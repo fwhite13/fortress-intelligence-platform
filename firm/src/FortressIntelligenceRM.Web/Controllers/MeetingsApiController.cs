@@ -31,6 +31,7 @@ public class MeetingsApiController : ControllerBase
     private readonly BrandingConfig _branding;
     private readonly PdfService _pdfService;
     private readonly IEmailService _emailService;
+    private readonly AutoJoinSchedulerService _autoJoinSchedulerService;
 
     public MeetingsApiController(
         MeetingService meetingService,
