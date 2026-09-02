@@ -8,6 +8,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 {
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly CalendarService _calendarService;
+    private readonly MeetingService _meetingService;
     private readonly AutoJoinSchedulerService _autoJoinScheduler;
     private readonly ILogger<CalendarAutoSyncService> _logger;
     private readonly IConfiguration _config;
@@ -16,12 +17,14 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
     public CalendarAutoSyncService(
         IDbContextFactory<FirmDbContext> dbFactory,
         CalendarService calendarService,
+        MeetingService meetingService,
         AutoJoinSchedulerService autoJoinScheduler,
         ILogger<CalendarAutoSyncService> logger,
         IConfiguration config)
     {
         _dbFactory = dbFactory;
         _calendarService = calendarService;
+        _meetingService = meetingService;
         _autoJoinScheduler = autoJoinScheduler;
         _logger = logger;
         _config = config;
@@ -81,9 +84,12 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
                     var startDatetime = DateTime.Parse(dto.StartDateTime);
 
+                    // EF Core sentinel workaround: MeetingStatus.Scheduled == 0 (CLR default), so
+                    // EF treats it as unset and omits from INSERT, letting DB default (Joining) win.
+                    // Insert as Joining, then UPDATE to Scheduled to bypass the sentinel check.
                     var meeting = new FirmMeeting
                     {
-                        Status = MeetingStatus.Scheduled,
+                        Status = MeetingStatus.Joining,
                         Platform = dto.Platform,
                         MeetingUrl = dto.JoinUrl,
                         CalendarEventId = dto.CalendarEventId,
@@ -99,6 +105,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
                     db.Meetings.Add(meeting);
                     await db.SaveChangesAsync(ct);
+                    await _meetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
 
                     await _autoJoinScheduler.CreateScheduleAsync(meeting.Id, dto.JoinUrl, startDatetime);
 

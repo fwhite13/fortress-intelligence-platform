@@ -50,7 +50,13 @@ public class AutoJoinSchedulerService
             return;
         }
 
-        var payload = JsonSerializer.Serialize(new { meetingId, meetingUrl });
+        var payload = JsonSerializer.Serialize(new
+        {
+            meetingId,
+            meetingUrl,
+            firmApiUrl = _config["Firm:ApiUrl"] ?? "",
+            botCallbackSecret = _config["Firm:BotCallbackSecret"] ?? ""
+        });
 
         try
         {
