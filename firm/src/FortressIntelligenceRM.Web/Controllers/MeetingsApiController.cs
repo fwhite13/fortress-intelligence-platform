@@ -31,6 +31,7 @@ public class MeetingsApiController : ControllerBase
     private readonly BrandingConfig _branding;
     private readonly PdfService _pdfService;
     private readonly IEmailService _emailService;
+    private readonly AutoJoinSchedulerService _autoJoinSchedulerService;
 
     public MeetingsApiController(
         MeetingService meetingService,
@@ -47,7 +48,8 @@ public class MeetingsApiController : ControllerBase
         IMindmapService mindmapService,
         BrandingConfig branding,
         PdfService pdfService,
-        IEmailService emailService)
+        IEmailService emailService,
+        AutoJoinSchedulerService autoJoinSchedulerService)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
@@ -64,6 +66,7 @@ public class MeetingsApiController : ControllerBase
         _branding = branding;
         _pdfService = pdfService;
         _emailService = emailService;
+        _autoJoinSchedulerService = autoJoinSchedulerService;
     }
 
 [HttpPost("/api/meetings/join")]
@@ -971,8 +974,28 @@ public class MeetingsApiController : ControllerBase
             or MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing or MeetingStatus.Summarizing)
             return Conflict(new { error = "Cannot remove a meeting that is currently in progress" });
 
+        // Delete EventBridge schedule if this meeting is scheduled
+        try
+        {
+            await _autoJoinSchedulerService.DeleteScheduleAsync(id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: Failed to delete schedule for meeting {Id} — proceeding with meeting deletion", id);
+            // Non-fatal: continue with meeting deletion even if schedule delete fails
+        }
+
+        // Use EF-tracked delete to trigger cascade delete on child tables
         await using var db = await _dbFactory.CreateDbContextAsync();
-        await db.Database.ExecuteSqlRawAsync("DELETE FROM firm_meetings WHERE id = {0}", id);
+        var meetingToDelete = await db.Meetings
+            .Include(m => m.Mindmap)
+            .FirstOrDefaultAsync(m => m.Id == id);
+        if (meetingToDelete != null)
+        {
+            db.Meetings.Remove(meetingToDelete);
+            await db.SaveChangesAsync();
+        }
+
         return NoContent();
     }
 
