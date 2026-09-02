@@ -78,11 +78,34 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
                 foreach (var dto in meetings)
                 {
+                    // Primary dedup: exact calendar event ID match
                     var exists = await db.Meetings.AnyAsync(
                         m => m.CalendarEventId == dto.CalendarEventId && m.CreatedBy == user.Id, ct);
                     if (exists) continue;
 
                     var startDatetime = DateTime.Parse(dto.StartDateTime);
+
+                    // Secondary dedup: same user + URL + start time (guards against MS Graph ID instability
+                    // on recurring occurrences returning different IDs across poll cycles)
+                    // Note: no index on (created_by, meeting_url, start_datetime) — could be added if user base grows
+                    var duplicate = await db.Meetings.FirstOrDefaultAsync(
+                        m => m.MeetingUrl == dto.JoinUrl
+                          && m.StartDatetime == startDatetime
+                          && m.CreatedBy == user.Id, ct);
+                    if (duplicate != null)
+                    {
+                        // Upsert the CalendarEventId to the latest value Graph returned
+                        if (duplicate.CalendarEventId != dto.CalendarEventId)
+                        {
+                            duplicate.CalendarEventId = dto.CalendarEventId;
+                            duplicate.UpdatedAt = DateTime.UtcNow;
+                            await db.SaveChangesAsync(ct);
+                            _logger.LogInformation(
+                                "[AutoSync] Updated CalendarEventId on meeting {Id} (Graph ID drift on recurring occurrence)",
+                                duplicate.Id);
+                        }
+                        continue;
+                    }
 
                     // EF Core sentinel workaround: MeetingStatus.Scheduled == 0 (CLR default), so
                     // EF treats it as unset and omits from INSERT, letting DB default (Joining) win.
