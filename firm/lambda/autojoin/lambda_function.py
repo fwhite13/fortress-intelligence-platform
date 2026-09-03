@@ -1,17 +1,22 @@
 import json
+import os
 import urllib.request
 import urllib.error
 
 def lambda_handler(event, context):
     meeting_id  = event.get('meetingId')
     meeting_url = event.get('meetingUrl')   # kept for logging; FIRM reads from DB now
-    firm_api_url = event.get('firmApiUrl', '')
+    # ADO#6813: fall back to the FIRM_API_URL env var when the payload doesn't carry
+    # firmApiUrl. EventBridge rules created before this field was added to the
+    # schedule payload (e.g. meetings 95, 100) invoke this Lambda without it, which
+    # crashed every invocation. Only fail if neither source has a value.
+    firm_api_url = event.get('firmApiUrl') or os.environ.get('FIRM_API_URL', '')
     bot_callback_secret = event.get('botCallbackSecret', '')
 
     print(f"firm-autojoin: validating meeting {meeting_id} via FIRM before ECS launch")
 
     if not firm_api_url:
-        raise Exception("firmApiUrl not in payload — cannot validate meeting")
+        raise Exception("firmApiUrl not in payload or FIRM_API_URL env var — cannot validate meeting")
 
     url = f"{firm_api_url}/api/vp/autojoin/{meeting_id}"
     req = urllib.request.Request(
