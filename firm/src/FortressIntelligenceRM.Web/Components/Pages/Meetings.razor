@@ -276,8 +276,8 @@
         finally
         {
             // Always load (or show empty state) — never leave _loading = true
-            await LoadUpcomingMeetingsAsync();
             await LoadMeetings();
+            await LoadUpcomingMeetingsAsync();
         }
         StartPolling();
     }

@@ -62,6 +62,31 @@ export class TeamsHandler {
   }
 
   /**
+   * Run a page.evaluate() call with a single retry if the execution context
+   * gets destroyed mid-evaluate — the Teams v2 SPA can still be hash-routing
+   * when we try to read the DOM, which kills the in-flight context. On that
+   * specific error, re-wait for the page to settle and try once more.
+   */
+  private static async evaluateWithNavRetry<T>(page: Page, fn: () => T): Promise<T> {
+    try {
+      return await page.evaluate(fn);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('Execution context was destroyed')) {
+        throw err;
+      }
+      console.log('[Teams] page.evaluate() hit a navigation race, re-waiting and retrying once...');
+      try {
+        await page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+      } catch (waitErr) {
+        console.log('[Teams] WARNING: waitForLoadState(domcontentloaded) timed out on retry, continuing anyway:', waitErr);
+      }
+      await page.waitForTimeout(1000);
+      return await page.evaluate(fn);
+    }
+  }
+
+  /**
    * Process a Teams meeting URL for browser join.
    * 
    * NEW TEAMS (v2): We navigate to the original URL directly. 
@@ -248,10 +273,22 @@ export class TeamsHandler {
     await this.screenshot(page, '01-initial-page');
 
     // Step 1: Handle the launcher page
-    // Wait for page to stabilize
-    await page.waitForTimeout(3000);
+    // Teams v2 lands on /v2/?meetingjoin=true#/... and immediately begins client-side
+    // hash routing (SPA navigation). A naive waitForTimeout(3000) here races that
+    // navigation — the execution context can be destroyed mid-wait, which then blows up
+    // the page.evaluate() below with "Execution context was destroyed, most likely
+    // because of a navigation". Wait for the SPA to settle first, then a short buffer.
+    try {
+      await page.waitForLoadState('domcontentloaded', { timeout: 15000 });
+    } catch (err) {
+      console.log('[Teams] WARNING: waitForLoadState(domcontentloaded) timed out, continuing anyway:', err);
+    }
+    await page.waitForTimeout(1000);
 
-    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 1000) || 'NO BODY TEXT');
+    const pageText = await this.evaluateWithNavRetry(
+      page,
+      () => document.body?.innerText?.substring(0, 1000) || 'NO BODY TEXT'
+    );
     console.log('[Teams] Initial page text:', pageText.substring(0, 200));
 
     // Check if we're on the launcher page
