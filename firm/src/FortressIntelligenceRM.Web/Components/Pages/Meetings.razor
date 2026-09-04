@@ -348,13 +348,30 @@
                 .Select(m => m.Id)
                 .ToHashSet();
 
-            // Hide upcoming cards for meetings already in My Meetings
+            // Hide upcoming cards for meetings already in My Meetings.
+            // Primary dedup: exact CalendarEventId match.
             var addedCalendarIds = _meetings
                 .Where(m => !string.IsNullOrEmpty(m.CalendarEventId))
                 .Select(m => m.CalendarEventId!)
                 .ToHashSet();
+
+            // Secondary dedup: normalized URL + start time (handles Graph recurring
+            // event ID instability — the same instance can get a different
+            // CalendarEventId across polls, per ADO#6833).
+            var addedUrlStartKeys = _meetings
+                .Where(m => !string.IsNullOrEmpty(m.MeetingUrl) && m.StartDatetime.HasValue)
+                .Select(m => (
+                    NormUrl: NormalizeMeetingUrl(m.MeetingUrl!),
+                    Start: m.StartDatetime!.Value.ToString("yyyy-MM-ddTHH:mm")
+                ))
+                .ToHashSet();
+
             _upcomingMeetings = _upcomingMeetings
-                .Where(c => !addedCalendarIds.Contains(c.CalendarEventId))
+                .Where(c => !addedCalendarIds.Contains(c.CalendarEventId)
+                         && !addedUrlStartKeys.Contains((
+                             NormUrl: NormalizeMeetingUrl(c.JoinUrl),
+                             Start: c.StartDateTime.Length >= 16 ? c.StartDateTime[..16] : c.StartDateTime
+                         )))
                 .ToList();
 
             await PreFormatMeetingTimesAsync();
@@ -367,6 +384,17 @@
         {
             _calendarLoading = false;
         }
+    }
+
+    /// <summary>
+    /// Normalizes a meeting join URL for dedup comparison: lowercase, strip query
+    /// string, strip trailing slash. No shared helper exists elsewhere in the
+    /// codebase for this (ADO#6833), so it's implemented locally.
+    /// </summary>
+    private static string NormalizeMeetingUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return "";
+        return url.ToLowerInvariant().Split('?')[0].TrimEnd('/');
     }
 
     private async Task OpenJoinDialogPrefilled(string joinUrl)
