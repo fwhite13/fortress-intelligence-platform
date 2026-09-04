@@ -130,6 +130,17 @@
                     {
                         <MudChip T="string" Color="Color.Warning" Size="Size.Small">⚠️ Removed from calendar</MudChip>
                     }
+                    @if (context.Status == MeetingStatus.Scheduled && context.LastFailureReason == "lobby_timeout")
+                    {
+                        <MudTooltip Text="The bot was not admitted to the Teams meeting lobby before timing out. Check the meeting's lobby settings, then retry.">
+                            <MudChip T="string" Color="Color.Warning" Size="Size.Small" Class="ml-1">⚠️ Bot wasn't admitted to lobby</MudChip>
+                        </MudTooltip>
+                        <MudIconButton Icon="@Icons.Material.Filled.Replay"
+                                       Style="color: #d4af37;" Size="Size.Small"
+                                       Title="Retry"
+                                       aria-label="Retry"
+                                       OnClick="@(() => RetryAfterLobbyTimeout(context))" />
+                    }
                 </MudTd>
                 <MudTd DataLabel="Actions">
                     <MudStack Row>
@@ -265,8 +276,8 @@
         finally
         {
             // Always load (or show empty state) — never leave _loading = true
-            await LoadMeetings();
             await LoadUpcomingMeetingsAsync();
+            await LoadMeetings();
         }
         StartPolling();
     }
@@ -577,7 +588,6 @@
                 }
                 else
                 {
-                    await MeetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Pending);
                     await InvokeAsync(() =>
                     {
                         Snackbar.Add("Bot is joining!", Severity.Success);
@@ -645,6 +655,16 @@
             Logger.LogError(ex, "FIRM: JoinNow failed for meeting {Id}", meetingId);
             Snackbar.Add($"Error: {ex.Message}", Severity.Error);
         }
+    }
+
+    private async Task RetryAfterLobbyTimeout(FirmMeeting meeting)
+    {
+        // Optimistic UI update — clear the failure notice and flip to Pending immediately,
+        // then drive the same join path as the "Join Now" button.
+        meeting.LastFailureReason = null;
+        meeting.Status = MeetingStatus.Pending;
+        StateHasChanged();
+        await JoinNow(meeting.Id);
     }
 
     private async Task RemoveMeeting(long meetingId)

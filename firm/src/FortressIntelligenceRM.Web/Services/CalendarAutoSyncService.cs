@@ -8,7 +8,6 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 {
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly CalendarService _calendarService;
-    private readonly MeetingService _meetingService;
     private readonly AutoJoinSchedulerService _autoJoinScheduler;
     private readonly ILogger<CalendarAutoSyncService> _logger;
     private readonly IConfiguration _config;
@@ -17,14 +16,12 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
     public CalendarAutoSyncService(
         IDbContextFactory<FirmDbContext> dbFactory,
         CalendarService calendarService,
-        MeetingService meetingService,
         AutoJoinSchedulerService autoJoinScheduler,
         ILogger<CalendarAutoSyncService> logger,
         IConfiguration config)
     {
         _dbFactory = dbFactory;
         _calendarService = calendarService;
-        _meetingService = meetingService;
         _autoJoinScheduler = autoJoinScheduler;
         _logger = logger;
         _config = config;
@@ -78,40 +75,20 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
                 foreach (var dto in meetings)
                 {
-                    // Primary dedup: exact calendar event ID match
                     var exists = await db.Meetings.AnyAsync(
                         m => m.CalendarEventId == dto.CalendarEventId && m.CreatedBy == user.Id, ct);
                     if (exists) continue;
 
                     var startDatetime = DateTime.Parse(dto.StartDateTime);
 
-                    // Secondary dedup: same user + URL + start time (guards against MS Graph ID instability
-                    // on recurring occurrences returning different IDs across poll cycles)
-                    // Note: no index on (created_by, meeting_url, start_datetime) — could be added if user base grows
-                    var duplicate = await db.Meetings.FirstOrDefaultAsync(
-                        m => m.MeetingUrl == dto.JoinUrl
-                          && m.StartDatetime == startDatetime
-                          && m.CreatedBy == user.Id, ct);
-                    if (duplicate != null)
-                    {
-                        // Upsert the CalendarEventId to the latest value Graph returned
-                        if (duplicate.CalendarEventId != dto.CalendarEventId)
-                        {
-                            duplicate.CalendarEventId = dto.CalendarEventId;
-                            duplicate.UpdatedAt = DateTime.UtcNow;
-                            await db.SaveChangesAsync(ct);
-                            _logger.LogInformation(
-                                "[AutoSync] Updated CalendarEventId on meeting {Id} (Graph ID drift on recurring occurrence)",
-                                duplicate.Id);
-                        }
-                        continue;
-                    }
-
-                    // EF Core sentinel workaround: MeetingStatus.Scheduled == 0 (CLR default), so
-                    // EF treats it as unset and omits from INSERT, letting DB default (Joining) win.
-                    // Insert as Joining, then UPDATE to Scheduled to bypass the sentinel check.
                     var meeting = new FirmMeeting
                     {
+                        // NOTE: MeetingStatus.Scheduled == 0, which is the CLR default for the enum.
+                        // EF Core's HasDefaultValue(MeetingStatus.Joining) treats Status as ValueGenerated.OnAdd,
+                        // so on INSERT it compares against the CLR sentinel (0/Scheduled) and — seeing a match —
+                        // omits the column entirely, letting the DB default (Joining) win. Inserting as Joining
+                        // avoids the sentinel match; the SaveChangesAsync below flips it to Scheduled via UPDATE,
+                        // which is not subject to the same sentinel check. Mirrors MeetingService.UpsertFromCalendarAsync (ADO#17).
                         Status = MeetingStatus.Joining,
                         Platform = dto.Platform,
                         MeetingUrl = dto.JoinUrl,
@@ -128,7 +105,10 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
                     db.Meetings.Add(meeting);
                     await db.SaveChangesAsync(ct);
-                    await _meetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
+
+                    meeting.Status = MeetingStatus.Scheduled;
+                    meeting.UpdatedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync(ct);
 
                     await _autoJoinScheduler.CreateScheduleAsync(meeting.Id, dto.JoinUrl, startDatetime);
 

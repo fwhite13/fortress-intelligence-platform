@@ -43,4 +43,7 @@ public class FirmMeeting
     [MaxLength(20)]
     public string Source { get; set; } = "teams";
     public FirmMeetingMindmap? Mindmap { get; set; }
+    /// <summary>Machine-readable reason the last bot attempt failed, e.g. "lobby_timeout". Cleared once the bot successfully joins (status = recording).</summary>
+    [MaxLength(64)]
+    public string? LastFailureReason { get; set; }
 }

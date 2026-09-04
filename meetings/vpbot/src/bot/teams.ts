@@ -38,7 +38,7 @@ import * as path from 'path';
 
 export class LobbyTimeoutError extends Error {
   constructor() {
-    super('Bot was not admitted to the Teams meeting lobby within 2 minutes');
+    super('Bot was not admitted to the Teams meeting lobby within 3 minutes');
     this.name = 'LobbyTimeoutError';
   }
 }
@@ -439,11 +439,11 @@ export class TeamsHandler {
     const inWaitingRoom = waitingRoomPhrases.some(t => bodyText.toLowerCase().includes(t.toLowerCase()));
     
     if (inWaitingRoom) {
-      console.log('[Teams] In waiting room / lobby, waiting to be admitted (max 2 min)...');
+      console.log('[Teams] In waiting room / lobby, waiting to be admitted (max 3 min)...');
       await this.screenshot(page, '04b-waiting-room');
       let admitted = false;
-      // Poll 12×10s = 2 minutes
-      for (let i = 0; i < 12; i++) {
+      // Poll 18×10s = 3 minutes
+      for (let i = 0; i < 18; i++) {
         await page.waitForTimeout(10000);
 
         // Check for Leave button (means we were admitted)
@@ -481,7 +481,7 @@ export class TeamsHandler {
         } catch {
           // not admitted
         }
-        console.log('[Teams] ❌ Not admitted to lobby within 2 minutes — throwing LobbyTimeoutError');
+        console.log('[Teams] ❌ Not admitted to lobby within 3 minutes — throwing LobbyTimeoutError');
         await this.screenshot(page, '05-lobby-timeout');
         throw new LobbyTimeoutError();
       }

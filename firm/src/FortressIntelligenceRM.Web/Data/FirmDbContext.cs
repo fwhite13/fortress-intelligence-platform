@@ -70,6 +70,7 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.TranscriptKbPushed).HasColumnName("transcript_kb_pushed").HasDefaultValue(false);
             entity.Property(e => e.SummaryKbPushed).HasColumnName("summary_kb_pushed").HasDefaultValue(false);
             entity.Property(e => e.Source).HasColumnName("source").HasMaxLength(20).HasDefaultValue("teams");
+            entity.Property(e => e.LastFailureReason).HasColumnName("last_failure_reason").HasMaxLength(64);
             entity.HasOne(e => e.Mindmap)
                 .WithOne(mm => mm.Meeting)
                 .HasForeignKey<FirmMeetingMindmap>(mm => mm.MeetingId)

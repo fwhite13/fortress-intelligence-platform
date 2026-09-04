@@ -34,7 +34,6 @@ public class VpBotService
         var cluster = _config["Firm:EcsCluster"];
         var subnetId = _config["Firm:VpBotSubnetId"];
         var securityGroupId = _config["Firm:VpBotSecurityGroupId"];
-        var firmApiUrl = _config["Firm:ApiUrl"] ?? "";
         var botSecret = _config["Firm:BotCallbackSecret"] ?? "";
         var containerName = _config["Firm:VpBotContainerName"] ?? "firm-vpbot";
         var botDisplayName = _branding.NotetakerName;
@@ -69,9 +68,14 @@ public class VpBotService
                         new ContainerOverride
                         {
                             Name = containerName,
+                            // NOTE (ADO#6815): do NOT override FIRM_API_URL here. The firm-vpbot task
+                            // definition already sets it to the internal URL (http://firm.fip.internal:8080),
+                            // bypassing Cloudflare. Overriding it at runtime with Firm:ApiUrl (the public
+                            // https://meetings.dev.fortressam.ai domain) sent the bot's callback through
+                            // Cloudflare's managed challenge, which returned HTTP 403 and left the callback
+                            // never reaching the API — meetings got stuck at Pending forever.
                             Environment = new List<Amazon.ECS.Model.KeyValuePair>
                             {
-                                new() { Name = "FIRM_API_URL", Value = firmApiUrl },
                                 new() { Name = "MEETING_ID", Value = meetingId.ToString() },
                                 new() { Name = "MEETING_URL", Value = meetingUrl },
                                 new() { Name = "BOT_DISPLAY_NAME", Value = botDisplayName },

@@ -31,7 +31,6 @@ public class MeetingsApiController : ControllerBase
     private readonly BrandingConfig _branding;
     private readonly PdfService _pdfService;
     private readonly IEmailService _emailService;
-    private readonly AutoJoinSchedulerService _autoJoinSchedulerService;
 
     public MeetingsApiController(
         MeetingService meetingService,
@@ -48,8 +47,7 @@ public class MeetingsApiController : ControllerBase
         IMindmapService mindmapService,
         BrandingConfig branding,
         PdfService pdfService,
-        IEmailService emailService,
-        AutoJoinSchedulerService autoJoinSchedulerService)
+        IEmailService emailService)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
@@ -66,7 +64,6 @@ public class MeetingsApiController : ControllerBase
         _branding = branding;
         _pdfService = pdfService;
         _emailService = emailService;
-        _autoJoinSchedulerService = autoJoinSchedulerService;
     }
 
 [HttpPost("/api/meetings/join")]
@@ -101,15 +98,13 @@ public class MeetingsApiController : ControllerBase
             return Ok(new { meetingId = meeting.Id, status = "scheduled" });
         }
 
-        // Trigger bot and track status so AutoJoinTrigger / clients can see the meeting is in flight.
+        // Trigger bot (fire and forget — don't fail the response if ECS isn't configured)
         // TODO (Mode A): When TeamsGraphService is implemented, detect platform here and route to
         // Mode A (native Teams transcript fetch) vs Mode B (VP bot). Mode A completion must call
         // FAIT /api/firm/meeting-complete the same way as Mode B does in VpCallback. See ADO#1232.
-        var taskArn = await _vpBotService.TriggerBotAsync(meeting.Id, request.MeetingUrl);
-        if (taskArn != null)
-            await _meetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Pending);
+        _ = _vpBotService.TriggerBotAsync(meeting.Id, request.MeetingUrl);
 
-        return Ok(new { meetingId = meeting.Id, status = taskArn != null ? "pending" : meeting.Status.ToString().ToLowerInvariant() });
+        return Ok(new { meetingId = meeting.Id });
     }
 
     [HttpPost("/api/vp/callback")]
@@ -157,7 +152,8 @@ public class MeetingsApiController : ControllerBase
                 _logger.LogWarning("FIRM: Meeting {Id} bot stuck in lobby — reverting to Scheduled (lobby_timeout)",
                     payload.MeetingId);
                 await _meetingService.UpdateStatusAsync(payload.MeetingId, MeetingStatus.Scheduled,
-                    "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot.");
+                    "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot.",
+                    lastFailureReason: "lobby_timeout");
             }
             else
             {
@@ -174,7 +170,8 @@ public class MeetingsApiController : ControllerBase
                     string.Equals(payload.Reason, "lobby_timeout", StringComparison.OrdinalIgnoreCase))
                 {
                     await _meetingService.UpdateStatusAsync(payload.MeetingId, MeetingStatus.Scheduled,
-                        "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot.");
+                        "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot.",
+                        lastFailureReason: "lobby_timeout");
                 }
                 else
                 {
@@ -974,28 +971,8 @@ public class MeetingsApiController : ControllerBase
             or MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing or MeetingStatus.Summarizing)
             return Conflict(new { error = "Cannot remove a meeting that is currently in progress" });
 
-        // Delete EventBridge schedule if this meeting is scheduled
-        try
-        {
-            await _autoJoinSchedulerService.DeleteScheduleAsync(id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "FIRM: Failed to delete schedule for meeting {Id} — proceeding with meeting deletion", id);
-            // Non-fatal: continue with meeting deletion even if schedule delete fails
-        }
-
-        // Use EF-tracked delete to trigger cascade delete on child tables
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var meetingToDelete = await db.Meetings
-            .Include(m => m.Mindmap)
-            .FirstOrDefaultAsync(m => m.Id == id);
-        if (meetingToDelete != null)
-        {
-            db.Meetings.Remove(meetingToDelete);
-            await db.SaveChangesAsync();
-        }
-
+        await db.Database.ExecuteSqlRawAsync("DELETE FROM firm_meetings WHERE id = {0}", id);
         return NoContent();
     }
 

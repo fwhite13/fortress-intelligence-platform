@@ -41,7 +41,7 @@ public class MeetingService
             .FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == userId);
     }
 
-    public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? platform = null, MeetingStatus initialStatus = MeetingStatus.Joining)
+    public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? platform = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = new FirmMeeting
@@ -49,7 +49,7 @@ public class MeetingService
             Title = title ?? $"Meeting — {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
             MeetingUrl = meetingUrl,
             Platform = platform ?? DerivePlatformFromUrl(meetingUrl),
-            Status = initialStatus,
+            Status = MeetingStatus.Joining,
             CreatedBy = userId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -70,7 +70,7 @@ public class MeetingService
         return "teams";
     }
 
-    public async Task UpdateStatusAsync(long id, MeetingStatus status, string? errorMessage = null)
+    public async Task UpdateStatusAsync(long id, MeetingStatus status, string? errorMessage = null, string? lastFailureReason = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = await db.Meetings.FindAsync(id);
@@ -78,8 +78,14 @@ public class MeetingService
         meeting.Status = status;
         meeting.UpdatedAt = DateTime.UtcNow;
         if (errorMessage != null) meeting.ErrorMessage = errorMessage;
-        if (status == MeetingStatus.Recording && meeting.StartedAt == null)
-            meeting.StartedAt = DateTime.UtcNow;
+        if (lastFailureReason != null) meeting.LastFailureReason = lastFailureReason;
+        if (status == MeetingStatus.Recording)
+        {
+            // Bot successfully joined — any previously recorded failure (e.g. lobby_timeout) no longer applies.
+            meeting.LastFailureReason = null;
+            if (meeting.StartedAt == null)
+                meeting.StartedAt = DateTime.UtcNow;
+        }
         // Only set EndedAt/DurationSeconds on recording-end transitions (bot leaving the meeting)
         // Do NOT overwrite on retranscription callbacks (Summarizing, Complete)
         if (status is MeetingStatus.WaitingTranscript or MeetingStatus.Transcribing)
