@@ -1,17 +1,22 @@
 import json
+import os
 import urllib.request
 import urllib.error
 
 def lambda_handler(event, context):
     meeting_id  = event.get('meetingId')
     meeting_url = event.get('meetingUrl')   # kept for logging; FIRM reads from DB now
-    firm_api_url = event.get('firmApiUrl', '')
-    bot_callback_secret = event.get('botCallbackSecret', '')
+    # ADO#6813: fall back to FIRM_API_URL env var when payload doesn't carry firmApiUrl
+    firm_api_url = event.get('firmApiUrl') or os.environ.get('FIRM_API_URL', '')
+    # ADO#6813 follow-up: fall back to BOT_CALLBACK_SECRET env var when payload
+    # doesn't carry botCallbackSecret. Old EventBridge schedules (created before
+    # this field was added) omit it, causing 401s on every autojoin attempt.
+    bot_callback_secret = event.get('botCallbackSecret') or os.environ.get('BOT_CALLBACK_SECRET', '')
 
     print(f"firm-autojoin: validating meeting {meeting_id} via FIRM before ECS launch")
 
     if not firm_api_url:
-        raise Exception("firmApiUrl not in payload — cannot validate meeting")
+        raise Exception("firmApiUrl not in payload or FIRM_API_URL env var — cannot validate meeting")
 
     url = f"{firm_api_url}/api/vp/autojoin/{meeting_id}"
     req = urllib.request.Request(
