@@ -91,7 +91,7 @@
     {
         <MudProgressLinear Color="Color.Warning" Indeterminate />
     }
-    else if (!_meetings.Any())
+    else if (!VisibleMeetings.Any())
     {
         <MudPaper Style="background: var(--color-bg-page); padding: 60px; text-align: center;" Elevation="0">
             <MudIcon Icon="@Icons.Material.Filled.VideoCall" Style="color: var(--color-border); font-size: 64px;" />
@@ -103,7 +103,7 @@
     }
     else
     {
-        <MudTable Items="@(_meetings.Skip((_page - 1) * _pageSize).Take(_pageSize).ToList())"
+        <MudTable Items="@(VisibleMeetings.Skip((_page - 1) * _pageSize).Take(_pageSize).ToList())"
                   Style="background: var(--color-bg-page);" Elevation="0" T="FirmMeeting">
             <HeaderContent>
                 <MudTh Style="color: var(--color-text-secondary);">Title</MudTh>
@@ -183,9 +183,9 @@
             </RowTemplate>
         </MudTable>
 
-        @if (_meetings.Count > _pageSize)
+        @if (VisibleMeetings.Count > _pageSize)
         {
-            <MudPagination Count="@((_meetings.Count + _pageSize - 1) / _pageSize)"
+            <MudPagination Count="@((VisibleMeetings.Count + _pageSize - 1) / _pageSize)"
                            @bind-Selected="_page" Class="mt-4" />
         }
     }
@@ -210,12 +210,18 @@
     private List<UpcomingMeetingCard>? _upcomingMeetings;
     private bool _calendarLoading = true;
     private HashSet<long> _calendarRemovedMeetingIds = new();
+    private HashSet<long> _pastPhantomMeetingIds = new();
     private HashSet<long> _stoppingMeetingIds = new();
     private Dictionary<string, string> _localStartTimes = new();
     private Dictionary<string, string> _localEndTimes = new();
     private Dictionary<long, string> _localCreatedTimes = new();
     private Dictionary<long, string> _localMeetingStartTimes = new();
     private bool _jsReady = false;
+
+    /// <summary>My Meetings list with Issue 5a phantom duplicates (past, no bot activity, same
+    /// normalized URL + start time as a row that DOES have activity) hidden — those are leftovers
+    /// from earlier Graph ID drift, not meetings the user needs to see or manually clean up.</summary>
+    private List<FirmMeeting> VisibleMeetings => _meetings.Where(m => !_pastPhantomMeetingIds.Contains(m.Id)).ToList();
 
 
     protected override async Task OnInitializedAsync()
@@ -330,6 +336,7 @@
             _upcomingMeetings = calendarMeetings.Select(c => new UpcomingMeetingCard
             {
                 CalendarEventId = c.CalendarEventId,
+                ICalUId = c.ICalUId,
                 Subject = c.Subject,
                 StartDateTime = c.StartDateTime,
                 EndDateTime = c.EndDateTime,
@@ -340,11 +347,59 @@
                 Mode = c.Mode
             }).ToList();
 
-            var calendarEventIds = _upcomingMeetings.Select(c => c.CalendarEventId).Where(id => !string.IsNullOrEmpty(id)).ToHashSet();
+            // Issue 5a overhaul: "Removed from calendar" must only fire when a meeting is
+            // confirmed gone by every reconciliation anchor (ID, iCalUId, normalized URL) AND is
+            // still upcoming. Past meetings simply fall outside the 7-day-forward Graph window —
+            // that's not removal, so they're excluded entirely (guarded by StartDatetime check).
+            var currentIds = _upcomingMeetings
+                .Where(c => !string.IsNullOrEmpty(c.CalendarEventId))
+                .Select(c => c.CalendarEventId)
+                .ToHashSet();
+            var currentICalUIds = _upcomingMeetings
+                .Where(c => !string.IsNullOrEmpty(c.ICalUId))
+                .Select(c => c.ICalUId)
+                .ToHashSet();
+            var currentNormalizedUrls = _upcomingMeetings
+                .Where(c => !string.IsNullOrEmpty(c.JoinUrl))
+                .Select(c => CalendarService.NormalizeMeetingUrl(c.JoinUrl))
+                .ToHashSet();
+
             _calendarRemovedMeetingIds = _meetings
+                .Where(m =>
+                    m.Status == MeetingStatus.Scheduled
+                    && !string.IsNullOrEmpty(m.CalendarEventId)
+                    // Only check meetings whose start time is still upcoming (within the Graph
+                    // window) — past meetings fall out of the window naturally, not "removed".
+                    && m.StartDatetime.HasValue
+                    && m.StartDatetime.Value > DateTime.UtcNow
+                    // Confirmed gone: not found by ID, iCalUId, OR normalized URL.
+                    && !currentIds.Contains(m.CalendarEventId!)
+                    && (string.IsNullOrEmpty(m.GraphMeetingId) || !currentICalUIds.Contains(m.GraphMeetingId!))
+                    && !currentNormalizedUrls.Contains(CalendarService.NormalizeMeetingUrl(m.MeetingUrl)))
+                .Select(m => m.Id)
+                .ToHashSet();
+
+            // Issue 5a past-duplicate cleanup: a past Scheduled meeting with no bot activity that
+            // shares normalized URL + StartDatetime with another meeting that DOES have activity is
+            // a phantom row created by earlier Graph ID drift — hide it rather than making the user
+            // manually clean up a sync bug's leftovers.
+            var pastPhantoms = _meetings
                 .Where(m => m.Status == MeetingStatus.Scheduled
-                         && !string.IsNullOrEmpty(m.CalendarEventId)
-                         && !calendarEventIds.Contains(m.CalendarEventId))
+                         && string.IsNullOrEmpty(m.AudioS3Key)
+                         && m.StartedAt == null
+                         && m.StartDatetime.HasValue
+                         && m.StartDatetime.Value < DateTime.UtcNow)
+                .ToList();
+
+            var meetingsWithActivity = _meetings
+                .Where(m => !string.IsNullOrEmpty(m.AudioS3Key) || m.StartedAt != null
+                         || m.Status is MeetingStatus.Complete or MeetingStatus.Transcribing
+                                       or MeetingStatus.Summarizing or MeetingStatus.Recording)
+                .Select(m => (NormalizedUrl: CalendarService.NormalizeMeetingUrl(m.MeetingUrl), m.StartDatetime))
+                .ToHashSet();
+
+            _pastPhantomMeetingIds = pastPhantoms
+                .Where(m => meetingsWithActivity.Contains((CalendarService.NormalizeMeetingUrl(m.MeetingUrl), m.StartDatetime)))
                 .Select(m => m.Id)
                 .ToHashSet();
 
@@ -387,15 +442,11 @@
     }
 
     /// <summary>
-    /// Normalizes a meeting join URL for dedup comparison: lowercase, strip query
-    /// string, strip trailing slash. No shared helper exists elsewhere in the
-    /// codebase for this (ADO#6833), so it's implemented locally.
+    /// Normalizes a meeting join URL for dedup comparison. Delegates to the shared helper on
+    /// CalendarService — was implemented locally here (ADO#6833) before that helper existed
+    /// (Issue 5b, 2026-09-09).
     /// </summary>
-    private static string NormalizeMeetingUrl(string? url)
-    {
-        if (string.IsNullOrEmpty(url)) return "";
-        return url.ToLowerInvariant().Split('?')[0].TrimEnd('/');
-    }
+    private static string NormalizeMeetingUrl(string? url) => CalendarService.NormalizeMeetingUrl(url);
 
     private async Task OpenJoinDialogPrefilled(string joinUrl)
     {
@@ -417,6 +468,8 @@
     internal class UpcomingMeetingCard
     {
         public string CalendarEventId { get; set; } = "";
+        /// <summary>Graph's iCalUId — stable reconciliation anchor (Issue 5b).</summary>
+        public string ICalUId { get; set; } = "";
         public string Subject { get; set; } = "";
         public string StartDateTime { get; set; } = "";
         public string EndDateTime { get; set; } = "";
