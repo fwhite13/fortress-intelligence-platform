@@ -9,6 +9,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly CalendarService _calendarService;
     private readonly AutoJoinSchedulerService _autoJoinScheduler;
+    private readonly MeetingService _meetingService;
     private readonly ILogger<CalendarAutoSyncService> _logger;
     private readonly IConfiguration _config;
     private Timer? _timer;
@@ -17,12 +18,14 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
         IDbContextFactory<FirmDbContext> dbFactory,
         CalendarService calendarService,
         AutoJoinSchedulerService autoJoinScheduler,
+        MeetingService meetingService,
         ILogger<CalendarAutoSyncService> logger,
         IConfiguration config)
     {
         _dbFactory = dbFactory;
         _calendarService = calendarService;
         _autoJoinScheduler = autoJoinScheduler;
+        _meetingService = meetingService;
         _logger = logger;
         _config = config;
     }
@@ -106,13 +109,6 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
                     var meeting = new FirmMeeting
                     {
-                        // NOTE: MeetingStatus.Scheduled == 0, which is the CLR default for the enum.
-                        // EF Core's HasDefaultValue(MeetingStatus.Joining) treats Status as ValueGenerated.OnAdd,
-                        // so on INSERT it compares against the CLR sentinel (0/Scheduled) and — seeing a match —
-                        // omits the column entirely, letting the DB default (Joining) win. Inserting as Joining
-                        // avoids the sentinel match; the SaveChangesAsync below flips it to Scheduled via UPDATE,
-                        // which is not subject to the same sentinel check. Mirrors MeetingService.UpsertFromCalendarAsync (ADO#17).
-                        Status = MeetingStatus.Joining,
                         Platform = dto.Platform,
                         MeetingUrl = dto.JoinUrl,
                         CalendarEventId = dto.CalendarEventId,
@@ -126,12 +122,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                         UpdatedAt = DateTime.UtcNow
                     };
 
-                    db.Meetings.Add(meeting);
-                    await db.SaveChangesAsync(ct);
-
-                    meeting.Status = MeetingStatus.Scheduled;
-                    meeting.UpdatedAt = DateTime.UtcNow;
-                    await db.SaveChangesAsync(ct);
+                    await InsertScheduledMeetingAsync(db, meeting, ct);
 
                     await _autoJoinScheduler.CreateScheduleAsync(meeting.Id, dto.JoinUrl, startDatetime);
 
@@ -144,5 +135,33 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                 _logger.LogWarning(ex, "[AutoSync] Failed to sync calendar for user {UserId}", user.Id);
             }
         }
+    }
+
+    /// <summary>
+    /// Inserts a new calendar-sourced meeting and lands it in MeetingStatus.Scheduled — the single,
+    /// shared copy of the EF-sentinel workaround (ADO#17 diagnostic, 2026-09-09; previously duplicated
+    /// in the now-deleted MeetingService.UpsertFromCalendarAsync, which had zero callers).
+    ///
+    /// NOTE: MeetingStatus.Scheduled == 0, which is the CLR default for the enum. EF Core's
+    /// HasDefaultValue(MeetingStatus.Joining) treats Status as ValueGenerated.OnAdd, so on INSERT
+    /// it compares against the CLR sentinel (0/Scheduled) and — seeing a match — omits the column
+    /// entirely, letting the DB default (Joining) win. Inserting as Joining avoids the sentinel
+    /// match; the follow-up UpdateStatusAsync flips it to Scheduled via UPDATE, which is not subject
+    /// to the same sentinel check.
+    ///
+    /// FirmDbContext now also configures .HasSentinel(MeetingStatus.Joining), which should make this
+    /// two-step dance unnecessary going forward — kept in place as defense-in-depth until that's
+    /// verified in production.
+    /// </summary>
+    private async Task<FirmMeeting> InsertScheduledMeetingAsync(FirmDbContext db, FirmMeeting draft, CancellationToken ct)
+    {
+        draft.Status = MeetingStatus.Joining;
+        db.Meetings.Add(draft);
+        await db.SaveChangesAsync(ct);
+
+        await _meetingService.UpdateStatusAsync(draft.Id, MeetingStatus.Scheduled);
+        draft.Status = MeetingStatus.Scheduled;
+
+        return draft;
     }
 }

@@ -55,7 +55,15 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.Status)
                 .HasColumnName("status")
                 .HasConversion<string>()
-                .HasDefaultValue(MeetingStatus.Joining);
+                .HasDefaultValue(MeetingStatus.Joining)
+                // ADO#17 diagnostic, 2026-09-09: MeetingStatus.Scheduled == 0, the CLR default for
+                // the enum, so EF Core's "omit column if it equals the sentinel" INSERT optimization
+                // was treating Scheduled as if it were never explicitly set, letting the DB column
+                // default (Joining) win. Declaring Joining as the actual sentinel tells EF Core to
+                // always include Status in the INSERT explicitly. Belt-and-suspenders alongside the
+                // Joining->Scheduled two-step workaround in CalendarAutoSyncService.InsertScheduledMeetingAsync
+                // — keep that workaround in place until this is verified working in production.
+                .HasSentinel(MeetingStatus.Joining);
             entity.Property(e => e.ErrorMessage).HasColumnName("error_message");
             entity.Property(e => e.ScheduledAt).HasColumnName("scheduled_at");
             entity.Property(e => e.StartedAt).HasColumnName("started_at");

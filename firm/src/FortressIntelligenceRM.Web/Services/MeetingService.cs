@@ -286,49 +286,12 @@ public class MeetingService
         await db.SaveChangesAsync();
     }
 
-    /// <summary>
-    /// Upserts a meeting from calendar detection. Keyed on calendar_event_id to prevent duplicates.
-    /// If meeting already exists for this user + calendar_event_id, returns existing meeting.
-    /// </summary>
-    public async Task<FirmMeeting> UpsertFromCalendarAsync(Guid userId, CalendarMeetingDto dto)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-
-        var existing = await db.Meetings.FirstOrDefaultAsync(m =>
-            m.CreatedBy == userId &&
-            m.CalendarEventId == dto.CalendarEventId);
-
-        if (existing != null)
-            return existing;
-
-        if (!DateTime.TryParse(dto.StartDateTime, null, System.Globalization.DateTimeStyles.RoundtripKind, out var startDt))
-            startDt = DateTime.UtcNow;
-
-        var meeting = new FirmMeeting
-        {
-            Title = dto.Subject,
-            MeetingUrl = dto.JoinUrl,
-            // NOTE: MeetingStatus.Scheduled == 0, which is the CLR default for the enum.
-            // EF Core's HasDefaultValue(MeetingStatus.Joining) treats Status as ValueGenerated.OnAdd,
-            // so on INSERT it compares against the CLR sentinel (0/Scheduled) and — seeing a match —
-            // omits the column entirely, letting the DB default (Joining) win. Inserting as Joining
-            // avoids the sentinel match; UpdateStatusAsync below flips it to Scheduled via UPDATE,
-            // which is not subject to the same sentinel check. Mirrors the working manual join path.
-            Status = MeetingStatus.Joining,
-            Platform = dto.Platform,
-            Mode = dto.Mode,
-            CreatedBy = userId,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            StartDatetime = startDt,
-            CalendarEventId = dto.CalendarEventId,
-        };
-        db.Meetings.Add(meeting);
-        await db.SaveChangesAsync();
-        await UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
-        _logger.LogInformation("FIRM: Calendar upsert created meeting {Id} Mode {Mode} for user {UserId}", meeting.Id, dto.Mode, userId);
-        return meeting;
-    }
+    // NOTE (ADO#17 diagnostic, 2026-09-09): UpsertFromCalendarAsync used to live here as a second,
+    // independently-maintained implementation of "create a meeting from a calendar event" — it had
+    // zero callers (the live path is CalendarAutoSyncService.PollCoreAsync, which has its own
+    // dedup + Joining->Scheduled insert logic). Deleted rather than kept in sync forever; see
+    // CalendarAutoSyncService.InsertScheduledMeetingAsync for the one remaining copy of the
+    // EF-sentinel workaround this method used to duplicate.
 
     private record ResolveFaitUserResponse(
         [property: System.Text.Json.Serialization.JsonPropertyName("userId")] string UserId);
