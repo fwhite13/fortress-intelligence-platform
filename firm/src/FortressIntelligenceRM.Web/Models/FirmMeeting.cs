@@ -16,7 +16,9 @@ public class FirmMeeting
     public DateTime? ScheduledAt { get; set; }
     public DateTime? StartDatetime { get; set; }    // When the meeting is scheduled to start
     [MaxLength(500)]
-    public string? CalendarEventId { get; set; }    // Graph calendar event ID for sync
+    public string? CalendarEventId { get; set; }    // Graph calendar event ID for sync — can drift across polls
+    [MaxLength(500)]
+    public string? GraphMeetingId { get; set; }      // Graph iCalUId — stable reconciliation anchor (Issue 5b)
     [MaxLength(2)]
     public string? Mode { get; set; }  // "A" or "B" — set at creation time
     public DateTime? StartedAt { get; set; }

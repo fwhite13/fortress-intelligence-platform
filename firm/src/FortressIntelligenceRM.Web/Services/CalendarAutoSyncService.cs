@@ -96,40 +96,87 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
                 foreach (var dto in meetings)
                 {
-                    // Primary dedup: exact calendar event ID match
-                    var exists = await db.Meetings.AnyAsync(
-                        m => m.CalendarEventId == dto.CalendarEventId && m.CreatedBy == user.Id, ct);
-                    if (exists) continue;
-
                     var startDatetime = DateTime.Parse(dto.StartDateTime);
+                    FirmMeeting? matched = null;
 
-                    // Secondary dedup: same user + URL + start time (guards against MS Graph ID instability
-                    // on recurring occurrences returning different IDs across poll cycles)
-                    // Note: no index on (created_by, meeting_url, start_datetime) — could be added if user base grows
-                    var duplicate = await db.Meetings.FirstOrDefaultAsync(
-                        m => m.MeetingUrl == dto.JoinUrl
-                          && m.StartDatetime == startDatetime
-                          && m.CreatedBy == user.Id, ct);
-                    if (duplicate != null)
+                    // Step 1 — iCalUId match: the most stable Graph identifier, doesn't drift across
+                    // polls the way the Graph `id` (CalendarEventId) can (Issue 5b).
+                    if (!string.IsNullOrEmpty(dto.ICalUId))
                     {
-                        // Upsert the CalendarEventId to the latest value Graph returned
-                        if (duplicate.CalendarEventId != dto.CalendarEventId)
+                        matched = await db.Meetings.FirstOrDefaultAsync(
+                            m => m.GraphMeetingId == dto.ICalUId && m.CreatedBy == user.Id, ct);
+                        if (matched != null)
                         {
-                            duplicate.CalendarEventId = dto.CalendarEventId;
-                            duplicate.UpdatedAt = DateTime.UtcNow;
+                            if (matched.CalendarEventId != dto.CalendarEventId)
+                            {
+                                // Self-repair: Graph's `id` drifted but the iCalUId anchor still matched.
+                                matched.CalendarEventId = dto.CalendarEventId;
+                                matched.UpdatedAt = DateTime.UtcNow;
+                                await db.SaveChangesAsync(ct);
+                                _logger.LogInformation(
+                                    "[AutoSync] Self-repaired CalendarEventId on meeting {Id} via iCalUId match (Graph ID drift)",
+                                    matched.Id);
+                            }
+                            continue;
+                        }
+                    }
+
+                    // Step 2 — exact CalendarEventId match (fast path when the Graph ID is stable).
+                    matched = await db.Meetings.FirstOrDefaultAsync(
+                        m => m.CalendarEventId == dto.CalendarEventId && m.CreatedBy == user.Id, ct);
+                    if (matched != null)
+                    {
+                        if (!string.IsNullOrEmpty(dto.ICalUId) && matched.GraphMeetingId != dto.ICalUId)
+                        {
+                            matched.GraphMeetingId = dto.ICalUId;
+                            matched.UpdatedAt = DateTime.UtcNow;
                             await db.SaveChangesAsync(ct);
-                            _logger.LogInformation(
-                                "[AutoSync] Updated CalendarEventId on meeting {Id} (Graph ID drift on recurring occurrence)",
-                                duplicate.Id);
                         }
                         continue;
                     }
 
+                    // Step 3 — normalized URL + start time (guards against Graph ID instability when
+                    // both anchors above miss, e.g. a recurring occurrence returning a fresh id and
+                    // iCalUId hasn't been backfilled onto the row yet). NormalizeMeetingUrl doesn't
+                    // reliably translate to SQL via EF, so pull the StartDatetime+user candidate set
+                    // first (both indexable) and normalize/filter in memory.
+                    var normalizedDtoUrl = CalendarService.NormalizeMeetingUrl(dto.JoinUrl);
+                    var startCandidates = await db.Meetings
+                        .Where(m => m.StartDatetime == startDatetime && m.CreatedBy == user.Id)
+                        .ToListAsync(ct);
+                    matched = startCandidates.FirstOrDefault(
+                        m => CalendarService.NormalizeMeetingUrl(m.MeetingUrl) == normalizedDtoUrl);
+                    if (matched != null)
+                    {
+                        var changed = false;
+                        if (matched.CalendarEventId != dto.CalendarEventId)
+                        {
+                            matched.CalendarEventId = dto.CalendarEventId;
+                            changed = true;
+                        }
+                        if (!string.IsNullOrEmpty(dto.ICalUId) && matched.GraphMeetingId != dto.ICalUId)
+                        {
+                            matched.GraphMeetingId = dto.ICalUId;
+                            changed = true;
+                        }
+                        if (changed)
+                        {
+                            matched.UpdatedAt = DateTime.UtcNow;
+                            await db.SaveChangesAsync(ct);
+                            _logger.LogInformation(
+                                "[AutoSync] Updated CalendarEventId/GraphMeetingId on meeting {Id} (Graph ID drift on recurring occurrence)",
+                                matched.Id);
+                        }
+                        continue;
+                    }
+
+                    // All three anchors missed — genuinely new meeting.
                     var meeting = new FirmMeeting
                     {
                         Platform = dto.Platform,
                         MeetingUrl = dto.JoinUrl,
                         CalendarEventId = dto.CalendarEventId,
+                        GraphMeetingId = string.IsNullOrEmpty(dto.ICalUId) ? null : dto.ICalUId,
                         Title = dto.Subject,
                         StartDatetime = startDatetime,
                         CreatedBy = user.Id,

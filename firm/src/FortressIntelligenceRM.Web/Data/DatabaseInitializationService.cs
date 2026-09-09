@@ -220,7 +220,12 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_meeting_mindmaps ADD CONSTRAINT fk_fmm_meeting_id FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE CASCADE",
                 "ALTER TABLE firm_users ADD COLUMN auto_add_calendar_meetings TINYINT(1) NOT NULL DEFAULT 0",
                 "ALTER TABLE firm_users ADD COLUMN auto_email_summary TINYINT(1) NOT NULL DEFAULT 0",
-                "ALTER TABLE firm_meetings ADD COLUMN last_failure_reason VARCHAR(64) NULL"
+                "ALTER TABLE firm_meetings ADD COLUMN last_failure_reason VARCHAR(64) NULL",
+                // Issue 5b: unique constraint to close the race-condition window in PollCoreAsync's
+                // dedup. NULL calendar_event_id (manually-added meetings) is excluded so those never
+                // collide. Mirrors FirmDbContext's HasIndex(...).IsUnique() model config — this raw
+                // SQL is what actually creates it, since FIRM does not use EF migrations.
+                "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_created_by_calendar_event_id (created_by, calendar_event_id)"
             };
 
             foreach (var alterSql in alterStatements)
@@ -233,6 +238,14 @@ public class DatabaseInitializationService : IHostedService
                 catch (MySqlException ex) when (ex.Number == 1060 || ex.Number == 1061 || ex.Number == 1091 || ex.Number == 1826)
                 {
                     _logger.LogInformation("FIRM: Schema migration already applied (idempotent): {Sql}", alterSql);
+                }
+                catch (MySqlException ex) when (ex.Number == 1062)
+                {
+                    // Existing duplicate (created_by, calendar_event_id) rows block the unique index —
+                    // known pre-existing duplicates (e.g. Issue 5b pairs 79/83, 108/103, 111/101) must
+                    // be reconciled/deleted manually before this index can apply. Non-fatal — app
+                    // continues without the constraint until cleanup happens.
+                    _logger.LogWarning("FIRM: Could not apply unique index — duplicate (created_by, calendar_event_id) rows exist. Manual cleanup required: {Sql}", alterSql);
                 }
                 catch (Exception ex)
                 {

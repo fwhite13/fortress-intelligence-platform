@@ -38,7 +38,7 @@ public class CalendarService
 
             var startDateTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
             var endDateTime = DateTime.UtcNow.AddDays(7).ToString("yyyy-MM-ddTHH:mm:ssZ");
-            var select = "id,subject,start,end,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,organizer,body,location";
+            var select = "id,iCalUId,subject,start,end,isOnlineMeeting,onlineMeetingProvider,onlineMeeting,organizer,body,location";
             // Use /me/calendarview with delegated token — not /users/{entraOid}/calendarview
             var url = $"https://graph.microsoft.com/v1.0/me/calendarview" +
                       $"?startDateTime={Uri.EscapeDataString(startDateTime)}" +
@@ -102,6 +102,7 @@ public class CalendarService
                 result.Add(new CalendarMeetingDto
                 {
                     CalendarEventId = ev.Id ?? "",
+                    ICalUId = ev.ICalUId ?? "",
                     Subject = ev.Subject ?? "(No Subject)",
                     StartDateTime = ev.Start?.DateTime ?? "",
                     EndDateTime = ev.End?.DateTime ?? "",
@@ -145,6 +146,7 @@ public class CalendarService
                 result.Add(new CalendarMeetingDto
                 {
                     CalendarEventId = eventId,
+                    ICalUId = ev.ICalUId ?? "",
                     Subject = ev.Subject ?? "(No Subject)",
                     StartDateTime = ev.Start?.DateTime ?? "",
                     EndDateTime = ev.End?.DateTime ?? "",
@@ -227,6 +229,18 @@ public class CalendarService
 
     public static string? ExtractTenantIdFromUrl(string? url) => url == null ? null : ExtractTenantId(url);
 
+    /// <summary>
+    /// Normalizes a meeting join URL for dedup/reconciliation comparison: lowercase, strip query
+    /// string, strip trailing slash. Shared by CalendarAutoSyncService (DB dedup) and
+    /// Meetings.razor (UI dedup + "Removed from calendar" detection) — previously duplicated
+    /// locally in Meetings.razor only (ADO#6833 / Issue 5b).
+    /// </summary>
+    public static string NormalizeMeetingUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return "";
+        return url.ToLowerInvariant().Split('?')[0].TrimEnd('/');
+    }
+
     /// <summary>Kept for backward compat — prefer BrandingConfig.IsHomeTenant() for new code.</summary>
     public bool IsHomeTenant(string? tenantId) => _branding.IsHomeTenant(tenantId);
 
@@ -238,6 +252,10 @@ public class CalendarService
 public class CalendarMeetingDto
 {
     public string CalendarEventId { get; set; } = "";
+    /// <summary>Graph's iCalUId — the most stable identifier for a calendar event/occurrence
+    /// (does not drift across polls the way the Graph <c>id</c> can). Used as the primary
+    /// reconciliation anchor (Issue 5b).</summary>
+    public string ICalUId { get; set; } = "";
     public string Subject { get; set; } = "";
     public string StartDateTime { get; set; } = "";
     public string EndDateTime { get; set; } = "";
@@ -253,6 +271,7 @@ public class CalendarMeetingDto
 internal class CalendarViewEvent
 {
     public string? Id { get; set; }
+    public string? ICalUId { get; set; }
     public string? Subject { get; set; }
     public bool IsOnlineMeeting { get; set; }
     public string? OnlineMeetingProvider { get; set; }

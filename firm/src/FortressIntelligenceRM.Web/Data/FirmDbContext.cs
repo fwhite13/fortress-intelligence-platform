@@ -86,6 +86,9 @@ public class FirmDbContext : DbContext
                 .HasConstraintName("fk_fmm_meeting_id");
             entity.Property(e => e.StartDatetime).HasColumnName("start_datetime");
             entity.Property(e => e.CalendarEventId).HasColumnName("calendar_event_id").HasMaxLength(500);
+            // graph_meeting_id existed as a dead column (never read/written); repurposed to store
+            // Graph's iCalUId, the stable reconciliation anchor (Issue 5b).
+            entity.Property(e => e.GraphMeetingId).HasColumnName("graph_meeting_id").HasMaxLength(500);
             entity.Property(e => e.Mode).HasColumnName("mode").HasMaxLength(2);
             entity.Property(e => e.CreatorEntraOid).HasColumnName("creator_entra_oid").HasMaxLength(128);
             entity.HasOne(e => e.CreatedByUser)
@@ -95,6 +98,16 @@ public class FirmDbContext : DbContext
             entity.HasIndex(e => e.CreatedBy).HasDatabaseName("idx_fm_created_by");
             entity.HasIndex(e => e.Status).HasDatabaseName("idx_fm_status");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("idx_fm_created_at");
+            // Issue 5b: close the race-condition window where two concurrent PollCoreAsync dedup
+            // misses can both insert a row for the same Graph event. NULL calendar_event_id
+            // (manually-added meetings) is excluded via the filter so those never collide.
+            // NOTE: FIRM does not use EF migrations (see class-level comment) — this index is
+            // declared here so EF's model matches the DB, but the actual DB-level index is created
+            // by the idempotent raw SQL in DatabaseInitializationService, not by `dotnet ef migrations`.
+            entity.HasIndex(e => new { e.CreatedBy, e.CalendarEventId })
+                .IsUnique()
+                .HasDatabaseName("uk_fm_created_by_calendar_event_id")
+                .HasFilter("`calendar_event_id` IS NOT NULL");
         });
 
         modelBuilder.Entity<FirmMeetingParticipant>(entity =>
