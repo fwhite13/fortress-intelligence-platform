@@ -70,6 +70,10 @@ public class BatchTranscriptionService : IBatchTranscriptionService
         {
             new Amazon.Batch.Model.KeyValuePair { Name = "MEETING_ID", Value = meetingId.ToString() },
             new Amazon.Batch.Model.KeyValuePair { Name = "AUDIO_S3_KEY", Value = audioS3Key },
+            // ADO#6798/Issue 1: audio lives in whichever bucket THIS environment's firm-web is
+            // configured with (Firm__S3Bucket), not whatever is baked into the Batch job definition.
+            // Mirrors the same override VpBotService already applies when launching the vpbot task.
+            new Amazon.Batch.Model.KeyValuePair { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },
             new Amazon.Batch.Model.KeyValuePair { Name = "BOT_CALLBACK_SECRET", Value = callbackSecret },
             new Amazon.Batch.Model.KeyValuePair { Name = "FIRM_CALLBACK_URL", Value = _config["Firm:CallbackUrl"] ?? "http://firm.fip.internal:8080/api/vp/callback" },
             new Amazon.Batch.Model.KeyValuePair { Name = "MEETING_DATE", Value = meetingDate?.ToString("yyyy-MM-dd") ?? "" },
