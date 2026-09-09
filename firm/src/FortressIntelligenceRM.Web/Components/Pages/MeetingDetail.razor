@@ -58,7 +58,7 @@
             </MudStack>
             <MudStack Row Class="mb-4" Style="gap: 24px; flex-wrap: wrap;">
                 <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
-                    @(_localCreatedAt ?? _meeting.CreatedAt.ToString("MMM d, yyyy h:mm tt"))
+                    @(_localDisplayDate ?? (_meeting.StartDatetime ?? _meeting.CreatedAt).ToString("MMM d, yyyy h:mm tt"))
                 </MudText>
                 @if (_meeting.DurationSeconds.HasValue)
                 {
@@ -312,7 +312,7 @@
     [Parameter] public long Id { get; set; }
     private FirmMeeting? _meeting;
     private bool _loading = true;
-    private string? _localCreatedAt;
+    private string? _localDisplayDate;
     private bool _pushingTranscript = false;
     private bool _pushingSummary = false;
     private bool _isAdmin = false;
@@ -401,15 +401,16 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        if (_meeting?.CreatedAt != null)
+        var displayDate = _meeting?.StartDatetime ?? _meeting?.CreatedAt;
+        if (displayDate != null)
         {
             try
             {
-                _localCreatedAt = await JS.InvokeAsync<string>("firmUtils.formatLocalDateTime",
-                    _meeting.CreatedAt.ToUniversalTime().ToString("O"));
+                _localDisplayDate = await JS.InvokeAsync<string>("firmUtils.formatLocalDateTime",
+                    displayDate.Value.ToUniversalTime().ToString("O"));
                 StateHasChanged();
             }
-            catch { /* JS not ready — leave _localCreatedAt null, fallback in markup */ }
+            catch { /* JS not ready — leave _localDisplayDate null, fallback in markup */ }
         }
     }
 

@@ -27,7 +27,7 @@ public class MeetingService
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.Meetings
             .Where(m => m.CreatedBy == userId)
-            .OrderByDescending(m => m.CreatedAt)
+            .OrderByDescending(m => m.StartDatetime ?? m.CreatedAt)
             .ToListAsync();
     }
 
