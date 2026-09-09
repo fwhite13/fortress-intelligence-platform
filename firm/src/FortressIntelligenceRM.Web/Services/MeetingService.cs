@@ -75,6 +75,8 @@ public class MeetingService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = await db.Meetings.FindAsync(id);
         if (meeting == null) return;
+        _logger.LogInformation("FIRM: Meeting {Id} status transition: {OldStatus} → {NewStatus}",
+            id, meeting.Status, status);
         meeting.Status = status;
         meeting.UpdatedAt = DateTime.UtcNow;
         if (errorMessage != null) meeting.ErrorMessage = errorMessage;
