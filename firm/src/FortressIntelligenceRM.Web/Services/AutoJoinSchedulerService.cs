@@ -1,6 +1,9 @@
 using Amazon.Scheduler;
 using Amazon.Scheduler.Model;
 using System.Text.Json;
+using FortressIntelligenceRM.Web.Data;
+using FortressIntelligenceRM.Web.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace FortressIntelligenceRM.Web.Services;
 
@@ -14,12 +17,18 @@ public class AutoJoinSchedulerService
     private readonly IAmazonScheduler _scheduler;
     private readonly IConfiguration _config;
     private readonly ILogger<AutoJoinSchedulerService> _logger;
+    private readonly IDbContextFactory<FirmDbContext> _dbFactory;
 
-    public AutoJoinSchedulerService(IAmazonScheduler scheduler, IConfiguration config, ILogger<AutoJoinSchedulerService> logger)
+    public AutoJoinSchedulerService(
+        IAmazonScheduler scheduler,
+        IConfiguration config,
+        ILogger<AutoJoinSchedulerService> logger,
+        IDbContextFactory<FirmDbContext> dbFactory)
     {
         _scheduler = scheduler;
         _config = config;
         _logger = logger;
+        _dbFactory = dbFactory;
     }
 
     private bool Enabled => _config.GetValue<bool>("Firm:AutoJoinEnabled", false);
@@ -82,6 +91,56 @@ public class AutoJoinSchedulerService
         {
             _logger.LogError(ex, "FIRM: Failed to create AutoJoin schedule for meeting {Id}", meetingId);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Issue 3 backfill (2026-09-09): the EventBridge schedule payload only started carrying
+    /// <c>botCallbackSecret</c> as of commit 5ce95fdc (2026-09-03 20:35 EDT). Any Scheduled,
+    /// auto-added meeting created before that timestamp still has a stale schedule missing the
+    /// field. The Lambda's BOT_CALLBACK_SECRET env-var fallback covers it in the meantime, but
+    /// this recreates each affected schedule with the current payload format so the schedule
+    /// itself is authoritative again. Runs once on every app startup — CreateScheduleAsync
+    /// upserts (EventBridge Scheduler CreateSchedule overwrites an existing schedule of the same
+    /// name), so this is safe to run repeatedly.
+    /// </summary>
+    public async Task BackfillStaleSchedulesAsync(CancellationToken ct = default)
+    {
+        if (!Enabled)
+        {
+            _logger.LogDebug("FIRM: AutoJoin disabled — skipping startup schedule backfill");
+            return;
+        }
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        var candidates = await db.Meetings
+            .Where(m => m.Status == MeetingStatus.Scheduled
+                     && m.StartDatetime != null
+                     && m.StartDatetime > DateTime.UtcNow
+                     && m.Source == "autoadd")
+            .ToListAsync(ct);
+
+        if (candidates.Count == 0)
+        {
+            _logger.LogDebug("FIRM: Startup schedule backfill — no eligible meetings found");
+            return;
+        }
+
+        _logger.LogInformation("FIRM: Startup schedule backfill — refreshing {Count} EventBridge schedule(s)", candidates.Count);
+
+        foreach (var meeting in candidates)
+        {
+            try
+            {
+                await CreateScheduleAsync(meeting.Id, meeting.MeetingUrl ?? "", meeting.StartDatetime!.Value);
+                _logger.LogInformation("FIRM: Refreshed EventBridge schedule for meeting {Id} (backfill)", meeting.Id);
+            }
+            catch (Exception ex)
+            {
+                // Per-meeting failure must not abort the rest of the backfill loop.
+                _logger.LogError(ex, "FIRM: Startup schedule backfill failed for meeting {Id}", meeting.Id);
+            }
         }
     }
 

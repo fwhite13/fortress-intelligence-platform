@@ -35,7 +35,25 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
         var intervalMinutes = _config.GetValue<int>("Firm:CalendarSyncIntervalMinutes", 15);
         _logger.LogInformation("[AutoSync] Service started. Poll interval: {Minutes}m", intervalMinutes);
         _timer = new Timer(PollAsync, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(intervalMinutes));
+
+        // Issue 3: refresh any stale pre-5ce95fdc EventBridge schedules on every startup.
+        // Fire-and-forget — a large backlog must not delay host startup; failures are
+        // caught/logged per-meeting inside BackfillStaleSchedulesAsync.
+        _ = RunStartupScheduleBackfillAsync();
+
         return Task.CompletedTask;
+    }
+
+    private async Task RunStartupScheduleBackfillAsync()
+    {
+        try
+        {
+            await _autoJoinScheduler.BackfillStaleSchedulesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[AutoSync] Unhandled error during startup AutoJoin schedule backfill");
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
