@@ -2,7 +2,7 @@
  * Zoom specific join logic
  */
 
-import { Page, FrameLocator } from 'playwright';
+import { Page, FrameLocator, Locator } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -313,6 +313,7 @@ export class ZoomHandler {
     // Click Join button (inside iframe)
     await this.screenshot(page, '03-before-join-click');
     let joinClicked = false;
+    let clickedJoinLocator: Locator | null = null;
     try {
       const joinLocators = [
         wcFrame.getByRole('button', { name: 'Join', exact: true }),
@@ -328,6 +329,7 @@ export class ZoomHandler {
             await button.click();
             console.log('[Zoom] Clicked join button');
             joinClicked = true;
+            clickedJoinLocator = button;
             break;
           }
         } catch {
@@ -344,6 +346,75 @@ export class ZoomHandler {
       await this.screenshot(page, '03b-no-join-button');
       throw new Error('[Zoom] No join button found — cannot proceed');
     }
+
+    // Verify the click actually took effect. A click can be logged as fired
+    // (Playwright reports the event dispatched) while the page still doesn't
+    // navigate — event interception, a stale handler, etc. The real signal
+    // is whether the pre-join name input is still present: if it is, we
+    // never left the pre-join form no matter what the click log says.
+    const nameInputSelectors = ['#inputname', 'input[placeholder*="name" i]', 'input[type="text"]'];
+    const isNameInputVisible = async (): Promise<boolean> => {
+      for (const selector of nameInputSelectors) {
+        try {
+          if (await wcFrame.locator(selector).first().isVisible()) {
+            return true;
+          }
+        } catch {
+          continue;
+        }
+      }
+      return false;
+    };
+    const pollUntilPreJoinGone = async (timeoutMs: number): Promise<boolean> => {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        if (!(await isNameInputVisible())) return true;
+        await page.waitForTimeout(500);
+      }
+      return !(await isNameInputVisible());
+    };
+
+    console.log('[Zoom] Verifying join click took effect — waiting up to 10s for pre-join name input to disappear...');
+    let leftPreJoin = await pollUntilPreJoinGone(10000);
+
+    if (!leftPreJoin) {
+      console.log('[Zoom] Retry 1: name input still visible after 10s — join click had no effect. Retrying with force click...');
+      if (clickedJoinLocator) {
+        try {
+          await clickedJoinLocator.click({ force: true });
+          console.log('[Zoom] Retry 1: force-clicked join button');
+        } catch (e) {
+          console.log(`[Zoom] Retry 1: force click threw: ${e}`);
+        }
+      } else {
+        console.log('[Zoom] Retry 1: no join button locator retained from first pass — cannot force-click');
+      }
+      leftPreJoin = await pollUntilPreJoinGone(5000);
+    }
+
+    if (!leftPreJoin) {
+      console.log('[Zoom] Retry 2: name input still visible after force click — dispatching click event directly via evaluate()...');
+      try {
+        if (clickedJoinLocator) {
+          await clickedJoinLocator.evaluate((el) => {
+            el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+          });
+          console.log('[Zoom] Retry 2: dispatched click event via evaluate() on join button element');
+        } else {
+          console.log('[Zoom] Retry 2: no join button locator retained from first pass — cannot evaluate() click');
+        }
+      } catch (e) {
+        console.log(`[Zoom] Retry 2: evaluate() click dispatch threw: ${e}`);
+      }
+      leftPreJoin = await pollUntilPreJoinGone(5000);
+    }
+
+    if (!leftPreJoin) {
+      await this.screenshot(page, '03c-join-click-no-effect');
+      throw new Error('[Zoom] Join button click had no effect after retries — pre-join form still visible');
+    }
+
+    console.log('[Zoom] Confirmed: pre-join name input is gone — join click took effect');
 
     // Wait for meeting to start
     await page.waitForTimeout(5000);
@@ -383,10 +454,39 @@ export class ZoomHandler {
       const inMeetingText = wcFrameObj
         ? await wcFrameObj.evaluate(() => document.body.innerText).catch(() => '')
         : await page.evaluate(() => document.body.innerText);
-      if (inMeetingText.includes('Mute') || inMeetingText.includes('Leave') || inMeetingText.includes('Participants')) {
+
+      // Diagnostics up front — enough to root-cause future failures from
+      // CloudWatch alone, without needing screenshots.
+      const stillOnPreJoin = await isNameInputVisible();
+      const currentUrl = page.url();
+      console.log(
+        `[Zoom] Join result diagnostics — name input still visible: ${stillOnPreJoin}, ` +
+        `iframe text (first 200 chars): ${JSON.stringify(inMeetingText.slice(0, 200))}, ` +
+        `page URL: ${currentUrl}`
+      );
+
+      // "Mute" is also a button label on the pre-join page itself (the
+      // muted-mic toggle), so it is NOT a valid in-meeting indicator on its
+      // own — checking it caused false positives whenever the join click
+      // failed silently and the bot never left the pre-join screen. The only
+      // reliable signal is whether the pre-join name input is actually gone.
+      if (stillOnPreJoin) {
+        await this.screenshot(page, '05-still-on-prejoin');
+        console.log('[Zoom] FAILED: Still on pre-join page after join click — name input still visible');
+        throw new Error('[Zoom] FAILED: Still on pre-join page after join click — name input still visible');
+      }
+
+      const hasLeaveControl = /\bLeave\b/.test(inMeetingText);
+      const hasParticipants = inMeetingText.includes('Participants');
+      const hasMeetingControlArea = inMeetingText.includes('Meeting Controls') || inMeetingText.includes('meeting control');
+
+      if (hasLeaveControl || hasParticipants || hasMeetingControlArea) {
         await this.screenshot(page, '05-in-meeting-alt-check');
         console.log('[Zoom] Successfully joined meeting (alternative check)');
       } else {
+        // Pre-join form is confirmed gone (checked above) but no in-meeting
+        // indicator matched either — genuinely uncertain, not a pre-join
+        // false positive. Safe to continue past this point.
         await this.screenshot(page, '05-uncertain-state');
         console.log('[Zoom] Meeting join status uncertain, continuing...');
       }
