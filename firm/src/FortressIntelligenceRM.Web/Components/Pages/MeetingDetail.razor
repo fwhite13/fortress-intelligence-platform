@@ -400,18 +400,24 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
-        var displayDate = _meeting?.StartDatetime ?? _meeting?.CreatedAt;
-        if (displayDate != null)
+        // Retry timezone conversion on every render until it succeeds —
+        // avoids UTC fallback when JS isn't ready on firstRender (e.g. circuit reconnect).
+        if (_localDisplayDate == null)
         {
-            try
+            var displayDate = _meeting?.StartDatetime ?? _meeting?.CreatedAt;
+            if (displayDate != null)
             {
-                _localDisplayDate = await JS.InvokeAsync<string>("firmUtils.formatLocalDateTime",
-                    displayDate.Value.ToUniversalTime().ToString("O"));
-                StateHasChanged();
+                try
+                {
+                    _localDisplayDate = await JS.InvokeAsync<string>("firmUtils.formatLocalDateTime",
+                        displayDate.Value.ToUniversalTime().ToString("O"));
+                    StateHasChanged();
+                }
+                catch { /* JS not ready yet — retry on next render */ }
             }
-            catch { /* JS not ready — leave _localDisplayDate null, fallback in markup */ }
         }
+
+        if (!firstRender) return;
     }
 
     private void DownloadAudio()
