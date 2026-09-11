@@ -103,7 +103,14 @@ async function postCallback(status: string, extra?: Record<string, unknown>): Pr
 
 const ONE_SHOT_MEETING_URL = process.env.MEETING_URL;
 const ONE_SHOT_MEETING_ID = process.env.MEETING_ID;
-const ONE_SHOT_BOT_NAME = process.env.BOT_DISPLAY_NAME || process.env.BOT_NAME || 'Fortress Notetaker';
+// WI #7009: BOT_JOIN_NAME is the per-deployment-configurable name used ONLY for the
+// join-form display name (Zoom's name-based bot detection swaps the Join button for
+// "Sign in to join" when it sees names like "Refuge Notetaker"). BOT_DISPLAY_NAME is
+// still sent by VpBotService and used elsewhere (callbacks, logging) — it's just no
+// longer what gets typed into the join form. Falls back to BOT_DISPLAY_NAME when
+// BOT_JOIN_NAME isn't set, preserving current behavior for any deployment that hasn't
+// configured Firm:BotJoinName yet.
+const ONE_SHOT_BOT_NAME = process.env.BOT_JOIN_NAME || process.env.BOT_DISPLAY_NAME || process.env.BOT_NAME || 'Fortress Notetaker';
 
 if (ONE_SHOT_MEETING_URL && ONE_SHOT_MEETING_ID) {
   console.log('[OneShot] Starting one-shot meeting mode:', ONE_SHOT_MEETING_ID);
