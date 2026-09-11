@@ -1,6 +1,8 @@
 using Amazon.ECS;
 using Amazon.ECS.Model;
+using FortressIntelligenceRM.Web.Data;
 using FortressIntelligenceRM.Web.Services;
+using Microsoft.EntityFrameworkCore;
 
 namespace FortressIntelligenceRM.Web.Services;
 
@@ -11,6 +13,7 @@ public class VpBotService
     private readonly ILogger<VpBotService> _logger;
     private readonly MeetingService _meetingService;
     private readonly BrandingConfig _branding;
+    private readonly IDbContextFactory<FirmDbContext> _dbFactory;
 
     // NOTE: inject the concrete BrandingConfig singleton (registered in Program.cs via
     // builder.Services.AddSingleton(branding) after binding config section "Branding"),
@@ -19,13 +22,14 @@ public class VpBotService
     // to bare class defaults (OrgName="Fortress") regardless of any env var/config —
     // this previously made every bot join as "Fortress Notetaker" on every deployment,
     // including RN, no matter what Branding__* env vars were set.
-    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, BrandingConfig branding)
+    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, BrandingConfig branding, IDbContextFactory<FirmDbContext> dbFactory)
     {
         _ecs = ecs;
         _config = config;
         _logger = logger;
         _meetingService = meetingService;
         _branding = branding;
+        _dbFactory = dbFactory;
     }
 
     public async Task<string?> TriggerBotAsync(long meetingId, string meetingUrl, string platform = "teams")
@@ -37,6 +41,17 @@ public class VpBotService
         var botSecret = _config["Firm:BotCallbackSecret"] ?? "";
         var containerName = _config["Firm:VpBotContainerName"] ?? "firm-vpbot";
         var botDisplayName = _branding.NotetakerName;
+
+        // WI #7009: BOT_JOIN_NAME is a separate, per-deployment-configurable name used ONLY
+        // for the join-form display name (Zoom's name-based bot detection swaps the Join
+        // button for "Sign in to join" when it sees names like "Refuge Notetaker"). It falls
+        // back to BOT_DISPLAY_NAME when Firm:BotJoinName isn't set, so behavior is unchanged
+        // until someone sets the new config key — no code deploy required to change it later.
+        var botJoinNameBase = _config["Firm:BotJoinName"] ?? botDisplayName;
+        var userFirstName = await GetUserFirstNameAsync(meetingId);
+        var botJoinName = string.IsNullOrWhiteSpace(userFirstName)
+            ? botJoinNameBase
+            : $"{botJoinNameBase} - {userFirstName}";
 
         if (string.IsNullOrEmpty(taskDef) || string.IsNullOrEmpty(cluster))
         {
@@ -79,6 +94,7 @@ public class VpBotService
                                 new() { Name = "MEETING_ID", Value = meetingId.ToString() },
                                 new() { Name = "MEETING_URL", Value = meetingUrl },
                                 new() { Name = "BOT_DISPLAY_NAME", Value = botDisplayName },
+                                new() { Name = "BOT_JOIN_NAME", Value = botJoinName },
                                 new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret },
                                 new() { Name = "MEETING_PLATFORM", Value = platform },
                                 new() { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },
@@ -99,6 +115,33 @@ public class VpBotService
         catch (Exception ex)
         {
             _logger.LogError(ex, "FIRM: Failed to launch VP bot ECS task for meeting {Id}", meetingId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Looks up the first name of the user who created the meeting, for join-name
+    /// disambiguation when multiple users' bots are in the same meeting (WI #7009).
+    /// Best-effort — returns null on any lookup failure so bot launch is never blocked.
+    /// </summary>
+    private async Task<string?> GetUserFirstNameAsync(long meetingId)
+    {
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var displayName = await db.Meetings
+                .Where(m => m.Id == meetingId)
+                .Select(m => m.CreatedByUser!.DisplayName)
+                .FirstOrDefaultAsync();
+
+            if (string.IsNullOrWhiteSpace(displayName))
+                return null;
+
+            return displayName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: Failed to resolve user first name for meeting {Id} — proceeding without it", meetingId);
             return null;
         }
     }
