@@ -611,6 +611,7 @@
             MeetingStatus.Complete => ("#4caf50", "Complete"),
             MeetingStatus.Failed => ("#f44336", "Failed"),
             MeetingStatus.Scheduled => ("#607d8b", "Scheduled"),
+            MeetingStatus.Waiting => ("#9e9e9e", "Waiting"),
             _ => ("#607d8b", status.ToString())
         };
         builder.OpenElement(0, "span");

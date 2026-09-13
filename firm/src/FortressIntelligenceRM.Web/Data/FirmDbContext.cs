@@ -108,6 +108,25 @@ public class FirmDbContext : DbContext
                 .IsUnique()
                 .HasDatabaseName("uk_fm_created_by_calendar_event_id")
                 .HasFilter("`calendar_event_id` IS NOT NULL");
+
+            // WI #7033 — multi-user meeting dedup (primary/subscriber model).
+            entity.Property(e => e.IsPrimaryRecorder).HasColumnName("is_primary_recorder").HasDefaultValue(true);
+            entity.Property(e => e.PrimaryMeetingId).HasColumnName("primary_meeting_id");
+            entity.Property(e => e.NormalizedMeetingUrl).HasColumnName("normalized_meeting_url").HasMaxLength(2000);
+            entity.HasOne(e => e.PrimaryMeeting)
+                .WithMany()
+                .HasForeignKey(e => e.PrimaryMeetingId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("fk_fm_primary_meeting");
+            entity.HasIndex(e => e.PrimaryMeetingId).HasDatabaseName("idx_fm_primary_meeting_id");
+            // DB-level race guard (see NormalizedMeetingUrl doc comment on FirmMeeting): only primaries
+            // ever populate NormalizedMeetingUrl, so this unique index only ever constrains primaries.
+            // NOTE: FIRM does not use EF migrations (see class-level comment) — the actual DB-level
+            // index is created by the idempotent raw SQL in DatabaseInitializationService.
+            entity.HasIndex(e => new { e.NormalizedMeetingUrl, e.StartDatetime })
+                .IsUnique()
+                .HasDatabaseName("uk_fm_normalized_url_start")
+                .HasFilter("`normalized_meeting_url` IS NOT NULL");
         });
 
         modelBuilder.Entity<FirmMeetingParticipant>(entity =>

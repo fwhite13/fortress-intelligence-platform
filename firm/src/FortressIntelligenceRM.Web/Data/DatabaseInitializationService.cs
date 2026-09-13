@@ -225,7 +225,18 @@ public class DatabaseInitializationService : IHostedService
                 // dedup. NULL calendar_event_id (manually-added meetings) is excluded so those never
                 // collide. Mirrors FirmDbContext's HasIndex(...).IsUnique() model config — this raw
                 // SQL is what actually creates it, since FIRM does not use EF migrations.
-                "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_created_by_calendar_event_id (created_by, calendar_event_id)"
+                "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_created_by_calendar_event_id (created_by, calendar_event_id)",
+                // WI #7033 — multi-user meeting dedup (primary/subscriber model). primary_meeting_id
+                // is BIGINT (not INT) to match firm_meetings.id's actual type.
+                "ALTER TABLE firm_meetings ADD COLUMN primary_meeting_id BIGINT NULL",
+                "ALTER TABLE firm_meetings ADD COLUMN is_primary_recorder TINYINT(1) NOT NULL DEFAULT 1",
+                "ALTER TABLE firm_meetings ADD COLUMN normalized_meeting_url VARCHAR(2000) NULL",
+                "ALTER TABLE firm_meetings ADD CONSTRAINT fk_fm_primary_meeting FOREIGN KEY (primary_meeting_id) REFERENCES firm_meetings(id)",
+                "ALTER TABLE firm_meetings ADD INDEX idx_fm_primary_meeting_id (primary_meeting_id)",
+                // Only primary rows ever populate normalized_meeting_url (see FirmMeeting.NormalizedMeetingUrl
+                // doc comment) — MySQL unique indexes allow unlimited NULLs, so this only ever constrains
+                // primaries, the same technique uk_fm_created_by_calendar_event_id already relies on.
+                "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_normalized_url_start (normalized_meeting_url, start_datetime)"
             };
 
             foreach (var alterSql in alterStatements)

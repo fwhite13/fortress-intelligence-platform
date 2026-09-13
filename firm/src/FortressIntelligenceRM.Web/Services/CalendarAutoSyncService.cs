@@ -1,6 +1,7 @@
 using FortressIntelligenceRM.Web.Data;
 using FortressIntelligenceRM.Web.Models;
 using Microsoft.EntityFrameworkCore;
+using MySqlConnector;
 
 namespace FortressIntelligenceRM.Web.Services;
 
@@ -170,7 +171,10 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                         continue;
                     }
 
-                    // All three anchors missed — genuinely new meeting.
+                    // All three per-user anchors missed — genuinely new meeting for this user.
+                    // WI #7033: before creating it, check whether ANY user already owns the bot
+                    // slot for this same real-world meeting (same normalized URL, overlapping
+                    // start time window). If so, this becomes a subscriber instead of a primary.
                     var meeting = new FirmMeeting
                     {
                         Platform = dto.Platform,
@@ -187,11 +191,55 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                         UpdatedAt = DateTime.UtcNow
                     };
 
-                    await InsertScheduledMeetingAsync(db, meeting, ct);
+                    var existingPrimary = await FindExistingPrimaryAsync(db, normalizedDtoUrl, startDatetime, ct);
+                    if (existingPrimary != null)
+                    {
+                        meeting.IsPrimaryRecorder = false;
+                        meeting.PrimaryMeetingId = existingPrimary.Id;
+                        await InsertScheduledMeetingAsync(db, meeting, MeetingStatus.Waiting, ct);
+                        _logger.LogInformation(
+                            "[AutoSync] Added meeting {Id} as SUBSCRIBER of primary {PrimaryId} for user {UserId} (calendar {CalendarEventId})",
+                            meeting.Id, existingPrimary.Id, user.Id, dto.CalendarEventId);
+                        continue;
+                    }
+
+                    meeting.IsPrimaryRecorder = true;
+                    meeting.NormalizedMeetingUrl = normalizedDtoUrl;
+                    try
+                    {
+                        await InsertScheduledMeetingAsync(db, meeting, MeetingStatus.Scheduled, ct);
+                    }
+                    catch (DbUpdateException dbEx) when (IsDuplicateKeyException(dbEx))
+                    {
+                        // Race: another user's poll cycle (or the same user across two overlapping
+                        // ticks) won the primary slot for this normalized URL + start time between
+                        // our lookup and our INSERT. `db`'s change tracker still holds the failed
+                        // Added entity, so retry on a fresh DbContext rather than reusing `db`.
+                        _logger.LogInformation(
+                            "[AutoSync] Primary insert raced for normalized URL {Url} @ {Start} — retrying as subscriber",
+                            normalizedDtoUrl, startDatetime);
+                        await using var raceDb = await _dbFactory.CreateDbContextAsync(ct);
+                        var racedPrimary = await FindExistingPrimaryAsync(raceDb, normalizedDtoUrl, startDatetime, ct);
+                        if (racedPrimary == null)
+                        {
+                            _logger.LogWarning(
+                                "[AutoSync] Could not resolve winning primary after duplicate-key race for {Url} @ {Start} — leaving meeting unscheduled",
+                                normalizedDtoUrl, startDatetime);
+                            continue;
+                        }
+                        meeting.IsPrimaryRecorder = false;
+                        meeting.PrimaryMeetingId = racedPrimary.Id;
+                        meeting.NormalizedMeetingUrl = null;
+                        await InsertScheduledMeetingAsync(raceDb, meeting, MeetingStatus.Waiting, ct);
+                        _logger.LogInformation(
+                            "[AutoSync] Added meeting {Id} as SUBSCRIBER of primary {PrimaryId} for user {UserId} after race",
+                            meeting.Id, racedPrimary.Id, user.Id);
+                        continue;
+                    }
 
                     await _autoJoinScheduler.CreateScheduleAsync(meeting.Id, dto.JoinUrl, startDatetime);
 
-                    _logger.LogInformation("[AutoSync] Added meeting {Id} from calendar {CalendarEventId} for user {UserId}",
+                    _logger.LogInformation("[AutoSync] Added meeting {Id} as PRIMARY from calendar {CalendarEventId} for user {UserId}",
                         meeting.Id, dto.CalendarEventId, user.Id);
                 }
             }
@@ -203,30 +251,60 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// Inserts a new calendar-sourced meeting and lands it in MeetingStatus.Scheduled — the single,
-    /// shared copy of the EF-sentinel workaround (ADO#17 diagnostic, 2026-09-09; previously duplicated
-    /// in the now-deleted MeetingService.UpsertFromCalendarAsync, which had zero callers).
+    /// Inserts a new calendar-sourced meeting and lands it in the given target status (Scheduled for
+    /// a primary, Waiting for a subscriber — WI #7033) — the single, shared copy of the EF-sentinel
+    /// workaround (ADO#17 diagnostic, 2026-09-09; previously duplicated in the now-deleted
+    /// MeetingService.UpsertFromCalendarAsync, which had zero callers).
     ///
     /// NOTE: MeetingStatus.Scheduled == 0, which is the CLR default for the enum. EF Core's
     /// HasDefaultValue(MeetingStatus.Joining) treats Status as ValueGenerated.OnAdd, so on INSERT
     /// it compares against the CLR sentinel (0/Scheduled) and — seeing a match — omits the column
     /// entirely, letting the DB default (Joining) win. Inserting as Joining avoids the sentinel
-    /// match; the follow-up UpdateStatusAsync flips it to Scheduled via UPDATE, which is not subject
-    /// to the same sentinel check.
+    /// match; the follow-up UpdateStatusAsync flips it to the target status via UPDATE, which is not
+    /// subject to the same sentinel check. Waiting != 0, so it isn't strictly required for
+    /// subscribers, but the shared two-step keeps this method's behavior uniform for both paths.
     ///
     /// FirmDbContext now also configures .HasSentinel(MeetingStatus.Joining), which should make this
     /// two-step dance unnecessary going forward — kept in place as defense-in-depth until that's
     /// verified in production.
     /// </summary>
-    private async Task<FirmMeeting> InsertScheduledMeetingAsync(FirmDbContext db, FirmMeeting draft, CancellationToken ct)
+    private async Task<FirmMeeting> InsertScheduledMeetingAsync(FirmDbContext db, FirmMeeting draft, MeetingStatus targetStatus, CancellationToken ct)
     {
         draft.Status = MeetingStatus.Joining;
         db.Meetings.Add(draft);
         await db.SaveChangesAsync(ct);
 
-        await _meetingService.UpdateStatusAsync(draft.Id, MeetingStatus.Scheduled);
-        draft.Status = MeetingStatus.Scheduled;
+        await _meetingService.UpdateStatusAsync(draft.Id, targetStatus);
+        draft.Status = targetStatus;
 
         return draft;
     }
+
+    /// <summary>
+    /// WI #7033 dedup lookup: does any user already have a PRIMARY firm_meetings record for this
+    /// same real-world meeting? Matched on normalized_meeting_url + start time within ±15 minutes,
+    /// excluding Failed (a failed primary shouldn't block a fresh attempt by another user).
+    /// </summary>
+    private static async Task<FirmMeeting?> FindExistingPrimaryAsync(FirmDbContext db, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(normalizedUrl)) return null;
+
+        var windowStart = startDatetime.AddMinutes(-15);
+        var windowEnd = startDatetime.AddMinutes(15);
+
+        var candidates = await db.Meetings
+            .Where(m => m.IsPrimaryRecorder
+                     && m.StartDatetime != null
+                     && m.StartDatetime >= windowStart
+                     && m.StartDatetime <= windowEnd
+                     && m.Status != MeetingStatus.Failed)
+            .ToListAsync(ct);
+
+        return candidates.FirstOrDefault(m => m.NormalizedMeetingUrl == normalizedUrl);
+    }
+
+    /// <summary>MySQL error 1062 (duplicate entry) surfaced through EF Core as a DbUpdateException —
+    /// used to detect the uk_fm_normalized_url_start race described in FindExistingPrimaryAsync's caller.</summary>
+    private static bool IsDuplicateKeyException(DbUpdateException ex) =>
+        ex.InnerException is MySqlException { Number: 1062 };
 }

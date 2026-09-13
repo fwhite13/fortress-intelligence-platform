@@ -48,4 +48,18 @@ public class FirmMeeting
     /// <summary>Machine-readable reason the last bot attempt failed, e.g. "lobby_timeout". Cleared once the bot successfully joins (status = recording).</summary>
     [MaxLength(64)]
     public string? LastFailureReason { get; set; }
+
+    // WI #7033 — multi-user meeting dedup (primary/subscriber model).
+    /// <summary>True if this row owns the bot slot for the underlying real-world meeting (or is a
+    /// standalone single-user meeting). False for subscriber rows, which mirror a primary's output.</summary>
+    public bool IsPrimaryRecorder { get; set; } = true;
+    /// <summary>FK to the primary FirmMeeting row when this is a subscriber (IsPrimaryRecorder=false). Null for primaries.</summary>
+    public long? PrimaryMeetingId { get; set; }
+    public FirmMeeting? PrimaryMeeting { get; set; }
+    /// <summary>Populated only on primary rows via CalendarService.NormalizeMeetingUrl(MeetingUrl) — the
+    /// dedup key, alongside StartDatetime. Left NULL on subscriber rows so the DB-level unique index
+    /// (NormalizedMeetingUrl, StartDatetime) only ever constrains primaries — MySQL unique indexes treat
+    /// NULLs as distinct, the same technique uk_fm_created_by_calendar_event_id already relies on.</summary>
+    [MaxLength(2000)]
+    public string? NormalizedMeetingUrl { get; set; }
 }
