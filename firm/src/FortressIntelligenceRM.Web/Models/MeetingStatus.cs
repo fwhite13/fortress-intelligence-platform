@@ -10,5 +10,7 @@ public enum MeetingStatus
     Transcribing,
     Summarizing,
     Complete,
-    Failed
+    Failed,
+    Waiting             // WI #7033: subscriber record in a multi-user dedup group, sitting idle
+                         // while the primary recorder (IsPrimaryRecorder=true) owns the bot slot.
 }

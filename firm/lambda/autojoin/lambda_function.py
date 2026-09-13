@@ -3,6 +3,11 @@ import os
 import urllib.request
 import urllib.error
 
+# WI #7033: this Lambda has no DB access, so the multi-user dedup guard (skip cleanly when the
+# meeting record is a subscriber, or another primary is already active for the same meeting) lives
+# server-side in firm-web's POST /api/vp/autojoin/{meetingId} (MeetingsApiController.AutoJoinTrigger).
+# That endpoint returns HTTP 409 for both cases, which the HTTPError handler below already treats
+# as a clean, non-retrying skip — no change needed here.
 def lambda_handler(event, context):
     meeting_id  = event.get('meetingId')
     meeting_url = event.get('meetingUrl')   # kept for logging; FIRM reads from DB now

@@ -53,6 +53,12 @@ public class VpBotService
             ? botJoinNameBase
             : $"{botJoinNameBase} - {userFirstName}";
 
+        // WI #7033: TriggerBotAsync is only ever called for a primary recorder (subscribers never
+        // launch a bot — see MeetingsApiController.AutoJoinTrigger's guard), so meetingId here is
+        // always the primary's id. Resolve every user (primary + subscribers) attributed to this
+        // meeting for the Phase 2 join-notification chat message.
+        var botNamesCsv = await GetBotNamesCsvAsync(meetingId);
+
         if (string.IsNullOrEmpty(taskDef) || string.IsNullOrEmpty(cluster))
         {
             _logger.LogWarning("FIRM: VpBotTaskDefinition or EcsCluster not configured. Skipping ECS RunTask.");
@@ -95,6 +101,7 @@ public class VpBotService
                                 new() { Name = "MEETING_URL", Value = meetingUrl },
                                 new() { Name = "BOT_DISPLAY_NAME", Value = botDisplayName },
                                 new() { Name = "BOT_JOIN_NAME", Value = botJoinName },
+                                new() { Name = "BOT_NAMES_CSV", Value = botNamesCsv },
                                 new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret },
                                 new() { Name = "MEETING_PLATFORM", Value = platform },
                                 new() { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },
@@ -143,6 +150,32 @@ public class VpBotService
         {
             _logger.LogWarning(ex, "FIRM: Failed to resolve user first name for meeting {Id} — proceeding without it", meetingId);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// WI #7033: resolves the comma-separated list of user full names (primary + subscribers,
+    /// ordered by created_at ASC) for the Phase 2 join-notification chat message
+    /// ("...on behalf of Fred White, Rob Smith"). Best-effort — returns just the primary's name
+    /// (or empty string) on any lookup failure so bot launch is never blocked.
+    /// </summary>
+    private async Task<string> GetBotNamesCsvAsync(long primaryMeetingId)
+    {
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var names = await db.Meetings
+                .Where(m => m.Id == primaryMeetingId || m.PrimaryMeetingId == primaryMeetingId)
+                .OrderBy(m => m.CreatedAt)
+                .Select(m => m.CreatedByUser!.DisplayName)
+                .ToListAsync();
+
+            return string.Join(",", names.Where(n => !string.IsNullOrWhiteSpace(n)));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: Failed to resolve BOT_NAMES_CSV for meeting {Id} — proceeding without it", primaryMeetingId);
+            return "";
         }
     }
 

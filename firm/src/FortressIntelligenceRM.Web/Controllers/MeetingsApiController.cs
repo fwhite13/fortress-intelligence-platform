@@ -511,6 +511,40 @@ public class MeetingsApiController : ControllerBase
         var meeting = await db.Meetings.FindAsync(meetingId);
         if (meeting == null) return NotFound(new { error = "Meeting not found" });
 
+        // WI #7033 — EventBridge dedup guard. The autojoin Lambda has no DB access and just proxies
+        // here (firm/lambda/autojoin/lambda_function.py); this is the actual guard location. The
+        // Lambda already treats a 409 response as a clean, non-retrying skip, so Conflict is reused
+        // for both "not Scheduled" and "this is a subscriber" — no Lambda code change needed.
+        if (!meeting.IsPrimaryRecorder || meeting.PrimaryMeetingId != null)
+        {
+            _logger.LogInformation("FIRM: AutoJoinTrigger skipped — meeting {Id} is a subscriber (primary={PrimaryId})", meetingId, meeting.PrimaryMeetingId);
+            return Conflict(new { error = "Meeting is a subscriber — primary recorder owns the bot slot", skipped = true });
+        }
+
+        // Brownfield safety net: covers races that predate the uk_fm_normalized_url_start unique
+        // index (or any row that slipped through without NormalizedMeetingUrl set). If another
+        // primary for the same normalized URL is already mid-join or recording, demote self.
+        if (!string.IsNullOrEmpty(meeting.NormalizedMeetingUrl))
+        {
+            var conflictingPrimary = await db.Meetings.FirstOrDefaultAsync(m =>
+                m.Id != meeting.Id
+                && m.IsPrimaryRecorder
+                && m.NormalizedMeetingUrl == meeting.NormalizedMeetingUrl
+                && (m.Status == MeetingStatus.Pending || m.Status == MeetingStatus.Joining || m.Status == MeetingStatus.Recording));
+
+            if (conflictingPrimary != null)
+            {
+                meeting.IsPrimaryRecorder = false;
+                meeting.PrimaryMeetingId = conflictingPrimary.Id;
+                meeting.NormalizedMeetingUrl = null;
+                meeting.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+                await _meetingService.UpdateStatusAsync(meetingId, MeetingStatus.Waiting);
+                _logger.LogWarning("FIRM: AutoJoinTrigger demoted meeting {Id} to subscriber of {PrimaryId} — another primary already active for this meeting", meetingId, conflictingPrimary.Id);
+                return Conflict(new { error = "Demoted to subscriber — another bot already active for this meeting", skipped = true });
+            }
+        }
+
         if (meeting.Status != MeetingStatus.Scheduled)
         {
             _logger.LogInformation("FIRM: AutoJoinTrigger skipped — meeting {Id} status is {Status} (not Scheduled)", meetingId, meeting.Status);
