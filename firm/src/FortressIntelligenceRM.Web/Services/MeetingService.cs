@@ -31,6 +31,19 @@ public class MeetingService
             .ToListAsync();
     }
 
+    /// <summary>
+    /// Resolve the display name of a meeting's owning (creating) user, for the
+    /// bot's post-join chat notification (BOT_NAMES_CSV — WI #7034).
+    /// Single-user only for now; multi-user/subscriber aggregation via
+    /// primary_meeting_id lands with the WI #7033 dedup work.
+    /// </summary>
+    public async Task<string?> GetMeetingOwnerNameAsync(long meetingId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.Include(m => m.CreatedByUser).FirstOrDefaultAsync(m => m.Id == meetingId);
+        return meeting?.CreatedByUser?.DisplayName;
+    }
+
     public async Task<FirmMeeting?> GetMeetingAsync(long id, Guid userId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();

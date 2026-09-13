@@ -38,6 +38,11 @@ public class VpBotService
         var containerName = _config["Firm:VpBotContainerName"] ?? "firm-vpbot";
         var botDisplayName = _branding.NotetakerName;
 
+        // WI #7034: name(s) for the post-join chat notification. Single user today;
+        // becomes a comma-separated list once WI #7033's primary/subscriber model lands.
+        var ownerName = await _meetingService.GetMeetingOwnerNameAsync(meetingId);
+        var botNamesCsv = ownerName ?? "";
+
         if (string.IsNullOrEmpty(taskDef) || string.IsNullOrEmpty(cluster))
         {
             _logger.LogWarning("FIRM: VpBotTaskDefinition or EcsCluster not configured. Skipping ECS RunTask.");
@@ -81,6 +86,7 @@ public class VpBotService
                                 new() { Name = "BOT_DISPLAY_NAME", Value = botDisplayName },
                                 new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret },
                                 new() { Name = "MEETING_PLATFORM", Value = platform },
+                                new() { Name = "BOT_NAMES_CSV", Value = botNamesCsv },
                                 new() { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },
                                 new() { Name = "AWS_REGION", Value = "us-east-1" }
                             }

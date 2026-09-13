@@ -32,7 +32,7 @@
  * Reference: https://github.com/screenappai/meeting-bot (MIT, production)
  */
 
-import { Page } from 'playwright';
+import { Page, Locator } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -455,6 +455,7 @@ export class TeamsHandler {
       await leaveButton.waitFor({ timeout: 60000 });
       console.log('[Teams] ✅ Successfully joined meeting (Leave button visible)');
       await this.screenshot(page, '04-in-meeting');
+      await this.postAdmissionChatNotification(page);
       return;
     } catch {
       console.log('[Teams] Leave button not found within 60s, checking other states...');
@@ -490,6 +491,7 @@ export class TeamsHandler {
             console.log('[Teams] ✅ Admitted from waiting room, now in meeting');
             await this.screenshot(page, '05-admitted-in-meeting');
             admitted = true;
+            await this.postAdmissionChatNotification(page);
             return; // admitted — normal path
           }
         } catch {
@@ -513,6 +515,7 @@ export class TeamsHandler {
           if (await leaveButton.isVisible({ timeout: 2000 })) {
             console.log('[Teams] ✅ Admitted just before timeout — now in meeting');
             await this.screenshot(page, '05-admitted-last-second');
+            await this.postAdmissionChatNotification(page);
             return;
           }
         } catch {
@@ -550,6 +553,7 @@ export class TeamsHandler {
     } else if (joinedCheck.hasLeave || joinedCheck.hasHangup || joinedCheck.hasMeetingUI || joinedCheck.hasRoster) {
       console.log('[Teams] ✅ Successfully joined meeting');
       await this.screenshot(page, '05-in-meeting');
+      await this.postAdmissionChatNotification(page);
     } else {
       console.log('[Teams] ⚠️ Meeting join status uncertain — hasMeetingUI=false, hasLeave=false. Treating as lobby timeout.');
       await this.screenshot(page, '05-uncertain-state');
@@ -558,8 +562,127 @@ export class TeamsHandler {
   }
 
   /**
+   * Post a join notification to the meeting chat (WI #7034), identifying the
+   * bot and attributing the recording to the FIRM user(s) who requested it.
+   *
+   * Only ever called after confirmed admission — never from the lobby.
+   * `BOT_NAMES_CSV` is passed by firm-web at ECS task launch: a single name
+   * for a single recorder, or a comma-separated list when multiple FIRM
+   * users share the meeting.
+   *
+   * Non-fatal by design — a failed chat post must never fail the recording.
+   */
+  private static async postAdmissionChatNotification(page: Page): Promise<void> {
+    try {
+      const namesCsv = process.env.BOT_NAMES_CSV || '';
+      const names = namesCsv.split(',').map(n => n.trim()).filter(Boolean);
+      if (names.length === 0) {
+        console.log('[Teams] BOT_NAMES_CSV not set — skipping chat notification');
+        return;
+      }
+
+      const message =
+        `Fortress Notetaker has joined to record this meeting on behalf of ${names.join(', ')}.\n` +
+        `This session is being recorded. Participants who continue acknowledge they consent to recording.`;
+
+      console.log('[Teams] Posting join notification to meeting chat...');
+
+      // Step 1: open the chat panel
+      const chatButtonSelectors = [
+        '[data-tid="chat-button"]',
+        'button[aria-label="Chat"]',
+        'button[aria-label*="Show conversation" i]',
+        'button[aria-label*="chat" i]',
+      ];
+      let openedChat = false;
+      for (const selector of chatButtonSelectors) {
+        try {
+          const btn = page.locator(selector).first();
+          if (await btn.isVisible({ timeout: 3000 })) {
+            await btn.click();
+            console.log(`[Teams] Opened chat panel via: ${selector}`);
+            openedChat = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+      if (!openedChat) {
+        console.log('[Teams] WARNING: could not find chat panel toggle — skipping chat notification');
+        return;
+      }
+
+      // Step 2: wait for the chat input to be ready
+      const inputSelectors = [
+        'div[aria-label="Type a message"]',
+        'div[data-tid="ckeditor"]',
+        '[contenteditable="true"][aria-label*="message" i]',
+        '[contenteditable="true"][role="textbox"]',
+      ];
+      let chatInput: Locator | null = null;
+      for (const selector of inputSelectors) {
+        try {
+          const el = page.locator(selector).first();
+          if (await el.isVisible({ timeout: 5000 })) {
+            chatInput = el;
+            console.log(`[Teams] Found chat input via: ${selector}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+      if (!chatInput) {
+        console.log('[Teams] WARNING: could not find chat input field — skipping chat notification');
+        return;
+      }
+
+      // Step 3: type the message — Shift+Enter for the internal line break,
+      // plain Enter (or the Send button) submits at the end.
+      await chatInput.click();
+      const lines = message.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        await chatInput.type(lines[i]);
+        if (i < lines.length - 1) {
+          await page.keyboard.down('Shift');
+          await page.keyboard.press('Enter');
+          await page.keyboard.up('Shift');
+        }
+      }
+
+      // Step 4: submit
+      const sendButtonSelectors = [
+        'button[data-tid="sendMessageCommand"]',
+        'button[aria-label="Send"]',
+        'button[aria-label*="send" i]',
+      ];
+      let sent = false;
+      for (const selector of sendButtonSelectors) {
+        try {
+          const btn = page.locator(selector).first();
+          if (await btn.isVisible({ timeout: 3000 })) {
+            await btn.click();
+            sent = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+      if (!sent) {
+        await page.keyboard.press('Enter');
+      }
+
+      console.log('[Teams] ✅ Chat notification posted');
+    } catch (err) {
+      console.log('[Teams] WARNING: failed to post chat notification (non-fatal):', err);
+    }
+  }
+
+  /**
    * Turn off camera and microphone on the pre-join screen.
-   * 
+   *
    * New Teams uses toggle inputs (data-tid="toggle-video" / "toggle-mute")
    * and button elements. We try both patterns.
    */
