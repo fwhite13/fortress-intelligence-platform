@@ -254,19 +254,108 @@ export class TeamsHandler {
   }
 
   /**
-   * Join a Teams meeting as an anonymous guest.
-   * 
+   * Authenticate the browser session with Microsoft 365 (WI #7032) before
+   * navigating to the meeting URL, so the bot joins as a real signed-in
+   * account instead of an anonymous guest.
+   *
+   * Runs entirely against login.microsoftonline.com's own flow — no
+   * FIRM-specific logic here, just BOT_EMAIL / BOT_PASSWORD (env-injected
+   * per environment by the ECS task definition).
+   *
+   * Never throws — sign-in problems (MFA challenge, conditional access,
+   * changed page layout, etc.) are logged and reported as `false` so the
+   * caller can fall back to the anonymous join path rather than losing the
+   * meeting entirely.
+   */
+  static async signInWithM365(page: Page, email: string, password: string): Promise<boolean> {
+    console.log('[Teams] Authenticating with Microsoft 365...');
+    try {
+      await page.goto('https://login.microsoftonline.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+      // Email entry
+      const emailInput = page.locator('input[type="email"], input[name="loginfmt"]').first();
+      await emailInput.waitFor({ state: 'visible', timeout: 20000 });
+      await emailInput.fill(email);
+      await this.clickM365Button(page);
+
+      // Password entry
+      const passwordInput = page.locator('input[type="password"], input[name="passwd"]').first();
+      await passwordInput.waitFor({ state: 'visible', timeout: 20000 });
+      await passwordInput.fill(password);
+      await this.clickM365Button(page);
+
+      // "Stay signed in?" (KMSI) prompt — not every tenant shows it, and it
+      // doesn't matter which way it's dismissed for a one-shot bot session.
+      try {
+        const staySignedIn = page.locator('#idSIButton9');
+        if (await staySignedIn.isVisible({ timeout: 10000 })) {
+          console.log('[Teams] Dismissing "Stay signed in?" prompt');
+          await staySignedIn.click();
+        }
+      } catch {
+        // Prompt didn't appear — fine.
+      }
+
+      // Confirm sign-in completed: we should have left login.microsoftonline.com
+      await page.waitForFunction(
+        () => !window.location.hostname.includes('login.microsoftonline.com'),
+        { timeout: 30000 }
+      ).catch(() => {
+        console.log('[Teams] WARNING: still on login.microsoftonline.com after sign-in attempt');
+      });
+
+      if (page.url().includes('login.microsoftonline.com')) {
+        console.log('[Teams] M365 sign-in did not complete — falling back to anonymous join');
+        return false;
+      }
+
+      console.log('[Teams] M365 sign-in complete');
+      return true;
+    } catch (err) {
+      console.log('[Teams] M365 sign-in failed, falling back to anonymous join:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Click the Next/Sign in submit button on login.microsoftonline.com.
+   * The same button id (#idSIButton9) is reused across the email, password,
+   * and KMSI steps of the flow.
+   */
+  private static async clickM365Button(page: Page): Promise<void> {
+    const selectors = ['#idSIButton9', 'input[type="submit"]', 'button[type="submit"]'];
+    for (const selector of selectors) {
+      try {
+        const btn = page.locator(selector).first();
+        if (await btn.isVisible({ timeout: 5000 })) {
+          await btn.click();
+          return;
+        }
+      } catch {
+        continue;
+      }
+    }
+    console.log('[Teams] WARNING: could not find a Next/Sign in button on login.microsoftonline.com');
+  }
+
+  /**
+   * Join a Teams meeting.
+   *
    * Flow (based on ScreenApp's production implementation):
    * 1. Navigate to meeting URL (original URL, no /_#/ rewriting)
    * 2. Wait for launcher page, click "Continue on this browser" (force:true)
    * 3. Wait for pre-join screen (name input field, up to 120s)
-   * 4. Fill in bot name
+   * 4. Fill in bot name — anonymous guest join only; a signed-in account
+   *    uses its M365 profile name and has no display-name field to fill
    * 5. Turn off camera/mic
    * 6. Click "Join now"
    * 7. Wait for meeting entry (look for "Leave" button)
    * 8. Handle waiting room if needed
+   *
+   * @param authenticated  true if signInWithM365() succeeded for this session —
+   *                       skips the anonymous display-name pre-fill (WI #7032)
    */
-  static async join(page: Page, botName: string, originalUrl?: string): Promise<void> {
+  static async join(page: Page, botName: string, originalUrl?: string, authenticated: boolean = false): Promise<void> {
     console.log('[Teams] Starting join flow...');
     console.log('[Teams] Current URL:', page.url());
 
@@ -347,45 +436,51 @@ export class TeamsHandler {
     await this.screenshot(page, '02-pre-join-screen');
 
     // Step 3: Enter name in the name field
-    const nameSelectors = [
-      'input[data-tid="prejoin-display-name-input"]',
-      'input[placeholder*="Enter your name" i]',
-      'input[placeholder*="Type your name" i]',
-      'input[placeholder*="name" i]',
-      'input[aria-label*="name" i]',
-      '#username',
-      'input[type="text"]',
-    ];
+    // Anonymous guest join only — a signed-in M365 account has no display-name
+    // field on the pre-join screen; Teams uses the account's profile name (WI #7032).
+    if (!authenticated) {
+      const nameSelectors = [
+        'input[data-tid="prejoin-display-name-input"]',
+        'input[placeholder*="Enter your name" i]',
+        'input[placeholder*="Type your name" i]',
+        'input[placeholder*="name" i]',
+        'input[aria-label*="name" i]',
+        '#username',
+        'input[type="text"]',
+      ];
 
-    let enteredName = false;
-    for (const selector of nameSelectors) {
-      try {
-        const nameInput = page.locator(selector).first();
-        if (await nameInput.isVisible({ timeout: 3000 })) {
-          await nameInput.clear();
-          await nameInput.fill(botName);
-          console.log(`[Teams] Entered name "${botName}" via: ${selector}`);
-          enteredName = true;
-          break;
+      let enteredName = false;
+      for (const selector of nameSelectors) {
+        try {
+          const nameInput = page.locator(selector).first();
+          if (await nameInput.isVisible({ timeout: 3000 })) {
+            await nameInput.clear();
+            await nameInput.fill(botName);
+            console.log(`[Teams] Entered name "${botName}" via: ${selector}`);
+            enteredName = true;
+            break;
+          }
+        } catch {
+          continue;
         }
-      } catch {
-        continue;
       }
-    }
-    
-    if (!enteredName) {
-      console.log('[Teams] WARNING: Could not find name input field');
-      const inputs = await page.evaluate(() => {
-        return Array.from(document.querySelectorAll('input')).map(i => ({
-          type: i.type,
-          placeholder: i.placeholder,
-          ariaLabel: i.getAttribute('aria-label'),
-          id: i.id,
-          dataTid: i.getAttribute('data-tid'),
-          visible: i.offsetParent !== null,
-        }));
-      });
-      console.log('[Teams] All inputs on page:', JSON.stringify(inputs));
+
+      if (!enteredName) {
+        console.log('[Teams] WARNING: Could not find name input field');
+        const inputs = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('input')).map(i => ({
+            type: i.type,
+            placeholder: i.placeholder,
+            ariaLabel: i.getAttribute('aria-label'),
+            id: i.id,
+            dataTid: i.getAttribute('data-tid'),
+            visible: i.offsetParent !== null,
+          }));
+        });
+        console.log('[Teams] All inputs on page:', JSON.stringify(inputs));
+      }
+    } else {
+      console.log('[Teams] Authenticated session — skipping anonymous display-name pre-fill');
     }
 
     // Step 4: Turn off camera and microphone
