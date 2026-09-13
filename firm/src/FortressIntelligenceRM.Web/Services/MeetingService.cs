@@ -12,14 +12,16 @@ public class MeetingService
     private readonly ILogger<MeetingService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IBatchTranscriptionService _batchService;
+    private readonly AutoJoinSchedulerService _autoJoinScheduler;
 
-    public MeetingService(IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config, ILogger<MeetingService> logger, IHttpClientFactory httpClientFactory, IBatchTranscriptionService batchService)
+    public MeetingService(IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config, ILogger<MeetingService> logger, IHttpClientFactory httpClientFactory, IBatchTranscriptionService batchService, AutoJoinSchedulerService autoJoinScheduler)
     {
         _dbFactory = dbFactory;
         _config = config;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _batchService = batchService;
+        _autoJoinScheduler = autoJoinScheduler;
     }
 
     public async Task<List<FirmMeeting>> GetMeetingsAsync(Guid userId)
@@ -34,11 +36,19 @@ public class MeetingService
     public async Task<FirmMeeting?> GetMeetingAsync(long id, Guid userId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        return await db.Meetings
-            .Include(m => m.Participants)
-            .Include(m => m.Transcripts.OrderBy(t => t.StartTimeMs))
-            .Include(m => m.Summary)
-            .FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == userId);
+        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == userId);
+        if (meeting == null) return null;
+
+        // WI #7033/#7035: a subscriber's own Participants/Transcripts/Summary rows are never
+        // duplicated on fan-out — only AudioS3Key/TranscriptS3Key are copied onto the subscriber row
+        // (see FanOutCompletionAsync). Resolve the effective source-of-truth meeting id for these
+        // relational artifacts here so a subscriber's detail page renders the shared content.
+        var artifactMeetingId = meeting.PrimaryMeetingId ?? meeting.Id;
+        meeting.Participants = await db.Participants.Where(p => p.MeetingId == artifactMeetingId).ToListAsync();
+        meeting.Transcripts = await db.Transcripts.Where(t => t.MeetingId == artifactMeetingId).OrderBy(t => t.StartTimeMs).ToListAsync();
+        meeting.Summary = await db.Summaries.FirstOrDefaultAsync(s => s.MeetingId == artifactMeetingId);
+
+        return meeting;
     }
 
     public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? platform = null)
@@ -102,6 +112,141 @@ public class MeetingService
             meeting.EndedAt ??= DateTime.UtcNow;
         }
         await db.SaveChangesAsync();
+
+        // WI #7035: only ever fires for a primary transitioning to Complete/Failed. Subscribers
+        // (IsPrimaryRecorder=false) never trigger this, so fan-out cannot re-trigger itself —
+        // subscriber rows are updated directly by FanOutCompletionAsync/PromoteOrFailSubscribersAsync
+        // below, not via a recursive UpdateStatusAsync call. Wrapped in try/catch so a fan-out/
+        // promotion failure isn't mistaken by VpCallback's caller for "the status update itself
+        // failed" and retried — the primary's own status transition above already committed.
+        try
+        {
+            if (meeting.IsPrimaryRecorder && status == MeetingStatus.Complete)
+            {
+                await FanOutCompletionAsync(meeting.Id);
+            }
+            else if (meeting.IsPrimaryRecorder && status == MeetingStatus.Failed)
+            {
+                await PromoteOrFailSubscribersAsync(meeting.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Subscriber fan-out/promotion failed for primary {Id} (status={Status}) — primary status transition itself still succeeded", id, status);
+        }
+    }
+
+    /// <summary>WI #7035: subscriber ids currently pointing at this primary (any non-Failed status).</summary>
+    public async Task<List<long>> GetSubscriberIdsAsync(long primaryMeetingId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.Meetings
+            .Where(m => m.PrimaryMeetingId == primaryMeetingId && m.Status != MeetingStatus.Failed)
+            .Select(m => m.Id)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// WI #7035 Part A: when a primary meeting completes, copies its shared artifacts onto every
+    /// linked subscriber and marks them Complete too. Returns the subscriber ids so the caller (the
+    /// VpCallback controller) can fire the same per-user completion notifications it fires for the
+    /// primary. Transcript segments/Summary rows are intentionally NOT duplicated — GetMeetingAsync
+    /// resolves those from the primary via PrimaryMeetingId instead.
+    /// </summary>
+    public async Task<List<long>> FanOutCompletionAsync(long primaryMeetingId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var primary = await db.Meetings.FindAsync(primaryMeetingId);
+        if (primary == null || !primary.IsPrimaryRecorder) return new List<long>();
+
+        var subscribers = await db.Meetings
+            .Where(m => m.PrimaryMeetingId == primaryMeetingId && m.Status != MeetingStatus.Failed)
+            .ToListAsync();
+        if (subscribers.Count == 0) return new List<long>();
+
+        var now = DateTime.UtcNow;
+        foreach (var sub in subscribers)
+        {
+            sub.AudioS3Key = primary.AudioS3Key;
+            sub.TranscriptS3Key = primary.TranscriptS3Key;
+            sub.Status = MeetingStatus.Complete;
+            sub.StartedAt ??= primary.StartedAt;
+            sub.EndedAt = primary.EndedAt;
+            sub.DurationSeconds = primary.DurationSeconds;
+            sub.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync();
+
+        _logger.LogInformation("FIRM: Fanned out completion from primary {Id} to {Count} subscriber(s)", primaryMeetingId, subscribers.Count);
+        return subscribers.Select(s => s.Id).ToList();
+    }
+
+    /// <summary>
+    /// WI #7035 Part B: when a primary meeting fails, promotes the earliest-created Waiting
+    /// subscriber to primary (re-triggering the join) if still within the join window
+    /// (start_datetime + 30 min), otherwise fails all remaining subscribers with a reason.
+    /// </summary>
+    public async Task PromoteOrFailSubscribersAsync(long primaryMeetingId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var primary = await db.Meetings.FindAsync(primaryMeetingId);
+        if (primary == null || !primary.IsPrimaryRecorder) return;
+
+        var subscribers = await db.Meetings
+            .Where(m => m.PrimaryMeetingId == primaryMeetingId && m.Status != MeetingStatus.Failed)
+            .OrderBy(m => m.CreatedAt)
+            .ToListAsync();
+        if (subscribers.Count == 0) return;
+
+        var withinJoinWindow = primary.StartDatetime.HasValue
+            && primary.StartDatetime.Value.AddMinutes(30) > DateTime.UtcNow;
+
+        if (!withinJoinWindow)
+        {
+            foreach (var sub in subscribers)
+            {
+                sub.Status = MeetingStatus.Failed;
+                sub.ErrorMessage = "Primary recorder failed and meeting window has passed.";
+                sub.LastFailureReason = "primary_failed_window_passed";
+                sub.EndedAt ??= DateTime.UtcNow;
+                sub.UpdatedAt = DateTime.UtcNow;
+            }
+            await db.SaveChangesAsync();
+            _logger.LogInformation("FIRM: Primary {Id} failed past join window — {Count} subscriber(s) set to Failed", primaryMeetingId, subscribers.Count);
+            return;
+        }
+
+        var candidate = subscribers.FirstOrDefault(m => m.Status == MeetingStatus.Waiting);
+        if (candidate == null)
+        {
+            _logger.LogInformation("FIRM: Primary {Id} failed within join window but no Waiting subscriber to promote", primaryMeetingId);
+            return;
+        }
+
+        candidate.IsPrimaryRecorder = true;
+        candidate.PrimaryMeetingId = null;
+        candidate.NormalizedMeetingUrl = primary.NormalizedMeetingUrl;
+        candidate.Status = MeetingStatus.Scheduled;
+        candidate.UpdatedAt = DateTime.UtcNow;
+
+        foreach (var other in subscribers.Where(m => m.Id != candidate.Id))
+        {
+            other.PrimaryMeetingId = candidate.Id;
+            other.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
+        _logger.LogInformation("FIRM: Promoted subscriber {CandidateId} to primary after primary {PrimaryId} failed within join window ({Count} subscriber(s) re-pointed)",
+            candidate.Id, primaryMeetingId, subscribers.Count - 1);
+
+        try
+        {
+            await _autoJoinScheduler.CreateScheduleAsync(candidate.Id, candidate.MeetingUrl ?? primary.MeetingUrl ?? "", candidate.StartDatetime ?? primary.StartDatetime ?? DateTime.UtcNow);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Failed to create AutoJoin schedule for promoted meeting {Id}", candidate.Id);
+        }
     }
 
     /// <summary>

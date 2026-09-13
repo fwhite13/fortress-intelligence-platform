@@ -387,107 +387,139 @@ public class MeetingsApiController : ControllerBase
             }
         }
 
-        // Fire-and-forget: notify FAIT so users with auto-add enabled get content pushed to KB
+        // WI #7035 Part A: fire the same completion notifications for this meeting, then for every
+        // subscriber that MeetingService.UpdateStatusAsync just fanned out to (fan-out itself already
+        // ran synchronously inside that call, above — this only needs their ids). meetingId==Complete
+        // is only ever true here for a primary (subscribers reach Complete via fan-out directly, not
+        // via this VpCallback path), so this cannot re-trigger itself.
         if (meetingStatus == MeetingStatus.Complete)
         {
+            FireCompletionNotifications(payload.MeetingId, payload.MeetingId);
+
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    // Resolve the entra OID from the meeting's creator
-                    await using var notifyDb = await _dbFactory.CreateDbContextAsync();
-                    var completedMeeting = await notifyDb.Meetings
-                        .Include(m => m.CreatedByUser)
-                        .FirstOrDefaultAsync(m => m.Id == payload.MeetingId);
-                    if (completedMeeting?.CreatedByUser == null) return;
-
-                    var faitApiUrl = _config["FIP:FaitApiUrl"] ?? "https://fait.dev.fortressam.ai";
-                    var sharedSecret = _config["Firm:SharedSecret"] ?? "";
-
-                    // Assemble transcript text
-                    var segments = await notifyDb.Transcripts
-                        .Where(t => t.MeetingId == payload.MeetingId)
-                        .OrderBy(t => t.StartTimeMs)
-                        .ToListAsync();
-                    var transcriptSb = new StringBuilder();
-                    foreach (var seg in segments)
-                    {
-                        var speaker = seg.SpeakerName ?? seg.SpeakerLabel ?? "Unknown";
-                        var ts = seg.StartTimeMs.HasValue
-                            ? TimeSpan.FromMilliseconds(seg.StartTimeMs.Value).ToString(@"hh\:mm\:ss")
-                            : "00:00:00";
-                        transcriptSb.AppendLine($"[{ts}] {speaker}: {seg.Text}");
-                    }
-
-                    // Assemble summary text
-                    var summaryRecord = await notifyDb.Summaries.FirstOrDefaultAsync(s => s.MeetingId == payload.MeetingId);
-                    var summaryText = summaryRecord?.SummaryText ?? "";
-
-                    var notifyBody = JsonSerializer.Serialize(new
-                    {
-                        entraOid = completedMeeting.CreatedByUser.EntraOid,
-                        meetingId = payload.MeetingId,
-                        transcriptText = transcriptSb.ToString(),
-                        summaryText = summaryText
-                    });
-
-                    var httpClient = _httpClientFactory.CreateClient();
-                    var req = new HttpRequestMessage(HttpMethod.Post, $"{faitApiUrl}/api/firm/meeting-complete");
-                    req.Content = new StringContent(notifyBody, System.Text.Encoding.UTF8, "application/json");
-                    if (!string.IsNullOrEmpty(sharedSecret))
-                        req.Headers.Add("X-Firm-Secret", sharedSecret);
-                    var response = await httpClient.SendAsync(req);
-                    _logger.LogInformation("FIRM: FAIT meeting-complete notification sent, status: {Status}", response.StatusCode);
+                    var subscriberIds = await _meetingService.GetSubscriberIdsAsync(payload.MeetingId);
+                    foreach (var subscriberId in subscriberIds)
+                        FireCompletionNotifications(subscriberId, payload.MeetingId);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "FIRM: Failed to notify FAIT of meeting completion (non-fatal)");
-                }
-            });
-        }
-
-        // Fire-and-forget: generate mind map after summary is written
-        if (meetingStatus == MeetingStatus.Complete)
-        {
-            _ = _mindmapService.GenerateAsync(payload.MeetingId);
-        }
-
-        // Fire-and-forget: send Expo push notification to mobile user if token registered
-        if (meetingStatus == MeetingStatus.Complete)
-        {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await using var pushDb = await _dbFactory.CreateDbContextAsync();
-                    var pushMeeting = await pushDb.Meetings
-                        .Include(m => m.CreatedByUser)
-                        .FirstOrDefaultAsync(m => m.Id == payload.MeetingId);
-                    var pushToken = pushMeeting?.CreatedByUser?.ExpoPushToken;
-                    if (string.IsNullOrEmpty(pushToken)) return;
-
-                    var pushTitle = pushMeeting?.Title ?? "Recording complete";
-                    var pushBody = new
-                    {
-                        to = pushToken,
-                        title = "FIRM — Recording Ready",
-                        body = $"Transcript and summary ready: {pushTitle}",
-                        data = new { meetingId = payload.MeetingId }
-                    };
-                    var httpClient = _httpClientFactory.CreateClient();
-                    var req = new HttpRequestMessage(HttpMethod.Post, "https://exp.host/--/api/v2/push/send");
-                    req.Content = new StringContent(JsonSerializer.Serialize(pushBody), System.Text.Encoding.UTF8, "application/json");
-                    await httpClient.SendAsync(req);
-                    _logger.LogInformation("FIRM: Expo push notification sent for meeting {MeetingId}", payload.MeetingId);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "FIRM: Expo push notification failed for meeting {MeetingId} (non-fatal)", payload.MeetingId);
+                    _logger.LogWarning(ex, "FIRM: Failed to fire subscriber completion notifications for primary {Id} (non-fatal)", payload.MeetingId);
                 }
             });
         }
 
         return Ok();
+    }
+
+    /// <summary>
+    /// Fires the standard per-user completion notifications (FAIT KB push, mind map, Expo push) for
+    /// one meeting row. <paramref name="meetingId"/> is the row being notified for (its own
+    /// CreatedByUser/title are used for attribution/push); <paramref name="artifactMeetingId"/> is
+    /// where the shared transcript/summary content actually lives (the primary's id — see
+    /// MeetingService.GetMeetingAsync's matching fallback). For the primary itself, both are equal.
+    /// Extracted from VpCallback (WI #7035) so the same code path serves both primary and
+    /// fanned-out subscriber completions without duplication.
+    /// </summary>
+    private void FireCompletionNotifications(long meetingId, long artifactMeetingId)
+    {
+        // Fire-and-forget: notify FAIT so users with auto-add enabled get content pushed to KB
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Resolve the entra OID from the meeting's creator
+                await using var notifyDb = await _dbFactory.CreateDbContextAsync();
+                var completedMeeting = await notifyDb.Meetings
+                    .Include(m => m.CreatedByUser)
+                    .FirstOrDefaultAsync(m => m.Id == meetingId);
+                if (completedMeeting?.CreatedByUser == null) return;
+
+                var faitApiUrl = _config["FIP:FaitApiUrl"] ?? "https://fait.dev.fortressam.ai";
+                var sharedSecret = _config["Firm:SharedSecret"] ?? "";
+
+                // Assemble transcript text — from the artifact meeting (shared content for subscribers)
+                var segments = await notifyDb.Transcripts
+                    .Where(t => t.MeetingId == artifactMeetingId)
+                    .OrderBy(t => t.StartTimeMs)
+                    .ToListAsync();
+                var transcriptSb = new StringBuilder();
+                foreach (var seg in segments)
+                {
+                    var speaker = seg.SpeakerName ?? seg.SpeakerLabel ?? "Unknown";
+                    var ts = seg.StartTimeMs.HasValue
+                        ? TimeSpan.FromMilliseconds(seg.StartTimeMs.Value).ToString(@"hh\:mm\:ss")
+                        : "00:00:00";
+                    transcriptSb.AppendLine($"[{ts}] {speaker}: {seg.Text}");
+                }
+
+                // Assemble summary text — from the artifact meeting (shared content for subscribers)
+                var summaryRecord = await notifyDb.Summaries.FirstOrDefaultAsync(s => s.MeetingId == artifactMeetingId);
+                var summaryText = summaryRecord?.SummaryText ?? "";
+
+                var notifyBody = JsonSerializer.Serialize(new
+                {
+                    entraOid = completedMeeting.CreatedByUser.EntraOid,
+                    meetingId,
+                    transcriptText = transcriptSb.ToString(),
+                    summaryText = summaryText
+                });
+
+                var httpClient = _httpClientFactory.CreateClient();
+                var req = new HttpRequestMessage(HttpMethod.Post, $"{faitApiUrl}/api/firm/meeting-complete");
+                req.Content = new StringContent(notifyBody, System.Text.Encoding.UTF8, "application/json");
+                if (!string.IsNullOrEmpty(sharedSecret))
+                    req.Headers.Add("X-Firm-Secret", sharedSecret);
+                var response = await httpClient.SendAsync(req);
+                _logger.LogInformation("FIRM: FAIT meeting-complete notification sent for meeting {MeetingId}, status: {Status}", meetingId, response.StatusCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "FIRM: Failed to notify FAIT of meeting completion for meeting {MeetingId} (non-fatal)", meetingId);
+            }
+        });
+
+        // Fire-and-forget: generate mind map after summary is written. Only once per real meeting —
+        // subscribers share the primary's mind map (rendered via the same artifact-id fallback used
+        // for transcript/summary), so skip regenerating it against an empty subscriber transcript set.
+        if (meetingId == artifactMeetingId)
+        {
+            _ = _mindmapService.GenerateAsync(artifactMeetingId);
+        }
+
+        // Fire-and-forget: send Expo push notification to mobile user if token registered
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var pushDb = await _dbFactory.CreateDbContextAsync();
+                var pushMeeting = await pushDb.Meetings
+                    .Include(m => m.CreatedByUser)
+                    .FirstOrDefaultAsync(m => m.Id == meetingId);
+                var pushToken = pushMeeting?.CreatedByUser?.ExpoPushToken;
+                if (string.IsNullOrEmpty(pushToken)) return;
+
+                var pushTitle = pushMeeting?.Title ?? "Recording complete";
+                var pushBody = new
+                {
+                    to = pushToken,
+                    title = "FIRM — Recording Ready",
+                    body = $"Transcript and summary ready: {pushTitle}",
+                    data = new { meetingId }
+                };
+                var httpClient = _httpClientFactory.CreateClient();
+                var req = new HttpRequestMessage(HttpMethod.Post, "https://exp.host/--/api/v2/push/send");
+                req.Content = new StringContent(JsonSerializer.Serialize(pushBody), System.Text.Encoding.UTF8, "application/json");
+                await httpClient.SendAsync(req);
+                _logger.LogInformation("FIRM: Expo push notification sent for meeting {MeetingId}", meetingId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "FIRM: Expo push notification failed for meeting {MeetingId} (non-fatal)", meetingId);
+            }
+        });
     }
 
     /// <summary>
