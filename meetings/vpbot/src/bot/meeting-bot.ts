@@ -155,6 +155,7 @@ export class MeetingBot extends EventEmitter {
       // Navigate to meeting URL
       // For Teams, process the URL (add query hints, keep original URL — no /_#/ rewriting)
       let navUrl = this.meeting.url;
+      let teamsAuthenticated = false;
       if (this.meeting.platform === 'zoom') {
         // Grant mic/camera for both Zoom origins (chooser page + web client)
         await this.context.grantPermissions(['microphone', 'camera'], {
@@ -170,6 +171,19 @@ export class MeetingBot extends EventEmitter {
         });
         navUrl = await TeamsHandler.processTeamsMeetingUrl(this.meeting.url);
         console.log(`[Bot] Teams processed URL: ${navUrl}`);
+
+        // WI #7032: authenticate as a real M365 account before joining, so the
+        // bot has a proper identity in the meeting instead of joining anonymously.
+        // BOT_EMAIL / BOT_PASSWORD are generic env vars — each environment's ECS
+        // task definition injects the correct values. Absent either one, or if
+        // sign-in fails for any reason, fall back to the existing anonymous flow.
+        const botEmail = process.env.BOT_EMAIL;
+        const botPassword = process.env.BOT_PASSWORD;
+        if (botEmail && botPassword) {
+          teamsAuthenticated = await TeamsHandler.signInWithM365(this.page, botEmail, botPassword);
+        } else {
+          console.log('[Bot] BOT_EMAIL/BOT_PASSWORD not set — joining Teams as anonymous guest');
+        }
       }
       // Teams: use networkidle (heavy JS app). Others: domcontentloaded is fine.
       const waitUntil = this.meeting.platform === 'teams' ? 'networkidle' as const : 'domcontentloaded' as const;
@@ -179,7 +193,7 @@ export class MeetingBot extends EventEmitter {
       try {
         switch (this.meeting.platform) {
           case 'teams':
-            await TeamsHandler.join(this.page, this.meeting.botName, this.meeting.url);
+            await TeamsHandler.join(this.page, this.meeting.botName, this.meeting.url, teamsAuthenticated);
             break;
           case 'zoom':
             await ZoomHandler.join(this.page, this.meeting.botName);
