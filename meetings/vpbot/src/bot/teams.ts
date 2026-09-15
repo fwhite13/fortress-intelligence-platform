@@ -35,6 +35,8 @@
 import { Page, Locator } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import { S3Service } from '../transcribe/s3.js';
 
 export class LobbyTimeoutError extends Error {
   constructor() {
@@ -266,35 +268,42 @@ export class TeamsHandler {
    * changed page layout, etc.) are logged and reported as `false` so the
    * caller can fall back to the anonymous join path rather than losing the
    * meeting entirely.
+   *
+   * @param meetingId  numeric FIRM meeting id, used only to namespace debug
+   *                   screenshots uploaded to S3 (`debug/auth/<meetingId>/...`).
+   *                   Defaults to 0, which skips screenshot capture entirely
+   *                   (unit tests / callers that don't have a meeting yet).
    */
-  static async signInWithM365(page: Page, email: string, password: string): Promise<boolean> {
+  static async signInWithM365(page: Page, email: string, password: string, meetingId: number = 0): Promise<boolean> {
     console.log('[Teams] Authenticating with Microsoft 365...');
+    const s3 = meetingId > 0
+      ? new S3Service(process.env.AWS_REGION || 'us-east-1', process.env.S3_BUCKET || 'firm-recordings-dev')
+      : null;
     try {
       await page.goto('https://login.microsoftonline.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await this.captureAuthDebugScreenshot(page, meetingId, 'after-load', s3);
 
       // Email entry
       const emailInput = page.locator('input[type="email"], input[name="loginfmt"]').first();
       await emailInput.waitFor({ state: 'visible', timeout: 20000 });
       await emailInput.fill(email);
       await this.clickM365Button(page);
+      await this.captureAuthDebugScreenshot(page, meetingId, 'after-email', s3);
 
       // Password entry
       const passwordInput = page.locator('input[type="password"], input[name="passwd"]').first();
       await passwordInput.waitFor({ state: 'visible', timeout: 20000 });
       await passwordInput.fill(password);
       await this.clickM365Button(page);
+      await this.captureAuthDebugScreenshot(page, meetingId, 'after-password', s3);
 
-      // "Stay signed in?" (KMSI) prompt — not every tenant shows it, and it
-      // doesn't matter which way it's dismissed for a one-shot bot session.
-      try {
-        const staySignedIn = page.locator('#idSIButton9');
-        if (await staySignedIn.isVisible({ timeout: 10000 })) {
-          console.log('[Teams] Dismissing "Stay signed in?" prompt');
-          await staySignedIn.click();
-        }
-      } catch {
-        // Prompt didn't appear — fine.
-      }
+      // Handle KMSI and any other known Microsoft interrupt pages (security info
+      // nag, account picker, consent screen) before checking for the final
+      // redirect off login.microsoftonline.com. This replaces the old bare KMSI
+      // check, which silently ate a 30s waitForFunction budget whenever a
+      // different interrupt page (e.g. "Don't lose access to your account")
+      // showed up instead of KMSI (WI #7086 / meeting 113 root cause).
+      await this.handleM365Interrupts(page, email, meetingId, s3);
 
       // Confirm sign-in completed: we should have left login.microsoftonline.com
       await page.waitForFunction(
@@ -305,6 +314,7 @@ export class TeamsHandler {
       });
 
       if (page.url().includes('login.microsoftonline.com')) {
+        await this.captureAuthDebugScreenshot(page, meetingId, 'at-warning', s3);
         console.log('[Teams] M365 sign-in did not complete — falling back to anonymous join');
         return false;
       }
@@ -315,6 +325,187 @@ export class TeamsHandler {
       console.log('[Teams] M365 sign-in failed, falling back to anonymous join:', err);
       return false;
     }
+  }
+
+  /**
+   * Save a debug screenshot of the current page state to
+   * `debug/auth/<meetingId>/<step>.png` in S3, for diagnosing M365 sign-in
+   * failures after the fact (WI #7086).
+   *
+   * No-op when meetingId <= 0 (unit tests / callers with no real meeting).
+   * Never throws — a failed screenshot must never break the sign-in flow.
+   */
+  private static async captureAuthDebugScreenshot(
+    page: Page,
+    meetingId: number,
+    step: string,
+    s3: S3Service | null
+  ): Promise<void> {
+    if (meetingId <= 0 || !s3) return;
+
+    let tmpFile: string | null = null;
+    try {
+      tmpFile = path.join(os.tmpdir(), `auth-debug-${meetingId}-${step}-${Date.now()}.png`);
+      await page.screenshot({ path: tmpFile });
+      const key = `debug/auth/${meetingId}/${step}.png`;
+      await s3.uploadWithKey(tmpFile, key);
+      console.log(`[Teams] Uploaded auth debug screenshot: ${key}`);
+    } catch (err) {
+      console.log(`[Teams] WARNING: failed to capture/upload auth debug screenshot (${step}):`, err);
+    } finally {
+      if (tmpFile) {
+        try {
+          fs.unlinkSync(tmpFile);
+        } catch {
+          // Best-effort cleanup — nothing to do if it fails.
+        }
+      }
+    }
+  }
+
+  /**
+   * Handle known Microsoft sign-in interrupt pages that can appear after the
+   * password step, before the final "did we leave login.microsoftonline.com"
+   * check. Loops up to 3 times since dismissing one interrupt (e.g. KMSI) can
+   * reveal another (e.g. the security info nag).
+   *
+   * Root cause of meeting 113 (2026-09-15): the old code only checked for the
+   * KMSI prompt. When Microsoft showed "Don't lose access to your account"
+   * instead, the KMSI check found nothing (fast no-op), and the bot burned
+   * the entire 30s waitForFunction budget stuck on that page before falling
+   * back to an anonymous join the tenant then rejected.
+   *
+   * Never throws. Returns true if the page navigated away from
+   * login.microsoftonline.com, false if still stuck there after 3 attempts
+   * (in which case an `unrecognized-interrupt` debug screenshot is uploaded).
+   * The caller's waitForFunction remains the final authoritative check.
+   */
+  private static async handleM365Interrupts(
+    page: Page,
+    email: string,
+    meetingId: number,
+    s3: S3Service | null
+  ): Promise<boolean> {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (!page.url().includes('login.microsoftonline.com')) {
+        return true;
+      }
+
+      console.log(`[Teams] Checking for M365 interrupt pages (attempt ${attempt}/3)...`);
+
+      // a. KMSI "Stay signed in?"
+      try {
+        const staySignedIn = page.locator('#idSIButton9');
+        const kmsiCheckbox = page.locator('#KmsiCheckboxField');
+        const onKmsi =
+          (await staySignedIn.isVisible({ timeout: 4000 }).catch(() => false)) ||
+          (await kmsiCheckbox.isVisible({ timeout: 2000 }).catch(() => false));
+        if (onKmsi) {
+          await staySignedIn.click({ timeout: 4000 }).catch((err) => {
+            console.log('[Teams] Could not click KMSI Yes button (non-fatal):', err);
+          });
+          console.log('[Teams] Handled KMSI prompt');
+          await page.waitForTimeout(1500);
+          continue;
+        }
+      } catch (err) {
+        console.log('[Teams] KMSI handler check failed (non-fatal):', err);
+      }
+
+      // b. "Don't lose access to your account" (security info update prompt)
+      try {
+        const title = await page.title().catch(() => '');
+        const saotccTitle = page.locator('#idDiv_SAOTCC_Title');
+        const onDontLoseAccess =
+          title.includes("Don't lose access") ||
+          (await saotccTitle.isVisible({ timeout: 3000 }).catch(() => false));
+        if (onDontLoseAccess) {
+          const dismissSelectors = [
+            '#idBtn_Back',
+            'a:has-text("Not now")',
+            'button:has-text("Not now")',
+            'a:has-text("Skip")',
+            'button:has-text("Skip")',
+          ];
+          for (const selector of dismissSelectors) {
+            const el = page.locator(selector).first();
+            if (await el.isVisible({ timeout: 3000 }).catch(() => false)) {
+              await el.click();
+              break;
+            }
+          }
+          console.log('[Teams] Handled "Don\'t lose access" security prompt');
+          await page.waitForTimeout(1500);
+          continue;
+        }
+      } catch (err) {
+        console.log('[Teams] "Don\'t lose access" handler check failed (non-fatal):', err);
+      }
+
+      // c. Account picker ("Pick an account" / "You have multiple accounts")
+      try {
+        const tile = page.locator('[data-test-id="tile"]').first();
+        const pickAccountText = page.getByText('Pick an account', { exact: false }).first();
+        const onAccountPicker =
+          (await tile.isVisible({ timeout: 3000 }).catch(() => false)) ||
+          (await pickAccountText.isVisible({ timeout: 2000 }).catch(() => false));
+        if (onAccountPicker) {
+          const matchingTile = page.locator('[data-test-id="tile"]', { hasText: email }).first();
+          if (await matchingTile.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await matchingTile.click();
+          } else if (await tile.isVisible({ timeout: 1000 }).catch(() => false)) {
+            console.log('[Teams] No tile matched BOT_EMAIL — clicking first available tile');
+            await tile.click();
+          }
+          console.log('[Teams] Handled account picker');
+          await page.waitForTimeout(1500);
+          continue;
+        }
+      } catch (err) {
+        console.log('[Teams] Account picker handler check failed (non-fatal):', err);
+      }
+
+      // d. Consent / permissions screen ("Permissions requested" / "Review permissions")
+      try {
+        const acceptButton = page.locator('button[value="Accept"]').first();
+        const permissionsText = page.getByText('Permissions requested', { exact: false }).first();
+        const onConsent =
+          (await acceptButton.isVisible({ timeout: 3000 }).catch(() => false)) ||
+          (await permissionsText.isVisible({ timeout: 2000 }).catch(() => false));
+        if (onConsent) {
+          if (await acceptButton.isVisible({ timeout: 2000 }).catch(() => false)) {
+            await acceptButton.click();
+          }
+          console.log('[Teams] Handled consent/permissions screen');
+          await page.waitForTimeout(1500);
+          continue;
+        }
+      } catch (err) {
+        console.log('[Teams] Consent handler check failed (non-fatal):', err);
+      }
+
+      // Nothing recognized this pass. If the page is still settling, give it
+      // one more short beat before the next attempt; if we're out of
+      // attempts, the loop exits and the unrecognized-interrupt path below
+      // takes over.
+      await page.waitForTimeout(1500);
+    }
+
+    // e. Still on login.microsoftonline.com after 3 attempts and none of the
+    // known handlers matched — capture evidence and let the caller's
+    // waitForFunction produce the existing WARNING + anonymous fallback.
+    if (page.url().includes('login.microsoftonline.com')) {
+      try {
+        const title = await page.title().catch(() => '(unknown title)');
+        console.log(`[Teams] Unrecognized M365 interrupt page — title: "${title}", url: ${page.url()}`);
+      } catch (err) {
+        console.log('[Teams] Failed to read page title for unrecognized interrupt log (non-fatal):', err);
+      }
+      await this.captureAuthDebugScreenshot(page, meetingId, 'unrecognized-interrupt', s3);
+      return false;
+    }
+
+    return true;
   }
 
   /**
