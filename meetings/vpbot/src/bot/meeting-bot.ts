@@ -184,7 +184,10 @@ export class MeetingBot extends EventEmitter {
         const botEmail = process.env.BOT_EMAIL;
         const botPassword = process.env.BOT_PASSWORD;
         if (botEmail && botPassword) {
-          teamsAuthenticated = await TeamsHandler.signInWithM365(this.page, botEmail, botPassword);
+          // Numeric meeting id for namespacing auth debug screenshots in S3
+          // (WI #7086) — same MEETING_ID-env-first pattern reportStatus() uses.
+          const numericMeetingId = parseInt(process.env.MEETING_ID || this.meeting.id, 10) || 0;
+          teamsAuthenticated = await TeamsHandler.signInWithM365(this.page, botEmail, botPassword, numericMeetingId);
         } else {
           console.log('[Bot] BOT_EMAIL/BOT_PASSWORD not set — joining Teams as anonymous guest');
         }
