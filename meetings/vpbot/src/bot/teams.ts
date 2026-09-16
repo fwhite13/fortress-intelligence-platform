@@ -203,6 +203,18 @@ export class TeamsHandler {
   private static async waitForPreJoinScreen(page: Page, timeoutMs: number = 120000): Promise<boolean> {
     console.log(`[Teams] Waiting for pre-join screen (timeout: ${timeoutMs / 1000}s)...`);
 
+    // Check for authenticated pre-join first (no name input, but join button
+    // present) — after a successful M365 sign-in, Teams reloads straight into
+    // this state with no display-name field to wait for (WI #7101).
+    const joinBtn = page.locator('[data-tid="prejoin-join-button"]').first();
+    if (await joinBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const nameInput = page.locator('input[data-tid="prejoin-display-name-input"]').first();
+      if (!(await nameInput.isVisible({ timeout: 1000 }).catch(() => false))) {
+        console.log('[Teams] Authenticated pre-join screen detected (join button present, no name input)');
+        return true;
+      }
+    }
+
     // Primary indicator: the name input field
     try {
       const nameInput = page.locator('input[data-tid="prejoin-display-name-input"]');
@@ -256,13 +268,20 @@ export class TeamsHandler {
   }
 
   /**
-   * Authenticate the browser session with Microsoft 365 (WI #7032) before
-   * navigating to the meeting URL, so the bot joins as a real signed-in
-   * account instead of an anonymous guest.
+   * Sign in with Microsoft 365 from the Teams pre-join screen (WI #7101).
    *
-   * Runs entirely against login.microsoftonline.com's own flow — no
-   * FIRM-specific logic here, just BOT_EMAIL / BOT_PASSWORD (env-injected
-   * per environment by the ECS task definition).
+   * Contract: `page` must already be on the Teams light-meetings pre-join
+   * screen (anonymous state) when this is called — NOT
+   * login.microsoftonline.com. Teams web auth starts from a "Sign in" link
+   * on the pre-join screen itself; navigating to Microsoft's login domain
+   * directly (the old approach) does not carry the meeting context and
+   * doesn't reflect how the Teams web client actually authenticates.
+   *
+   * Flow: click "Sign in" -> in-page Teams email modal -> enter email ->
+   * Next -> Microsoft password step (rendered in an iframe OR a popup
+   * window, detected at runtime) -> enter password -> Sign in -> KMSI
+   * ("Stay signed in?") -> pre-join screen reloads authenticated (name
+   * input gone, Join button + account identity present).
    *
    * Never throws — sign-in problems (MFA challenge, conditional access,
    * changed page layout, etc.) are logged and reported as `false` so the
@@ -275,56 +294,155 @@ export class TeamsHandler {
    *                   (unit tests / callers that don't have a meeting yet).
    */
   static async signInWithM365(page: Page, email: string, password: string, meetingId: number = 0): Promise<boolean> {
-    console.log('[Teams] Authenticating with Microsoft 365...');
+    console.log('[Teams] Attempting M365 sign-in from pre-join screen...');
     const s3 = meetingId > 0
       ? new S3Service(process.env.AWS_REGION || 'us-east-1', process.env.S3_BUCKET || 'firm-recordings-dev')
       : null;
-    try {
-      await page.goto('https://login.microsoftonline.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await this.captureAuthDebugScreenshot(page, meetingId, 'after-load', s3);
 
-      // Email entry
-      const emailInput = page.locator('input[type="email"], input[name="loginfmt"]').first();
+    try {
+      // Step 1: click the "Sign in" link/button on the pre-join screen
+      const signInSelectors = [
+        'a:has-text("Sign in")',
+        'button:has-text("Sign in")',
+        '[data-tid*="sign-in"]',
+      ];
+      let clickedSignIn = false;
+      for (const selector of signInSelectors) {
+        try {
+          const el = page.locator(selector).first();
+          if (await el.isVisible({ timeout: 5000 })) {
+            await el.click();
+            console.log(`[Teams] Clicked "Sign in" via: ${selector}`);
+            clickedSignIn = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+      if (!clickedSignIn) {
+        console.log('[Teams] No "Sign in" link found on pre-join screen — cannot authenticate');
+        return false;
+      }
+      await this.captureAuthDebugScreenshot(page, meetingId, 'after-signin-click', s3);
+
+      // Step 2: in-page Teams email entry modal
+      const emailInput = page.locator('input[type="email"], input[placeholder*="email" i], input[placeholder*="phone" i]').first();
       await emailInput.waitFor({ state: 'visible', timeout: 20000 });
       await emailInput.fill(email);
-      await this.clickM365Button(page);
+      await this.clickTeamsAuthNext(page);
       await this.captureAuthDebugScreenshot(page, meetingId, 'after-email', s3);
 
-      // Password entry
-      const passwordInput = page.locator('input[type="password"], input[name="passwd"]').first();
-      await passwordInput.waitFor({ state: 'visible', timeout: 20000 });
-      await passwordInput.fill(password);
-      await this.clickM365Button(page);
-      await this.captureAuthDebugScreenshot(page, meetingId, 'after-password', s3);
-
-      // Handle KMSI and any other known Microsoft interrupt pages (security info
-      // nag, account picker, consent screen) before checking for the final
-      // redirect off login.microsoftonline.com. This replaces the old bare KMSI
-      // check, which silently ate a 30s waitForFunction budget whenever a
-      // different interrupt page (e.g. "Don't lose access to your account")
-      // showed up instead of KMSI (WI #7086 / meeting 113 root cause).
-      await this.handleM365Interrupts(page, email, meetingId, s3);
-
-      // Confirm sign-in completed: we should have left login.microsoftonline.com
-      await page.waitForFunction(
-        () => !window.location.hostname.includes('login.microsoftonline.com'),
-        { timeout: 30000 }
-      ).catch(() => {
-        console.log('[Teams] WARNING: still on login.microsoftonline.com after sign-in attempt');
-      });
-
-      if (page.url().includes('login.microsoftonline.com')) {
-        await this.captureAuthDebugScreenshot(page, meetingId, 'at-warning', s3);
-        console.log('[Teams] M365 sign-in did not complete — falling back to anonymous join');
+      // Step 3: password step — start listening for a popup *before* the
+      // click that could open one, then try the iframe path; whichever
+      // surface actually shows the password field wins.
+      const popupPromise = page.context().waitForEvent('page', { timeout: 8000 }).catch(() => null);
+      const authCtx = await this.resolvePasswordContext(page, popupPromise);
+      if (!authCtx) {
+        console.log('[Teams] Could not locate password field (iframe or popup) — falling back to anonymous join');
+        await this.captureAuthDebugScreenshot(page, meetingId, 'no-password-field', s3);
         return false;
       }
 
-      console.log('[Teams] M365 sign-in complete');
+      const passwordInput = authCtx.locator('input[type="password"], input[name="passwd"]').first();
+      await passwordInput.waitFor({ state: 'visible', timeout: 20000 });
+      await passwordInput.fill(password);
+      await this.clickM365Button(authCtx.locator);
+      await this.captureAuthDebugScreenshot(page, meetingId, 'after-password', s3);
+
+      // Step 4: KMSI and other known Microsoft interrupt pages, in whichever
+      // surface (iframe or popup) the auth flow is actually running.
+      await this.handleM365InterruptsInContext(authCtx, email);
+      await this.captureAuthDebugScreenshot(page, meetingId, 'after-kmsi', s3);
+
+      // Step 5: wait for the pre-join screen to reload in authenticated
+      // state — name input gone, Join button present.
+      await page.waitForFunction(() => {
+        const nameInput = document.querySelector('input[data-tid="prejoin-display-name-input"]');
+        const joinBtn = document.querySelector('button[data-tid="prejoin-join-button"], [data-tid="prejoin-join-button"]');
+        return !nameInput && !!joinBtn;
+      }, { timeout: 30000 }).catch(async () => {
+        // Fall back to an identity-display indicator in case the join
+        // button selector changed but the account identity view is there.
+        await page.waitForSelector('[data-tid*="identity"], [class*="identity"], a:has-text("Change")', { timeout: 10000 });
+      });
+
+      console.log('[Teams] M365 sign-in complete — authenticated pre-join screen detected');
       return true;
     } catch (err) {
       console.log('[Teams] M365 sign-in failed, falling back to anonymous join:', err);
+      await this.captureAuthDebugScreenshot(page, meetingId, 'signin-failed', s3);
       return false;
     }
+  }
+
+  /**
+   * Click the "Next" button on the in-page Teams email entry modal (the
+   * Teams-styled overlay shown after clicking "Sign in" on the pre-join
+   * screen — distinct from the Microsoft-branded password step).
+   */
+  private static async clickTeamsAuthNext(page: Page): Promise<void> {
+    const selectors = ['button:has-text("Next")', 'input[type="submit"]'];
+    for (const selector of selectors) {
+      try {
+        const btn = page.locator(selector).first();
+        if (await btn.isVisible({ timeout: 5000 })) {
+          await btn.click();
+          return;
+        }
+      } catch {
+        continue;
+      }
+    }
+    console.log('[Teams] WARNING: could not find Next button on Teams email entry modal');
+  }
+
+  /**
+   * Locate the Microsoft password step after the Teams email modal's "Next"
+   * click. It can render two different ways depending on the tenant/session:
+   * an iframe embedded in the Teams pre-join page, or a separate popup
+   * window. Try the iframe first (checked in-place, no extra wait needed
+   * beyond its own timeout); if that comes up empty, fall back to whatever
+   * popup (if any) the caller's `popupPromise` already started listening
+   * for before this step began.
+   *
+   * Returns a small context object abstracting over the two surfaces so the
+   * rest of the sign-in flow can locate elements without caring which one
+   * it's in.
+   */
+  private static async resolvePasswordContext(
+    page: Page,
+    popupPromise: Promise<Page | null>
+  ): Promise<{ locator: (selector: string) => Locator; kind: 'iframe' | 'popup' } | null> {
+    console.log('[Teams] Looking for Microsoft password step (iframe or popup)...');
+
+    const iframeSelectors = [
+      'iframe[src*="login.microsoftonline.com"]',
+      'iframe[src*="login.microsoft.com"]',
+    ];
+    for (const selector of iframeSelectors) {
+      try {
+        const frame = page.frameLocator(selector);
+        const pwInput = frame.locator('input[type="password"], input[name="passwd"]').first();
+        if (await pwInput.isVisible({ timeout: 8000 }).catch(() => false)) {
+          console.log(`[Teams] Password step found in iframe: ${selector}`);
+          return { locator: (sel: string) => frame.locator(sel), kind: 'iframe' };
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    console.log('[Teams] No iframe password field found — checking for popup window...');
+    const popup = await popupPromise;
+    if (popup) {
+      await popup.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+      console.log('[Teams] Popup window detected for auth:', popup.url());
+      return { locator: (sel: string) => popup.locator(sel), kind: 'popup' };
+    }
+
+    console.log('[Teams] No popup window appeared either');
+    return null;
   }
 
   /**
@@ -365,38 +483,37 @@ export class TeamsHandler {
 
   /**
    * Handle known Microsoft sign-in interrupt pages that can appear after the
-   * password step, before the final "did we leave login.microsoftonline.com"
-   * check. Loops up to 3 times since dismissing one interrupt (e.g. KMSI) can
-   * reveal another (e.g. the security info nag).
+   * password step (KMSI, security info nag, account picker, consent), in
+   * whichever surface (iframe or popup) the Teams-initiated auth flow is
+   * actually running (WI #7101 — generalized from the old page-only version
+   * that assumed login.microsoftonline.com was the top-level page). Loops up
+   * to 3 times since dismissing one interrupt (e.g. KMSI) can reveal another.
    *
-   * Root cause of meeting 113 (2026-09-15): the old code only checked for the
-   * KMSI prompt. When Microsoft showed "Don't lose access to your account"
-   * instead, the KMSI check found nothing (fast no-op), and the bot burned
-   * the entire 30s waitForFunction budget stuck on that page before falling
-   * back to an anonymous join the tenant then rejected.
+   * Root cause of meeting 113 (2026-09-15) that motivated the original
+   * multi-interrupt handling: the old code only checked for the KMSI prompt.
+   * When Microsoft showed "Don't lose access to your account" instead, the
+   * KMSI check found nothing (fast no-op), and the bot burned the entire 30s
+   * waitForFunction budget stuck on that page before falling back to an
+   * anonymous join the tenant then rejected.
    *
-   * Never throws. Returns true if the page navigated away from
-   * login.microsoftonline.com, false if still stuck there after 3 attempts
-   * (in which case an `unrecognized-interrupt` debug screenshot is uploaded).
-   * The caller's waitForFunction remains the final authoritative check.
+   * Never throws. Best-effort — once no recognized interrupt shows up, the
+   * caller's own wait for the authenticated pre-join screen is the final
+   * authoritative check that sign-in actually completed.
    */
-  private static async handleM365Interrupts(
-    page: Page,
-    email: string,
-    meetingId: number,
-    s3: S3Service | null
-  ): Promise<boolean> {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      if (!page.url().includes('login.microsoftonline.com')) {
-        return true;
-      }
+  private static async handleM365InterruptsInContext(
+    authCtx: { locator: (selector: string) => Locator; kind: 'iframe' | 'popup' },
+    email: string
+  ): Promise<void> {
+    const locate = authCtx.locator;
 
-      console.log(`[Teams] Checking for M365 interrupt pages (attempt ${attempt}/3)...`);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`[Teams] Checking for M365 interrupt pages in ${authCtx.kind} (attempt ${attempt}/3)...`);
+      let handled = false;
 
       // a. KMSI "Stay signed in?"
       try {
-        const staySignedIn = page.locator('#idSIButton9');
-        const kmsiCheckbox = page.locator('#KmsiCheckboxField');
+        const staySignedIn = locate('#idSIButton9');
+        const kmsiCheckbox = locate('#KmsiCheckboxField');
         const onKmsi =
           (await staySignedIn.isVisible({ timeout: 4000 }).catch(() => false)) ||
           (await kmsiCheckbox.isVisible({ timeout: 2000 }).catch(() => false));
@@ -404,120 +521,95 @@ export class TeamsHandler {
           await staySignedIn.click({ timeout: 4000 }).catch((err) => {
             console.log('[Teams] Could not click KMSI Yes button (non-fatal):', err);
           });
-          console.log('[Teams] Handled KMSI prompt');
-          await page.waitForTimeout(1500);
-          continue;
+          console.log(`[Teams] Handled KMSI prompt in ${authCtx.kind}`);
+          handled = true;
         }
       } catch (err) {
         console.log('[Teams] KMSI handler check failed (non-fatal):', err);
       }
 
       // b. "Don't lose access to your account" (security info update prompt)
-      try {
-        const title = await page.title().catch(() => '');
-        const saotccTitle = page.locator('#idDiv_SAOTCC_Title');
-        const onDontLoseAccess =
-          title.includes("Don't lose access") ||
-          (await saotccTitle.isVisible({ timeout: 3000 }).catch(() => false));
-        if (onDontLoseAccess) {
-          const dismissSelectors = [
-            '#idBtn_Back',
-            'a:has-text("Not now")',
-            'button:has-text("Not now")',
-            'a:has-text("Skip")',
-            'button:has-text("Skip")',
-          ];
-          for (const selector of dismissSelectors) {
-            const el = page.locator(selector).first();
-            if (await el.isVisible({ timeout: 3000 }).catch(() => false)) {
-              await el.click();
-              break;
+      if (!handled) {
+        try {
+          const saotccTitle = locate('#idDiv_SAOTCC_Title');
+          if (await saotccTitle.isVisible({ timeout: 3000 }).catch(() => false)) {
+            const dismissSelectors = [
+              '#idBtn_Back',
+              'a:has-text("Not now")',
+              'button:has-text("Not now")',
+              'a:has-text("Skip")',
+              'button:has-text("Skip")',
+            ];
+            for (const selector of dismissSelectors) {
+              const el = locate(selector).first();
+              if (await el.isVisible({ timeout: 3000 }).catch(() => false)) {
+                await el.click();
+                break;
+              }
             }
+            console.log(`[Teams] Handled "Don't lose access" security prompt in ${authCtx.kind}`);
+            handled = true;
           }
-          console.log('[Teams] Handled "Don\'t lose access" security prompt');
-          await page.waitForTimeout(1500);
-          continue;
+        } catch (err) {
+          console.log('[Teams] "Don\'t lose access" handler check failed (non-fatal):', err);
         }
-      } catch (err) {
-        console.log('[Teams] "Don\'t lose access" handler check failed (non-fatal):', err);
       }
 
       // c. Account picker ("Pick an account" / "You have multiple accounts")
-      try {
-        const tile = page.locator('[data-test-id="tile"]').first();
-        const pickAccountText = page.getByText('Pick an account', { exact: false }).first();
-        const onAccountPicker =
-          (await tile.isVisible({ timeout: 3000 }).catch(() => false)) ||
-          (await pickAccountText.isVisible({ timeout: 2000 }).catch(() => false));
-        if (onAccountPicker) {
-          const matchingTile = page.locator('[data-test-id="tile"]', { hasText: email }).first();
-          if (await matchingTile.isVisible({ timeout: 3000 }).catch(() => false)) {
-            await matchingTile.click();
-          } else if (await tile.isVisible({ timeout: 1000 }).catch(() => false)) {
-            console.log('[Teams] No tile matched BOT_EMAIL — clicking first available tile');
-            await tile.click();
+      if (!handled) {
+        try {
+          const tile = locate('[data-test-id="tile"]').first();
+          if (await tile.isVisible({ timeout: 3000 }).catch(() => false)) {
+            const matchingTile = locate('[data-test-id="tile"]').filter({ hasText: email }).first();
+            if (await matchingTile.isVisible({ timeout: 3000 }).catch(() => false)) {
+              await matchingTile.click();
+            } else {
+              console.log('[Teams] No tile matched BOT_EMAIL — clicking first available tile');
+              await tile.click();
+            }
+            console.log(`[Teams] Handled account picker in ${authCtx.kind}`);
+            handled = true;
           }
-          console.log('[Teams] Handled account picker');
-          await page.waitForTimeout(1500);
-          continue;
+        } catch (err) {
+          console.log('[Teams] Account picker handler check failed (non-fatal):', err);
         }
-      } catch (err) {
-        console.log('[Teams] Account picker handler check failed (non-fatal):', err);
       }
 
       // d. Consent / permissions screen ("Permissions requested" / "Review permissions")
-      try {
-        const acceptButton = page.locator('button[value="Accept"]').first();
-        const permissionsText = page.getByText('Permissions requested', { exact: false }).first();
-        const onConsent =
-          (await acceptButton.isVisible({ timeout: 3000 }).catch(() => false)) ||
-          (await permissionsText.isVisible({ timeout: 2000 }).catch(() => false));
-        if (onConsent) {
-          if (await acceptButton.isVisible({ timeout: 2000 }).catch(() => false)) {
+      if (!handled) {
+        try {
+          const acceptButton = locate('button[value="Accept"]').first();
+          if (await acceptButton.isVisible({ timeout: 3000 }).catch(() => false)) {
             await acceptButton.click();
+            console.log(`[Teams] Handled consent/permissions screen in ${authCtx.kind}`);
+            handled = true;
           }
-          console.log('[Teams] Handled consent/permissions screen');
-          await page.waitForTimeout(1500);
-          continue;
+        } catch (err) {
+          console.log('[Teams] Consent handler check failed (non-fatal):', err);
         }
-      } catch (err) {
-        console.log('[Teams] Consent handler check failed (non-fatal):', err);
       }
 
-      // Nothing recognized this pass. If the page is still settling, give it
-      // one more short beat before the next attempt; if we're out of
-      // attempts, the loop exits and the unrecognized-interrupt path below
-      // takes over.
-      await page.waitForTimeout(1500);
-    }
-
-    // e. Still on login.microsoftonline.com after 3 attempts and none of the
-    // known handlers matched — capture evidence and let the caller's
-    // waitForFunction produce the existing WARNING + anonymous fallback.
-    if (page.url().includes('login.microsoftonline.com')) {
-      try {
-        const title = await page.title().catch(() => '(unknown title)');
-        console.log(`[Teams] Unrecognized M365 interrupt page — title: "${title}", url: ${page.url()}`);
-      } catch (err) {
-        console.log('[Teams] Failed to read page title for unrecognized interrupt log (non-fatal):', err);
+      if (!handled) {
+        // Nothing recognized this pass — the auth surface may already be
+        // closing as Teams transitions back to the authenticated pre-join
+        // screen. Stop looping; the caller's own wait is authoritative.
+        break;
       }
-      await this.captureAuthDebugScreenshot(page, meetingId, 'unrecognized-interrupt', s3);
-      return false;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     }
-
-    return true;
   }
 
   /**
-   * Click the Next/Sign in submit button on login.microsoftonline.com.
-   * The same button id (#idSIButton9) is reused across the email, password,
-   * and KMSI steps of the flow.
+   * Click the Next/Sign in submit button on the Microsoft password step.
+   * The same button id (#idSIButton9) is reused across the password and
+   * KMSI steps of the flow. `locate` abstracts over whether the step is
+   * rendered in an iframe or a popup window (WI #7101).
    */
-  private static async clickM365Button(page: Page): Promise<void> {
+  private static async clickM365Button(locate: (selector: string) => Locator): Promise<void> {
     const selectors = ['#idSIButton9', 'input[type="submit"]', 'button[type="submit"]'];
     for (const selector of selectors) {
       try {
-        const btn = page.locator(selector).first();
+        const btn = locate(selector).first();
         if (await btn.isVisible({ timeout: 5000 })) {
           await btn.click();
           return;
@@ -526,7 +618,7 @@ export class TeamsHandler {
         continue;
       }
     }
-    console.log('[Teams] WARNING: could not find a Next/Sign in button on login.microsoftonline.com');
+    console.log('[Teams] WARNING: could not find a Next/Sign in button on the Microsoft password step');
   }
 
   /**
@@ -536,17 +628,16 @@ export class TeamsHandler {
    * 1. Navigate to meeting URL (original URL, no /_#/ rewriting)
    * 2. Wait for launcher page, click "Continue on this browser" (force:true)
    * 3. Wait for pre-join screen (name input field, up to 120s)
-   * 4. Fill in bot name — anonymous guest join only; a signed-in account
+   * 4. Attempt M365 sign-in from the pre-join screen if BOT_EMAIL/BOT_PASSWORD
+   *    are configured (WI #7101) — falls back to anonymous on any failure
+   * 5. Fill in bot name — anonymous guest join only; a signed-in account
    *    uses its M365 profile name and has no display-name field to fill
-   * 5. Turn off camera/mic
-   * 6. Click "Join now"
-   * 7. Wait for meeting entry (look for "Leave" button)
-   * 8. Handle waiting room if needed
-   *
-   * @param authenticated  true if signInWithM365() succeeded for this session —
-   *                       skips the anonymous display-name pre-fill (WI #7032)
+   * 6. Turn off camera/mic
+   * 7. Click "Join now"
+   * 8. Wait for meeting entry (look for "Leave" button)
+   * 9. Handle waiting room if needed
    */
-  static async join(page: Page, botName: string, originalUrl?: string, authenticated: boolean = false): Promise<void> {
+  static async join(page: Page, botName: string, originalUrl?: string): Promise<void> {
     console.log('[Teams] Starting join flow...');
     console.log('[Teams] Current URL:', page.url());
 
@@ -583,9 +674,30 @@ export class TeamsHandler {
       const clicked = await this.clickLauncherButton(page);
       
       if (clicked) {
-        console.log('[Teams] Launcher button clicked, waiting for navigation...');
-        // Wait for navigation or page change after clicking
-        await page.waitForTimeout(5000);
+        console.log('[Teams] Launcher button clicked, waiting for navigation to light-meetings...');
+        try {
+          await page.waitForURL(
+            (url) => !url.toString().includes('launcher.html') && !url.toString().includes('/dl/launcher/'),
+            { timeout: 15000 }
+          );
+          console.log('[Teams] Launcher navigation complete:', page.url());
+        } catch {
+          // Natural navigation didn't complete in 15s — a browser camera/mic
+          // permission popup can add enough delay to blow past a flat sleep.
+          // Force it by re-navigating directly to the original meeting URL.
+          // We do NOT rewrite to the classic /_#/l/meetup-join/ format here:
+          // that route was retired July 1, 2025 and now returns /error/eoa
+          // (see module docstring) — re-navigating the original URL re-enters
+          // the same launcher/light-meetings flow instead.
+          if (originalUrl) {
+            console.log('[Teams] Launcher navigation timed out — re-navigating directly to original meeting URL:', originalUrl);
+            await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch((err) => {
+              console.log('[Teams] WARNING: direct re-navigation failed:', err);
+            });
+          } else {
+            console.log('[Teams] WARNING: Launcher navigation timed out and no originalUrl available for fallback');
+          }
+        }
       } else {
         console.log('[Teams] WARNING: Could not find launcher button');
         // Log page state for debugging
@@ -626,7 +738,27 @@ export class TeamsHandler {
 
     await this.screenshot(page, '02-pre-join-screen');
 
-    // Step 3: Enter name in the name field
+    // Step 3: Attempt M365 sign-in from the pre-join screen if credentials
+    // are configured (WI #7101). BOT_EMAIL / BOT_PASSWORD are generic env
+    // vars — each environment's ECS task definition injects the correct
+    // values. Absent either one, or if sign-in fails for any reason, fall
+    // back to the existing anonymous join path.
+    let authenticated = false;
+    const botEmail = process.env.BOT_EMAIL;
+    const botPassword = process.env.BOT_PASSWORD;
+    if (botEmail && botPassword) {
+      // Numeric meeting id for namespacing auth debug screenshots in S3
+      // (WI #7086) — same MEETING_ID-env-first pattern reportStatus() uses.
+      const numericMeetingId = parseInt(process.env.MEETING_ID || '0', 10) || 0;
+      authenticated = await this.signInWithM365(page, botEmail, botPassword, numericMeetingId);
+      console.log(authenticated
+        ? '[Teams] M365 authentication succeeded — will skip anonymous name entry'
+        : '[Teams] M365 authentication did not complete — continuing as anonymous guest');
+    } else {
+      console.log('[Teams] BOT_EMAIL/BOT_PASSWORD not set — joining Teams as anonymous guest');
+    }
+
+    // Step 4: Enter name in the name field
     // Anonymous guest join only — a signed-in M365 account has no display-name
     // field on the pre-join screen; Teams uses the account's profile name (WI #7032).
     if (!authenticated) {
@@ -674,13 +806,13 @@ export class TeamsHandler {
       console.log('[Teams] Authenticated session — skipping anonymous display-name pre-fill');
     }
 
-    // Step 4: Turn off camera and microphone
+    // Step 5: Turn off camera and microphone
     await this.turnOffDevices(page);
 
     await page.waitForTimeout(1000);
     await this.screenshot(page, '03-before-join-click');
 
-    // Step 5: Click Join now button
+    // Step 6: Click Join now button
     const joinButtonTexts = ['Join now', 'Join', 'Ask to join', 'Join meeting'];
 
     let clickedJoin = false;
@@ -732,7 +864,7 @@ export class TeamsHandler {
       await this.screenshot(page, '03b-no-join-button');
     }
 
-    // Step 6: Wait for meeting to load
+    // Step 7: Wait for meeting to load
     console.log('[Teams] Waiting for meeting to load...');
     
     // Look for the Leave button as confirmation we're in the meeting
@@ -749,7 +881,7 @@ export class TeamsHandler {
 
     await this.screenshot(page, '04-after-join-attempt');
 
-    // Step 7: Check if we're in a waiting room
+    // Step 8: Check if we're in a waiting room
     const bodyText = await page.evaluate(() => document.body?.innerText || '');
     const waitingRoomPhrases = [
       'waiting to be admitted',
