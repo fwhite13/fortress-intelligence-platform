@@ -90,31 +90,34 @@ export class TeamsHandler {
 
   /**
    * Process a Teams meeting URL for browser join.
-   * 
-   * NEW TEAMS (v2): We navigate to the original URL directly. 
-   * The launcher page is handled by clicking "Continue on this browser".
-   * 
-   * We do NOT rewrite to /_#/ URLs — those route to Classic Teams which
-   * was retired July 1, 2025 and returns /error/eoa.
-   * 
-   * We DO add query params that hint the browser to suppress app launch prompts,
-   * but the core flow relies on clicking through the launcher page.
+   *
+   * NEW TEAMS (v2) /meet/ID?p=KEY format: navigating there always redirects
+   * to the launcher page (/dl/launcher/launcher.html), and its "Continue on
+   * this browser" button click produces a synthetic isTrusted:false event
+   * that Teams' launcher JS does not act on — confirmed unfixable via
+   * force:true, fake media device flags, or grantPermissions (live test,
+   * meeting 135, 2026-09-16). Navigating directly to light-meetings/launch
+   * with the same ?p= key lands immediately on the pre-join screen, skipping
+   * the launcher page entirely (confirmed via live browser test, 2026-09-16).
+   *
+   * Other URL formats (e.g. /l/meetup-join/) are passed through as-is.
    */
   static async processTeamsMeetingUrl(meetingUrl: string): Promise<string> {
     console.log('[Teams] Processing meeting URL:', meetingUrl);
 
-    // IMPORTANT: Do NOT add extra query parameters (anon, launchAgent, type).
-    // Teams' server-side redirect intermittently mangles URLs when extra params
-    // are present — it can drop the ?p= passcode parameter, causing the coords
-    // base64 blob to have empty meetingCode and missing passcode, resulting in
-    // "We couldn't find a meeting matching this ID and passcode" errors.
-    //
-    // The launcher page is handled by clicking "Continue on this browser" anyway,
-    // so the extra params are unnecessary. Pass the URL through as-is.
-
     try {
-      // Validate it's a proper URL
-      new URL(meetingUrl);
+      const url = new URL(meetingUrl);
+
+      if (url.hostname === 'teams.microsoft.com' && url.pathname.startsWith('/meet/')) {
+        const meetingKey = url.searchParams.get('p');
+        if (meetingKey) {
+          const lightMeetingsUrl = `https://teams.microsoft.com/light-meetings/launch?p=${encodeURIComponent(meetingKey)}&anon=true&launchAgent=join_launcher_web&lightExperience=true`;
+          console.log('[Teams] /meet/ format detected — bypassing launcher, navigating to:', lightMeetingsUrl);
+          return lightMeetingsUrl;
+        }
+        console.log('[Teams] /meet/ format with no p= parameter — using pass-through');
+      }
+
       console.log('[Teams] Processed URL (pass-through):', meetingUrl);
       return meetingUrl;
     } catch (error) {
