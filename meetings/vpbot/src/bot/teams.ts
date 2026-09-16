@@ -194,6 +194,46 @@ export class TeamsHandler {
   }
 
   /**
+   * Bypass the Teams launcher page by navigating directly to the destination
+   * URL encoded in the launcher's `url` query param, instead of relying on
+   * the "Continue on this browser" button click to trigger navigation.
+   *
+   * The launcher page (`/dl/launcher/launcher.html?url=...&type=meet&...`)
+   * embeds the real destination (e.g. `/_#/meet/<id>?p=<token>&anon=true`)
+   * as a URL-encoded query param. In headless Chromium the button click
+   * sometimes doesn't trigger navigation (likely automation detection), so
+   * we decode that param and go there directly.
+   *
+   * Returns true if the `url` param was found and navigation was attempted
+   * (regardless of whether the resulting page load fully settles — callers
+   * should re-check page state afterward), false if no `url` param was present.
+   */
+  private static async navigateFromLauncherParam(page: Page, launcherUrl: string): Promise<boolean> {
+    let destination: string;
+    try {
+      const parsed = new URL(launcherUrl);
+      const urlParam = parsed.searchParams.get('url');
+      if (!urlParam) {
+        return false;
+      }
+      destination = `https://teams.microsoft.com${urlParam}`;
+    } catch (err) {
+      console.log('[Teams] Failed to parse launcher URL for `url` param:', err);
+      return false;
+    }
+
+    console.log(`[Teams] Launcher button unresponsive — navigating directly to: ${destination}`);
+    try {
+      await page.goto(destination, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } catch (err) {
+      console.log('[Teams] Direct navigation from launcher param failed:', err);
+    }
+    // Give the SPA a moment to begin rendering before callers re-check page state.
+    await page.waitForTimeout(2000);
+    return true;
+  }
+
+  /**
    * Wait for the pre-join screen to appear.
    * 
    * The pre-join screen is where you enter your name and toggle devices.
@@ -685,21 +725,15 @@ export class TeamsHandler {
           );
           console.log('[Teams] Launcher navigation complete:', page.url());
         } catch {
-          // Natural navigation didn't complete in 15s — a browser camera/mic
-          // permission popup can add enough delay to blow past a flat sleep.
-          // Force it by re-navigating directly to the original meeting URL.
-          // We do NOT rewrite to the classic /_#/l/meetup-join/ format here:
-          // that route was retired July 1, 2025 and now returns /error/eoa
-          // (see module docstring) — re-navigating the original URL re-enters
-          // the same launcher/light-meetings flow instead.
-          if (originalUrl) {
-            console.log('[Teams] Launcher navigation timed out — re-navigating directly to original meeting URL:', originalUrl);
-            await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch((err) => {
-              console.log('[Teams] WARNING: direct re-navigation failed:', err);
-            });
-          } else {
-            console.log('[Teams] WARNING: Launcher navigation timed out and no originalUrl available for fallback');
-          }
+          // Natural navigation didn't complete in 15s — fall through to the
+          // launcher-param bypass below.
+        }
+
+        // The button click doesn't always trigger navigation (headless
+        // detection) — if we're still on the launcher, bypass it by
+        // navigating directly to the URL encoded in the launcher's `url` param.
+        if (page.url().includes('/dl/launcher/') || page.url().includes('launcher.html')) {
+          await this.navigateFromLauncherParam(page, page.url());
         }
       } else {
         console.log('[Teams] WARNING: Could not find launcher button');
@@ -734,6 +768,15 @@ export class TeamsHandler {
           if (!retryResult) {
             console.log('[Teams] WARNING: Still cannot reach pre-join screen after retry');
             await this.screenshot(page, '01d-retry-failed');
+
+            // Last resort: bypass the unresponsive launcher button entirely
+            // by navigating directly to the URL encoded in its `url` param.
+            if (page.url().includes('/dl/launcher/') || page.url().includes('launcher.html')) {
+              const navigated = await this.navigateFromLauncherParam(page, page.url());
+              if (navigated) {
+                await this.waitForPreJoinScreen(page, 60000);
+              }
+            }
           }
         }
       }
