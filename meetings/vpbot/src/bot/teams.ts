@@ -35,7 +35,6 @@
 import { Page, Locator } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { S3Service } from '../transcribe/s3.js';
 
 export class LobbyTimeoutError extends Error {
@@ -50,14 +49,30 @@ const SCREENSHOTS_DIR = process.env.RECORDINGS_DIR || '/app/recordings';
 export class TeamsHandler {
 
   /**
-   * Save a debug screenshot with sequential numbering
+   * Save a debug screenshot with sequential numbering and upload to S3
    */
-  private static async screenshot(page: Page, label: string): Promise<void> {
+  private static async screenshot(
+    page: Page,
+    label: string,
+    s3?: S3Service | null,
+    meetingId?: string | null
+  ): Promise<void> {
     try {
       const filename = `debug-${label}-${Date.now()}.png`;
       const filepath = path.join(SCREENSHOTS_DIR, filename);
       await page.screenshot({ path: filepath, fullPage: true });
       console.log(`[Teams] Screenshot saved: ${filename}`);
+
+      // Always upload to S3 when service is available
+      if (s3 && meetingId) {
+        try {
+          const key = `debug/screenshots/${meetingId}/${filename}`;
+          await s3.uploadWithKey(filepath, key);
+          console.log(`[Teams] Screenshot uploaded to S3: ${key}`);
+        } catch (uploadErr) {
+          console.log(`[Teams] WARNING: S3 screenshot upload failed (${label}):`, uploadErr);
+        }
+      }
     } catch (e) {
       console.log(`[Teams] Screenshot failed: ${e}`);
     }
@@ -89,39 +104,45 @@ export class TeamsHandler {
   }
 
   /**
-   * Process a Teams meeting URL for browser join.
+   * Process a Teams meeting URL for browser join using the Recall.ai
+   * server-side fetch approach.
    *
-   * NEW TEAMS (v2) /meet/ID?p=KEY format: navigating there always redirects
-   * to the launcher page (/dl/launcher/launcher.html), and its "Continue on
-   * this browser" button click produces a synthetic isTrusted:false event
-   * that Teams' launcher JS does not act on — confirmed unfixable via
-   * force:true, fake media device flags, or grantPermissions (live test,
-   * meeting 135, 2026-09-16). Navigating directly to light-meetings/launch
-   * with the same ?p= key lands immediately on the pre-join screen, skipping
-   * the launcher page entirely (confirmed via live browser test, 2026-09-16).
+   * This approach resolves any Teams URL format (/meet/, /l/meetup-join/, etc.)
+   * to the launcher URL by following redirects server-side, then modifies the
+   * launcher params to suppress the native-app dialog.
    *
-   * Other URL formats (e.g. /l/meetup-join/) are passed through as-is.
+   * Evidence: Recall.ai's production bot (github.com/recallai/microsoft-teams-meeting-bot)
+   * uses this method successfully across all Teams URL formats.
    */
   static async processTeamsMeetingUrl(meetingUrl: string): Promise<string> {
     console.log('[Teams] Processing meeting URL:', meetingUrl);
-
     try {
-      const url = new URL(meetingUrl);
+      new URL(meetingUrl); // validate
 
-      if (url.hostname === 'teams.microsoft.com' && url.pathname.startsWith('/meet/')) {
-        const meetingKey = url.searchParams.get('p');
-        if (meetingKey) {
-          const lightMeetingsUrl = `https://teams.microsoft.com/light-meetings/launch?p=${encodeURIComponent(meetingKey)}&anon=true&launchAgent=join_launcher_web&lightExperience=true`;
-          console.log('[Teams] /meet/ format detected — bypassing launcher, navigating to:', lightMeetingsUrl);
-          return lightMeetingsUrl;
-        }
-        console.log('[Teams] /meet/ format with no p= parameter — using pass-through');
+      // Server-side fetch: follow redirects to get the launcher URL
+      // This works for any Teams URL format (/meet/, /l/meetup-join/, etc.)
+      const response = await fetch(meetingUrl, {
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+        },
+      });
+
+      const resolvedUrl = new URL(response.url);
+      console.log('[Teams] Resolved URL:', resolvedUrl.toString());
+
+      // Only modify if we landed on the launcher page (suppress app-picker dialog)
+      if (resolvedUrl.pathname.includes('/dl/launcher/') || resolvedUrl.hostname.includes('teams')) {
+        resolvedUrl.searchParams.set('msLaunch', 'false');
+        resolvedUrl.searchParams.set('directDl', 'true');
+        resolvedUrl.searchParams.set('enableMobilePage', 'true');
+        resolvedUrl.searchParams.set('suppressPrompt', 'true');
       }
 
-      console.log('[Teams] Processed URL (pass-through):', meetingUrl);
-      return meetingUrl;
+      console.log('[Teams] Final processed URL:', resolvedUrl.toString());
+      return resolvedUrl.toString();
     } catch (error) {
-      console.log('[Teams] URL processing failed, using original:', error);
+      console.log('[Teams] URL resolution failed, using original:', error);
       return meetingUrl;
     }
   }
@@ -140,6 +161,7 @@ export class TeamsHandler {
     console.log('[Teams] Looking for launcher "Continue on this browser" button...');
 
     const launcherButtonSelectors = [
+      'button[data-tid="joinOnWeb"]', // Most stable (Recall.ai) — data-tid doesn't change with locale/version
       'button[aria-label="Join meeting from this browser"]',
       'button[aria-label="Continue on this browser"]',
       'button[aria-label="Join on this browser"]',
@@ -334,16 +356,18 @@ export class TeamsHandler {
    * caller can fall back to the anonymous join path rather than losing the
    * meeting entirely.
    *
-   * @param meetingId  numeric FIRM meeting id, used only to namespace debug
-   *                   screenshots uploaded to S3 (`debug/auth/<meetingId>/...`).
-   *                   Defaults to 0, which skips screenshot capture entirely
-   *                   (unit tests / callers that don't have a meeting yet).
+   * @param s3         S3Service instance for uploading auth debug screenshots.
+   *                   Pass null to skip screenshot uploads (unit tests).
+   * @param meetingId  meeting id string for namespacing S3 screenshot keys.
    */
-  static async signInWithM365(page: Page, email: string, password: string, meetingId: number = 0): Promise<boolean> {
+  static async signInWithM365(
+    page: Page,
+    email: string,
+    password: string,
+    s3: S3Service | null,
+    meetingId: string
+  ): Promise<boolean> {
     console.log('[Teams] Attempting M365 sign-in from pre-join screen...');
-    const s3 = meetingId > 0
-      ? new S3Service(process.env.AWS_REGION || 'us-east-1', process.env.S3_BUCKET || 'firm-recordings-dev')
-      : null;
 
     try {
       // Step 1: click the "Sign in" button on the pre-join screen. Confirmed
@@ -360,10 +384,10 @@ export class TeamsHandler {
         await page.waitForSelector('input[data-testid="emailInput"]', { state: 'visible', timeout: 10000 });
       } catch {
         console.log('[Teams] No "Sign in" dialog appeared on pre-join screen — cannot authenticate');
-        await this.captureAuthDebugScreenshot(page, meetingId, 'no-signin-dialog', s3);
+        await this.screenshot(page, 'auth-no-signin-dialog', s3, meetingId);
         return false;
       }
-      await this.captureAuthDebugScreenshot(page, meetingId, 'after-signin-click', s3);
+      await this.screenshot(page, 'auth-after-signin-click', s3, meetingId);
 
       // Step 2: in-page Fluent UI email dialog. The email input has
       // data-testid="emailInput" and placeholder="Enter your email" — NOT
@@ -372,7 +396,7 @@ export class TeamsHandler {
       await emailInput.waitFor({ state: 'visible', timeout: 10000 });
       await emailInput.fill(email);
       await this.clickTeamsAuthNext(page);
-      await this.captureAuthDebugScreenshot(page, meetingId, 'after-email', s3);
+      await this.screenshot(page, 'auth-after-email', s3, meetingId);
 
       // Step 3: after Next, the entire page navigates to
       // login.microsoftonline.com — confirmed via live test 2026-09-16 to be
@@ -383,23 +407,23 @@ export class TeamsHandler {
         await page.waitForURL('**/login.microsoftonline.com/**', { timeout: 30000 });
       } catch {
         console.log('[Teams] Did not navigate to login.microsoftonline.com — falling back to anonymous join');
-        await this.captureAuthDebugScreenshot(page, meetingId, 'no-msft-navigation', s3);
+        await this.screenshot(page, 'auth-no-msft-navigation', s3, meetingId);
         return false;
       }
       console.log('[Teams] On Microsoft login page:', page.url());
-      await this.captureAuthDebugScreenshot(page, meetingId, 'on-msft-login', s3);
+      await this.screenshot(page, 'auth-on-msft-login', s3, meetingId);
 
       // Step 4: password on login.microsoftonline.com
       const passwordInput = page.locator('input[type="password"], input[name="passwd"]').first();
       await passwordInput.waitFor({ state: 'visible', timeout: 20000 });
       await passwordInput.fill(password);
       await this.clickM365Button(page);
-      await this.captureAuthDebugScreenshot(page, meetingId, 'after-password', s3);
+      await this.screenshot(page, 'auth-after-password', s3, meetingId);
 
       // Step 5: KMSI and other known Microsoft interrupt pages on the
       // top-level page.
       await this.handleM365Interrupts(page, email);
-      await this.captureAuthDebugScreenshot(page, meetingId, 'after-kmsi', s3);
+      await this.screenshot(page, 'auth-after-kmsi', s3, meetingId);
 
       // Step 6: Microsoft redirects to teams.microsoft.com/v2/authv2, which
       // Teams forwards internally to /v2/ — confirm we're back on Teams.
@@ -411,7 +435,7 @@ export class TeamsHandler {
       });
 
       if (!page.url().includes('teams.microsoft.com')) {
-        await this.captureAuthDebugScreenshot(page, meetingId, 'at-warning', s3);
+        await this.screenshot(page, 'auth-at-warning', s3, meetingId);
         console.log('[Teams] M365 sign-in did not complete — still on:', page.url());
         return false;
       }
@@ -420,7 +444,7 @@ export class TeamsHandler {
       return true;
     } catch (err) {
       console.log('[Teams] M365 sign-in failed, falling back to anonymous join:', err);
-      await this.captureAuthDebugScreenshot(page, meetingId, 'signin-failed', s3);
+      await this.screenshot(page, 'auth-signin-failed', s3, meetingId);
       return false;
     }
   }
@@ -452,41 +476,6 @@ export class TeamsHandler {
     console.log('[Teams] WARNING: could not find Next button on Teams email entry modal');
   }
 
-  /**
-   * Save a debug screenshot of the current page state to
-   * `debug/auth/<meetingId>/<step>.png` in S3, for diagnosing M365 sign-in
-   * failures after the fact (WI #7086).
-   *
-   * No-op when meetingId <= 0 (unit tests / callers with no real meeting).
-   * Never throws — a failed screenshot must never break the sign-in flow.
-   */
-  private static async captureAuthDebugScreenshot(
-    page: Page,
-    meetingId: number,
-    step: string,
-    s3: S3Service | null
-  ): Promise<void> {
-    if (meetingId <= 0 || !s3) return;
-
-    let tmpFile: string | null = null;
-    try {
-      tmpFile = path.join(os.tmpdir(), `auth-debug-${meetingId}-${step}-${Date.now()}.png`);
-      await page.screenshot({ path: tmpFile });
-      const key = `debug/auth/${meetingId}/${step}.png`;
-      await s3.uploadWithKey(tmpFile, key);
-      console.log(`[Teams] Uploaded auth debug screenshot: ${key}`);
-    } catch (err) {
-      console.log(`[Teams] WARNING: failed to capture/upload auth debug screenshot (${step}):`, err);
-    } finally {
-      if (tmpFile) {
-        try {
-          fs.unlinkSync(tmpFile);
-        } catch {
-          // Best-effort cleanup — nothing to do if it fails.
-        }
-      }
-    }
-  }
 
   /**
    * Handle known Microsoft sign-in interrupt pages that can appear after the
@@ -644,7 +633,14 @@ export class TeamsHandler {
     console.log('[Teams] Starting join flow...');
     console.log('[Teams] Current URL:', page.url());
 
-    await this.screenshot(page, '01-initial-page');
+    // Instantiate S3Service early for all debug screenshots
+    const meetingId = process.env.MEETING_ID || '0';
+    const s3 = new S3Service(
+      process.env.AWS_REGION || 'us-east-1',
+      process.env.S3_BUCKET || 'firm-recordings-dev'
+    );
+
+    await this.screenshot(page, '01-initial-page', s3, meetingId);
 
     // Step 1: Handle the launcher page
     // Teams v2 lands on /v2/?meetingjoin=true#/... and immediately begins client-side
@@ -702,7 +698,7 @@ export class TeamsHandler {
         console.log('[Teams] Page HTML snippet:', html.substring(0, 500));
       }
 
-      await this.screenshot(page, '01b-after-launcher-click');
+      await this.screenshot(page, '01b-after-launcher-click', s3, meetingId);
     }
 
     // Step 2: Wait for pre-join screen
@@ -713,7 +709,7 @@ export class TeamsHandler {
       console.log('[Teams] Current URL:', page.url());
       const currentText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
       console.log('[Teams] Current page text:', currentText);
-      await this.screenshot(page, '01c-pre-join-not-reached');
+      await this.screenshot(page, '01c-pre-join-not-reached', s3, meetingId);
 
       // If we're still on the launcher, try one more time with a fresh navigation
       if (page.url().includes('/dl/launcher/') || page.url().includes('launcher.html')) {
@@ -727,7 +723,7 @@ export class TeamsHandler {
           const retryResult = await this.waitForPreJoinScreen(page, 60000);
           if (!retryResult) {
             console.log('[Teams] WARNING: Still cannot reach pre-join screen after retry');
-            await this.screenshot(page, '01d-retry-failed');
+            await this.screenshot(page, '01d-retry-failed', s3, meetingId);
 
             // Last resort: bypass the unresponsive launcher button entirely
             // by navigating directly to the URL encoded in its `url` param.
@@ -742,7 +738,7 @@ export class TeamsHandler {
       }
     }
 
-    await this.screenshot(page, '02-pre-join-screen');
+    await this.screenshot(page, '02-pre-join-screen', s3, meetingId);
 
     // Step 3: Attempt M365 sign-in from the pre-join screen if credentials
     // are configured (WI #7101). BOT_EMAIL / BOT_PASSWORD are generic env
@@ -753,13 +749,12 @@ export class TeamsHandler {
     const botEmail = process.env.BOT_EMAIL;
     const botPassword = process.env.BOT_PASSWORD;
     if (botEmail && botPassword) {
-      // Numeric meeting id for namespacing auth debug screenshots in S3
-      // (WI #7086) — same MEETING_ID-env-first pattern reportStatus() uses.
-      const numericMeetingId = parseInt(process.env.MEETING_ID || '0', 10) || 0;
-      authenticated = await this.signInWithM365(page, botEmail, botPassword, numericMeetingId);
-      console.log(authenticated
-        ? '[Teams] M365 authentication succeeded — will skip anonymous name entry'
-        : '[Teams] M365 authentication did not complete — continuing as anonymous guest');
+      authenticated = await this.signInWithM365(page, botEmail, botPassword, s3, meetingId);
+      if (authenticated) {
+        console.log('[Teams] M365 authentication succeeded — will skip anonymous name entry');
+      } else {
+        console.log('[Teams] ⚠️ M365 authentication did not complete — proceeding as anonymous guest (DEGRADED MODE)');
+      }
     } else {
       console.log('[Teams] BOT_EMAIL/BOT_PASSWORD not set — joining Teams as anonymous guest');
     }
@@ -816,7 +811,7 @@ export class TeamsHandler {
     await this.turnOffDevices(page);
 
     await page.waitForTimeout(1000);
-    await this.screenshot(page, '03-before-join-click');
+    await this.screenshot(page, '03-before-join-click', s3, meetingId);
 
     // Step 6: Click Join now button
     const joinButtonTexts = ['Join now', 'Join', 'Ask to join', 'Join meeting'];
@@ -867,25 +862,25 @@ export class TeamsHandler {
         }));
       });
       console.log('[Teams] All buttons on page:', JSON.stringify(buttons));
-      await this.screenshot(page, '03b-no-join-button');
+      await this.screenshot(page, '03b-no-join-button', s3, meetingId);
     }
 
     // Step 7: Wait for meeting to load
     console.log('[Teams] Waiting for meeting to load...');
-    
+
     // Look for the Leave button as confirmation we're in the meeting
     try {
       const leaveButton = page.getByRole('button', { name: /Leave/i });
       await leaveButton.waitFor({ timeout: 60000 });
       console.log('[Teams] ✅ Successfully joined meeting (Leave button visible)');
-      await this.screenshot(page, '04-in-meeting');
+      await this.screenshot(page, '04-in-meeting', s3, meetingId);
       await this.postAdmissionChatNotification(page);
       return;
     } catch {
       console.log('[Teams] Leave button not found within 60s, checking other states...');
     }
 
-    await this.screenshot(page, '04-after-join-attempt');
+    await this.screenshot(page, '04-after-join-attempt', s3, meetingId);
 
     // Step 8: Check if we're in a waiting room
     const bodyText = await page.evaluate(() => document.body?.innerText || '');
@@ -902,7 +897,7 @@ export class TeamsHandler {
     
     if (inWaitingRoom) {
       console.log('[Teams] In waiting room / lobby, waiting to be admitted (max 3 min)...');
-      await this.screenshot(page, '04b-waiting-room');
+      await this.screenshot(page, '04b-waiting-room', s3, meetingId);
       let admitted = false;
       // Poll 18×10s = 3 minutes
       for (let i = 0; i < 18; i++) {
@@ -913,7 +908,7 @@ export class TeamsHandler {
           const leaveButton = page.getByRole('button', { name: /Leave/i });
           if (await leaveButton.isVisible({ timeout: 1000 })) {
             console.log('[Teams] ✅ Admitted from waiting room, now in meeting');
-            await this.screenshot(page, '05-admitted-in-meeting');
+            await this.screenshot(page, '05-admitted-in-meeting', s3, meetingId);
             admitted = true;
             await this.postAdmissionChatNotification(page);
             return; // admitted — normal path
@@ -938,7 +933,7 @@ export class TeamsHandler {
           const leaveButton = page.getByRole('button', { name: /Leave/i });
           if (await leaveButton.isVisible({ timeout: 2000 })) {
             console.log('[Teams] ✅ Admitted just before timeout — now in meeting');
-            await this.screenshot(page, '05-admitted-last-second');
+            await this.screenshot(page, '05-admitted-last-second', s3, meetingId);
             await this.postAdmissionChatNotification(page);
             return;
           }
@@ -946,7 +941,7 @@ export class TeamsHandler {
           // not admitted
         }
         console.log('[Teams] ❌ Not admitted to lobby within 3 minutes — throwing LobbyTimeoutError');
-        await this.screenshot(page, '05-lobby-timeout');
+        await this.screenshot(page, '05-lobby-timeout', s3, meetingId);
         throw new LobbyTimeoutError();
       }
     }
@@ -972,15 +967,15 @@ export class TeamsHandler {
 
     if (joinedCheck.hasEOA) {
       console.log('[Teams] ❌ ERROR: Hit Classic Teams EOA page! Treating as lobby timeout.');
-      await this.screenshot(page, '05-eoa-error');
+      await this.screenshot(page, '05-eoa-error', s3, meetingId);
       throw new LobbyTimeoutError();
     } else if (joinedCheck.hasLeave || joinedCheck.hasHangup || joinedCheck.hasMeetingUI || joinedCheck.hasRoster) {
       console.log('[Teams] ✅ Successfully joined meeting');
-      await this.screenshot(page, '05-in-meeting');
+      await this.screenshot(page, '05-in-meeting', s3, meetingId);
       await this.postAdmissionChatNotification(page);
     } else {
       console.log('[Teams] ⚠️ Meeting join status uncertain — hasMeetingUI=false, hasLeave=false. Treating as lobby timeout.');
-      await this.screenshot(page, '05-uncertain-state');
+      await this.screenshot(page, '05-uncertain-state', s3, meetingId);
       throw new LobbyTimeoutError();
     }
   }
