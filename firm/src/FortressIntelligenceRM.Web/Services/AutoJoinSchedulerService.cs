@@ -63,7 +63,6 @@ public class AutoJoinSchedulerService
         {
             meetingId,
             meetingUrl,
-            firmApiUrl = _config["Firm:ApiUrl"] ?? "",
             botCallbackSecret = _config["Firm:BotCallbackSecret"] ?? ""
         });
 
