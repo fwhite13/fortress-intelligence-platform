@@ -104,45 +104,16 @@ export class TeamsHandler {
   }
 
   /**
-   * Process a Teams meeting URL for browser join using the Recall.ai
-   * server-side fetch approach.
-   *
-   * This approach resolves any Teams URL format (/meet/, /l/meetup-join/, etc.)
-   * to the launcher URL by following redirects server-side, then modifies the
-   * launcher params to suppress the native-app dialog.
-   *
-   * Evidence: Recall.ai's production bot (github.com/recallai/microsoft-teams-meeting-bot)
-   * uses this method successfully across all Teams URL formats.
+   * Process a Teams meeting URL (pass-through with validation).
    */
   static async processTeamsMeetingUrl(meetingUrl: string): Promise<string> {
     console.log('[Teams] Processing meeting URL:', meetingUrl);
     try {
       new URL(meetingUrl); // validate
-
-      // Server-side fetch: follow redirects to get the launcher URL
-      // This works for any Teams URL format (/meet/, /l/meetup-join/, etc.)
-      const response = await fetch(meetingUrl, {
-        redirect: 'follow',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-        },
-      });
-
-      const resolvedUrl = new URL(response.url);
-      console.log('[Teams] Resolved URL:', resolvedUrl.toString());
-
-      // Only modify if we landed on the launcher page (suppress app-picker dialog)
-      if (resolvedUrl.pathname.includes('/dl/launcher/') || resolvedUrl.hostname.includes('teams')) {
-        resolvedUrl.searchParams.set('msLaunch', 'false');
-        resolvedUrl.searchParams.set('directDl', 'true');
-        resolvedUrl.searchParams.set('enableMobilePage', 'true');
-        resolvedUrl.searchParams.set('suppressPrompt', 'true');
-      }
-
-      console.log('[Teams] Final processed URL:', resolvedUrl.toString());
-      return resolvedUrl.toString();
+      console.log('[Teams] Processed URL (pass-through):', meetingUrl);
+      return meetingUrl;
     } catch (error) {
-      console.log('[Teams] URL resolution failed, using original:', error);
+      console.log('[Teams] URL processing failed, using original:', error);
       return meetingUrl;
     }
   }
@@ -213,46 +184,6 @@ export class TeamsHandler {
 
     console.log('[Teams] No launcher button found');
     return false;
-  }
-
-  /**
-   * Bypass the Teams launcher page by navigating directly to the destination
-   * URL encoded in the launcher's `url` query param, instead of relying on
-   * the "Continue on this browser" button click to trigger navigation.
-   *
-   * The launcher page (`/dl/launcher/launcher.html?url=...&type=meet&...`)
-   * embeds the real destination (e.g. `/_#/meet/<id>?p=<token>&anon=true`)
-   * as a URL-encoded query param. In headless Chromium the button click
-   * sometimes doesn't trigger navigation (likely automation detection), so
-   * we decode that param and go there directly.
-   *
-   * Returns true if the `url` param was found and navigation was attempted
-   * (regardless of whether the resulting page load fully settles — callers
-   * should re-check page state afterward), false if no `url` param was present.
-   */
-  private static async navigateFromLauncherParam(page: Page, launcherUrl: string): Promise<boolean> {
-    let destination: string;
-    try {
-      const parsed = new URL(launcherUrl);
-      const urlParam = parsed.searchParams.get('url');
-      if (!urlParam) {
-        return false;
-      }
-      destination = `https://teams.microsoft.com${urlParam}`;
-    } catch (err) {
-      console.log('[Teams] Failed to parse launcher URL for `url` param:', err);
-      return false;
-    }
-
-    console.log(`[Teams] Launcher button unresponsive — navigating directly to: ${destination}`);
-    try {
-      await page.goto(destination, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    } catch (err) {
-      console.log('[Teams] Direct navigation from launcher param failed:', err);
-    }
-    // Give the SPA a moment to begin rendering before callers re-check page state.
-    await page.waitForTimeout(2000);
-    return true;
   }
 
   /**
@@ -685,12 +616,6 @@ export class TeamsHandler {
           // launcher-param bypass below.
         }
 
-        // The button click doesn't always trigger navigation (headless
-        // detection) — if we're still on the launcher, bypass it by
-        // navigating directly to the URL encoded in the launcher's `url` param.
-        if (page.url().includes('/dl/launcher/') || page.url().includes('launcher.html')) {
-          await this.navigateFromLauncherParam(page, page.url());
-        }
       } else {
         console.log('[Teams] WARNING: Could not find launcher button');
         // Log page state for debugging
@@ -724,15 +649,6 @@ export class TeamsHandler {
           if (!retryResult) {
             console.log('[Teams] WARNING: Still cannot reach pre-join screen after retry');
             await this.screenshot(page, '01d-retry-failed', s3, meetingId);
-
-            // Last resort: bypass the unresponsive launcher button entirely
-            // by navigating directly to the URL encoded in its `url` param.
-            if (page.url().includes('/dl/launcher/') || page.url().includes('launcher.html')) {
-              const navigated = await this.navigateFromLauncherParam(page, page.url());
-              if (navigated) {
-                await this.waitForPreJoinScreen(page, 60000);
-              }
-            }
           }
         }
       }
@@ -753,7 +669,7 @@ export class TeamsHandler {
       if (authenticated) {
         console.log('[Teams] M365 authentication succeeded — will skip anonymous name entry');
       } else {
-        console.log('[Teams] ⚠️ M365 authentication did not complete — proceeding as anonymous guest (DEGRADED MODE)');
+        console.log('[Teams] ⚠️ M365 auth did not complete — joining as anonymous guest (DEGRADED MODE)');
       }
     } else {
       console.log('[Teams] BOT_EMAIL/BOT_PASSWORD not set — joining Teams as anonymous guest');

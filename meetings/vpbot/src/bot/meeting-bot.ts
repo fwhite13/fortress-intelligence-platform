@@ -175,9 +175,7 @@ export class MeetingBot extends EventEmitter {
         navUrl = await TeamsHandler.processTeamsMeetingUrl(this.meeting.url);
         console.log(`[Bot] Teams processed URL: ${navUrl}`);
       }
-      // Teams: use networkidle (heavy JS app). Others: domcontentloaded is fine.
-      const waitUntil = this.meeting.platform === 'teams' ? 'networkidle' as const : 'domcontentloaded' as const;
-      await this.page.goto(navUrl, { waitUntil, timeout: 30000 });
+      await this.page.goto(navUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
       // Platform-specific join logic
       try {
