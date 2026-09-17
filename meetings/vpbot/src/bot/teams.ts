@@ -132,7 +132,6 @@ export class TeamsHandler {
     console.log('[Teams] Looking for launcher "Continue on this browser" button...');
 
     const launcherButtonSelectors = [
-      'button[data-tid="joinOnWeb"]', // Most stable (Recall.ai) — data-tid doesn't change with locale/version
       'button[aria-label="Join meeting from this browser"]',
       'button[aria-label="Continue on this browser"]',
       'button[aria-label="Join on this browser"]',
@@ -198,18 +197,6 @@ export class TeamsHandler {
    */
   private static async waitForPreJoinScreen(page: Page, timeoutMs: number = 120000): Promise<boolean> {
     console.log(`[Teams] Waiting for pre-join screen (timeout: ${timeoutMs / 1000}s)...`);
-
-    // Check for authenticated pre-join first (no name input, but join button
-    // present) — after a successful M365 sign-in, Teams reloads straight into
-    // this state with no display-name field to wait for (WI #7101).
-    const joinBtn = page.locator('[data-tid="prejoin-join-button"], button:has-text("Join now")').first();
-    if (await joinBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-      const nameInput = page.locator('input[data-tid="prejoin-display-name-input"]').first();
-      if (!(await nameInput.isVisible({ timeout: 1000 }).catch(() => false))) {
-        console.log('[Teams] Authenticated pre-join screen detected (join button present, no name input)');
-        return true;
-      }
-    }
 
     // Primary indicator: the name input field
     try {
@@ -551,14 +538,15 @@ export class TeamsHandler {
    * 1. Navigate to meeting URL (original URL, no /_#/ rewriting)
    * 2. Wait for launcher page, click "Continue on this browser" (force:true)
    * 3. Wait for pre-join screen (name input field, up to 120s)
-   * 4. Attempt M365 sign-in from the pre-join screen if BOT_EMAIL/BOT_PASSWORD
-   *    are configured (WI #7101) — falls back to anonymous on any failure
-   * 5. Fill in bot name — anonymous guest join only; a signed-in account
-   *    uses its M365 profile name and has no display-name field to fill
-   * 6. Turn off camera/mic
-   * 7. Click "Join now"
-   * 8. Wait for meeting entry (look for "Leave" button)
-   * 9. Handle waiting room if needed
+   * 4. Fill in bot name — or, if BOT_EMAIL/BOT_PASSWORD are configured (WI
+   *    #7101), sign in with M365 instead, right at the point the name input
+   *    is confirmed visible; falls back to filling the name on any sign-in
+   *    failure. A signed-in account uses its M365 profile name and has no
+   *    display-name field to fill.
+   * 5. Turn off camera/mic
+   * 6. Click "Join now"
+   * 7. Wait for meeting entry (look for "Leave" button)
+   * 8. Handle waiting room if needed
    */
   static async join(page: Page, botName: string, originalUrl?: string): Promise<void> {
     console.log('[Teams] Starting join flow...');
@@ -604,18 +592,9 @@ export class TeamsHandler {
       const clicked = await this.clickLauncherButton(page);
       
       if (clicked) {
-        console.log('[Teams] Launcher button clicked, waiting for navigation to light-meetings...');
-        try {
-          await page.waitForURL(
-            (url) => !url.toString().includes('launcher.html') && !url.toString().includes('/dl/launcher/'),
-            { timeout: 15000 }
-          );
-          console.log('[Teams] Launcher navigation complete:', page.url());
-        } catch {
-          // Natural navigation didn't complete in 15s — fall through to the
-          // launcher-param bypass below.
-        }
-
+        console.log('[Teams] Launcher button clicked, waiting for navigation...');
+        // Wait for navigation or page change after clicking
+        await page.waitForTimeout(5000);
       } else {
         console.log('[Teams] WARNING: Could not find launcher button');
         // Log page state for debugging
@@ -656,80 +635,74 @@ export class TeamsHandler {
 
     await this.screenshot(page, '02-pre-join-screen', s3, meetingId);
 
-    // Step 3: Attempt M365 sign-in from the pre-join screen if credentials
-    // are configured (WI #7101). BOT_EMAIL / BOT_PASSWORD are generic env
-    // vars — each environment's ECS task definition injects the correct
-    // values. Absent either one, or if sign-in fails for any reason, fall
-    // back to the existing anonymous join path.
-    let authenticated = false;
+    // Step 3: Enter name in the name field — or, if BOT_EMAIL/BOT_PASSWORD are
+    // configured (WI #7101), sign in with M365 instead. Each environment's ECS
+    // task definition injects the correct values; absent either one, or if
+    // sign-in fails for any reason, fall back to the anonymous join path.
+    // The sign-in attempt happens exactly where the anonymous flow would call
+    // nameInput.fill() — once the name input is confirmed visible, i.e. once
+    // we know we're truly on the pre-join screen.
     const botEmail = process.env.BOT_EMAIL;
     const botPassword = process.env.BOT_PASSWORD;
-    if (botEmail && botPassword) {
-      authenticated = await this.signInWithM365(page, botEmail, botPassword, s3, meetingId);
-      if (authenticated) {
-        console.log('[Teams] M365 authentication succeeded — will skip anonymous name entry');
-      } else {
-        console.log('[Teams] ⚠️ M365 auth did not complete — joining as anonymous guest (DEGRADED MODE)');
-      }
-    } else {
-      console.log('[Teams] BOT_EMAIL/BOT_PASSWORD not set — joining Teams as anonymous guest');
-    }
 
-    // Step 4: Enter name in the name field
-    // Anonymous guest join only — a signed-in M365 account has no display-name
-    // field on the pre-join screen; Teams uses the account's profile name (WI #7032).
-    if (!authenticated) {
-      const nameSelectors = [
-        'input[data-tid="prejoin-display-name-input"]',
-        'input[placeholder*="Enter your name" i]',
-        'input[placeholder*="Type your name" i]',
-        'input[placeholder*="name" i]',
-        'input[aria-label*="name" i]',
-        '#username',
-        'input[type="text"]',
-      ];
+    const nameSelectors = [
+      'input[data-tid="prejoin-display-name-input"]',
+      'input[placeholder*="Enter your name" i]',
+      'input[placeholder*="Type your name" i]',
+      'input[placeholder*="name" i]',
+      'input[aria-label*="name" i]',
+      '#username',
+      'input[type="text"]',
+    ];
 
-      let enteredName = false;
-      for (const selector of nameSelectors) {
-        try {
-          const nameInput = page.locator(selector).first();
-          if (await nameInput.isVisible({ timeout: 3000 })) {
-            await nameInput.clear();
-            await nameInput.fill(botName);
-            console.log(`[Teams] Entered name "${botName}" via: ${selector}`);
-            enteredName = true;
-            break;
+    let enteredName = false;
+    let authenticated = false;
+    for (const selector of nameSelectors) {
+      try {
+        const nameInput = page.locator(selector).first();
+        if (await nameInput.isVisible({ timeout: 3000 })) {
+          if (botEmail && botPassword) {
+            authenticated = await this.signInWithM365(page, botEmail, botPassword, s3, meetingId);
+            if (authenticated) {
+              console.log('[Teams] M365 sign-in succeeded — skipping anonymous name entry');
+              enteredName = true;
+              break;
+            }
+            console.log('[Teams] M365 sign-in failed — falling back to anonymous name entry');
           }
-        } catch {
-          continue;
+          await nameInput.clear();
+          await nameInput.fill(botName);
+          console.log(`[Teams] Entered name "${botName}" via: ${selector}`);
+          enteredName = true;
+          break;
         }
+      } catch {
+        continue;
       }
-
-      if (!enteredName) {
-        console.log('[Teams] WARNING: Could not find name input field');
-        const inputs = await page.evaluate(() => {
-          return Array.from(document.querySelectorAll('input')).map(i => ({
-            type: i.type,
-            placeholder: i.placeholder,
-            ariaLabel: i.getAttribute('aria-label'),
-            id: i.id,
-            dataTid: i.getAttribute('data-tid'),
-            visible: i.offsetParent !== null,
-          }));
-        });
-        console.log('[Teams] All inputs on page:', JSON.stringify(inputs));
-      }
-    } else {
-      console.log('[Teams] Authenticated session — skipping anonymous display-name pre-fill');
     }
 
-    // Step 5: Turn off camera and microphone
+    if (!enteredName) {
+      console.log('[Teams] WARNING: Could not find name input field');
+      const inputs = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('input')).map(i => ({
+          type: i.type,
+          placeholder: i.placeholder,
+          ariaLabel: i.getAttribute('aria-label'),
+          id: i.id,
+          dataTid: i.getAttribute('data-tid'),
+          visible: i.offsetParent !== null,
+        }));
+      });
+      console.log('[Teams] All inputs on page:', JSON.stringify(inputs));
+    }
+
+    // Step 4: Turn off camera and microphone
     await this.turnOffDevices(page);
 
     await page.waitForTimeout(1000);
     await this.screenshot(page, '03-before-join-click', s3, meetingId);
 
-    // Step 6: Click Join now button
+    // Step 5: Click Join now button
     const joinButtonTexts = ['Join now', 'Join', 'Ask to join', 'Join meeting'];
 
     let clickedJoin = false;
@@ -781,7 +754,7 @@ export class TeamsHandler {
       await this.screenshot(page, '03b-no-join-button', s3, meetingId);
     }
 
-    // Step 7: Wait for meeting to load
+    // Step 6: Wait for meeting to load
     console.log('[Teams] Waiting for meeting to load...');
 
     // Look for the Leave button as confirmation we're in the meeting
@@ -798,7 +771,7 @@ export class TeamsHandler {
 
     await this.screenshot(page, '04-after-join-attempt', s3, meetingId);
 
-    // Step 8: Check if we're in a waiting room
+    // Step 7: Check if we're in a waiting room
     const bodyText = await page.evaluate(() => document.body?.innerText || '');
     const waitingRoomPhrases = [
       'waiting to be admitted',
