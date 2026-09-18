@@ -562,22 +562,10 @@ export class TeamsHandler {
     await this.screenshot(page, '01-initial-page', s3, meetingId);
 
     // Step 1: Handle the launcher page
-    // Teams v2 lands on /v2/?meetingjoin=true#/... and immediately begins client-side
-    // hash routing (SPA navigation). A naive waitForTimeout(3000) here races that
-    // navigation — the execution context can be destroyed mid-wait, which then blows up
-    // the page.evaluate() below with "Execution context was destroyed, most likely
-    // because of a navigation". Wait for the SPA to settle first, then a short buffer.
-    try {
-      await page.waitForLoadState('domcontentloaded', { timeout: 15000 });
-    } catch (err) {
-      console.log('[Teams] WARNING: waitForLoadState(domcontentloaded) timed out, continuing anyway:', err);
-    }
-    await page.waitForTimeout(1000);
+    // Wait for page to stabilize
+    await page.waitForTimeout(3000);
 
-    const pageText = await this.evaluateWithNavRetry(
-      page,
-      () => document.body?.innerText?.substring(0, 1000) || 'NO BODY TEXT'
-    );
+    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 1000) || 'NO BODY TEXT');
     console.log('[Teams] Initial page text:', pageText.substring(0, 200));
 
     // Check if we're on the launcher page
