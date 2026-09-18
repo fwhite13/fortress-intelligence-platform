@@ -6,11 +6,7 @@
  * captures from the monitor source. This works for Teams, Zoom, and Meet.
  */
 
-import { chromium as _chromium, Browser, BrowserContext, Page } from 'playwright';
-import { chromium as chromiumExtra } from 'playwright-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-chromiumExtra.use(StealthPlugin());
-const chromium = chromiumExtra as unknown as typeof _chromium;
+import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import { EventEmitter } from 'events';
 import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
