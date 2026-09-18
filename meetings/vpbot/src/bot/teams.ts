@@ -653,6 +653,21 @@ export class TeamsHandler {
             authenticated = await this.signInWithM365(page, botEmail, botPassword, s3, meetingId);
             if (authenticated) {
               console.log('[Teams] M365 sign-in succeeded — skipping anonymous name entry');
+              // Re-navigate to the original clean meeting URL (no anon=true) so Teams
+              // processes the join as an authenticated user and routes to /v2/ instead
+              // of light-meetings. The auth session cookies are now set; the clean URL
+              // will get the full authenticated pre-join, not the anonymous one.
+              if (originalUrl) {
+                console.log('[Teams] Re-navigating to original URL post-auth to force authenticated pre-join...');
+                try {
+                  await page.goto(originalUrl, { waitUntil: 'networkidle', timeout: 30000 });
+                } catch (navErr) {
+                  console.log('[Teams] WARNING: Post-auth navigation timed out (non-fatal):', navErr);
+                }
+                const authPreJoinReached = await this.waitForPreJoinScreen(page, 30000);
+                console.log('[Teams] Post-auth pre-join state — reached:', authPreJoinReached, 'URL:', page.url());
+                await this.screenshot(page, '02b-post-auth-prejoin', s3, meetingId);
+              }
               enteredName = true;
               break;
             }
