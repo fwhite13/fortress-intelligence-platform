@@ -77,7 +77,8 @@ RUN apt-get update && apt-get install -y \
 # --break-system-packages: Ubuntu 24.04 marks the system Python as
 # externally-managed (PEP 668); zoom_meeting_sdk must land in the same
 # site-packages that apt's python3-gi installs into, so a venv isn't an option.
-RUN pip3 install --break-system-packages --no-cache-dir zoom-meeting-sdk PyJWT==2.8.0
+RUN pip3 install --break-system-packages --no-cache-dir zoom-meeting-sdk PyJWT==2.8.0 \
+    && mkdir -p /root/.zoomsdk/logs
 
 # Set up virtual display and audio environment
 ENV DISPLAY=:99
