@@ -14,6 +14,7 @@ public class VpBotService
     private readonly MeetingService _meetingService;
     private readonly BrandingConfig _branding;
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
+    private readonly IZoomOAuthService _zoomOAuthService;
 
     // NOTE: inject the concrete BrandingConfig singleton (registered in Program.cs via
     // builder.Services.AddSingleton(branding) after binding config section "Branding"),
@@ -22,7 +23,7 @@ public class VpBotService
     // to bare class defaults (OrgName="Fortress") regardless of any env var/config —
     // this previously made every bot join as "Fortress Notetaker" on every deployment,
     // including RN, no matter what Branding__* env vars were set.
-    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, BrandingConfig branding, IDbContextFactory<FirmDbContext> dbFactory)
+    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, BrandingConfig branding, IDbContextFactory<FirmDbContext> dbFactory, IZoomOAuthService zoomOAuthService)
     {
         _ecs = ecs;
         _config = config;
@@ -30,6 +31,7 @@ public class VpBotService
         _meetingService = meetingService;
         _branding = branding;
         _dbFactory = dbFactory;
+        _zoomOAuthService = zoomOAuthService;
     }
 
     public async Task<string?> TriggerBotAsync(long meetingId, string meetingUrl, string platform = "teams")
@@ -67,6 +69,49 @@ public class VpBotService
 
         try
         {
+            var envVars = new List<Amazon.ECS.Model.KeyValuePair>
+            {
+                new() { Name = "MEETING_ID", Value = meetingId.ToString() },
+                new() { Name = "MEETING_URL", Value = meetingUrl },
+                new() { Name = "BOT_DISPLAY_NAME", Value = botDisplayName },
+                new() { Name = "BOT_JOIN_NAME", Value = botJoinName },
+                new() { Name = "BOT_NAMES_CSV", Value = botNamesCsv },
+                new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret },
+                new() { Name = "MEETING_PLATFORM", Value = platform },
+                new() { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },
+                new() { Name = "AWS_REGION", Value = "us-east-1" }
+            };
+
+            // For Zoom meetings: fetch an OBF token if the meeting's owner has a linked Zoom
+            // account. Zoom requires OBF for meetings hosted outside the app owner's account —
+            // a missing token is non-fatal, the bot falls back to a JWT-only join.
+            if (platform == "zoom")
+            {
+                // Zoom's OBF endpoint needs the real Zoom meeting number, not the FIRM DB id.
+                var zoomMeetingNumber = ExtractZoomMeetingNumber(meetingUrl);
+                if (!zoomMeetingNumber.HasValue)
+                {
+                    _logger.LogWarning("FIRM: Could not extract Zoom meeting number from URL for meeting {Id} — skipping OBF, JWT-only join", meetingId);
+                }
+                else
+                {
+                    var userId = await GetMeetingUserIdAsync(meetingId);
+                    if (userId.HasValue)
+                    {
+                        var obfToken = await _zoomOAuthService.GetObfTokenAsync(userId.Value, zoomMeetingNumber.Value);
+                        if (!string.IsNullOrEmpty(obfToken))
+                        {
+                            envVars.Add(new() { Name = "ZOOM_OBF_TOKEN", Value = obfToken });
+                            _logger.LogInformation("FIRM: OBF token obtained for Zoom meeting {ZoomMeetingNumber}", zoomMeetingNumber.Value);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("FIRM: No OBF token for Zoom meeting {ZoomMeetingNumber} — JWT-only join", zoomMeetingNumber.Value);
+                        }
+                    }
+                }
+            }
+
             var request = new RunTaskRequest
             {
                 Cluster = cluster,
@@ -95,18 +140,7 @@ public class VpBotService
                             // https://meetings.dev.fortressam.ai domain) sent the bot's callback through
                             // Cloudflare's managed challenge, which returned HTTP 403 and left the callback
                             // never reaching the API — meetings got stuck at Pending forever.
-                            Environment = new List<Amazon.ECS.Model.KeyValuePair>
-                            {
-                                new() { Name = "MEETING_ID", Value = meetingId.ToString() },
-                                new() { Name = "MEETING_URL", Value = meetingUrl },
-                                new() { Name = "BOT_DISPLAY_NAME", Value = botDisplayName },
-                                new() { Name = "BOT_JOIN_NAME", Value = botJoinName },
-                                new() { Name = "BOT_NAMES_CSV", Value = botNamesCsv },
-                                new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret },
-                                new() { Name = "MEETING_PLATFORM", Value = platform },
-                                new() { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },
-                                new() { Name = "AWS_REGION", Value = "us-east-1" }
-                            }
+                            Environment = envVars
                         }
                     }
                 }
@@ -124,6 +158,19 @@ public class VpBotService
             _logger.LogError(ex, "FIRM: Failed to launch VP bot ECS task for meeting {Id}", meetingId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// WI #7254: extracts the Zoom meeting number from a join URL such as
+    /// https://zoom.us/j/81932006770?pwd=... Returns null if the URL is not a Zoom join URL.
+    /// </summary>
+    private static long? ExtractZoomMeetingNumber(string? meetingUrl)
+    {
+        if (string.IsNullOrWhiteSpace(meetingUrl) || !Uri.TryCreate(meetingUrl, UriKind.Absolute, out var uri))
+            return null;
+
+        var match = System.Text.RegularExpressions.Regex.Match(uri.AbsolutePath, @"/j/(\d{9,11})(?!\d)");
+        return match.Success && long.TryParse(match.Groups[1].Value, out var number) ? number : null;
     }
 
     /// <summary>
@@ -176,6 +223,25 @@ public class VpBotService
         {
             _logger.LogWarning(ex, "FIRM: Failed to resolve BOT_NAMES_CSV for meeting {Id} — proceeding without it", primaryMeetingId);
             return "";
+        }
+    }
+
+    /// <summary>
+    /// Looks up the id of the FIRM user who created (owns) the meeting, for Zoom OBF token
+    /// resolution. Best-effort — returns null on any lookup failure.
+    /// </summary>
+    private async Task<Guid?> GetMeetingUserIdAsync(long meetingId)
+    {
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var meeting = await db.Meetings.Where(m => m.Id == meetingId).Select(m => new { m.CreatedBy }).FirstOrDefaultAsync();
+            return meeting?.CreatedBy;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: Failed to resolve owning user for meeting {Id}", meetingId);
+            return null;
         }
     }
 

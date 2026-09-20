@@ -18,6 +18,7 @@ public class FirmDbContext : DbContext
     public DbSet<FirmOrgContext> OrgContexts => Set<FirmOrgContext>();
     public DbSet<FirmUserWiki> UserWikis => Set<FirmUserWiki>();
     public DbSet<FirmMeetingMindmap> Mindmaps => Set<FirmMeetingMindmap>();
+    public DbSet<FirmZoomOAuth> ZoomOAuthTokens => Set<FirmZoomOAuth>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -242,6 +243,27 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.UpdatedBy).HasColumnName("updated_by").HasMaxLength(256);
             entity.HasIndex(e => new { e.EntraOid, e.EntraTenantId }).IsUnique().HasDatabaseName("idx_user_wiki_user");
+        });
+
+        modelBuilder.Entity<FirmZoomOAuth>(entity =>
+        {
+            entity.ToTable("firm_zoom_oauth");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+            entity.HasIndex(e => e.UserId).IsUnique().HasDatabaseName("uk_fzo_user");
+            entity.Property(e => e.ZoomUserId).HasColumnName("zoom_user_id").HasMaxLength(128).IsRequired();
+            entity.Property(e => e.ZoomEmail).HasColumnName("zoom_email").HasMaxLength(256);
+            entity.Property(e => e.AccessToken).HasColumnName("access_token").IsRequired();
+            entity.Property(e => e.RefreshToken).HasColumnName("refresh_token").IsRequired();
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at").IsRequired();
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne<FirmUser>()
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_fzo_user");
         });
 
     }

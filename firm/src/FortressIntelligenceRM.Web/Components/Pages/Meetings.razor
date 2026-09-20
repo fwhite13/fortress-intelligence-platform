@@ -226,6 +226,14 @@
 
     protected override async Task OnInitializedAsync()
     {
+        var zoomOAuthQuery = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(Navigation.ToAbsoluteUri(Navigation.Uri).Query);
+        if (zoomOAuthQuery.ContainsKey("zoomConnected"))
+            Snackbar.Add("Zoom account connected.", Severity.Success);
+        else if (zoomOAuthQuery.ContainsKey("zoomConnectError"))
+            Snackbar.Add("Failed to connect Zoom account. Please try again.", Severity.Error);
+        else if (zoomOAuthQuery.ContainsKey("zoomDisconnected"))
+            Snackbar.Add("Zoom account disconnected.", Severity.Info);
+
         try
         {
             var authState = await AuthStateProvider.GetAuthenticationStateAsync();
