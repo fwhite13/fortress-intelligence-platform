@@ -450,6 +450,8 @@ export class ZoomHandler {
       await wcFrame.locator('.meeting-app, .meeting-client, [class*="meeting"]').first().waitFor({ timeout: 60000 });
       await this.screenshot(page, '05-in-meeting');
       console.log('[Zoom] Successfully joined meeting');
+      // Send chat announcement if configured (WI #7258)
+      await this.sendChatAnnouncement(page, wcFrame);
     } catch {
       const inMeetingText = wcFrameObj
         ? await wcFrameObj.evaluate(() => document.body.innerText).catch(() => '')
@@ -483,6 +485,8 @@ export class ZoomHandler {
       if (hasLeaveControl || hasParticipants || hasMeetingControlArea) {
         await this.screenshot(page, '05-in-meeting-alt-check');
         console.log('[Zoom] Successfully joined meeting (alternative check)');
+        // Send chat announcement if configured (WI #7258)
+        await this.sendChatAnnouncement(page, wcFrame);
       } else {
         // Pre-join form is confirmed gone (checked above) but no in-meeting
         // indicator matched either — genuinely uncertain, not a pre-join
@@ -510,6 +514,113 @@ export class ZoomHandler {
       }
     } catch {
       console.log('[Zoom] Could not toggle devices');
+    }
+  }
+
+  /**
+   * Send chat announcement to meeting participants (WI #7258).
+   * Non-fatal — a failed chat post must never fail the recording.
+   */
+  private static async sendChatAnnouncement(page: Page, wcFrame: FrameLocator): Promise<void> {
+    try {
+      const announceName = process.env.BOT_CHAT_ANNOUNCE_NAME || '';
+      if (!announceName) {
+        console.log('[Zoom] BOT_CHAT_ANNOUNCE_NAME not set — skipping chat announcement');
+        return;
+      }
+
+      const message = `I'm here to take notes for ${announceName}. I'll send a summary when the meeting ends.`;
+      console.log('[Zoom] Sending chat announcement...');
+
+      // Wait a bit for the meeting to stabilize
+      await page.waitForTimeout(2000);
+
+      // Step 1: Open chat panel — button is in the main Zoom PWA frame, not the iframe
+      const chatButtonSelectors = [
+        'button[aria-label="Chat"]',
+        'button[aria-label*="chat" i]',
+        'button:has-text("Chat")',
+        '[data-tooltip*="Chat" i]',
+      ];
+      let openedChat = false;
+      for (const selector of chatButtonSelectors) {
+        try {
+          const btn = page.locator(selector).first();
+          if (await btn.isVisible({ timeout: 3000 })) {
+            await btn.click();
+            console.log(`[Zoom] Opened chat panel via: ${selector}`);
+            openedChat = true;
+            await page.waitForTimeout(1000);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+      if (!openedChat) {
+        console.log('[Zoom] WARNING: could not find chat button — skipping chat announcement (non-fatal)');
+        return;
+      }
+
+      // Step 2: Find chat input — chat UI renders inside the iframe
+      const chatInputSelectors = [
+        'textarea[placeholder*="Type message" i]',
+        'textarea[aria-label*="Type message" i]',
+        'textarea[placeholder*="chat" i]',
+        'div[contenteditable="true"][aria-label*="message" i]',
+        'textarea',
+      ];
+      let chatInput: Locator | null = null;
+      for (const selector of chatInputSelectors) {
+        try {
+          const el = wcFrame.locator(selector).first();
+          if (await el.isVisible({ timeout: 5000 })) {
+            chatInput = el;
+            console.log(`[Zoom] Found chat input via: ${selector}`);
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+      if (!chatInput) {
+        console.log('[Zoom] WARNING: could not find chat input — skipping chat announcement (non-fatal)');
+        return;
+      }
+
+      // Step 3: Type and send message
+      await chatInput.click();
+      await chatInput.fill(message);
+      await page.waitForTimeout(500);
+
+      // Try to find and click send button
+      const sendButtonSelectors = [
+        'button[aria-label="Send"]',
+        'button[aria-label*="send" i]',
+        'button:has-text("Send")',
+      ];
+      let sentViaButton = false;
+      for (const selector of sendButtonSelectors) {
+        try {
+          const btn = wcFrame.locator(selector).first();
+          if (await btn.isVisible({ timeout: 2000 })) {
+            await btn.click();
+            console.log(`[Zoom] Chat announcement sent via button: ${message}`);
+            sentViaButton = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      // Fallback: press Enter
+      if (!sentViaButton) {
+        await chatInput.press('Enter');
+        console.log(`[Zoom] Chat announcement sent via Enter: ${message}`);
+      }
+    } catch (err) {
+      console.log(`[Zoom] Chat announcement failed (non-fatal): ${err}`);
     }
   }
 }

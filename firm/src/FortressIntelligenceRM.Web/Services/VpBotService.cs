@@ -102,6 +102,7 @@ public class VpBotService
                                 new() { Name = "BOT_DISPLAY_NAME", Value = botDisplayName },
                                 new() { Name = "BOT_JOIN_NAME", Value = botJoinName },
                                 new() { Name = "BOT_NAMES_CSV", Value = botNamesCsv },
+                                new() { Name = "BOT_CHAT_ANNOUNCE_NAME", Value = await GetUserFullNameAsync(meetingId) ?? botDisplayName },
                                 new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret },
                                 new() { Name = "MEETING_PLATFORM", Value = platform },
                                 new() { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },
@@ -149,6 +150,30 @@ public class VpBotService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "FIRM: Failed to resolve user first name for meeting {Id} — proceeding without it", meetingId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// WI #7258/#7259: Looks up the full display name of the user who created the meeting,
+    /// for chat announcements ("I'm here to take notes for {FullName}").
+    /// Best-effort — returns null on any lookup failure so bot launch is never blocked.
+    /// </summary>
+    private async Task<string?> GetUserFullNameAsync(long meetingId)
+    {
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var displayName = await db.Meetings
+                .Where(m => m.Id == meetingId)
+                .Select(m => m.CreatedByUser!.DisplayName)
+                .FirstOrDefaultAsync();
+
+            return string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: Failed to resolve user full name for meeting {Id} — proceeding without it", meetingId);
             return null;
         }
     }

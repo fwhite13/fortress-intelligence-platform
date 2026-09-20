@@ -563,9 +563,9 @@ export class TeamsHandler {
 
     // Step 1: Handle the launcher page
     // Wait for page to stabilize
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(5000);
 
-    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 1000) || 'NO BODY TEXT');
+    const pageText = await this.evaluateWithNavRetry(page, () => document.body?.innerText?.substring(0, 1000) || 'NO BODY TEXT');
     console.log('[Teams] Initial page text:', pageText.substring(0, 200));
 
     // Check if we're on the launcher page
@@ -586,7 +586,7 @@ export class TeamsHandler {
       } else {
         console.log('[Teams] WARNING: Could not find launcher button');
         // Log page state for debugging
-        const html = await page.evaluate(() => document.body?.innerHTML?.substring(0, 2000) || '');
+        const html = await this.evaluateWithNavRetry(page, () => document.body?.innerHTML?.substring(0, 2000) || '');
         console.log('[Teams] Page HTML snippet:', html.substring(0, 500));
       }
 
@@ -599,7 +599,7 @@ export class TeamsHandler {
     if (!preJoinReached) {
       console.log('[Teams] WARNING: Pre-join screen not reached after 120s');
       console.log('[Teams] Current URL:', page.url());
-      const currentText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
+      const currentText = await this.evaluateWithNavRetry(page, () => document.body?.innerText?.substring(0, 500) || '');
       console.log('[Teams] Current page text:', currentText);
       await this.screenshot(page, '01c-pre-join-not-reached', s3, meetingId);
 
@@ -986,6 +986,58 @@ export class TeamsHandler {
       }
 
       console.log('[Teams] ✅ Chat notification posted');
+
+      // WI #7259: Also send a simpler welcome message using BOT_CHAT_ANNOUNCE_NAME
+      const announceName = process.env.BOT_CHAT_ANNOUNCE_NAME || '';
+      if (announceName) {
+        try {
+          const simpleMessage = `I'm here to take notes for ${announceName}. I'll send a summary when the meeting ends.`;
+          console.log('[Teams] Sending simple welcome message...');
+
+          // Wait a bit between messages
+          await page.waitForTimeout(2000);
+
+          // Re-find the chat input (it may have been reset after the first message)
+          let welcomeChatInput: Locator | null = null;
+          for (const selector of inputSelectors) {
+            try {
+              const el = page.locator(selector).first();
+              if (await el.isVisible({ timeout: 3000 })) {
+                welcomeChatInput = el;
+                break;
+              }
+            } catch {
+              continue;
+            }
+          }
+
+          if (welcomeChatInput) {
+            await welcomeChatInput.click();
+            await welcomeChatInput.type(simpleMessage);
+
+            // Send the message
+            let welcomeSent = false;
+            for (const selector of sendButtonSelectors) {
+              try {
+                const btn = page.locator(selector).first();
+                if (await btn.isVisible({ timeout: 3000 })) {
+                  await btn.click();
+                  welcomeSent = true;
+                  break;
+                }
+              } catch {
+                continue;
+              }
+            }
+            if (!welcomeSent) {
+              await page.keyboard.press('Enter');
+            }
+            console.log('[Teams] ✅ Simple welcome message posted');
+          }
+        } catch (welcomeErr) {
+          console.log('[Teams] WARNING: failed to post simple welcome message (non-fatal):', welcomeErr);
+        }
+      }
     } catch (err) {
       console.log('[Teams] WARNING: failed to post chat notification (non-fatal):', err);
     }
