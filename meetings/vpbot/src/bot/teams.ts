@@ -552,6 +552,26 @@ export class TeamsHandler {
     console.log('[Teams] Starting join flow...');
     console.log('[Teams] Current URL:', page.url());
 
+    // Extract meetingId and token early for post-auth navigation (WI #7267)
+    let extractedMeetingId: string | null = null;
+    let extractedToken: string | null = null;
+    if (originalUrl) {
+      try {
+        const url = new URL(originalUrl);
+        // Short format: /meet/{id}?p={token}
+        const meetMatch = url.pathname.match(/\/meet\/([^/]+)/);
+        if (meetMatch) {
+          extractedMeetingId = meetMatch[1];
+          extractedToken = url.searchParams.get('p');
+          console.log('[Teams] Extracted from short URL — meetingId:', extractedMeetingId, 'token:', extractedToken ? '(present)' : '(none)');
+        }
+        // Long format: /l/meetup-join/... (also extract if possible, though less reliable)
+        // For long format, we'll fall back to originalUrl if extraction fails
+      } catch (parseErr) {
+        console.log('[Teams] WARNING: could not parse originalUrl for meetingId/token:', parseErr);
+      }
+    }
+
     // Instantiate S3Service early for all debug screenshots
     const meetingId = process.env.MEETING_ID || '0';
     const s3 = new S3Service(
@@ -653,12 +673,22 @@ export class TeamsHandler {
             authenticated = await this.signInWithM365(page, botEmail, botPassword, s3, meetingId);
             if (authenticated) {
               console.log('[Teams] M365 sign-in succeeded — skipping anonymous name entry');
-              // Re-navigate to the original clean meeting URL (no anon=true) so Teams
-              // processes the join as an authenticated user and routes to /v2/ instead
-              // of light-meetings. The auth session cookies are now set; the clean URL
-              // will get the full authenticated pre-join, not the anonymous one.
-              if (originalUrl) {
-                console.log('[Teams] Re-navigating to original URL post-auth to force authenticated pre-join...');
+              // WI #7267: Navigate to /v2/ SPA URL to stay in authenticated context.
+              // The short /meet/ URL triggers anonymous redirect; /v2/ preserves auth cookies.
+              if (extractedMeetingId) {
+                const authPreJoinUrl = `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${extractedMeetingId}${extractedToken ? `?p=${extractedToken}` : ''}`;
+                console.log('[Teams] Re-navigating to /v2/ SPA URL post-auth:', authPreJoinUrl);
+                try {
+                  await page.goto(authPreJoinUrl, { waitUntil: 'networkidle', timeout: 30000 });
+                } catch (navErr) {
+                  console.log('[Teams] WARNING: Post-auth navigation timed out (non-fatal):', navErr);
+                }
+                const authPreJoinReached = await this.waitForPreJoinScreen(page, 30000);
+                console.log('[Teams] Post-auth pre-join state — reached:', authPreJoinReached, 'URL:', page.url());
+                await this.screenshot(page, '02b-post-auth-prejoin', s3, meetingId);
+              } else if (originalUrl) {
+                // Fallback for long-format URLs or failed extraction — use original URL
+                console.log('[Teams] No extracted meetingId — falling back to original URL:', originalUrl);
                 try {
                   await page.goto(originalUrl, { waitUntil: 'networkidle', timeout: 30000 });
                 } catch (navErr) {
