@@ -87,18 +87,27 @@ public class VpBotService
             // a missing token is non-fatal, the bot falls back to a JWT-only join.
             if (platform == "zoom")
             {
-                var userId = await GetMeetingUserIdAsync(meetingId);
-                if (userId.HasValue)
+                // Zoom's OBF endpoint needs the real Zoom meeting number, not the FIRM DB id.
+                var zoomMeetingNumber = ExtractZoomMeetingNumber(meetingUrl);
+                if (!zoomMeetingNumber.HasValue)
                 {
-                    var obfToken = await _zoomOAuthService.GetObfTokenAsync(userId.Value, meetingId);
-                    if (!string.IsNullOrEmpty(obfToken))
+                    _logger.LogWarning("FIRM: Could not extract Zoom meeting number from URL for meeting {Id} — skipping OBF, JWT-only join", meetingId);
+                }
+                else
+                {
+                    var userId = await GetMeetingUserIdAsync(meetingId);
+                    if (userId.HasValue)
                     {
-                        envVars.Add(new() { Name = "ZOOM_OBF_TOKEN", Value = obfToken });
-                        _logger.LogInformation("FIRM: OBF token obtained for meeting {Id}", meetingId);
-                    }
-                    else
-                    {
-                        _logger.LogInformation("FIRM: No OBF token for meeting {Id} — JWT-only join", meetingId);
+                        var obfToken = await _zoomOAuthService.GetObfTokenAsync(userId.Value, zoomMeetingNumber.Value);
+                        if (!string.IsNullOrEmpty(obfToken))
+                        {
+                            envVars.Add(new() { Name = "ZOOM_OBF_TOKEN", Value = obfToken });
+                            _logger.LogInformation("FIRM: OBF token obtained for Zoom meeting {ZoomMeetingNumber}", zoomMeetingNumber.Value);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("FIRM: No OBF token for Zoom meeting {ZoomMeetingNumber} — JWT-only join", zoomMeetingNumber.Value);
+                        }
                     }
                 }
             }
@@ -149,6 +158,19 @@ public class VpBotService
             _logger.LogError(ex, "FIRM: Failed to launch VP bot ECS task for meeting {Id}", meetingId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// WI #7254: extracts the Zoom meeting number from a join URL such as
+    /// https://zoom.us/j/81932006770?pwd=... Returns null if the URL is not a Zoom join URL.
+    /// </summary>
+    private static long? ExtractZoomMeetingNumber(string? meetingUrl)
+    {
+        if (string.IsNullOrWhiteSpace(meetingUrl) || !Uri.TryCreate(meetingUrl, UriKind.Absolute, out var uri))
+            return null;
+
+        var match = System.Text.RegularExpressions.Regex.Match(uri.AbsolutePath, @"/j/(\d{9,11})(?!\d)");
+        return match.Success && long.TryParse(match.Groups[1].Value, out var number) ? number : null;
     }
 
     /// <summary>
