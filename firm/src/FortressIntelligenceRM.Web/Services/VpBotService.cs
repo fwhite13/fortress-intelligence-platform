@@ -14,6 +14,7 @@ public class VpBotService
     private readonly MeetingService _meetingService;
     private readonly BrandingConfig _branding;
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
+    private readonly IZoomOAuthService _zoomOAuthService;
 
     // NOTE: inject the concrete BrandingConfig singleton (registered in Program.cs via
     // builder.Services.AddSingleton(branding) after binding config section "Branding"),
@@ -22,7 +23,7 @@ public class VpBotService
     // to bare class defaults (OrgName="Fortress") regardless of any env var/config —
     // this previously made every bot join as "Fortress Notetaker" on every deployment,
     // including RN, no matter what Branding__* env vars were set.
-    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, BrandingConfig branding, IDbContextFactory<FirmDbContext> dbFactory)
+    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, BrandingConfig branding, IDbContextFactory<FirmDbContext> dbFactory, IZoomOAuthService zoomOAuthService)
     {
         _ecs = ecs;
         _config = config;
@@ -30,6 +31,7 @@ public class VpBotService
         _meetingService = meetingService;
         _branding = branding;
         _dbFactory = dbFactory;
+        _zoomOAuthService = zoomOAuthService;
     }
 
     public async Task<string?> TriggerBotAsync(long meetingId, string meetingUrl, string platform = "teams")
@@ -67,6 +69,41 @@ public class VpBotService
 
         try
         {
+            var envVars = new List<Amazon.ECS.Model.KeyValuePair>
+            {
+                new() { Name = "MEETING_ID", Value = meetingId.ToString() },
+                new() { Name = "MEETING_URL", Value = meetingUrl },
+                new() { Name = "BOT_DISPLAY_NAME", Value = botDisplayName },
+                new() { Name = "BOT_JOIN_NAME", Value = botJoinName },
+                new() { Name = "BOT_NAMES_CSV", Value = botNamesCsv },
+                new() { Name = "BOT_CHAT_ANNOUNCE_NAME", Value = await GetUserFullNameAsync(meetingId) ?? botDisplayName },
+                new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret },
+                new() { Name = "MEETING_PLATFORM", Value = platform },
+                new() { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },
+                new() { Name = "AWS_REGION", Value = "us-east-1" }
+            };
+
+            // For Zoom meetings: fetch an OBF token if the meeting's owner has a linked Zoom
+            // account. Zoom requires OBF for meetings hosted outside the app owner's account —
+            // a missing token is non-fatal, the bot falls back to a JWT-only join.
+            if (platform == "zoom")
+            {
+                var userId = await GetMeetingUserIdAsync(meetingId);
+                if (userId.HasValue)
+                {
+                    var obfToken = await _zoomOAuthService.GetObfTokenAsync(userId.Value, meetingId);
+                    if (!string.IsNullOrEmpty(obfToken))
+                    {
+                        envVars.Add(new() { Name = "ZOOM_OBF_TOKEN", Value = obfToken });
+                        _logger.LogInformation("FIRM: OBF token obtained for meeting {Id}", meetingId);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("FIRM: No OBF token for meeting {Id} — JWT-only join", meetingId);
+                    }
+                }
+            }
+
             var request = new RunTaskRequest
             {
                 Cluster = cluster,
@@ -95,19 +132,7 @@ public class VpBotService
                             // https://meetings.dev.fortressam.ai domain) sent the bot's callback through
                             // Cloudflare's managed challenge, which returned HTTP 403 and left the callback
                             // never reaching the API — meetings got stuck at Pending forever.
-                            Environment = new List<Amazon.ECS.Model.KeyValuePair>
-                            {
-                                new() { Name = "MEETING_ID", Value = meetingId.ToString() },
-                                new() { Name = "MEETING_URL", Value = meetingUrl },
-                                new() { Name = "BOT_DISPLAY_NAME", Value = botDisplayName },
-                                new() { Name = "BOT_JOIN_NAME", Value = botJoinName },
-                                new() { Name = "BOT_NAMES_CSV", Value = botNamesCsv },
-                                new() { Name = "BOT_CHAT_ANNOUNCE_NAME", Value = await GetUserFullNameAsync(meetingId) ?? botDisplayName },
-                                new() { Name = "BOT_CALLBACK_SECRET", Value = botSecret },
-                                new() { Name = "MEETING_PLATFORM", Value = platform },
-                                new() { Name = "S3_BUCKET", Value = _config["Firm:S3Bucket"] ?? "firm-recordings-dev" },
-                                new() { Name = "AWS_REGION", Value = "us-east-1" }
-                            }
+                            Environment = envVars
                         }
                     }
                 }
@@ -201,6 +226,25 @@ public class VpBotService
         {
             _logger.LogWarning(ex, "FIRM: Failed to resolve BOT_NAMES_CSV for meeting {Id} — proceeding without it", primaryMeetingId);
             return "";
+        }
+    }
+
+    /// <summary>
+    /// Looks up the id of the FIRM user who created (owns) the meeting, for Zoom OBF token
+    /// resolution. Best-effort — returns null on any lookup failure.
+    /// </summary>
+    private async Task<Guid?> GetMeetingUserIdAsync(long meetingId)
+    {
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var meeting = await db.Meetings.Where(m => m.Id == meetingId).Select(m => new { m.CreatedBy }).FirstOrDefaultAsync();
+            return meeting?.CreatedBy;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: Failed to resolve owning user for meeting {Id}", meetingId);
+            return null;
         }
     }
 

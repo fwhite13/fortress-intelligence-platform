@@ -1,6 +1,7 @@
 @using MudBlazor
 @using FortressIntelligenceRM.Web.Services
 @inject MeetingService MeetingService
+@inject IZoomOAuthService ZoomOAuthService
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -18,6 +19,25 @@
                        Color="Color.Warning" Class="mb-2" />
             <MudSwitch @bind-Value="_autoEmailSummary" Label="Auto-Email Summary"
                        Color="Color.Warning" />
+
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.subtitle2" Class="mb-2" Style="color: var(--color-text-primary);">Zoom Account</MudText>
+            @if (!string.IsNullOrEmpty(_zoomEmail))
+            {
+                <MudText Typo="Typo.body2" Class="mb-2">✓ Connected as @_zoomEmail</MudText>
+                <form method="post" action="/oauth/zoom/disconnect">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" ButtonType="ButtonType.Submit">
+                        Disconnect
+                    </MudButton>
+                </form>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                           Href="/oauth/zoom/authorize">
+                    Connect Zoom Account
+                </MudButton>
+            }
         }
     </DialogContent>
     <DialogActions>
@@ -37,6 +57,7 @@
     private bool _loading = true;
     private bool _autoAddCalendarMeetings;
     private bool _autoEmailSummary;
+    private string? _zoomEmail;
 
     protected override async Task OnInitializedAsync()
     {
@@ -46,6 +67,7 @@
             _autoAddCalendarMeetings = user.AutoAddCalendarMeetings;
             _autoEmailSummary = user.AutoEmailSummary;
         }
+        _zoomEmail = await ZoomOAuthService.GetLinkedEmailAsync(UserId);
         _loading = false;
     }
 

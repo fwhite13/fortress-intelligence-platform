@@ -218,6 +218,11 @@ class ZoomJoinBot:
         p.isMyVoiceInMix = False
         p.isAudioRawDataStereo = False
         p.eAudioRawdataSamplingRate = SUPPORTED_SAMPLE_RATES[self.sample_rate]
+        if self.args.obf_token:
+            # WI #7246: OBF (on-behalf-of) token, required to join a meeting hosted outside the
+            # app owner's Zoom account. Field confirmed present on the underlying JoinParam4WithoutLogin
+            # binding (see py-zoom-meeting-sdk src/binding/meeting_service_interface_binding.cpp).
+            p.onBehalfToken = self.args.obf_token
         join_param.param = p
 
         result = self.meeting_service.Join(join_param)
@@ -364,6 +369,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sdk-key", required=True, help="Zoom Meeting SDK key")
     parser.add_argument("--sdk-secret", required=True, help="Zoom Meeting SDK secret")
     parser.add_argument("--fifo-path", required=True, help="Path to the FIFO to write raw PCM audio to")
+    parser.add_argument(
+        "--obf-token",
+        default=None,
+        help="Zoom OBF (on-behalf-of) token, required to join a meeting hosted outside the "
+             "app owner's Zoom account (WI #7246). Optional -- falls back to JWT-only join.",
+    )
     parser.add_argument(
         "--audio-sample-rate",
         type=int,

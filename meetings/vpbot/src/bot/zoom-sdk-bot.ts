@@ -185,6 +185,7 @@ export class ZoomSDKBot extends EventEmitter {
   }
 
   private startPython(meetingNumber: string, password: string, sdkKey: string, sdkSecret: string): void {
+    const obfToken = process.env.ZOOM_OBF_TOKEN;
     this.pythonProcess = spawn('python3', [
       ZOOM_JOIN_SCRIPT,
       '--meeting-id', meetingNumber,
@@ -194,6 +195,7 @@ export class ZoomSDKBot extends EventEmitter {
       '--sdk-secret', sdkSecret,
       '--fifo-path', this.fifoPath,
       '--audio-sample-rate', String(ZOOM_SDK_SAMPLE_RATE),
+      ...(obfToken ? ['--obf-token', obfToken] : []),
     ], {
       stdio: ['ignore', 'ignore', 'pipe'],
       env: { ...process.env },
