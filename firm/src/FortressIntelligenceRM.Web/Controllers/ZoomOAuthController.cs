@@ -47,15 +47,14 @@ public class ZoomOAuthController : Controller
         return Redirect(_zoomOAuthService.GetAuthorizationUrl(state));
     }
 
+    // Anonymous: Zoom's cross-site redirect may not carry the FIRM session cookie (SameSite). Identity
+    // comes solely from the DataProtection-signed state token, which is the CSRF protection.
+    [AllowAnonymous]
     [HttpGet("callback")]
     public async Task<IActionResult> Callback([FromQuery] string? code, [FromQuery] string? state)
     {
         if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state))
             return BadRequest("Missing code or state");
-
-        var firmUser = await ResolveCurrentUserAsync();
-        if (firmUser == null)
-            return Unauthorized();
 
         ZoomOAuthState? parsedState;
         try
@@ -69,22 +68,21 @@ public class ZoomOAuthController : Controller
             return BadRequest("Invalid or expired state");
         }
 
-        if (parsedState == null || parsedState.UserId != firmUser.Id
-            || DateTime.UtcNow - parsedState.IssuedAtUtc > StateLifetime)
+        if (parsedState == null || DateTime.UtcNow - parsedState.IssuedAtUtc > StateLifetime)
         {
-            _logger.LogWarning("FIRM: Zoom OAuth callback rejected — state mismatch or expired for user {UserId}", firmUser.Id);
+            _logger.LogWarning("FIRM: Zoom OAuth callback rejected — state missing or expired");
             return BadRequest("Invalid or expired state");
         }
 
         try
         {
-            var zoomEmail = await _zoomOAuthService.HandleCallbackAsync(firmUser.Id, code);
-            _logger.LogInformation("FIRM: Zoom account linked for user {UserId} ({Email})", firmUser.Id, zoomEmail);
+            var zoomEmail = await _zoomOAuthService.HandleCallbackAsync(parsedState.UserId, code);
+            _logger.LogInformation("FIRM: Zoom account linked for user {UserId} ({Email})", parsedState.UserId, zoomEmail);
             return Redirect("/meetings?zoomConnected=1");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "FIRM: Zoom OAuth callback failed for user {UserId}", firmUser.Id);
+            _logger.LogError(ex, "FIRM: Zoom OAuth callback failed for user {UserId}", parsedState.UserId);
             return Redirect("/meetings?zoomConnectError=1");
         }
     }
