@@ -16,6 +16,7 @@ import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 
 import { MeetingBot } from './bot/meeting-bot.js';
+import { ZoomSDKBot } from './bot/zoom-sdk-bot.js';
 import { S3Service } from './transcribe/s3.js';
 import { BatchTranscriptionService } from './transcribe/batch.js';
 import {
@@ -52,6 +53,10 @@ const MEETING_ID = process.env.MEETING_ID || '';
 const BOT_CALLBACK_SECRET = process.env.BOT_CALLBACK_SECRET || '';
 const MEETING_PLATFORM = process.env.MEETING_PLATFORM || ''; // teams|zoom|meet|google-meet
 const FIRM_MAX_MEETING_HOURS = parseFloat(process.env.FIRM_MAX_MEETING_HOURS || '4');
+const FIRM_ZOOM_SDK_KEY = process.env.FIRM_ZOOM_SDK_KEY || '';
+const FIRM_ZOOM_SDK_SECRET = process.env.FIRM_ZOOM_SDK_SECRET || '';
+console.log(`[Config] FIRM_ZOOM_SDK_KEY present: ${!!FIRM_ZOOM_SDK_KEY}`);
+console.log(`[Config] FIRM_ZOOM_SDK_SECRET present: ${!!FIRM_ZOOM_SDK_SECRET}`);
 
 // Ensure recordings directory exists
 if (!fs.existsSync(RECORDINGS_DIR)) {
@@ -177,6 +182,11 @@ async function runOneShotMeeting(meetingUrl: string, meetingId: string, botName:
     console.log(`[OneShot] Platform override: ${meeting.platform}`);
   }
 
+  if (meeting.platform === 'zoom') {
+    await runOneShotZoomSDK(meeting, meetingId);
+    return;
+  }
+
   // MeetingBot constructor: (meeting: Meeting, recordingsDir: string)
   const bot = new MeetingBot(meeting, '/tmp/recordings');
 
@@ -229,6 +239,55 @@ async function runOneShotMeeting(meetingUrl: string, meetingId: string, botName:
     });
 
     // MeetingBot uses .join() not .start()
+    bot.join().catch(reject);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// One-shot Zoom SDK runner (WI #7024) — replaces the browser-based Zoom path,
+// which Cloudflare blocks at the zoom.us pre-join page for headless Chrome.
+// ---------------------------------------------------------------------------
+
+async function runOneShotZoomSDK(meeting: Meeting, meetingId: string): Promise<void> {
+  const bot = new ZoomSDKBot(meeting, '/tmp/recordings');
+
+  process.once('SIGTERM', () => {
+    console.log('[ZoomSDKBot] SIGTERM received — stopping recording gracefully');
+    if (bot.isRecording) {
+      bot.stop().catch((err) => {
+        console.error('[ZoomSDKBot] Error stopping on SIGTERM:', err);
+        process.exit(1);
+      });
+    } else {
+      console.log('[ZoomSDKBot] SIGTERM received but not recording — exiting');
+      process.exit(0);
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    bot.on('joined', () => {
+      console.log('[ZoomSDKBot] Joined meeting');
+      meeting.status = 'recording';
+    });
+
+    bot.on('recording-started', () => {
+      meeting.status = 'recording';
+      meeting.startedAt = new Date();
+    });
+
+    bot.on('recording-stopped', async (wavPath: string) => {
+      try {
+        meeting.audioPath = wavPath;
+        meeting.endedAt = new Date();
+        await processRecording(meeting);
+        resolve();
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    bot.on('error', (err: Error) => reject(err));
+
     bot.join().catch(reject);
   });
 }

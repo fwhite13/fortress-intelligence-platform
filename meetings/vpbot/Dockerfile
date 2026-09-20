@@ -60,6 +60,26 @@ RUN apt-get update && apt-get install -y \
 
 # ML/Whisper deps removed (ADO#1841) — transcription now handled by firm-transcriber Batch job
 
+# Python for Zoom Meeting SDK (WI #7024). python3-gi provides the GLib
+# bindings the SDK's event loop requires (py-zoom-meeting-sdk callbacks are
+# driven by a GLib.MainLoop, same as the SDK's own sample program) — this is
+# a system package, not pip-installable, so it must come from apt.
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-gi \
+    gir1.2-glib-2.0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Zoom Meeting SDK Python bindings.
+# py-zoom-meeting-sdk bundles the Zoom Linux .so directly in its wheel
+# (see its pyproject.toml cibuildwheel step) — no manual SDK download needed.
+# --break-system-packages: Ubuntu 24.04 marks the system Python as
+# externally-managed (PEP 668); zoom_meeting_sdk must land in the same
+# site-packages that apt's python3-gi installs into, so a venv isn't an option.
+RUN pip3 install --break-system-packages --no-cache-dir zoom-meeting-sdk PyJWT==2.8.0 \
+    && mkdir -p /root/.zoomsdk/logs
+
 # Set up virtual display and audio environment
 ENV DISPLAY=:99
 ENV PULSE_SERVER=unix:/var/run/pulse/native
@@ -68,6 +88,9 @@ ENV PULSE_SERVER=unix:/var/run/pulse/native
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
+
+# Copy Zoom SDK Python module
+COPY zoom_sdk /app/zoom_sdk
 
 # Install Playwright Chromium browser
 RUN npx playwright install chromium
