@@ -241,14 +241,33 @@ export class MeetingBot extends EventEmitter {
         const botPasswordEnv = process.env.BOT_PASSWORD;
         if (botEmailEnv && botPasswordEnv) {
           try {
-            console.log('[Bot] Teams auth configured — signing in before meeting navigation...');
             const s3Bucket = process.env.S3_BUCKET || 'firm-recordings-dev';
             const region = process.env.AWS_REGION || 'us-east-1';
             const s3 = new S3Service(region, s3Bucket);
             const meetingIdStr = this.meeting.id.toString();
 
-            await signInToMicrosoft(this.page, botEmailEnv, botPasswordEnv, s3, meetingIdStr);
-            const warmed = await warmTeamsSession(this.page, 30000, s3, meetingIdStr);
+            let warmed = false;
+
+            // If storage state was loaded, try warming session directly — no sign-in needed
+            if (storageStatePath) {
+              console.log('[Bot] Storage state loaded — attempting session warm-up without sign-in...');
+              warmed = await warmTeamsSession(this.page, 20000, s3, meetingIdStr);
+              if (warmed) {
+                console.log('[Bot] Teams session restored from storage state — skipping sign-in');
+                await MeetingBot.saveStorageState(this.context, botEmailEnv);
+              }
+            }
+
+            // Full sign-in needed (first run or session expired)
+            if (!warmed) {
+              console.log('[Bot] Teams auth configured — signing in before meeting navigation...');
+              await signInToMicrosoft(this.page, botEmailEnv, botPasswordEnv, s3, meetingIdStr);
+              warmed = await warmTeamsSession(this.page, 30000, s3, meetingIdStr);
+              if (warmed) {
+                await MeetingBot.saveStorageState(this.context, botEmailEnv);
+              }
+            }
+
             if (!warmed) {
               console.warn('[Bot] Teams warm-up failed; attempting anonymous join');
             }
