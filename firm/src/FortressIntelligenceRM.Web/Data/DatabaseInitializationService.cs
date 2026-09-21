@@ -167,6 +167,19 @@ public class DatabaseInitializationService : IHostedService
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_fmm_meeting (meeting_id)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                ("firm_zoom_oauth", @"CREATE TABLE IF NOT EXISTS firm_zoom_oauth (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+    zoom_user_id VARCHAR(128) NOT NULL,
+    zoom_email VARCHAR(256) NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_fzo_user (user_id),
+    CONSTRAINT fk_fzo_user FOREIGN KEY (user_id) REFERENCES firm_users(id) ON DELETE CASCADE
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
                 ("firm_user_wiki", @"CREATE TABLE IF NOT EXISTS firm_user_wiki (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     entra_oid VARCHAR(128) NOT NULL,
