@@ -287,34 +287,76 @@ export class TeamsHandler {
   ): Promise<boolean> {
     console.log('[Teams] Attempting M365 sign-in from pre-join screen...');
 
+    // URL navigation logging
+    const navLog: string[] = [];
+    page.on('framenavigated', frame => {
+      if (frame === page.mainFrame()) {
+        const url = page.url();
+        console.log(`[Teams][AUTH-NAV] URL changed: ${url}`);
+        navLog.push(url);
+      }
+    });
+
     try {
       // Step 1: click the "Sign in" button on the pre-join screen. Confirmed
       // via live test 2026-09-16: a plain Playwright .click() intermittently
       // fails to trigger the Fluent UI dialog on this button, so we invoke
       // the click through page.evaluate() instead.
+      console.log(`[Teams][AUTH] Step: before-signin-click | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-00-before-signin-click', s3, meetingId);
+
+      const signInBtnExists = await page.evaluate(() => {
+        return !!document.querySelector('[data-tid="auth-sign-in-link"]');
+      });
+      console.log(`[Teams][AUTH] Sign in button found: ${signInBtnExists} | URL: ${page.url()}`);
+
       await page.evaluate(() => {
         const btn = document.querySelector('[data-tid="auth-sign-in-link"]') as HTMLElement | null;
         if (btn) btn.click();
       });
       console.log('[Teams] Clicked Sign in button via evaluate');
 
+      console.log(`[Teams][AUTH] Step: after-signin-click | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-01-after-signin-click', s3, meetingId);
+
       try {
         await page.waitForSelector('input[data-testid="emailInput"]', { state: 'visible', timeout: 10000 });
       } catch {
         console.log('[Teams] No "Sign in" dialog appeared on pre-join screen — cannot authenticate');
+        console.log(`[Teams][AUTH] Step: no-signin-dialog | URL: ${page.url()}`);
         await this.screenshot(page, 'auth-no-signin-dialog', s3, meetingId);
+        console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
         return false;
       }
-      await this.screenshot(page, 'auth-after-signin-click', s3, meetingId);
 
       // Step 2: in-page Fluent UI email dialog. The email input has
       // data-testid="emailInput" and placeholder="Enter your email" — NOT
       // type="email" (confirmed via live test 2026-09-16).
+      console.log(`[Teams][AUTH] Step: before-email | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-02-before-email', s3, meetingId);
+
       const emailInput = page.locator('input[data-testid="emailInput"], input[placeholder="Enter your email"]').first();
-      await emailInput.waitFor({ state: 'visible', timeout: 10000 });
+      try {
+        await emailInput.waitFor({ state: 'visible', timeout: 10000 });
+        const isVisible = await emailInput.isVisible();
+        console.log(`[Teams][AUTH] Email input found: input[data-testid="emailInput"] | visible: ${isVisible} | URL: ${page.url()}`);
+      } catch (err) {
+        console.log(`[Teams][AUTH] Email input not found | URL: ${page.url()} | Error: ${err}`);
+        await this.screenshot(page, 'auth-email-input-not-found', s3, meetingId);
+        console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
+        return false;
+      }
+
       await emailInput.fill(email);
+      console.log(`[Teams][AUTH] Step: after-email | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-03-after-email', s3, meetingId);
+
+      console.log(`[Teams][AUTH] Step: before-email-submit | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-04-before-email-submit', s3, meetingId);
       await this.clickTeamsAuthNext(page);
-      await this.screenshot(page, 'auth-after-email', s3, meetingId);
+
+      console.log(`[Teams][AUTH] Step: after-email-submit | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-05-after-email-submit', s3, meetingId);
 
       // Step 3: after Next, the entire page navigates to
       // login.microsoftonline.com — confirmed via live test 2026-09-16 to be
@@ -323,46 +365,77 @@ export class TeamsHandler {
       console.log('[Teams] Email submitted — waiting for Microsoft login page...');
       try {
         await page.waitForURL('**/login.microsoftonline.com/**', { timeout: 30000 });
-      } catch {
-        console.log('[Teams] Did not navigate to login.microsoftonline.com — falling back to anonymous join');
+      } catch (err) {
+        console.log(`[Teams] Did not navigate to login.microsoftonline.com — falling back to anonymous join | URL: ${page.url()} | Error: ${err}`);
         await this.screenshot(page, 'auth-no-msft-navigation', s3, meetingId);
+        console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
         return false;
       }
       console.log('[Teams] On Microsoft login page:', page.url());
-      await this.screenshot(page, 'auth-on-msft-login', s3, meetingId);
+      console.log(`[Teams][AUTH] Step: after-msft-navigation | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-06-on-msft-login', s3, meetingId);
 
       // Step 4: password on login.microsoftonline.com
+      console.log(`[Teams][AUTH] Step: before-password | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-07-before-password', s3, meetingId);
+
       const passwordInput = page.locator('input[type="password"], input[name="passwd"]').first();
-      await passwordInput.waitFor({ state: 'visible', timeout: 20000 });
+      try {
+        await passwordInput.waitFor({ state: 'visible', timeout: 20000 });
+        const isVisible = await passwordInput.isVisible();
+        console.log(`[Teams][AUTH] Password input found: input[type="password"] | visible: ${isVisible} | URL: ${page.url()}`);
+      } catch (err) {
+        console.log(`[Teams][AUTH] Password input not found | URL: ${page.url()} | Error: ${err}`);
+        await this.screenshot(page, 'auth-password-input-not-found', s3, meetingId);
+        console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
+        return false;
+      }
+
       await passwordInput.fill(password);
+      console.log(`[Teams][AUTH] Step: after-password | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-08-after-password', s3, meetingId);
+
+      console.log(`[Teams][AUTH] Step: before-password-submit | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-09-before-password-submit', s3, meetingId);
       await this.clickM365Button(page);
-      await this.screenshot(page, 'auth-after-password', s3, meetingId);
+
+      console.log(`[Teams][AUTH] Step: after-password-submit | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-10-after-password-submit', s3, meetingId);
 
       // Step 5: KMSI and other known Microsoft interrupt pages on the
       // top-level page.
-      await this.handleM365Interrupts(page, email);
-      await this.screenshot(page, 'auth-after-kmsi', s3, meetingId);
+      console.log(`[Teams][AUTH] Step: before-interrupts | URL: ${page.url()}`);
+      await this.handleM365Interrupts(page, email, s3, meetingId);
+      console.log(`[Teams][AUTH] Step: after-interrupts | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-13-after-kmsi', s3, meetingId);
 
       // Step 6: Microsoft redirects to teams.microsoft.com/v2/authv2, which
       // Teams forwards internally to /v2/ — confirm we're back on Teams.
       await page.waitForFunction(
         () => window.location.hostname === 'teams.microsoft.com' && window.location.pathname.startsWith('/v2'),
         { timeout: 30000 }
-      ).catch(() => {
-        console.log('[Teams] WARNING: Did not redirect back to teams.microsoft.com/v2 after sign-in');
+      ).catch((err) => {
+        console.log(`[Teams] WARNING: Did not redirect back to teams.microsoft.com/v2 after sign-in | URL: ${page.url()} | Error: ${err}`);
       });
 
       if (!page.url().includes('teams.microsoft.com')) {
+        console.log(`[Teams][AUTH] Step: not-on-teams | URL: ${page.url()}`);
         await this.screenshot(page, 'auth-at-warning', s3, meetingId);
         console.log('[Teams] M365 sign-in did not complete — still on:', page.url());
+        console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
         return false;
       }
 
       console.log('[Teams] M365 sign-in complete, back on Teams:', page.url());
+      console.log(`[Teams][AUTH] Step: final-state | URL: ${page.url()}`);
+      await this.screenshot(page, 'auth-14-final-state', s3, meetingId);
+      console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
       return true;
     } catch (err) {
       console.log('[Teams] M365 sign-in failed, falling back to anonymous join:', err);
+      console.log(`[Teams][AUTH] Error at URL: ${page.url()}`);
       await this.screenshot(page, 'auth-signin-failed', s3, meetingId);
+      console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
       return false;
     }
   }
@@ -414,11 +487,12 @@ export class TeamsHandler {
    * caller's own wait for the authenticated pre-join screen is the final
    * authoritative check that sign-in actually completed.
    */
-  private static async handleM365Interrupts(page: Page, email: string): Promise<void> {
+  private static async handleM365Interrupts(page: Page, email: string, s3: S3Service | null, meetingId: string): Promise<void> {
     const locate = (selector: string) => page.locator(selector);
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       console.log(`[Teams] Checking for M365 interrupt pages (attempt ${attempt}/3)...`);
+      console.log(`[Teams][AUTH] Step: interrupt-attempt-${attempt} | URL: ${page.url()}`);
       let handled = false;
 
       // a. KMSI "Stay signed in?"
@@ -429,6 +503,8 @@ export class TeamsHandler {
           (await staySignedIn.isVisible({ timeout: 4000 }).catch(() => false)) ||
           (await kmsiCheckbox.isVisible({ timeout: 2000 }).catch(() => false));
         if (onKmsi) {
+          console.log(`[Teams][AUTH] KMSI page detected | URL: ${page.url()}`);
+          await this.screenshot(page, 'auth-12-kmsi-page', s3, meetingId);
           await staySignedIn.click({ timeout: 4000 }).catch((err) => {
             console.log('[Teams] Could not click KMSI Yes button (non-fatal):', err);
           });
@@ -504,8 +580,10 @@ export class TeamsHandler {
         // Nothing recognized this pass — the auth surface may already be
         // closing as Teams transitions back to the authenticated pre-join
         // screen. Stop looping; the caller's own wait is authoritative.
+        await this.screenshot(page, `auth-11${String.fromCharCode(96 + attempt)}-interrupt-attempt-${attempt}`, s3, meetingId);
         break;
       }
+      await this.screenshot(page, `auth-11${String.fromCharCode(96 + attempt)}-interrupt-attempt-${attempt}`, s3, meetingId);
       await new Promise((resolve) => setTimeout(resolve, 1500));
     }
   }
