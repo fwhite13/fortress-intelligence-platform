@@ -129,6 +129,14 @@ export class MeetingBot extends EventEmitter {
         '--use-fake-device-for-media-stream', // Teams needs fake devices for pre-join toggles
         '--kiosk',                            // Prevents address bar in recording
         '--start-maximized',
+        '--use-gl=angle',
+        '--use-angle=swiftshader',
+        '--auto-accept-this-tab-capture',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-first-run-ui',
+        '--disable-default-browser-promo',
+        '--disable-default-apps',
       ];
 
       const otherArgs = [
@@ -141,15 +149,14 @@ export class MeetingBot extends EventEmitter {
           ...baseArgs,
           ...(isTeams ? teamsArgs : otherArgs),
         ],
+        ignoreDefaultArgs: ['--mute-audio'],
       });
 
-      const userAgent = isTeams
-        ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36'
-        : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36';
+      const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36';
 
       this.context = await this.browser.newContext({
         permissions: ['microphone', 'camera'],
-        userAgent,
+        ...(isTeams ? {} : { userAgent }),  // Teams: let browser report naturally; others: keep custom UA
         viewport: { width: 1280, height: 720 },
         ignoreHTTPSErrors: true,
       });
@@ -175,10 +182,8 @@ export class MeetingBot extends EventEmitter {
         navUrl = await TeamsHandler.processTeamsMeetingUrl(this.meeting.url);
         console.log(`[Bot] Teams processed URL: ${navUrl}`);
       }
-      // Teams: use networkidle (heavy JS app — click handlers need full init before launcher click).
-      // Others: domcontentloaded is fine.
-      const waitUntil = this.meeting.platform === 'teams' ? 'networkidle' as const : 'domcontentloaded' as const;
-      await this.page.goto(navUrl, { waitUntil, timeout: 30000 });
+      // Use domcontentloaded for all platforms (aligned with ScreenApp's working implementation)
+      await this.page.goto(navUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
       // Platform-specific join logic
       try {
