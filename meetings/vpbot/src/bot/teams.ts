@@ -132,10 +132,8 @@ export class TeamsHandler {
     console.log('[Teams] Looking for launcher "Continue on this browser" button...');
 
     const launcherButtonSelectors = [
-      'button[aria-label="Join meeting from this browser"]',
       'button[aria-label="Continue on this browser"]',
       'button[aria-label="Join on this browser"]',
-      'a[aria-label="Join meeting from this browser"]',
       'a[aria-label="Continue on this browser"]',
       'a[aria-label="Join on this browser"]',
       'button:has-text("Continue on this browser")',
