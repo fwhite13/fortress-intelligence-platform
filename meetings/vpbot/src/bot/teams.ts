@@ -308,6 +308,17 @@ export class TeamsHandler {
       });
       console.log(`[Teams][AUTH] Sign in button found: ${signInBtnExists} | URL: ${page.url()}`);
 
+      // Inject webdriver override so Teams routes us to authenticated pre-join after auth
+      // Must be added before Sign in click so it applies to all subsequent navigations
+      // (Microsoft login → KMSI → back to Teams)
+      await page.context().addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined,
+          configurable: true,
+        });
+      });
+      console.log('[Teams][AUTH] navigator.webdriver override injected');
+
       await page.evaluate(() => {
         const btn = document.querySelector('[data-tid="auth-sign-in-link"]') as HTMLElement | null;
         if (btn) btn.click();
