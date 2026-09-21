@@ -111,6 +111,7 @@ class ZoomJoinBot:
 
         self.fifo_fd = None
         self.audio_started = False
+        self.chat_sent = False
         self.reached_in_meeting = False
         self.exiting = False
         self.exit_code = 0
@@ -134,6 +135,10 @@ class ZoomJoinBot:
         if not self.audio_started:
             self.audio_started = True
             log(f"[ZoomSDK] Audio started (sample_rate={data.GetSampleRate()})")
+            # Send chat announcement once after audio starts (non-fatal)
+            if not self.chat_sent:
+                self.chat_sent = True
+                self.send_chat_announcement()
 
         if not self._try_open_fifo():
             return
@@ -286,6 +291,29 @@ class ZoomJoinBot:
         if subscribe_result != zoom.SDKERR_SUCCESS:
             self.request_exit(1)
         return False
+
+    def send_chat_announcement(self) -> None:
+        """Send a chat announcement to all meeting participants.
+
+        Non-fatal: a failed chat must never abort the recording.
+        """
+        bot_name = os.environ.get('BOT_CHAT_ANNOUNCE_NAME')
+        if not bot_name:
+            log("[ZoomSDK] Chat skipped — BOT_CHAT_ANNOUNCE_NAME not set")
+            return
+
+        try:
+            chat_ctrl = self.meeting_service.GetMeetingChatController()
+            if chat_ctrl is None:
+                log("[ZoomSDK] Chat failed — GetMeetingChatController returned None")
+                return
+
+            message = f"I'm here to take notes for {bot_name}. I'll send a summary when the meeting ends."
+            # Send to all participants (receiver = None or empty string = send to all)
+            result = chat_ctrl.SendChatTo(None, message)
+            log(f"[ZoomSDK] Chat sent (result={result})")
+        except Exception as e:
+            log(f"[ZoomSDK] Chat failed — {e}")
 
     # -- Shutdown -----------------------------------------------------
 
