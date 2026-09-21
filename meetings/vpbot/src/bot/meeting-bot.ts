@@ -16,6 +16,7 @@ import { Meeting, MeetingPlatform, MeetingStatus } from '../types.js';
 import { TeamsHandler, LobbyTimeoutError } from './teams.js';
 import { ZoomHandler } from './zoom.js';
 import { GoogleMeetHandler } from './google-meet.js';
+import { signInToMicrosoft, warmTeamsSession, dumpAuthState } from './teams-auth.js';
 
 // FIRM callback: POST status updates to FIRM_API_URL /api/vp/callback
 // Env vars: FIRM_API_URL, BOT_CALLBACK_SECRET, MEETING_ID (numeric)
@@ -86,7 +87,7 @@ export class MeetingBot extends EventEmitter {
    * Detect the meeting platform from the URL
    */
   static detectPlatform(url: string): MeetingPlatform {
-    if (url.includes('teams.microsoft.com') || url.includes('teams.live.com')) {
+    if (url.includes('teams.microsoft.com') || url.includes('cloud.microsoft') || url.includes('teams.live.com')) {
       return 'teams';
     }
     if (url.includes('zoom.us')) {
@@ -169,12 +170,35 @@ export class MeetingBot extends EventEmitter {
           origin: 'https://app.zoom.us'
         });
       } else if (this.meeting.platform === 'teams') {
-        // Grant permissions for the Teams origin specifically
-        await this.context.grantPermissions(['microphone', 'camera'], { 
-          origin: 'https://teams.microsoft.com' 
+        // Grant permissions for all Teams origins
+        await this.context.grantPermissions(['microphone', 'camera'], {
+          origin: 'https://teams.microsoft.com'
+        });
+        await this.context.grantPermissions(['microphone', 'camera'], {
+          origin: 'https://teams.cloud.microsoft'
+        });
+        await this.context.grantPermissions(['microphone', 'camera'], {
+          origin: 'https://teams.live.com'
         });
         navUrl = await TeamsHandler.processTeamsMeetingUrl(this.meeting.url);
         console.log(`[Bot] Teams processed URL: ${navUrl}`);
+
+        // WI #7287: Inverted auth flow — sign in and warm session BEFORE navigating to meeting
+        const botEmailEnv = process.env.BOT_EMAIL;
+        const botPasswordEnv = process.env.BOT_PASSWORD;
+        if (botEmailEnv && botPasswordEnv) {
+          try {
+            console.log('[Bot] Teams auth configured — signing in before meeting navigation...');
+            await signInToMicrosoft(this.page, botEmailEnv, botPasswordEnv);
+            const warmed = await warmTeamsSession(this.page);
+            if (!warmed) {
+              console.warn('[Bot] Teams warm-up failed; attempting anonymous join');
+            }
+            await dumpAuthState(this.context, this.page, 'before-meeting-nav');
+          } catch (authErr) {
+            console.warn('[Bot] Teams auth failed, falling back to anonymous:', authErr);
+          }
+        }
       }
       // Use domcontentloaded for all platforms (aligned with ScreenApp's working implementation)
       await this.page.goto(navUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
