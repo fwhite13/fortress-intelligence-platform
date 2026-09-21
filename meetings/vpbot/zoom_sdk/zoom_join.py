@@ -313,29 +313,6 @@ class ZoomJoinBot:
             self.request_exit(1)
         return False
 
-    def send_chat_announcement(self) -> None:
-        """Send a chat announcement to all meeting participants.
-
-        Non-fatal: a failed chat must never abort the recording.
-        """
-        bot_name = os.environ.get('BOT_CHAT_ANNOUNCE_NAME')
-        if not bot_name:
-            log("[ZoomSDK] Chat skipped — BOT_CHAT_ANNOUNCE_NAME not set")
-            return
-
-        try:
-            chat_ctrl = self.meeting_service.GetMeetingChatController()
-            if chat_ctrl is None:
-                log("[ZoomSDK] Chat failed — GetMeetingChatController returned None")
-                return
-
-            message = f"I'm here to take notes for {bot_name}. I'll send a summary when the meeting ends."
-            # Send to all participants (receiver = None or empty string = send to all)
-            result = chat_ctrl.SendChatTo(None, message)
-            log(f"[ZoomSDK] Chat sent (result={result})")
-        except Exception as e:
-            log(f"[ZoomSDK] Chat failed — {e}")
-
     # -- Shutdown -----------------------------------------------------
 
     def leave(self) -> None:
