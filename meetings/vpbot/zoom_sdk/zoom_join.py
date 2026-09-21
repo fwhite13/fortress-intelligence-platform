@@ -263,6 +263,27 @@ class ZoomJoinBot:
         self.recording_ctrl.SetEvent(self.recording_event)
 
         GLib.timeout_add_seconds(1, self.start_raw_recording)
+        self.send_chat_announcement()
+
+    def send_chat_announcement(self) -> None:
+        """Send a chat announcement to all meeting participants. Non-fatal."""
+        announce_name = os.environ.get("BOT_CHAT_ANNOUNCE_NAME", "")
+        if not announce_name:
+            log("[ZoomSDK] Chat skipped — BOT_CHAT_ANNOUNCE_NAME not set")
+            return
+        try:
+            chat_ctrl = self.meeting_service.GetMeetingChatController()
+            if chat_ctrl is None:
+                log("[ZoomSDK] Chat failed — GetMeetingChatController returned None")
+                return
+            message = f"I'm here to take notes for {announce_name}. I'll send a summary when the meeting ends."
+            builder = chat_ctrl.GetChatMessageBuilder()
+            builder.SetReceiver(0)  # 0 = send to all
+            builder.SetContent(message)
+            result = chat_ctrl.SendChatMsgTo(builder.Build())
+            log(f"[ZoomSDK] Chat sent (result={result})")
+        except Exception as e:
+            log(f"[ZoomSDK] Chat failed — {e}")
 
     def start_raw_recording(self) -> bool:
         can_start = self.recording_ctrl.CanStartRawRecording()
