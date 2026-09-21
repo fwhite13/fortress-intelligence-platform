@@ -6,7 +6,9 @@
  * captures from the monitor source. This works for Teams, Zoom, and Meet.
  */
 
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { chromium } from 'playwright-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import { EventEmitter } from 'events';
 import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
@@ -15,6 +17,11 @@ import { Meeting, MeetingPlatform, MeetingStatus } from '../types.js';
 import { TeamsHandler, LobbyTimeoutError } from './teams.js';
 import { ZoomHandler } from './zoom.js';
 import { GoogleMeetHandler } from './google-meet.js';
+
+const stealthPlugin = StealthPlugin();
+stealthPlugin.enabledEvasions.delete('iframe.contentWindow'); // avoid Teams iframe breakage
+stealthPlugin.enabledEvasions.delete('media.codecs');         // avoid conflict with fake-device flags
+chromium.use(stealthPlugin);
 
 // FIRM callback: POST status updates to FIRM_API_URL /api/vp/callback
 // Env vars: FIRM_API_URL, BOT_CALLBACK_SECRET, MEETING_ID (numeric)
