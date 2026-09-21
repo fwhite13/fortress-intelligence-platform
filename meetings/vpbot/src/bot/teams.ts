@@ -1106,38 +1106,82 @@ export class TeamsHandler {
    *
    * New Teams uses toggle inputs (data-tid="toggle-video" / "toggle-mute")
    * and button elements. We try both patterns.
+   *
+   * WI #7295: Fixed camera toggle to check actual button state using
+   * aria-checked/aria-pressed instead of [checked] attribute.
    */
   private static async turnOffDevices(page: Page): Promise<void> {
     try {
       console.log('[Teams] Toggling camera and microphone off...');
       await page.waitForTimeout(2000);
 
-      // Turn off camera — try toggle inputs first (new Teams), then buttons
+      // Turn off camera — check actual state via aria-checked/aria-pressed
+      // Pre-join defaults to camera ON, so if we find a toggle we click it once
       const cameraSelectors = [
-        // New Teams toggle inputs (checked = camera ON, need to click to turn off)
-        'input[data-tid="toggle-video"][checked]',
-        'input[type="checkbox"][title*="Turn camera off" i]',
-        'input[role="switch"][data-tid="toggle-video"]',
-        // Button-based (older or alternative UI)
-        'button[aria-label*="Turn camera off" i]',
-        'button[aria-label*="Camera off" i]',
-        '[data-tid="prejoin-camera-button"]',
+        'button[data-tid="toggle-video"]',
+        'input[data-tid="toggle-video"]',
         'button[aria-label*="camera" i]',
+        '[data-tid="prejoin-camera-button"]',
       ];
 
+      let toggledCamera = false;
       for (const selector of cameraSelectors) {
         try {
           const el = page.locator(selector).first();
           if (await el.isVisible({ timeout: 2000 })) {
-            await el.click();
-            console.log(`[Teams] Turned off camera via: ${selector}`);
-            await page.waitForTimeout(500);
-            break;
+            // Check if camera is currently ON via aria-checked or aria-pressed
+            const state = await page.evaluate((sel) => {
+              const elem = document.querySelector(sel);
+              if (!elem) return null;
+              const ariaChecked = elem.getAttribute('aria-checked');
+              const ariaPressed = elem.getAttribute('aria-pressed');
+              const checked = (elem as HTMLInputElement).checked;
+              return { ariaChecked, ariaPressed, checked };
+            }, selector);
+
+            console.log(`[Teams] Camera toggle state via ${selector}:`, state);
+
+            // If camera is on (aria-checked="true" or aria-pressed="true"), click to turn off
+            // Or if state is indeterminate, just click once (pre-join defaults to camera ON)
+            const shouldClick =
+              state?.ariaChecked === 'true' ||
+              state?.ariaPressed === 'true' ||
+              state?.checked === true ||
+              state === null; // Fallback: always click if we can't determine state
+
+            if (shouldClick) {
+              // Use page.evaluate for reliable click (same pattern as Teams auth)
+              await page.evaluate((sel) => {
+                const elem = document.querySelector(sel) as HTMLElement | null;
+                if (elem) elem.click();
+              }, selector);
+              console.log(`[Teams] Clicked camera toggle via: ${selector}`);
+              await page.waitForTimeout(500);
+              toggledCamera = true;
+              break;
+            } else {
+              console.log(`[Teams] Camera already off via ${selector} — skipping click`);
+              toggledCamera = true;
+              break;
+            }
           }
-        } catch {
+        } catch (err) {
+          console.log(`[Teams] Failed to toggle camera via ${selector}:`, err);
           continue;
         }
       }
+
+      if (!toggledCamera) {
+        console.log('[Teams] WARNING: Could not find camera toggle — camera may still be on');
+      }
+
+      // Screenshot after camera toggle attempt
+      const meetingId = process.env.MEETING_ID || '0';
+      const s3 = new S3Service(
+        process.env.AWS_REGION || 'us-east-1',
+        process.env.S3_BUCKET || 'firm-recordings-dev'
+      );
+      await this.screenshot(page, 'pre-join-camera-toggled', s3, meetingId);
 
       // Mute microphone
       const micSelectors = [
