@@ -552,26 +552,6 @@ export class TeamsHandler {
     console.log('[Teams] Starting join flow...');
     console.log('[Teams] Current URL:', page.url());
 
-    // Extract meetingId and token early for post-auth navigation (WI #7267)
-    let extractedMeetingId: string | null = null;
-    let extractedToken: string | null = null;
-    if (originalUrl) {
-      try {
-        const url = new URL(originalUrl);
-        // Short format: /meet/{id}?p={token}
-        const meetMatch = url.pathname.match(/\/meet\/([^/]+)/);
-        if (meetMatch) {
-          extractedMeetingId = meetMatch[1];
-          extractedToken = url.searchParams.get('p');
-          console.log('[Teams] Extracted from short URL — meetingId:', extractedMeetingId, 'token:', extractedToken ? '(present)' : '(none)');
-        }
-        // Long format: /l/meetup-join/... (also extract if possible, though less reliable)
-        // For long format, we'll fall back to originalUrl if extraction fails
-      } catch (parseErr) {
-        console.log('[Teams] WARNING: could not parse originalUrl for meetingId/token:', parseErr);
-      }
-    }
-
     // Instantiate S3Service early for all debug screenshots
     const meetingId = process.env.MEETING_ID || '0';
     const s3 = new S3Service(
@@ -583,9 +563,9 @@ export class TeamsHandler {
 
     // Step 1: Handle the launcher page
     // Wait for page to stabilize
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
 
-    const pageText = await this.evaluateWithNavRetry(page, () => document.body?.innerText?.substring(0, 1000) || 'NO BODY TEXT');
+    const pageText = await page.evaluate(() => document.body?.innerText?.substring(0, 1000) || 'NO BODY TEXT');
     console.log('[Teams] Initial page text:', pageText.substring(0, 200));
 
     // Check if we're on the launcher page
@@ -606,7 +586,7 @@ export class TeamsHandler {
       } else {
         console.log('[Teams] WARNING: Could not find launcher button');
         // Log page state for debugging
-        const html = await this.evaluateWithNavRetry(page, () => document.body?.innerHTML?.substring(0, 2000) || '');
+        const html = await page.evaluate(() => document.body?.innerHTML?.substring(0, 2000) || '');
         console.log('[Teams] Page HTML snippet:', html.substring(0, 500));
       }
 
@@ -619,7 +599,7 @@ export class TeamsHandler {
     if (!preJoinReached) {
       console.log('[Teams] WARNING: Pre-join screen not reached after 120s');
       console.log('[Teams] Current URL:', page.url());
-      const currentText = await this.evaluateWithNavRetry(page, () => document.body?.innerText?.substring(0, 500) || '');
+      const currentText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
       console.log('[Teams] Current page text:', currentText);
       await this.screenshot(page, '01c-pre-join-not-reached', s3, meetingId);
 
@@ -672,32 +652,9 @@ export class TeamsHandler {
           if (botEmail && botPassword) {
             authenticated = await this.signInWithM365(page, botEmail, botPassword, s3, meetingId);
             if (authenticated) {
-              console.log('[Teams] M365 sign-in succeeded — skipping anonymous name entry');
-              // WI #7267: Navigate to /v2/ SPA URL to stay in authenticated context.
-              // The short /meet/ URL triggers anonymous redirect; /v2/ preserves auth cookies.
-              if (extractedMeetingId) {
-                const authPreJoinUrl = `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${extractedMeetingId}${extractedToken ? `?p=${extractedToken}` : ''}`;
-                console.log('[Teams] Re-navigating to /v2/ SPA URL post-auth:', authPreJoinUrl);
-                try {
-                  await page.goto(authPreJoinUrl, { waitUntil: 'networkidle', timeout: 30000 });
-                } catch (navErr) {
-                  console.log('[Teams] WARNING: Post-auth navigation timed out (non-fatal):', navErr);
-                }
-                const authPreJoinReached = await this.waitForPreJoinScreen(page, 30000);
-                console.log('[Teams] Post-auth pre-join state — reached:', authPreJoinReached, 'URL:', page.url());
-                await this.screenshot(page, '02b-post-auth-prejoin', s3, meetingId);
-              } else if (originalUrl) {
-                // Fallback for long-format URLs or failed extraction — use original URL
-                console.log('[Teams] No extracted meetingId — falling back to original URL:', originalUrl);
-                try {
-                  await page.goto(originalUrl, { waitUntil: 'networkidle', timeout: 30000 });
-                } catch (navErr) {
-                  console.log('[Teams] WARNING: Post-auth navigation timed out (non-fatal):', navErr);
-                }
-                const authPreJoinReached = await this.waitForPreJoinScreen(page, 30000);
-                console.log('[Teams] Post-auth pre-join state — reached:', authPreJoinReached, 'URL:', page.url());
-                await this.screenshot(page, '02b-post-auth-prejoin', s3, meetingId);
-              }
+              console.log('[Teams] M365 sign-in succeeded — page is already on authenticated pre-join screen');
+              console.log('[Teams] Post-auth URL:', page.url());
+              await this.screenshot(page, '02b-post-auth-prejoin', s3, meetingId);
               enteredName = true;
               break;
             }
@@ -1016,58 +973,6 @@ export class TeamsHandler {
       }
 
       console.log('[Teams] ✅ Chat notification posted');
-
-      // WI #7259: Also send a simpler welcome message using BOT_CHAT_ANNOUNCE_NAME
-      const announceName = process.env.BOT_CHAT_ANNOUNCE_NAME || '';
-      if (announceName) {
-        try {
-          const simpleMessage = `I'm here to take notes for ${announceName}. I'll send a summary when the meeting ends.`;
-          console.log('[Teams] Sending simple welcome message...');
-
-          // Wait a bit between messages
-          await page.waitForTimeout(2000);
-
-          // Re-find the chat input (it may have been reset after the first message)
-          let welcomeChatInput: Locator | null = null;
-          for (const selector of inputSelectors) {
-            try {
-              const el = page.locator(selector).first();
-              if (await el.isVisible({ timeout: 3000 })) {
-                welcomeChatInput = el;
-                break;
-              }
-            } catch {
-              continue;
-            }
-          }
-
-          if (welcomeChatInput) {
-            await welcomeChatInput.click();
-            await welcomeChatInput.type(simpleMessage);
-
-            // Send the message
-            let welcomeSent = false;
-            for (const selector of sendButtonSelectors) {
-              try {
-                const btn = page.locator(selector).first();
-                if (await btn.isVisible({ timeout: 3000 })) {
-                  await btn.click();
-                  welcomeSent = true;
-                  break;
-                }
-              } catch {
-                continue;
-              }
-            }
-            if (!welcomeSent) {
-              await page.keyboard.press('Enter');
-            }
-            console.log('[Teams] ✅ Simple welcome message posted');
-          }
-        } catch (welcomeErr) {
-          console.log('[Teams] WARNING: failed to post simple welcome message (non-fatal):', welcomeErr);
-        }
-      }
     } catch (err) {
       console.log('[Teams] WARNING: failed to post chat notification (non-fatal):', err);
     }
