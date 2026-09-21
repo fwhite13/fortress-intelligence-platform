@@ -433,6 +433,26 @@ export class MeetingBot extends EventEmitter {
     const END_POLL_INTERVAL_MS = 15_000;
     let participantOneCount = 0;
 
+    // WI #7289: UI-signal detection for meeting end (Teams v2 compatible)
+    // Meeting is considered over when UI controls are absent for N consecutive polls
+    const MEETING_UI_SELECTORS = [
+      '[data-tid="hangup-button"]',
+      '[data-tid="calling-screen"]',
+      '[data-tid="roster-button"]',
+      'button:has-text("Leave")',
+    ];
+    let noMeetingUiCount = 0;
+    const NO_UI_THRESHOLD = 3; // 3 consecutive polls (45s)
+
+    const isMeetingUiPresent = async (page: Page): Promise<boolean> => {
+      for (const sel of MEETING_UI_SELECTORS) {
+        try {
+          if (await page.locator(sel).isVisible({ timeout: 500 })) return true;
+        } catch { /* ignore */ }
+      }
+      return false;
+    };
+
     this._endPollInterval = setInterval(async () => {
       try {
         const page = this.page;
@@ -473,30 +493,32 @@ export class MeetingBot extends EventEmitter {
           return;
         }
 
-        // Detect navigation away from Teams meeting
-        try {
-          const currentUrl = page.url();
-          const meetingUrl = this.meeting.url;
-          if (currentUrl && meetingUrl) {
-            const isTeams = this.meeting.platform === 'teams';
-            if (isTeams && currentUrl !== meetingUrl) {
-              // Check if we've navigated to a non-meeting page
-              const isAboutBlank = currentUrl === 'about:blank' || currentUrl === '';
-              const isTeamsHome = currentUrl.includes('teams.microsoft.com/_#/') && !currentUrl.includes('/meetup-join/');
-              const isTeamsConversations = currentUrl.includes('/conversations') || currentUrl.includes('/calendar') || currentUrl.includes('/chat');
-              if (isAboutBlank || isTeamsHome || isTeamsConversations) {
-                console.log(`[Bot] Navigation away from meeting detected: ${currentUrl}`);
-                if (this._endPollInterval) clearInterval(this._endPollInterval);
-                this._endPollInterval = null;
-                this.stop('navigation-away').catch((err) =>
-                  console.error('[Bot] Error stopping after navigation away:', err)
-                );
-                return;
-              }
-            }
+        // WI #7289: UI-signal detection for meeting end (replaces URL heuristics)
+        // Check if meeting UI controls are present
+        const meetingUiPresent = await isMeetingUiPresent(page);
+        if (!meetingUiPresent) {
+          noMeetingUiCount++;
+          console.log(`[Bot] Meeting UI absent (${noMeetingUiCount}/${NO_UI_THRESHOLD} consecutive polls)`);
+
+          // Minimum duration guard: require at least MIN_RECORDING_MINUTES before UI-based end detection
+          const minDurationMs = MIN_RECORDING_MINUTES * 60 * 1000;
+          const pastMinDuration = (Date.now() - this._recordingStartTime) >= minDurationMs;
+
+          if (noMeetingUiCount >= NO_UI_THRESHOLD && pastMinDuration) {
+            console.log('[Bot] Meeting UI absent for 3 consecutive polls (45s) — ending');
+            if (this._endPollInterval) clearInterval(this._endPollInterval);
+            this._endPollInterval = null;
+            this.stop('meeting-ui-absent').catch((err) =>
+              console.error('[Bot] Error stopping after UI absence detection:', err)
+            );
+            return;
           }
-        } catch (_urlErr) {
-          // Non-fatal — page may be in transition
+        } else {
+          // Reset counter when meeting UI is present
+          if (noMeetingUiCount > 0) {
+            console.log('[Bot] Meeting UI present — reset no-UI counter');
+          }
+          noMeetingUiCount = 0;
         }
 
         // Minimum duration guard: signals below require at least MIN_RECORDING_MINUTES
