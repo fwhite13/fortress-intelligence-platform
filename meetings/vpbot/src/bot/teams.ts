@@ -1034,37 +1034,52 @@ export class TeamsHandler {
         return;
       }
 
-      // Step 2: wait for the chat input to be ready
+      // Step 2: wait for chat panel to fully render
+      await page.waitForTimeout(2000);
+      console.log('[Teams] Chat panel opened, waiting for input field to render...');
+
+      // Step 3: find the chat input with fallbacks for authenticated mode
       const inputSelectors = [
+        'div[data-tid="newMessageInput"]',
         'div[aria-label="Type a message"]',
         'div[data-tid="ckeditor"]',
-        '[contenteditable="true"][aria-label*="message" i]',
+        'div[contenteditable="true"][aria-label*="message" i]',
+        'div[contenteditable="true"][aria-label*="chat" i]',
+        'div[contenteditable="true"][aria-label*="reply" i]',
         '[contenteditable="true"][role="textbox"]',
+        'div[contenteditable="true"]', // broadest fallback
       ];
       let chatInput: Locator | null = null;
+      let successfulSelector: string | null = null;
       for (const selector of inputSelectors) {
         try {
           const el = page.locator(selector).first();
           if (await el.isVisible({ timeout: 5000 })) {
             chatInput = el;
-            console.log(`[Teams] Found chat input via: ${selector}`);
+            successfulSelector = selector;
+            console.log(`[Teams] ✅ Found chat input via: ${selector}`);
             break;
           }
         } catch {
           continue;
         }
       }
-      if (!chatInput) {
+      if (!chatInput || !successfulSelector) {
         console.log('[Teams] WARNING: could not find chat input field — skipping chat notification');
+        const s3 = new S3Service(
+          process.env.AWS_REGION || 'us-east-1',
+          process.env.S3_BUCKET || 'firm-recordings-dev'
+        );
+        await this.screenshot(page, 'teams-chat-failed', s3, process.env.MEETING_ID || '0');
         return;
       }
 
-      // Step 3: type the message — Shift+Enter for the internal line break,
-      // plain Enter (or the Send button) submits at the end.
+      // Step 4: type the message — for contenteditable divs, use click + keyboard.type
       await chatInput.click();
+      await page.waitForTimeout(500);
       const lines = message.split('\n');
       for (let i = 0; i < lines.length; i++) {
-        await chatInput.type(lines[i]);
+        await page.keyboard.type(lines[i]);
         if (i < lines.length - 1) {
           await page.keyboard.down('Shift');
           await page.keyboard.press('Enter');
@@ -1072,7 +1087,7 @@ export class TeamsHandler {
         }
       }
 
-      // Step 4: submit
+      // Step 5: submit
       const sendButtonSelectors = [
         'button[data-tid="sendMessageCommand"]',
         'button[aria-label="Send"]',
@@ -1095,7 +1110,13 @@ export class TeamsHandler {
         await page.keyboard.press('Enter');
       }
 
-      console.log('[Teams] ✅ Chat notification posted');
+      // Step 6: capture screenshot and log success
+      const s3 = new S3Service(
+        process.env.AWS_REGION || 'us-east-1',
+        process.env.S3_BUCKET || 'firm-recordings-dev'
+      );
+      await this.screenshot(page, 'teams-chat-sent', s3, process.env.MEETING_ID || '0');
+      console.log(`[Teams] ✅ Chat notification posted (input selector: ${successfulSelector})`);
     } catch (err) {
       console.log('[Teams] WARNING: failed to post chat notification (non-fatal):', err);
     }
