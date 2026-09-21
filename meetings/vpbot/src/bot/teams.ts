@@ -45,9 +45,18 @@ export class LobbyTimeoutError extends Error {
   }
 }
 
+export interface RosterEntry {
+  name: string;
+  joinedAtMs: number;
+  leftAtMs?: number;
+  possiblyMultiVoice: boolean; // conference room heuristic
+}
+
 const SCREENSHOTS_DIR = process.env.RECORDINGS_DIR || '/app/recordings';
 
 export class TeamsHandler {
+  private rosterEntries: RosterEntry[] = [];
+  private rosterPollInterval?: NodeJS.Timeout;
 
   /**
    * Save a debug screenshot with sequential numbering and upload to S3
@@ -284,7 +293,7 @@ export class TeamsHandler {
       // fails to trigger the Fluent UI dialog on this button, so we invoke
       // the click through page.evaluate() instead.
       console.log(`[Teams][AUTH] Step: before-signin-click | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-00-before-signin-click', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-00-before-signin-click', s3, meetingId);
 
       const signInBtnExists = await page.evaluate(() => {
         return !!document.querySelector('[data-tid="auth-sign-in-link"]');
@@ -309,14 +318,14 @@ export class TeamsHandler {
       console.log('[Teams] Clicked Sign in button via evaluate');
 
       console.log(`[Teams][AUTH] Step: after-signin-click | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-01-after-signin-click', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-01-after-signin-click', s3, meetingId);
 
       try {
         await page.waitForSelector('input[data-testid="emailInput"]', { state: 'visible', timeout: 10000 });
       } catch {
         console.log('[Teams] No "Sign in" dialog appeared on pre-join screen — cannot authenticate');
         console.log(`[Teams][AUTH] Step: no-signin-dialog | URL: ${page.url()}`);
-        await this.screenshot(page, 'auth-no-signin-dialog', s3, meetingId);
+        await TeamsHandler.screenshot(page, 'auth-no-signin-dialog', s3, meetingId);
         console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
         return false;
       }
@@ -325,7 +334,7 @@ export class TeamsHandler {
       // data-testid="emailInput" and placeholder="Enter your email" — NOT
       // type="email" (confirmed via live test 2026-09-16).
       console.log(`[Teams][AUTH] Step: before-email | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-02-before-email', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-02-before-email', s3, meetingId);
 
       const emailInput = page.locator('input[data-testid="emailInput"], input[placeholder="Enter your email"]').first();
       try {
@@ -334,21 +343,21 @@ export class TeamsHandler {
         console.log(`[Teams][AUTH] Email input found: input[data-testid="emailInput"] | visible: ${isVisible} | URL: ${page.url()}`);
       } catch (err) {
         console.log(`[Teams][AUTH] Email input not found | URL: ${page.url()} | Error: ${err}`);
-        await this.screenshot(page, 'auth-email-input-not-found', s3, meetingId);
+        await TeamsHandler.screenshot(page, 'auth-email-input-not-found', s3, meetingId);
         console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
         return false;
       }
 
       await emailInput.fill(email);
       console.log(`[Teams][AUTH] Step: after-email | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-03-after-email', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-03-after-email', s3, meetingId);
 
       console.log(`[Teams][AUTH] Step: before-email-submit | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-04-before-email-submit', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-04-before-email-submit', s3, meetingId);
       await this.clickTeamsAuthNext(page);
 
       console.log(`[Teams][AUTH] Step: after-email-submit | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-05-after-email-submit', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-05-after-email-submit', s3, meetingId);
 
       // Step 3: after Next, the entire page navigates to
       // login.microsoftonline.com — confirmed via live test 2026-09-16 to be
@@ -359,17 +368,17 @@ export class TeamsHandler {
         await page.waitForURL('**/login.microsoftonline.com/**', { timeout: 30000 });
       } catch (err) {
         console.log(`[Teams] Did not navigate to login.microsoftonline.com — falling back to anonymous join | URL: ${page.url()} | Error: ${err}`);
-        await this.screenshot(page, 'auth-no-msft-navigation', s3, meetingId);
+        await TeamsHandler.screenshot(page, 'auth-no-msft-navigation', s3, meetingId);
         console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
         return false;
       }
       console.log('[Teams] On Microsoft login page:', page.url());
       console.log(`[Teams][AUTH] Step: after-msft-navigation | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-06-on-msft-login', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-06-on-msft-login', s3, meetingId);
 
       // Step 4: password on login.microsoftonline.com
       console.log(`[Teams][AUTH] Step: before-password | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-07-before-password', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-07-before-password', s3, meetingId);
 
       const passwordInput = page.locator('input[type="password"], input[name="passwd"]').first();
       try {
@@ -378,28 +387,28 @@ export class TeamsHandler {
         console.log(`[Teams][AUTH] Password input found: input[type="password"] | visible: ${isVisible} | URL: ${page.url()}`);
       } catch (err) {
         console.log(`[Teams][AUTH] Password input not found | URL: ${page.url()} | Error: ${err}`);
-        await this.screenshot(page, 'auth-password-input-not-found', s3, meetingId);
+        await TeamsHandler.screenshot(page, 'auth-password-input-not-found', s3, meetingId);
         console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
         return false;
       }
 
       await passwordInput.fill(password);
       console.log(`[Teams][AUTH] Step: after-password | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-08-after-password', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-08-after-password', s3, meetingId);
 
       console.log(`[Teams][AUTH] Step: before-password-submit | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-09-before-password-submit', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-09-before-password-submit', s3, meetingId);
       await this.clickM365Button(page);
 
       console.log(`[Teams][AUTH] Step: after-password-submit | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-10-after-password-submit', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-10-after-password-submit', s3, meetingId);
 
       // Step 5: KMSI and other known Microsoft interrupt pages on the
       // top-level page.
       console.log(`[Teams][AUTH] Step: before-interrupts | URL: ${page.url()}`);
       await this.handleM365Interrupts(page, email, s3, meetingId);
       console.log(`[Teams][AUTH] Step: after-interrupts | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-13-after-kmsi', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-13-after-kmsi', s3, meetingId);
 
       // Step 6: Microsoft redirects to teams.microsoft.com/v2/authv2, which
       // Teams forwards internally to /v2/ — confirm we're back on Teams.
@@ -412,7 +421,7 @@ export class TeamsHandler {
 
       if (!page.url().includes('teams.microsoft.com')) {
         console.log(`[Teams][AUTH] Step: not-on-teams | URL: ${page.url()}`);
-        await this.screenshot(page, 'auth-at-warning', s3, meetingId);
+        await TeamsHandler.screenshot(page, 'auth-at-warning', s3, meetingId);
         console.log('[Teams] M365 sign-in did not complete — still on:', page.url());
         console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
         return false;
@@ -436,13 +445,13 @@ export class TeamsHandler {
 
       console.log('[Teams] M365 sign-in complete, back on Teams:', page.url());
       console.log(`[Teams][AUTH] Step: final-state | URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-14-final-state', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-14-final-state', s3, meetingId);
       console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
       return true;
     } catch (err) {
       console.log('[Teams] M365 sign-in failed, falling back to anonymous join:', err);
       console.log(`[Teams][AUTH] Error at URL: ${page.url()}`);
-      await this.screenshot(page, 'auth-signin-failed', s3, meetingId);
+      await TeamsHandler.screenshot(page, 'auth-signin-failed', s3, meetingId);
       console.log(`[Teams][AUTH] Navigation history: ${navLog.join(' -> ')}`);
       return false;
     }
@@ -512,7 +521,7 @@ export class TeamsHandler {
           (await kmsiCheckbox.isVisible({ timeout: 2000 }).catch(() => false));
         if (onKmsi) {
           console.log(`[Teams][AUTH] KMSI page detected | URL: ${page.url()}`);
-          await this.screenshot(page, 'auth-12-kmsi-page', s3, meetingId);
+          await TeamsHandler.screenshot(page, 'auth-12-kmsi-page', s3, meetingId);
           await staySignedIn.click({ timeout: 4000 }).catch((err) => {
             console.log('[Teams] Could not click KMSI Yes button (non-fatal):', err);
           });
@@ -588,10 +597,10 @@ export class TeamsHandler {
         // Nothing recognized this pass — the auth surface may already be
         // closing as Teams transitions back to the authenticated pre-join
         // screen. Stop looping; the caller's own wait is authoritative.
-        await this.screenshot(page, `auth-11${String.fromCharCode(96 + attempt)}-interrupt-attempt-${attempt}`, s3, meetingId);
+        await TeamsHandler.screenshot(page, `auth-11${String.fromCharCode(96 + attempt)}-interrupt-attempt-${attempt}`, s3, meetingId);
         break;
       }
-      await this.screenshot(page, `auth-11${String.fromCharCode(96 + attempt)}-interrupt-attempt-${attempt}`, s3, meetingId);
+      await TeamsHandler.screenshot(page, `auth-11${String.fromCharCode(96 + attempt)}-interrupt-attempt-${attempt}`, s3, meetingId);
       await new Promise((resolve) => setTimeout(resolve, 1500));
     }
   }
@@ -634,7 +643,7 @@ export class TeamsHandler {
    * 7. Wait for meeting entry (look for "Leave" button)
    * 8. Handle waiting room if needed
    */
-  static async join(page: Page, botName: string, originalUrl?: string): Promise<void> {
+  async join(page: Page, botName: string, originalUrl?: string): Promise<void> {
     console.log('[Teams] Starting join flow...');
     console.log('[Teams] Current URL:', page.url());
 
@@ -645,7 +654,7 @@ export class TeamsHandler {
       process.env.S3_BUCKET || 'firm-recordings-dev'
     );
 
-    await this.screenshot(page, '01-initial-page', s3, meetingId);
+    await TeamsHandler.screenshot(page, '01-initial-page', s3, meetingId);
 
     // Step 1: Handle the launcher page
     // Wait for page to stabilize
@@ -663,7 +672,7 @@ export class TeamsHandler {
 
     if (isLauncherPage) {
       console.log('[Teams] On launcher page, clicking through...');
-      const clicked = await this.clickLauncherButton(page);
+      const clicked = await TeamsHandler.clickLauncherButton(page);
       
       if (clicked) {
         console.log('[Teams] Launcher button clicked, waiting for navigation...');
@@ -676,18 +685,18 @@ export class TeamsHandler {
         console.log('[Teams] Page HTML snippet:', html.substring(0, 500));
       }
 
-      await this.screenshot(page, '01b-after-launcher-click', s3, meetingId);
+      await TeamsHandler.screenshot(page, '01b-after-launcher-click', s3, meetingId);
     }
 
     // Step 2: Wait for pre-join screen
-    const preJoinReached = await this.waitForPreJoinScreen(page, 120000);
+    const preJoinReached = await TeamsHandler.waitForPreJoinScreen(page, 120000);
 
     if (!preJoinReached) {
       console.log('[Teams] WARNING: Pre-join screen not reached after 120s');
       console.log('[Teams] Current URL:', page.url());
       const currentText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
       console.log('[Teams] Current page text:', currentText);
-      await this.screenshot(page, '01c-pre-join-not-reached', s3, meetingId);
+      await TeamsHandler.screenshot(page, '01c-pre-join-not-reached', s3, meetingId);
 
       // If we're still on the launcher, try one more time with a fresh navigation
       if (page.url().includes('/dl/launcher/') || page.url().includes('launcher.html')) {
@@ -695,19 +704,19 @@ export class TeamsHandler {
         if (originalUrl) {
           await page.goto(originalUrl, { waitUntil: 'networkidle', timeout: 30000 });
           await page.waitForTimeout(3000);
-          await this.clickLauncherButton(page);
+          await TeamsHandler.clickLauncherButton(page);
           await page.waitForTimeout(5000);
           // Try waiting for pre-join one more time
-          const retryResult = await this.waitForPreJoinScreen(page, 60000);
+          const retryResult = await TeamsHandler.waitForPreJoinScreen(page, 60000);
           if (!retryResult) {
             console.log('[Teams] WARNING: Still cannot reach pre-join screen after retry');
-            await this.screenshot(page, '01d-retry-failed', s3, meetingId);
+            await TeamsHandler.screenshot(page, '01d-retry-failed', s3, meetingId);
           }
         }
       }
     }
 
-    await this.screenshot(page, '02-pre-join-screen', s3, meetingId);
+    await TeamsHandler.screenshot(page, '02-pre-join-screen', s3, meetingId);
 
     // Step 3: Detect pre-join state and handle auth retry if needed
     type PreJoinState = 'signed_in' | 'signed_out' | 'unknown';
@@ -733,7 +742,7 @@ export class TeamsHandler {
     if (preJoinState === 'signed_out' && botEmail && botPassword) {
       console.log('[Teams] Pre-join shows signed_out despite auth attempt — refreshing session...');
       for (let retry = 0; retry < 2; retry++) {
-        await this.screenshot(page, `02c-retry-${retry}-before-refresh`, s3, meetingId);
+        await TeamsHandler.screenshot(page, `02c-retry-${retry}-before-refresh`, s3, meetingId);
         const refreshed = await refreshTeamsSession(page.context());
         if (refreshed) {
           console.log('[Teams] Session refreshed — re-navigating to meeting...');
@@ -741,15 +750,15 @@ export class TeamsHandler {
           await page.waitForTimeout(2000);
 
           // Click launcher if present
-          const launcherClicked = await this.clickLauncherButton(page);
+          const launcherClicked = await TeamsHandler.clickLauncherButton(page);
           if (launcherClicked) {
             await page.waitForTimeout(3000);
           }
 
           // Wait for pre-join again
-          await this.waitForPreJoinScreen(page, 60000);
+          await TeamsHandler.waitForPreJoinScreen(page, 60000);
           preJoinState = await detectPreJoinState();
-          await this.screenshot(page, `02d-retry-${retry}-after-refresh`, s3, meetingId);
+          await TeamsHandler.screenshot(page, `02d-retry-${retry}-after-refresh`, s3, meetingId);
           console.log(`[Teams] Pre-join state after refresh: ${preJoinState}`);
 
           if (preJoinState === 'signed_in') {
@@ -810,10 +819,10 @@ export class TeamsHandler {
     }
 
     // Step 5: Turn off camera and microphone
-    await this.turnOffDevices(page);
+    await TeamsHandler.turnOffDevices(page);
 
     await page.waitForTimeout(1000);
-    await this.screenshot(page, '03-before-join-click', s3, meetingId);
+    await TeamsHandler.screenshot(page, '03-before-join-click', s3, meetingId);
 
     // Step 6: Click Join now button
     const joinButtonTexts = ['Join now', 'Join', 'Ask to join', 'Join meeting'];
@@ -864,7 +873,7 @@ export class TeamsHandler {
         }));
       });
       console.log('[Teams] All buttons on page:', JSON.stringify(buttons));
-      await this.screenshot(page, '03b-no-join-button', s3, meetingId);
+      await TeamsHandler.screenshot(page, '03b-no-join-button', s3, meetingId);
     }
 
     // Step 7: Wait for meeting to load
@@ -875,14 +884,15 @@ export class TeamsHandler {
       const leaveButton = page.getByRole('button', { name: /Leave/i });
       await leaveButton.waitFor({ timeout: 60000 });
       console.log('[Teams] ✅ Successfully joined meeting (Leave button visible)');
-      await this.screenshot(page, '04-in-meeting', s3, meetingId);
-      await this.postAdmissionChatNotification(page);
+      await TeamsHandler.screenshot(page, '04-in-meeting', s3, meetingId);
+      await TeamsHandler.postAdmissionChatNotification(page);
+      this.startRosterPolling(page);
       return;
     } catch {
       console.log('[Teams] Leave button not found within 60s, checking other states...');
     }
 
-    await this.screenshot(page, '04-after-join-attempt', s3, meetingId);
+    await TeamsHandler.screenshot(page, '04-after-join-attempt', s3, meetingId);
 
     // Step 8: Check if we're in a waiting room
     const bodyText = await page.evaluate(() => document.body?.innerText || '');
@@ -899,7 +909,7 @@ export class TeamsHandler {
     
     if (inWaitingRoom) {
       console.log('[Teams] In waiting room / lobby, waiting to be admitted (max 3 min)...');
-      await this.screenshot(page, '04b-waiting-room', s3, meetingId);
+      await TeamsHandler.screenshot(page, '04b-waiting-room', s3, meetingId);
       let admitted = false;
       // Poll 18×10s = 3 minutes
       for (let i = 0; i < 18; i++) {
@@ -910,9 +920,10 @@ export class TeamsHandler {
           const leaveButton = page.getByRole('button', { name: /Leave/i });
           if (await leaveButton.isVisible({ timeout: 1000 })) {
             console.log('[Teams] ✅ Admitted from waiting room, now in meeting');
-            await this.screenshot(page, '05-admitted-in-meeting', s3, meetingId);
+            await TeamsHandler.screenshot(page, '05-admitted-in-meeting', s3, meetingId);
             admitted = true;
-            await this.postAdmissionChatNotification(page);
+            await TeamsHandler.postAdmissionChatNotification(page);
+            this.startRosterPolling(page);
             return; // admitted — normal path
           }
         } catch {
@@ -935,15 +946,16 @@ export class TeamsHandler {
           const leaveButton = page.getByRole('button', { name: /Leave/i });
           if (await leaveButton.isVisible({ timeout: 2000 })) {
             console.log('[Teams] ✅ Admitted just before timeout — now in meeting');
-            await this.screenshot(page, '05-admitted-last-second', s3, meetingId);
-            await this.postAdmissionChatNotification(page);
+            await TeamsHandler.screenshot(page, '05-admitted-last-second', s3, meetingId);
+            await TeamsHandler.postAdmissionChatNotification(page);
+            this.startRosterPolling(page);
             return;
           }
         } catch {
           // not admitted
         }
         console.log('[Teams] ❌ Not admitted to lobby within 3 minutes — throwing LobbyTimeoutError');
-        await this.screenshot(page, '05-lobby-timeout', s3, meetingId);
+        await TeamsHandler.screenshot(page, '05-lobby-timeout', s3, meetingId);
         throw new LobbyTimeoutError();
       }
     }
@@ -969,15 +981,16 @@ export class TeamsHandler {
 
     if (joinedCheck.hasEOA) {
       console.log('[Teams] ❌ ERROR: Hit Classic Teams EOA page! Treating as lobby timeout.');
-      await this.screenshot(page, '05-eoa-error', s3, meetingId);
+      await TeamsHandler.screenshot(page, '05-eoa-error', s3, meetingId);
       throw new LobbyTimeoutError();
     } else if (joinedCheck.hasLeave || joinedCheck.hasHangup || joinedCheck.hasMeetingUI || joinedCheck.hasRoster) {
       console.log('[Teams] ✅ Successfully joined meeting');
-      await this.screenshot(page, '05-in-meeting', s3, meetingId);
-      await this.postAdmissionChatNotification(page);
+      await TeamsHandler.screenshot(page, '05-in-meeting', s3, meetingId);
+      await TeamsHandler.postAdmissionChatNotification(page);
+      this.startRosterPolling(page);
     } else {
       console.log('[Teams] ⚠️ Meeting join status uncertain — hasMeetingUI=false, hasLeave=false. Treating as lobby timeout.');
-      await this.screenshot(page, '05-uncertain-state', s3, meetingId);
+      await TeamsHandler.screenshot(page, '05-uncertain-state', s3, meetingId);
       throw new LobbyTimeoutError();
     }
   }
@@ -1170,5 +1183,164 @@ export class TeamsHandler {
     } catch (error) {
       console.log('[Teams] Could not toggle devices, continuing...', error);
     }
+  }
+
+  /**
+   * Start roster polling every 30 seconds
+   */
+  startRosterPolling(page: Page): void {
+    console.log('[Teams][Roster] Starting roster polling (30s interval)');
+    this.rosterPollInterval = setInterval(async () => {
+      try {
+        await this.pollRoster(page);
+      } catch (err) {
+        console.log('[Teams][Roster] Polling error (non-fatal):', err);
+      }
+    }, 30000);
+    // Also poll immediately on start
+    this.pollRoster(page).catch(err => console.log('[Teams][Roster] Initial poll error (non-fatal):', err));
+  }
+
+  /**
+   * Stop roster polling and mark all remaining entries as left
+   */
+  stopRosterPolling(): void {
+    if (this.rosterPollInterval) {
+      clearInterval(this.rosterPollInterval);
+      this.rosterPollInterval = undefined;
+      console.log('[Teams][Roster] Stopped roster polling');
+    }
+    // Mark all entries without leftAtMs
+    const now = Date.now();
+    for (const entry of this.rosterEntries) {
+      if (!entry.leftAtMs) {
+        entry.leftAtMs = now;
+      }
+    }
+  }
+
+  /**
+   * Poll the roster panel for current participants
+   */
+  private async pollRoster(page: Page): Promise<void> {
+    try {
+      // Open roster panel
+      const rosterButtonSelectors = [
+        '[data-tid="roster-button"]',
+        'button[aria-label*="People" i]',
+        'button[aria-label*="Participants" i]',
+      ];
+
+      let rosterButtonClicked = false;
+      for (const selector of rosterButtonSelectors) {
+        try {
+          const btn = page.locator(selector).first();
+          if (await btn.isVisible({ timeout: 2000 })) {
+            await btn.click();
+            rosterButtonClicked = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!rosterButtonClicked) {
+        console.log('[Teams][Roster] WARNING: Could not find roster button');
+        return;
+      }
+
+      // Wait for roster panel to load
+      await page.waitForTimeout(1000);
+
+      // Query participant names
+      const participantSelectors = [
+        '[data-tid="roster-participant"] [data-tid="participant-display-name"]',
+        '[data-tid="participants-list"] [aria-label]',
+        '[data-tid="calling-roster-section-participants"] span[aria-hidden="false"]',
+      ];
+
+      let names: string[] = [];
+      for (const selector of participantSelectors) {
+        try {
+          const elements = await page.locator(selector).all();
+          if (elements.length > 0) {
+            names = await Promise.all(
+              elements.map(async (el) => {
+                const text = await el.textContent();
+                return text?.trim() || '';
+              })
+            );
+            names = names.filter(n => n.length > 0);
+            if (names.length > 0) break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (names.length === 0) {
+        console.log('[Teams][Roster] WARNING: No participant names found — selectors may need update');
+        // Close roster panel
+        if (rosterButtonClicked) {
+          try {
+            const btn = page.locator('[data-tid="roster-button"]').first();
+            if (await btn.isVisible({ timeout: 1000 })) {
+              await btn.click();
+            }
+          } catch {
+            // ignore
+          }
+        }
+        return;
+      }
+
+      const now = Date.now();
+      const currentNames = new Set(names);
+
+      // Add new participants
+      for (const name of names) {
+        if (!this.rosterEntries.some(e => e.name === name && !e.leftAtMs)) {
+          const possiblyMultiVoice = /conference.?room|conf.?room|board.?room|huddle.?room/i.test(name);
+          this.rosterEntries.push({
+            name,
+            joinedAtMs: now,
+            possiblyMultiVoice,
+          });
+          console.log(`[Teams][Roster] Participant joined: ${name}${possiblyMultiVoice ? ' (possibly multi-voice)' : ''}`);
+        }
+      }
+
+      // Mark left participants
+      for (const entry of this.rosterEntries) {
+        if (!entry.leftAtMs && !currentNames.has(entry.name)) {
+          entry.leftAtMs = now;
+          console.log(`[Teams][Roster] Participant left: ${entry.name}`);
+        }
+      }
+
+      console.log(`[Teams][Roster] ${names.length} participants: ${names.join(', ')}`);
+
+      // Close roster panel
+      if (rosterButtonClicked) {
+        try {
+          const btn = page.locator('[data-tid="roster-button"]').first();
+          if (await btn.isVisible({ timeout: 1000 })) {
+            await btn.click();
+          }
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err) {
+      console.log('[Teams][Roster] Poll error:', err);
+    }
+  }
+
+  /**
+   * Get the roster timeline for inclusion in recording_complete callback
+   */
+  getRosterTimeline(): RosterEntry[] {
+    return this.rosterEntries;
   }
 }

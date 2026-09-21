@@ -62,4 +62,8 @@ public class FirmMeeting
     /// NULLs as distinct, the same technique uk_fm_created_by_calendar_event_id already relies on.</summary>
     [MaxLength(2000)]
     public string? NormalizedMeetingUrl { get; set; }
+    /// <summary>WI #7297 — timestamped roster join/leave timeline from Teams bot, passed to firm-transcriber
+    /// as soft LLM context for speaker labeling (handles conference rooms, multi-person single-account joins).
+    /// Stored as JSON: [{"name":"...", "joinedAtMs":..., "leftAtMs":..., "possiblyMultiVoice":true}, ...]</summary>
+    public string? RosterTimeline { get; set; }
 }

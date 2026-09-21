@@ -188,12 +188,17 @@ public class MeetingsApiController : ControllerBase
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        // Update S3 keys if provided
+        // Update S3 keys and roster timeline if provided
         var meeting = await db.Meetings.FindAsync(payload.MeetingId);
         if (meeting != null)
         {
             if (!string.IsNullOrEmpty(payload.AudioS3Key)) meeting.AudioS3Key = payload.AudioS3Key;
             if (!string.IsNullOrEmpty(payload.TranscriptS3Key)) meeting.TranscriptS3Key = payload.TranscriptS3Key;
+            if (payload.RosterTimeline != null && payload.RosterTimeline.Count > 0)
+            {
+                meeting.RosterTimeline = JsonSerializer.Serialize(payload.RosterTimeline);
+                _logger.LogInformation("FIRM: Roster timeline saved for meeting {Id}: {Count} entries", payload.MeetingId, payload.RosterTimeline.Count);
+            }
             meeting.UpdatedAt = DateTime.UtcNow;
             try
             {
@@ -1482,6 +1487,7 @@ public class VpCallbackPayload
     public string? Error { get; set; }
     public List<TranscriptSegmentPayload>? Segments { get; set; }
     public SummaryPayload? Summary { get; set; }
+    public List<RosterTimelineEntry>? RosterTimeline { get; set; }
 }
 
 public class ParticipantPayload
@@ -1530,4 +1536,16 @@ public class MobileUploadRequest
     public DateTime? RecordedAt { get; set; }
     public int? DurationSec { get; set; }
     public string KbScope { get; set; } = "none";
+}
+
+public class RosterTimelineEntry
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+    [JsonPropertyName("joinedAtMs")]
+    public long JoinedAtMs { get; set; }
+    [JsonPropertyName("leftAtMs")]
+    public long? LeftAtMs { get; set; }
+    [JsonPropertyName("possiblyMultiVoice")]
+    public bool PossiblyMultiVoice { get; set; }
 }
