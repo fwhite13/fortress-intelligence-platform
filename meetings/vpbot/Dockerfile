@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     gnupg \
+    wget \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list \
@@ -57,6 +58,11 @@ RUN apt-get update && apt-get install -y \
     fonts-liberation \
     libgl1 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Google Chrome stable for Teams authenticated join
+RUN wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get install -y /tmp/google-chrome.deb \
+    && rm /tmp/google-chrome.deb
 
 # ML/Whisper deps removed (ADO#1841) — transcription now handled by firm-transcriber Batch job
 
