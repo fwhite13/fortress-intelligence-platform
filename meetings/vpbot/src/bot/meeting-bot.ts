@@ -12,11 +12,13 @@ import { EventEmitter } from 'events';
 import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { Meeting, MeetingPlatform, MeetingStatus } from '../types.js';
 import { TeamsHandler, LobbyTimeoutError } from './teams.js';
 import { ZoomHandler } from './zoom.js';
 import { GoogleMeetHandler } from './google-meet.js';
 import { signInToMicrosoft, warmTeamsSession, dumpAuthState } from './teams-auth.js';
+import { S3Service } from '../transcribe/s3.js';
 
 // FIRM callback: POST status updates to FIRM_API_URL /api/vp/callback
 // Env vars: FIRM_API_URL, BOT_CALLBACK_SECRET, MEETING_ID (numeric)
@@ -100,6 +102,50 @@ export class MeetingBot extends EventEmitter {
   }
 
   /**
+   * Load browser storage state from S3 for session persistence
+   */
+  private static async loadStorageState(email: string): Promise<string | undefined> {
+    const s3Bucket = process.env.S3_BUCKET || 'firm-recordings-dev';
+    const region = process.env.AWS_REGION || 'us-east-1';
+    const s3 = new S3Service(region, s3Bucket);
+
+    try {
+      const s3Key = `auth/${email}-state.json`;
+      const tmpPath = path.join(os.tmpdir(), `${email}-state-${Date.now()}.json`);
+
+      await s3.downloadToFile(s3Key, tmpPath);
+      console.log(`[Bot] Loaded storage state from S3: ${s3Key}`);
+      return tmpPath;
+    } catch (err) {
+      console.log(`[Bot] No storage state found for ${email} (non-fatal): ${err}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * Save browser storage state to S3 for session persistence
+   */
+  private static async saveStorageState(context: BrowserContext, email: string): Promise<void> {
+    const s3Bucket = process.env.S3_BUCKET || 'firm-recordings-dev';
+    const region = process.env.AWS_REGION || 'us-east-1';
+    const s3 = new S3Service(region, s3Bucket);
+
+    try {
+      const tmpPath = path.join(os.tmpdir(), `${email}-state-${Date.now()}.json`);
+      await context.storageState({ path: tmpPath });
+
+      const s3Key = `auth/${email}-state.json`;
+      await s3.uploadWithKey(tmpPath, s3Key);
+
+      // Clean up temp file
+      fs.unlinkSync(tmpPath);
+      console.log(`[Bot] Saved storage state to S3: ${s3Key}`);
+    } catch (err) {
+      console.log(`[Bot] Failed to save storage state (non-fatal): ${err}`);
+    }
+  }
+
+  /**
    * Launch browser and join the meeting
    */
   async join(): Promise<void> {
@@ -113,10 +159,12 @@ export class MeetingBot extends EventEmitter {
       const baseArgs = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-web-security',
         '--autoplay-policy=no-user-gesture-required',
-        '--enable-features=MediaRecorder',
         '--enable-audio-service-out-of-process',
+        '--disable-blink-features=AutomationControlled',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-first-run-ui',
       ];
 
       const teamsArgs = [
@@ -127,9 +175,6 @@ export class MeetingBot extends EventEmitter {
         '--use-gl=angle',
         '--use-angle=swiftshader',
         '--auto-accept-this-tab-capture',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-first-run-ui',
         '--disable-default-browser-promo',
         '--disable-default-apps',
       ];
@@ -140,6 +185,7 @@ export class MeetingBot extends EventEmitter {
 
       this.browser = await chromium.launch({
         headless: false, // Must be headed — Teams requires it for audio/video
+        channel: 'chrome', // Use system Google Chrome instead of bundled Chromium
         args: [
           ...baseArgs,
           ...(isTeams ? teamsArgs : otherArgs),
@@ -149,11 +195,17 @@ export class MeetingBot extends EventEmitter {
 
       const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36';
 
+      // Load storage state if available (for session persistence)
+      const botEmail = process.env.BOT_EMAIL || 'fortress-bot@firm.dev';
+      const storageStatePath = await MeetingBot.loadStorageState(botEmail);
+
       this.context = await this.browser.newContext({
         permissions: ['microphone', 'camera'],
         ...(isTeams ? {} : { userAgent }),  // Teams: let browser report naturally; others: keep custom UA
         viewport: { width: 1280, height: 720 },
-        ignoreHTTPSErrors: true,
+        locale: 'en-US',
+        timezoneId: 'America/New_York',
+        ...(storageStatePath ? { storageState: storageStatePath } : {}),
       });
 
       this.page = await this.context.newPage();
@@ -208,6 +260,10 @@ export class MeetingBot extends EventEmitter {
         switch (this.meeting.platform) {
           case 'teams':
             await TeamsHandler.join(this.page, this.meeting.botName, this.meeting.url);
+            // Save storage state after successful Teams join for session persistence
+            if (this.context) {
+              await MeetingBot.saveStorageState(this.context, botEmail);
+            }
             break;
           case 'zoom':
             await ZoomHandler.join(this.page, this.meeting.botName);
