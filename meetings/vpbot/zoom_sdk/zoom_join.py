@@ -108,6 +108,8 @@ class ZoomJoinBot:
         self.audio_ctrl = None
         self.audio_helper = None
         self.audio_source = None
+        self.chat_ctrl = None
+        self.chat_event = None
 
         self.fifo_fd = None
         self.audio_started = False
@@ -135,10 +137,6 @@ class ZoomJoinBot:
         if not self.audio_started:
             self.audio_started = True
             log(f"[ZoomSDK] Audio started (sample_rate={data.GetSampleRate()})")
-            # Send chat announcement once after audio starts (non-fatal)
-            if not self.chat_sent:
-                self.chat_sent = True
-                self.send_chat_announcement()
 
         if not self._try_open_fifo():
             return
@@ -268,27 +266,69 @@ class ZoomJoinBot:
         self.recording_ctrl.SetEvent(self.recording_event)
 
         GLib.timeout_add_seconds(1, self.start_raw_recording)
-        self.send_chat_announcement()
+        self._setup_chat()
+        GLib.timeout_add_seconds(2, self._send_chat_announcement_once)
 
-    def send_chat_announcement(self) -> None:
-        """Send a chat announcement to all meeting participants. Non-fatal."""
+    def _setup_chat(self) -> None:
+        """Grab the chat controller and register the event sink. Keep both on
+        self — the SDK returns them by reference."""
+        try:
+            self.chat_ctrl = self.meeting_service.GetMeetingChatController()
+            if self.chat_ctrl is None:
+                log("[ZoomSDK] Chat setup failed — GetMeetingChatController returned None")
+                return
+            self.chat_event = zoom.MeetingChatEventCallbacks(
+                onChatMsgNotificationCallback=self._on_chat_msg,
+                onChatStatusChangedNotificationCallback=self._on_chat_status,
+            )
+            self.chat_ctrl.SetEvent(self.chat_event)
+        except Exception as e:
+            log(f"[ZoomSDK] Chat setup failed — {e}")
+
+    def _on_chat_msg(self, info, content) -> None:
+        """SDK echoes our own accepted messages here — this is the real delivery
+        signal. SendChatMsgTo's return code only means the request was accepted."""
+        try:
+            log(
+                f"[ZoomSDK] Chat echo: sender={info.GetSenderUserId()} "
+                f"to_all={info.IsChatToAll()} content={content!r}"
+            )
+        except Exception as e:
+            log(f"[ZoomSDK] Chat echo (unreadable) — {e}")
+
+    def _on_chat_status(self, status) -> None:
+        log("[ZoomSDK] Chat status changed")
+
+    def _send_chat_announcement_once(self) -> bool:
+        """Send the join announcement to everyone. Non-fatal.
+        Returns False so GLib does not reschedule."""
+        if self.chat_sent:
+            return False
+        self.chat_sent = True
+
         announce_name = os.environ.get("BOT_CHAT_ANNOUNCE_NAME", "")
         if not announce_name:
             log("[ZoomSDK] Chat skipped — BOT_CHAT_ANNOUNCE_NAME not set")
-            return
+            return False
+        if self.chat_ctrl is None:
+            log("[ZoomSDK] Chat skipped — chat controller not available")
+            return False
+
         try:
-            chat_ctrl = self.meeting_service.GetMeetingChatController()
-            if chat_ctrl is None:
-                log("[ZoomSDK] Chat failed — GetMeetingChatController returned None")
-                return
-            message = f"I'm here to take notes for {announce_name}. I'll send a summary when the meeting ends."
-            builder = chat_ctrl.GetChatMessageBuilder()
-            builder.SetReceiver(0)  # 0 = send to all
+            message = (
+                f"I'm here to take notes for {announce_name}. "
+                f"I'll send a summary when the meeting ends."
+            )
+            builder = self.chat_ctrl.GetChatMessageBuilder()
             builder.SetContent(message)
-            result = chat_ctrl.SendChatMsgTo(builder.Build())
+            builder.SetReceiver(0)
+            builder.SetMessageType(zoom.SDKChatMessageType.To_All)  # ← THE FIX
+            result = self.chat_ctrl.SendChatMsgTo(builder.Build())
+            builder.Clear()
             log(f"[ZoomSDK] Chat sent (result={result})")
         except Exception as e:
             log(f"[ZoomSDK] Chat failed — {e}")
+        return False
 
     def start_raw_recording(self) -> bool:
         can_start = self.recording_ctrl.CanStartRawRecording()
