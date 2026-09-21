@@ -251,7 +251,8 @@ export class ZoomSDKBot extends EventEmitter {
       this.emit('recording-stopped', this._audioPath);
     };
 
-    if (ffmpeg && !ffmpeg.killed) {
+    if (ffmpeg && !ffmpeg.killed && ffmpeg.exitCode === null) {
+      // FFmpeg still running — send SIGINT for graceful WAV header write, then wait
       const timeout = setTimeout(() => {
         ffmpeg.kill('SIGKILL');
       }, 5000);
@@ -260,6 +261,7 @@ export class ZoomSDKBot extends EventEmitter {
         emitStopped();
       });
     } else {
+      // FFmpeg already exited naturally (FIFO EOF), or was never started
       emitStopped();
     }
   }
