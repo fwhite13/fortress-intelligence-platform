@@ -17,7 +17,7 @@ import { Meeting, MeetingPlatform, MeetingStatus } from '../types.js';
 import { TeamsHandler, LobbyTimeoutError } from './teams.js';
 import { ZoomHandler } from './zoom.js';
 import { GoogleMeetHandler } from './google-meet.js';
-import { signInToMicrosoft, warmTeamsSession, dumpAuthState } from './teams-auth.js';
+import { signInToMicrosoft, warmTeamsSession, dumpAuthState, screenshot } from './teams-auth.js';
 import { S3Service } from '../transcribe/s3.js';
 
 // FIRM callback: POST status updates to FIRM_API_URL /api/vp/callback
@@ -241,12 +241,18 @@ export class MeetingBot extends EventEmitter {
         if (botEmailEnv && botPasswordEnv) {
           try {
             console.log('[Bot] Teams auth configured — signing in before meeting navigation...');
-            await signInToMicrosoft(this.page, botEmailEnv, botPasswordEnv);
-            const warmed = await warmTeamsSession(this.page);
+            const s3Bucket = process.env.S3_BUCKET || 'firm-recordings-dev';
+            const region = process.env.AWS_REGION || 'us-east-1';
+            const s3 = new S3Service(region, s3Bucket);
+            const meetingIdStr = this.meeting.id.toString();
+
+            await signInToMicrosoft(this.page, botEmailEnv, botPasswordEnv, s3, meetingIdStr);
+            const warmed = await warmTeamsSession(this.page, 30000, s3, meetingIdStr);
             if (!warmed) {
               console.warn('[Bot] Teams warm-up failed; attempting anonymous join');
             }
             await dumpAuthState(this.context, this.page, 'before-meeting-nav');
+            await screenshot(this.page, 'auth-10-before-meeting-nav', s3, meetingIdStr);
           } catch (authErr) {
             console.warn('[Bot] Teams auth failed, falling back to anonymous:', authErr);
           }
