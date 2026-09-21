@@ -358,6 +358,22 @@ export class TeamsHandler {
         return false;
       }
 
+      // After KMSI handling and back on Teams URL, wait for auth to fully complete in SPA
+      // The Sign in link disappearing is the reliable indicator that auth is recognized
+      try {
+        await page.waitForFunction(
+          () => {
+            const signInLink = document.querySelector('[data-tid="auth-sign-in-link"]');
+            return !signInLink || (signInLink as HTMLElement).offsetParent === null;
+          },
+          { timeout: 15000 }
+        );
+        console.log('[Teams] Authenticated UI state confirmed (sign-in link gone)');
+      } catch {
+        console.log('[Teams] WARNING: Timed out waiting for authenticated UI state — proceeding anyway');
+        // Non-fatal: if Teams doesn't transition, the join attempt will fail naturally
+      }
+
       console.log('[Teams] M365 sign-in complete, back on Teams:', page.url());
       return true;
     } catch (err) {
@@ -654,6 +670,7 @@ export class TeamsHandler {
             if (authenticated) {
               console.log('[Teams] M365 sign-in succeeded — page is already on authenticated pre-join screen');
               console.log('[Teams] Post-auth URL:', page.url());
+              await page.waitForTimeout(1000); // Give Teams time to fully render after auth
               await this.screenshot(page, '02b-post-auth-prejoin', s3, meetingId);
               enteredName = true;
               break;
