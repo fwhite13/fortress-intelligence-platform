@@ -1051,8 +1051,25 @@ export class TeamsHandler {
       await page.waitForTimeout(2000);
       console.log('[Teams] Chat panel opened, waiting for input field to render...');
 
+      // Step 2a: Dismiss "You have been muted" notification if present
+      try {
+        const dismissBtn = page.locator('button[aria-label="Dismiss"]').first();
+        if (await dismissBtn.isVisible({ timeout: 2000 })) {
+          await dismissBtn.click();
+          console.log('[Teams] Dismissed "You have been muted" notification');
+          await page.waitForTimeout(500);
+        }
+      } catch {
+        // No notification present, continue
+      }
+
       // Step 3: find the chat input with fallbacks for authenticated mode
       const inputSelectors = [
+        'div[aria-label="Type a message"][contenteditable="true"]',
+        'div[aria-placeholder="Type a message"]',
+        'p[data-placeholder="Type a message"]',
+        'div[contenteditable="true"][role="textbox"]',
+        '[data-tid*="compose"][contenteditable="true"]',
         'div[data-tid="newMessageInput"]',
         'div[aria-label="Type a message"]',
         'div[data-tid="ckeditor"]',
@@ -1064,10 +1081,23 @@ export class TeamsHandler {
       ];
       let chatInput: Locator | null = null;
       let successfulSelector: string | null = null;
+
+      // Try "Type a message" placeholder text directly if visible
+      try {
+        const placeholderText = page.locator('text=Type a message').first();
+        if (await placeholderText.isVisible({ timeout: 2000 })) {
+          await placeholderText.click();
+          console.log('[Teams] Clicked "Type a message" placeholder text');
+          await page.waitForTimeout(500);
+        }
+      } catch {
+        // Not found, continue with selector search
+      }
+
       for (const selector of inputSelectors) {
         try {
           const el = page.locator(selector).first();
-          if (await el.isVisible({ timeout: 5000 })) {
+          if (await el.isVisible({ timeout: 3000 })) {
             chatInput = el;
             successfulSelector = selector;
             console.log(`[Teams] ✅ Found chat input via: ${selector}`);
