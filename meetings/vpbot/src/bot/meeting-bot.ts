@@ -78,6 +78,7 @@ export class MeetingBot extends EventEmitter {
   private _monitorInterval: ReturnType<typeof setInterval> | null = null;
   private _recordingStartTime: number = 0;
   private _silenceStartTime: number | null = null;
+  private _teamsHandler: TeamsHandler | null = null;
 
   constructor(meeting: Meeting, recordingsDir: string) {
     super();
@@ -265,7 +266,8 @@ export class MeetingBot extends EventEmitter {
       try {
         switch (this.meeting.platform) {
           case 'teams':
-            await TeamsHandler.join(this.page, this.meeting.botName, this.meeting.url);
+            this._teamsHandler = new TeamsHandler();
+            await this._teamsHandler.join(this.page, this.meeting.botName, this.meeting.url);
             // Save storage state after successful Teams join for session persistence
             if (this.context) {
               await MeetingBot.saveStorageState(this.context, botEmail);
@@ -701,6 +703,11 @@ export class MeetingBot extends EventEmitter {
       fs.writeFileSync(this.audioPath, Buffer.alloc(0));
     }
 
+    // Stop roster polling if Teams meeting
+    if (this._teamsHandler) {
+      this._teamsHandler.stopRosterPolling();
+    }
+
     this.emit('recording-stopped', this.audioPath);
 
     // Close browser
@@ -737,5 +744,12 @@ export class MeetingBot extends EventEmitter {
    */
   isCurrentlyRecording(): boolean {
     return this.isRecording;
+  }
+
+  /**
+   * Get roster timeline from Teams handler (if available)
+   */
+  getRosterTimeline() {
+    return this._teamsHandler?.getRosterTimeline() ?? [];
   }
 }

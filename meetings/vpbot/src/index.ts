@@ -223,7 +223,7 @@ async function runOneShotMeeting(meetingUrl: string, meetingId: string, botName:
         // to record regardless), so this is the only place that reliably runs
         // after every join attempt, successful or not.
         await uploadDebugScreenshots(meetingId).catch(() => {});
-        await processRecording(meeting);
+        await processRecording(meeting, bot);
         resolve();
       } catch (err) {
         reject(err);
@@ -279,6 +279,7 @@ async function runOneShotZoomSDK(meeting: Meeting, meetingId: string): Promise<v
       try {
         meeting.audioPath = wavPath;
         meeting.endedAt = new Date();
+        // ZoomSDKBot doesn't support roster polling (no browser-based roster access)
         await processRecording(meeting);
         resolve();
       } catch (err) {
@@ -372,7 +373,7 @@ function startApiServer(): void {
         meeting.endedAt = new Date();
 
         // Start transcription pipeline
-        processRecording(meeting).catch(err => {
+        processRecording(meeting, bot).catch(err => {
           console.error(`[Pipeline] Error processing meeting ${meeting.id}:`, err);
           meeting.status = 'error';
           meeting.error = err.message;
@@ -599,7 +600,7 @@ async function uploadDebugScreenshots(meetingId: string): Promise<void> {
 
 // ---------------------------------------------------------------------------
 
-async function processRecording(meeting: Meeting): Promise<void> {
+async function processRecording(meeting: Meeting, bot?: MeetingBot): Promise<void> {
   if (!meeting.audioPath) {
     throw new Error('No audio file available');
   }
@@ -617,9 +618,12 @@ async function processRecording(meeting: Meeting): Promise<void> {
   meeting.s3AudioKey = audioKey;
   console.log(`[Pipeline] Audio uploaded to S3: ${audioKey}`);
 
-  // Step 3: Post recording_complete callback — firm-web will submit Batch job (ADO#2179)
-  await postCallback('recording_complete', { audioS3Key: audioKey });
-  console.log(`[Pipeline] Meeting ${meeting.id} recording_complete posted — Batch submission delegated to firm-web`);
+  // Step 3: Get roster timeline if available (Teams meetings only)
+  const rosterTimeline = bot?.getRosterTimeline?.() ?? [];
+
+  // Step 4: Post recording_complete callback — firm-web will submit Batch job (ADO#2179)
+  await postCallback('recording_complete', { audioS3Key: audioKey, rosterTimeline });
+  console.log(`[Pipeline] Meeting ${meeting.id} recording_complete posted (roster: ${rosterTimeline.length} entries) — Batch submission delegated to firm-web`);
 }
 
 export { app };

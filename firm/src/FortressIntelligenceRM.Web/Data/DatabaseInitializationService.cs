@@ -249,7 +249,9 @@ public class DatabaseInitializationService : IHostedService
                 // Only primary rows ever populate normalized_meeting_url (see FirmMeeting.NormalizedMeetingUrl
                 // doc comment) — MySQL unique indexes allow unlimited NULLs, so this only ever constrains
                 // primaries, the same technique uk_fm_created_by_calendar_event_id already relies on.
-                "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_normalized_url_start (normalized_meeting_url, start_datetime)"
+                "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_normalized_url_start (normalized_meeting_url, start_datetime)",
+                // WI #7297 — roster timeline for Teams meetings (soft LLM guidance for transcription)
+                "ALTER TABLE firm_meetings ADD COLUMN roster_timeline JSON NULL"
             };
 
             foreach (var alterSql in alterStatements)

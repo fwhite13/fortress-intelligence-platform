@@ -7,7 +7,7 @@ namespace FortressIntelligenceRM.Web.Services;
 
 public interface IBatchTranscriptionService
 {
-    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, CancellationToken ct = default);
+    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, string? rosterTimeline = null, CancellationToken ct = default);
 }
 
 public class BatchTranscriptionService : IBatchTranscriptionService
@@ -31,7 +31,7 @@ public class BatchTranscriptionService : IBatchTranscriptionService
         _logger = logger;
     }
 
-    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, CancellationToken ct = default)
+    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, string? rosterTimeline = null, CancellationToken ct = default)
     {
         var callbackSecret = _config["Firm:BotCallbackSecret"] ?? "";
         if (string.IsNullOrEmpty(callbackSecret))
@@ -85,6 +85,9 @@ public class BatchTranscriptionService : IBatchTranscriptionService
 
         if (wikiJson != null)
             envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "ORG_WIKI_JSON", Value = wikiJson });
+
+        if (!string.IsNullOrEmpty(rosterTimeline))
+            envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "ROSTER_TIMELINE_JSON", Value = rosterTimeline });
 
         var request = new SubmitJobRequest
         {
