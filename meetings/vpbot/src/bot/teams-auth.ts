@@ -7,6 +7,32 @@
  */
 
 import type { BrowserContext, Page } from 'playwright';
+import * as path from 'path';
+import * as fs from 'fs';
+import { S3Service } from '../transcribe/s3.js';
+
+const SCREENSHOTS_DIR = process.env.RECORDINGS_DIR || '/app/recordings';
+
+export async function screenshot(
+  page: Page,
+  label: string,
+  s3?: S3Service | null,
+  meetingId?: string | null
+): Promise<void> {
+  try {
+    const filename = `debug-${label}-${Date.now()}.png`;
+    const filepath = path.join(SCREENSHOTS_DIR, filename);
+    await page.screenshot({ path: filepath, fullPage: true });
+    console.log(`[Teams][AUTH] Screenshot saved: ${filename}`);
+    if (s3 && meetingId) {
+      const key = `debug/screenshots/${meetingId}/${filename}`;
+      await s3.uploadWithKey(filepath, key);
+      console.log(`[Teams][AUTH] Screenshot uploaded to S3: ${key}`);
+    }
+  } catch (e) {
+    console.log(`[Teams][AUTH] Screenshot failed (${label}): ${e}`);
+  }
+}
 
 /**
  * Log authentication state without throwing (cookies, localStorage, URL)
@@ -62,9 +88,12 @@ export async function dumpAuthState(
 export async function signInToMicrosoft(
   page: Page,
   email: string,
-  password: string
+  password: string,
+  s3?: S3Service | null,
+  meetingId?: string | null
 ): Promise<void> {
   console.log('[Teams][AUTH] Starting Microsoft sign-in...');
+  await screenshot(page, 'auth-00-start', s3, meetingId);
 
   // Navigate to Microsoft login
   await page.goto('https://login.microsoftonline.com/', {
@@ -77,12 +106,14 @@ export async function signInToMicrosoft(
   // Fill email
   const emailInput = page.locator('input[name="loginfmt"], input[type="email"]').first();
   await emailInput.waitFor({ state: 'visible', timeout: 15000 });
+  await screenshot(page, 'auth-01-email-page', s3, meetingId);
   await emailInput.fill(email);
   console.log('[Teams][AUTH] Email entered');
 
   // Click Next
   const nextButton = page.locator('#idSIButton9, input[type="submit"]').first();
   await nextButton.click();
+  await screenshot(page, 'auth-02-after-email', s3, meetingId);
   console.log('[Teams][AUTH] Clicked Next after email');
 
   await page.waitForTimeout(1500);
@@ -90,18 +121,21 @@ export async function signInToMicrosoft(
   // Fill password
   const passwordInput = page.locator('input[name="passwd"], input[type="password"]').first();
   await passwordInput.waitFor({ state: 'visible', timeout: 20000 });
+  await screenshot(page, 'auth-03-password-page', s3, meetingId);
   await passwordInput.fill(password);
   console.log('[Teams][AUTH] Password entered');
 
   // Click Sign in
   const signInButton = page.locator('#idSIButton9, input[type="submit"]').first();
   await signInButton.click();
+  await screenshot(page, 'auth-04-after-password', s3, meetingId);
   console.log('[Teams][AUTH] Clicked Sign in');
 
   await page.waitForTimeout(1500);
 
   // Handle interrupts (KMSI, account picker, consent, etc.)
-  await handleInterrupts(page, email);
+  await screenshot(page, 'auth-05-interrupts-start', s3, meetingId);
+  await handleInterrupts(page, email, s3, meetingId);
 
   // Wait for ESTSAUTH or ESTSAUTHPERSISTENT cookie
   console.log('[Teams][AUTH] Waiting for ESTSAUTH cookie...');
@@ -120,8 +154,10 @@ export async function signInToMicrosoft(
 
   if (!cookieFound) {
     console.log('[Teams][AUTH] WARNING: ESTSAUTH cookie not found after 45s');
+    await screenshot(page, 'auth-error-cookie-timeout', s3, meetingId);
   } else {
     console.log('[Teams][AUTH] ESTSAUTH cookie confirmed');
+    await screenshot(page, 'auth-09-post-signin', s3, meetingId);
   }
 }
 
@@ -129,7 +165,12 @@ export async function signInToMicrosoft(
  * Handle Microsoft sign-in interrupts: KMSI, SAOTCC, account picker, consent.
  * Loops up to 3 times since dismissing one can reveal another.
  */
-async function handleInterrupts(page: Page, email: string): Promise<void> {
+async function handleInterrupts(
+  page: Page,
+  email: string,
+  s3?: S3Service | null,
+  meetingId?: string | null
+): Promise<void> {
   for (let attempt = 1; attempt <= 3; attempt++) {
     console.log(`[Teams][AUTH] Checking for interrupts (attempt ${attempt}/3)...`);
     let handled = false;
@@ -144,11 +185,13 @@ async function handleInterrupts(page: Page, email: string): Promise<void> {
 
       if (onKmsi) {
         console.log('[Teams][AUTH] KMSI page detected');
+        await screenshot(page, 'auth-06-kmsi', s3, meetingId);
         const yesButton = page.locator('#idSIButton9').first();
         await yesButton.click({ timeout: 4000 }).catch(err => {
           console.log('[Teams][AUTH] Could not click KMSI Yes button (non-fatal):', err);
         });
         console.log('[Teams][AUTH] Handled KMSI prompt');
+        await screenshot(page, 'auth-07-after-kmsi', s3, meetingId);
         handled = true;
         await page.waitForTimeout(1500);
       }
@@ -167,6 +210,7 @@ async function handleInterrupts(page: Page, email: string): Promise<void> {
 
         if (onSaotcc) {
           console.log('[Teams][AUTH] "Don\'t lose access" prompt detected');
+          await screenshot(page, 'auth-08-saotcc', s3, meetingId);
           const dismissSelectors = [
             '#idBtn_Back',
             'a:has-text("Not now")',
@@ -243,9 +287,12 @@ async function handleInterrupts(page: Page, email: string): Promise<void> {
  */
 export async function warmTeamsSession(
   page: Page,
-  timeoutMs: number = 30000
+  timeoutMs: number = 30000,
+  s3?: S3Service | null,
+  meetingId?: string | null
 ): Promise<boolean> {
   console.log(`[Teams][AUTH] Warming Teams session (timeout: ${timeoutMs}ms)...`);
+  await screenshot(page, 'warm-00-start', s3, meetingId);
 
   // Navigate to Teams home with retry on ERR_ABORTED
   let navigated = false;
@@ -273,9 +320,11 @@ export async function warmTeamsSession(
     return false;
   }
 
+  await screenshot(page, 'warm-01-teams-loaded', s3, meetingId);
   console.log('[Teams][AUTH] On Teams URL, polling for authtoken/ringFinder...');
 
   const startTime = Date.now();
+  let interruptCount = 0;
   while (Date.now() - startTime < timeoutMs) {
     // Check current URL and cookies
     const url = page.url();
@@ -290,13 +339,19 @@ export async function warmTeamsSession(
 
     if (onTeamsHost && !onAuthEndpoint && hasAuthToken) {
       console.log('[Teams][AUTH] Teams session warmed (authtoken/ringFinder present)');
+      await screenshot(page, 'warm-02-success', s3, meetingId);
       await dumpAuthState(page.context(), page, 'after-warm-success');
       return true;
     }
 
     // Handle any interrupts that appear during warming
     try {
-      await handleInterrupts(page, '');
+      const beforeUrl = page.url();
+      await handleInterrupts(page, '', s3, meetingId);
+      const afterUrl = page.url();
+      if (beforeUrl !== afterUrl && interruptCount < 3) {
+        await screenshot(page, `warm-interrupt-${++interruptCount}`, s3, meetingId);
+      }
     } catch {
       // non-fatal
     }
@@ -305,6 +360,7 @@ export async function warmTeamsSession(
   }
 
   console.log('[Teams][AUTH] Teams session warm timeout — cookies not found');
+  await screenshot(page, 'warm-03-timeout', s3, meetingId);
   await dumpAuthState(page.context(), page, 'after-warm-timeout');
   return false;
 }
@@ -315,11 +371,17 @@ export async function warmTeamsSession(
  *
  * @returns true if session was refreshed successfully, false otherwise
  */
-export async function refreshTeamsSession(context: BrowserContext): Promise<boolean> {
+export async function refreshTeamsSession(
+  context: BrowserContext,
+  s3?: S3Service | null,
+  meetingId?: string | null
+): Promise<boolean> {
   console.log('[Teams][AUTH] Refreshing Teams session in new page...');
   const tempPage = await context.newPage();
   try {
-    const result = await warmTeamsSession(tempPage, 20000);
+    await screenshot(tempPage, 'refresh-00-start', s3, meetingId);
+    const result = await warmTeamsSession(tempPage, 20000, s3, meetingId);
+    await screenshot(tempPage, `refresh-01-result-warmed-${result}`, s3, meetingId);
     return result;
   } finally {
     await tempPage.close().catch(() => {});
