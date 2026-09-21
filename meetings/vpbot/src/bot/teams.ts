@@ -1352,119 +1352,47 @@ export class TeamsHandler {
 
   /**
    * Poll the roster panel for current participants
+   *
+   * Teams v2 DOM structure (confirmed 2026-09-21): participant tiles are
+   * always present in the DOM with data-stream-type="Video" and the
+   * participant's display name in the data-tid attribute. No need to open
+   * the roster panel.
    */
   private async pollRoster(page: Page): Promise<void> {
     try {
-      // Open roster panel
-      const rosterButtonSelectors = [
-        '[data-tid="roster-button"]',
-        'button[aria-label*="People" i]',
-        'button[aria-label*="Participants" i]',
-      ];
-
-      let rosterButtonClicked = false;
-      for (const selector of rosterButtonSelectors) {
-        try {
-          const btn = page.locator(selector).first();
-          if (await btn.isVisible({ timeout: 2000 })) {
-            await btn.click();
-            rosterButtonClicked = true;
-            break;
-          }
-        } catch {
-          continue;
-        }
-      }
-
-      if (!rosterButtonClicked) {
-        console.log('[Teams][Roster] WARNING: Could not find roster button');
-        return;
-      }
-
-      // Wait for roster panel to load
-      await page.waitForTimeout(1000);
-
-      // Query participant names
-      const participantSelectors = [
-        '[data-tid="roster-participant"] [data-tid="participant-display-name"]',
-        '[data-tid="participants-list"] [aria-label]',
-        '[data-tid="calling-roster-section-participants"] span[aria-hidden="false"]',
-      ];
-
-      let names: string[] = [];
-      for (const selector of participantSelectors) {
-        try {
-          const elements = await page.locator(selector).all();
-          if (elements.length > 0) {
-            names = await Promise.all(
-              elements.map(async (el) => {
-                const text = await el.textContent();
-                return text?.trim() || '';
-              })
-            );
-            names = names.filter(n => n.length > 0);
-            if (names.length > 0) break;
-          }
-        } catch {
-          continue;
-        }
-      }
+      // Query participant tiles directly — name is in data-tid, no panel open needed
+      const names = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-stream-type="Video"][data-tid]')]
+          .map(el => el.getAttribute('data-tid') || '')
+          .filter(name => name.length > 0 && !name.includes('@')) // exclude email-format data-tids
+      );
 
       if (names.length === 0) {
-        console.log('[Teams][Roster] WARNING: No participant names found — selectors may need update');
-        // Close roster panel
-        if (rosterButtonClicked) {
-          try {
-            const btn = page.locator('[data-tid="roster-button"]').first();
-            if (await btn.isVisible({ timeout: 1000 })) {
-              await btn.click();
-            }
-          } catch {
-            // ignore
-          }
-        }
+        console.log('[Teams][Roster] No video tiles found (meeting may still be loading)');
         return;
       }
 
       const now = Date.now();
-      const currentNames = new Set(names);
-
       // Add new participants
       for (const name of names) {
-        if (!this.rosterEntries.some(e => e.name === name && !e.leftAtMs)) {
-          const possiblyMultiVoice = /conference.?room|conf.?room|board.?room|huddle.?room/i.test(name);
+        if (!this.rosterEntries.find(e => e.name === name && !e.leftAtMs)) {
           this.rosterEntries.push({
             name,
             joinedAtMs: now,
-            possiblyMultiVoice,
+            possiblyMultiVoice: /conference.?room|conf.?room|board.?room|huddle/i.test(name)
           });
-          console.log(`[Teams][Roster] Participant joined: ${name}${possiblyMultiVoice ? ' (possibly multi-voice)' : ''}`);
         }
       }
-
       // Mark left participants
-      for (const entry of this.rosterEntries) {
-        if (!entry.leftAtMs && !currentNames.has(entry.name)) {
+      for (const entry of this.rosterEntries.filter(e => !e.leftAtMs)) {
+        if (!names.includes(entry.name)) {
           entry.leftAtMs = now;
-          console.log(`[Teams][Roster] Participant left: ${entry.name}`);
         }
       }
 
       console.log(`[Teams][Roster] ${names.length} participants: ${names.join(', ')}`);
-
-      // Close roster panel
-      if (rosterButtonClicked) {
-        try {
-          const btn = page.locator('[data-tid="roster-button"]').first();
-          if (await btn.isVisible({ timeout: 1000 })) {
-            await btn.click();
-          }
-        } catch {
-          // ignore
-        }
-      }
-    } catch (err) {
-      console.log('[Teams][Roster] Poll error:', err);
+    } catch (e) {
+      console.log(`[Teams][Roster] Poll error: ${e}`);
     }
   }
 
