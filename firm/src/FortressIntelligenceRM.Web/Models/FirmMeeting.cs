@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace FortressIntelligenceRM.Web.Models;
 
@@ -65,5 +66,6 @@ public class FirmMeeting
     /// <summary>WI #7297 — timestamped roster join/leave timeline from Teams bot, passed to firm-transcriber
     /// as soft LLM context for speaker labeling (handles conference rooms, multi-person single-account joins).
     /// Stored as JSON: [{"name":"...", "joinedAtMs":..., "leftAtMs":..., "possiblyMultiVoice":true}, ...]</summary>
+    [Column("roster_timeline")]
     public string? RosterTimeline { get; set; }
 }
