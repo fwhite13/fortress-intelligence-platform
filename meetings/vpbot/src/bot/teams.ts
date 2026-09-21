@@ -1217,32 +1217,68 @@ export class TeamsHandler {
       );
       await this.screenshot(page, 'pre-join-camera-toggled', s3, meetingId);
 
-      // Mute microphone
+      // Mute microphone — check actual state via aria-checked/aria-pressed/checked
+      // Pre-join defaults to mic ON, so if it's currently ON we click to mute
       const micSelectors = [
-        // New Teams toggle inputs
-        'input[data-tid="toggle-mute"]:not([checked])',
-        'input[type="checkbox"][title*="Mute mic" i]',
-        'input[role="switch"][data-tid="toggle-mute"]',
-        // Button-based
-        'button[aria-label*="Mute microphone" i]',
-        'button[aria-label*="Mute mic" i]',
-        '[data-tid="prejoin-mic-button"]',
+        'button[data-tid="toggle-mute"]',
+        'input[data-tid="toggle-mute"]',
         'button[aria-label*="microphone" i]',
+        '[data-tid="prejoin-mic-button"]',
       ];
 
+      let toggledMic = false;
       for (const selector of micSelectors) {
         try {
           const el = page.locator(selector).first();
           if (await el.isVisible({ timeout: 2000 })) {
-            await el.click();
-            console.log(`[Teams] Muted microphone via: ${selector}`);
-            await page.waitForTimeout(500);
-            break;
+            // Check if microphone is currently ON via aria-checked, aria-pressed, or checked
+            const state = await page.evaluate((sel) => {
+              const elem = document.querySelector(sel);
+              if (!elem) return null;
+              const ariaChecked = elem.getAttribute('aria-checked');
+              const ariaPressed = elem.getAttribute('aria-pressed');
+              const checked = (elem as HTMLInputElement).checked;
+              return { ariaChecked, ariaPressed, checked };
+            }, selector);
+
+            console.log(`[Teams] Microphone toggle state via ${selector}:`, state);
+
+            // If mic is on (aria-checked="true" or aria-pressed="true" or checked=true), click to mute
+            // Or if state is indeterminate, just click once (pre-join defaults to mic ON)
+            const shouldClick =
+              state?.ariaChecked === 'true' ||
+              state?.ariaPressed === 'true' ||
+              state?.checked === true ||
+              state === null; // Fallback: always click if we can't determine state
+
+            if (shouldClick) {
+              // Use page.evaluate for reliable click (same pattern as camera and Teams auth)
+              await page.evaluate((sel) => {
+                const elem = document.querySelector(sel) as HTMLElement | null;
+                if (elem) elem.click();
+              }, selector);
+              console.log(`[Teams] Clicked microphone toggle via: ${selector}`);
+              await page.waitForTimeout(500);
+              toggledMic = true;
+              break;
+            } else {
+              console.log(`[Teams] Microphone already muted via ${selector} — skipping click`);
+              toggledMic = true;
+              break;
+            }
           }
-        } catch {
+        } catch (err) {
+          console.log(`[Teams] Failed to toggle microphone via ${selector}:`, err);
           continue;
         }
       }
+
+      if (!toggledMic) {
+        console.log('[Teams] WARNING: Could not find microphone toggle — mic may still be on');
+      }
+
+      // Screenshot after microphone toggle attempt
+      await this.screenshot(page, 'pre-join-mic-toggled', s3, meetingId);
 
       console.log('[Teams] Finished toggling devices');
     } catch (error) {
