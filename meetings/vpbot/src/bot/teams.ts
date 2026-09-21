@@ -36,6 +36,7 @@ import { Page, Locator } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 import { S3Service } from '../transcribe/s3.js';
+import { refreshTeamsSession } from './teams-auth.js';
 
 export class LobbyTimeoutError extends Error {
   constructor() {
@@ -185,45 +186,27 @@ export class TeamsHandler {
 
   /**
    * Wait for the pre-join screen to appear.
-   * 
+   *
    * The pre-join screen is where you enter your name and toggle devices.
-   * The most reliable indicator is the name input field with
-   * data-tid="prejoin-display-name-input".
-   * 
+   * For authenticated joins, the Join button appears without a name input.
+   * For anonymous joins, the name input appears.
+   *
    * Uses a long timeout (120s) because Teams can be slow to load,
    * especially for anonymous/guest joins.
    */
   private static async waitForPreJoinScreen(page: Page, timeoutMs: number = 120000): Promise<boolean> {
     console.log(`[Teams] Waiting for pre-join screen (timeout: ${timeoutMs / 1000}s)...`);
 
-    // Primary indicator: the name input field
+    // Primary indicator: either join button OR name input (authenticated vs anonymous)
     try {
-      const nameInput = page.locator('input[data-tid="prejoin-display-name-input"]');
-      await nameInput.waitFor({ state: 'visible', timeout: timeoutMs });
-      console.log('[Teams] Pre-join screen detected (found name input field)');
+      await page.waitForSelector(
+        '[data-tid="prejoin-join-button"], input[data-tid="prejoin-display-name-input"]',
+        { timeout: timeoutMs }
+      );
+      console.log('[Teams] Pre-join screen detected');
       return true;
     } catch {
-      console.log('[Teams] Name input not found within timeout');
-    }
-
-    // Secondary indicators: check for other pre-join elements
-    const secondaryIndicators = [
-      'input[placeholder*="name" i]',
-      'input[placeholder*="Enter your name" i]',
-      'button:has-text("Join now")',
-      '[data-tid="prejoin-join-button"]',
-    ];
-
-    for (const selector of secondaryIndicators) {
-      try {
-        const el = page.locator(selector).first();
-        if (await el.isVisible({ timeout: 5000 })) {
-          console.log(`[Teams] Pre-join screen detected via secondary indicator: ${selector}`);
-          return true;
-        }
-      } catch {
-        continue;
-      }
+      console.log('[Teams] Pre-join screen not detected within timeout');
     }
 
     // Also check for waiting room / lobby text (means we're past the launcher)
@@ -726,77 +709,113 @@ export class TeamsHandler {
 
     await this.screenshot(page, '02-pre-join-screen', s3, meetingId);
 
-    // Step 3: Enter name in the name field — or, if BOT_EMAIL/BOT_PASSWORD are
-    // configured (WI #7101), sign in with M365 instead. Each environment's ECS
-    // task definition injects the correct values; absent either one, or if
-    // sign-in fails for any reason, fall back to the anonymous join path.
-    // The sign-in attempt happens exactly where the anonymous flow would call
-    // nameInput.fill() — once the name input is confirmed visible, i.e. once
-    // we know we're truly on the pre-join screen.
+    // Step 3: Detect pre-join state and handle auth retry if needed
+    type PreJoinState = 'signed_in' | 'signed_out' | 'unknown';
+    const detectPreJoinState = async (): Promise<PreJoinState> => {
+      const hasJoinButton = await page.locator('[data-tid="prejoin-join-button"]').isVisible({ timeout: 2000 }).catch(() => false);
+      const hasNameInput = await page.locator('input[data-tid="prejoin-display-name-input"]').isVisible({ timeout: 2000 }).catch(() => false);
+
+      if (hasJoinButton && !hasNameInput) {
+        return 'signed_in';
+      } else if (hasNameInput) {
+        return 'signed_out';
+      } else {
+        return 'unknown';
+      }
+    };
+
     const botEmail = process.env.BOT_EMAIL;
     const botPassword = process.env.BOT_PASSWORD;
+    let preJoinState = await detectPreJoinState();
+    console.log(`[Teams] Pre-join state: ${preJoinState}`);
 
-    const nameSelectors = [
-      'input[data-tid="prejoin-display-name-input"]',
-      'input[placeholder*="Enter your name" i]',
-      'input[placeholder*="Type your name" i]',
-      'input[placeholder*="name" i]',
-      'input[aria-label*="name" i]',
-      '#username',
-      'input[type="text"]',
-    ];
+    // If we're on signed_out but creds were configured, retry with refreshTeamsSession
+    if (preJoinState === 'signed_out' && botEmail && botPassword) {
+      console.log('[Teams] Pre-join shows signed_out despite auth attempt — refreshing session...');
+      for (let retry = 0; retry < 2; retry++) {
+        await this.screenshot(page, `02c-retry-${retry}-before-refresh`, s3, meetingId);
+        const refreshed = await refreshTeamsSession(page.context());
+        if (refreshed) {
+          console.log('[Teams] Session refreshed — re-navigating to meeting...');
+          await page.goto(originalUrl || page.url(), { waitUntil: 'domcontentloaded', timeout: 30000 });
+          await page.waitForTimeout(2000);
 
-    let enteredName = false;
-    let authenticated = false;
-    for (const selector of nameSelectors) {
-      try {
-        const nameInput = page.locator(selector).first();
-        if (await nameInput.isVisible({ timeout: 3000 })) {
-          if (botEmail && botPassword) {
-            authenticated = await this.signInWithM365(page, botEmail, botPassword, s3, meetingId);
-            if (authenticated) {
-              console.log('[Teams] M365 sign-in succeeded — page is already on authenticated pre-join screen');
-              console.log('[Teams] Post-auth URL:', page.url());
-              await page.waitForTimeout(1000); // Give Teams time to fully render after auth
-              await this.screenshot(page, '02b-post-auth-prejoin', s3, meetingId);
-              enteredName = true;
-              break;
-            }
-            console.log('[Teams] M365 sign-in failed — falling back to anonymous name entry');
+          // Click launcher if present
+          const launcherClicked = await this.clickLauncherButton(page);
+          if (launcherClicked) {
+            await page.waitForTimeout(3000);
           }
-          await nameInput.clear();
-          await nameInput.fill(botName);
-          console.log(`[Teams] Entered name "${botName}" via: ${selector}`);
-          enteredName = true;
+
+          // Wait for pre-join again
+          await this.waitForPreJoinScreen(page, 60000);
+          preJoinState = await detectPreJoinState();
+          await this.screenshot(page, `02d-retry-${retry}-after-refresh`, s3, meetingId);
+          console.log(`[Teams] Pre-join state after refresh: ${preJoinState}`);
+
+          if (preJoinState === 'signed_in') {
+            console.log('[Teams] Successfully reached authenticated pre-join after retry');
+            break;
+          }
+        } else {
+          console.log('[Teams] Session refresh failed — continuing with anonymous');
           break;
         }
-      } catch {
-        continue;
       }
     }
 
-    if (!enteredName) {
-      console.log('[Teams] WARNING: Could not find name input field');
-      const inputs = await page.evaluate(() => {
-        return Array.from(document.querySelectorAll('input')).map(i => ({
-          type: i.type,
-          placeholder: i.placeholder,
-          ariaLabel: i.getAttribute('aria-label'),
-          id: i.id,
-          dataTid: i.getAttribute('data-tid'),
-          visible: i.offsetParent !== null,
-        }));
-      });
-      console.log('[Teams] All inputs on page:', JSON.stringify(inputs));
+    // Step 4: Enter name if on signed_out state
+    if (preJoinState === 'signed_out') {
+      const nameSelectors = [
+        'input[data-tid="prejoin-display-name-input"]',
+        'input[placeholder*="Enter your name" i]',
+        'input[placeholder*="Type your name" i]',
+        'input[placeholder*="name" i]',
+        'input[aria-label*="name" i]',
+        '#username',
+        'input[type="text"]',
+      ];
+
+      let enteredName = false;
+      for (const selector of nameSelectors) {
+        try {
+          const nameInput = page.locator(selector).first();
+          if (await nameInput.isVisible({ timeout: 3000 })) {
+            await nameInput.clear();
+            await nameInput.fill(botName);
+            console.log(`[Teams] Entered name "${botName}" via: ${selector}`);
+            enteredName = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!enteredName) {
+        console.log('[Teams] WARNING: Could not find name input field');
+        const inputs = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll('input')).map(i => ({
+            type: i.type,
+            placeholder: i.placeholder,
+            ariaLabel: i.getAttribute('aria-label'),
+            id: i.id,
+            dataTid: i.getAttribute('data-tid'),
+            visible: i.offsetParent !== null,
+          }));
+        });
+        console.log('[Teams] All inputs on page:', JSON.stringify(inputs));
+      }
+    } else {
+      console.log('[Teams] Pre-join state is signed_in — skipping name entry');
     }
 
-    // Step 4: Turn off camera and microphone
+    // Step 5: Turn off camera and microphone
     await this.turnOffDevices(page);
 
     await page.waitForTimeout(1000);
     await this.screenshot(page, '03-before-join-click', s3, meetingId);
 
-    // Step 5: Click Join now button
+    // Step 6: Click Join now button
     const joinButtonTexts = ['Join now', 'Join', 'Ask to join', 'Join meeting'];
 
     let clickedJoin = false;
@@ -848,7 +867,7 @@ export class TeamsHandler {
       await this.screenshot(page, '03b-no-join-button', s3, meetingId);
     }
 
-    // Step 6: Wait for meeting to load
+    // Step 7: Wait for meeting to load
     console.log('[Teams] Waiting for meeting to load...');
 
     // Look for the Leave button as confirmation we're in the meeting
@@ -865,7 +884,7 @@ export class TeamsHandler {
 
     await this.screenshot(page, '04-after-join-attempt', s3, meetingId);
 
-    // Step 7: Check if we're in a waiting room
+    // Step 8: Check if we're in a waiting room
     const bodyText = await page.evaluate(() => document.body?.innerText || '');
     const waitingRoomPhrases = [
       'waiting to be admitted',
