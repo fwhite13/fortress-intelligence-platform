@@ -885,8 +885,6 @@ export class TeamsHandler {
       await leaveButton.waitFor({ timeout: 60000 });
       console.log('[Teams] ✅ Successfully joined meeting (Leave button visible)');
       await TeamsHandler.screenshot(page, '04-in-meeting', s3, meetingId);
-      await TeamsHandler.postAdmissionChatNotification(page);
-      this.startRosterPolling(page);
       return;
     } catch {
       console.log('[Teams] Leave button not found within 60s, checking other states...');
@@ -922,8 +920,6 @@ export class TeamsHandler {
             console.log('[Teams] ✅ Admitted from waiting room, now in meeting');
             await TeamsHandler.screenshot(page, '05-admitted-in-meeting', s3, meetingId);
             admitted = true;
-            await TeamsHandler.postAdmissionChatNotification(page);
-            this.startRosterPolling(page);
             return; // admitted — normal path
           }
         } catch {
@@ -947,8 +943,6 @@ export class TeamsHandler {
           if (await leaveButton.isVisible({ timeout: 2000 })) {
             console.log('[Teams] ✅ Admitted just before timeout — now in meeting');
             await TeamsHandler.screenshot(page, '05-admitted-last-second', s3, meetingId);
-            await TeamsHandler.postAdmissionChatNotification(page);
-            this.startRosterPolling(page);
             return;
           }
         } catch {
@@ -986,8 +980,6 @@ export class TeamsHandler {
     } else if (joinedCheck.hasLeave || joinedCheck.hasHangup || joinedCheck.hasMeetingUI || joinedCheck.hasRoster) {
       console.log('[Teams] ✅ Successfully joined meeting');
       await TeamsHandler.screenshot(page, '05-in-meeting', s3, meetingId);
-      await TeamsHandler.postAdmissionChatNotification(page);
-      this.startRosterPolling(page);
     } else {
       console.log('[Teams] ⚠️ Meeting join status uncertain — hasMeetingUI=false, hasLeave=false. Treating as lobby timeout.');
       await TeamsHandler.screenshot(page, '05-uncertain-state', s3, meetingId);
@@ -1000,13 +992,14 @@ export class TeamsHandler {
    * bot and attributing the recording to the FIRM user(s) who requested it.
    *
    * Only ever called after confirmed admission — never from the lobby.
+   * Invoked by MeetingBot after FFmpeg recording has started (WI #7609).
    * `BOT_NAMES_CSV` is passed by firm-web at ECS task launch: a single name
    * for a single recorder, or a comma-separated list when multiple FIRM
    * users share the meeting.
    *
    * Non-fatal by design — a failed chat post must never fail the recording.
    */
-  private static async postAdmissionChatNotification(page: Page): Promise<void> {
+  static async postAdmissionChatNotification(page: Page): Promise<void> {
     try {
       const namesCsv = process.env.BOT_NAMES_CSV || '';
       const names = namesCsv.split(',').map(n => n.trim()).filter(Boolean);
