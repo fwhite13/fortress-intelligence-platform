@@ -221,6 +221,7 @@ def main():
                     for speaker_label, segs in speaker_segments.items():
                         best_name = None
                         best_overlap = 0.0
+                        second_overlap = 0.0
                         for attendee in roster_attendees:
                             att_start = (attendee["joinedAtMs"] - recording_start_ms) / 1000.0
                             att_end = (attendee["leftAtMs"] - recording_start_ms) / 1000.0
@@ -229,13 +230,21 @@ def main():
                                 for seg_start, seg_end in segs
                             )
                             if total_overlap > best_overlap:
+                                second_overlap = best_overlap
                                 best_overlap = total_overlap
                                 best_name = attendee["name"]
-                        if best_name and best_overlap > 0:
+                            elif total_overlap > second_overlap:
+                                second_overlap = total_overlap
+                        # Only attribute when one attendee clearly dominates — when presence windows
+                        # largely coincide, overlap can't distinguish people, and assigning the
+                        # earliest joiner to every label would be worse than leaving SPEAKER_NN
+                        # for the summary model to resolve via the attendee list.
+                        if best_name and best_overlap > 0 and second_overlap <= 0.5 * best_overlap:
                             speaker_name_map[speaker_label] = best_name
-                            print(f"[Transcriber] {speaker_label} → {best_name} (overlap {best_overlap:.1f}s)")
+                            print(f"[Transcriber] {speaker_label} → {best_name} (overlap {best_overlap:.1f}s, runner-up {second_overlap:.1f}s)")
                         else:
-                            speaker_name_map[speaker_label] = speaker_label  # fallback to label
+                            speaker_name_map[speaker_label] = speaker_label  # ambiguous or no overlap — keep label
+                            print(f"[Transcriber] {speaker_label} left unresolved (best {best_name} {best_overlap:.1f}s, runner-up {second_overlap:.1f}s)")
             except Exception as e:
                 print(f"[Transcriber] Diarization failed (non-fatal): {e}", file=sys.stderr)
         else:
