@@ -10,6 +10,7 @@ Environment variables (injected by Batch):
   HF_TOKEN           - HuggingFace token for pyannote
   AWS_REGION         - us-east-1
   BEDROCK_MODEL_ID   - us.anthropic.claude-sonnet-4-6
+  ROSTER_TIMELINE_JSON - (optional) JSON array of {name, joinedAtMs, leftAtMs, possiblyMultiVoice}
 """
 
 import os
@@ -99,7 +100,37 @@ def main():
         except Exception as e:
             print(f"[Transcriber] Failed to parse ORG_WIKI_JSON: {e}")
 
-    s3 = boto3.client("s3", region_name=aws_region)
+    roster_timeline_json = os.environ.get("ROSTER_TIMELINE_JSON", "")
+    roster_attendees = []  # list of dicts with name, joinedAtMs, leftAtMs, possiblyMultiVoice
+    if roster_timeline_json:
+        try:
+            raw_entries = json.loads(roster_timeline_json) or []
+            # Deduplicate by name, keeping the widest time window (covers leave/rejoin)
+            seen = {}
+            for entry in raw_entries:
+                name = (entry.get("name") or "").strip()
+                if not name or name == notetaker_name or entry.get("joinedAtMs") is None:
+                    continue
+                if name not in seen:
+                    seen[name] = dict(entry, name=name)
+                else:
+                    seen[name]["joinedAtMs"] = min(seen[name]["joinedAtMs"], entry["joinedAtMs"])
+                    if entry.get("leftAtMs") is not None:
+                        seen[name]["leftAtMs"] = max(seen[name].get("leftAtMs") or 0, entry["leftAtMs"])
+                    seen[name]["possiblyMultiVoice"] = bool(seen[name].get("possiblyMultiVoice")) or bool(entry.get("possiblyMultiVoice"))
+            roster_attendees = list(seen.values())
+            # leftAtMs is optional in the vpbot RosterEntry — treat missing as "present until the end"
+            if roster_attendees:
+                roster_end_ms = max(max(e["joinedAtMs"], e.get("leftAtMs") or 0) for e in roster_attendees)
+                for e in roster_attendees:
+                    if e.get("leftAtMs") is None:
+                        e["leftAtMs"] = roster_end_ms
+            print(f"[Transcriber] Roster loaded: {len(roster_attendees)} attendees: {[e['name'] for e in roster_attendees]}")
+        except Exception as e:
+            roster_attendees = []
+            print(f"[Transcriber] Failed to parse ROSTER_TIMELINE_JSON: {e}")
+
+    s3 =boto3.client("s3", region_name=aws_region)
 
     print(f"[Transcriber] Starting job for meeting {meeting_id}, audio: {audio_s3_key}")
 
@@ -134,6 +165,7 @@ def main():
 
         # Pyannote diarization (GPU)
         diarization_map = {}
+        speaker_name_map = {}  # SPEAKER_NN -> actual name (from roster timing overlap)
         if hf_token:
             try:
                 print(f"[Transcriber] Loading pyannote diarization pipeline...")
@@ -149,7 +181,22 @@ def main():
                 import torch
                 pipeline = pipeline.to(torch.device("cuda"))
                 print(f"[Transcriber] Running diarization...")
-                diarization = pipeline(audio_path)
+                diarization_kwargs = {}
+                if roster_attendees:
+                    n = len(roster_attendees)
+                    multi_voice = sum(1 for e in roster_attendees if e.get("possiblyMultiVoice", False))
+                    if multi_voice == 0:
+                        diarization_kwargs["num_speakers"] = n
+                        print(f"[Transcriber] Pyannote num_speakers={n} (from roster, no multi-voice entries)")
+                    else:
+                        min_s = n
+                        max_s = n + (multi_voice * 2)
+                        diarization_kwargs["min_speakers"] = min_s
+                        diarization_kwargs["max_speakers"] = max_s
+                        print(f"[Transcriber] Pyannote min_speakers={min_s}, max_speakers={max_s} (roster has {multi_voice} multi-voice entries)")
+                else:
+                    print(f"[Transcriber] No roster data — pyannote in automatic speaker detection mode")
+                diarization = pipeline(audio_path, **diarization_kwargs)
                 turns = [(turn.start, turn.end, speaker)
                          for turn, _, speaker in diarization.itertracks(yield_label=True)]
                 for seg in whisper_segments:
@@ -161,6 +208,34 @@ def main():
                             break
                     diarization_map[seg["start"]] = speaker
                 print(f"[Transcriber] Diarization complete: {len(turns)} turns, {len(set(s for _,_,s in turns))} speakers")
+
+                # Build speaker label → name assignment using roster timing overlap
+                if roster_attendees and turns:
+                    speaker_segments = {}  # speaker_label -> list of (start, end) tuples
+                    for (t_start, t_end, t_speaker) in turns:
+                        speaker_segments.setdefault(t_speaker, []).append((t_start, t_end))
+
+                    # Roster timestamps are epoch ms; approximate recording start as earliest join
+                    recording_start_ms = min(e["joinedAtMs"] for e in roster_attendees)
+
+                    for speaker_label, segs in speaker_segments.items():
+                        best_name = None
+                        best_overlap = 0.0
+                        for attendee in roster_attendees:
+                            att_start = (attendee["joinedAtMs"] - recording_start_ms) / 1000.0
+                            att_end = (attendee["leftAtMs"] - recording_start_ms) / 1000.0
+                            total_overlap = sum(
+                                max(0, min(seg_end, att_end) - max(seg_start, att_start))
+                                for seg_start, seg_end in segs
+                            )
+                            if total_overlap > best_overlap:
+                                best_overlap = total_overlap
+                                best_name = attendee["name"]
+                        if best_name and best_overlap > 0:
+                            speaker_name_map[speaker_label] = best_name
+                            print(f"[Transcriber] {speaker_label} → {best_name} (overlap {best_overlap:.1f}s)")
+                        else:
+                            speaker_name_map[speaker_label] = speaker_label  # fallback to label
             except Exception as e:
                 print(f"[Transcriber] Diarization failed (non-fatal): {e}", file=sys.stderr)
         else:
@@ -178,10 +253,11 @@ def main():
         # Build transcript
         result = []
         for seg in whisper_segments:
-            speaker = diarization_map.get(seg["start"], "SPEAKER_00")
+            speaker_label = diarization_map.get(seg["start"], "SPEAKER_00")
+            speaker_name = speaker_name_map.get(speaker_label, speaker_label) if speaker_name_map else speaker_label
             result.append({
-                "speakerLabel": speaker,
-                "speakerName": speaker,
+                "speakerLabel": speaker_label,
+                "speakerName": speaker_name,  # actual name if resolved, else SPEAKER_NN
                 "text": seg["text"],
                 "startTimeMs": int(seg["start"] * 1000),
                 "endTimeMs": int(seg["end"] * 1000)
@@ -230,14 +306,25 @@ def main():
                 region_name=aws_region,
                 config=Config(read_timeout=300, retries={"max_attempts": 2})
             )
-            full_text = "\n".join([f"{s['speakerLabel']}: {s['text']}" for s in result])
+            full_text = "\n".join([f"{s['speakerName']}: {s['text']}" for s in result])
             org_context_block = ""
             if org_wiki_entries:
                 terms = "\n".join([f"- {e.get('Term', '') or e.get('term', '')}: {e.get('Description', '') or e.get('description', '')}" for e in org_wiki_entries if (e.get('Term', '') or e.get('term', ''))])
                 print(f"[Transcriber] Org wiki terms block:\n{terms}")
                 org_context_block = f"\n[ORG WIKI — AUTHORITATIVE DEFINITIONS. READ BEFORE INTERPRETING TRANSCRIPT.]\n{terms}\n[END ORG WIKI]\n\n"
+            attendees_block = ""
+            if roster_attendees:
+                recording_start_ms = min(e["joinedAtMs"] for e in roster_attendees)
+                att_lines = []
+                for e in roster_attendees:
+                    rel_sec = (e["joinedAtMs"] - recording_start_ms) / 1000
+                    mins = int(rel_sec // 60)
+                    secs = int(rel_sec % 60)
+                    mv_note = " [⚠ may contain multiple voices]" if e.get("possiblyMultiVoice") else ""
+                    att_lines.append(f"- {e['name']} (joined {mins}:{secs:02d}){mv_note}")
+                attendees_block = "\n[MEETING ATTENDEES — confirmed by bot roster polling]\n" + "\n".join(att_lines) + "\n[END ATTENDEES]\n\n"
             summary_prompt = f"""Analyze this meeting transcript and provide a rich, structured summary.
-{org_context_block}
+{org_context_block}{attendees_block}
 Meeting date: {meeting_date if meeting_date else "unknown"}
 
 IMPORTANT — Org Context Usage:
