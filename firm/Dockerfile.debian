@@ -64,4 +64,7 @@ RUN curl -sSL https://dot.net/v1/dotnet-install.sh \
 ENV ASPNETCORE_URLS=http://+:8080
 RUN mkdir -p /app/keys && chmod 755 /app/keys
 COPY --from=build /app/publish .
+# Self-healing: ECS uses this to restart the container if Kestrel stops accepting connections
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
 ENTRYPOINT ["dotnet", "FortressIntelligenceRM.Web.dll"]
