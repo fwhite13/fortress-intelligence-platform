@@ -11,8 +11,11 @@ Environment variables (injected by Batch):
   AWS_REGION         - us-east-1
   BEDROCK_MODEL_ID   - us.anthropic.claude-sonnet-4-6
   ROSTER_TIMELINE_JSON - (optional) JSON array of {name, joinedAtMs, leftAtMs, possiblyMultiVoice}
+  ACTIVE_SPEAKER_JSON  - (optional) JSON array of {name, startMs, endMs} from the meeting platform's
+                         speaking indicator. Epoch ms or ms from recording start; may be empty/absent.
 """
 
+import gc
 import os
 import re
 import sys
@@ -21,9 +24,11 @@ import tempfile
 import boto3
 from botocore.config import Config
 import requests
-from faster_whisper import WhisperModel
-from pyannote.audio import Pipeline
+import torch
+import whisperx
 from json_repair import repair_json
+
+ACTIVE_SPEAKER_PROMPT_LIMIT = 50  # cap timeline entries in the summary prompt to bound token usage
 
 
 def extract_summary_text_field(raw_text: str) -> str | None:
@@ -68,6 +73,94 @@ def extract_summary_text_field(raw_text: str) -> str | None:
     # for the parts that WERE escaped correctly.
     value = value.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
     return value.strip() if value.strip() else None
+
+def free_gpu_memory():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+def split_segments_by_speaker(segments: list) -> list:
+    """
+    Turn WhisperX segments (after assign_word_speakers) into {text, start, end, speaker}
+    segments, splitting a segment wherever the word-level speaker changes. This is the
+    point of word-level diarization: a Whisper segment that spans a speaker handoff no
+    longer gets attributed wholesale to whoever owned its midpoint.
+
+    Words WhisperX could not align (numerals, symbols) have no timestamps and therefore
+    no speaker; they inherit the speaker of the preceding word (or the following word at
+    the start of a segment).
+    """
+    out = []
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        seg_speaker = seg.get("speaker", "SPEAKER_00")
+        words = [w for w in (seg.get("words") or []) if (w.get("word") or "").strip()]
+
+        word_speakers = [w.get("speaker") for w in words]
+        for i in range(1, len(word_speakers)):  # forward-fill
+            if word_speakers[i] is None:
+                word_speakers[i] = word_speakers[i - 1]
+        first_known = next((spk for spk in word_speakers if spk is not None), seg_speaker)
+        word_speakers = [spk if spk is not None else first_known for spk in word_speakers]
+
+        runs = []  # [speaker, [words]]
+        for w, spk in zip(words, word_speakers):
+            if runs and runs[-1][0] == spk:
+                runs[-1][1].append(w)
+            else:
+                runs.append([spk, [w]])
+
+        if len(runs) <= 1:
+            out.append({"text": text, "start": seg["start"], "end": seg["end"],
+                        "speaker": runs[0][0] if runs else seg_speaker})
+            continue
+
+        for i, (spk, run_words) in enumerate(runs):
+            # Every run after the first begins with a speaker-attributed (hence timestamped) word
+            timed = [w for w in run_words if "start" in w]
+            start = seg["start"] if i == 0 else timed[0]["start"]
+            end = seg["end"] if i == len(runs) - 1 else timed[-1]["end"]
+            out.append({"text": " ".join(w["word"].strip() for w in run_words),
+                        "start": start, "end": end, "speaker": spk})
+    return out
+
+def build_active_speaker_block(active_speaker: list, recording_start_ms: int | None, notetaker_name: str) -> str:
+    """
+    Render the platform active-speaker log as a prompt block. Adjacent entries for the same
+    person are merged before capping so the cap covers as much of the meeting as possible.
+    """
+    entries = []
+    for e in active_speaker:
+        name = (e.get("name") or "").strip()
+        start_ms = e.get("startMs")
+        if not name or name == notetaker_name or start_ms is None:
+            continue
+        end_ms = e.get("endMs") or start_ms
+        if entries and entries[-1]["name"] == name:
+            entries[-1]["endMs"] = max(entries[-1]["endMs"], end_ms)
+        else:
+            entries.append({"name": name, "startMs": start_ms, "endMs": end_ms})
+    if not entries:
+        return ""
+
+    # Epoch-ms timelines are rebased onto the recording (approximated like the roster: earliest known timestamp)
+    if entries[0]["startMs"] > 1_000_000_000_000:
+        base_ms = recording_start_ms if recording_start_ms is not None else min(e["startMs"] for e in entries)
+    else:
+        base_ms = 0
+
+    def fmt(ms):
+        sec = max(0, int((ms - base_ms) // 1000))
+        return f"{sec // 60}:{sec % 60:02d}"
+
+    lines = [f"- {e['name']}: {fmt(e['startMs'])}–{fmt(e['endMs'])}" for e in entries[:ACTIVE_SPEAKER_PROMPT_LIMIT]]
+    if len(entries) > ACTIVE_SPEAKER_PROMPT_LIMIT:
+        lines.append(f"- … {len(entries) - ACTIVE_SPEAKER_PROMPT_LIMIT} more entries omitted")
+    return ("\n[ACTIVE SPEAKER TIMELINE — meeting platform's speaking indicator, mm:ss from recording start. "
+            "Approximate; use it to resolve ambiguous speaker labels, not as ground truth]\n"
+            + "\n".join(lines) + "\n[END ACTIVE SPEAKER TIMELINE]\n\n")
 
 def post_callback(url: str, secret: str, payload: dict):
     try:
@@ -130,6 +223,16 @@ def main():
             roster_attendees = []
             print(f"[Transcriber] Failed to parse ROSTER_TIMELINE_JSON: {e}")
 
+    active_speaker_json = os.environ.get("ACTIVE_SPEAKER_JSON", "")
+    active_speaker_log = []  # list of dicts with name, startMs, endMs
+    if active_speaker_json:
+        try:
+            parsed = json.loads(active_speaker_json) or []
+            active_speaker_log = [e for e in parsed if isinstance(e, dict)] if isinstance(parsed, list) else []
+            print(f"[Transcriber] Active speaker log loaded: {len(active_speaker_log)} entries")
+        except Exception as e:
+            print(f"[Transcriber] Failed to parse ACTIVE_SPEAKER_JSON: {e}")
+
     s3 =boto3.client("s3", region_name=aws_region)
 
     print(f"[Transcriber] Starting job for meeting {meeting_id}, audio: {audio_s3_key}")
@@ -142,44 +245,54 @@ def main():
     print(f"[Transcriber] Download complete")
 
     try:
-        # Whisper transcription (GPU)
-        print(f"[Transcriber] Loading Whisper model (large-v3-turbo, GPU)...")
-        model = WhisperModel("large-v3-turbo", device="cuda", compute_type="float16")
-        print(f"[Transcriber] Running transcription...")
+        # WhisperX transcription (GPU) — faster-whisper backend with batched inference
+        device = "cuda"
+        print(f"[Transcriber] Loading WhisperX model (large-v3-turbo, GPU)...")
         initial_prompt = ", ".join([e.get("Term", "") or e.get("term", "") for e in org_wiki_entries if (e.get("Term", "") or e.get("term", ""))])
         if initial_prompt:
             print(f"[Transcriber] Whisper initial_prompt: {initial_prompt}")
-        segments_raw, info = model.transcribe(
-            audio_path,
+        model = whisperx.load_model(
+            "large-v3-turbo",
+            device,
+            compute_type="float16",
             language="en",
-            beam_size=5,
-            word_timestamps=True,
-            vad_filter=True,
-            initial_prompt=initial_prompt if initial_prompt else None,
+            asr_options={"initial_prompt": initial_prompt} if initial_prompt else None,
         )
-        whisper_segments = [
-            {"text": seg.text.strip(), "start": seg.start, "end": seg.end}
-            for seg in segments_raw
-        ]
-        print(f"[Transcriber] Whisper complete: {len(whisper_segments)} segments, duration={info.duration:.1f}s")
+        audio = whisperx.load_audio(audio_path)
+        print(f"[Transcriber] Running transcription...")
+        transcription = model.transcribe(audio, batch_size=16, language="en")
+        whisper_segments = transcription["segments"]
+        print(f"[Transcriber] Whisper complete: {len(whisper_segments)} segments, duration={len(audio) / whisperx.audio.SAMPLE_RATE:.1f}s")
+        del model
+        free_gpu_memory()
 
-        # Pyannote diarization (GPU)
-        diarization_map = {}
+        # Word-level alignment (wav2vec2) — prerequisite for word-level speaker assignment
+        try:
+            print(f"[Transcriber] Running word-level alignment...")
+            align_model, align_metadata = whisperx.load_align_model(language_code=transcription["language"], device=device)
+            aligned = whisperx.align(whisper_segments, align_model, align_metadata, audio, device, return_char_alignments=False)
+            whisper_segments = aligned["segments"]
+            print(f"[Transcriber] Alignment complete: {len(aligned['word_segments'])} words")
+            del align_model
+            free_gpu_memory()
+        except Exception as e:
+            print(f"[Transcriber] Alignment failed (non-fatal, falling back to segment-level speakers): {e}", file=sys.stderr)
+
+        # Pyannote diarization (GPU) via WhisperX, speakers assigned per word
         speaker_name_map = {}  # SPEAKER_NN -> actual name (from roster timing overlap)
         if hf_token:
             try:
                 print(f"[Transcriber] Loading pyannote diarization pipeline...")
-                # Set offline mode only for pyannote — Whisper downloads at runtime
+                # Set offline mode only for pyannote — weights are pre-baked, Whisper downloads at runtime
                 os.environ["HF_HUB_OFFLINE"] = "1"
                 try:
-                    pipeline = Pipeline.from_pretrained(
-                        "pyannote/speaker-diarization-3.1",
-                        use_auth_token=hf_token
+                    diarize_model = whisperx.DiarizationPipeline(
+                        model_name="pyannote/speaker-diarization-3.1",
+                        use_auth_token=hf_token,
+                        device=device,
                     )
                 finally:
                     del os.environ["HF_HUB_OFFLINE"]
-                import torch
-                pipeline = pipeline.to(torch.device("cuda"))
                 print(f"[Transcriber] Running diarization...")
                 diarization_kwargs = {}
                 if roster_attendees:
@@ -196,17 +309,11 @@ def main():
                         print(f"[Transcriber] Pyannote min_speakers={min_s}, max_speakers={max_s} (roster has {multi_voice} multi-voice entries)")
                 else:
                     print(f"[Transcriber] No roster data — pyannote in automatic speaker detection mode")
-                diarization = pipeline(audio_path, **diarization_kwargs)
-                turns = [(turn.start, turn.end, speaker)
-                         for turn, _, speaker in diarization.itertracks(yield_label=True)]
-                for seg in whisper_segments:
-                    mid = (seg["start"] + seg["end"]) / 2
-                    speaker = "SPEAKER_00"
-                    for (t_start, t_end, t_speaker) in turns:
-                        if t_start <= mid <= t_end:
-                            speaker = t_speaker
-                            break
-                    diarization_map[seg["start"]] = speaker
+                diarize_df = diarize_model(audio, **diarization_kwargs)
+                del diarize_model
+                free_gpu_memory()
+                turns = list(zip(diarize_df["start"], diarize_df["end"], diarize_df["speaker"]))
+                whisper_segments = whisperx.assign_word_speakers(diarize_df, {"segments": whisper_segments})["segments"]
                 print(f"[Transcriber] Diarization complete: {len(turns)} turns, {len(set(s for _,_,s in turns))} speakers")
 
                 # Build speaker label → name assignment using roster timing overlap
@@ -259,10 +366,10 @@ def main():
         if wiki_people:
             print(f"[Transcriber] Wiki people available for name resolution: {list(wiki_people.values())}")
 
-        # Build transcript
+        # Build transcript — segments are split at word-level speaker changes
         result = []
-        for seg in whisper_segments:
-            speaker_label = diarization_map.get(seg["start"], "SPEAKER_00")
+        for seg in split_segments_by_speaker(whisper_segments):
+            speaker_label = seg["speaker"]
             speaker_name = speaker_name_map.get(speaker_label, speaker_label) if speaker_name_map else speaker_label
             result.append({
                 "speakerLabel": speaker_label,
@@ -331,9 +438,13 @@ def main():
                     secs = int(rel_sec % 60)
                     mv_note = " [⚠ may contain multiple voices]" if e.get("possiblyMultiVoice") else ""
                     att_lines.append(f"- {e['name']} (joined {mins}:{secs:02d}){mv_note}")
-                attendees_block = "\n[MEETING ATTENDEES — confirmed by bot roster polling]\n" + "\n".join(att_lines) + "\n[END ATTENDEES]\n\n"
+                attendees_block = "\n[MEETING ATTENDEES — confirmed by bot roster polling. Some entries may represent multiple people in the same room]\n" + "\n".join(att_lines) + "\n[END ATTENDEES]\n\n"
+            active_speaker_block = ""
+            if active_speaker_log:
+                roster_start_ms = min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else None
+                active_speaker_block = build_active_speaker_block(active_speaker_log, roster_start_ms, notetaker_name)
             summary_prompt = f"""Analyze this meeting transcript and provide a rich, structured summary.
-{org_context_block}{attendees_block}
+{org_context_block}{attendees_block}{active_speaker_block}
 Meeting date: {meeting_date if meeting_date else "unknown"}
 
 IMPORTANT — Org Context Usage:
@@ -345,6 +456,8 @@ IMPORTANT — Org Context Usage:
    - Once you identify a speaker label as a person, treat ALL segments with that label as that person
    - The SAME person may appear as MULTIPLE speaker numbers (e.g., diarization may split one person into SPEAKER_02 and SPEAKER_07) — this is expected; use context to merge them
    - Build an internal speaker-to-name map before writing the summary and use it consistently throughout
+   - If MEETING ATTENDEES are listed above, they are the people actually in the meeting — prefer mapping speaker labels to those names. Some labels may already be replaced with attendee names based on join/leave timing
+   - If an ACTIVE SPEAKER TIMELINE is given above, use it to break ties: a speaker label whose lines fall inside a person's speaking window is likely that person
 
 Transcript:
 {full_text[:50000]}
@@ -378,6 +491,7 @@ For summaryText, produce rich markdown in this exact format:
 
 Notes:
 - List everyone identified from the transcript, whether they spoke or were just mentioned
+- If MEETING ATTENDEES are listed above, Key People MUST include every attendee who spoke or was addressed by name — do not leave this table empty when attendees are known
 - "Active participant" = spoke in the meeting
 - "Mentioned only" = referenced but did not speak
 - Do NOT include SPEAKER_XX labels in this table
