@@ -37,6 +37,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { S3Service } from '../transcribe/s3.js';
 import { refreshTeamsSession } from './teams-auth.js';
+import { ActiveSpeakerEntry } from '../types.js';
 
 export class LobbyTimeoutError extends Error {
   constructor() {
@@ -57,6 +58,10 @@ const SCREENSHOTS_DIR = process.env.RECORDINGS_DIR || '/app/recordings';
 export class TeamsHandler {
   private rosterEntries: RosterEntry[] = [];
   private rosterPollInterval?: NodeJS.Timeout;
+  private _activeSpeakerLog: ActiveSpeakerEntry[] = [];
+  private _currentSpeaker: string | null = null;
+  private _speakerPollInterval: NodeJS.Timeout | null = null;
+  private _recordingStartMs: number = 0;
 
   /**
    * Save a debug screenshot with sequential numbering and upload to S3
@@ -1394,5 +1399,69 @@ export class TeamsHandler {
    */
   getRosterTimeline(): RosterEntry[] {
     return this.rosterEntries;
+  }
+
+  /**
+   * Poll the Teams UI every 1s for the active speaker (WI #7298). Builds a
+   * timestamped log (ms relative to recordingStartMs) that firm-transcriber
+   * matches against diarized segments. The active-speaker DOM is not yet
+   * confirmed for Teams v2 — if no selector matches, the log stays empty.
+   */
+  startActiveSpeakerPolling(page: Page, recordingStartMs: number): void {
+    this._recordingStartMs = recordingStartMs;
+    console.log('[Teams][ActiveSpeaker] Polling started');
+    this._speakerPollInterval = setInterval(async () => {
+      try {
+        const speakerName = await page.evaluate(() => {
+          // Active speaker tile has a speaking indicator
+          const selectors = [
+            '[data-tid="video-tile"][aria-label*="speaking"]:not([aria-label*="not speaking" i])',
+            '[data-tid="calling-roster-cell"][data-is-speaking="true"]',
+            '.fui-VideoTile[data-is-speaking="true"] [data-tid="participant-display-name"]',
+          ];
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+              const nameEl = el.querySelector('[data-tid="participant-display-name"]') || el;
+              return nameEl.textContent?.trim() || null;
+            }
+          }
+          return null;
+        }).catch(() => null);
+
+        const nowMs = Date.now() - this._recordingStartMs;
+        if (speakerName && speakerName !== this._currentSpeaker) {
+          if (this._currentSpeaker !== null) {
+            const last = this._activeSpeakerLog[this._activeSpeakerLog.length - 1];
+            if (last) last.endMs = nowMs;
+          }
+          this._activeSpeakerLog.push({ name: speakerName, startMs: nowMs });
+          this._currentSpeaker = speakerName;
+          console.log(`[Teams][ActiveSpeaker] ${speakerName} at ${nowMs}ms`);
+        }
+      } catch { /* ignore poll errors */ }
+    }, 1000);
+  }
+
+  /**
+   * Stop active speaker polling and close the open entry
+   */
+  stopActiveSpeakerPolling(): ActiveSpeakerEntry[] {
+    if (this._speakerPollInterval) {
+      clearInterval(this._speakerPollInterval);
+      this._speakerPollInterval = null;
+      console.log(`[Teams][ActiveSpeaker] Polling stopped (${this._activeSpeakerLog.length} entries)`);
+    }
+    const nowMs = Date.now() - this._recordingStartMs;
+    const last = this._activeSpeakerLog[this._activeSpeakerLog.length - 1];
+    if (last && last.endMs === undefined) last.endMs = nowMs;
+    return this._activeSpeakerLog;
+  }
+
+  /**
+   * Get the active speaker log for inclusion in recording_complete callback
+   */
+  getActiveSpeakerLog(): ActiveSpeakerEntry[] {
+    return this._activeSpeakerLog;
   }
 }

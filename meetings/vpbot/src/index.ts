@@ -618,12 +618,13 @@ async function processRecording(meeting: Meeting, bot?: MeetingBot): Promise<voi
   meeting.s3AudioKey = audioKey;
   console.log(`[Pipeline] Audio uploaded to S3: ${audioKey}`);
 
-  // Step 3: Get roster timeline if available (Teams meetings only)
+  // Step 3: Get roster timeline + active speaker log if available (Teams meetings only)
   const rosterTimeline = bot?.getRosterTimeline?.() ?? [];
+  const activeSpeakerLog = bot?.getActiveSpeakerLog?.() ?? [];
 
   // Step 4: Post recording_complete callback — firm-web will submit Batch job (ADO#2179)
-  await postCallback('recording_complete', { audioS3Key: audioKey, rosterTimeline });
-  console.log(`[Pipeline] Meeting ${meeting.id} recording_complete posted (roster: ${rosterTimeline.length} entries) — Batch submission delegated to firm-web`);
+  await postCallback('recording_complete', { audioS3Key: audioKey, rosterTimeline, activeSpeakerLog });
+  console.log(`[Pipeline] Meeting ${meeting.id} recording_complete posted (roster: ${rosterTimeline.length} entries, active speaker: ${activeSpeakerLog.length} entries) — Batch submission delegated to firm-web`);
 }
 
 export { app };
