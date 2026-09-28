@@ -219,6 +219,11 @@ export class ZoomSDKBot extends EventEmitter {
         this._isRecording = true;
         this.emit('recording-started');
         reportStatus(this.meeting.id, 'recording', { participants: [] }).catch(console.error);
+      } else if (line.includes('[ZoomSDK] Chat echo') && line.includes('to_all=True')
+          && line.includes('here to take notes for')) {
+        // SDK echo of our own message with IsChatToAll() — confirms the
+        // SetMessageType(To_All) send in zoom_join.py reached everyone (WI #7301)
+        console.log('[Zoom] Chat announcement sent to all participants');
       }
     });
 

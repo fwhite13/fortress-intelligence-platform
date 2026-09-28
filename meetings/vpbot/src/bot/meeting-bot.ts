@@ -320,6 +320,7 @@ export class MeetingBot extends EventEmitter {
           console.warn('[Bot] Chat notification error (non-fatal):', err)
         );
         this._teamsHandler.startRosterPolling(this.page);
+        this._teamsHandler.startActiveSpeakerPolling(this.page, this._recordingStartTime);
       }
 
     } catch (error) {
@@ -730,9 +731,10 @@ export class MeetingBot extends EventEmitter {
       fs.writeFileSync(this.audioPath, Buffer.alloc(0));
     }
 
-    // Stop roster polling if Teams meeting
+    // Stop roster + active speaker polling if Teams meeting
     if (this._teamsHandler) {
       this._teamsHandler.stopRosterPolling();
+      this._teamsHandler.stopActiveSpeakerPolling();
     }
 
     this.emit('recording-stopped', this.audioPath);
@@ -778,5 +780,12 @@ export class MeetingBot extends EventEmitter {
    */
   getRosterTimeline() {
     return this._teamsHandler?.getRosterTimeline() ?? [];
+  }
+
+  /**
+   * Get active speaker log from Teams handler (if available)
+   */
+  getActiveSpeakerLog() {
+    return this._teamsHandler?.getActiveSpeakerLog() ?? [];
   }
 }

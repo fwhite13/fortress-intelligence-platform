@@ -39,6 +39,14 @@ export interface TranscriptSegment {
   confidence: number;
 }
 
+// Timestamped active-speaker attribution from the Teams UI (WI #7298).
+// Offsets are ms relative to recording start, so they align with the audio.
+export interface ActiveSpeakerEntry {
+  name: string;
+  startMs: number;
+  endMs?: number;
+}
+
 export interface Transcript {
   segments: TranscriptSegment[];
   fullText: string;
