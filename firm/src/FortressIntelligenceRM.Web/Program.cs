@@ -111,6 +111,7 @@ builder.Services.AddAWSService<IAmazonS3>();
 builder.Services.AddAWSService<IAmazonBatch>();
 builder.Services.AddScoped<IBatchTranscriptionService, BatchTranscriptionService>();
 builder.Services.AddScoped<IMindmapService, MindmapService>();
+builder.Services.AddScoped<ResummarizeService>();
 builder.Services.AddAWSService<Amazon.BedrockAgent.IAmazonBedrockAgent>();
 builder.Services.AddAWSService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
 builder.Services.AddAWSService<IAmazonSimpleEmailServiceV2>();
@@ -184,6 +185,7 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHostedService<DatabaseInitializationService>();
 builder.Services.AddHostedService<CalendarAutoSyncService>();
+builder.Services.AddHostedService<StuckMeetingRecoveryService>();
 builder.Services.AddSingleton<TeamsGraphService>();
 // builder.Services.AddHostedService(sp => sp.GetRequiredService<TeamsGraphService>()); // ADO#1352: disabled — FIRM reads via FipTokenService now
 // builder.Services.AddHostedService<TranscriptPollingService>(); // ADO#1352: disabled

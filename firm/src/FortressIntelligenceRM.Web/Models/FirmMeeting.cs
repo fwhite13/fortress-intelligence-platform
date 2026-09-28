@@ -68,4 +68,7 @@ public class FirmMeeting
     /// Stored as JSON: [{"name":"...", "joinedAtMs":..., "leftAtMs":..., "possiblyMultiVoice":true}, ...]</summary>
     [Column("roster_timeline")]
     public string? RosterTimeline { get; set; }
+    /// <summary>WI #7299 — incremented each time the summary is regenerated from a user speaker correction.
+    /// v1 is the original transcriber summary (archived in S3 as summary-v1.json on first correction).</summary>
+    public int SummaryVersion { get; set; } = 1;
 }

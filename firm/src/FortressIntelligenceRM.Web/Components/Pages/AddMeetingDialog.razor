@@ -1,6 +1,7 @@
 @using MudBlazor
 @using FortressIntelligenceRM.Web.Services
 @inject BrandingConfig Branding
+@inject IJSRuntime JS
 
 <MudDialog>
     <TitleContent>
@@ -48,10 +49,12 @@
         <div class="d-flex gap-2 mb-1">
             <MudDatePicker @bind-Date="_startDate" Label="Date" Variant="Variant.Outlined"
                            Class="flex-1" MinDate="DateTime.Today"
-                           Required />
+                           Required
+                           @bind-Date:after="RefreshTimezoneOffsetAsync" />
             <MudTimePicker @bind-Time="_startTime" Label="Time" Variant="Variant.Outlined"
                            Class="flex-1" AmPm="true"
-                           Required />
+                           Required
+                           @bind-Time:after="RefreshTimezoneOffsetAsync" />
         </div>
 
         @if (_validationError != null)
@@ -82,6 +85,31 @@
     private string? _validationError;
     private bool _showHostToggle = false;
     private string _isHostValue = "no";
+    // Browser's minutes-behind-UTC (EDT = 240). The server runs in UTC, so the entered
+    // date/time must be shifted by the *browser's* offset, not the server's local zone.
+    private int _tzOffsetMinutes = 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await RefreshTimezoneOffsetAsync();
+        StateHasChanged();
+    }
+
+    private async Task RefreshTimezoneOffsetAsync()
+    {
+        try
+        {
+            // Ask for the offset on the selected date so a meeting across a DST boundary
+            // uses that day's offset, not today's.
+            string? localIso = _startDate != null && _startTime != null
+                ? (_startDate.Value.Date + _startTime.Value).ToString("yyyy-MM-ddTHH:mm")
+                : null;
+            _tzOffsetMinutes = await JS.InvokeAsync<int>("firmUtils.getTimezoneOffset", localIso);
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { /* keep last known offset */ }
+    }
 
     private void OnUrlChanged()
     {
@@ -102,8 +130,9 @@
     private DateTime? GetScheduledDatetime()
     {
         if (_startDate == null || _startTime == null) return null;
-        var date = _startDate.Value.Date;
-        return DateTime.SpecifyKind(date + _startTime.Value, DateTimeKind.Local).ToUniversalTime();
+        var localDt = _startDate.Value.Date + _startTime.Value;
+        // Apply browser timezone offset to convert local → UTC
+        return DateTime.SpecifyKind(localDt.AddMinutes(_tzOffsetMinutes), DateTimeKind.Utc);
     }
 
     private bool IsValid()

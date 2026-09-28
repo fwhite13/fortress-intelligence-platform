@@ -31,6 +31,7 @@ public class MeetingsApiController : ControllerBase
     private readonly BrandingConfig _branding;
     private readonly PdfService _pdfService;
     private readonly IEmailService _emailService;
+    private readonly ResummarizeService _resummarizeService;
 
     public MeetingsApiController(
         MeetingService meetingService,
@@ -47,7 +48,8 @@ public class MeetingsApiController : ControllerBase
         IMindmapService mindmapService,
         BrandingConfig branding,
         PdfService pdfService,
-        IEmailService emailService)
+        IEmailService emailService,
+        ResummarizeService resummarizeService)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
@@ -64,6 +66,7 @@ public class MeetingsApiController : ControllerBase
         _branding = branding;
         _pdfService = pdfService;
         _emailService = emailService;
+        _resummarizeService = resummarizeService;
     }
 
 [HttpPost("/api/meetings/join")]
@@ -1166,6 +1169,29 @@ public class MeetingsApiController : ControllerBase
 
         return Ok(new { status = "retranscribe_triggered", meetingId = id });
     }
+
+    /// <summary>
+    /// POST /api/meetings/{id}/re-summarize
+    /// WI #7299: regenerates the summary from a plain-English speaker-attribution correction.
+    /// </summary>
+    [HttpPost("{id}/re-summarize")]
+    [Authorize]
+    public async Task<IActionResult> Resummarize(long id, [FromBody] ResummarizeRequest request, CancellationToken ct)
+    {
+        var (_, user, error) = await ResolveOwnedMeetingWithUser(id);
+        if (error != null) return error;
+
+        var result = await _resummarizeService.ResummarizeAsync(id, user!.Id, request.Corrections, ct);
+        return result.Outcome switch
+        {
+            ResummarizeOutcome.Success => Ok(new { meetingId = id, summaryVersion = result.SummaryVersion, summary = result.Summary }),
+            ResummarizeOutcome.Invalid => BadRequest(new { error = result.Error }),
+            ResummarizeOutcome.NotFound => NotFound(new { error = result.Error }),
+            _ => StatusCode(500, new { error = result.Error })
+        };
+    }
+
+    public record ResummarizeRequest(string Corrections);
 
     private async Task<string> BuildTranscriptFromDbAsync(FirmDbContext db, long meetingId)
     {

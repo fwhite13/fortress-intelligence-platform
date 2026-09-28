@@ -37,6 +37,17 @@ public class VpBotService
     public async Task<string?> TriggerBotAsync(long meetingId, string meetingUrl, string platform = "teams")
     {
         var taskDef = _config["Firm:VpBotTaskDefinition"];
+        // Strip any pinned :revision suffix so ECS always uses the latest active revision.
+        // This allows vpbot to be rebuilt and redeployed without requiring a firm-web config update.
+        // Only a trailing numeric ":N" is stripped, so a full ARN
+        // (arn:aws:ecs:<region>:<account>:task-definition/firm-vpbot:3) keeps its prefix.
+        var revisionSep = taskDef?.LastIndexOf(':') ?? -1;
+        if (revisionSep > 0 && int.TryParse(taskDef![(revisionSep + 1)..], out _))
+        {
+            var family = taskDef[..revisionSep];
+            _logger.LogInformation("FIRM: VpBotTaskDefinition has pinned revision ({TaskDef}) — using family name ({Family}) instead", taskDef, family);
+            taskDef = family;
+        }
         var cluster = _config["Firm:EcsCluster"];
         var subnetId = _config["Firm:VpBotSubnetId"];
         var securityGroupId = _config["Firm:VpBotSecurityGroupId"];

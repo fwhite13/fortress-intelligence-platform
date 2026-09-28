@@ -9,7 +9,7 @@ namespace FortressIntelligenceRM.Web.Services;
 
 /// <summary>
 /// Creates and deletes one-shot EventBridge Scheduler schedules that fire the
-/// autojoin Lambda at StartDatetime - 2 minutes for scheduled meetings.
+/// autojoin Lambda at StartDatetime - 3 minutes for scheduled meetings.
 /// No-ops when Firm:AutoJoinEnabled is false (default).
 /// </summary>
 public class AutoJoinSchedulerService
@@ -52,7 +52,7 @@ public class AutoJoinSchedulerService
             return;
         }
 
-        var fireAt = startDatetimeUtc.AddMinutes(-2);
+        var fireAt = startDatetimeUtc.AddMinutes(-3);
         if (fireAt <= DateTime.UtcNow)
         {
             _logger.LogWarning("FIRM: AutoJoin schedule time {FireAt} is in the past for meeting {Id} — skipping", fireAt, meetingId);

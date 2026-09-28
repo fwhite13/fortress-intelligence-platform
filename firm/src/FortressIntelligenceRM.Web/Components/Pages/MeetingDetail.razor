@@ -10,6 +10,8 @@
 @inject IConfiguration Configuration
 @inject IMindmapService MindmapService
 @inject BrandingConfig Branding
+@inject ResummarizeService ResummarizeService
+@inject IDialogService DialogService
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
@@ -151,6 +153,30 @@
                         <div class="firm-summary-markdown">
                             @RenderMarkdown(_meeting.Summary.SummaryText)
                         </div>
+                        @if (_meeting.Status == MeetingStatus.Complete)
+                        {
+                            @* WI #7299 — feedback-driven re-summarization with speaker correction *@
+                            <div class="d-flex align-center flex-wrap mt-4" style="gap: 12px;">
+                                <MudButton Variant="Variant.Text" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.RecordVoiceOver"
+                                           Style="color: var(--color-text-secondary); text-transform: none;"
+                                           Disabled="_resummarizing"
+                                           OnClick="OpenCorrectSpeakerDialogAsync">
+                                    @(_resummarizing ? "Re-summarizing..." : "Correct speaker attribution")
+                                </MudButton>
+                                @if (_resummarizing)
+                                {
+                                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Style="color: var(--color-gold);" />
+                                }
+                                @if (_meeting.SummaryVersion > 1)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                                             Style="border-color: var(--color-gold); color: var(--color-gold);">
+                                        Summary updated (v@(_meeting.SummaryVersion))
+                                    </MudChip>
+                                }
+                            </div>
+                        }
                     }
                     else if (!string.IsNullOrEmpty(_meeting.Summary.KeyDecisionsJson) ||
                              !string.IsNullOrEmpty(_meeting.Summary.ActionItemsJson))
@@ -317,6 +343,7 @@
     private bool _pushingSummary = false;
     private bool _isAdmin = false;
     private bool _retranscribing = false;
+    private bool _resummarizing = false;
     private string? _retranscribeError = null;
     private string? _mindmapJson = null;
     private bool _mindmapLoading = false;
@@ -489,6 +516,43 @@
         }
         finally
         {
+            StateHasChanged();
+        }
+    }
+
+    private async Task OpenCorrectSpeakerDialogAsync()
+    {
+        if (_meeting == null || _user == null || _resummarizing) return;
+
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<CorrectSpeakerDialog>("Correct speaker attribution", options);
+        var result = await dialog.Result;
+        if (result == null || result.Canceled || result.Data is not string correction || string.IsNullOrWhiteSpace(correction))
+            return;
+
+        _resummarizing = true;
+        StateHasChanged();
+        try
+        {
+            var outcome = await ResummarizeService.ResummarizeAsync(_meeting.Id, _user.Id, correction);
+            if (outcome.Outcome == ResummarizeOutcome.Success)
+            {
+                _meeting = await MeetingService.GetMeetingAsync(_meeting.Id, _user.Id) ?? _meeting;
+                Snackbar.Add($"Summary updated (v{outcome.SummaryVersion})", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add($"Could not update summary: {outcome.Error}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: re-summarize failed for meeting {MeetingId}", _meeting?.Id);
+            Snackbar.Add("Could not update summary. Please try again.", Severity.Error);
+        }
+        finally
+        {
+            _resummarizing = false;
             StateHasChanged();
         }
     }
