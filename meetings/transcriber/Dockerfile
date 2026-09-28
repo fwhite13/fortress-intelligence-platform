@@ -28,6 +28,14 @@ snapshot_download('pyannote/segmentation-3.0', token=token, local_dir=None); \
 print('pyannote model weights cached successfully'); \
 "
 
+# Pre-bake the WhisperX English word-alignment model (torchaudio wav2vec2 bundle) so jobs
+# don't depend on download.pytorch.org at runtime. WhisperX's VAD model ships in the wheel.
+RUN python3 -c "\
+import torchaudio; \
+torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H.get_model(); \
+print('wav2vec2 alignment model cached successfully'); \
+"
+
 COPY transcribe.py .
 
 ENTRYPOINT ["python3", "transcribe.py"]
