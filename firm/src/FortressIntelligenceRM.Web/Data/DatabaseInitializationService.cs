@@ -188,7 +188,17 @@ public class DatabaseInitializationService : IHostedService
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     updated_by VARCHAR(256) NULL,
     UNIQUE INDEX idx_user_wiki_user (entra_oid, entra_tenant_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4")
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"),
+                // WI #7299 — speaker-correction history for feedback-driven re-summarization.
+                // created_by is CHAR(36) to match firm_users.id (a GUID), not BIGINT.
+                ("firm_meeting_corrections", @"CREATE TABLE IF NOT EXISTS firm_meeting_corrections (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    meeting_id BIGINT NOT NULL,
+    correction TEXT NOT NULL,
+    created_by CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_fmc_meeting (meeting_id)
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 
             foreach (var (name, sql) in extraTables)
@@ -251,7 +261,10 @@ public class DatabaseInitializationService : IHostedService
                 // primaries, the same technique uk_fm_created_by_calendar_event_id already relies on.
                 "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_normalized_url_start (normalized_meeting_url, start_datetime)",
                 // WI #7297 — roster timeline for Teams meetings (soft LLM guidance for transcription)
-                "ALTER TABLE firm_meetings ADD COLUMN roster_timeline JSON NULL"
+                "ALTER TABLE firm_meetings ADD COLUMN roster_timeline JSON NULL",
+                // WI #7299 — summary version, bumped on each speaker-correction re-summarization.
+                // MySQL 8 has no ADD COLUMN IF NOT EXISTS; re-runs hit 1060 and are skipped below.
+                "ALTER TABLE firm_meetings ADD COLUMN summary_version INT NOT NULL DEFAULT 1"
             };
 
             foreach (var alterSql in alterStatements)

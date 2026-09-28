@@ -60,6 +60,14 @@ public class MeetingService
         meeting.Participants = await db.Participants.Where(p => p.MeetingId == artifactMeetingId).ToListAsync();
         meeting.Transcripts = await db.Transcripts.Where(t => t.MeetingId == artifactMeetingId).OrderBy(t => t.StartTimeMs).ToListAsync();
         meeting.Summary = await db.Summaries.FirstOrDefaultAsync(s => s.MeetingId == artifactMeetingId);
+        if (meeting.PrimaryMeetingId != null)
+        {
+            var primaryVersion = await db.Meetings
+                .Where(m => m.Id == artifactMeetingId)
+                .Select(m => (int?)m.SummaryVersion)
+                .FirstOrDefaultAsync();
+            if (primaryVersion != null) meeting.SummaryVersion = primaryVersion.Value;
+        }
 
         return meeting;
     }

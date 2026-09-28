@@ -24,6 +24,13 @@ window.firmUtils = {
             month: 'short', day: 'numeric', year: 'numeric',
             hour: 'numeric', minute: '2-digit', hour12: true
         }).format(d);
+    },
+    // Minutes behind UTC (EDT = 240), as Date.getTimezoneOffset() returns. Pass a local
+    // "yyyy-MM-ddTHH:mm" string to get the offset in effect on that date (DST-aware);
+    // omit it for the current offset.
+    getTimezoneOffset: function(localIso) {
+        const d = localIso ? new Date(localIso) : new Date();
+        return isNaN(d.getTime()) ? new Date().getTimezoneOffset() : d.getTimezoneOffset();
     }
 };
 

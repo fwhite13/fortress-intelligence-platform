@@ -19,6 +19,7 @@ public class FirmDbContext : DbContext
     public DbSet<FirmUserWiki> UserWikis => Set<FirmUserWiki>();
     public DbSet<FirmMeetingMindmap> Mindmaps => Set<FirmMeetingMindmap>();
     public DbSet<FirmZoomOAuth> ZoomOAuthTokens => Set<FirmZoomOAuth>();
+    public DbSet<FirmMeetingCorrection> MeetingCorrections => Set<FirmMeetingCorrection>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -80,6 +81,7 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.SummaryKbPushed).HasColumnName("summary_kb_pushed").HasDefaultValue(false);
             entity.Property(e => e.Source).HasColumnName("source").HasMaxLength(20).HasDefaultValue("teams");
             entity.Property(e => e.LastFailureReason).HasColumnName("last_failure_reason").HasMaxLength(64);
+            entity.Property(e => e.SummaryVersion).HasColumnName("summary_version").HasDefaultValue(1);
             entity.HasOne(e => e.Mindmap)
                 .WithOne(mm => mm.Meeting)
                 .HasForeignKey<FirmMeetingMindmap>(mm => mm.MeetingId)
@@ -264,6 +266,19 @@ public class FirmDbContext : DbContext
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("fk_fzo_user");
+        });
+
+        // WI #7299 — speaker-correction history for feedback-driven re-summarization.
+        modelBuilder.Entity<FirmMeetingCorrection>(entity =>
+        {
+            entity.ToTable("firm_meeting_corrections");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            entity.Property(e => e.MeetingId).HasColumnName("meeting_id");
+            entity.Property(e => e.Correction).HasColumnName("correction").IsRequired();
+            entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasIndex(e => e.MeetingId).HasDatabaseName("idx_fmc_meeting");
         });
 
     }

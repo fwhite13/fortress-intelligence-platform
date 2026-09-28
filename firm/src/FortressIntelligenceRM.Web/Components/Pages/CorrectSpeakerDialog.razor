@@ -1,0 +1,34 @@
+@using MudBlazor
+@using FortressIntelligenceRM.Web.Services
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="color: var(--color-text-primary);">Correct speaker attribution</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="color: var(--color-text-secondary);">
+            The summary will be regenerated using your correction. This can take up to a minute.
+        </MudText>
+        <MudTextField @bind-Value="_correction" Label="Describe the correction in plain English"
+                      Placeholder="e.g. SPEAKER_01 is Jane Smith, not John. The budget comments were Jane's."
+                      Variant="Variant.Outlined" Lines="5" AutoGrow="true"
+                      MaxLength="ResummarizeService.MaxCorrectionLength" Counter="ResummarizeService.MaxCorrectionLength"
+                      Immediate="true" Style="color: var(--color-text-primary);" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Style="color: var(--color-text-secondary);">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                   OnClick="Submit" Disabled="@string.IsNullOrWhiteSpace(_correction)">
+            Re-summarize
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _correction = "";
+
+    private void Cancel() => MudDialog.Cancel();
+    private void Submit() => MudDialog.Close(DialogResult.Ok(_correction.Trim()));
+}
