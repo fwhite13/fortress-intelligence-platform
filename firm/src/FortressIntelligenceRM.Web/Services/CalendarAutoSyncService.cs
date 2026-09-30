@@ -252,31 +252,18 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
     /// <summary>
     /// Inserts a new calendar-sourced meeting and lands it in the given target status (Scheduled for
-    /// a primary, Waiting for a subscriber — WI #7033) — the single, shared copy of the EF-sentinel
-    /// workaround (ADO#17 diagnostic, 2026-09-09; previously duplicated in the now-deleted
-    /// MeetingService.UpsertFromCalendarAsync, which had zero callers).
+    /// a primary, Waiting for a subscriber — WI #7033) with a single INSERT.
     ///
-    /// NOTE: MeetingStatus.Scheduled == 0, which is the CLR default for the enum. EF Core's
-    /// HasDefaultValue(MeetingStatus.Joining) treats Status as ValueGenerated.OnAdd, so on INSERT
-    /// it compares against the CLR sentinel (0/Scheduled) and — seeing a match — omits the column
-    /// entirely, letting the DB default (Joining) win. Inserting as Joining avoids the sentinel
-    /// match; the follow-up UpdateStatusAsync flips it to the target status via UPDATE, which is not
-    /// subject to the same sentinel check. Waiting != 0, so it isn't strictly required for
-    /// subscribers, but the shared two-step keeps this method's behavior uniform for both paths.
-    ///
-    /// FirmDbContext now also configures .HasSentinel(MeetingStatus.Joining), which should make this
-    /// two-step dance unnecessary going forward — kept in place as defense-in-depth until that's
-    /// verified in production.
+    /// NOTE: MeetingStatus.Scheduled == 0 (the CLR default). FirmDbContext configures
+    /// .HasSentinel(MeetingStatus.Joining) (ADO#17), so EF Core includes Status=Scheduled in the
+    /// INSERT rather than letting the DB default (Joining) win. The former Joining→target two-step
+    /// workaround is no longer needed (verified in production, WI #7784).
     /// </summary>
     private async Task<FirmMeeting> InsertScheduledMeetingAsync(FirmDbContext db, FirmMeeting draft, MeetingStatus targetStatus, CancellationToken ct)
     {
-        draft.Status = MeetingStatus.Joining;
+        draft.Status = targetStatus;
         db.Meetings.Add(draft);
         await db.SaveChangesAsync(ct);
-
-        await _meetingService.UpdateStatusAsync(draft.Id, targetStatus);
-        draft.Status = targetStatus;
-
         return draft;
     }
 
