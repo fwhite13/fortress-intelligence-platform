@@ -94,6 +94,12 @@ public class VpBotService
                 new() { Name = "AWS_REGION", Value = "us-east-1" }
             };
 
+            // WI #7792: auto-join fires 5 min before start; the bot waits at the Teams pre-join
+            // screen until just before this time. Optional — the bot skips the wait when absent.
+            var scheduledStartUtc = await GetScheduledStartUtcAsync(meetingId);
+            if (scheduledStartUtc.HasValue)
+                envVars.Add(new() { Name = "SCHEDULED_START_TIME", Value = scheduledStartUtc.Value.ToString("O") });
+
             // For Zoom meetings: fetch an OBF token if the meeting's owner has a linked Zoom
             // account. Zoom requires OBF for meetings hosted outside the app owner's account —
             // a missing token is non-fatal, the bot falls back to a JWT-only join.
@@ -280,6 +286,37 @@ public class VpBotService
             return null;
         }
     }
+
+    /// <summary>
+    /// WI #7792: Looks up the meeting's scheduled start (UTC) to pass to the bot as
+    /// SCHEDULED_START_TIME. Returns null — so the bot joins immediately — when no start time
+    /// is recorded, the start has already passed, or it is more than
+    /// <see cref="MaxPreJoinWait"/> away (e.g. a manual "Join now" well ahead of the meeting).
+    /// Best-effort — returns null on any lookup failure.
+    /// </summary>
+    private async Task<DateTime?> GetScheduledStartUtcAsync(long meetingId)
+    {
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var meeting = await db.Meetings.Where(m => m.Id == meetingId).Select(m => new { m.StartDatetime, m.ScheduledAt }).FirstOrDefaultAsync();
+            var start = meeting?.StartDatetime ?? meeting?.ScheduledAt;
+            if (start == null) return null;
+
+            // Stored as UTC in a MySQL DATETIME column, so EF hands it back as Unspecified.
+            var startUtc = DateTime.SpecifyKind(start.Value, DateTimeKind.Utc);
+            var untilStart = startUtc - DateTime.UtcNow;
+            if (untilStart <= TimeSpan.Zero || untilStart > MaxPreJoinWait) return null;
+            return startUtc;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: Failed to resolve scheduled start for meeting {Id}", meetingId);
+            return null;
+        }
+    }
+
+    private static readonly TimeSpan MaxPreJoinWait = TimeSpan.FromMinutes(10);
 
     public async System.Threading.Tasks.Task StopBotAsync(string taskArn)
     {

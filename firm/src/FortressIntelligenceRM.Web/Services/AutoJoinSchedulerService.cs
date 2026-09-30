@@ -9,7 +9,7 @@ namespace FortressIntelligenceRM.Web.Services;
 
 /// <summary>
 /// Creates and deletes one-shot EventBridge Scheduler schedules that fire the
-/// autojoin Lambda at StartDatetime - 3 minutes for scheduled meetings.
+/// autojoin Lambda at StartDatetime - 5 minutes for scheduled meetings.
 /// No-ops when Firm:AutoJoinEnabled is false (default).
 /// </summary>
 public class AutoJoinSchedulerService
@@ -52,7 +52,10 @@ public class AutoJoinSchedulerService
             return;
         }
 
-        var fireAt = startDatetimeUtc.AddMinutes(-3);
+        // WI #7792: fire 5 min early — Fargate cold start + Teams pre-join render take ~3 min.
+        // The bot waits at the pre-join screen (Join not yet clicked) until just before the
+        // scheduled start, so the early launch can't trip a Teams lobby timeout.
+        var fireAt = startDatetimeUtc.AddMinutes(-5);
         if (fireAt <= DateTime.UtcNow)
         {
             _logger.LogWarning("FIRM: AutoJoin schedule time {FireAt} is in the past for meeting {Id} — skipping", fireAt, meetingId);
@@ -63,7 +66,8 @@ public class AutoJoinSchedulerService
         {
             meetingId,
             meetingUrl,
-            botCallbackSecret = _config["Firm:BotCallbackSecret"] ?? ""
+            botCallbackSecret = _config["Firm:BotCallbackSecret"] ?? "",
+            scheduledAt = DateTime.SpecifyKind(startDatetimeUtc, DateTimeKind.Utc).ToString("O")   // ISO 8601 UTC
         });
 
         try
