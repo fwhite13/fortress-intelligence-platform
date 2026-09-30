@@ -826,6 +826,25 @@ export class TeamsHandler {
     // Step 5: Turn off camera and microphone
     await TeamsHandler.turnOffDevices(page);
 
+    // WI #7792: Wait at pre-join screen until scheduled start time (minus a small buffer)
+    // so the bot joins at the meeting start rather than late due to cold-start overhead.
+    // The wait is safe here because we haven't clicked Join yet — Teams doesn't know we exist.
+    const scheduledStartEnv = process.env.SCHEDULED_START_TIME;
+    if (scheduledStartEnv) {
+      const scheduledStartMs = new Date(scheduledStartEnv).getTime();
+      const waitUntilMs = scheduledStartMs - 20_000; // join 20s before start
+      const nowMs = Date.now();
+      const maxWaitMs = 10 * 60_000; // guard against a bad value parking the bot indefinitely
+      if (Number.isNaN(scheduledStartMs)) {
+        console.warn(`[Teams] Ignoring unparseable SCHEDULED_START_TIME: ${scheduledStartEnv}`);
+      } else if (waitUntilMs > nowMs) {
+        const waitMs = Math.min(waitUntilMs - nowMs, maxWaitMs);
+        console.log(`[Teams] Waiting ${Math.round(waitMs / 1000)}s at pre-join screen until T-20s of scheduled start...`);
+        await page.waitForTimeout(waitMs);
+        console.log('[Teams] Pre-join wait complete — proceeding to join click');
+      }
+    }
+
     await page.waitForTimeout(1000);
     await TeamsHandler.screenshot(page, '03-before-join-click', s3, meetingId);
 
