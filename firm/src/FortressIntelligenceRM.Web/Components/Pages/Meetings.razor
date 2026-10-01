@@ -435,6 +435,7 @@
                              NormUrl: NormalizeMeetingUrl(c.JoinUrl),
                              Start: c.StartDateTime.Length >= 16 ? c.StartDateTime[..16] : c.StartDateTime
                          )))
+                .OrderBy(c => c.StartDateTime)
                 .ToList();
 
             await PreFormatMeetingTimesAsync();
