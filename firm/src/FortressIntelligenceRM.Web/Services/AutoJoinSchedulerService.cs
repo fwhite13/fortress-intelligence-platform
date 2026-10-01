@@ -70,29 +70,45 @@ public class AutoJoinSchedulerService
             scheduledAt = DateTime.SpecifyKind(startDatetimeUtc, DateTimeKind.Utc).ToString("O")   // ISO 8601 UTC
         });
 
+        var scheduleName = ScheduleName(meetingId);
+        var target = new Target { Arn = LambdaArn, RoleArn = SchedulerRoleArn, Input = payload };
+        var flexWindow = new FlexibleTimeWindow { Mode = FlexibleTimeWindowMode.OFF };
+        var expr = $"at({fireAt:yyyy-MM-ddTHH:mm:ss})";
+
         try
         {
             await _scheduler.CreateScheduleAsync(new CreateScheduleRequest
             {
-                Name = ScheduleName(meetingId),
+                Name = scheduleName,
                 GroupName = ScheduleGroup,
-                ScheduleExpression = $"at({fireAt:yyyy-MM-ddTHH:mm:ss})",
+                ScheduleExpression = expr,
                 ScheduleExpressionTimezone = "UTC",
-                FlexibleTimeWindow = new FlexibleTimeWindow { Mode = FlexibleTimeWindowMode.OFF },
-                Target = new Target
-                {
-                    Arn = LambdaArn,
-                    RoleArn = SchedulerRoleArn,
-                    Input = payload
-                },
+                FlexibleTimeWindow = flexWindow,
+                Target = target,
                 ActionAfterCompletion = ActionAfterCompletion.DELETE
             });
 
             _logger.LogInformation("FIRM: AutoJoin schedule created for meeting {Id} firing at {FireAt}", meetingId, fireAt);
         }
+        catch (ConflictException)
+        {
+            // Schedule already exists — update it in place (upsert semantics).
+            await _scheduler.UpdateScheduleAsync(new UpdateScheduleRequest
+            {
+                Name = scheduleName,
+                GroupName = ScheduleGroup,
+                ScheduleExpression = expr,
+                ScheduleExpressionTimezone = "UTC",
+                FlexibleTimeWindow = flexWindow,
+                Target = target,
+                ActionAfterCompletion = ActionAfterCompletion.DELETE
+            });
+
+            _logger.LogInformation("FIRM: AutoJoin schedule updated (upsert) for meeting {Id} firing at {FireAt}", meetingId, fireAt);
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "FIRM: Failed to create AutoJoin schedule for meeting {Id}", meetingId);
+            _logger.LogError(ex, "FIRM: Failed to create/update AutoJoin schedule for meeting {Id}", meetingId);
             throw;
         }
     }
@@ -104,8 +120,7 @@ public class AutoJoinSchedulerService
     /// field. The Lambda's BOT_CALLBACK_SECRET env-var fallback covers it in the meantime, but
     /// this recreates each affected schedule with the current payload format so the schedule
     /// itself is authoritative again. Runs once on every app startup — CreateScheduleAsync
-    /// upserts (EventBridge Scheduler CreateSchedule overwrites an existing schedule of the same
-    /// name), so this is safe to run repeatedly.
+    /// upserts via CreateSchedule + UpdateSchedule on ConflictException, so this is safe to run repeatedly.
     /// </summary>
     public async Task BackfillStaleSchedulesAsync(CancellationToken ct = default)
     {
