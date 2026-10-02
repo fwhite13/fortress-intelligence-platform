@@ -105,7 +105,7 @@ public class MeetingsApiController : ControllerBase
         // TODO (Mode A): When TeamsGraphService is implemented, detect platform here and route to
         // Mode A (native Teams transcript fetch) vs Mode B (VP bot). Mode A completion must call
         // FAIT /api/firm/meeting-complete the same way as Mode B does in VpCallback. See ADO#1232.
-        _ = _vpBotService.TriggerBotAsync(meeting.Id, request.MeetingUrl);
+        _ = _vpBotService.TriggerBotAsync(meeting.Id, request.MeetingUrl, meeting.Platform);
 
         return Ok(new { meetingId = meeting.Id });
     }
@@ -990,8 +990,10 @@ public class MeetingsApiController : ControllerBase
             return Conflict(new { error = "Meeting is not in Scheduled state" });
 
         // Mode A is mothballed (Firm__EnableModeA=false). Always dispatch bot (Mode B).
-        _ = _vpBotService.TriggerBotAsync(id, meeting.MeetingUrl ?? "");
+        // Set Pending before dispatching so a launch abort inside TriggerBotAsync (e.g. Zoom with
+        // no OBF token, WI #7833 → Failed) can't be overwritten by this Pending write.
         await _meetingService.UpdateStatusAsync(id, MeetingStatus.Pending);
+        _ = _vpBotService.TriggerBotAsync(id, meeting.MeetingUrl ?? "", meeting.Platform);
         return Ok(new { meetingId = id, status = "pending" });
     }
 

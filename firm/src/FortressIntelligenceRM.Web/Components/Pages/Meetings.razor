@@ -732,8 +732,10 @@
             var taskArn = await VpBotService.TriggerBotAsync(meetingId, meeting.MeetingUrl ?? "", meeting.Platform);
             if (taskArn == null)
             {
-                // TriggerBotAsync returned null — ECS launch failed (it logged internally)
+                // TriggerBotAsync returned null — ECS launch failed (it logged internally).
+                // Reload so a meeting it marked Failed (e.g. Zoom with no OBF token) shows as such.
                 Snackbar.Add("Failed to launch recording bot. Please try again.", Severity.Error);
+                await LoadMeetings();
                 return;
             }
             await MeetingService.UpdateStatusAsync(meetingId, MeetingStatus.Pending);

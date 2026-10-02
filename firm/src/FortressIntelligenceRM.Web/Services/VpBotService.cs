@@ -1,6 +1,7 @@
 using Amazon.ECS;
 using Amazon.ECS.Model;
 using FortressIntelligenceRM.Web.Data;
+using FortressIntelligenceRM.Web.Models;
 using FortressIntelligenceRM.Web.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -100,34 +101,36 @@ public class VpBotService
             if (scheduledStartUtc.HasValue)
                 envVars.Add(new() { Name = "SCHEDULED_START_TIME", Value = scheduledStartUtc.Value.ToString("O") });
 
-            // For Zoom meetings: fetch an OBF token if the meeting's owner has a linked Zoom
-            // account. Zoom requires OBF for meetings hosted outside the app owner's account —
-            // a missing token is non-fatal, the bot falls back to a JWT-only join.
+            // For Zoom meetings: an OBF token from the meeting owner's linked Zoom account is
+            // mandatory (WI #7833). The old JWT-only fallback only ever worked for the Zoom app
+            // owner's own account, so without a token the bot is never launched and the meeting
+            // is failed instead of being left stuck at Pending/Joining.
             if (platform == "zoom")
             {
                 // Zoom's OBF endpoint needs the real Zoom meeting number, not the FIRM DB id.
                 var zoomMeetingNumber = ExtractZoomMeetingNumber(meetingUrl);
                 if (!zoomMeetingNumber.HasValue)
                 {
-                    _logger.LogWarning("FIRM: Could not extract Zoom meeting number from URL for meeting {Id} — skipping OBF, JWT-only join", meetingId);
+                    await FailZoomLaunchAsync(meetingId, "could not extract Zoom meeting number from URL");
+                    return null;
                 }
-                else
+
+                var userId = await GetMeetingUserIdAsync(meetingId);
+                if (!userId.HasValue)
                 {
-                    var userId = await GetMeetingUserIdAsync(meetingId);
-                    if (userId.HasValue)
-                    {
-                        var obfToken = await _zoomOAuthService.GetObfTokenAsync(userId.Value, zoomMeetingNumber.Value);
-                        if (!string.IsNullOrEmpty(obfToken))
-                        {
-                            envVars.Add(new() { Name = "ZOOM_OBF_TOKEN", Value = obfToken });
-                            _logger.LogInformation("FIRM: OBF token obtained for Zoom meeting {ZoomMeetingNumber}", zoomMeetingNumber.Value);
-                        }
-                        else
-                        {
-                            _logger.LogInformation("FIRM: No OBF token for Zoom meeting {ZoomMeetingNumber} — JWT-only join", zoomMeetingNumber.Value);
-                        }
-                    }
+                    await FailZoomLaunchAsync(meetingId, "could not resolve the meeting's owning user");
+                    return null;
                 }
+
+                var obfToken = await _zoomOAuthService.GetObfTokenAsync(userId.Value, zoomMeetingNumber.Value);
+                if (string.IsNullOrEmpty(obfToken))
+                {
+                    await FailZoomLaunchAsync(meetingId, $"no OBF token for user {userId.Value} / Zoom meeting {zoomMeetingNumber.Value} (Zoom account not linked, or token refresh/OBF request failed)");
+                    return null;
+                }
+
+                envVars.Add(new() { Name = "ZOOM_OBF_TOKEN", Value = obfToken });
+                _logger.LogInformation("FIRM: OBF token obtained for Zoom meeting {ZoomMeetingNumber}", zoomMeetingNumber.Value);
             }
 
             var request = new RunTaskRequest
@@ -176,6 +179,18 @@ public class VpBotService
             _logger.LogError(ex, "FIRM: Failed to launch VP bot ECS task for meeting {Id}", meetingId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// WI #7833: logs why a Zoom bot launch was aborted and marks the meeting Failed (the same
+    /// transition a bot "failed" callback makes) so it doesn't sit at Pending/Joining in the UI.
+    /// </summary>
+    private async System.Threading.Tasks.Task FailZoomLaunchAsync(long meetingId, string reason)
+    {
+        _logger.LogError("FIRM: Cannot launch Zoom bot for meeting {Id} — OBF token unavailable: {Reason}", meetingId, reason);
+        await _meetingService.UpdateStatusAsync(meetingId, MeetingStatus.Failed,
+            "Could not join the Zoom meeting: Zoom authorization unavailable. Make sure your Zoom account is connected in Settings, then try again.",
+            lastFailureReason: "zoom_obf_unavailable");
     }
 
     /// <summary>
