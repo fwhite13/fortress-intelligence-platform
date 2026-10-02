@@ -270,7 +270,8 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
     /// <summary>
     /// WI #7033 dedup lookup: does any user already have a PRIMARY firm_meetings record for this
     /// same real-world meeting? Matched on normalized_meeting_url + start time within ±15 minutes,
-    /// excluding Failed (a failed primary shouldn't block a fresh attempt by another user).
+    /// excluding Failed (a failed primary shouldn't block a fresh attempt by another user); falls
+    /// back to a URL-only match against active null-start primaries (WI #7847).
     /// </summary>
     private static async Task<FirmMeeting?> FindExistingPrimaryAsync(FirmDbContext db, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
     {
@@ -287,7 +288,20 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                      && m.Status != MeetingStatus.Failed)
             .ToListAsync(ct);
 
-        return candidates.FirstOrDefault(m => m.NormalizedMeetingUrl == normalizedUrl);
+        var windowed = candidates.FirstOrDefault(m => m.NormalizedMeetingUrl == normalizedUrl);
+        if (windowed != null) return windowed;
+
+        // WI #7847: an active primary with a null StartDatetime (e.g. created for an already
+        // in-progress meeting) is invisible to the time-window check above, which let a second
+        // primary — and a second bot — be created. Fall back to a URL-only match on those rows.
+        // Scoped to null-start rows so recurring meetings (same join URL every occurrence) still
+        // get one primary per occurrence.
+        return await db.Meetings.FirstOrDefaultAsync(m =>
+            m.IsPrimaryRecorder
+            && m.StartDatetime == null
+            && m.NormalizedMeetingUrl == normalizedUrl
+            && m.Status != MeetingStatus.Failed
+            && m.Status != MeetingStatus.Complete, ct);
     }
 
     /// <summary>MySQL error 1062 (duplicate entry) surfaced through EF Core as a DbUpdateException —
