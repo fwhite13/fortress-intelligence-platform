@@ -35,7 +35,7 @@ def lambda_handler(event, context):
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             body = json.loads(resp.read().decode())
             task_arn = body.get('taskArn')
             print(f"firm-autojoin: FIRM launched task {task_arn} for meeting {meeting_id}")
