@@ -129,6 +129,23 @@ export class ZoomSDKBot extends EventEmitter {
       this._rejectJoin = reject;
     });
 
+    // Lambda launches the task ~5 min early — hold here until T-20s of the scheduled start
+    const scheduledStartEnv = process.env.SCHEDULED_START_TIME;
+    if (scheduledStartEnv) {
+      const scheduledStartMs = new Date(scheduledStartEnv).getTime();
+      const waitUntilMs = scheduledStartMs - 20_000; // join 20s before start
+      const nowMs = Date.now();
+      const maxWaitMs = 10 * 60_000; // guard against a bad value parking the bot indefinitely
+      if (Number.isNaN(scheduledStartMs)) {
+        console.warn(`[ZoomSDKBot] Ignoring unparseable SCHEDULED_START_TIME: ${scheduledStartEnv}`);
+      } else if (waitUntilMs > nowMs) {
+        const waitMs = Math.min(waitUntilMs - nowMs, maxWaitMs);
+        console.log(`[ZoomSDKBot] Waiting ${Math.round(waitMs / 1000)}s at pre-join until T-20s of scheduled start...`);
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+        console.log('[ZoomSDKBot] Pre-join wait complete — proceeding to join');
+      }
+    }
+
     this.startFfmpeg();
     this.startPython(meetingNumber, password, sdkKey, sdkSecret);
 
