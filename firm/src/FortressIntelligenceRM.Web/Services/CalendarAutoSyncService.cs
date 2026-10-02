@@ -237,10 +237,20 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                         continue;
                     }
 
-                    await _autoJoinScheduler.CreateScheduleAsync(meeting.Id, dto.JoinUrl, startDatetime);
+                    // WI #7848: don't auto-launch a bot into a meeting that's already under way (e.g.
+                    // auto-add enabled mid-meeting). Leave it Scheduled so the user can Join Now.
+                    if (startDatetime > DateTime.UtcNow)
+                    {
+                        await _autoJoinScheduler.CreateScheduleAsync(meeting.Id, dto.JoinUrl, startDatetime);
 
-                    _logger.LogInformation("[AutoSync] Added meeting {Id} as PRIMARY from calendar {CalendarEventId} for user {UserId}",
-                        meeting.Id, dto.CalendarEventId, user.Id);
+                        _logger.LogInformation("[AutoSync] Added meeting {Id} as PRIMARY from calendar {CalendarEventId} for user {UserId}",
+                            meeting.Id, dto.CalendarEventId, user.Id);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("[AutoSync] Meeting {Id} start time {Start} is already past — skipping auto-launch, leaving in Scheduled status for user {UserId} (calendar {CalendarEventId})",
+                            meeting.Id, startDatetime, user.Id, dto.CalendarEventId);
+                    }
                 }
             }
             catch (Exception ex)
