@@ -1032,8 +1032,9 @@ export class TeamsHandler {
         return;
       }
 
+      const botLabel = process.env.BOT_NAME || 'Fortress Notetaker';
       const message =
-        `Fortress Notetaker has joined to record this meeting on behalf of ${names.join(', ')}.\n` +
+        `${botLabel} has joined to record this meeting on behalf of ${names.join(', ')}.\n` +
         `This session is being recorded. Participants who continue acknowledge they consent to recording.`;
 
       console.log('[Teams] Posting join notification to meeting chat...');
