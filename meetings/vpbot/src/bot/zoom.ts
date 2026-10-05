@@ -2,9 +2,10 @@
  * Zoom specific join logic
  */
 
-import { Page, FrameLocator, Locator } from 'playwright';
+import { Page, Frame, FrameLocator, Locator } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { RosterEntry } from './teams.js';
 
 const SCREENSHOTS_DIR = process.env.SCREENSHOTS_DIR || '/tmp/screenshots';
 if (!fs.existsSync(SCREENSHOTS_DIR)) {
@@ -12,6 +13,10 @@ if (!fs.existsSync(SCREENSHOTS_DIR)) {
 }
 
 export class ZoomHandler {
+  private rosterEntries: RosterEntry[] = [];
+  private rosterPollInterval?: NodeJS.Timeout;
+  private rosterPanelOpenAttempted = false;
+
   /**
    * Save a debug screenshot.
    */
@@ -495,6 +500,223 @@ export class ZoomHandler {
         console.log('[Zoom] Meeting join status uncertain, continuing...');
       }
     }
+  }
+
+  /**
+   * Start roster polling every 30 seconds (also polls immediately).
+   */
+  startRosterPolling(page: Page, botName: string): void {
+    console.log('[Zoom][Roster] Starting roster polling (30s interval)');
+    this.rosterPollInterval = setInterval(async () => {
+      try {
+        await this.pollRoster(page, botName);
+      } catch (err) {
+        console.log('[Zoom][Roster] Polling error (non-fatal):', err);
+      }
+    }, 30000);
+    this.pollRoster(page, botName).catch(err => console.log('[Zoom][Roster] Initial poll error (non-fatal):', err));
+  }
+
+  /**
+   * Stop roster polling and mark all remaining entries as left
+   */
+  stopRosterPolling(): void {
+    if (this.rosterPollInterval) {
+      clearInterval(this.rosterPollInterval);
+      this.rosterPollInterval = undefined;
+      console.log('[Zoom][Roster] Stopped roster polling');
+    }
+    const now = Date.now();
+    for (const entry of this.rosterEntries) {
+      if (!entry.leftAtMs) {
+        entry.leftAtMs = now;
+      }
+    }
+  }
+
+  /**
+   * Get the roster timeline for inclusion in recording_complete callback
+   */
+  getRosterTimeline(): RosterEntry[] {
+    return this.rosterEntries;
+  }
+
+  /**
+   * Poll the Zoom web client for current participants.
+   *
+   * Sources, in order (see references/zoom-roster-research.md):
+   *   1. Participants panel rows (`.participants-item__display-name`) — every
+   *      participant regardless of camera state. Opened once on first need and
+   *      left open, same as the Teams roster panel (PR #61).
+   *   2. Video tile name labels — last resort, only covers rendered tiles.
+   *
+   * The Zoom PWA shell renders the meeting UI inside an iframe, and which frame
+   * owns the footer vs. the side panels has varied, so every frame is searched.
+   */
+  private async pollRoster(page: Page, botName: string): Promise<void> {
+    try {
+      if (page.isClosed()) return;
+
+      let source = 'participants-panel';
+      let names = await this.readRosterFromPanel(page);
+      if (names === null || names.length === 0) {
+        const tileNames = await this.readRosterFromTiles(page);
+        if (tileNames.length > 0 || names === null) {
+          source = 'video-tiles';
+          names = tileNames;
+        }
+      }
+
+      const selfNames = [botName, process.env.BOT_NAME, ...(process.env.BOT_NAMES_CSV || '').split(',')]
+        .map(n => (n || '').trim().toLowerCase())
+        .filter(n => n.length > 0);
+      names = [...new Set(names
+        // Strip role/self suffixes like "(Host, me)", "(Guest)", "(Co-host)"
+        .map(n => n.replace(/\s*\((?:[^)]*\b(?:host|co-host|me|guest|participant id[^)]*)\b[^)]*)\)\s*$/i, '').trim())
+        .filter(n => n.length > 0 && !n.includes('@') && !selfNames.includes(n.toLowerCase())))];
+
+      if (names.length === 0) {
+        console.log('[Zoom][Roster] No participants found via any source (meeting may still be loading)');
+        return;
+      }
+
+      const now = Date.now();
+      for (const name of names) {
+        if (!this.rosterEntries.find(e => e.name === name && !e.leftAtMs)) {
+          this.rosterEntries.push({
+            name,
+            joinedAtMs: now,
+            possiblyMultiVoice: /conference.?room|conf.?room|board.?room|huddle/i.test(name)
+          });
+        }
+      }
+      for (const entry of this.rosterEntries.filter(e => !e.leftAtMs)) {
+        if (!names.includes(entry.name)) {
+          entry.leftAtMs = now;
+        }
+      }
+
+      console.log(`[Zoom][Roster] ${names.length} participants via ${source}: ${names.join(', ')}`);
+    } catch (e) {
+      console.log(`[Zoom][Roster] Poll error: ${e}`);
+    }
+  }
+
+  /** All frames of the page: main PWA shell first, then the web client iframe(s). */
+  private static rosterFrames(page: Page): Frame[] {
+    return [page.mainFrame(), ...page.frames().filter(f => f !== page.mainFrame())];
+  }
+
+  /**
+   * Read names from the participants panel, opening it once if needed.
+   * Returns null if the panel can't be found or opened.
+   */
+  private async readRosterFromPanel(page: Page): Promise<string[] | null> {
+    const panelSelector = [
+      '.participants-section-container',
+      '.participants-ul',
+      '[class*="participants-list"]',
+      '[aria-label*="participants list" i][role="list"]',
+      '[aria-label*="participants list" i][role="grid"]',
+    ].join(', ');
+
+    const findOpenPanelFrame = async (): Promise<Frame | null> => {
+      for (const frame of ZoomHandler.rosterFrames(page)) {
+        if (await frame.locator(panelSelector).first().isVisible().catch(() => false)) return frame;
+      }
+      return null;
+    };
+
+    try {
+      let panelFrame = await findOpenPanelFrame();
+      if (!panelFrame && !this.rosterPanelOpenAttempted) {
+        this.rosterPanelOpenAttempted = true;
+        panelFrame = await this.openParticipantsPanel(page, findOpenPanelFrame);
+      }
+      if (!panelFrame) return null;
+
+      return await panelFrame.evaluate(() => {
+        const names: string[] = [];
+        const rows = document.querySelectorAll('.participants-item__item-layout, .participants-li, [class*="participants-item"][role="listitem"]');
+        for (const row of rows) {
+          const nameEl = row.querySelector('.participants-item__display-name, [class*="display-name"]');
+          const raw = (nameEl?.textContent || '').trim();
+          if (raw) names.push(raw);
+        }
+        if (names.length === 0) {
+          // Row layout changed — fall back to any display-name element in the panel
+          for (const el of document.querySelectorAll('.participants-item__display-name')) {
+            const raw = (el.textContent || '').trim();
+            if (raw) names.push(raw);
+          }
+        }
+        return names;
+      });
+    } catch (e) {
+      console.log(`[Zoom][Roster] Panel read failed (non-fatal): ${e}`);
+      return null;
+    }
+  }
+
+  /**
+   * Click the footer Participants button (searched in every frame) and wait for
+   * the panel. Left open afterwards — never toggled closed between polls.
+   */
+  private async openParticipantsPanel(
+    page: Page,
+    findOpenPanelFrame: () => Promise<Frame | null>
+  ): Promise<Frame | null> {
+    // The meeting footer auto-hides; a mouse move reveals it.
+    await page.mouse.move(400, 400).catch(() => {});
+    await page.mouse.move(420, 600).catch(() => {});
+
+    for (const frame of ZoomHandler.rosterFrames(page)) {
+      const candidates = [
+        frame.getByRole('button', { name: /open the participants list/i }),
+        frame.locator('button[aria-label*="open the participants" i]'),
+        frame.locator('.footer-button__participants-icon').locator('xpath=ancestor-or-self::button[1]'),
+        frame.getByRole('button', { name: /^participants\b/i }),
+      ];
+      for (const candidate of candidates) {
+        try {
+          const button = candidate.first();
+          if (!(await button.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+          const label = (await button.getAttribute('aria-label').catch(() => null)) || '';
+          if (/close the participants/i.test(label)) return findOpenPanelFrame(); // already open
+          await button.click({ timeout: 3000 });
+          console.log('[Zoom][Roster] Opened participants panel (left open for remaining polls)');
+          for (let i = 0; i < 10; i++) {
+            const opened = await findOpenPanelFrame();
+            if (opened) return opened;
+            await page.waitForTimeout(500);
+          }
+          console.log('[Zoom][Roster] Clicked participants button but panel did not appear');
+          return null;
+        } catch {
+          continue;
+        }
+      }
+    }
+    console.log('[Zoom][Roster] Participants button not found');
+    return null;
+  }
+
+  /** Last resort: name labels on rendered video/avatar tiles. */
+  private async readRosterFromTiles(page: Page): Promise<string[]> {
+    const names: string[] = [];
+    for (const frame of ZoomHandler.rosterFrames(page)) {
+      try {
+        const frameNames = await frame.evaluate(() =>
+          [...document.querySelectorAll('.video-avatar__avatar-name, .video-avatar__avatar-footer span, [class*="avatar-name"]')]
+            .map(el => (el.textContent || '').trim())
+            .filter(n => n.length > 0)
+        );
+        names.push(...frameNames);
+      } catch {
+        continue;
+      }
+    }
+    return names;
   }
 
   /**
