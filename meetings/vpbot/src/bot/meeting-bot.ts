@@ -79,6 +79,7 @@ export class MeetingBot extends EventEmitter {
   private _recordingStartTime: number = 0;
   private _silenceStartTime: number | null = null;
   private _teamsHandler: TeamsHandler | null = null;
+  private _zoomHandler: ZoomHandler | null = null;
 
   constructor(meeting: Meeting, recordingsDir: string) {
     super();
@@ -294,6 +295,7 @@ export class MeetingBot extends EventEmitter {
             break;
           case 'zoom':
             await ZoomHandler.join(this.page, this.meeting.botName);
+            this._zoomHandler = new ZoomHandler();
             break;
           case 'google-meet':
             await GoogleMeetHandler.join(this.page, this.meeting.botName);
@@ -321,6 +323,9 @@ export class MeetingBot extends EventEmitter {
         );
         this._teamsHandler.startRosterPolling(this.page);
         this._teamsHandler.startActiveSpeakerPolling(this.page, this._recordingStartTime);
+      }
+      if (this._zoomHandler && this.page) {
+        this._zoomHandler.startRosterPolling(this.page, this.meeting.botName);
       }
 
     } catch (error) {
@@ -736,6 +741,9 @@ export class MeetingBot extends EventEmitter {
       this._teamsHandler.stopRosterPolling();
       this._teamsHandler.stopActiveSpeakerPolling();
     }
+    if (this._zoomHandler) {
+      this._zoomHandler.stopRosterPolling();
+    }
 
     this.emit('recording-stopped', this.audioPath);
 
@@ -776,10 +784,10 @@ export class MeetingBot extends EventEmitter {
   }
 
   /**
-   * Get roster timeline from Teams handler (if available)
+   * Get roster timeline from Teams or Zoom handler (if available)
    */
   getRosterTimeline() {
-    return this._teamsHandler?.getRosterTimeline() ?? [];
+    return this._teamsHandler?.getRosterTimeline() ?? this._zoomHandler?.getRosterTimeline() ?? [];
   }
 
   /**
