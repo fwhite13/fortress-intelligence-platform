@@ -136,7 +136,7 @@ public class AutoJoinSchedulerService
             .Where(m => m.Status == MeetingStatus.Scheduled
                      && m.StartDatetime != null
                      && m.StartDatetime > DateTime.UtcNow
-                     && m.Source == "autoadd")
+                     && (m.Source == "autoadd" || m.CalendarEventId != null))
             .ToListAsync(ct);
 
         if (candidates.Count == 0)
