@@ -58,6 +58,7 @@ const SCREENSHOTS_DIR = process.env.RECORDINGS_DIR || '/app/recordings';
 export class TeamsHandler {
   private rosterEntries: RosterEntry[] = [];
   private rosterPollInterval?: NodeJS.Timeout;
+  private rosterPanelOpenAttempted = false;
   private _activeSpeakerLog: ActiveSpeakerEntry[] = [];
   private _currentSpeaker: string | null = null;
   private _speakerPollInterval: NodeJS.Timeout | null = null;
@@ -1369,24 +1370,47 @@ export class TeamsHandler {
   }
 
   /**
-   * Poll the roster panel for current participants
+   * Poll for current participants, regardless of camera state.
    *
-   * Teams v2 DOM structure (confirmed 2026-09-21): participant tiles are
-   * always present in the DOM with data-stream-type="Video" and the
-   * participant's display name in the data-tid attribute. No need to open
-   * the roster panel.
+   * The previous implementation read only Video-type stream tiles, which
+   * only exist for participants with cameras on — camera-off meetings produced
+   * an empty roster. Sources are now tried in order (see
+   * references/roster-research.md):
+   *   1. Teams' in-page call state (`callingService.getActiveCall().participants`)
+   *      — camera-agnostic, includes participants outside the visible gallery,
+   *      needs no UI interaction. Same technique as the open-source Attendee bot.
+   *   2. The People/roster panel — opened once on first need and left open so
+   *      we don't toggle UI every poll. Panel rows exist for every participant.
+   *   3. Any stream tile (`[data-stream-type][data-tid]`, any stream type) —
+   *      last resort; limited to whoever the gallery is currently rendering.
    */
   private async pollRoster(page: Page): Promise<void> {
     try {
-      // Query participant tiles directly — name is in data-tid, no panel open needed
-      const names = await page.evaluate(() =>
-        [...document.querySelectorAll('[data-stream-type="Video"][data-tid]')]
-          .map(el => el.getAttribute('data-tid') || '')
-          .filter(name => name.length > 0 && !name.includes('@')) // exclude email-format data-tids
-      );
+      let source = 'call-state';
+      let names = await this.readRosterFromCallState(page);
+      if (names === null) {
+        source = 'roster-panel';
+        names = await this.readRosterFromPanel(page);
+      }
+      if (names === null || names.length === 0) {
+        const tileNames = await this.readRosterFromTiles(page);
+        if (tileNames.length > 0 || names === null) {
+          source = 'stream-tiles';
+          names = tileNames;
+        }
+      }
 
-      if (names.length === 0) {
-        console.log('[Teams][Roster] No video tiles found (meeting may still be loading)');
+      const selfNames = [process.env.BOT_NAME, ...(process.env.BOT_NAMES_CSV || '').split(',')]
+        .map(n => (n || '').trim().toLowerCase())
+        .filter(n => n.length > 0);
+      names = [...new Set(names
+        .map(n => n.replace(/\s*\((?:you|guest|unverified|external)\)\s*$/i, '').trim())
+        .filter(n => n.length > 0 && !n.includes('@') && !selfNames.includes(n.toLowerCase())))];
+
+      // Only the call state is authoritative for "nobody else is here"; an empty
+      // DOM read usually means the meeting UI is still loading.
+      if (names.length === 0 && source !== 'call-state') {
+        console.log('[Teams][Roster] No participants found via any source (meeting may still be loading)');
         return;
       }
 
@@ -1408,9 +1432,106 @@ export class TeamsHandler {
         }
       }
 
-      console.log(`[Teams][Roster] ${names.length} participants: ${names.join(', ')}`);
+      console.log(`[Teams][Roster] ${names.length} participants via ${source}: ${names.join(', ')}`);
     } catch (e) {
       console.log(`[Teams][Roster] Poll error: ${e}`);
+    }
+  }
+
+  /**
+   * Read remote participants from the Teams web client's in-page call object.
+   * Returns null if the call object isn't reachable (client internals changed).
+   * Lobby participants (state 7) and nameless system participants are excluded.
+   */
+  private async readRosterFromCallState(page: Page): Promise<string[] | null> {
+    try {
+      return await page.evaluate(() => {
+        const w = window as any;
+        let call: any = null;
+        try { call = w.msteamscalling?.deref?.()?.callingService?.getActiveCall?.() || null; } catch { /* ignore */ }
+        if (!call) call = w.callingDebug?.observableCall || null;
+        if (!call || !call.participants) return null;
+        const LOBBY_STATE = 7;
+        return Array.from(call.participants as Iterable<any>)
+          .filter(p => p && typeof p.displayName === 'string' && p.displayName.trim() && p.state !== LOBBY_STATE)
+          .map(p => p.displayName.trim() as string);
+      });
+    } catch (e) {
+      console.log(`[Teams][Roster] Call-state read failed (non-fatal): ${e}`);
+      return null;
+    }
+  }
+
+  /**
+   * Read participant names from the People/roster panel, opening it once if it
+   * isn't already open. Returns null if the panel can't be found or opened.
+   */
+  private async readRosterFromPanel(page: Page): Promise<string[] | null> {
+    const panelSelector = [
+      '[data-tid="roster"]',
+      '[data-tid="people-pane"]',
+      '[data-tid*="participant-list"]',
+      '[role="tree"][aria-label*="articipant" i]',
+      '[role="tree"][aria-label*="people" i]',
+    ].join(', ');
+    try {
+      let panelOpen = await page.locator(panelSelector).first().isVisible({ timeout: 1000 }).catch(() => false);
+      if (!panelOpen && !this.rosterPanelOpenAttempted) {
+        this.rosterPanelOpenAttempted = true;
+        const button = page.locator('[data-tid="roster-button"], #roster-button, button[aria-label^="People" i]').first();
+        if (await button.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await button.click({ timeout: 3000 });
+          console.log('[Teams][Roster] Opened roster panel (left open for remaining polls)');
+          panelOpen = await page.locator(panelSelector).first()
+            .waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+        }
+      }
+      if (!panelOpen) return null;
+
+      return await page.evaluate((sel) => {
+        const sectionHeader = /^(in this meeting|in the meeting|others invited|waiting in lobby|lobby|suggestions|attendees|presenters|organizers?)\b/i;
+        const names: string[] = [];
+        for (const panel of document.querySelectorAll(sel)) {
+          const rows = panel.querySelectorAll(
+            '[data-tid*="roster-participant"], [data-tid^="participantsInCall-"], [role="treeitem"], [role="listitem"]'
+          );
+          for (const row of rows) {
+            // Skip rows under a lobby / "others invited" section
+            const group = row.closest('[role="group"], [role="treeitem"][aria-expanded]');
+            const groupLabel = group && group !== row ? (group.getAttribute('aria-label') || '') : '';
+            if (/lobby|invited|suggest/i.test(groupLabel)) continue;
+            if (row.getAttribute('aria-expanded') !== null) continue; // section header
+
+            const titled = row.querySelector('span[title], [data-tid*="display-name"], [data-tid*="participant-name"]');
+            const raw = titled?.getAttribute('title')
+              || titled?.textContent
+              || (row.getAttribute('aria-label') || '').split(',')[0];
+            const name = (raw || '').trim();
+            if (name && name.length <= 128 && !sectionHeader.test(name)) names.push(name);
+          }
+        }
+        return names;
+      }, panelSelector);
+    } catch (e) {
+      console.log(`[Teams][Roster] Roster panel read failed (non-fatal): ${e}`);
+      return null;
+    }
+  }
+
+  /**
+   * Read names from rendered stream tiles of any stream type (camera on or off).
+   * Only covers participants the gallery is currently rendering.
+   */
+  private async readRosterFromTiles(page: Page): Promise<string[]> {
+    try {
+      return await page.evaluate(() =>
+        [...document.querySelectorAll('[data-stream-type][data-tid]')]
+          .map(el => (el.getAttribute('data-tid') || '').trim())
+          .filter(name => name.length > 0)
+      );
+    } catch (e) {
+      console.log(`[Teams][Roster] Tile read failed (non-fatal): ${e}`);
+      return [];
     }
   }
 
