@@ -153,7 +153,9 @@
                                            Style="color: var(--color-text-secondary);" Size="Size.Small"
                                            Href="@($"/api/meetings/{context.Id}/transcript/download")" />
                         }
-                        @if (context.Status == MeetingStatus.Scheduled)
+                        @* WI #7909: Join Now on a Failed meeting launches a new run on a cloned row. *@
+                        @if (context.Status == MeetingStatus.Scheduled
+                             || (context.Status == MeetingStatus.Failed && context.IsPrimaryRecorder))
                         {
                             <MudButton Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined"
                                        OnClick="@(() => JoinNow(context.Id))">Join Now</MudButton>
@@ -717,19 +719,17 @@
         }
         try
         {
-            var meeting = await MeetingService.GetMeetingAsync(meetingId, Guid.Parse(_userId));
+            // WI #7909: a meeting that already had a bot run is cloned into a new row for this run,
+            // so the original keeps its failure state/duration.
+            var (meeting, error) = await MeetingService.PrepareJoinNowAsync(meetingId, Guid.Parse(_userId));
             if (meeting == null)
             {
-                Snackbar.Add("Meeting not found.", Severity.Error);
-                return;
-            }
-            if (meeting.Status != MeetingStatus.Scheduled)
-            {
-                Snackbar.Add($"Meeting is not in Scheduled state (current: {meeting.Status}).", Severity.Warning);
+                Snackbar.Add($"{error}.", Severity.Warning);
+                await LoadMeetings();
                 return;
             }
 
-            var taskArn = await VpBotService.TriggerBotAsync(meetingId, meeting.MeetingUrl ?? "", meeting.Platform);
+            var taskArn = await VpBotService.TriggerBotAsync(meeting.Id, meeting.MeetingUrl ?? "", meeting.Platform);
             if (taskArn == null)
             {
                 // TriggerBotAsync returned null — ECS launch failed (it logged internally).
@@ -738,7 +738,7 @@
                 await LoadMeetings();
                 return;
             }
-            await MeetingService.UpdateStatusAsync(meetingId, MeetingStatus.Pending);
+            await MeetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Pending);
             Snackbar.Add("Bot is joining!", Severity.Success);
 
             await LoadMeetings();

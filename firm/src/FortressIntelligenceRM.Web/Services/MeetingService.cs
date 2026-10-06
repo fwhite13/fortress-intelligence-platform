@@ -304,6 +304,89 @@ public class MeetingService
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// WI #7909: resolve which row a "Join Now" should launch the bot against. A fresh Scheduled
+    /// meeting is used as-is. A meeting that already had a bot run — terminal (Failed/Complete), or
+    /// reverted to Scheduled after a failed run (lobby_timeout callback / StuckMeetingRecovery set
+    /// LastFailureReason) — is cloned into a new Scheduled row so the original keeps its failure
+    /// state, duration and artifacts instead of being overwritten by the second run.
+    /// The clone takes over the calendar/dedup anchors (CalendarEventId, GraphMeetingId,
+    /// NormalizedMeetingUrl): uk_fm_created_by_calendar_event_id and uk_fm_normalized_url_start
+    /// don't allow both rows to hold them, and AutoSync should reconcile against the live row.
+    /// Returns (null, error) if the meeting isn't joinable (in flight, or a subscriber).
+    /// </summary>
+    public async Task<(FirmMeeting? meeting, string? error)> PrepareJoinNowAsync(long id, Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var original = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == userId);
+        if (original == null) return (null, "Meeting not found");
+
+        var hadPriorRun = !string.IsNullOrEmpty(original.BotTaskArn) || !string.IsNullOrEmpty(original.LastFailureReason);
+        if (original.Status == MeetingStatus.Scheduled && !hadPriorRun)
+            return (original, null);
+
+        if (original.Status is not (MeetingStatus.Scheduled or MeetingStatus.Failed or MeetingStatus.Complete)
+            || !original.IsPrimaryRecorder)
+            return (null, $"Meeting is not in a joinable state (current: {original.Status})");
+
+        var clone = new FirmMeeting
+        {
+            Title = original.Title,
+            Platform = original.Platform,
+            MeetingUrl = original.MeetingUrl,
+            ScheduledAt = original.ScheduledAt,
+            StartDatetime = original.StartDatetime,
+            CalendarEventId = original.CalendarEventId,
+            GraphMeetingId = original.GraphMeetingId,
+            Mode = original.Mode,
+            CreatedBy = original.CreatedBy,
+            CreatorEntraOid = original.CreatorEntraOid,
+            Source = original.Source,
+            IsPrimaryRecorder = true,
+            NormalizedMeetingUrl = original.NormalizedMeetingUrl,
+            Status = MeetingStatus.Scheduled,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        // Retrying execution strategy (EnableRetryOnFailure) requires user transactions to run inside it.
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await db.Database.BeginTransactionAsync();
+
+            // Release the unique anchors first so the clone INSERT can't collide with them.
+            original.CalendarEventId = null;
+            original.GraphMeetingId = null;
+            original.NormalizedMeetingUrl = null;
+            if (original.Status == MeetingStatus.Scheduled)
+                original.Status = MeetingStatus.Failed; // reverted-after-failure row: record the failed run
+            original.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+
+            db.Meetings.Add(clone);
+            await db.SaveChangesAsync();
+
+            // Subscribers still waiting on the original now follow the new run.
+            var waiting = await db.Meetings
+                .Where(m => m.PrimaryMeetingId == original.Id && m.Status == MeetingStatus.Waiting)
+                .ToListAsync();
+            foreach (var s in waiting)
+            {
+                s.PrimaryMeetingId = clone.Id;
+                s.UpdatedAt = DateTime.UtcNow;
+            }
+            await db.SaveChangesAsync();
+
+            await tx.CommitAsync();
+        });
+
+        _logger.LogInformation(
+            "FIRM: JoinNow on meeting {OriginalId} ({Status}, prior run) — cloned to new meeting {CloneId} for the new bot run",
+            original.Id, original.Status, clone.Id);
+        return (clone, null);
+    }
+
     // ADO#1450-NOTE: MeetingUrl has no unique index — re-joining the same Teams URL
     // creates a new firm_meetings row each time. This is by design today but may need
     // a uniqueness strategy (per-user? time-window?) if duplicate meetings become an issue.
