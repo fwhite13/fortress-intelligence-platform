@@ -1070,7 +1070,8 @@ export class TeamsHandler {
       await page.waitForTimeout(2000);
       console.log('[Teams] Chat panel opened, waiting for input field to render...');
 
-      // Step 2a: Dismiss "You have been muted" notification if present
+      // Step 2a: Dismiss notifications/banners that may block chat input
+      // Dismiss "You have been muted" notification if present
       try {
         const dismissBtn = page.locator('button[aria-label="Dismiss"]').first();
         if (await dismissBtn.isVisible({ timeout: 2000 })) {
@@ -1080,6 +1081,44 @@ export class TeamsHandler {
         }
       } catch {
         // No notification present, continue
+      }
+
+      // Step 2b: Dismiss "Replying to external participants" banner if present
+      // This banner appears above the compose box when external guests are in the meeting
+      // and may interfere with input field detection
+      try {
+        const externalBannerSelectors = [
+          'button[aria-label*="close" i]:has(~ *:has-text("Replying to external"))',
+          'button[aria-label*="dismiss" i]:has(~ *:has-text("external"))',
+          '[data-tid*="external-banner"] button[aria-label*="close" i]',
+          '[data-tid*="external-banner"] button[aria-label*="dismiss" i]',
+        ];
+        for (const selector of externalBannerSelectors) {
+          try {
+            const btn = page.locator(selector).first();
+            if (await btn.isVisible({ timeout: 1000 })) {
+              await btn.click();
+              console.log('[Teams] Dismissed "Replying to external participants" banner');
+              await page.waitForTimeout(500);
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+        // Also try finding the banner by text and clicking its X button
+        const bannerText = page.locator('text=/replying to external/i').first();
+        if (await bannerText.isVisible({ timeout: 1000 })) {
+          // Look for close button near the banner
+          const closeBtn = page.locator('button:near(:text("Replying to external"))').filter({ hasText: /×|X|close/i }).first();
+          if (await closeBtn.isVisible({ timeout: 1000 })) {
+            await closeBtn.click();
+            console.log('[Teams] Dismissed external participants banner via nearby close button');
+            await page.waitForTimeout(500);
+          }
+        }
+      } catch {
+        // No external banner present, continue
       }
 
       // Step 3: find the chat input with fallbacks for authenticated mode
@@ -1126,6 +1165,92 @@ export class TeamsHandler {
           continue;
         }
       }
+
+      // Step 3b: If standard selectors failed, try shadow-root-aware search
+      // The "Replying to external participants" context may render the compose box in a shadow root
+      if (!chatInput) {
+        console.log('[Teams] Standard selectors failed — trying shadow-root-aware search...');
+        try {
+          const shadowResult = await page.evaluate(() => {
+            // Recursively search shadow roots for contenteditable elements
+            const searchShadowRoots = (root: Document | ShadowRoot): Element | null => {
+              // Check direct children first
+              const direct = root.querySelector('div[contenteditable="true"], [contenteditable="true"][role="textbox"]');
+              if (direct) return direct;
+
+              // Search in shadow roots of all elements
+              for (const el of root.querySelectorAll('*')) {
+                if (el.shadowRoot) {
+                  const found = searchShadowRoots(el.shadowRoot);
+                  if (found) return found;
+                }
+              }
+              return null;
+            };
+
+            const found = searchShadowRoots(document);
+            if (found) {
+              // Generate a unique selector path for Playwright to use
+              // Return info about what we found
+              return {
+                found: true,
+                tagName: found.tagName,
+                ariaLabel: found.getAttribute('aria-label'),
+                role: found.getAttribute('role'),
+              };
+            }
+            return { found: false };
+          });
+
+          if (shadowResult.found) {
+            console.log(`[Teams] Shadow-root search found contenteditable: ${JSON.stringify(shadowResult)}`);
+            // Use Playwright's built-in pierce selector to access shadow DOM
+            const pierceSelectors = [
+              'div[contenteditable="true"] >> visible=true',
+              '[contenteditable="true"][role="textbox"] >> visible=true',
+            ];
+            for (const sel of pierceSelectors) {
+              try {
+                const el = page.locator(sel).first();
+                if (await el.isVisible({ timeout: 2000 })) {
+                  chatInput = el;
+                  successfulSelector = `shadow-pierce: ${sel}`;
+                  console.log(`[Teams] ✅ Found chat input via shadow-pierce: ${sel}`);
+                  break;
+                }
+              } catch {
+                continue;
+              }
+            }
+          }
+        } catch (shadowErr) {
+          console.log(`[Teams] Shadow-root search failed: ${shadowErr}`);
+        }
+      }
+
+      // Step 3c: Last resort — try additional selectors for external-reply context
+      if (!chatInput) {
+        const externalReplySelectors = [
+          'div[aria-label*="reply" i][contenteditable="true"]',
+          'div[aria-label*="external" i][contenteditable="true"]',
+          'div[aria-label*="message" i][contenteditable="true"]',
+          'div[placeholder*="reply" i][contenteditable="true"]',
+        ];
+        for (const selector of externalReplySelectors) {
+          try {
+            const el = page.locator(selector).first();
+            if (await el.isVisible({ timeout: 2000 })) {
+              chatInput = el;
+              successfulSelector = selector;
+              console.log(`[Teams] ✅ Found chat input via external-reply selector: ${selector}`);
+              break;
+            }
+          } catch {
+            continue;
+          }
+        }
+      }
+
       if (!chatInput || !successfulSelector) {
         console.log('[Teams] WARNING: could not find chat input field — skipping chat notification');
         const s3 = new S3Service(
@@ -1388,6 +1513,28 @@ export class TeamsHandler {
     try {
       let source = 'call-state';
       let names = await this.readRosterFromCallState(page);
+
+      // WI #7919: Supplement call-state with roster panel if count seems low
+      // The organizer may be missing from call.participants but visible in the panel
+      if (names !== null && names.length > 0) {
+        const panelNames = await this.readRosterFromPanel(page);
+        if (panelNames !== null && panelNames.length > names.length) {
+          // Panel has more participants — merge any missing names
+          const callStateSet = new Set(names.map(n => n.toLowerCase()));
+          const supplemented: string[] = [];
+          for (const panelName of panelNames) {
+            if (!callStateSet.has(panelName.toLowerCase())) {
+              supplemented.push(panelName);
+            }
+          }
+          if (supplemented.length > 0) {
+            console.log(`[Teams][Roster] Supplementing call-state with ${supplemented.length} names from panel: ${supplemented.join(', ')}`);
+            names = [...names, ...supplemented];
+            source = 'call-state+panel';
+          }
+        }
+      }
+
       if (names === null) {
         source = 'roster-panel';
         names = await this.readRosterFromPanel(page);
@@ -1442,20 +1589,133 @@ export class TeamsHandler {
    * Read remote participants from the Teams web client's in-page call object.
    * Returns null if the call object isn't reachable (client internals changed).
    * Lobby participants (state 7) and nameless system participants are excluded.
+   *
+   * WI #7919: Also checks call.organizer, call.callerInfo, and other supplemental
+   * properties to capture the meeting organizer who may not appear in participants.
    */
   private async readRosterFromCallState(page: Page): Promise<string[] | null> {
     try {
-      return await page.evaluate(() => {
+      const result = await page.evaluate(() => {
         const w = window as any;
         let call: any = null;
         try { call = w.msteamscalling?.deref?.()?.callingService?.getActiveCall?.() || null; } catch { /* ignore */ }
         if (!call) call = w.callingDebug?.observableCall || null;
         if (!call || !call.participants) return null;
+
         const LOBBY_STATE = 7;
-        return Array.from(call.participants as Iterable<any>)
-          .filter(p => p && typeof p.displayName === 'string' && p.displayName.trim() && p.state !== LOBBY_STATE)
-          .map(p => p.displayName.trim() as string);
+        const names: string[] = [];
+        const diagnostics = {
+          rawParticipantCount: 0,
+          filteredCount: 0,
+          skippedStates: [] as number[],
+          missingDisplayName: 0,
+          organizerName: null as string | null,
+          callerInfoName: null as string | null,
+          localParticipantName: null as string | null,
+        };
+
+        // Extract displayName with fallbacks for nested structures
+        const extractName = (p: any): string | null => {
+          if (!p) return null;
+          // Direct displayName
+          if (typeof p.displayName === 'string' && p.displayName.trim()) {
+            return p.displayName.trim();
+          }
+          // Nested identity.displayName (some Teams versions)
+          if (p.identity?.displayName && typeof p.identity.displayName === 'string') {
+            return p.identity.displayName.trim();
+          }
+          // Nested user.displayName
+          if (p.user?.displayName && typeof p.user.displayName === 'string') {
+            return p.user.displayName.trim();
+          }
+          // info.displayName pattern
+          if (p.info?.displayName && typeof p.info.displayName === 'string') {
+            return p.info.displayName.trim();
+          }
+          return null;
+        };
+
+        // Process main participants array
+        const participantsArray = Array.from(call.participants as Iterable<any>);
+        diagnostics.rawParticipantCount = participantsArray.length;
+
+        for (const p of participantsArray) {
+          const name = extractName(p);
+          if (!name) {
+            diagnostics.missingDisplayName++;
+            continue;
+          }
+          if (p.state === LOBBY_STATE) {
+            diagnostics.skippedStates.push(LOBBY_STATE);
+            continue;
+          }
+          names.push(name);
+        }
+        diagnostics.filteredCount = names.length;
+
+        // WI #7919: Check supplemental properties for organizer
+        // The organizer may be in a separate property, not in participants array
+        if (call.organizer) {
+          const orgName = extractName(call.organizer);
+          if (orgName) {
+            diagnostics.organizerName = orgName;
+            if (!names.includes(orgName)) {
+              names.push(orgName);
+            }
+          }
+        }
+
+        // Check callerInfo (who initiated the call)
+        if (call.callerInfo) {
+          const callerName = extractName(call.callerInfo);
+          if (callerName) {
+            diagnostics.callerInfoName = callerName;
+            if (!names.includes(callerName)) {
+              names.push(callerName);
+            }
+          }
+        }
+
+        // Check localParticipant (might be the organizer if they're also local)
+        if (call.localParticipant) {
+          const localName = extractName(call.localParticipant);
+          if (localName) {
+            diagnostics.localParticipantName = localName;
+            // Don't auto-add local participant (usually the bot itself)
+          }
+        }
+
+        // Check for presenter/organizer role in participants
+        for (const p of participantsArray) {
+          const role = p.role || p.meetingRole || p.participantRole;
+          if (role && /organizer|presenter/i.test(String(role))) {
+            const name = extractName(p);
+            if (name && !names.includes(name)) {
+              names.push(name);
+            }
+          }
+        }
+
+        return { names, diagnostics };
       });
+
+      if (!result) return null;
+
+      // Log diagnostics if there's a mismatch (filtered < raw, suggesting possible missed participants)
+      if (result.diagnostics.filteredCount < result.diagnostics.rawParticipantCount - 1) {
+        console.log(`[Teams][Roster] Call-state diagnostic: raw=${result.diagnostics.rawParticipantCount}, ` +
+          `filtered=${result.diagnostics.filteredCount}, missingDisplayName=${result.diagnostics.missingDisplayName}, ` +
+          `skippedStates=${result.diagnostics.skippedStates.join(',') || 'none'}`);
+      }
+      if (result.diagnostics.organizerName) {
+        console.log(`[Teams][Roster] Organizer found via call.organizer: ${result.diagnostics.organizerName}`);
+      }
+      if (result.diagnostics.callerInfoName) {
+        console.log(`[Teams][Roster] Caller found via call.callerInfo: ${result.diagnostics.callerInfoName}`);
+      }
+
+      return result.names;
     } catch (e) {
       console.log(`[Teams][Roster] Call-state read failed (non-fatal): ${e}`);
       return null;
@@ -1548,29 +1808,137 @@ export class TeamsHandler {
    * matches against diarized segments. The active-speaker DOM is not yet
    * confirmed for Teams v2 — if no selector matches, the log stays empty.
    */
+  private _speakerPollCount = 0;
+  private _speakerZeroMatchWarned = false;
+
   startActiveSpeakerPolling(page: Page, recordingStartMs: number): void {
     this._recordingStartMs = recordingStartMs;
+    this._speakerPollCount = 0;
+    this._speakerZeroMatchWarned = false;
     console.log('[Teams][ActiveSpeaker] Polling started');
     this._speakerPollInterval = setInterval(async () => {
       try {
-        const speakerName = await page.evaluate(() => {
-          // Active speaker tile has a speaking indicator
-          const selectors = [
-            '[data-tid="video-tile"][aria-label*="speaking"]:not([aria-label*="not speaking" i])',
-            '[data-tid="calling-roster-cell"][data-is-speaking="true"]',
-            '.fui-VideoTile[data-is-speaking="true"] [data-tid="participant-display-name"]',
+        this._speakerPollCount++;
+        const result = await page.evaluate(() => {
+          // Teams v2 (Fluent 2 / New Teams) active speaker detection strategies:
+          // 1. CSS class-based speaking ring (blue border) — most common in v2
+          // 2. data-is-speaking attribute on tile
+          // 3. aria-label containing ", speaking" (comma-separated format)
+          // 4. Presence of speaking indicator element within the tile
+
+          // Strategy 1: Look for CSS classes indicating speaking state
+          const speakingClassSelectors = [
+            '.fui-VideoTile--speaking',
+            '[data-tid="video-tile"].speaking',
+            '[data-tid="video-tile"][class*="speaking" i]',
+            '[data-tid="video-tile"][class*="active-speaker" i]',
+            '.video-tile--speaking',
+            '[class*="VideoTile"][class*="speaking" i]',
           ];
-          for (const sel of selectors) {
+
+          for (const sel of speakingClassSelectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+              const nameEl = el.querySelector('[data-tid="participant-display-name"]') ||
+                             el.querySelector('[data-tid*="display-name"]') ||
+                             el;
+              const name = nameEl.textContent?.trim();
+              if (name) return { name, strategy: 'css-class', selector: sel };
+            }
+          }
+
+          // Strategy 2: Look for speaking indicator element within video tiles
+          const indicatorSelectors = [
+            '[data-tid="video-tile-speaking-indicator"]',
+            '[data-tid*="speaking-indicator"]',
+            '[data-tid="video-tile"] [data-tid*="speaking"]',
+          ];
+
+          for (const sel of indicatorSelectors) {
+            const indicator = document.querySelector(sel);
+            if (indicator) {
+              // Navigate up to find the parent tile and extract name
+              const tile = indicator.closest('[data-tid="video-tile"]') ||
+                           indicator.closest('.fui-VideoTile') ||
+                           indicator.closest('[data-tid*="video"]');
+              if (tile) {
+                const nameEl = tile.querySelector('[data-tid="participant-display-name"]') ||
+                               tile.querySelector('[data-tid*="display-name"]');
+                const name = nameEl?.textContent?.trim();
+                if (name) return { name, strategy: 'indicator-element', selector: sel };
+              }
+            }
+          }
+
+          // Strategy 3: data-is-speaking attribute
+          const dataAttrSelectors = [
+            '[data-tid="video-tile"][data-is-speaking="true"]',
+            '[data-tid="calling-roster-cell"][data-is-speaking="true"]',
+            '.fui-VideoTile[data-is-speaking="true"]',
+            '[data-is-speaking="true"]',
+          ];
+
+          for (const sel of dataAttrSelectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+              const nameEl = el.querySelector('[data-tid="participant-display-name"]') ||
+                             el.querySelector('[data-tid*="display-name"]') ||
+                             el;
+              const name = nameEl.textContent?.trim();
+              if (name) return { name, strategy: 'data-attr', selector: sel };
+            }
+          }
+
+          // Strategy 4: aria-label containing ", speaking" (comma-separated format in Teams v2)
+          // Format: "Julie Austin, speaking" or "Julie Austin, not speaking"
+          const tiles = document.querySelectorAll('[data-tid="video-tile"], .fui-VideoTile');
+          for (const tile of tiles) {
+            const ariaLabel = tile.getAttribute('aria-label') || '';
+            // Match ", speaking" but not ", not speaking"
+            if (/,\s*speaking\s*$/i.test(ariaLabel) && !/not\s+speaking/i.test(ariaLabel)) {
+              // Extract name: everything before ", speaking"
+              const name = ariaLabel.replace(/,\s*speaking\s*$/i, '').trim();
+              if (name) return { name, strategy: 'aria-label-comma', selector: 'aria-label' };
+            }
+          }
+
+          // Strategy 5: Original selectors (legacy fallback)
+          const legacySelectors = [
+            '[data-tid="video-tile"][aria-label*="speaking"]:not([aria-label*="not speaking" i])',
+          ];
+
+          for (const sel of legacySelectors) {
             const el = document.querySelector(sel);
             if (el) {
               const nameEl = el.querySelector('[data-tid="participant-display-name"]') || el;
-              return nameEl.textContent?.trim() || null;
+              const name = nameEl.textContent?.trim();
+              // Also try extracting from aria-label if textContent is empty
+              if (!name) {
+                const ariaLabel = el.getAttribute('aria-label') || '';
+                const match = ariaLabel.match(/^([^,]+)/);
+                if (match) return { name: match[1].trim(), strategy: 'aria-label-legacy', selector: sel };
+              }
+              if (name) return { name, strategy: 'legacy', selector: sel };
             }
           }
-          return null;
-        }).catch(() => null);
+
+          // No match — return diagnostic info for debugging
+          const tileCount = document.querySelectorAll('[data-tid="video-tile"], .fui-VideoTile').length;
+          return { name: null, strategy: 'none', tileCount };
+        }).catch(() => ({ name: null, strategy: 'error' }));
 
         const nowMs = Date.now() - this._recordingStartMs;
+
+        // Diagnostic logging for first few polls with zero matches
+        if (!result.name && !this._speakerZeroMatchWarned && this._speakerPollCount <= 5) {
+          console.log(`[Teams][ActiveSpeaker] Poll #${this._speakerPollCount}: no match (strategy: ${result.strategy}, tiles: ${(result as any).tileCount || '?'})`);
+          if (this._speakerPollCount === 5) {
+            console.log('[Teams][ActiveSpeaker] WARNING: 5 consecutive polls with zero speaker matches — DOM selectors may need updating');
+            this._speakerZeroMatchWarned = true;
+          }
+        }
+
+        const speakerName = result.name;
         if (speakerName && speakerName !== this._currentSpeaker) {
           if (this._currentSpeaker !== null) {
             const last = this._activeSpeakerLog[this._activeSpeakerLog.length - 1];
@@ -1578,7 +1946,7 @@ export class TeamsHandler {
           }
           this._activeSpeakerLog.push({ name: speakerName, startMs: nowMs });
           this._currentSpeaker = speakerName;
-          console.log(`[Teams][ActiveSpeaker] ${speakerName} at ${nowMs}ms`);
+          console.log(`[Teams][ActiveSpeaker] ${speakerName} at ${nowMs}ms (via ${result.strategy})`);
         }
       } catch { /* ignore poll errors */ }
     }, 1000);
