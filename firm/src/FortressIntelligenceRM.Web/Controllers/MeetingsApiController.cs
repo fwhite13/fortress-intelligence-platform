@@ -984,17 +984,17 @@ public class MeetingsApiController : ControllerBase
         var firmUser = await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
         if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
 
-        var meeting = await _meetingService.GetMeetingAsync(id, firmUser.Id);
-        if (meeting == null) return NotFound();
-        if (meeting.Status != MeetingStatus.Scheduled)
-            return Conflict(new { error = "Meeting is not in Scheduled state" });
+        // WI #7909: a meeting that already had a bot run is cloned into a new row for this run.
+        var (meeting, error) = await _meetingService.PrepareJoinNowAsync(id, firmUser.Id);
+        if (meeting == null)
+            return error == "Meeting not found" ? NotFound() : Conflict(new { error });
 
         // Mode A is mothballed (Firm__EnableModeA=false). Always dispatch bot (Mode B).
         // Set Pending before dispatching so a launch abort inside TriggerBotAsync (e.g. Zoom with
         // no OBF token, WI #7833 → Failed) can't be overwritten by this Pending write.
-        await _meetingService.UpdateStatusAsync(id, MeetingStatus.Pending);
-        _ = _vpBotService.TriggerBotAsync(id, meeting.MeetingUrl ?? "", meeting.Platform);
-        return Ok(new { meetingId = id, status = "pending" });
+        await _meetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Pending);
+        _ = _vpBotService.TriggerBotAsync(meeting.Id, meeting.MeetingUrl ?? "", meeting.Platform);
+        return Ok(new { meetingId = meeting.Id, originalMeetingId = id, status = "pending" });
     }
 
     [HttpPost("/api/vp/stop/{meetingId}")]
