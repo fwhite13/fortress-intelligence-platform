@@ -118,7 +118,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                                     "[AutoSync] Self-repaired CalendarEventId on meeting {Id} via iCalUId match (Graph ID drift)",
                                     matched.Id);
                             }
-                            await ReconcileMatchedMeetingAsync(db, matched, changed, ct);
+                            await ReconcileMatchedMeetingAsync(db, matched, startDatetime, changed, ct);
                             continue;
                         }
                     }
@@ -134,7 +134,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                             matched.GraphMeetingId = dto.ICalUId;
                             changed = true;
                         }
-                        await ReconcileMatchedMeetingAsync(db, matched, changed, ct);
+                        await ReconcileMatchedMeetingAsync(db, matched, startDatetime, changed, ct);
                         continue;
                     }
 
@@ -168,7 +168,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                                 "[AutoSync] Updated CalendarEventId/GraphMeetingId on meeting {Id} (Graph ID drift on recurring occurrence)",
                                 matched.Id);
                         }
-                        await ReconcileMatchedMeetingAsync(db, matched, changed, ct);
+                        await ReconcileMatchedMeetingAsync(db, matched, startDatetime, changed, ct);
                         continue;
                     }
 
@@ -290,9 +290,22 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
     /// AutoJoin backfill skipped it and no EventBridge schedule was ever created. Promote it, save
     /// any pending changes, and (re)create the schedule — CreateScheduleAsync upserts, so this is
     /// safe for meetings that already have one.
+    /// WI #7907: also picks up reschedules — if the calendar event's start moved, update the row
+    /// and re-point the EventBridge schedule so the bot doesn't fire at the old time.
     /// </summary>
-    private async Task ReconcileMatchedMeetingAsync(FirmDbContext db, FirmMeeting matched, bool changed, CancellationToken ct)
+    private async Task ReconcileMatchedMeetingAsync(FirmDbContext db, FirmMeeting matched, DateTime startDatetime, bool changed, CancellationToken ct)
     {
+        var rescheduled = false;
+        if (matched.StartDatetime != startDatetime)
+        {
+            _logger.LogInformation(
+                "[AutoSync] Rescheduled: updated start_datetime for meeting {Id} from {Old} to {New}",
+                matched.Id, matched.StartDatetime, startDatetime);
+            matched.StartDatetime = startDatetime;
+            changed = true;
+            rescheduled = true;
+        }
+
         if (matched.Source != "autoadd")
         {
             _logger.LogInformation(
@@ -307,8 +320,14 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
         matched.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
 
-        if (matched.Status == MeetingStatus.Scheduled && matched.StartDatetime > DateTime.UtcNow)
-            await _autoJoinScheduler.CreateScheduleAsync(matched.Id, matched.MeetingUrl ?? "", matched.StartDatetime!.Value);
+        if (matched.Status != MeetingStatus.Scheduled) return;
+
+        if (startDatetime > DateTime.UtcNow)
+            await _autoJoinScheduler.CreateScheduleAsync(matched.Id, matched.MeetingUrl ?? "", startDatetime);
+        else if (rescheduled)
+            // Moved to a time that's already past — drop the stale schedule so it can't fire at the
+            // old time (mirrors the WI #7848 rule: no auto-launch into a meeting already under way).
+            await _autoJoinScheduler.DeleteScheduleAsync(matched.Id);
     }
 
     private static async Task<FirmMeeting?> FindExistingPrimaryAsync(FirmDbContext db, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
