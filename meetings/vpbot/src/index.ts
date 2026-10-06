@@ -230,6 +230,12 @@ async function runOneShotMeeting(meetingUrl: string, meetingId: string, botName:
       }
     });
 
+    // WI #7908: dead-room join — bot already sent failed/dead_room; nothing to upload.
+    bot.on('dead-room', async () => {
+      await uploadDebugScreenshots(meetingId).catch(() => {});
+      resolve();
+    });
+
     bot.on('error', (err: Error) => reject(err));
 
     bot.on('ffmpeg-fast-exit', (code: number | null, elapsed: number) => {
@@ -390,6 +396,11 @@ function startApiServer(): void {
 
       bot.on('meeting-ended', () => {
         console.log(`[Bot] Meeting ${meeting.id} ended`);
+      });
+
+      bot.on('dead-room', () => {
+        meeting.status = 'error';
+        meeting.error = 'dead_room';
       });
 
       // Start joining (don't await - runs in background)

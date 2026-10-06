@@ -60,9 +60,15 @@ export interface MeetingBotEvents {
   'recording-stopped': (audioPath: string) => void;
   'error': (error: Error) => void;
   'meeting-ended': () => void;
+  'dead-room': () => void;
 }
 
 const MIN_RECORDING_MINUTES = 3;
+
+// WI #7908: Teams lets the bot through pre-join on an already-ended meeting, then closes the
+// page within seconds. A page close this soon after recording start with no roster ever seen
+// is a failed join to a dead room, not a real meeting end.
+const DEAD_ROOM_THRESHOLD_MS = 60_000;
 
 export class MeetingBot extends EventEmitter {
   private browser: Browser | null = null;
@@ -80,6 +86,7 @@ export class MeetingBot extends EventEmitter {
   private _silenceStartTime: number | null = null;
   private _teamsHandler: TeamsHandler | null = null;
   private _zoomHandler: ZoomHandler | null = null;
+  private _deadRoom = false;
 
   constructor(meeting: Meeting, recordingsDir: string) {
     super();
@@ -349,7 +356,7 @@ export class MeetingBot extends EventEmitter {
     this.page.on('close', () => {
       console.log('[Bot] Page close event fired — treating as meeting end');
       if (this.isRecording) {
-        this.stop('page-close-event').catch((err) =>
+        this.handlePageClosed('page-close-event').catch((err) =>
           console.error('[Bot] Error stopping on page close event:', err)
         );
       }
@@ -528,7 +535,7 @@ export class MeetingBot extends EventEmitter {
           console.log('[Bot] Page is closed — treating as meeting end');
           if (this._endPollInterval) clearInterval(this._endPollInterval);
           this._endPollInterval = null;
-          this.stop('page-closed').catch((err) =>
+          this.handlePageClosed('page-closed').catch((err) =>
             console.error('[Bot] Error stopping after page close:', err)
           );
           return;
@@ -673,6 +680,28 @@ export class MeetingBot extends EventEmitter {
    * @param reason  Optional stop reason for logging (e.g. 'meeting-ended-detected',
    *                'max-recording-timeout', 'participant-count-timeout', 'api-request')
    */
+  /**
+   * Page closed under us — either a real meeting end or a dead-room join (WI #7908).
+   * Dead room: stop FFmpeg and close the browser but do NOT emit 'recording-stopped', so no
+   * audio is uploaded and no recording_complete is sent. Report failed/dead_room instead.
+   */
+  private async handlePageClosed(reason: string): Promise<void> {
+    if (!this.isRecording) return;
+
+    const elapsedMs = Date.now() - this._recordingStartTime;
+    const rosterCount = this.getRosterTimeline().length;
+    if (elapsedMs < DEAD_ROOM_THRESHOLD_MS && rosterCount === 0) {
+      console.log(`[Bot] Dead-room detected — page closed ${elapsedMs}ms after join with 0 roster entries — sending failed callback`);
+      this._deadRoom = true;
+      await this.stop(reason);
+      await reportStatus(this.meeting.id, 'failed', { reason: 'dead_room' });
+      this.emit('dead-room');
+      return;
+    }
+
+    await this.stop(reason);
+  }
+
   async stop(reason: string = 'api-request'): Promise<string> {
     if (!this.isRecording) {
       throw new Error('Not currently recording');
@@ -745,7 +774,11 @@ export class MeetingBot extends EventEmitter {
       this._zoomHandler.stopRosterPolling();
     }
 
-    this.emit('recording-stopped', this.audioPath);
+    if (this._deadRoom) {
+      console.log('[Bot] Dead room — skipping recording-stopped (no upload, no recording_complete)');
+    } else {
+      this.emit('recording-stopped', this.audioPath);
+    }
 
     // Close browser
     await this.cleanup();
