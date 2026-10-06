@@ -108,16 +108,17 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                             m => m.GraphMeetingId == dto.ICalUId && m.CreatedBy == user.Id, ct);
                         if (matched != null)
                         {
+                            var changed = false;
                             if (matched.CalendarEventId != dto.CalendarEventId)
                             {
                                 // Self-repair: Graph's `id` drifted but the iCalUId anchor still matched.
                                 matched.CalendarEventId = dto.CalendarEventId;
-                                matched.UpdatedAt = DateTime.UtcNow;
-                                await db.SaveChangesAsync(ct);
+                                changed = true;
                                 _logger.LogInformation(
                                     "[AutoSync] Self-repaired CalendarEventId on meeting {Id} via iCalUId match (Graph ID drift)",
                                     matched.Id);
                             }
+                            await ReconcileMatchedMeetingAsync(db, matched, changed, ct);
                             continue;
                         }
                     }
@@ -127,12 +128,13 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                         m => m.CalendarEventId == dto.CalendarEventId && m.CreatedBy == user.Id, ct);
                     if (matched != null)
                     {
+                        var changed = false;
                         if (!string.IsNullOrEmpty(dto.ICalUId) && matched.GraphMeetingId != dto.ICalUId)
                         {
                             matched.GraphMeetingId = dto.ICalUId;
-                            matched.UpdatedAt = DateTime.UtcNow;
-                            await db.SaveChangesAsync(ct);
+                            changed = true;
                         }
+                        await ReconcileMatchedMeetingAsync(db, matched, changed, ct);
                         continue;
                     }
 
@@ -162,12 +164,11 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                         }
                         if (changed)
                         {
-                            matched.UpdatedAt = DateTime.UtcNow;
-                            await db.SaveChangesAsync(ct);
                             _logger.LogInformation(
                                 "[AutoSync] Updated CalendarEventId/GraphMeetingId on meeting {Id} (Graph ID drift on recurring occurrence)",
                                 matched.Id);
                         }
+                        await ReconcileMatchedMeetingAsync(db, matched, changed, ct);
                         continue;
                     }
 
@@ -283,6 +284,33 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
     /// excluding Failed (a failed primary shouldn't block a fresh attempt by another user); falls
     /// back to a URL-only match against active null-start primaries (WI #7847).
     /// </summary>
+    /// <summary>
+    /// Shared tail for the three match paths. WI #7906: a meeting created via the UI (source=teams)
+    /// before AutoSync first saw it is matched here but was never promoted to autoadd, so the
+    /// AutoJoin backfill skipped it and no EventBridge schedule was ever created. Promote it, save
+    /// any pending changes, and (re)create the schedule — CreateScheduleAsync upserts, so this is
+    /// safe for meetings that already have one.
+    /// </summary>
+    private async Task ReconcileMatchedMeetingAsync(FirmDbContext db, FirmMeeting matched, bool changed, CancellationToken ct)
+    {
+        if (matched.Source != "autoadd")
+        {
+            _logger.LogInformation(
+                "[AutoSync] Promoted meeting {Id} source from {OldSource} to autoadd (calendar match)",
+                matched.Id, matched.Source);
+            matched.Source = "autoadd";
+            changed = true;
+        }
+
+        if (!changed) return;
+
+        matched.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        if (matched.Status == MeetingStatus.Scheduled && matched.StartDatetime > DateTime.UtcNow)
+            await _autoJoinScheduler.CreateScheduleAsync(matched.Id, matched.MeetingUrl ?? "", matched.StartDatetime!.Value);
+    }
+
     private static async Task<FirmMeeting?> FindExistingPrimaryAsync(FirmDbContext db, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(normalizedUrl)) return null;
