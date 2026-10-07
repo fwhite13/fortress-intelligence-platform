@@ -1070,6 +1070,18 @@ export class TeamsHandler {
       await page.waitForTimeout(2000);
       console.log('[Teams] Chat panel opened, waiting for input field to render...');
 
+      // Wait for compose box to appear in DOM before running selector loop
+      // Uses the broadest fallback selector with a generous timeout
+      try {
+        await page.waitForSelector(
+          'div[contenteditable="true"], [contenteditable="true"][role="textbox"]',
+          { timeout: 7000 }
+        );
+        console.log('[Teams] Compose box appeared in DOM — proceeding with input search');
+      } catch {
+        console.log('[Teams] WARNING: Compose box did not appear within 7s — attempting input search anyway');
+      }
+
       // Step 2a: Dismiss notifications/banners that may block chat input
       // Dismiss "You have been muted" notification if present
       try {
@@ -1547,7 +1559,7 @@ export class TeamsHandler {
         }
       }
 
-      const selfNames = [process.env.BOT_NAME, ...(process.env.BOT_NAMES_CSV || '').split(',')]
+      const selfNames = [process.env.BOT_NAME]
         .map(n => (n || '').trim().toLowerCase())
         .filter(n => n.length > 0);
       names = [...new Set(names
@@ -1931,10 +1943,47 @@ export class TeamsHandler {
 
         // Diagnostic logging for first few polls with zero matches
         if (!result.name && !this._speakerZeroMatchWarned && this._speakerPollCount <= 5) {
-          console.log(`[Teams][ActiveSpeaker] Poll #${this._speakerPollCount}: no match (strategy: ${result.strategy}, tiles: ${(result as any).tileCount || '?'})`);
+          if (this._speakerPollCount === 1) {
+            // Dump DOM diagnostic to help identify correct selectors
+            try {
+              const domDiag = await page.evaluate(() => {
+                const candidates = [
+                  '[data-tid*="video"]',
+                  '[data-tid*="tile"]',
+                  '[class*="VideoTile"]',
+                  '[class*="video-tile"]',
+                  '[data-tid*="speaking"]',
+                  '[data-is-speaking]',
+                  '[aria-label*="speaking" i]',
+                ];
+                const results: Record<string, number> = {};
+                for (const sel of candidates) {
+                  results[sel] = document.querySelectorAll(sel).length;
+                }
+                // Sample first aria-label from any video-like element
+                const sampleEl = document.querySelector('[data-tid*="video"], [class*="VideoTile"]');
+                const sampleAriaLabel = sampleEl?.getAttribute('aria-label') || null;
+                const sampleDataTid = sampleEl?.getAttribute('data-tid') || null;
+                return { counts: results, sampleAriaLabel, sampleDataTid };
+              });
+              console.log('[Teams][ActiveSpeaker] DOM diagnostic:', JSON.stringify(domDiag));
+            } catch (diagErr) {
+              console.log('[Teams][ActiveSpeaker] DOM diagnostic failed:', diagErr);
+            }
+          }
+          const tileCount = (result as any).tileCount;
+          console.log(`[Teams][ActiveSpeaker] Poll #${this._speakerPollCount}: no match (strategy: ${result.strategy}, tiles: ${tileCount !== undefined ? tileCount : '?'})`);
           if (this._speakerPollCount === 5) {
             console.log('[Teams][ActiveSpeaker] WARNING: 5 consecutive polls with zero speaker matches — DOM selectors may need updating');
             this._speakerZeroMatchWarned = true;
+            // If tiles are genuinely absent (count=0), no point continuing — stop polling
+            if (typeof tileCount === 'number' && tileCount === 0) {
+              console.log('[Teams][ActiveSpeaker] tileCount=0 on all polls — stopping active speaker polling (selectors need updating)');
+              if (this._speakerPollInterval) {
+                clearInterval(this._speakerPollInterval);
+                this._speakerPollInterval = null;
+              }
+            }
           }
         }
 
