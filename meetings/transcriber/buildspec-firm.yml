@@ -18,6 +18,20 @@ phases:
       - echo Pushing Docker image...
       - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/firm-transcriber:latest
       - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/firm-transcriber:$IMAGE_TAG
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/firm-transcriber:$IMAGE_TAG
+      - echo Registering new Batch job definition...
+      - |
+        JOB_DEF=$(aws batch describe-job-definitions --job-definition-name firm-transcription-job --status ACTIVE \
+          --query "jobDefinitions | sort_by(@, &revision) | [-1]" --output json)
+        CONTAINER_PROPS=$(echo $JOB_DEF | python3 -c "import json,sys; d=json.load(sys.stdin); d['image']='$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/firm-transcriber:latest'; print(json.dumps(d))")
+        NEW_JOB_DEF=$(aws batch register-job-definition --job-definition-name firm-transcription-job \
+          --type container \
+          --container-properties "$CONTAINER_PROPS" \
+          --region $AWS_DEFAULT_REGION \
+          --query 'jobDefinitionArn' --output text)
+        echo "Registered Batch job def: $NEW_JOB_DEF"
+        NEW_REV=$(echo $NEW_JOB_DEF | grep -oP ':\K[0-9]+$')
+        echo "New revision: $NEW_REV"
       - echo Deploy complete.
 
 env:
