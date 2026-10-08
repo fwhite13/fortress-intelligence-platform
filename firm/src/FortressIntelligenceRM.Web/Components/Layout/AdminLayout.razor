@@ -1,0 +1,45 @@
+@inherits LayoutComponentBase
+@layout MainLayout
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AdminAccessService AdminAccess
+@inject NavigationManager Navigation
+
+@* WI #8034: /admin/* pages use this layout. Non-admins are silently redirected home. *@
+
+@if (_isAdmin)
+{
+    <MudGrid Spacing="2">
+        <MudItem xs="12" md="3" lg="2">
+            <MudPaper Elevation="0" Class="py-2">
+                <MudText Typo="Typo.overline" Class="px-4 nav-section-label">Admin</MudText>
+                <MudNavMenu>
+                    <MudNavLink Href="/admin/org-context" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">
+                        Org Context
+                    </MudNavLink>
+                    <MudNavLink Href="/admin/zoom" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.VideoCall">
+                        Zoom Bot Account
+                    </MudNavLink>
+                </MudNavMenu>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="9" lg="10">
+            @Body
+        </MudItem>
+    </MudGrid>
+}
+else
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+
+@code {
+    private bool _isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = await AdminAccess.IsAdminAsync(authState.User);
+        if (!_isAdmin)
+            Navigation.NavigateTo("/", replace: true);
+    }
+}

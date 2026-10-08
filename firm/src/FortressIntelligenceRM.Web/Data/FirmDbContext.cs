@@ -20,6 +20,7 @@ public class FirmDbContext : DbContext
     public DbSet<FirmMeetingMindmap> Mindmaps => Set<FirmMeetingMindmap>();
     public DbSet<FirmZoomOAuth> ZoomOAuthTokens => Set<FirmZoomOAuth>();
     public DbSet<FirmMeetingCorrection> MeetingCorrections => Set<FirmMeetingCorrection>();
+    public DbSet<FirmSystemConfig> SystemConfig => Set<FirmSystemConfig>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -279,6 +280,16 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.HasIndex(e => e.MeetingId).HasDatabaseName("idx_fmc_meeting");
+        });
+
+        // WI #8034 — runtime-mutable org-wide settings (e.g. zoom_bot_user_id).
+        modelBuilder.Entity<FirmSystemConfig>(entity =>
+        {
+            entity.ToTable("firm_system_config");
+            entity.HasKey(e => e.ConfigKey);
+            entity.Property(e => e.ConfigKey).HasColumnName("config_key").HasMaxLength(100);
+            entity.Property(e => e.ConfigValue).HasColumnName("config_value");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
         });
 
     }

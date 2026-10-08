@@ -1,5 +1,7 @@
 @using MudBlazor
 @inject NavigationManager NavManager
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AdminAccessService AdminAccess
 
 <MudNavMenu>
     <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
@@ -13,10 +15,27 @@
         My Wiki
     </MudNavLink>
 
-    <MudDivider Class="my-2" />
+    @if (_isAdmin)
+    {
+        <MudDivider Class="my-2" />
 
-    <MudText Typo="Typo.overline" Class="px-4 nav-section-label">Settings</MudText>
-    <MudNavLink Href="/org-context" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">
-        Org Context
-    </MudNavLink>
+        <MudNavGroup Title="Admin" Icon="@Icons.Material.Filled.AdminPanelSettings" Expanded="true">
+            <MudNavLink Href="/admin/org-context" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">
+                Org Context
+            </MudNavLink>
+            <MudNavLink Href="/admin/zoom" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.VideoCall">
+                Zoom Bot Account
+            </MudNavLink>
+        </MudNavGroup>
+    }
 </MudNavMenu>
+
+@code {
+    private bool _isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _isAdmin = await AdminAccess.IsAdminAsync(authState.User);
+    }
+}

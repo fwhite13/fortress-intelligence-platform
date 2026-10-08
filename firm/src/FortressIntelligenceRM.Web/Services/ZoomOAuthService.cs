@@ -174,6 +174,12 @@ public class ZoomOAuthService : IZoomOAuthService
             .FirstOrDefaultAsync();
     }
 
+    public async Task<FirmZoomOAuth?> GetConnectionAsync(Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.ZoomOAuthTokens.AsNoTracking().FirstOrDefaultAsync(z => z.UserId == userId);
+    }
+
     private async Task<bool> RefreshAccessTokenAsync(FirmDbContext db, FirmZoomOAuth record)
     {
         var http = _httpClientFactory.CreateClient();
