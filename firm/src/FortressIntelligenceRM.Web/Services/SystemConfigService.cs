@@ -6,8 +6,6 @@ namespace FortressIntelligenceRM.Web.Services;
 
 public class SystemConfigService : ISystemConfigService
 {
-    public const string ZoomBotUserIdKey = "zoom_bot_user_id";
-
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
 
     public SystemConfigService(IDbContextFactory<FirmDbContext> dbFactory)
@@ -49,12 +47,4 @@ public class SystemConfigService : ISystemConfigService
         db.SystemConfig.Remove(record);
         await db.SaveChangesAsync();
     }
-
-    public async Task<Guid?> GetZoomBotUserIdAsync()
-    {
-        var value = await GetAsync(ZoomBotUserIdKey);
-        return Guid.TryParse(value, out var userId) ? userId : null;
-    }
-
-    public Task SetZoomBotUserIdAsync(Guid userId) => SetAsync(ZoomBotUserIdKey, userId.ToString());
 }

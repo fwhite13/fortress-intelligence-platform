@@ -19,7 +19,7 @@ public class ZoomOAuthController : Controller
 
     private readonly IZoomOAuthService _zoomOAuthService;
     private readonly MeetingService _meetingService;
-    private readonly ISystemConfigService _systemConfigService;
+    private readonly IZoomBotAccountService _zoomBotAccountService;
     private readonly AdminAccessService _adminAccess;
     private readonly IDataProtector _stateProtector;
     private readonly ILogger<ZoomOAuthController> _logger;
@@ -27,20 +27,21 @@ public class ZoomOAuthController : Controller
     public ZoomOAuthController(
         IZoomOAuthService zoomOAuthService,
         MeetingService meetingService,
-        ISystemConfigService systemConfigService,
+        IZoomBotAccountService zoomBotAccountService,
         AdminAccessService adminAccess,
         IDataProtectionProvider dataProtectionProvider,
         ILogger<ZoomOAuthController> logger)
     {
         _zoomOAuthService = zoomOAuthService;
         _meetingService = meetingService;
-        _systemConfigService = systemConfigService;
+        _zoomBotAccountService = zoomBotAccountService;
         _adminAccess = adminAccess;
         _stateProtector = dataProtectionProvider.CreateProtector("Firm.ZoomOAuthState");
         _logger = logger;
     }
 
-    // bot=true (WI #8034, admin-only): the linked account becomes the shared Zoom bot account.
+    // bot=true (WI #8034, admin-only): the linked account becomes the shared Zoom bot account,
+    // stored in firm_zoom_bot_account with no user association (WI #8043).
     // The flag travels inside the signed state — Zoom's redirect URI is fixed, so a query param on
     // /authorize would not survive to /callback.
     [HttpGet("authorize")]
@@ -87,15 +88,16 @@ public class ZoomOAuthController : Controller
 
         try
         {
-            var zoomEmail = await _zoomOAuthService.HandleCallbackAsync(parsedState.UserId, code);
-            _logger.LogInformation("FIRM: Zoom account linked for user {UserId} ({Email})", parsedState.UserId, zoomEmail);
-
             if (parsedState.IsBot)
             {
-                await _systemConfigService.SetZoomBotUserIdAsync(parsedState.UserId);
-                _logger.LogInformation("FIRM: Zoom bot account set to user {UserId} ({Email})", parsedState.UserId, zoomEmail);
+                var bot = await _zoomOAuthService.ExchangeCodeAsync(code);
+                await _zoomBotAccountService.SaveAsync(bot.Email, bot.ZoomUserId, bot.AccessToken, bot.RefreshToken, bot.ExpiresAt);
+                _logger.LogInformation("FIRM: Zoom bot account connected as {Email} by user {UserId}", bot.Email ?? bot.ZoomUserId, parsedState.UserId);
                 return Redirect("/admin/zoom?zoomConnected=1");
             }
+
+            var zoomEmail = await _zoomOAuthService.HandleCallbackAsync(parsedState.UserId, code);
+            _logger.LogInformation("FIRM: Zoom account linked for user {UserId} ({Email})", parsedState.UserId, zoomEmail);
             return Redirect("/meetings?zoomConnected=1");
         }
         catch (Exception ex)
@@ -118,11 +120,8 @@ public class ZoomOAuthController : Controller
             if (!await _adminAccess.IsAdminAsync(User))
                 return Forbid();
 
-            var botUserId = await _systemConfigService.GetZoomBotUserIdAsync();
-            if (botUserId.HasValue)
-                await _zoomOAuthService.DisconnectAsync(botUserId.Value);
-            await _systemConfigService.RemoveAsync(SystemConfigService.ZoomBotUserIdKey);
-            _logger.LogInformation("FIRM: Zoom bot account (user {BotUserId}) disconnected by {UserId}", botUserId, firmUser.Id);
+            await _zoomBotAccountService.ClearAsync();
+            _logger.LogInformation("FIRM: Zoom bot account disconnected by {UserId}", firmUser.Id);
             return Redirect("/admin/zoom?zoomDisconnected=1");
         }
 

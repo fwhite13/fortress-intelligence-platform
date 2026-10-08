@@ -21,6 +21,7 @@ public class FirmDbContext : DbContext
     public DbSet<FirmZoomOAuth> ZoomOAuthTokens => Set<FirmZoomOAuth>();
     public DbSet<FirmMeetingCorrection> MeetingCorrections => Set<FirmMeetingCorrection>();
     public DbSet<FirmSystemConfig> SystemConfig => Set<FirmSystemConfig>();
+    public DbSet<FirmZoomBotAccount> ZoomBotAccount => Set<FirmZoomBotAccount>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -282,7 +283,7 @@ public class FirmDbContext : DbContext
             entity.HasIndex(e => e.MeetingId).HasDatabaseName("idx_fmc_meeting");
         });
 
-        // WI #8034 — runtime-mutable org-wide settings (e.g. zoom_bot_user_id).
+        // WI #8034 — runtime-mutable org-wide settings.
         modelBuilder.Entity<FirmSystemConfig>(entity =>
         {
             entity.ToTable("firm_system_config");
@@ -290,6 +291,20 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.ConfigKey).HasColumnName("config_key").HasMaxLength(100);
             entity.Property(e => e.ConfigValue).HasColumnName("config_value");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+        });
+
+        // WI #8043 — shared Zoom bot account tokens; single row, no user association.
+        modelBuilder.Entity<FirmZoomBotAccount>(entity =>
+        {
+            entity.ToTable("firm_zoom_bot_account");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedNever();
+            entity.Property(e => e.Email).HasColumnName("email").HasMaxLength(255);
+            entity.Property(e => e.ZoomUserId).HasColumnName("zoom_user_id").HasMaxLength(100);
+            entity.Property(e => e.AccessToken).HasColumnName("access_token");
+            entity.Property(e => e.RefreshToken).HasColumnName("refresh_token");
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
+            entity.Property(e => e.ConnectedAt).HasColumnName("connected_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
         });
 
     }
