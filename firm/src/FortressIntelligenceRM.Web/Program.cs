@@ -92,6 +92,8 @@ builder.Services.AddSingleton<IOrgContextService, OrgContextService>();
 builder.Services.AddSingleton<IUserWikiService, UserWikiService>();
 builder.Services.AddScoped<FipTokenService>();
 builder.Services.AddScoped<IZoomOAuthService, ZoomOAuthService>();
+builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
+builder.Services.AddScoped<AdminAccessService>();
 // Bot Framework
 builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();
 builder.Services.AddTransient<IBot, FirmBot>();

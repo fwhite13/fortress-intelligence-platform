@@ -46,6 +46,7 @@ public class DatabaseInitializationService : IHostedService
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     last_login_at DATETIME NULL,
+                    is_admin TINYINT(1) NOT NULL DEFAULT 0,
                     UNIQUE INDEX idx_firm_users_oid (entra_oid),
                     UNIQUE INDEX idx_firm_users_email (email)
                 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
@@ -198,6 +199,12 @@ public class DatabaseInitializationService : IHostedService
     created_by CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_fmc_meeting (meeting_id)
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                // WI #8034 — key/value org settings mutable at runtime (e.g. zoom_bot_user_id).
+                ("firm_system_config", @"CREATE TABLE IF NOT EXISTS firm_system_config (
+    config_key VARCHAR(100) NOT NULL PRIMARY KEY,
+    config_value TEXT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 

@@ -1,4 +1,5 @@
-@page "/org-context"
+@page "/admin/org-context"
+@layout AdminLayout
 @attribute [Authorize]
 @inject IOrgContextService OrgContextService
 @inject ISnackbar Snackbar
@@ -13,7 +14,7 @@
 @using MudBlazor
 @inject BrandingConfig Branding
 
-<PageTitle>Settings — @Branding.ModuleName</PageTitle>
+<PageTitle>Org Context — @Branding.ModuleName</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
     <MudText Typo="Typo.h5" Class="mb-2 org-context-title">
