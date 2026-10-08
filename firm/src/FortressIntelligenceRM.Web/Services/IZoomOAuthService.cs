@@ -1,3 +1,5 @@
+using FortressIntelligenceRM.Web.Models;
+
 namespace FortressIntelligenceRM.Web.Services;
 
 public interface IZoomOAuthService
@@ -20,4 +22,7 @@ public interface IZoomOAuthService
 
     /// <summary>Returns the linked Zoom email for display, or null if not connected.</summary>
     Task<string?> GetLinkedEmailAsync(Guid userId);
+
+    /// <summary>Returns the user's stored Zoom OAuth record (for status display), or null if not connected.</summary>
+    Task<FirmZoomOAuth?> GetConnectionAsync(Guid userId);
 }

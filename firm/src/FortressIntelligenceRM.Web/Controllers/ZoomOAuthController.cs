@@ -19,29 +19,40 @@ public class ZoomOAuthController : Controller
 
     private readonly IZoomOAuthService _zoomOAuthService;
     private readonly MeetingService _meetingService;
+    private readonly ISystemConfigService _systemConfigService;
+    private readonly AdminAccessService _adminAccess;
     private readonly IDataProtector _stateProtector;
     private readonly ILogger<ZoomOAuthController> _logger;
 
     public ZoomOAuthController(
         IZoomOAuthService zoomOAuthService,
         MeetingService meetingService,
+        ISystemConfigService systemConfigService,
+        AdminAccessService adminAccess,
         IDataProtectionProvider dataProtectionProvider,
         ILogger<ZoomOAuthController> logger)
     {
         _zoomOAuthService = zoomOAuthService;
         _meetingService = meetingService;
+        _systemConfigService = systemConfigService;
+        _adminAccess = adminAccess;
         _stateProtector = dataProtectionProvider.CreateProtector("Firm.ZoomOAuthState");
         _logger = logger;
     }
 
+    // bot=true (WI #8034, admin-only): the linked account becomes the shared Zoom bot account.
+    // The flag travels inside the signed state — Zoom's redirect URI is fixed, so a query param on
+    // /authorize would not survive to /callback.
     [HttpGet("authorize")]
-    public async Task<IActionResult> Authorize()
+    public async Task<IActionResult> Authorize([FromQuery] bool bot = false)
     {
         var firmUser = await ResolveCurrentUserAsync();
         if (firmUser == null)
             return Unauthorized();
+        if (bot && !await _adminAccess.IsAdminAsync(User))
+            return Forbid();
 
-        var statePayload = JsonSerializer.Serialize(new ZoomOAuthState(firmUser.Id, DateTime.UtcNow));
+        var statePayload = JsonSerializer.Serialize(new ZoomOAuthState(firmUser.Id, DateTime.UtcNow, bot));
         var state = _stateProtector.Protect(statePayload);
 
         return Redirect(_zoomOAuthService.GetAuthorizationUrl(state));
@@ -78,21 +89,42 @@ public class ZoomOAuthController : Controller
         {
             var zoomEmail = await _zoomOAuthService.HandleCallbackAsync(parsedState.UserId, code);
             _logger.LogInformation("FIRM: Zoom account linked for user {UserId} ({Email})", parsedState.UserId, zoomEmail);
+
+            if (parsedState.IsBot)
+            {
+                await _systemConfigService.SetZoomBotUserIdAsync(parsedState.UserId);
+                _logger.LogInformation("FIRM: Zoom bot account set to user {UserId} ({Email})", parsedState.UserId, zoomEmail);
+                return Redirect("/admin/zoom?zoomConnected=1");
+            }
             return Redirect("/meetings?zoomConnected=1");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "FIRM: Zoom OAuth callback failed for user {UserId}", parsedState.UserId);
-            return Redirect("/meetings?zoomConnectError=1");
+            return Redirect(parsedState.IsBot ? "/admin/zoom?zoomConnectError=1" : "/meetings?zoomConnectError=1");
         }
     }
 
+    // bot=true (WI #8034, admin-only): disconnects the shared Zoom bot account, whichever admin linked it.
     [HttpPost("disconnect")]
-    public async Task<IActionResult> Disconnect()
+    public async Task<IActionResult> Disconnect([FromForm] bool bot = false)
     {
         var firmUser = await ResolveCurrentUserAsync();
         if (firmUser == null)
             return Unauthorized();
+
+        if (bot)
+        {
+            if (!await _adminAccess.IsAdminAsync(User))
+                return Forbid();
+
+            var botUserId = await _systemConfigService.GetZoomBotUserIdAsync();
+            if (botUserId.HasValue)
+                await _zoomOAuthService.DisconnectAsync(botUserId.Value);
+            await _systemConfigService.RemoveAsync(SystemConfigService.ZoomBotUserIdKey);
+            _logger.LogInformation("FIRM: Zoom bot account (user {BotUserId}) disconnected by {UserId}", botUserId, firmUser.Id);
+            return Redirect("/admin/zoom?zoomDisconnected=1");
+        }
 
         await _zoomOAuthService.DisconnectAsync(firmUser.Id);
         return Redirect("/meetings?zoomDisconnected=1");
@@ -113,5 +145,5 @@ public class ZoomOAuthController : Controller
         return await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
     }
 
-    private record ZoomOAuthState(Guid UserId, DateTime IssuedAtUtc);
+    private record ZoomOAuthState(Guid UserId, DateTime IssuedAtUtc, bool IsBot = false);
 }

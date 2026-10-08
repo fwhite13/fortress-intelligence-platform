@@ -1,0 +1,12 @@
+@page "/org-context"
+@attribute [Authorize]
+@inject NavigationManager Navigation
+
+@* WI #8034: Org Context moved under /admin — keep old bookmarks working. *@
+
+@code {
+    protected override void OnInitialized()
+    {
+        Navigation.NavigateTo("/admin/org-context", replace: true);
+    }
+}
