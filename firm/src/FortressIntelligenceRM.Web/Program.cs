@@ -93,6 +93,7 @@ builder.Services.AddSingleton<IUserWikiService, UserWikiService>();
 builder.Services.AddScoped<FipTokenService>();
 builder.Services.AddScoped<IZoomOAuthService, ZoomOAuthService>();
 builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
+builder.Services.AddScoped<IZoomBotAccountService, ZoomBotAccountService>();
 builder.Services.AddScoped<AdminAccessService>();
 // Bot Framework
 builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();

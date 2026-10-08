@@ -48,7 +48,7 @@ public class ZoomOAuthService : IZoomOAuthService
         return $"https://zoom.us/oauth/authorize?{query}";
     }
 
-    public async Task<string> HandleCallbackAsync(Guid userId, string code)
+    public async Task<ZoomTokenExchangeResult> ExchangeCodeAsync(string code)
     {
         var http = _httpClientFactory.CreateClient();
 
@@ -74,7 +74,7 @@ public class ZoomOAuthService : IZoomOAuthService
         var tokenJson = JsonSerializer.Deserialize<JsonElement>(tokenBody);
         var accessToken = tokenJson.GetProperty("access_token").GetString()!;
         var refreshToken = tokenJson.GetProperty("refresh_token").GetString()!;
-        var expiresIn = tokenJson.GetProperty("expires_in").GetInt32();
+        var expiresAt = DateTime.UtcNow.AddSeconds(tokenJson.GetProperty("expires_in").GetInt32());
 
         using var meReq = new HttpRequestMessage(HttpMethod.Get, "https://api.zoom.us/v2/users/me");
         meReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
@@ -90,10 +90,16 @@ public class ZoomOAuthService : IZoomOAuthService
         var zoomUserId = meJson.GetProperty("id").GetString() ?? "";
         var zoomEmail = meJson.TryGetProperty("email", out var emailProp) ? emailProp.GetString() : null;
 
+        return new ZoomTokenExchangeResult(zoomUserId, zoomEmail, accessToken, refreshToken, expiresAt);
+    }
+
+    public async Task<string> HandleCallbackAsync(Guid userId, string code)
+    {
+        var (zoomUserId, zoomEmail, accessToken, refreshToken, expiresAt) = await ExchangeCodeAsync(code);
+
         await using var db = await _dbFactory.CreateDbContextAsync();
         var record = await db.ZoomOAuthTokens.FirstOrDefaultAsync(z => z.UserId == userId);
         var now = DateTime.UtcNow;
-        var expiresAt = now.AddSeconds(expiresIn);
 
         if (record == null)
         {
@@ -182,8 +188,26 @@ public class ZoomOAuthService : IZoomOAuthService
 
     private async Task<bool> RefreshAccessTokenAsync(FirmDbContext db, FirmZoomOAuth record)
     {
+        var refreshed = await RefreshTokensAsync(record.RefreshToken);
+        if (refreshed == null)
+        {
+            _logger.LogWarning("FIRM: Zoom token refresh failed for user {UserId}", record.UserId);
+            return false;
+        }
+
+        record.AccessToken = refreshed.AccessToken;
+        if (refreshed.RefreshToken != null)
+            record.RefreshToken = refreshed.RefreshToken;
+        record.ExpiresAt = refreshed.ExpiresAt;
+        record.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<ZoomTokenRefreshResult?> RefreshTokensAsync(string refreshToken)
+    {
         var http = _httpClientFactory.CreateClient();
-        var url = $"https://zoom.us/oauth/token?grant_type=refresh_token&refresh_token={Uri.EscapeDataString(record.RefreshToken)}";
+        var url = $"https://zoom.us/oauth/token?grant_type=refresh_token&refresh_token={Uri.EscapeDataString(refreshToken)}";
         using var req = new HttpRequestMessage(HttpMethod.Post, url);
         req.Headers.Authorization = BasicAuthHeader();
 
@@ -191,21 +215,18 @@ public class ZoomOAuthService : IZoomOAuthService
         var body = await res.Content.ReadAsStringAsync();
         if (!res.IsSuccessStatusCode)
         {
-            _logger.LogWarning("FIRM: Zoom token refresh failed for user {UserId}: {Status} {Body}", record.UserId, res.StatusCode, body);
-            return false;
+            _logger.LogWarning("FIRM: Zoom token refresh failed: {Status} {Body}", res.StatusCode, body);
+            return null;
         }
 
         var json = JsonSerializer.Deserialize<JsonElement>(body);
-        record.AccessToken = json.GetProperty("access_token").GetString()!;
-        if (json.TryGetProperty("refresh_token", out var rt))
-            record.RefreshToken = rt.GetString()!;
-        record.ExpiresAt = DateTime.UtcNow.AddSeconds(json.GetProperty("expires_in").GetInt32());
-        record.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
-        return true;
+        return new ZoomTokenRefreshResult(
+            json.GetProperty("access_token").GetString()!,
+            json.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null,
+            DateTime.UtcNow.AddSeconds(json.GetProperty("expires_in").GetInt32()));
     }
 
-    private async Task<(bool ok, bool authError, string? token)> FetchObfTokenAsync(string accessToken, long meetingId)
+    public async Task<(bool ok, bool authError, string? token)> FetchObfTokenAsync(string accessToken, long meetingId)
     {
         var http = _httpClientFactory.CreateClient();
         using var req = new HttpRequestMessage(HttpMethod.Get,

@@ -1,8 +1,7 @@
 @page "/admin/zoom"
 @layout AdminLayout
 @attribute [Authorize]
-@inject ISystemConfigService SystemConfigService
-@inject IZoomOAuthService ZoomOAuthService
+@inject IZoomBotAccountService ZoomBotAccountService
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 @inject BrandingConfig Branding
@@ -13,7 +12,7 @@
     <MudText Typo="Typo.h5" Class="mb-2 org-context-title">Zoom Bot Account</MudText>
     <MudText Typo="Typo.body2" Class="mb-4 org-context-subtitle">
         The shared Zoom account the bot uses to join all Zoom meetings. Connecting signs in with Zoom and
-        stores the account against your FIRM user; reconnecting replaces it.
+        stores the account as the system bot account (not linked to any FIRM user); reconnecting replaces it.
     </MudText>
 
     @if (_loading)
@@ -27,8 +26,7 @@
             {
                 <MudText Typo="Typo.subtitle1" Class="mb-1">Connected as @(_email ?? _connection.ZoomUserId)</MudText>
                 <MudText Typo="Typo.caption" Class="d-block mb-3 org-context-timestamp">
-                    Connected @_connection.CreatedAt.ToString("MMM d, yyyy h:mm tt") UTC
-                    · last token refresh @_connection.UpdatedAt.ToString("MMM d, yyyy h:mm tt") UTC
+                    Last connected / token refresh @_connection.ConnectedAt.ToString("MMM d, yyyy h:mm tt") UTC
                 </MudText>
 
                 <div class="d-flex align-center gap-2 mb-4">
@@ -65,7 +63,7 @@
             {
                 <MudText Typo="Typo.subtitle1" Class="mb-1">Not connected</MudText>
                 <MudText Typo="Typo.body2" Class="mb-4 org-context-subtitle">
-                    Without a bot account, Zoom meetings can only be recorded for users who have connected their own Zoom account in Settings.
+                    Without a bot account, Zoom meetings cannot be recorded.
                 </MudText>
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/oauth/zoom/authorize?bot=true"
                            StartIcon="@Icons.Material.Filled.Link">
@@ -77,27 +75,24 @@
 </MudContainer>
 
 @code {
-    // Zoom refresh tokens are valid for 90 days and are rotated on each refresh (UpdatedAt).
+    // Zoom refresh tokens are valid for 90 days and are rotated on each refresh (ConnectedAt is
+    // bumped by the DB's ON UPDATE on every token write).
     private static readonly TimeSpan RefreshTokenLifetime = TimeSpan.FromDays(90);
 
     private bool _loading = true;
-    private FirmZoomOAuth? _connection;
+    private FirmZoomBotAccount? _connection;
     private string? _email;
     private DateTime _refreshTokenExpiresAt;
     private bool _refreshTokenExpired;
 
     protected override async Task OnInitializedAsync()
     {
-        var botUserId = await SystemConfigService.GetZoomBotUserIdAsync();
-        if (botUserId.HasValue)
+        _email = await ZoomBotAccountService.GetEmailAsync();
+        _connection = await ZoomBotAccountService.GetAsync();
+        if (_connection != null)
         {
-            _email = await ZoomOAuthService.GetLinkedEmailAsync(botUserId.Value);
-            _connection = await ZoomOAuthService.GetConnectionAsync(botUserId.Value);
-            if (_connection != null)
-            {
-                _refreshTokenExpiresAt = _connection.UpdatedAt + RefreshTokenLifetime;
-                _refreshTokenExpired = _refreshTokenExpiresAt < DateTime.UtcNow;
-            }
+            _refreshTokenExpiresAt = _connection.ConnectedAt + RefreshTokenLifetime;
+            _refreshTokenExpired = _refreshTokenExpiresAt < DateTime.UtcNow;
         }
         _loading = false;
     }
