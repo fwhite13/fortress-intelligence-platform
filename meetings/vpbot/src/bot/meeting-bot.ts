@@ -217,6 +217,11 @@ export class MeetingBot extends EventEmitter {
         ...(storageStatePath ? { storageState: storageStatePath } : {}),
       });
 
+      // WI #8031: CSRC active speaker hook must exist before any Teams page loads
+      if (isTeams) {
+        await TeamsHandler.installSpeechHook(this.context);
+      }
+
       this.page = await this.context.newPage();
 
       // Navigate to meeting URL
@@ -768,7 +773,7 @@ export class MeetingBot extends EventEmitter {
     // Stop roster + active speaker polling if Teams meeting
     if (this._teamsHandler) {
       this._teamsHandler.stopRosterPolling();
-      this._teamsHandler.stopActiveSpeakerPolling();
+      await this._teamsHandler.stopActiveSpeakerPolling();
     }
     if (this._zoomHandler) {
       this._zoomHandler.stopRosterPolling();

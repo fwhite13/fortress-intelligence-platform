@@ -32,7 +32,7 @@
  * Reference: https://github.com/screenappai/meeting-bot (MIT, production)
  */
 
-import { Page, Locator } from 'playwright';
+import { Page, Locator, BrowserContext } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 import { S3Service } from '../transcribe/s3.js';
@@ -71,13 +71,146 @@ async function waitVisible(locator: Locator, timeout: number): Promise<boolean> 
   }
 }
 
+/**
+ * In-page active speaker hook (WI #8031), installed via addInitScript so it
+ * runs before Teams creates its RTCPeerConnections. Serialized with
+ * toString(), so it must be self-contained (no closures, no async helpers).
+ *
+ * Teams' media server sends mixed audio; each RTP packet lists the
+ * participants mixed into it as CSRCs. We capture every incoming audio
+ * RTCRtpReceiver, poll getContributingSources(), and map recent CSRCs to
+ * participants with Teams' own call model (participant.hasAudioSource) —
+ * camera-agnostic, unlike the DOM tile selectors. Same technique as the
+ * Attendee bot (teams_chromedriver_payload.js).
+ *
+ * Closed intervals are buffered on window.__firmSpeech as
+ * { name, startMs, endMs } relative to window.__firmSpeechStartMs (set by
+ * Node when recording starts); Node drains the buffer every few seconds.
+ */
+function firmSpeechHook(): void {
+  const w = window as any;
+  if (w.__firmSpeechHookInstalled) return;
+  w.__firmSpeechHookInstalled = true;
+  w.__firmReceivers = [];
+  w.__firmSpeech = [];
+  w.__firmSpeechDiag = { pcCount: 0, callFound: false, participantCount: 0, sampleCsrcs: [] };
+
+  const POLL_MS = 150;
+  const RECENT_MS = 100;    // CSRC seen within this window = speaking now
+  const START_MS = 300;     // consecutive speech before an interval opens
+  const STOP_MS = 500;      // silence before an open interval closes
+  const MAX_BUFFER = 5000;  // cap if Node never drains
+
+  const Orig = w.RTCPeerConnection;
+  if (typeof Orig !== 'function') return;
+  const Wrapped = class extends Orig {
+    constructor(...args: any[]) {
+      super(...args);
+      w.__firmSpeechDiag.pcCount++;
+      this.addEventListener('track', (ev: any) => {
+        if (ev.track?.kind === 'audio' && ev.receiver && !w.__firmReceivers.includes(ev.receiver)) {
+          w.__firmReceivers.push(ev.receiver);
+        }
+      });
+    }
+  };
+  w.RTCPeerConnection = Wrapped;
+  if (w.webkitRTCPeerConnection) w.webkitRTCPeerConnection = Wrapped;
+
+  // key -> { name, first, last, open } in Date.now() ms
+  const speakers = new Map<string, { name: string; first: number; last: number; open: boolean }>();
+
+  const emit = (s: { name: string; first: number; last: number }) => {
+    const base = w.__firmSpeechStartMs;
+    if (typeof base !== 'number' || s.last < base) return; // before recording started
+    if (w.__firmSpeech.length >= MAX_BUFFER) w.__firmSpeech.shift();
+    w.__firmSpeech.push({ name: s.name, startMs: Math.max(0, s.first - base), endMs: s.last - base });
+  };
+
+  // Close every open interval now (called by Node on final drain).
+  w.__firmSpeechFlush = () => {
+    for (const s of speakers.values()) if (s.open) emit(s);
+    speakers.clear();
+  };
+
+  setInterval(() => {
+    try {
+      const now = Date.now();
+      w.__firmReceivers = w.__firmReceivers.filter((r: any) => r.track?.readyState !== 'ended');
+
+      const recent: any[] = [];
+      for (const r of w.__firmReceivers) {
+        for (const c of r.getContributingSources?.() || []) {
+          // Chrome reports epoch ms; fall back to performance.now() if a build uses a monotonic clock
+          const ref = c.timestamp > 1e12 ? now : performance.now();
+          if (ref - c.timestamp <= RECENT_MS) recent.push(c);
+        }
+      }
+      if (recent.length > 0) {
+        w.__firmSpeechDiag.sampleCsrcs = recent.slice(0, 5).map((c: any) => ({ source: c.source, audioLevel: c.audioLevel }));
+      }
+
+      let call: any = null;
+      try { call = w.msteamscalling?.deref?.()?.callingService?.getActiveCall?.() || null; } catch { /* ignore */ }
+      if (!call) call = w.callingDebug?.observableCall || null;
+      w.__firmSpeechDiag.callFound = !!call;
+
+      const speakingNow = new Map<string, string>();
+      if (call?.participants && recent.length > 0) {
+        const participants = Array.from(call.participants as Iterable<any>);
+        w.__firmSpeechDiag.participantCount = participants.length;
+        for (const p of participants) {
+          if (typeof p?.hasAudioSource !== 'function') continue;
+          if (!recent.some(c => { try { return p.hasAudioSource(c.source); } catch { return false; } })) continue;
+          const name = (p.displayName || '').trim();
+          if (name) speakingNow.set(p.id || name, name);
+        }
+      }
+
+      for (const [key, name] of speakingNow) {
+        const s = speakers.get(key);
+        if (!s) {
+          speakers.set(key, { name, first: now, last: now, open: false });
+        } else {
+          s.last = now;
+          if (!s.open && now - s.first >= START_MS) s.open = true;
+        }
+      }
+      for (const [key, s] of speakers) {
+        if (speakingNow.has(key)) continue;
+        if (s.open && now - s.last >= STOP_MS) {
+          emit(s);
+          speakers.delete(key);
+        } else if (!s.open && now - s.last > 2 * POLL_MS) {
+          speakers.delete(key); // speech wasn't consecutive long enough to count
+        }
+      }
+    } catch { /* never break the page */ }
+  }, POLL_MS);
+}
+
 export class TeamsHandler {
   private rosterEntries: RosterEntry[] = [];
   private rosterPollInterval?: NodeJS.Timeout;
   private rosterPanelOpenAttempted = false;
   private _activeSpeakerLog: ActiveSpeakerEntry[] = [];
   private _currentSpeaker: string | null = null;
+  private _currentSpeakerEntry: ActiveSpeakerEntry | null = null;
   private _speakerPollInterval: NodeJS.Timeout | null = null;
+  private _speechDrainInterval: NodeJS.Timeout | null = null;
+  private _speechDrainCount = 0;
+  private _csrcActive = false;
+  private _speakerPage: Page | null = null;
+
+  /**
+   * Install the CSRC active speaker hook (WI #8031). Must be called on the
+   * context before any Teams page loads — unconditionally, not only on the
+   * sign-in path, since a session restored from storage state never signs in.
+   */
+  static async installSpeechHook(context: BrowserContext): Promise<void> {
+    await context.addInitScript(firmSpeechHook);
+    console.log('[Teams][ActiveSpeaker] CSRC speech hook registered on browser context');
+  }
   private _recordingStartMs: number = 0;
 
   /**
@@ -1761,10 +1894,13 @@ export class TeamsHandler {
   }
 
   /**
-   * Poll the Teams UI every 1s for the active speaker (WI #7298). Builds a
-   * timestamped log (ms relative to recordingStartMs) that firm-transcriber
-   * matches against diarized segments. The active-speaker DOM is not yet
-   * confirmed for Teams v2 — if no selector matches, the log stays empty.
+   * Build a timestamped active speaker log (ms relative to recordingStartMs)
+   * that firm-transcriber matches against diarized segments.
+   *
+   * Primary source (WI #8031): the in-page CSRC hook (firmSpeechHook), drained
+   * every 3s. Works with cameras off. Fallback: DOM polling every 1s (WI
+   * #7298) — video-tile selectors only, so it is only recorded until the CSRC
+   * hook produces its first interval.
    */
   private _speakerPollCount = 0;
   private _speakerZeroMatchWarned = false;
@@ -1773,9 +1909,21 @@ export class TeamsHandler {
     this._recordingStartMs = recordingStartMs;
     this._speakerPollCount = 0;
     this._speakerZeroMatchWarned = false;
+    this._speechDrainCount = 0;
+    this._csrcActive = false;
+    this._speakerPage = page;
     console.log('[Teams][ActiveSpeaker] Polling started');
+
+    page.evaluate((t) => { (window as any).__firmSpeechStartMs = t; }, recordingStartMs)
+      .catch(err => console.log('[Teams][ActiveSpeaker] Could not set speech start time:', err));
+    this._speechDrainInterval = setInterval(() => {
+      this.drainSpeech(page, false).catch(() => { /* logged inside */ });
+    }, 3000);
+
     this._speakerPollInterval = setInterval(async () => {
       try {
+        // DOM fallback only counts until the CSRC hook is producing data
+        if (this._csrcActive) return;
         this._speakerPollCount++;
         const result = await page.evaluate(() => {
           // Teams v2 (Fluent 2 / New Teams) active speaker detection strategies:
@@ -1920,26 +2068,18 @@ export class TeamsHandler {
           const tileCount = (result as any).tileCount;
           console.log(`[Teams][ActiveSpeaker] Poll #${this._speakerPollCount}: no match (strategy: ${result.strategy}, tiles: ${tileCount !== undefined ? tileCount : '?'})`);
           if (this._speakerPollCount === 5) {
-            console.log('[Teams][ActiveSpeaker] WARNING: 5 consecutive polls with zero speaker matches — DOM selectors may need updating');
+            // WI #8031: no early exit on tileCount=0 — camera-off meetings have
+            // no tiles, and the CSRC hook is the primary source anyway.
+            console.log('[Teams][ActiveSpeaker] 5 DOM polls with zero matches — relying on CSRC hook (DOM fallback keeps polling)');
             this._speakerZeroMatchWarned = true;
-            // If tiles are genuinely absent (count=0), no point continuing — stop polling
-            if (typeof tileCount === 'number' && tileCount === 0) {
-              console.log('[Teams][ActiveSpeaker] tileCount=0 on all polls — stopping active speaker polling (selectors need updating)');
-              if (this._speakerPollInterval) {
-                clearInterval(this._speakerPollInterval);
-                this._speakerPollInterval = null;
-              }
-            }
           }
         }
 
         const speakerName = result.name;
         if (speakerName && speakerName !== this._currentSpeaker) {
-          if (this._currentSpeaker !== null) {
-            const last = this._activeSpeakerLog[this._activeSpeakerLog.length - 1];
-            if (last) last.endMs = nowMs;
-          }
-          this._activeSpeakerLog.push({ name: speakerName, startMs: nowMs });
+          if (this._currentSpeakerEntry) this._currentSpeakerEntry.endMs = nowMs;
+          this._currentSpeakerEntry = { name: speakerName, startMs: nowMs };
+          this._activeSpeakerLog.push(this._currentSpeakerEntry);
           this._currentSpeaker = speakerName;
           console.log(`[Teams][ActiveSpeaker] ${speakerName} at ${nowMs}ms (via ${result.strategy})`);
         }
@@ -1948,17 +2088,73 @@ export class TeamsHandler {
   }
 
   /**
-   * Stop active speaker polling and close the open entry
+   * Drain speech intervals buffered by the in-page CSRC hook into
+   * _activeSpeakerLog. `final` closes any still-open interval first.
    */
-  stopActiveSpeakerPolling(): ActiveSpeakerEntry[] {
+  private async drainSpeech(page: Page, final: boolean): Promise<void> {
+    try {
+      const { speech, diag } = await page.evaluate(([t, flush]) => {
+        const w = window as any;
+        // Re-set if the page reloaded mid-meeting (init script reran with no start time)
+        if (typeof w.__firmSpeechStartMs !== 'number') w.__firmSpeechStartMs = t;
+        if (flush) w.__firmSpeechFlush?.();
+        const s = w.__firmSpeech || [];
+        w.__firmSpeech = [];
+        return {
+          speech: s as { name: string; startMs: number; endMs: number }[],
+          diag: {
+            hookInstalled: !!w.__firmSpeechHookInstalled,
+            receiverCount: (w.__firmReceivers || []).length,
+            ...(w.__firmSpeechDiag || {}),
+          },
+        };
+      }, [this._recordingStartMs, final] as const);
+      this._speechDrainCount++;
+
+      if (speech.length > 0) {
+        if (!this._csrcActive) {
+          this._csrcActive = true;
+          console.log(`[Teams][ActiveSpeaker] CSRC hook producing data — receivers: ${diag.receiverCount}, ` +
+            `peerConnections: ${diag.pcCount}, participants: ${diag.participantCount}, ` +
+            `sample CSRCs: ${JSON.stringify(diag.sampleCsrcs)}`);
+          // Close any open DOM-sourced entry; CSRC takes over from here
+          if (this._currentSpeakerEntry && this._currentSpeakerEntry.endMs === undefined) {
+            this._currentSpeakerEntry.endMs = Date.now() - this._recordingStartMs;
+          }
+        }
+        this._activeSpeakerLog.push(...speech);
+        console.log(`[Teams][ActiveSpeaker] CSRC: ${speech.map(s => `${s.name} ${s.startMs}-${s.endMs}ms`).join(', ')}`);
+      } else if (!this._csrcActive && (this._speechDrainCount === 1 || this._speechDrainCount % 20 === 0)) {
+        // Hook status in CloudWatch while no data has arrived (first drain, then ~every 60s)
+        console.log(`[Teams][ActiveSpeaker] CSRC drain #${this._speechDrainCount}: no intervals yet — ${JSON.stringify(diag)}`);
+      }
+    } catch (err) {
+      console.log(`[Teams][ActiveSpeaker] CSRC drain failed (non-fatal): ${err}`);
+    }
+  }
+
+  /**
+   * Stop active speaker polling, drain the CSRC buffer one last time, and
+   * close the open entry
+   */
+  async stopActiveSpeakerPolling(): Promise<ActiveSpeakerEntry[]> {
     if (this._speakerPollInterval) {
       clearInterval(this._speakerPollInterval);
       this._speakerPollInterval = null;
-      console.log(`[Teams][ActiveSpeaker] Polling stopped (${this._activeSpeakerLog.length} entries)`);
+    }
+    if (this._speechDrainInterval) {
+      clearInterval(this._speechDrainInterval);
+      this._speechDrainInterval = null;
+      if (this._speakerPage && !this._speakerPage.isClosed()) {
+        await this.drainSpeech(this._speakerPage, true);
+      }
     }
     const nowMs = Date.now() - this._recordingStartMs;
-    const last = this._activeSpeakerLog[this._activeSpeakerLog.length - 1];
-    if (last && last.endMs === undefined) last.endMs = nowMs;
+    if (this._currentSpeakerEntry && this._currentSpeakerEntry.endMs === undefined) {
+      this._currentSpeakerEntry.endMs = nowMs;
+    }
+    this._activeSpeakerLog.sort((a, b) => a.startMs - b.startMs);
+    console.log(`[Teams][ActiveSpeaker] Polling stopped (${this._activeSpeakerLog.length} entries, source: ${this._csrcActive ? 'csrc' : 'dom'})`);
     return this._activeSpeakerLog;
   }
 
