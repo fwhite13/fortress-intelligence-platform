@@ -55,6 +55,22 @@ export interface RosterEntry {
 
 const SCREENSHOTS_DIR = process.env.RECORDINGS_DIR || '/app/recordings';
 
+/**
+ * Wait up to `timeout` ms for a locator to become visible; true if it did.
+ *
+ * WI #8032: use this instead of `locator.isVisible({ timeout })` — Playwright
+ * ignores that timeout (deprecated option) and returns immediately, so every
+ * "wait for X" check was really a single instant probe.
+ */
+async function waitVisible(locator: Locator, timeout: number): Promise<boolean> {
+  try {
+    await locator.waitFor({ state: 'visible', timeout });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class TeamsHandler {
   private rosterEntries: RosterEntry[] = [];
   private rosterPollInterval?: NodeJS.Timeout;
@@ -91,6 +107,25 @@ export class TeamsHandler {
       }
     } catch (e) {
       console.log(`[Teams] Screenshot failed: ${e}`);
+    }
+  }
+
+  /**
+   * Log every frame's URL and how many elements in it match `selector`
+   * (WI #8032). Diagnoses chat compose-box misses — if the box lives in a
+   * child frame, a page-level locator will never find it.
+   */
+  private static async logFrameDiagnostics(page: Page, selector: string): Promise<void> {
+    try {
+      const frames = page.frames();
+      console.log(`[Teams] Frame diagnostics (${frames.length} frames):`);
+      for (const frame of frames) {
+        const matches = await frame.locator(selector).count().catch(() => -1);
+        const label = frame === page.mainFrame() ? 'main' : 'child';
+        console.log(`[Teams]   [${label}] ${frame.url()} — compose matches: ${matches}`);
+      }
+    } catch (e) {
+      console.log(`[Teams] Frame diagnostics failed: ${e}`);
     }
   }
 
@@ -163,7 +198,7 @@ export class TeamsHandler {
       try {
         const element = page.locator(selector).first();
         // Short timeout — if the button exists, it should be visible quickly
-        if (await element.isVisible({ timeout: 3000 })) {
+        if (await waitVisible(element, 3000)) {
           console.log(`[Teams] Found launcher button: ${selector}`);
           // force:true is critical — without it, Playwright may not trigger
           // the click handler due to overlay/interception issues
@@ -182,7 +217,7 @@ export class TeamsHandler {
       for (const text of fallbackTexts) {
         try {
           const el = page.getByText(text, { exact: false }).first();
-          if (await el.isVisible({ timeout: 2000 })) {
+          if (await waitVisible(el, 2000)) {
             await el.click({ force: true });
             console.log(`[Teams] Clicked fallback text element: "${text}"`);
             return true;
@@ -479,7 +514,7 @@ export class TeamsHandler {
     for (const selector of selectors) {
       try {
         const btn = page.locator(selector).first();
-        if (await btn.isVisible({ timeout: 5000 })) {
+        if (await waitVisible(btn, 5000)) {
           await btn.click();
           return;
         }
@@ -523,8 +558,8 @@ export class TeamsHandler {
         const staySignedIn = locate('#idSIButton9');
         const kmsiCheckbox = locate('#KmsiCheckboxField');
         const onKmsi =
-          (await staySignedIn.isVisible({ timeout: 4000 }).catch(() => false)) ||
-          (await kmsiCheckbox.isVisible({ timeout: 2000 }).catch(() => false));
+          (await waitVisible(staySignedIn, 4000)) ||
+          (await waitVisible(kmsiCheckbox, 2000));
         if (onKmsi) {
           console.log(`[Teams][AUTH] KMSI page detected | URL: ${page.url()}`);
           await TeamsHandler.screenshot(page, 'auth-12-kmsi-page', s3, meetingId);
@@ -542,7 +577,7 @@ export class TeamsHandler {
       if (!handled) {
         try {
           const saotccTitle = locate('#idDiv_SAOTCC_Title');
-          if (await saotccTitle.isVisible({ timeout: 3000 }).catch(() => false)) {
+          if (await waitVisible(saotccTitle, 3000)) {
             const dismissSelectors = [
               '#idBtn_Back',
               'a:has-text("Not now")',
@@ -552,7 +587,7 @@ export class TeamsHandler {
             ];
             for (const selector of dismissSelectors) {
               const el = locate(selector).first();
-              if (await el.isVisible({ timeout: 3000 }).catch(() => false)) {
+              if (await waitVisible(el, 3000)) {
                 await el.click();
                 break;
               }
@@ -569,9 +604,9 @@ export class TeamsHandler {
       if (!handled) {
         try {
           const tile = locate('[data-test-id="tile"]').first();
-          if (await tile.isVisible({ timeout: 3000 }).catch(() => false)) {
+          if (await waitVisible(tile, 3000)) {
             const matchingTile = locate('[data-test-id="tile"]').filter({ hasText: email }).first();
-            if (await matchingTile.isVisible({ timeout: 3000 }).catch(() => false)) {
+            if (await waitVisible(matchingTile, 3000)) {
               await matchingTile.click();
             } else {
               console.log('[Teams] No tile matched BOT_EMAIL — clicking first available tile');
@@ -589,7 +624,7 @@ export class TeamsHandler {
       if (!handled) {
         try {
           const acceptButton = locate('button[value="Accept"]').first();
-          if (await acceptButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+          if (await waitVisible(acceptButton, 3000)) {
             await acceptButton.click();
             console.log('[Teams] Handled consent/permissions screen');
             handled = true;
@@ -621,7 +656,7 @@ export class TeamsHandler {
     for (const selector of selectors) {
       try {
         const btn = page.locator(selector).first();
-        if (await btn.isVisible({ timeout: 5000 })) {
+        if (await waitVisible(btn, 5000)) {
           await btn.click();
           return;
         }
@@ -727,8 +762,8 @@ export class TeamsHandler {
     // Step 3: Detect pre-join state and handle auth retry if needed
     type PreJoinState = 'signed_in' | 'signed_out' | 'unknown';
     const detectPreJoinState = async (): Promise<PreJoinState> => {
-      const hasJoinButton = await page.locator('[data-tid="prejoin-join-button"]').isVisible({ timeout: 2000 }).catch(() => false);
-      const hasNameInput = await page.locator('input[data-tid="prejoin-display-name-input"]').isVisible({ timeout: 2000 }).catch(() => false);
+      const hasJoinButton = await waitVisible(page.locator('[data-tid="prejoin-join-button"]'), 2000);
+      const hasNameInput = await waitVisible(page.locator('input[data-tid="prejoin-display-name-input"]'), 2000);
 
       if (hasJoinButton && !hasNameInput) {
         return 'signed_in';
@@ -794,7 +829,7 @@ export class TeamsHandler {
       for (const selector of nameSelectors) {
         try {
           const nameInput = page.locator(selector).first();
-          if (await nameInput.isVisible({ timeout: 3000 })) {
+          if (await waitVisible(nameInput, 3000)) {
             await nameInput.clear();
             await nameInput.fill(botName);
             console.log(`[Teams] Entered name "${botName}" via: ${selector}`);
@@ -857,7 +892,7 @@ export class TeamsHandler {
     // First try data-tid selector (most reliable)
     try {
       const tidButton = page.locator('[data-tid="prejoin-join-button"]').first();
-      if (await tidButton.isVisible({ timeout: 3000 })) {
+      if (await waitVisible(tidButton, 3000)) {
         await tidButton.click();
         console.log('[Teams] Clicked join via data-tid="prejoin-join-button"');
         clickedJoin = true;
@@ -870,7 +905,7 @@ export class TeamsHandler {
       for (const text of joinButtonTexts) {
         try {
           const button = page.getByRole('button', { name: new RegExp(text, 'i') });
-          if (await button.isVisible({ timeout: 3000 })) {
+          if (await waitVisible(button, 3000)) {
             const buttonText = await button.textContent();
             // Skip buttons that would open the desktop app
             if (buttonText && (buttonText.includes('Teams app') || buttonText.includes('Download'))) {
@@ -941,7 +976,7 @@ export class TeamsHandler {
         // Check for Leave button (means we were admitted)
         try {
           const leaveButton = page.getByRole('button', { name: /Leave/i });
-          if (await leaveButton.isVisible({ timeout: 1000 })) {
+          if (await waitVisible(leaveButton, 1000)) {
             console.log('[Teams] ✅ Admitted from waiting room, now in meeting');
             await TeamsHandler.screenshot(page, '05-admitted-in-meeting', s3, meetingId);
             admitted = true;
@@ -965,7 +1000,7 @@ export class TeamsHandler {
         // Check one final time
         try {
           const leaveButton = page.getByRole('button', { name: /Leave/i });
-          if (await leaveButton.isVisible({ timeout: 2000 })) {
+          if (await waitVisible(leaveButton, 2000)) {
             console.log('[Teams] ✅ Admitted just before timeout — now in meeting');
             await TeamsHandler.screenshot(page, '05-admitted-last-second', s3, meetingId);
             return;
@@ -1040,22 +1075,34 @@ export class TeamsHandler {
 
       console.log('[Teams] Posting join notification to meeting chat...');
 
-      // Step 1: open the chat panel
+      // Step 1: open the chat panel. WI #8032: the in-meeting toggle is
+      // button#chat-button (an id, not a data-tid — matches the Attendee bot).
+      // The old broad aria-label "Chat" match hit the left app-bar Chat app in
+      // the signed-in shell, which navigates away from the meeting stage.
+      const composeSelector = [
+        '[aria-label^="Type a message"]',
+        '[placeholder^="Type a message"]',
+        '[id^="new-message-"][contenteditable="true"]',
+      ].join(', ');
+      const composeBox = page.locator(composeSelector).first();
+
       const chatButtonSelectors = [
-        '[data-tid="chat-button"]',
-        'button[aria-label="Chat"]',
+        '#chat-button',
+        'button[data-tid="chat-button"]',
         'button[aria-label*="Show conversation" i]',
-        'button[aria-label*="chat" i]',
       ];
-      let openedChat = false;
+      let openedChat = await composeBox.isVisible();
+      if (openedChat) {
+        console.log('[Teams] Chat panel already open — not toggling');
+      }
       for (const selector of chatButtonSelectors) {
+        if (openedChat) break;
         try {
           const btn = page.locator(selector).first();
-          if (await btn.isVisible({ timeout: 3000 })) {
+          if (await waitVisible(btn, 3000)) {
             await btn.click();
             console.log(`[Teams] Opened chat panel via: ${selector}`);
             openedChat = true;
-            break;
           }
         } catch {
           continue;
@@ -1063,30 +1110,24 @@ export class TeamsHandler {
       }
       if (!openedChat) {
         console.log('[Teams] WARNING: could not find chat panel toggle — skipping chat notification');
+        await TeamsHandler.logFrameDiagnostics(page, composeSelector);
         return;
       }
 
-      // Step 2: wait for chat panel to fully render
-      await page.waitForTimeout(2000);
-      console.log('[Teams] Chat panel opened, waiting for input field to render...');
-
-      // Wait for compose box to appear in DOM before running selector loop
-      // Uses the broadest fallback selector with a generous timeout
-      try {
-        await page.waitForSelector(
-          'div[contenteditable="true"], [contenteditable="true"][role="textbox"]',
-          { timeout: 7000 }
-        );
-        console.log('[Teams] Compose box appeared in DOM — proceeding with input search');
-      } catch {
-        console.log('[Teams] WARNING: Compose box did not appear within 7s — attempting input search anyway');
-      }
+      // Step 2: wait for the CKEditor compose box. It mounts lazily after the
+      // panel shell, and the first open after joining can take well over the
+      // old 2s+7s budget — allow 20s on cold start.
+      console.log('[Teams] Chat panel opened, waiting up to 20s for compose box...');
+      const composeReady = await waitVisible(composeBox, 20000);
+      console.log(composeReady
+        ? '[Teams] Compose box visible'
+        : '[Teams] WARNING: compose box not visible within 20s — trying fallbacks');
 
       // Step 2a: Dismiss notifications/banners that may block chat input
       // Dismiss "You have been muted" notification if present
       try {
         const dismissBtn = page.locator('button[aria-label="Dismiss"]').first();
-        if (await dismissBtn.isVisible({ timeout: 2000 })) {
+        if (await waitVisible(dismissBtn, 2000)) {
           await dismissBtn.click();
           console.log('[Teams] Dismissed "You have been muted" notification');
           await page.waitForTimeout(500);
@@ -1108,7 +1149,7 @@ export class TeamsHandler {
         for (const selector of externalBannerSelectors) {
           try {
             const btn = page.locator(selector).first();
-            if (await btn.isVisible({ timeout: 1000 })) {
+            if (await waitVisible(btn, 1000)) {
               await btn.click();
               console.log('[Teams] Dismissed "Replying to external participants" banner');
               await page.waitForTimeout(500);
@@ -1120,10 +1161,10 @@ export class TeamsHandler {
         }
         // Also try finding the banner by text and clicking its X button
         const bannerText = page.locator('text=/replying to external/i').first();
-        if (await bannerText.isVisible({ timeout: 1000 })) {
+        if (await waitVisible(bannerText, 1000)) {
           // Look for close button near the banner
           const closeBtn = page.locator('button:near(:text("Replying to external"))').filter({ hasText: /×|X|close/i }).first();
-          if (await closeBtn.isVisible({ timeout: 1000 })) {
+          if (await waitVisible(closeBtn, 1000)) {
             await closeBtn.click();
             console.log('[Teams] Dismissed external participants banner via nearby close button');
             await page.waitForTimeout(500);
@@ -1133,138 +1174,43 @@ export class TeamsHandler {
         // No external banner present, continue
       }
 
-      // Step 3: find the chat input with fallbacks for authenticated mode
-      const inputSelectors = [
-        'div[aria-label="Type a message"][contenteditable="true"]',
+      // Step 3: find the chat input. Primary selectors are the production-
+      // confirmed Attendee ones above; the rest are older guesses kept as a
+      // fallback. No shadow-DOM search — the compose box is light DOM
+      // (CKEditor 5), and Playwright CSS locators pierce open shadow roots anyway.
+      const fallbackInputSelectors = [
         'div[aria-placeholder="Type a message"]',
         'p[data-placeholder="Type a message"]',
-        'div[contenteditable="true"][role="textbox"]',
         '[data-tid*="compose"][contenteditable="true"]',
         'div[data-tid="newMessageInput"]',
-        'div[aria-label="Type a message"]',
         'div[data-tid="ckeditor"]',
         'div[contenteditable="true"][aria-label*="message" i]',
-        'div[contenteditable="true"][aria-label*="chat" i]',
         'div[contenteditable="true"][aria-label*="reply" i]',
         '[contenteditable="true"][role="textbox"]',
-        'div[contenteditable="true"]', // broadest fallback
       ];
       let chatInput: Locator | null = null;
       let successfulSelector: string | null = null;
 
-      // Try "Type a message" placeholder text directly if visible
-      try {
-        const placeholderText = page.locator('text=Type a message').first();
-        if (await placeholderText.isVisible({ timeout: 2000 })) {
-          await placeholderText.click();
-          console.log('[Teams] Clicked "Type a message" placeholder text');
-          await page.waitForTimeout(500);
-        }
-      } catch {
-        // Not found, continue with selector search
-      }
-
-      for (const selector of inputSelectors) {
-        try {
+      if (await waitVisible(composeBox, 2000)) {
+        chatInput = composeBox;
+        successfulSelector = composeSelector;
+      } else {
+        for (const selector of fallbackInputSelectors) {
           const el = page.locator(selector).first();
-          if (await el.isVisible({ timeout: 3000 })) {
+          if (await el.isVisible()) {
             chatInput = el;
             successfulSelector = selector;
-            console.log(`[Teams] ✅ Found chat input via: ${selector}`);
             break;
           }
-        } catch {
-          continue;
         }
       }
-
-      // Step 3b: If standard selectors failed, try shadow-root-aware search
-      // The "Replying to external participants" context may render the compose box in a shadow root
-      if (!chatInput) {
-        console.log('[Teams] Standard selectors failed — trying shadow-root-aware search...');
-        try {
-          const shadowResult = await page.evaluate(() => {
-            // Recursively search shadow roots for contenteditable elements
-            const searchShadowRoots = (root: Document | ShadowRoot): Element | null => {
-              // Check direct children first
-              const direct = root.querySelector('div[contenteditable="true"], [contenteditable="true"][role="textbox"]');
-              if (direct) return direct;
-
-              // Search in shadow roots of all elements
-              for (const el of root.querySelectorAll('*')) {
-                if (el.shadowRoot) {
-                  const found = searchShadowRoots(el.shadowRoot);
-                  if (found) return found;
-                }
-              }
-              return null;
-            };
-
-            const found = searchShadowRoots(document);
-            if (found) {
-              // Generate a unique selector path for Playwright to use
-              // Return info about what we found
-              return {
-                found: true,
-                tagName: found.tagName,
-                ariaLabel: found.getAttribute('aria-label'),
-                role: found.getAttribute('role'),
-              };
-            }
-            return { found: false };
-          });
-
-          if (shadowResult.found) {
-            console.log(`[Teams] Shadow-root search found contenteditable: ${JSON.stringify(shadowResult)}`);
-            // Use Playwright's built-in pierce selector to access shadow DOM
-            const pierceSelectors = [
-              'div[contenteditable="true"] >> visible=true',
-              '[contenteditable="true"][role="textbox"] >> visible=true',
-            ];
-            for (const sel of pierceSelectors) {
-              try {
-                const el = page.locator(sel).first();
-                if (await el.isVisible({ timeout: 2000 })) {
-                  chatInput = el;
-                  successfulSelector = `shadow-pierce: ${sel}`;
-                  console.log(`[Teams] ✅ Found chat input via shadow-pierce: ${sel}`);
-                  break;
-                }
-              } catch {
-                continue;
-              }
-            }
-          }
-        } catch (shadowErr) {
-          console.log(`[Teams] Shadow-root search failed: ${shadowErr}`);
-        }
-      }
-
-      // Step 3c: Last resort — try additional selectors for external-reply context
-      if (!chatInput) {
-        const externalReplySelectors = [
-          'div[aria-label*="reply" i][contenteditable="true"]',
-          'div[aria-label*="external" i][contenteditable="true"]',
-          'div[aria-label*="message" i][contenteditable="true"]',
-          'div[placeholder*="reply" i][contenteditable="true"]',
-        ];
-        for (const selector of externalReplySelectors) {
-          try {
-            const el = page.locator(selector).first();
-            if (await el.isVisible({ timeout: 2000 })) {
-              chatInput = el;
-              successfulSelector = selector;
-              console.log(`[Teams] ✅ Found chat input via external-reply selector: ${selector}`);
-              break;
-            }
-          } catch {
-            continue;
-          }
-        }
+      if (successfulSelector) {
+        console.log(`[Teams] ✅ Found chat input via: ${successfulSelector}`);
       }
 
       if (!chatInput || !successfulSelector) {
         console.log('[Teams] WARNING: could not find chat input field — skipping chat notification');
+        await TeamsHandler.logFrameDiagnostics(page, composeSelector);
         const s3 = new S3Service(
           process.env.AWS_REGION || 'us-east-1',
           process.env.S3_BUCKET || 'firm-recordings-dev'
@@ -1296,7 +1242,7 @@ export class TeamsHandler {
       for (const selector of sendButtonSelectors) {
         try {
           const btn = page.locator(selector).first();
-          if (await btn.isVisible({ timeout: 3000 })) {
+          if (await waitVisible(btn, 3000)) {
             await btn.click();
             sent = true;
             break;
@@ -1348,7 +1294,7 @@ export class TeamsHandler {
       for (const selector of cameraSelectors) {
         try {
           const el = page.locator(selector).first();
-          if (await el.isVisible({ timeout: 2000 })) {
+          if (await waitVisible(el, 2000)) {
             // Check if camera is currently ON via aria-checked or aria-pressed
             const state = await page.evaluate((sel) => {
               const elem = document.querySelector(sel);
@@ -1416,7 +1362,7 @@ export class TeamsHandler {
       for (const selector of micSelectors) {
         try {
           const el = page.locator(selector).first();
-          if (await el.isVisible({ timeout: 2000 })) {
+          if (await waitVisible(el, 2000)) {
             // Check if microphone is currently ON via aria-checked, aria-pressed, or checked
             const state = await page.evaluate((sel) => {
               const elem = document.querySelector(sel);
@@ -1747,11 +1693,11 @@ export class TeamsHandler {
       '[role="tree"][aria-label*="people" i]',
     ].join(', ');
     try {
-      let panelOpen = await page.locator(panelSelector).first().isVisible({ timeout: 1000 }).catch(() => false);
+      let panelOpen = await waitVisible(page.locator(panelSelector).first(), 1000);
       if (!panelOpen && !this.rosterPanelOpenAttempted) {
         this.rosterPanelOpenAttempted = true;
         const button = page.locator('[data-tid="roster-button"], #roster-button, button[aria-label^="People" i]').first();
-        if (await button.isVisible({ timeout: 2000 }).catch(() => false)) {
+        if (await waitVisible(button, 2000)) {
           await button.click({ timeout: 3000 });
           console.log('[Teams][Roster] Opened roster panel (left open for remaining polls)');
           panelOpen = await page.locator(panelSelector).first()
