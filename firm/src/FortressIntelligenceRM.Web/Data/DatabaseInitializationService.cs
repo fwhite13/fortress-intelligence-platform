@@ -200,11 +200,21 @@ public class DatabaseInitializationService : IHostedService
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_fmc_meeting (meeting_id)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
-                // WI #8034 — key/value org settings mutable at runtime (e.g. zoom_bot_user_id).
+                // WI #8034 — key/value org settings mutable at runtime.
                 ("firm_system_config", @"CREATE TABLE IF NOT EXISTS firm_system_config (
     config_key VARCHAR(100) NOT NULL PRIMARY KEY,
     config_value TEXT NULL,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                // WI #8043 — shared Zoom bot account tokens; single row (id = 1), no user FK.
+                ("firm_zoom_bot_account", @"CREATE TABLE IF NOT EXISTS firm_zoom_bot_account (
+    id INT PRIMARY KEY DEFAULT 1,
+    email VARCHAR(255),
+    zoom_user_id VARCHAR(100),
+    access_token TEXT,
+    refresh_token TEXT,
+    expires_at DATETIME,
+    connected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 

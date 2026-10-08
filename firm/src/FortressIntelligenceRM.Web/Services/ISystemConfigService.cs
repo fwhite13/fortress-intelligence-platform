@@ -10,12 +10,4 @@ public interface ISystemConfigService
 
     /// <summary>Removes <paramref name="key"/> if present.</summary>
     Task RemoveAsync(string key);
-
-    /// <summary>
-    /// Returns the FIRM userId whose linked Zoom account is the shared bot account, or null if
-    /// none is configured.
-    /// </summary>
-    Task<Guid?> GetZoomBotUserIdAsync();
-
-    Task SetZoomBotUserIdAsync(Guid userId);
 }
