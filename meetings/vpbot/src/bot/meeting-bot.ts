@@ -70,6 +70,11 @@ const MIN_RECORDING_MINUTES = 3;
 // is a failed join to a dead room, not a real meeting end.
 const DEAD_ROOM_THRESHOLD_MS = 60_000;
 
+// WI #8083: Until someone other than the bot has appeared in the roster, the meeting hasn't
+// started yet (empty room / host running late). Wait this long from scheduled start (or
+// recording start) before giving up.
+const NO_PARTICIPANTS_PATIENCE_MS = 20 * 60_000;
+
 export class MeetingBot extends EventEmitter {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
@@ -87,6 +92,8 @@ export class MeetingBot extends EventEmitter {
   private _teamsHandler: TeamsHandler | null = null;
   private _zoomHandler: ZoomHandler | null = null;
   private _deadRoom = false;
+  // WI #8083: true once the roster has shown anyone besides the bot. Never reset.
+  private _hasHadOtherParticipants = false;
 
   constructor(meeting: Meeting, recordingsDir: string) {
     super();
@@ -486,6 +493,18 @@ export class MeetingBot extends EventEmitter {
     const END_POLL_INTERVAL_MS = 15_000;
     let participantOneCount = 0;
 
+    // WI #8083: Patience window anchor — scheduled start if known, else recording start
+    let patienceStartMs = this._recordingStartTime;
+    const scheduledStartEnv = process.env.SCHEDULED_START_TIME;
+    if (scheduledStartEnv) {
+      const scheduledStartMs = new Date(scheduledStartEnv).getTime();
+      if (Number.isNaN(scheduledStartMs)) {
+        console.warn(`[Bot] Ignoring unparseable SCHEDULED_START_TIME for patience window: ${scheduledStartEnv}`);
+      } else {
+        patienceStartMs = scheduledStartMs;
+      }
+    }
+
     // WI #7289: UI-signal detection for meeting end (Teams v2 compatible)
     // Meeting is considered over when UI controls are absent for N consecutive polls
     const MEETING_UI_SELECTORS = [
@@ -578,24 +597,44 @@ export class MeetingBot extends EventEmitter {
         const minDurationMs = MIN_RECORDING_MINUTES * 60 * 1000;
         const pastMinDuration = (Date.now() - this._recordingStartTime) >= minDurationMs;
 
-        // Signal 2: Participant count drops to ≤1 for 5 consecutive polls (75s)
+        // Signal 2: Participant count drops to ≤1 (WI #8083: presence is the viability signal)
+        // - Never had other participants: meeting hasn't started — wait until T+20min before giving up
+        // - Had other participants: all left — end after 5 consecutive polls (75s)
         // Requires: min-duration guard
         const countEl = await page.$('[data-tid="roster-button"]');
         if (countEl) {
           const countText = (await countEl.textContent()) || '';
           const count = parseInt(countText.match(/\d+/)?.[0] || '0', 10);
+          if (count > 1 && !this._hasHadOtherParticipants) {
+            this._hasHadOtherParticipants = true;
+            console.log('[Bot] First participant joined — meeting is live');
+          }
           if (count <= 1) {
             participantOneCount++;
-            console.log(`[Bot] Participant count ≤1 (${participantOneCount}/5 consecutive polls)`);
-            if (participantOneCount >= 5 && pastMinDuration) {
-              // 5 consecutive 15s polls = alone for ≥75s
-              console.log('[Bot] Alone in meeting for 75s — ending');
-              if (this._endPollInterval) clearInterval(this._endPollInterval);
-              this._endPollInterval = null;
-              this.stop('participant-count-timeout').catch((err) =>
-                console.error('[Bot] Error stopping after participant count timeout:', err)
-              );
-              return;
+            if (!this._hasHadOtherParticipants) {
+              const waitedMs = Date.now() - patienceStartMs;
+              if (waitedMs >= NO_PARTICIPANTS_PATIENCE_MS && pastMinDuration) {
+                console.log('[Bot] No participants after 20 min — giving up');
+                if (this._endPollInterval) clearInterval(this._endPollInterval);
+                this._endPollInterval = null;
+                this.stop('no-participants-timeout').catch((err) =>
+                  console.error('[Bot] Error stopping after no-participants timeout:', err)
+                );
+                return;
+              }
+              console.log(`[Bot] No participants yet — waiting until T+20min before giving up (elapsed: ${Math.max(0, Math.round(waitedMs / 1000))}s)`);
+            } else {
+              console.log(`[Bot] Participant count ≤1 (${participantOneCount}/5 consecutive polls)`);
+              if (participantOneCount >= 5 && pastMinDuration) {
+                // 5 consecutive 15s polls = alone for ≥75s after participants had been present
+                console.log('[Bot] All participants left (roster empty for 75s) — ending');
+                if (this._endPollInterval) clearInterval(this._endPollInterval);
+                this._endPollInterval = null;
+                this.stop('participant-count-timeout').catch((err) =>
+                  console.error('[Bot] Error stopping after participant count timeout:', err)
+                );
+                return;
+              }
             }
           } else {
             participantOneCount = 0;
@@ -603,9 +642,11 @@ export class MeetingBot extends EventEmitter {
         }
 
         // Signal 3: Sustained audio silence via FFmpeg silencedetect
-        // Requires: min-duration guard + alone (participant count ≤1 or roster unknown)
+        // WI #8083: only applies after participants have been present AND the roster is now
+        // empty (or unknown). Silence in an empty room = not started yet; silence with people
+        // present = everyone muted. Neither means the meeting ended.
         // Trigger: silence_start was detected and no silence_end has arrived for >90s
-        if (this._silenceStartTime !== null && pastMinDuration) {
+        if (this._silenceStartTime !== null && pastMinDuration && this._hasHadOtherParticipants) {
           const silenceDurationMs = Date.now() - this._silenceStartTime;
           const aloneOrUnknown = !countEl || participantOneCount >= 3; // 45s alone before silence can trigger
           if (silenceDurationMs > 90_000 && aloneOrUnknown) {
@@ -683,7 +724,7 @@ export class MeetingBot extends EventEmitter {
    * Sends SIGINT (graceful quit) to ffmpeg so it writes the WAV header properly.
    *
    * @param reason  Optional stop reason for logging (e.g. 'meeting-ended-detected',
-   *                'max-recording-timeout', 'participant-count-timeout', 'api-request')
+   *                'max-recording-timeout', 'participant-count-timeout', 'no-participants-timeout', 'api-request')
    */
   /**
    * Page closed under us — either a real meeting end or a dead-room join (WI #7908).
