@@ -41,7 +41,7 @@ import { ActiveSpeakerEntry } from '../types.js';
 
 export class LobbyTimeoutError extends Error {
   constructor() {
-    super('Bot was not admitted to the Teams meeting lobby within 3 minutes');
+    super('Bot was not admitted to the Teams meeting lobby within 20 minutes');
     this.name = 'LobbyTimeoutError';
   }
 }
@@ -1099,11 +1099,11 @@ export class TeamsHandler {
     const inWaitingRoom = waitingRoomPhrases.some(t => bodyText.toLowerCase().includes(t.toLowerCase()));
     
     if (inWaitingRoom) {
-      console.log('[Teams] In waiting room / lobby, waiting to be admitted (max 3 min)...');
+      console.log('[Teams] In waiting room / lobby, waiting to be admitted (up to 20 min)...');
       await TeamsHandler.screenshot(page, '04b-waiting-room', s3, meetingId);
       let admitted = false;
-      // Poll 18×10s = 3 minutes
-      for (let i = 0; i < 18; i++) {
+      // Poll 120×10s = 20 minutes
+      for (let i = 0; i < 120; i++) {
         await page.waitForTimeout(10000);
 
         // Check for Leave button (means we were admitted)
@@ -1141,7 +1141,7 @@ export class TeamsHandler {
         } catch {
           // not admitted
         }
-        console.log('[Teams] ❌ Not admitted to lobby within 3 minutes — throwing LobbyTimeoutError');
+        console.log('[Teams] ❌ Not admitted to lobby within 20 minutes — throwing LobbyTimeoutError');
         await TeamsHandler.screenshot(page, '05-lobby-timeout', s3, meetingId);
         throw new LobbyTimeoutError();
       }
