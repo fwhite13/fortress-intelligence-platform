@@ -1225,6 +1225,8 @@ export class TeamsHandler {
         'button[aria-label*="Show conversation" i]',
       ];
       let openedChat = await composeBox.isVisible();
+      // WI #8064: the compose-box retry budget is measured from this moment.
+      let chatOpenedAt = Date.now();
       if (openedChat) {
         console.log('[Teams] Chat panel already open — not toggling');
       }
@@ -1234,6 +1236,7 @@ export class TeamsHandler {
           const btn = page.locator(selector).first();
           if (await waitVisible(btn, 3000)) {
             await btn.click();
+            chatOpenedAt = Date.now();
             console.log(`[Teams] Opened chat panel via: ${selector}`);
             openedChat = true;
           }
@@ -1254,7 +1257,7 @@ export class TeamsHandler {
       const composeReady = await waitVisible(composeBox, 20000);
       console.log(composeReady
         ? '[Teams] Compose box visible'
-        : '[Teams] WARNING: compose box not visible within 20s — trying fallbacks');
+        : '[Teams] Compose box not visible within 20s — continuing to poll all selectors (up to 60s)');
 
       // Step 2a: Dismiss notifications/banners that may block chat input
       // Dismiss "You have been muted" notification if present
@@ -1311,6 +1314,12 @@ export class TeamsHandler {
       // confirmed Attendee ones above; the rest are older guesses kept as a
       // fallback. No shadow-DOM search — the compose box is light DOM
       // (CKEditor 5), and Playwright CSS locators pierce open shadow roots anyway.
+      // WI #8064: when the bot joins at meeting start, the compose box can take
+      // well over 20s to mount, so poll all selectors every 3s until 60s have
+      // elapsed since the chat panel was opened.
+      const COMPOSE_TOTAL_WAIT_MS = 60000;
+      const COMPOSE_POLL_INTERVAL_MS = 3000;
+      const COMPOSE_LOG_INTERVAL_MS = 10000;
       const fallbackInputSelectors = [
         'div[aria-placeholder="Type a message"]',
         'p[data-placeholder="Type a message"]',
@@ -1324,10 +1333,13 @@ export class TeamsHandler {
       let chatInput: Locator | null = null;
       let successfulSelector: string | null = null;
 
-      if (await waitVisible(composeBox, 2000)) {
-        chatInput = composeBox;
-        successfulSelector = composeSelector;
-      } else {
+      let lastProgressLog = chatOpenedAt;
+      while (true) {
+        if (await composeBox.isVisible()) {
+          chatInput = composeBox;
+          successfulSelector = composeSelector;
+          break;
+        }
         for (const selector of fallbackInputSelectors) {
           const el = page.locator(selector).first();
           if (await el.isVisible()) {
@@ -1336,6 +1348,20 @@ export class TeamsHandler {
             break;
           }
         }
+        if (chatInput) break;
+
+        const now = Date.now();
+        if (now - chatOpenedAt >= COMPOSE_TOTAL_WAIT_MS) {
+          console.log(`[Teams] WARNING: compose box not visible within ${COMPOSE_TOTAL_WAIT_MS / 1000}s of opening chat`);
+          break;
+        }
+        if (now - lastProgressLog >= COMPOSE_LOG_INTERVAL_MS) {
+          console.log(`[Teams] Waiting for compose box... (${Math.round((now - chatOpenedAt) / 1000)}s elapsed)`);
+          lastProgressLog = now;
+        }
+        await page.waitForTimeout(
+          Math.min(COMPOSE_POLL_INTERVAL_MS, COMPOSE_TOTAL_WAIT_MS - (now - chatOpenedAt))
+        );
       }
       if (successfulSelector) {
         console.log(`[Teams] ✅ Found chat input via: ${successfulSelector}`);
