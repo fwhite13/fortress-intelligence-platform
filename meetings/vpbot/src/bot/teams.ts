@@ -1922,17 +1922,50 @@ export class TeamsHandler {
 
     this._speakerPollInterval = setInterval(async () => {
       try {
-        // DOM fallback only counts until the CSRC hook is producing data
-        if (this._csrcActive) return;
+        // WI #8058: DOM polling always runs, regardless of CSRC hook state
         this._speakerPollCount++;
         const result = await page.evaluate(() => {
           // Teams v2 (Fluent 2 / New Teams) active speaker detection strategies:
-          // 1. CSS class-based speaking ring (blue border) — most common in v2
-          // 2. data-is-speaking attribute on tile
-          // 3. aria-label containing ", speaking" (comma-separated format)
-          // 4. Presence of speaking indicator element within the tile
+          // 1. data-is-speaking attribute on tile/roster cell — PRIMARY (camera-on and camera-off)
+          // 2. CSS class-based speaking ring (blue border)
+          // 3. Presence of speaking indicator element within the tile
+          // 4. aria-label containing ", speaking" (comma-separated format)
+          // 5. Legacy aria-label selectors
 
-          // Strategy 1: Look for CSS classes indicating speaking state
+          // Strategy 1: data-is-speaking attribute (WI #8058)
+          // Production DOM has the attribute on every participant tile but never
+          // with value "true", so evaluate the value instead of matching a literal.
+          // Explicit falsy values mean not speaking; a bare/empty attribute counts
+          // as speaking only when other elements carry a different value (otherwise
+          // an all-empty set carries no speaking signal).
+          const falsyValues = new Set(['false', '0', 'no', 'off', 'null', 'undefined']);
+          const speakingAttrEls = Array.from(document.querySelectorAll('[data-is-speaking]'));
+          const speakingAttrValues = speakingAttrEls.map(el => (el.getAttribute('data-is-speaking') || '').trim().toLowerCase());
+          const allEmpty = speakingAttrValues.every(v => v === '');
+          for (let i = 0; i < speakingAttrEls.length; i++) {
+            const v = speakingAttrValues[i];
+            if (falsyValues.has(v) || (v === '' && allEmpty)) continue;
+            const el = speakingAttrEls[i];
+            const tile = el.closest('[data-tid="video-tile"]') ||
+                         el.closest('.fui-VideoTile') ||
+                         el.closest('[data-tid="calling-roster-cell"]') ||
+                         el.closest('[data-tid*="participant"]');
+            let name: string | undefined;
+            for (const scope of [el, tile].filter(Boolean) as Element[]) {
+              const nameEl = scope.querySelector('[data-tid="participant-display-name"]') ||
+                             scope.querySelector('[data-tid*="display-name"]');
+              name = nameEl?.textContent?.trim() || undefined;
+              if (name) break;
+            }
+            if (!name) {
+              const ariaLabel = (el.getAttribute('aria-label') || tile?.getAttribute('aria-label') || '').trim();
+              name = ariaLabel.match(/^([^,]+)/)?.[1]?.trim() || undefined;
+            }
+            if (!name) name = el.textContent?.trim() || undefined;
+            if (name) return { name, strategy: 'data-is-speaking', selector: `[data-is-speaking="${v}"]` };
+          }
+
+          // Strategy 2: Look for CSS classes indicating speaking state
           const speakingClassSelectors = [
             '.fui-VideoTile--speaking',
             '[data-tid="video-tile"].speaking',
@@ -1953,7 +1986,7 @@ export class TeamsHandler {
             }
           }
 
-          // Strategy 2: Look for speaking indicator element within video tiles
+          // Strategy 3: Look for speaking indicator element within video tiles
           const indicatorSelectors = [
             '[data-tid="video-tile-speaking-indicator"]',
             '[data-tid*="speaking-indicator"]',
@@ -1973,25 +2006,6 @@ export class TeamsHandler {
                 const name = nameEl?.textContent?.trim();
                 if (name) return { name, strategy: 'indicator-element', selector: sel };
               }
-            }
-          }
-
-          // Strategy 3: data-is-speaking attribute
-          const dataAttrSelectors = [
-            '[data-tid="video-tile"][data-is-speaking="true"]',
-            '[data-tid="calling-roster-cell"][data-is-speaking="true"]',
-            '.fui-VideoTile[data-is-speaking="true"]',
-            '[data-is-speaking="true"]',
-          ];
-
-          for (const sel of dataAttrSelectors) {
-            const el = document.querySelector(sel);
-            if (el) {
-              const nameEl = el.querySelector('[data-tid="participant-display-name"]') ||
-                             el.querySelector('[data-tid*="display-name"]') ||
-                             el;
-              const name = nameEl.textContent?.trim();
-              if (name) return { name, strategy: 'data-attr', selector: sel };
             }
           }
 
@@ -2030,7 +2044,10 @@ export class TeamsHandler {
 
           // No match — return diagnostic info for debugging
           const tileCount = document.querySelectorAll('[data-tid="video-tile"], .fui-VideoTile').length;
-          return { name: null, strategy: 'none', tileCount };
+          // WI #8058: value distribution of data-is-speaking, to confirm the real value pattern in CloudWatch
+          const dataIsSpeakingValues: Record<string, number> = {};
+          for (const v of speakingAttrValues) dataIsSpeakingValues[v || '(empty)'] = (dataIsSpeakingValues[v || '(empty)'] || 0) + 1;
+          return { name: null, strategy: 'none', tileCount, dataIsSpeakingValues };
         }).catch(() => ({ name: null, strategy: 'error' }));
 
         const nowMs = Date.now() - this._recordingStartMs;
@@ -2066,11 +2083,12 @@ export class TeamsHandler {
             }
           }
           const tileCount = (result as any).tileCount;
-          console.log(`[Teams][ActiveSpeaker] Poll #${this._speakerPollCount}: no match (strategy: ${result.strategy}, tiles: ${tileCount !== undefined ? tileCount : '?'})`);
+          const attrValues = (result as any).dataIsSpeakingValues;
+          console.log(`[Teams][ActiveSpeaker] Poll #${this._speakerPollCount}: no match (strategy: ${result.strategy}, tiles: ${tileCount !== undefined ? tileCount : '?'}, data-is-speaking values: ${attrValues ? JSON.stringify(attrValues) : '?'})`);
           if (this._speakerPollCount === 5) {
             // WI #8031: no early exit on tileCount=0 — camera-off meetings have
             // no tiles, and the CSRC hook is the primary source anyway.
-            console.log('[Teams][ActiveSpeaker] 5 DOM polls with zero matches — relying on CSRC hook (DOM fallback keeps polling)');
+            console.log('[Teams][ActiveSpeaker] 5 DOM polls with zero matches — DOM polling continues alongside CSRC hook');
             this._speakerZeroMatchWarned = true;
           }
         }
