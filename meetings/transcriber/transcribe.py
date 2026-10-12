@@ -26,6 +26,7 @@ from botocore.config import Config
 import requests
 import torch
 import whisperx
+from whisperx.diarize import DiarizationPipeline  # no longer re-exported from the whisperx package in 3.8
 from json_repair import repair_json
 
 ACTIVE_SPEAKER_PROMPT_LIMIT = 50  # cap timeline entries in the summary prompt to bound token usage
@@ -286,9 +287,9 @@ def main():
                 # Set offline mode only for pyannote — weights are pre-baked, Whisper downloads at runtime
                 os.environ["HF_HUB_OFFLINE"] = "1"
                 try:
-                    diarize_model = whisperx.DiarizationPipeline(
-                        model_name="pyannote/speaker-diarization-3.1",
-                        use_auth_token=hf_token,
+                    diarize_model = DiarizationPipeline(
+                        model_name="pyannote/speaker-diarization-community-1",
+                        token=hf_token,
                         device=device,
                     )
                 finally:
