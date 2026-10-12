@@ -224,11 +224,6 @@ export class MeetingBot extends EventEmitter {
         ...(storageStatePath ? { storageState: storageStatePath } : {}),
       });
 
-      // WI #8031: CSRC active speaker hook must exist before any Teams page loads
-      if (isTeams) {
-        await TeamsHandler.installSpeechHook(this.context);
-      }
-
       this.page = await this.context.newPage();
 
       // Navigate to meeting URL
@@ -340,6 +335,9 @@ export class MeetingBot extends EventEmitter {
         TeamsHandler.postAdmissionChatNotification(this.page).catch(err =>
           console.warn('[Bot] Chat notification error (non-fatal):', err)
         );
+        // Live captions are the active speaker source (WI #8154); failure is non-fatal.
+        // Before roster polling so the People panel can't take keyboard focus from the shortcut.
+        await TeamsHandler.enableLiveCaptions(this.page);
         this._teamsHandler.startRosterPolling(this.page);
         this._teamsHandler.startActiveSpeakerPolling(this.page, this._recordingStartTime);
       }

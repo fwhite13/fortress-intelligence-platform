@@ -32,7 +32,7 @@
  * Reference: https://github.com/screenappai/meeting-bot (MIT, production)
  */
 
-import { Page, Locator, BrowserContext } from 'playwright';
+import { Page, Locator } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 import { S3Service } from '../transcribe/s3.js';
@@ -71,123 +71,8 @@ async function waitVisible(locator: Locator, timeout: number): Promise<boolean> 
   }
 }
 
-/**
- * In-page active speaker hook (WI #8031), installed via addInitScript so it
- * runs before Teams creates its RTCPeerConnections. Serialized with
- * toString(), so it must be self-contained (no closures, no async helpers).
- *
- * Teams' media server sends mixed audio; each RTP packet lists the
- * participants mixed into it as CSRCs. We capture every incoming audio
- * RTCRtpReceiver, poll getContributingSources(), and map recent CSRCs to
- * participants with Teams' own call model (participant.hasAudioSource) —
- * camera-agnostic, unlike the DOM tile selectors. Same technique as the
- * Attendee bot (teams_chromedriver_payload.js).
- *
- * Closed intervals are buffered on window.__firmSpeech as
- * { name, startMs, endMs } relative to window.__firmSpeechStartMs (set by
- * Node when recording starts); Node drains the buffer every few seconds.
- */
-function firmSpeechHook(): void {
-  const w = window as any;
-  if (w.__firmSpeechHookInstalled) return;
-  w.__firmSpeechHookInstalled = true;
-  w.__firmReceivers = [];
-  w.__firmSpeech = [];
-  w.__firmSpeechDiag = { pcCount: 0, callFound: false, participantCount: 0, sampleCsrcs: [] };
-
-  const POLL_MS = 150;
-  const RECENT_MS = 100;    // CSRC seen within this window = speaking now
-  const START_MS = 300;     // consecutive speech before an interval opens
-  const STOP_MS = 500;      // silence before an open interval closes
-  const MAX_BUFFER = 5000;  // cap if Node never drains
-
-  const Orig = w.RTCPeerConnection;
-  if (typeof Orig !== 'function') return;
-  const Wrapped = class extends Orig {
-    constructor(...args: any[]) {
-      super(...args);
-      w.__firmSpeechDiag.pcCount++;
-      this.addEventListener('track', (ev: any) => {
-        if (ev.track?.kind === 'audio' && ev.receiver && !w.__firmReceivers.includes(ev.receiver)) {
-          w.__firmReceivers.push(ev.receiver);
-        }
-      });
-    }
-  };
-  w.RTCPeerConnection = Wrapped;
-  if (w.webkitRTCPeerConnection) w.webkitRTCPeerConnection = Wrapped;
-
-  // key -> { name, first, last, open } in Date.now() ms
-  const speakers = new Map<string, { name: string; first: number; last: number; open: boolean }>();
-
-  const emit = (s: { name: string; first: number; last: number }) => {
-    const base = w.__firmSpeechStartMs;
-    if (typeof base !== 'number' || s.last < base) return; // before recording started
-    if (w.__firmSpeech.length >= MAX_BUFFER) w.__firmSpeech.shift();
-    w.__firmSpeech.push({ name: s.name, startMs: Math.max(0, s.first - base), endMs: s.last - base });
-  };
-
-  // Close every open interval now (called by Node on final drain).
-  w.__firmSpeechFlush = () => {
-    for (const s of speakers.values()) if (s.open) emit(s);
-    speakers.clear();
-  };
-
-  setInterval(() => {
-    try {
-      const now = Date.now();
-      w.__firmReceivers = w.__firmReceivers.filter((r: any) => r.track?.readyState !== 'ended');
-
-      const recent: any[] = [];
-      for (const r of w.__firmReceivers) {
-        for (const c of r.getContributingSources?.() || []) {
-          // Chrome reports epoch ms; fall back to performance.now() if a build uses a monotonic clock
-          const ref = c.timestamp > 1e12 ? now : performance.now();
-          if (ref - c.timestamp <= RECENT_MS) recent.push(c);
-        }
-      }
-      if (recent.length > 0) {
-        w.__firmSpeechDiag.sampleCsrcs = recent.slice(0, 5).map((c: any) => ({ source: c.source, audioLevel: c.audioLevel }));
-      }
-
-      let call: any = null;
-      try { call = w.msteamscalling?.deref?.()?.callingService?.getActiveCall?.() || null; } catch { /* ignore */ }
-      if (!call) call = w.callingDebug?.observableCall || null;
-      w.__firmSpeechDiag.callFound = !!call;
-
-      const speakingNow = new Map<string, string>();
-      if (call?.participants && recent.length > 0) {
-        const participants = Array.from(call.participants as Iterable<any>);
-        w.__firmSpeechDiag.participantCount = participants.length;
-        for (const p of participants) {
-          if (typeof p?.hasAudioSource !== 'function') continue;
-          if (!recent.some(c => { try { return p.hasAudioSource(c.source); } catch { return false; } })) continue;
-          const name = (p.displayName || '').trim();
-          if (name) speakingNow.set(p.id || name, name);
-        }
-      }
-
-      for (const [key, name] of speakingNow) {
-        const s = speakers.get(key);
-        if (!s) {
-          speakers.set(key, { name, first: now, last: now, open: false });
-        } else {
-          s.last = now;
-          if (!s.open && now - s.first >= START_MS) s.open = true;
-        }
-      }
-      for (const [key, s] of speakers) {
-        if (speakingNow.has(key)) continue;
-        if (s.open && now - s.last >= STOP_MS) {
-          emit(s);
-          speakers.delete(key);
-        } else if (!s.open && now - s.last > 2 * POLL_MS) {
-          speakers.delete(key); // speech wasn't consecutive long enough to count
-        }
-      }
-    } catch { /* never break the page */ }
-  }, POLL_MS);
-}
+/** Live captions list container (WI #8154 — confirmed via DevTools 2026-10-12) */
+const CAPTIONS_CONTAINER_SELECTOR = '[data-tid="closed-caption-v2-virtual-list-content"]';
 
 export class TeamsHandler {
   private rosterEntries: RosterEntry[] = [];
@@ -197,21 +82,28 @@ export class TeamsHandler {
   private _currentSpeaker: string | null = null;
   private _currentSpeakerEntry: ActiveSpeakerEntry | null = null;
   private _speakerPollInterval: NodeJS.Timeout | null = null;
-  private _speechDrainInterval: NodeJS.Timeout | null = null;
-  private _speechDrainCount = 0;
-  private _csrcActive = false;
-  private _speakerPage: Page | null = null;
+  private _speakerPollCount = 0;
+  private _lastCaptionKey: string | null = null;
+  private _recordingStartMs: number = 0;
 
   /**
-   * Install the CSRC active speaker hook (WI #8031). Must be called on the
-   * context before any Teams page loads — unconditionally, not only on the
-   * sign-in path, since a session restored from storage state never signs in.
+   * Turn on Teams live captions (WI #8154) — the caption DOM is the active
+   * speaker source. Non-fatal: on failure the speaker log is simply empty.
    */
-  static async installSpeechHook(context: BrowserContext): Promise<void> {
-    await context.addInitScript(firmSpeechHook);
-    console.log('[Teams][ActiveSpeaker] CSRC speech hook registered on browser context');
+  static async enableLiveCaptions(page: Page): Promise<void> {
+    try {
+      await page.keyboard.press('Alt+Shift+C');
+      console.log('[Teams][Captions] Sent Alt+Shift+C to enable live captions');
+      // Wait for container to appear (up to 10s)
+      const container = page.locator(CAPTIONS_CONTAINER_SELECTOR).first();
+      const appeared = await container.waitFor({ state: 'attached', timeout: 10000 }).then(() => true).catch(() => false);
+      console.log(appeared
+        ? '[Teams][Captions] Caption container appeared'
+        : '[Teams][Captions] Caption container did not appear within 10s — speaker log will be empty');
+    } catch (err) {
+      console.log('[Teams][Captions] Failed to enable captions (non-fatal):', err);
+    }
   }
-  private _recordingStartMs: number = 0;
 
   /**
    * Save a debug screenshot with sequential numbering and upload to S3
@@ -1923,282 +1815,86 @@ export class TeamsHandler {
    * Build a timestamped active speaker log (ms relative to recordingStartMs)
    * that firm-transcriber matches against diarized segments.
    *
-   * Primary source (WI #8031): the in-page CSRC hook (firmSpeechHook), drained
-   * every 3s. Works with cameras off. Fallback: DOM polling every 1s (WI
-   * #7298) — video-tile selectors only, so it is only recorded until the CSRC
-   * hook produces its first interval.
+   * WI #8154: source is the live captions DOM (enableLiveCaptions must run
+   * first). Every 3s, read author/caption text node pairs from the caption
+   * container; the most recent pair's author is the current speaker. When the
+   * speaker changes, the previous interval is closed and a new one opened.
+   * Dedup is by the last-seen caption (author + text) — unchanged means no
+   * new speech since the previous poll.
    */
-  private _speakerPollCount = 0;
-  private _speakerZeroMatchWarned = false;
-
   startActiveSpeakerPolling(page: Page, recordingStartMs: number): void {
     this._recordingStartMs = recordingStartMs;
     this._speakerPollCount = 0;
-    this._speakerZeroMatchWarned = false;
-    this._speechDrainCount = 0;
-    this._csrcActive = false;
-    this._speakerPage = page;
-    console.log('[Teams][ActiveSpeaker] Polling started');
-
-    page.evaluate((t) => { (window as any).__firmSpeechStartMs = t; }, recordingStartMs)
-      .catch(err => console.log('[Teams][ActiveSpeaker] Could not set speech start time:', err));
-    this._speechDrainInterval = setInterval(() => {
-      this.drainSpeech(page, false).catch(() => { /* logged inside */ });
-    }, 3000);
+    this._lastCaptionKey = null;
+    console.log('[Teams][ActiveSpeaker] Caption polling started');
 
     this._speakerPollInterval = setInterval(async () => {
       try {
-        // WI #8058: DOM polling always runs, regardless of CSRC hook state
         this._speakerPollCount++;
-        const result = await page.evaluate(() => {
-          // Teams v2 (Fluent 2 / New Teams) active speaker detection strategies:
-          // 1. data-is-speaking attribute on tile/roster cell — PRIMARY (camera-on and camera-off)
-          // 2. CSS class-based speaking ring (blue border)
-          // 3. Presence of speaking indicator element within the tile
-          // 4. aria-label containing ", speaking" (comma-separated format)
-          // 5. Legacy aria-label selectors
-
-          // Strategy 1: data-is-speaking attribute (WI #8058)
-          // Production DOM has the attribute on every participant tile but never
-          // with value "true", so evaluate the value instead of matching a literal.
-          // Explicit falsy values mean not speaking; a bare/empty attribute counts
-          // as speaking only when other elements carry a different value (otherwise
-          // an all-empty set carries no speaking signal).
-          const falsyValues = new Set(['false', '0', 'no', 'off', 'null', 'undefined']);
-          const speakingAttrEls = Array.from(document.querySelectorAll('[data-is-speaking]'));
-          const speakingAttrValues = speakingAttrEls.map(el => (el.getAttribute('data-is-speaking') || '').trim().toLowerCase());
-          const allEmpty = speakingAttrValues.every(v => v === '');
-          for (let i = 0; i < speakingAttrEls.length; i++) {
-            const v = speakingAttrValues[i];
-            if (falsyValues.has(v) || (v === '' && allEmpty)) continue;
-            const el = speakingAttrEls[i];
-            const tile = el.closest('[data-tid="video-tile"]') ||
-                         el.closest('.fui-VideoTile') ||
-                         el.closest('[data-tid="calling-roster-cell"]') ||
-                         el.closest('[data-tid*="participant"]');
-            let name: string | undefined;
-            for (const scope of [el, tile].filter(Boolean) as Element[]) {
-              const nameEl = scope.querySelector('[data-tid="participant-display-name"]') ||
-                             scope.querySelector('[data-tid*="display-name"]');
-              name = nameEl?.textContent?.trim() || undefined;
-              if (name) break;
-            }
-            if (!name) {
-              const ariaLabel = (el.getAttribute('aria-label') || tile?.getAttribute('aria-label') || '').trim();
-              name = ariaLabel.match(/^([^,]+)/)?.[1]?.trim() || undefined;
-            }
-            if (!name) name = el.textContent?.trim() || undefined;
-            if (name) return { name, strategy: 'data-is-speaking', selector: `[data-is-speaking="${v}"]` };
-          }
-
-          // Strategy 2: Look for CSS classes indicating speaking state
-          const speakingClassSelectors = [
-            '.fui-VideoTile--speaking',
-            '[data-tid="video-tile"].speaking',
-            '[data-tid="video-tile"][class*="speaking" i]',
-            '[data-tid="video-tile"][class*="active-speaker" i]',
-            '.video-tile--speaking',
-            '[class*="VideoTile"][class*="speaking" i]',
-          ];
-
-          for (const sel of speakingClassSelectors) {
-            const el = document.querySelector(sel);
-            if (el) {
-              const nameEl = el.querySelector('[data-tid="participant-display-name"]') ||
-                             el.querySelector('[data-tid*="display-name"]') ||
-                             el;
-              const name = nameEl.textContent?.trim();
-              if (name) return { name, strategy: 'css-class', selector: sel };
+        const captions = await page.evaluate((containerSelector) => {
+          // Caption text lives in raw text nodes, so walk text nodes rather than querySelector
+          const container = document.querySelector(containerSelector);
+          if (!container) return null;
+          const results: Array<{ name: string; text: string }> = [];
+          const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+          let currentName: string | null = null;
+          let node: Text | null;
+          while ((node = walker.nextNode() as Text | null)) {
+            const text = node.textContent?.trim() || '';
+            if (!text) continue;
+            const parentDataTid = node.parentElement?.getAttribute('data-tid');
+            if (parentDataTid === 'author') {
+              currentName = text;
+            } else if (parentDataTid === 'closed-caption-text' && currentName) {
+              results.push({ name: currentName, text });
+              currentName = null;
             }
           }
+          return results;
+        }, CAPTIONS_CONTAINER_SELECTOR);
 
-          // Strategy 3: Look for speaking indicator element within video tiles
-          const indicatorSelectors = [
-            '[data-tid="video-tile-speaking-indicator"]',
-            '[data-tid*="speaking-indicator"]',
-            '[data-tid="video-tile"] [data-tid*="speaking"]',
-          ];
-
-          for (const sel of indicatorSelectors) {
-            const indicator = document.querySelector(sel);
-            if (indicator) {
-              // Navigate up to find the parent tile and extract name
-              const tile = indicator.closest('[data-tid="video-tile"]') ||
-                           indicator.closest('.fui-VideoTile') ||
-                           indicator.closest('[data-tid*="video"]');
-              if (tile) {
-                const nameEl = tile.querySelector('[data-tid="participant-display-name"]') ||
-                               tile.querySelector('[data-tid*="display-name"]');
-                const name = nameEl?.textContent?.trim();
-                if (name) return { name, strategy: 'indicator-element', selector: sel };
-              }
-            }
-          }
-
-          // Strategy 4: aria-label containing ", speaking" (comma-separated format in Teams v2)
-          // Format: "Julie Austin, speaking" or "Julie Austin, not speaking"
-          const tiles = document.querySelectorAll('[data-tid="video-tile"], .fui-VideoTile');
-          for (const tile of tiles) {
-            const ariaLabel = tile.getAttribute('aria-label') || '';
-            // Match ", speaking" but not ", not speaking"
-            if (/,\s*speaking\s*$/i.test(ariaLabel) && !/not\s+speaking/i.test(ariaLabel)) {
-              // Extract name: everything before ", speaking"
-              const name = ariaLabel.replace(/,\s*speaking\s*$/i, '').trim();
-              if (name) return { name, strategy: 'aria-label-comma', selector: 'aria-label' };
-            }
-          }
-
-          // Strategy 5: Original selectors (legacy fallback)
-          const legacySelectors = [
-            '[data-tid="video-tile"][aria-label*="speaking"]:not([aria-label*="not speaking" i])',
-          ];
-
-          for (const sel of legacySelectors) {
-            const el = document.querySelector(sel);
-            if (el) {
-              const nameEl = el.querySelector('[data-tid="participant-display-name"]') || el;
-              const name = nameEl.textContent?.trim();
-              // Also try extracting from aria-label if textContent is empty
-              if (!name) {
-                const ariaLabel = el.getAttribute('aria-label') || '';
-                const match = ariaLabel.match(/^([^,]+)/);
-                if (match) return { name: match[1].trim(), strategy: 'aria-label-legacy', selector: sel };
-              }
-              if (name) return { name, strategy: 'legacy', selector: sel };
-            }
-          }
-
-          // No match — return diagnostic info for debugging
-          const tileCount = document.querySelectorAll('[data-tid="video-tile"], .fui-VideoTile').length;
-          // WI #8058: value distribution of data-is-speaking, to confirm the real value pattern in CloudWatch
-          const dataIsSpeakingValues: Record<string, number> = {};
-          for (const v of speakingAttrValues) dataIsSpeakingValues[v || '(empty)'] = (dataIsSpeakingValues[v || '(empty)'] || 0) + 1;
-          return { name: null, strategy: 'none', tileCount, dataIsSpeakingValues };
-        }).catch(() => ({ name: null, strategy: 'error' }));
-
-        const nowMs = Date.now() - this._recordingStartMs;
-
-        // Diagnostic logging for first few polls with zero matches
-        if (!result.name && !this._speakerZeroMatchWarned && this._speakerPollCount <= 5) {
-          if (this._speakerPollCount === 1) {
-            // Dump DOM diagnostic to help identify correct selectors
-            try {
-              const domDiag = await page.evaluate(() => {
-                const candidates = [
-                  '[data-tid*="video"]',
-                  '[data-tid*="tile"]',
-                  '[class*="VideoTile"]',
-                  '[class*="video-tile"]',
-                  '[data-tid*="speaking"]',
-                  '[data-is-speaking]',
-                  '[aria-label*="speaking" i]',
-                ];
-                const results: Record<string, number> = {};
-                for (const sel of candidates) {
-                  results[sel] = document.querySelectorAll(sel).length;
-                }
-                // Sample first aria-label from any video-like element
-                const sampleEl = document.querySelector('[data-tid*="video"], [class*="VideoTile"]');
-                const sampleAriaLabel = sampleEl?.getAttribute('aria-label') || null;
-                const sampleDataTid = sampleEl?.getAttribute('data-tid') || null;
-                return { counts: results, sampleAriaLabel, sampleDataTid };
-              });
-              console.log('[Teams][ActiveSpeaker] DOM diagnostic:', JSON.stringify(domDiag));
-            } catch (diagErr) {
-              console.log('[Teams][ActiveSpeaker] DOM diagnostic failed:', diagErr);
-            }
-          }
-          const tileCount = (result as any).tileCount;
-          const attrValues = (result as any).dataIsSpeakingValues;
-          console.log(`[Teams][ActiveSpeaker] Poll #${this._speakerPollCount}: no match (strategy: ${result.strategy}, tiles: ${tileCount !== undefined ? tileCount : '?'}, data-is-speaking values: ${attrValues ? JSON.stringify(attrValues) : '?'})`);
-          if (this._speakerPollCount === 5) {
-            // WI #8031: no early exit on tileCount=0 — camera-off meetings have
-            // no tiles, and the CSRC hook is the primary source anyway.
-            console.log('[Teams][ActiveSpeaker] 5 DOM polls with zero matches — DOM polling continues alongside CSRC hook');
-            this._speakerZeroMatchWarned = true;
-          }
+        // Status in CloudWatch: first poll, then ~every 60s
+        if (this._speakerPollCount === 1 || this._speakerPollCount % 20 === 0) {
+          console.log(`[Teams][ActiveSpeaker] Caption poll #${this._speakerPollCount}: ` +
+            (captions === null ? 'caption container not found' : `${captions.length} caption entries`));
         }
+        if (!captions || captions.length === 0) return;
 
-        const speakerName = result.name;
-        if (speakerName && speakerName !== this._currentSpeaker) {
+        const latest = captions[captions.length - 1];
+        const key = `${latest.name}\u0000${latest.text}`;
+        if (key === this._lastCaptionKey) return;
+        this._lastCaptionKey = key;
+
+        if (latest.name !== this._currentSpeaker) {
+          const nowMs = Date.now() - this._recordingStartMs;
           if (this._currentSpeakerEntry) this._currentSpeakerEntry.endMs = nowMs;
-          this._currentSpeakerEntry = { name: speakerName, startMs: nowMs };
+          this._currentSpeakerEntry = { name: latest.name, startMs: nowMs };
           this._activeSpeakerLog.push(this._currentSpeakerEntry);
-          this._currentSpeaker = speakerName;
-          console.log(`[Teams][ActiveSpeaker] ${speakerName} at ${nowMs}ms (via ${result.strategy})`);
+          this._currentSpeaker = latest.name;
+          console.log(`[Teams][ActiveSpeaker] ${latest.name} at ${nowMs}ms (via captions)`);
         }
-      } catch { /* ignore poll errors */ }
-    }, 1000);
-  }
-
-  /**
-   * Drain speech intervals buffered by the in-page CSRC hook into
-   * _activeSpeakerLog. `final` closes any still-open interval first.
-   */
-  private async drainSpeech(page: Page, final: boolean): Promise<void> {
-    try {
-      const { speech, diag } = await page.evaluate(([t, flush]) => {
-        const w = window as any;
-        // Re-set if the page reloaded mid-meeting (init script reran with no start time)
-        if (typeof w.__firmSpeechStartMs !== 'number') w.__firmSpeechStartMs = t;
-        if (flush) w.__firmSpeechFlush?.();
-        const s = w.__firmSpeech || [];
-        w.__firmSpeech = [];
-        return {
-          speech: s as { name: string; startMs: number; endMs: number }[],
-          diag: {
-            hookInstalled: !!w.__firmSpeechHookInstalled,
-            receiverCount: (w.__firmReceivers || []).length,
-            ...(w.__firmSpeechDiag || {}),
-          },
-        };
-      }, [this._recordingStartMs, final] as const);
-      this._speechDrainCount++;
-
-      if (speech.length > 0) {
-        if (!this._csrcActive) {
-          this._csrcActive = true;
-          console.log(`[Teams][ActiveSpeaker] CSRC hook producing data — receivers: ${diag.receiverCount}, ` +
-            `peerConnections: ${diag.pcCount}, participants: ${diag.participantCount}, ` +
-            `sample CSRCs: ${JSON.stringify(diag.sampleCsrcs)}`);
-          // Close any open DOM-sourced entry; CSRC takes over from here
-          if (this._currentSpeakerEntry && this._currentSpeakerEntry.endMs === undefined) {
-            this._currentSpeakerEntry.endMs = Date.now() - this._recordingStartMs;
-          }
-        }
-        this._activeSpeakerLog.push(...speech);
-        console.log(`[Teams][ActiveSpeaker] CSRC: ${speech.map(s => `${s.name} ${s.startMs}-${s.endMs}ms`).join(', ')}`);
-      } else if (!this._csrcActive && (this._speechDrainCount === 1 || this._speechDrainCount % 20 === 0)) {
-        // Hook status in CloudWatch while no data has arrived (first drain, then ~every 60s)
-        console.log(`[Teams][ActiveSpeaker] CSRC drain #${this._speechDrainCount}: no intervals yet — ${JSON.stringify(diag)}`);
+      } catch (err) {
+        console.log(`[Teams][ActiveSpeaker] Caption poll failed (non-fatal): ${err}`);
       }
-    } catch (err) {
-      console.log(`[Teams][ActiveSpeaker] CSRC drain failed (non-fatal): ${err}`);
-    }
+    }, 3000);
   }
 
   /**
-   * Stop active speaker polling, drain the CSRC buffer one last time, and
-   * close the open entry
+   * Stop active speaker polling and close the open entry
    */
   async stopActiveSpeakerPolling(): Promise<ActiveSpeakerEntry[]> {
     if (this._speakerPollInterval) {
       clearInterval(this._speakerPollInterval);
       this._speakerPollInterval = null;
     }
-    if (this._speechDrainInterval) {
-      clearInterval(this._speechDrainInterval);
-      this._speechDrainInterval = null;
-      if (this._speakerPage && !this._speakerPage.isClosed()) {
-        await this.drainSpeech(this._speakerPage, true);
-      }
-    }
     const nowMs = Date.now() - this._recordingStartMs;
     if (this._currentSpeakerEntry && this._currentSpeakerEntry.endMs === undefined) {
       this._currentSpeakerEntry.endMs = nowMs;
     }
+    this._currentSpeakerEntry = null;
+    this._currentSpeaker = null;
     this._activeSpeakerLog.sort((a, b) => a.startMs - b.startMs);
-    console.log(`[Teams][ActiveSpeaker] Polling stopped (${this._activeSpeakerLog.length} entries, source: ${this._csrcActive ? 'csrc' : 'dom'})`);
+    console.log(`[Teams][ActiveSpeaker] Polling stopped (${this._activeSpeakerLog.length} entries, source: captions)`);
     return this._activeSpeakerLog;
   }
 
