@@ -84,6 +84,22 @@ public class PdfService
                                 col.Item().PaddingBottom(4);
                                 break;
                             }
+                            case Markdig.Syntax.QuoteBlock quote:
+                            {
+                                foreach (var child in quote.OfType<Markdig.Syntax.ParagraphBlock>())
+                                {
+                                    col.Item()
+                                        .PaddingLeft(12).PaddingBottom(6)
+                                        .BorderLeft(3).BorderColor(Color.FromHex(brandHex))
+                                        .PaddingLeft(8)
+                                        .Text(txt =>
+                                        {
+                                            txt.DefaultTextStyle(s => s.Italic().FontColor(Colors.Grey.Darken2));
+                                            RenderInlines(txt, child.Inline);
+                                        });
+                                }
+                                break;
+                            }
                             case Markdig.Syntax.ThematicBreakBlock:
                                 col.Item().PaddingVertical(6).LineHorizontal(0.5f).LineColor(Colors.Grey.Lighten2);
                                 break;
