@@ -335,9 +335,10 @@ export class MeetingBot extends EventEmitter {
       // Start recording after joining (only reached if join succeeded)
       await this.startRecording();
 
-      // Post-join activities run after recording has started, non-blocking (WI #7609)
+      // Post-join activities run after recording has started (WI #7609)
       if (this._teamsHandler && this.page) {
-        TeamsHandler.postAdmissionChatNotification(this.page).catch(err =>
+        // Await chat notification so roster polling doesn't open People panel first (WI #8153)
+        await TeamsHandler.postAdmissionChatNotification(this.page).catch(err =>
           console.warn('[Bot] Chat notification error (non-fatal):', err)
         );
         this._teamsHandler.startRosterPolling(this.page);
