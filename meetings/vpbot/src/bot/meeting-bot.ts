@@ -347,7 +347,8 @@ export class MeetingBot extends EventEmitter {
       if (this._teamsHandler && this.page) {
         // Fire-and-forget so captions and roster/active speaker polling start on
         // schedule instead of waiting up to ~40s for chat (WI #8211)
-        TeamsHandler.postAdmissionChatNotification(this.page).catch(err =>
+        const teamsHandler = this._teamsHandler;
+        TeamsHandler.postAdmissionChatNotification(this.page, () => teamsHandler.markChatNotificationDone()).catch(err =>
           console.warn('[Teams] Chat notification error (non-fatal):', err?.message ?? err)
         );
         // Live captions are the active speaker source (WI #8154); failure is non-fatal.

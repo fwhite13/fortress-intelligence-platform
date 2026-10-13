@@ -79,6 +79,8 @@ export class TeamsHandler {
   private rosterPollInterval?: NodeJS.Timeout;
   private rosterPanelOpenAttempted = false;
   private _onRosterCount: ((count: number) => void) | null = null;
+  // WI #8211: chat and People panels share one slot — roster waits for chat to resolve
+  private _chatNotificationDone = false;
   private _activeSpeakerLog: ActiveSpeakerEntry[] = [];
   private _currentSpeaker: string | null = null;
   private _currentSpeakerEntry: ActiveSpeakerEntry | null = null;
@@ -1085,8 +1087,19 @@ export class TeamsHandler {
    * users share the meeting.
    *
    * Non-fatal by design — a failed chat post must never fail the recording.
+   *
+   * `onPanelResolved` fires once the chat panel open attempt resolves (opened
+   * or gave up) — roster polling waits on it before opening the People panel,
+   * since only one side panel can be open at a time (WI #8211). Always fires,
+   * even on early return or error.
    */
-  static async postAdmissionChatNotification(page: Page): Promise<void> {
+  static async postAdmissionChatNotification(page: Page, onPanelResolved?: () => void): Promise<void> {
+    let panelResolved = false;
+    const resolvePanel = () => {
+      if (panelResolved) return;
+      panelResolved = true;
+      onPanelResolved?.();
+    };
     try {
       const namesCsv = process.env.BOT_NAMES_CSV || '';
       const names = namesCsv.split(',').map(n => n.trim()).filter(Boolean);
@@ -1189,6 +1202,8 @@ export class TeamsHandler {
           await page.keyboard.press('Escape').catch(() => {});
         }
       }
+
+      resolvePanel();
 
       if (!openedChat) {
         console.log('[Teams] Chat unavailable — no chat control found (host policy: anonymous/external users excluded, or UI load timeout)');
@@ -1385,7 +1400,16 @@ export class TeamsHandler {
       console.log(`[Teams] ✅ Chat notification posted (input selector: ${successfulSelector})`);
     } catch (err) {
       console.log('[Teams] WARNING: failed to post chat notification (non-fatal):', err);
+    } finally {
+      resolvePanel();
     }
+  }
+
+  /** Unblock the People panel once the chat panel attempt has resolved (WI #8211). */
+  markChatNotificationDone(): void {
+    if (this._chatNotificationDone) return;
+    this._chatNotificationDone = true;
+    console.log('[Teams] Chat panel resolution complete — roster People panel now unblocked');
   }
 
   /**
@@ -1820,6 +1844,10 @@ export class TeamsHandler {
     ].join(', ');
     try {
       let panelOpen = await waitVisible(page.locator(panelSelector).first(), 1000);
+      if (!panelOpen && !this.rosterPanelOpenAttempted && !this._chatNotificationDone) {
+        console.log('[Teams][Roster] Skipping People panel — chat notification still in progress');
+        return null;
+      }
       if (!panelOpen && !this.rosterPanelOpenAttempted) {
         this.rosterPanelOpenAttempted = true;
         const button = page.locator('[data-tid="roster-button"], #roster-button, button[aria-label^="People" i]').first();
