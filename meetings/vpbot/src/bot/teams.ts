@@ -969,7 +969,7 @@ export class TeamsHandler {
       const leaveButton = page.getByRole('button', { name: /Leave/i });
       await leaveButton.waitFor({ timeout: 60000 });
       console.log('[Teams] ✅ Successfully joined meeting (Leave button visible)');
-      await TeamsHandler.screenshot(page, '04-in-meeting', s3, meetingId);
+      TeamsHandler.screenshot(page, '04-in-meeting', s3, meetingId).catch(() => {}); // fire-and-forget (WI #8182)
       return;
     } catch {
       console.log('[Teams] Leave button not found within 60s, checking other states...');
@@ -1003,7 +1003,7 @@ export class TeamsHandler {
           const leaveButton = page.getByRole('button', { name: /Leave/i });
           if (await waitVisible(leaveButton, 1000)) {
             console.log('[Teams] ✅ Admitted from waiting room, now in meeting');
-            await TeamsHandler.screenshot(page, '05-admitted-in-meeting', s3, meetingId);
+            TeamsHandler.screenshot(page, '05-admitted-in-meeting', s3, meetingId).catch(() => {}); // fire-and-forget (WI #8182)
             admitted = true;
             return; // admitted — normal path
           }
@@ -1027,7 +1027,7 @@ export class TeamsHandler {
           const leaveButton = page.getByRole('button', { name: /Leave/i });
           if (await waitVisible(leaveButton, 2000)) {
             console.log('[Teams] ✅ Admitted just before timeout — now in meeting');
-            await TeamsHandler.screenshot(page, '05-admitted-last-second', s3, meetingId);
+            TeamsHandler.screenshot(page, '05-admitted-last-second', s3, meetingId).catch(() => {}); // fire-and-forget (WI #8182)
             return;
           }
         } catch {
@@ -1064,7 +1064,7 @@ export class TeamsHandler {
       throw new LobbyTimeoutError();
     } else if (joinedCheck.hasLeave || joinedCheck.hasHangup || joinedCheck.hasMeetingUI || joinedCheck.hasRoster) {
       console.log('[Teams] ✅ Successfully joined meeting');
-      await TeamsHandler.screenshot(page, '05-in-meeting', s3, meetingId);
+      TeamsHandler.screenshot(page, '05-in-meeting', s3, meetingId).catch(() => {}); // fire-and-forget (WI #8182)
     } else {
       console.log('[Teams] ⚠️ Meeting join status uncertain — hasMeetingUI=false, hasLeave=false. Treating as lobby timeout.');
       await TeamsHandler.screenshot(page, '05-uncertain-state', s3, meetingId);
