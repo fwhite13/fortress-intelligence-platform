@@ -868,8 +868,8 @@
                 return;
             }
         }
-        // Imminent/past meeting (or unparseable) — open dialog for immediate join
-        await OpenJoinDialogPrefilled(card.JoinUrl);
+        // Imminent/past meeting (or unparseable) — join immediately with calendar subject as title
+        await JoinMeetingWithParams(card.JoinUrl, card.Subject, card.Platform);
     }
 
     private async Task PreFormatMeetingTimesAsync()
