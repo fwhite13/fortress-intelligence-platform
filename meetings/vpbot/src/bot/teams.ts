@@ -113,12 +113,13 @@ export class TeamsHandler {
     page: Page,
     label: string,
     s3?: S3Service | null,
-    meetingId?: string | null
+    meetingId?: string | null,
+    fullPage = true
   ): Promise<void> {
     try {
       const filename = `debug-${label}-${Date.now()}.png`;
       const filepath = path.join(SCREENSHOTS_DIR, filename);
-      await page.screenshot({ path: filepath, fullPage: true });
+      await page.screenshot({ path: filepath, fullPage });
       console.log(`[Teams] Screenshot saved: ${filename}`);
 
       // Always upload to S3 when service is available
@@ -970,7 +971,7 @@ export class TeamsHandler {
       const leaveButton = page.getByRole('button', { name: /Leave/i });
       await leaveButton.waitFor({ timeout: 60000 });
       console.log('[Teams] ✅ Successfully joined meeting (Leave button visible)');
-      TeamsHandler.screenshot(page, '04-in-meeting', s3, meetingId).catch(() => {}); // fire-and-forget (WI #8182)
+      TeamsHandler.screenshot(page, '04-in-meeting', s3, meetingId, false).catch(() => {}); // fire-and-forget (WI #8182); viewport-only to limit renderer load (WI #8211)
       return;
     } catch {
       console.log('[Teams] Leave button not found within 60s, checking other states...');
@@ -1112,33 +1113,100 @@ export class TeamsHandler {
       ].join(', ');
       const composeBox = page.locator(composeSelector).first();
 
+      // WI #8211: poll for the toolbar toggle every 1.5s for up to 30s. Under
+      // renderer CPU load the toolbar can mount late, and locator.click() can
+      // hang on actionability checks — so JS-click via evaluate() instead.
+      const CHAT_POLL_TOTAL_MS = 30000;
+      const CHAT_POLL_INTERVAL_MS = 1500;
       const chatButtonSelectors = [
         '#chat-button',
-        'button[data-tid="chat-button"]',
         'button[aria-label*="Show conversation" i]',
       ];
-      let openedChat = await composeBox.isVisible();
+      let openedChat = false;
       // WI #8064: the compose-box retry budget is measured from this moment.
       let chatOpenedAt = Date.now();
-      if (openedChat) {
-        console.log('[Teams] Chat panel already open — not toggling');
-      }
-      for (const selector of chatButtonSelectors) {
-        if (openedChat) break;
-        try {
+      const chatPollDeadline = Date.now() + CHAT_POLL_TOTAL_MS;
+      while (!openedChat) {
+        if (await composeBox.isVisible()) {
+          console.log('[Teams] Chat panel already open — not toggling');
+          openedChat = true;
+          break;
+        }
+        for (const selector of chatButtonSelectors) {
           const btn = page.locator(selector).first();
-          if (await waitVisible(btn, 3000)) {
-            await btn.click();
-            chatOpenedAt = Date.now();
-            console.log(`[Teams] Opened chat panel via: ${selector}`);
+          if ((await btn.count()) === 0) continue;
+          try {
+            // Don't toggle a panel that's already open
+            const state = await btn.evaluate((el: HTMLElement) => ({
+              pressed: el.getAttribute('aria-pressed'),
+              outcome: el.getAttribute('data-track-action-outcome'),
+            }), undefined, { timeout: 3000 });
+            if (state.pressed === 'true' || state.outcome?.toLowerCase() === 'hide') {
+              console.log(`[Teams] Chat panel already open per ${selector} state — not toggling`);
+            } else {
+              await btn.evaluate((el: HTMLElement) => el.click(), undefined, { timeout: 3000 });
+              chatOpenedAt = Date.now();
+              console.log(`[Teams] Opened chat panel via JS click: ${selector}`);
+            }
             openedChat = true;
+            break;
+          } catch {
+            continue;
           }
-        } catch {
-          continue;
+        }
+        if (openedChat || Date.now() + CHAT_POLL_INTERVAL_MS > chatPollDeadline) break;
+        await page.waitForTimeout(CHAT_POLL_INTERVAL_MS);
+      }
+
+      // WI #8211: overflow fallback — at narrow widths Teams moves Chat into
+      // the "More" menu, so #chat-button never appears in the toolbar.
+      if (!openedChat) {
+        console.log('[Teams] Chat toggle not found in toolbar after 30s — trying More overflow menu');
+        try {
+          const moreBtn = page.locator('#callingButtons-showMoreBtn').first();
+          if ((await moreBtn.count()) > 0) {
+            await moreBtn.evaluate((el: HTMLElement) => el.click(), undefined, { timeout: 3000 });
+            await page.waitForTimeout(1000);
+            let menuItem: Locator | null = page.getByRole('menuitem', { name: /^chat$/i }).first();
+            if (!(await waitVisible(menuItem, 3000))) {
+              menuItem = page.locator('[role="menuitem"]:has-text("Chat")').first();
+              if (!(await waitVisible(menuItem, 2000))) menuItem = null;
+            }
+            if (menuItem) {
+              await menuItem.click({ timeout: 5000 });
+              chatOpenedAt = Date.now();
+              console.log('[Teams] Opened chat panel via More overflow menu');
+              openedChat = true;
+            } else {
+              console.log('[Teams] No Chat item in More overflow menu — closing menu');
+              await page.keyboard.press('Escape');
+            }
+          } else {
+            console.log('[Teams] More overflow button (#callingButtons-showMoreBtn) not found');
+          }
+        } catch (err) {
+          console.log('[Teams] More overflow menu fallback failed:', err);
+          await page.keyboard.press('Escape').catch(() => {});
         }
       }
+
       if (!openedChat) {
-        console.log('[Teams] WARNING: could not find chat panel toggle — skipping chat notification');
+        console.log('[Teams] Chat unavailable — no chat control found (host policy: anonymous/external users excluded, or UI load timeout)');
+        try {
+          const toolbarButtons = await page.evaluate(() => {
+            const toolbarEls = Array.from(document.querySelectorAll('[role="toolbar"] [data-tid]'));
+            const els = toolbarEls.length > 0 ? toolbarEls : Array.from(document.querySelectorAll('button[data-tid]'));
+            return els.slice(0, 50).map(el => ({
+              dataTid: el.getAttribute('data-tid'),
+              id: el.id || null,
+              ariaLabel: el.getAttribute('aria-label'),
+            }));
+          });
+          console.log('[Teams] Toolbar button inventory:', JSON.stringify(toolbarButtons));
+        } catch (err) {
+          console.log('[Teams] Could not collect toolbar button inventory:', err);
+        }
+        await TeamsHandler.screenshot(page, 'chat-unavailable', null, null, false);
         await TeamsHandler.logFrameDiagnostics(page, composeSelector);
         return;
       }

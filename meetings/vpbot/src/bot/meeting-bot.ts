@@ -228,7 +228,7 @@ export class MeetingBot extends EventEmitter {
       this.context = await this.browser.newContext({
         permissions: ['microphone', 'camera'],
         ...(isTeams ? {} : { userAgent }),  // Teams: let browser report naturally; others: keep custom UA
-        viewport: { width: 1280, height: 720 },
+        viewport: { width: 1920, height: 1080 },  // WI #8211: at 1280 Teams moves Chat into the More overflow menu
         locale: 'en-US',
         timezoneId: 'America/New_York',
         ...(storageStatePath ? { storageState: storageStatePath } : {}),
@@ -345,9 +345,10 @@ export class MeetingBot extends EventEmitter {
 
       // Post-join activities run after recording has started (WI #7609)
       if (this._teamsHandler && this.page) {
-        // Await chat notification so roster polling doesn't open People panel first (WI #8153)
-        await TeamsHandler.postAdmissionChatNotification(this.page).catch(err =>
-          console.warn('[Bot] Chat notification error (non-fatal):', err)
+        // Fire-and-forget so captions and roster/active speaker polling start on
+        // schedule instead of waiting up to ~40s for chat (WI #8211)
+        TeamsHandler.postAdmissionChatNotification(this.page).catch(err =>
+          console.warn('[Teams] Chat notification error (non-fatal):', err?.message ?? err)
         );
         // Live captions are the active speaker source (WI #8154); failure is non-fatal.
         // Before roster polling so the People panel can't take keyboard focus from the shortcut.
