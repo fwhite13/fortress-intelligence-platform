@@ -302,9 +302,12 @@ export class MeetingBot extends EventEmitter {
           case 'teams':
             this._teamsHandler = new TeamsHandler();
             await this._teamsHandler.join(this.page, this.meeting.botName, this.meeting.url);
-            // Save storage state after successful Teams join for session persistence
+            // Save storage state after successful Teams join for session persistence.
+            // Fire-and-forget so the S3 upload doesn't delay FFmpeg start (WI #8182).
             if (this.context) {
-              await MeetingBot.saveStorageState(this.context, botEmail);
+              MeetingBot.saveStorageState(this.context, botEmail).catch(err =>
+                console.warn('[Bot] Post-join storage state save error (non-fatal):', err)
+              );
             }
             break;
           case 'zoom':
