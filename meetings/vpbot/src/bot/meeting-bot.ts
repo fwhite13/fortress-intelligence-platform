@@ -75,6 +75,11 @@ const DEAD_ROOM_THRESHOLD_MS = 60_000;
 // recording start) before giving up.
 const NO_PARTICIPANTS_PATIENCE_MS = 20 * 60_000;
 
+// WI #8195: Once participants have been present, a call-state roster of 0 means everyone left.
+// Stop after this long unless someone returns; shorter if FFmpeg already reports silence.
+const EMPTY_MEETING_TIMEOUT_MS = 90_000;
+const EMPTY_MEETING_SILENCE_TIMEOUT_MS = 30_000;
+
 export class MeetingBot extends EventEmitter {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
@@ -89,6 +94,11 @@ export class MeetingBot extends EventEmitter {
   private _monitorInterval: ReturnType<typeof setInterval> | null = null;
   private _recordingStartTime: number = 0;
   private _silenceStartTime: number | null = null;
+  // WI #8195: true between FFmpeg silence_start and silence_end
+  private _silenceDetected = false;
+  private _emptyMeetingTimer: ReturnType<typeof setTimeout> | null = null;
+  // WI #8195: guards against the empty-meeting timer triggering stop more than once
+  private _emptyMeetingStopTriggered = false;
   private _teamsHandler: TeamsHandler | null = null;
   private _zoomHandler: ZoomHandler | null = null;
   private _deadRoom = false;
@@ -342,7 +352,7 @@ export class MeetingBot extends EventEmitter {
         // Live captions are the active speaker source (WI #8154); failure is non-fatal.
         // Before roster polling so the People panel can't take keyboard focus from the shortcut.
         await TeamsHandler.enableLiveCaptions(this.page);
-        this._teamsHandler.startRosterPolling(this.page);
+        this._teamsHandler.startRosterPolling(this.page, (count) => this.handleRosterCount(count));
         this._teamsHandler.startActiveSpeakerPolling(this.page, this._recordingStartTime);
       }
       if (this._zoomHandler && this.page) {
@@ -448,10 +458,12 @@ export class MeetingBot extends EventEmitter {
       //               "[silencedetect @ 0x...] silence_end: 47.1 | silence_duration: 1.8"
       if (msg.includes('silence_start')) {
         this._silenceStartTime = Date.now();
+        this._silenceDetected = true;
         console.log('[Bot] FFmpeg silence_start detected');
       } else if (msg.includes('silence_end')) {
         const durMatch = msg.match(/silence_duration:\s*([\d.]+)/);
         this._silenceStartTime = null;
+        this._silenceDetected = false;
         console.log('[Bot] FFmpeg silence_end detected — silence cleared');
       }
       // Only log non-progress, non-silencedetect lines to avoid spam
@@ -672,6 +684,43 @@ export class MeetingBot extends EventEmitter {
   }
 
   /**
+   * WI #8195: Roster poll callback (Teams call-state participant count, bot excluded).
+   * Roster at 0 after participants were present starts the empty-meeting timer; anyone
+   * returning cancels it. When it fires, stop via the same path as SIGTERM.
+   */
+  private handleRosterCount(count: number): void {
+    if (!this.isRecording || this._emptyMeetingStopTriggered) return;
+
+    if (count > 0) {
+      if (!this._hasHadOtherParticipants) {
+        this._hasHadOtherParticipants = true;
+        console.log('[Bot] First participant joined (roster) — meeting is live');
+      }
+      if (this._emptyMeetingTimer) {
+        clearTimeout(this._emptyMeetingTimer);
+        this._emptyMeetingTimer = null;
+        console.log('[Bot] Participants rejoined — empty meeting timer cancelled');
+      }
+      return;
+    }
+
+    // Empty before anyone joined = meeting not started yet (WI #8083 patience window applies)
+    if (!this._hasHadOtherParticipants || this._emptyMeetingTimer) return;
+
+    const timeoutMs = this._silenceDetected ? EMPTY_MEETING_SILENCE_TIMEOUT_MS : EMPTY_MEETING_TIMEOUT_MS;
+    console.log(`[Bot] Empty meeting timer started — stopping in ${timeoutMs / 1000}s unless participants return`);
+    this._emptyMeetingTimer = setTimeout(() => {
+      this._emptyMeetingTimer = null;
+      if (!this.isRecording || this._emptyMeetingStopTriggered) return;
+      this._emptyMeetingStopTriggered = true;
+      console.log(`[Bot] Empty meeting timer fired — triggering graceful stop (roster: 0, silence: ${this._silenceDetected})`);
+      this.stop('empty-meeting-timeout').catch((err) =>
+        console.error('[Bot] Error stopping after empty meeting timeout:', err)
+      );
+    }, timeoutMs);
+  }
+
+  /**
    * Monitor if the meeting has ended
    */
   private monitorMeetingStatus(): void {
@@ -770,7 +819,12 @@ export class MeetingBot extends EventEmitter {
       clearInterval(this._monitorInterval);
       this._monitorInterval = null;
     }
+    if (this._emptyMeetingTimer) {
+      clearTimeout(this._emptyMeetingTimer);
+      this._emptyMeetingTimer = null;
+    }
     this._silenceStartTime = null;
+    this._silenceDetected = false;
 
     this.isRecording = false;
     this.emit('status-change', 'processing');
