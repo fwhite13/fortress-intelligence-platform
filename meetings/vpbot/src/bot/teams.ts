@@ -78,6 +78,7 @@ export class TeamsHandler {
   private rosterEntries: RosterEntry[] = [];
   private rosterPollInterval?: NodeJS.Timeout;
   private rosterPanelOpenAttempted = false;
+  private _onRosterCount: ((count: number) => void) | null = null;
   private _activeSpeakerLog: ActiveSpeakerEntry[] = [];
   private _currentSpeaker: string | null = null;
   private _currentSpeakerEntry: ActiveSpeakerEntry | null = null;
@@ -1471,10 +1472,13 @@ export class TeamsHandler {
   }
 
   /**
-   * Start roster polling every 30 seconds
+   * Start roster polling every 30 seconds.
+   * `onCount` receives the participant count (bot excluded) after each poll whose
+   * result is trustworthy — empty DOM reads during UI load are not reported (WI #8195).
    */
-  startRosterPolling(page: Page): void {
+  startRosterPolling(page: Page, onCount?: (count: number) => void): void {
     console.log('[Teams][Roster] Starting roster polling (30s interval)');
+    this._onRosterCount = onCount ?? null;
     this.rosterPollInterval = setInterval(async () => {
       try {
         await this.pollRoster(page);
@@ -1495,6 +1499,7 @@ export class TeamsHandler {
       this.rosterPollInterval = undefined;
       console.log('[Teams][Roster] Stopped roster polling');
     }
+    this._onRosterCount = null;
     // Mark all entries without leftAtMs
     const now = Date.now();
     for (const entry of this.rosterEntries) {
@@ -1590,6 +1595,7 @@ export class TeamsHandler {
       }
 
       console.log(`[Teams][Roster] ${names.length} participants via ${source}: ${names.join(', ')}`);
+      this._onRosterCount?.(names.length);
     } catch (e) {
       console.log(`[Teams][Roster] Poll error: ${e}`);
     }
