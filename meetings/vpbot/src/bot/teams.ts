@@ -1270,41 +1270,42 @@ export class TeamsHandler {
         return;
       }
 
-      // Step 4: type the message — for contenteditable divs, use click + keyboard.type
-      await chatInput.click();
-      await page.waitForTimeout(500);
+      // Step 4: insert the message. WI #8183: per-keystroke keyboard.type took
+      // ~31s in live meetings. fill() sets the contenteditable content in one
+      // shot; extra lines are appended after a Shift+Enter soft break via
+      // insertText (a single input event, not per-character keystrokes).
+      const typeStart = Date.now();
       const lines = message.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        await page.keyboard.type(lines[i]);
-        if (i < lines.length - 1) {
-          await page.keyboard.down('Shift');
-          await page.keyboard.press('Enter');
-          await page.keyboard.up('Shift');
-        }
+      await chatInput.click();
+      await chatInput.fill(lines[0]);
+      for (let i = 1; i < lines.length; i++) {
+        await page.keyboard.down('Shift');
+        await page.keyboard.press('Enter');
+        await page.keyboard.up('Shift');
+        await page.keyboard.insertText(lines[i]);
+      }
+
+      // Verify the editor actually took the text; if not, fall back to setting
+      // the DOM directly and dispatching an input event so the editor syncs.
+      const normalize = (t: string) => t.replace(/\s+/g, ' ').trim();
+      const actual = normalize((await chatInput.textContent()) || '');
+      if (!lines.every(l => actual.includes(normalize(l)))) {
+        console.log('[Teams] fill() did not populate compose box — falling back to DOM insert');
+        await chatInput.evaluate((el, msgLines) => {
+          el.innerHTML = '';
+          for (const line of msgLines) {
+            const p = document.createElement('p');
+            p.textContent = line;
+            el.appendChild(p);
+          }
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+        }, lines);
+        await chatInput.focus();
       }
 
       // Step 5: submit
-      const sendButtonSelectors = [
-        'button[data-tid="sendMessageCommand"]',
-        'button[aria-label="Send"]',
-        'button[aria-label*="send" i]',
-      ];
-      let sent = false;
-      for (const selector of sendButtonSelectors) {
-        try {
-          const btn = page.locator(selector).first();
-          if (await waitVisible(btn, 3000)) {
-            await btn.click();
-            sent = true;
-            break;
-          }
-        } catch {
-          continue;
-        }
-      }
-      if (!sent) {
-        await page.keyboard.press('Enter');
-      }
+      await page.keyboard.press('Enter');
+      console.log(`[Teams] Chat message inserted and sent in ${Date.now() - typeStart}ms`);
 
       // Step 6: capture screenshot and log success
       const s3 = new S3Service(
