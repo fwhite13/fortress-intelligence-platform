@@ -281,7 +281,9 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_meetings ADD COLUMN roster_timeline JSON NULL",
                 // WI #7299 — summary version, bumped on each speaker-correction re-summarization.
                 // MySQL 8 has no ADD COLUMN IF NOT EXISTS; re-runs hit 1060 and are skipped below.
-                "ALTER TABLE firm_meetings ADD COLUMN summary_version INT NOT NULL DEFAULT 1"
+                "ALTER TABLE firm_meetings ADD COLUMN summary_version INT NOT NULL DEFAULT 1",
+                // WI #8199 — caption-derived active speaker timeline from Teams bot (ACTIVE_SPEAKER_JSON)
+                "ALTER TABLE firm_meetings ADD COLUMN active_speaker_timeline JSON NULL"
             };
 
             foreach (var alterSql in alterStatements)
