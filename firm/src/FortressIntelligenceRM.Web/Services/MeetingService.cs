@@ -566,7 +566,8 @@ public class MeetingService
         var meetingDate = meeting.StartedAt ?? meeting.ScheduledAt;
         var creatorEntraOid = meeting.CreatorEntraOid ?? meeting.CreatedByUser?.EntraOid;
         var rosterTimeline = meeting.RosterTimeline;
-        var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate, creatorEntraOid, rosterTimeline);
+        var activeSpeakerTimeline = meeting.ActiveSpeakerTimeline;
+        var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate, creatorEntraOid, rosterTimeline, activeSpeakerTimeline);
         _logger.LogInformation("FIRM: SubmitTranscriptionJobAsync submitted Batch job {JobId} for meeting {MeetingId}", jobId, meetingId);
         return jobId;
     }

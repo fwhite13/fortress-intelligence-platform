@@ -202,6 +202,11 @@ public class MeetingsApiController : ControllerBase
                 meeting.RosterTimeline = JsonSerializer.Serialize(payload.RosterTimeline);
                 _logger.LogInformation("FIRM: Roster timeline saved for meeting {Id}: {Count} entries", payload.MeetingId, payload.RosterTimeline.Count);
             }
+            if (payload.ActiveSpeakerLog != null && payload.ActiveSpeakerLog.Count > 0)
+            {
+                meeting.ActiveSpeakerTimeline = JsonSerializer.Serialize(payload.ActiveSpeakerLog);
+                _logger.LogInformation("FIRM: Active speaker timeline saved for meeting {Id}: {Count} entries", payload.MeetingId, payload.ActiveSpeakerLog.Count);
+            }
             meeting.UpdatedAt = DateTime.UtcNow;
             try
             {
@@ -1516,6 +1521,7 @@ public class VpCallbackPayload
     public List<TranscriptSegmentPayload>? Segments { get; set; }
     public SummaryPayload? Summary { get; set; }
     public List<RosterTimelineEntry>? RosterTimeline { get; set; }
+    public List<ActiveSpeakerEntry>? ActiveSpeakerLog { get; set; }
 }
 
 public class ParticipantPayload
@@ -1576,4 +1582,14 @@ public class RosterTimelineEntry
     public long? LeftAtMs { get; set; }
     [JsonPropertyName("possiblyMultiVoice")]
     public bool PossiblyMultiVoice { get; set; }
+}
+
+public class ActiveSpeakerEntry
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+    [JsonPropertyName("startMs")]
+    public long StartMs { get; set; }
+    [JsonPropertyName("endMs")]
+    public long EndMs { get; set; }
 }

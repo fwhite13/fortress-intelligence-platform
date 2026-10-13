@@ -68,6 +68,11 @@ public class FirmMeeting
     /// Stored as JSON: [{"name":"...", "joinedAtMs":..., "leftAtMs":..., "possiblyMultiVoice":true}, ...]</summary>
     [Column("roster_timeline")]
     public string? RosterTimeline { get; set; }
+    /// <summary>WI #8199 — caption-derived active speaker timeline from Teams bot, passed to firm-transcriber
+    /// as ACTIVE_SPEAKER_JSON for speaker overlap resolution.
+    /// Stored as JSON: [{"name":"...", "startMs":..., "endMs":...}, ...]</summary>
+    [Column("active_speaker_timeline")]
+    public string? ActiveSpeakerTimeline { get; set; }
     /// <summary>WI #7299 — incremented each time the summary is regenerated from a user speaker correction.
     /// v1 is the original transcriber summary (archived in S3 as summary-v1.json on first correction).</summary>
     public int SummaryVersion { get; set; } = 1;
