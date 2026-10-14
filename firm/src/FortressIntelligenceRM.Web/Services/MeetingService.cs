@@ -27,10 +27,25 @@ public class MeetingService
     public async Task<List<FirmMeeting>> GetMeetingsAsync(Guid userId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        return await db.Meetings
+        var meetings = await db.Meetings
             .Where(m => m.CreatedBy == userId)
             .OrderByDescending(m => m.StartDatetime ?? m.CreatedAt)
             .ToListAsync();
+
+        // WI #8289: flag primaries that have at least one subscriber row (drives "Scheduled - Primary" label).
+        var primaryIds = meetings.Where(m => m.IsPrimaryRecorder).Select(m => m.Id).ToList();
+        if (primaryIds.Count > 0)
+        {
+            var withSubscribers = (await db.Meetings
+                .Where(s => s.PrimaryMeetingId != null && primaryIds.Contains(s.PrimaryMeetingId.Value))
+                .Select(s => s.PrimaryMeetingId!.Value)
+                .Distinct()
+                .ToListAsync()).ToHashSet();
+            foreach (var m in meetings)
+                m.HasSubscribers = withSubscribers.Contains(m.Id);
+        }
+
+        return meetings;
     }
 
     /// <summary>
@@ -51,6 +66,10 @@ public class MeetingService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == id && m.CreatedBy == userId);
         if (meeting == null) return null;
+
+        // WI #8289: drives "Scheduled - Primary" label only when a subscriber actually exists.
+        meeting.HasSubscribers = meeting.IsPrimaryRecorder
+            && await db.Meetings.AnyAsync(s => s.PrimaryMeetingId == meeting.Id);
 
         // WI #7033/#7035: a subscriber's own Participants/Transcripts/Summary rows are never
         // duplicated on fan-out — only the meeting-row fields are copied onto the subscriber row

@@ -76,4 +76,8 @@ public class FirmMeeting
     /// <summary>WI #7299 — incremented each time the summary is regenerated from a user speaker correction.
     /// v1 is the original transcriber summary (archived in S3 as summary-v1.json on first correction).</summary>
     public int SummaryVersion { get; set; } = 1;
+    /// <summary>WI #8289 — UI-only: true when at least one subscriber row points at this meeting via
+    /// PrimaryMeetingId. Populated by MeetingService list/detail queries; not persisted.</summary>
+    [NotMapped]
+    public bool HasSubscribers { get; set; }
 }
