@@ -407,6 +407,19 @@ public class MeetingsApiController : ControllerBase
         // via this VpCallback path), so this cannot re-trigger itself.
         if (meetingStatus == MeetingStatus.Complete)
         {
+            // WI #8278: UpdateStatusAsync fanned out before this callback persisted the payload's
+            // AudioS3Key/TranscriptS3Key/RosterTimeline and the transcript-derived duration, so
+            // subscribers got stale (often null) values. Re-run now that the primary is final —
+            // still inside this request, so subscribers are consistent by the time we return Ok().
+            try
+            {
+                await _meetingService.FanOutToSubscribersAsync(payload.MeetingId);
+            }
+            catch (Exception fanOutEx)
+            {
+                _logger.LogError(fanOutEx, "FIRM: Final subscriber fan-out failed for primary {Id} (non-fatal)", payload.MeetingId);
+            }
+
             FireCompletionNotifications(payload.MeetingId, payload.MeetingId);
 
             _ = Task.Run(async () =>
