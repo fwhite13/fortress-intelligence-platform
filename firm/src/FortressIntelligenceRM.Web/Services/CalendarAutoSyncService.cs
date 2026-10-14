@@ -201,6 +201,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                         _logger.LogInformation(
                             "[AutoSync] Added meeting {Id} as SUBSCRIBER of primary {PrimaryId} for user {UserId} (calendar {CalendarEventId})",
                             meeting.Id, existingPrimary.Id, user.Id, dto.CalendarEventId);
+                        await FanOutIfPrimaryCompleteAsync(existingPrimary, ct);
                         continue;
                     }
 
@@ -235,6 +236,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                         _logger.LogInformation(
                             "[AutoSync] Added meeting {Id} as SUBSCRIBER of primary {PrimaryId} for user {UserId} after race",
                             meeting.Id, racedPrimary.Id, user.Id);
+                        await FanOutIfPrimaryCompleteAsync(racedPrimary, ct);
                         continue;
                     }
 
@@ -270,6 +272,24 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
     /// INSERT rather than letting the DB default (Joining) win. The former Joining→target two-step
     /// workaround is no longer needed (verified in production, WI #7784).
     /// </summary>
+    /// <summary>
+    /// WI #8278: FindExistingPrimaryAsync can match a primary that has already finished (e.g. a
+    /// user's calendar syncs after the meeting ended). Its completion fan-out has already run, so
+    /// without this the new Waiting subscriber would never receive the recording.
+    /// </summary>
+    private async Task FanOutIfPrimaryCompleteAsync(FirmMeeting primary, CancellationToken ct)
+    {
+        if (primary.Status != MeetingStatus.Complete) return;
+        try
+        {
+            await _meetingService.FanOutToSubscribersAsync(primary.Id, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[AutoSync] Fan-out to late subscriber(s) of completed primary {PrimaryId} failed", primary.Id);
+        }
+    }
+
     private async Task<FirmMeeting> InsertScheduledMeetingAsync(FirmDbContext db, FirmMeeting draft, MeetingStatus targetStatus, CancellationToken ct)
     {
         draft.Status = targetStatus;

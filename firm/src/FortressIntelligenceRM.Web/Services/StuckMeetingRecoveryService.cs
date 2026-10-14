@@ -13,6 +13,9 @@ namespace FortressIntelligenceRM.Web.Services;
 /// 10+ minutes has its bot task checked; if the task is STOPPED or no longer known to ECS, the
 /// meeting is reverted to Scheduled with LastFailureReason = "bot_launch_failed".
 /// Tasks still provisioning/running are left alone (legitimate slow start or lobby wait).
+/// WI #8278: the same cycle also re-runs the completion fan-out for any Waiting subscriber whose
+/// primary is already Complete — a safety net for subscribers missed by the inline fan-out
+/// (including rows stranded before the fix shipped).
 /// </summary>
 public class StuckMeetingRecoveryService : BackgroundService
 {
@@ -23,17 +26,20 @@ public class StuckMeetingRecoveryService : BackgroundService
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly IAmazonECS _ecs;
     private readonly IConfiguration _config;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<StuckMeetingRecoveryService> _logger;
 
     public StuckMeetingRecoveryService(
         IDbContextFactory<FirmDbContext> dbFactory,
         IAmazonECS ecs,
         IConfiguration config,
+        IServiceScopeFactory scopeFactory,
         ILogger<StuckMeetingRecoveryService> logger)
     {
         _dbFactory = dbFactory;
         _ecs = ecs;
         _config = config;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -53,6 +59,15 @@ public class StuckMeetingRecoveryService : BackgroundService
                 catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
                 {
                     _logger.LogError(ex, "FIRM: StuckMeetingRecoveryService cycle failed");
+                }
+
+                try
+                {
+                    await RecoverOrphanedSubscribersAsync(stoppingToken);
+                }
+                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogError(ex, "FIRM: StuckMeetingRecoveryService subscriber fan-out sweep failed");
                 }
             }
             while (await timer.WaitForNextTickAsync(stoppingToken));
@@ -134,5 +149,28 @@ public class StuckMeetingRecoveryService : BackgroundService
                 "FIRM: StuckMeetingRecovery — meeting {Id} reverted {OldStatus} → Scheduled (bot task {Arn}: {TaskStatus}), LastFailureReason={Reason}",
                 m.Id, m.Status, m.BotTaskArn ?? "(none)", lastStatus ?? "not found", FailureReason);
         }
+    }
+
+    private async Task RecoverOrphanedSubscribersAsync(CancellationToken ct)
+    {
+        List<long> primaryIds;
+        await using (var db = await _dbFactory.CreateDbContextAsync(ct))
+        {
+            primaryIds = await db.Meetings
+                .Where(m => m.Status == MeetingStatus.Waiting
+                         && m.PrimaryMeetingId != null
+                         && m.PrimaryMeeting!.Status == MeetingStatus.Complete)
+                .Select(m => m.PrimaryMeetingId!.Value)
+                .Distinct()
+                .ToListAsync(ct);
+        }
+        if (primaryIds.Count == 0) return;
+
+        _logger.LogWarning("FIRM: StuckMeetingRecovery — {Count} Complete primary(ies) with Waiting subscribers; re-running fan-out", primaryIds.Count);
+
+        using var scope = _scopeFactory.CreateScope();
+        var meetingService = scope.ServiceProvider.GetRequiredService<MeetingService>();
+        foreach (var primaryId in primaryIds)
+            await meetingService.FanOutToSubscribersAsync(primaryId, ct);
     }
 }

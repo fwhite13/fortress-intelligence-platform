@@ -53,8 +53,8 @@ public class MeetingService
         if (meeting == null) return null;
 
         // WI #7033/#7035: a subscriber's own Participants/Transcripts/Summary rows are never
-        // duplicated on fan-out — only AudioS3Key/TranscriptS3Key are copied onto the subscriber row
-        // (see FanOutCompletionAsync). Resolve the effective source-of-truth meeting id for these
+        // duplicated on fan-out — only the meeting-row fields are copied onto the subscriber row
+        // (see FanOutToSubscribersAsync). Resolve the effective source-of-truth meeting id for these
         // relational artifacts here so a subscriber's detail page renders the shared content.
         var artifactMeetingId = meeting.PrimaryMeetingId ?? meeting.Id;
         meeting.Participants = await db.Participants.Where(p => p.MeetingId == artifactMeetingId).ToListAsync();
@@ -136,7 +136,7 @@ public class MeetingService
 
         // WI #7035: only ever fires for a primary transitioning to Complete/Failed. Subscribers
         // (IsPrimaryRecorder=false) never trigger this, so fan-out cannot re-trigger itself —
-        // subscriber rows are updated directly by FanOutCompletionAsync/PromoteOrFailSubscribersAsync
+        // subscriber rows are updated directly by FanOutToSubscribersAsync/PromoteOrFailSubscribersAsync
         // below, not via a recursive UpdateStatusAsync call. Wrapped in try/catch so a fan-out/
         // promotion failure isn't mistaken by VpCallback's caller for "the status update itself
         // failed" and retried — the primary's own status transition above already committed.
@@ -144,7 +144,7 @@ public class MeetingService
         {
             if (meeting.IsPrimaryRecorder && status == MeetingStatus.Complete)
             {
-                await FanOutCompletionAsync(meeting.Id);
+                await FanOutToSubscribersAsync(meeting.Id);
             }
             else if (meeting.IsPrimaryRecorder && status == MeetingStatus.Failed)
             {
@@ -168,21 +168,27 @@ public class MeetingService
     }
 
     /// <summary>
-    /// WI #7035 Part A: when a primary meeting completes, copies its shared artifacts onto every
-    /// linked subscriber and marks them Complete too. Returns the subscriber ids so the caller (the
-    /// VpCallback controller) can fire the same per-user completion notifications it fires for the
-    /// primary. Transcript segments/Summary rows are intentionally NOT duplicated — GetMeetingAsync
-    /// resolves those from the primary via PrimaryMeetingId instead.
+    /// WI #7035 Part A / WI #8278: when a primary meeting completes, copies its shared artifacts onto
+    /// every linked subscriber and marks them Complete too, so a subscriber's detail page is identical
+    /// to the primary's. Idempotent — safe to call again whenever the primary's artifacts change
+    /// (VpCallback re-runs it after persisting the final S3 keys/roster/duration; a retranscribe
+    /// re-runs it via the same summary_complete callback; AutoSync runs it for a subscriber attached
+    /// after the primary already finished). Always re-reads the primary so the latest committed
+    /// artifacts win. Returns the subscriber ids so the caller (the VpCallback controller) can fire
+    /// the same per-user completion notifications it fires for the primary. Transcript segments/
+    /// Participants/Summary rows are intentionally NOT duplicated — GetMeetingAsync resolves those
+    /// from the primary via PrimaryMeetingId instead.
     /// </summary>
-    public async Task<List<long>> FanOutCompletionAsync(long primaryMeetingId)
+    public async Task<List<long>> FanOutToSubscribersAsync(long primaryMeetingId, CancellationToken ct = default)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var primary = await db.Meetings.FindAsync(primaryMeetingId);
-        if (primary == null || !primary.IsPrimaryRecorder) return new List<long>();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var primary = await db.Meetings.FindAsync(new object[] { primaryMeetingId }, ct);
+        if (primary == null || !primary.IsPrimaryRecorder || primary.Status != MeetingStatus.Complete)
+            return new List<long>();
 
         var subscribers = await db.Meetings
             .Where(m => m.PrimaryMeetingId == primaryMeetingId && m.Status != MeetingStatus.Failed)
-            .ToListAsync();
+            .ToListAsync(ct);
         if (subscribers.Count == 0) return new List<long>();
 
         var now = DateTime.UtcNow;
@@ -190,13 +196,17 @@ public class MeetingService
         {
             sub.AudioS3Key = primary.AudioS3Key;
             sub.TranscriptS3Key = primary.TranscriptS3Key;
-            sub.Status = MeetingStatus.Complete;
-            sub.StartedAt ??= primary.StartedAt;
+            sub.RosterTimeline = primary.RosterTimeline;
+            sub.SummaryVersion = primary.SummaryVersion;
+            sub.StartedAt = primary.StartedAt;
             sub.EndedAt = primary.EndedAt;
             sub.DurationSeconds = primary.DurationSeconds;
+            sub.Status = MeetingStatus.Complete;
+            sub.ErrorMessage = null;
+            sub.LastFailureReason = null;
             sub.UpdatedAt = now;
         }
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(ct);
 
         _logger.LogInformation("FIRM: Fanned out completion from primary {Id} to {Count} subscriber(s)", primaryMeetingId, subscribers.Count);
         return subscribers.Select(s => s.Id).ToList();
@@ -585,20 +595,25 @@ public class MeetingService
         if (string.IsNullOrEmpty(meeting.AudioS3Key))
             return (false, "No audio recording available for this meeting");
 
+        // WI #8278: a subscriber's transcript/summary are read from its primary, so retranscribing a
+        // subscriber must retranscribe the primary — its summary_complete callback then re-fans the
+        // new artifacts out to every subscriber (including this one).
+        var targetMeetingId = meeting.PrimaryMeetingId ?? meetingId;
+
         try
         {
-            var jobId = await SubmitTranscriptionJobAsync(meetingId);
+            var jobId = await SubmitTranscriptionJobAsync(targetMeetingId);
 
             // Reset meeting status to Transcribing
             await using var db = await _dbFactory.CreateDbContextAsync();
-            var dbMeeting = await db.Meetings.FindAsync(meetingId);
+            var dbMeeting = await db.Meetings.FindAsync(targetMeetingId);
             if (dbMeeting != null)
             {
                 dbMeeting.Status = MeetingStatus.Transcribing;
                 await db.SaveChangesAsync();
             }
 
-            _logger.LogInformation("FIRM: RetranscribeAsync submitted Batch job {JobId} for meeting {MeetingId}", jobId, meetingId);
+            _logger.LogInformation("FIRM: RetranscribeAsync submitted Batch job {JobId} for meeting {MeetingId} (requested via {RequestedId})", jobId, targetMeetingId, meetingId);
             return (true, null);
         }
         catch (Exception ex)
