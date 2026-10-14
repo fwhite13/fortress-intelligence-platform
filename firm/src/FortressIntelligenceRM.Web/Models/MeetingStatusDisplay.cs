@@ -4,6 +4,8 @@ namespace FortressIntelligenceRM.Web.Models;
 /// UI-only status labels/colors for meeting badges. DB status values are unchanged.
 /// WI #8277: subscribers sit in Waiting from creation, which read as "broken" for meetings
 /// still in the future — show "Scheduled - Subscriber" until start time passes.
+/// WI #8289: "Scheduled - Primary" only when the primary actually has subscribers (HasSubscribers);
+/// solo primaries show plain "Scheduled".
 /// </summary>
 public static class MeetingStatusDisplay
 {
@@ -11,7 +13,7 @@ public static class MeetingStatusDisplay
     {
         var now = utcNow ?? DateTime.UtcNow;
 
-        if (meeting.IsPrimaryRecorder && meeting.Status == MeetingStatus.Scheduled)
+        if (meeting.IsPrimaryRecorder && meeting.HasSubscribers && meeting.Status == MeetingStatus.Scheduled)
             return ("#607d8b", "Scheduled - Primary");
 
         if (!meeting.IsPrimaryRecorder && meeting.Status == MeetingStatus.Waiting
