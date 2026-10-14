@@ -165,6 +165,36 @@ def build_active_speaker_block(active_speaker: list, recording_start_ms: int | N
             "Approximate; use it to resolve ambiguous speaker labels, not as ground truth]\n"
             + "\n".join(lines) + "\n[END ACTIVE SPEAKER TIMELINE]\n\n")
 
+def resolve_speakers_from_active_log(speaker_segments: dict, active_speaker_log: list, recording_start_ms: int) -> dict:
+    """
+    Map diarization labels to names using the platform active-speaker log (ADO#8232).
+    speaker_segments: SPEAKER_NN -> list of (start_s, end_s) relative to recording start.
+    active_speaker_log: list of {name, startMs, endMs} in epoch ms.
+    Returns SPEAKER_NN -> name for labels where one name clearly dominates the overlap.
+    """
+    resolved = {}
+    for speaker_label, segs in speaker_segments.items():
+        seg_ms = [(recording_start_ms + s * 1000, recording_start_ms + e * 1000) for s, e in segs]
+        overlap_by_name = {}  # aggregated across all log entries for the same person
+        for entry in active_speaker_log:
+            name = (entry.get("name") or "").strip()
+            entry_start = entry.get("startMs")
+            if not name or entry_start is None:
+                continue
+            entry_end = entry.get("endMs") or entry_start
+            overlap = sum(max(0, min(seg_end, entry_end) - max(seg_start, entry_start)) for seg_start, seg_end in seg_ms)
+            if overlap > 0:
+                overlap_by_name[name] = overlap_by_name.get(name, 0) + overlap
+        ranked = sorted(overlap_by_name.items(), key=lambda kv: kv[1], reverse=True)
+        if not ranked:
+            continue
+        best_name, best_overlap = ranked[0]
+        second_overlap = ranked[1][1] if len(ranked) > 1 else 0
+        if best_overlap > 0 and second_overlap <= 0.5 * best_overlap:
+            resolved[speaker_label] = best_name
+            print(f"[Transcriber] {speaker_label} → {best_name} via active speaker log (overlap {best_overlap:.0f}ms)")
+    return resolved
+
 def post_callback(url: str, secret: str, payload: dict):
     try:
         resp = requests.post(url, json=payload,
@@ -332,16 +362,36 @@ def main():
                 whisper_segments = whisperx.assign_word_speakers(diarize_df, {"segments": whisper_segments})["segments"]
                 print(f"[Transcriber] Diarization complete: {len(turns)} turns, {len(set(s for _,_,s in turns))} speakers")
 
-                # Build speaker label → name assignment using roster timing overlap
-                if roster_attendees and turns:
+                # Build speaker label → name assignment: active speaker log first, then roster timing overlap
+                if (roster_attendees or active_speaker_log) and turns:
                     speaker_segments = {}  # speaker_label -> list of (start, end) tuples
                     for (t_start, t_end, t_speaker) in turns:
                         speaker_segments.setdefault(t_speaker, []).append((t_start, t_end))
 
+                    # ADO#8232: the active speaker log is the primary signal — roster overlap can't
+                    # separate attendees who all joined together. Notetaker entries are excluded.
+                    if active_speaker_log:
+                        speaker_log = [e for e in active_speaker_log if (e.get("name") or "").strip() != notetaker_name]
+                        log_starts = [e["startMs"] for e in speaker_log if e.get("startMs") is not None]
+                        if log_starts:
+                            # Same rebasing as build_active_speaker_block: epoch-ms logs use the roster's
+                            # approximate recording start (earliest join); relative logs are already 0-based
+                            if min(log_starts) > 1_000_000_000_000:
+                                log_base_ms = min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else min(log_starts)
+                            else:
+                                log_base_ms = 0
+                            speaker_name_map.update(resolve_speakers_from_active_log(speaker_segments, speaker_log, log_base_ms))
+
                     # Roster timestamps are epoch ms; approximate recording start as earliest join
-                    recording_start_ms = min(e["joinedAtMs"] for e in roster_attendees)
+                    recording_start_ms = min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else None
 
                     for speaker_label, segs in speaker_segments.items():
+                        if speaker_label in speaker_name_map:
+                            continue  # resolved via active speaker log
+                        if not roster_attendees:
+                            speaker_name_map[speaker_label] = speaker_label
+                            print(f"[Transcriber] {speaker_label} left unresolved (no active speaker match, no roster)")
+                            continue
                         best_name = None
                         best_overlap = 0.0
                         second_overlap = 0.0
