@@ -33,6 +33,16 @@ snapshot_download('pyannote/segmentation-3.0', token=token, local_dir=None); \
 print('pyannote model weights cached successfully'); \
 "
 
+# ADO#8232: pyannote/embedding (voice embeddings for speaker name resolution) is a separately gated repo.
+# Non-fatal so the image still builds before its terms are accepted — the job then downloads at runtime
+# or falls back to roster-timing speaker resolution.
+RUN HF_HOME=/app/.cache/huggingface python3 -c "\
+from huggingface_hub import snapshot_download; \
+token = '${HF_TOKEN}'; \
+snapshot_download('pyannote/embedding', token=token, local_dir=None); \
+print('pyannote/embedding cached successfully'); \
+" || echo "WARNING: pyannote/embedding pre-bake failed (accept its HF terms) — will download at runtime"
+
 # Pre-bake the WhisperX English word-alignment model (torchaudio wav2vec2 bundle) so jobs
 # don't depend on download.pytorch.org at runtime. WhisperX's VAD model ships in the wheel.
 RUN python3 -c "\
