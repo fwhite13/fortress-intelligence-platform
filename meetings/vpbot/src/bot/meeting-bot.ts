@@ -618,9 +618,22 @@ export class MeetingBot extends EventEmitter {
         // - Had other participants: all left — end after 5 consecutive polls (75s)
         // Requires: min-duration guard
         const countEl = await page.$('[data-tid="roster-button"]');
+        // WI #8281: DOM roster button is unreachable in the Fargate container — fall back
+        // to the Teams call-state roster. Call-state excludes the bot, so add 1 to match
+        // the DOM count semantics (≤1 = bot alone).
+        let count: number | null = null;
         if (countEl) {
           const countText = (await countEl.textContent()) || '';
-          const count = parseInt(countText.match(/\d+/)?.[0] || '0', 10);
+          count = parseInt(countText.match(/\d+/)?.[0] || '0', 10);
+        } else if (this._teamsHandler) {
+          const info = this._teamsHandler.getActiveParticipantInfo();
+          if (info.hasHadParticipants && !this._hasHadOtherParticipants) {
+            this._hasHadOtherParticipants = true;
+            console.log('[Bot] First participant joined (call-state) — meeting is live');
+          }
+          count = info.count + 1;
+        }
+        if (count !== null) {
           if (count > 1 && !this._hasHadOtherParticipants) {
             this._hasHadOtherParticipants = true;
             console.log('[Bot] First participant joined — meeting is live');
@@ -664,7 +677,7 @@ export class MeetingBot extends EventEmitter {
         // Trigger: silence_start was detected and no silence_end has arrived for >90s
         if (this._silenceStartTime !== null && pastMinDuration && this._hasHadOtherParticipants) {
           const silenceDurationMs = Date.now() - this._silenceStartTime;
-          const aloneOrUnknown = !countEl || participantOneCount >= 3; // 45s alone before silence can trigger
+          const aloneOrUnknown = count === null || participantOneCount >= 3; // 45s alone before silence can trigger
           if (silenceDurationMs > 90_000 && aloneOrUnknown) {
             console.log(`[Bot] Audio silence for ${(silenceDurationMs / 1000).toFixed(0)}s with no other participants — ending`);
             if (this._endPollInterval) clearInterval(this._endPollInterval);

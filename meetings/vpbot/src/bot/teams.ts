@@ -1915,6 +1915,19 @@ export class TeamsHandler {
   }
 
   /**
+   * WI #8281: Current call-state roster summary for meeting-end detection when the
+   * DOM roster button is unavailable (e.g. in the Fargate container).
+   * `count` is participants currently present (bot excluded); `hasHadParticipants`
+   * is true once anyone has ever appeared in the roster.
+   */
+  getActiveParticipantInfo(): { count: number; hasHadParticipants: boolean } {
+    return {
+      count: this.rosterEntries.filter(e => !e.leftAtMs).length,
+      hasHadParticipants: this.rosterEntries.length > 0,
+    };
+  }
+
+  /**
    * Build a timestamped active speaker log (ms relative to recordingStartMs)
    * that firm-transcriber matches against diarized segments.
    *
