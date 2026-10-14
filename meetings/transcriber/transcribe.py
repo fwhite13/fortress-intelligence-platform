@@ -11,8 +11,10 @@ Environment variables (injected by Batch):
   AWS_REGION         - us-east-1
   BEDROCK_MODEL_ID   - us.anthropic.claude-sonnet-4-6
   ROSTER_TIMELINE_JSON - (optional) JSON array of {name, joinedAtMs, leftAtMs, possiblyMultiVoice}
-  ACTIVE_SPEAKER_JSON  - (optional) JSON array of {name, startMs, endMs} from the meeting platform's
-                         speaking indicator. Epoch ms or ms from recording start; may be empty/absent.
+  ACTIVE_SPEAKER_S3_KEY - (optional) S3 key (in S3_BUCKET) of a JSON array of {name, startMs, endMs} from the
+                         meeting platform's speaking indicator. Epoch ms or ms from recording start.
+                         Preferred over ACTIVE_SPEAKER_JSON — Batch caps container overrides at 8192 bytes.
+  ACTIVE_SPEAKER_JSON  - (optional, legacy) same array passed inline; used only if ACTIVE_SPEAKER_S3_KEY is absent.
 """
 
 import gc
@@ -224,17 +226,30 @@ def main():
             roster_attendees = []
             print(f"[Transcriber] Failed to parse ROSTER_TIMELINE_JSON: {e}")
 
-    active_speaker_json = os.environ.get("ACTIVE_SPEAKER_JSON", "")
+    s3 =boto3.client("s3", region_name=aws_region)
+
+    # ADO#8230: prefer the S3-staged timeline (avoids Batch's 8192-byte override limit);
+    # fall back to the legacy inline env var for jobs submitted by older firm-web builds.
+    active_speaker_s3_key = os.environ.get("ACTIVE_SPEAKER_S3_KEY", "")
+    active_speaker_json = ""
+    active_speaker_source = "ACTIVE_SPEAKER_JSON"
+    if active_speaker_s3_key:
+        active_speaker_source = f"s3://{s3_bucket}/{active_speaker_s3_key}"
+        try:
+            obj = s3.get_object(Bucket=s3_bucket, Key=active_speaker_s3_key)
+            active_speaker_json = obj["Body"].read().decode("utf-8")
+        except Exception as e:
+            print(f"[Transcriber] Failed to download active speaker log from {active_speaker_source}: {e}")
+    else:
+        active_speaker_json = os.environ.get("ACTIVE_SPEAKER_JSON", "")
     active_speaker_log = []  # list of dicts with name, startMs, endMs
     if active_speaker_json:
         try:
             parsed = json.loads(active_speaker_json) or []
             active_speaker_log = [e for e in parsed if isinstance(e, dict)] if isinstance(parsed, list) else []
-            print(f"[Transcriber] Active speaker log loaded: {len(active_speaker_log)} entries")
+            print(f"[Transcriber] Active speaker log loaded from {active_speaker_source}: {len(active_speaker_log)} entries")
         except Exception as e:
-            print(f"[Transcriber] Failed to parse ACTIVE_SPEAKER_JSON: {e}")
-
-    s3 =boto3.client("s3", region_name=aws_region)
+            print(f"[Transcriber] Failed to parse active speaker log from {active_speaker_source}: {e}")
 
     print(f"[Transcriber] Starting job for meeting {meeting_id}, audio: {audio_s3_key}")
 
