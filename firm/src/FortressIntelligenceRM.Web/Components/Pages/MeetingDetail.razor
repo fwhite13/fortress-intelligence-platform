@@ -56,7 +56,7 @@
                     @(_meeting.Title ?? $"Meeting — {_meeting.CreatedAt:yyyy-MM-dd}")
                 </MudText>
                 <MudSpacer />
-                @StatusBadge(_meeting.Status)
+                @StatusBadge(_meeting)
             </MudStack>
             <MudStack Row Class="mb-4" Style="gap: 24px; flex-wrap: wrap;">
                 <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
@@ -664,20 +664,9 @@
         return new MarkupString(html);
     }
 
-    private RenderFragment StatusBadge(MeetingStatus status) => builder =>
+    private RenderFragment StatusBadge(FirmMeeting meeting) => builder =>
     {
-        var (color, label) = status switch
-        {
-            MeetingStatus.Joining => ("#2196f3", "Joining"),
-            MeetingStatus.Recording => ("#ff9800", "Recording"),
-            MeetingStatus.Transcribing => ("#9c27b0", "Transcribing"),
-            MeetingStatus.Summarizing => ("#00bcd4", "Summarizing"),
-            MeetingStatus.Complete => ("#4caf50", "Complete"),
-            MeetingStatus.Failed => ("#f44336", "Failed"),
-            MeetingStatus.Scheduled => ("#607d8b", "Scheduled"),
-            MeetingStatus.Waiting => ("#9e9e9e", "Waiting"),
-            _ => ("#607d8b", status.ToString())
-        };
+        var (color, label) = meeting.GetStatusDisplay();
         builder.OpenElement(0, "span");
         builder.AddAttribute(1, "style",
             $"background: {color}22; color: {color}; border: 1px solid {color}44; " +
