@@ -170,29 +170,41 @@ def resolve_speakers_from_active_log(speaker_segments: dict, active_speaker_log:
     Map diarization labels to names using the platform active-speaker log (ADO#8232).
     speaker_segments: SPEAKER_NN -> list of (start_s, end_s) relative to recording start.
     active_speaker_log: list of {name, startMs, endMs} in epoch ms.
-    Returns SPEAKER_NN -> name for labels where one name clearly dominates the overlap.
+    Each segment votes for the log entry it overlaps most; a label resolves to a name only
+    with a clear majority (> 50% of votes, and >= 2 votes unless the label has one segment).
+    Per-segment voting stops the most talkative person from swamping every label on total overlap.
     """
+    log_entries = []
+    for entry in active_speaker_log:
+        name = (entry.get("name") or "").strip()
+        entry_start = entry.get("startMs")
+        if not name or entry_start is None:
+            continue
+        log_entries.append((name, entry_start, entry.get("endMs") or entry_start))
+
     resolved = {}
     for speaker_label, segs in speaker_segments.items():
-        seg_ms = [(recording_start_ms + s * 1000, recording_start_ms + e * 1000) for s, e in segs]
-        overlap_by_name = {}  # aggregated across all log entries for the same person
-        for entry in active_speaker_log:
-            name = (entry.get("name") or "").strip()
-            entry_start = entry.get("startMs")
-            if not name or entry_start is None:
-                continue
-            entry_end = entry.get("endMs") or entry_start
-            overlap = sum(max(0, min(seg_end, entry_end) - max(seg_start, entry_start)) for seg_start, seg_end in seg_ms)
-            if overlap > 0:
-                overlap_by_name[name] = overlap_by_name.get(name, 0) + overlap
-        ranked = sorted(overlap_by_name.items(), key=lambda kv: kv[1], reverse=True)
-        if not ranked:
+        votes = {}
+        for s, e in segs:
+            seg_start, seg_end = recording_start_ms + s * 1000, recording_start_ms + e * 1000
+            best_name, best_overlap = None, 0
+            for name, entry_start, entry_end in log_entries:
+                overlap = min(seg_end, entry_end) - max(seg_start, entry_start)
+                if overlap > best_overlap:
+                    best_name, best_overlap = name, overlap
+            if best_name:  # segments with no overlapping log entry cast no vote
+                votes[best_name] = votes.get(best_name, 0) + 1
+        if not votes:
             continue
-        best_name, best_overlap = ranked[0]
-        second_overlap = ranked[1][1] if len(ranked) > 1 else 0
-        if best_overlap > 0 and second_overlap <= 0.5 * best_overlap:
+        ranked = sorted(votes.items(), key=lambda kv: kv[1], reverse=True)
+        tally = ", ".join(f"{n}={v}" for n, v in ranked)
+        best_name, best_votes = ranked[0]
+        min_votes = 1 if len(segs) == 1 else 2
+        if best_votes * 2 > sum(votes.values()) and best_votes >= min_votes:
             resolved[speaker_label] = best_name
-            print(f"[Transcriber] {speaker_label} → {best_name} via active speaker log (overlap {best_overlap:.0f}ms)")
+            print(f"[Transcriber] {speaker_label} → {best_name} via active speaker log (votes: {tally})")
+        else:
+            print(f"[Transcriber] {speaker_label} no clear majority in active speaker log (votes: {tally})")
     return resolved
 
 def post_callback(url: str, secret: str, payload: dict):
