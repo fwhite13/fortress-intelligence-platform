@@ -96,6 +96,7 @@ builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
 builder.Services.AddScoped<IZoomBotAccountService, ZoomBotAccountService>();
 builder.Services.AddScoped<AdminAccessService>();
 builder.Services.AddScoped<SpeakerEmbeddingService>();
+builder.Services.AddScoped<VoiceSampleProcessingService>();
 // Bot Framework
 builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>();
 builder.Services.AddTransient<IBot, FirmBot>();

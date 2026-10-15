@@ -43,4 +43,44 @@ public class SpeakerEmbeddingService
         _logger.LogInformation("FIRM: Voiceprint {Id} ({Name}) deactivated", id, record.Name);
         return true;
     }
+
+    // WI #8298 — self-service enrollment status for one user. meeting_auto rows are written by the
+    // transcriber without an entra_oid, so they are matched on the user's display name.
+    public async Task<VoiceEnrollmentStatus> GetEnrollmentStatusAsync(string entraOid, string displayName)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var voiceSample = await db.SpeakerEmbeddings.AsNoTracking()
+            .Where(e => e.TenantId == TenantId && e.IsActive && e.Source == "voice_sample" && e.EntraOid == entraOid)
+            .OrderByDescending(e => e.Id)
+            .FirstOrDefaultAsync();
+        var autoMeetingCount = await db.SpeakerEmbeddings.AsNoTracking()
+            .Where(e => e.TenantId == TenantId && e.IsActive && e.Source == "meeting_auto"
+                        && (e.EntraOid == entraOid || (displayName != "" && e.Name == displayName)))
+            .Select(e => e.MeetingId)
+            .Distinct()
+            .CountAsync();
+        return new VoiceEnrollmentStatus(voiceSample?.Id, voiceSample?.CreatedAt, autoMeetingCount);
+    }
+
+    // WI #8298 — opt-out: soft-delete every voice_sample row for this user.
+    public async Task<int> DeactivateVoiceSamplesAsync(string entraOid)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var records = await db.SpeakerEmbeddings
+            .Where(e => e.TenantId == TenantId && e.IsActive && e.Source == "voice_sample" && e.EntraOid == entraOid)
+            .ToListAsync();
+        foreach (var record in records)
+        {
+            record.IsActive = false;
+            record.UpdatedAt = DateTime.UtcNow;
+        }
+        await db.SaveChangesAsync();
+        _logger.LogInformation("FIRM: {Count} voice sample(s) deactivated for {EntraOid}", records.Count, entraOid);
+        return records.Count;
+    }
+}
+
+public record VoiceEnrollmentStatus(long? VoiceSampleId, DateTime? VoiceSampleRecordedAt, int AutoMeetingCount)
+{
+    public bool IsEnrolled => VoiceSampleId.HasValue;
 }
