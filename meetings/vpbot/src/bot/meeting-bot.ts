@@ -546,6 +546,18 @@ export class MeetingBot extends EventEmitter {
         const page = this.page;
         if (!page || !this.isRecording) return;
 
+        // WI #8311: Sync _hasHadOtherParticipants from call-state history as a reliability backstop.
+        // The three normal paths to set this flag can miss if the DOM element is stale or
+        // there's a timing gap on the first roster poll. The TeamsHandler's rosterEntries
+        // (populated by roster polling) are authoritative.
+        if (!this._hasHadOtherParticipants && this._teamsHandler) {
+          const info = this._teamsHandler.getActiveParticipantInfo();
+          if (info.hasHadParticipants) {
+            this._hasHadOtherParticipants = true;
+            console.log('[Bot] _hasHadOtherParticipants set from roster history backstop — call-state has had participants');
+          }
+        }
+
         // Signal 1: Explicit end-of-meeting overlays — fires immediately (no min-duration guard)
         const endTexts = [
           'This call has ended',
@@ -622,9 +634,11 @@ export class MeetingBot extends EventEmitter {
         // to the Teams call-state roster. Call-state excludes the bot, so add 1 to match
         // the DOM count semantics (≤1 = bot alone).
         let count: number | null = null;
+        let countSource = 'null';
         if (countEl) {
           const countText = (await countEl.textContent()) || '';
           count = parseInt(countText.match(/\d+/)?.[0] || '0', 10);
+          countSource = `DOM(text="${countText.trim().slice(0, 40)}")`;
         } else if (this._teamsHandler) {
           const info = this._teamsHandler.getActiveParticipantInfo();
           if (info.hasHadParticipants && !this._hasHadOtherParticipants) {
@@ -632,7 +646,9 @@ export class MeetingBot extends EventEmitter {
             console.log('[Bot] First participant joined (call-state) — meeting is live');
           }
           count = info.count + 1;
+          countSource = 'call-state';
         }
+        console.log(`[Bot] End-poll count=${count} source=${countSource} hasHadOthers=${this._hasHadOtherParticipants} participantOneCount=${participantOneCount} pastMinDuration=${pastMinDuration}`);
         if (count !== null) {
           if (count > 1 && !this._hasHadOtherParticipants) {
             this._hasHadOtherParticipants = true;
@@ -651,7 +667,7 @@ export class MeetingBot extends EventEmitter {
                 );
                 return;
               }
-              console.log(`[Bot] No participants yet — waiting until T+20min before giving up (elapsed: ${Math.max(0, Math.round(waitedMs / 1000))}s)`);
+              console.log(`[Bot] No participants yet — waiting until T+20min before giving up (elapsed: ${Math.max(0, Math.round(waitedMs / 1000))}s, waitedMs=${waitedMs}/${NO_PARTICIPANTS_PATIENCE_MS}ms)`);
             } else {
               console.log(`[Bot] Participant count ≤1 (${participantOneCount}/5 consecutive polls)`);
               if (participantOneCount >= 5 && pastMinDuration) {
@@ -666,6 +682,9 @@ export class MeetingBot extends EventEmitter {
               }
             }
           } else {
+            if (participantOneCount > 0) {
+              console.log(`[Bot] Participant count ${count} > 1 — reset participantOneCount (was ${participantOneCount})`);
+            }
             participantOneCount = 0;
           }
         }
@@ -704,13 +723,15 @@ export class MeetingBot extends EventEmitter {
    * returning cancels it. When it fires, stop via the same path as SIGTERM.
    */
   private handleRosterCount(count: number): void {
+    console.log(`[Bot] handleRosterCount: count=${count} hasHadOthers=${this._hasHadOtherParticipants} isRecording=${this.isRecording} emptyTimer=${this._emptyMeetingTimer !== null}`);
+    // WI #8311: Always track whether participants have been present (not gated by isRecording).
+    if (count > 0 && !this._hasHadOtherParticipants) {
+      this._hasHadOtherParticipants = true;
+      console.log('[Bot] First participant joined (roster) — meeting is live');
+    }
     if (!this.isRecording || this._emptyMeetingStopTriggered) return;
 
     if (count > 0) {
-      if (!this._hasHadOtherParticipants) {
-        this._hasHadOtherParticipants = true;
-        console.log('[Bot] First participant joined (roster) — meeting is live');
-      }
       if (this._emptyMeetingTimer) {
         clearTimeout(this._emptyMeetingTimer);
         this._emptyMeetingTimer = null;
