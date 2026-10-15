@@ -79,6 +79,50 @@ def extract_summary_text_field(raw_text: str) -> str | None:
     value = value.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
     return value.strip() if value.strip() else None
 
+SUGGESTED_EVENT_MIN_CONFIDENCE = 0.65
+SUGGESTED_EVENT_MAX = 3
+SUGGESTED_EVENT_DEFAULT_TZ = "Central Standard Time"
+
+
+def normalize_suggested_events(raw) -> list:
+    """
+    WI #8294: sanitize the model's suggested_events array. Enforces the prompt's
+    contract defensively (confidence >= 0.65, at least one attendee, max 3) so a
+    sloppy model response can never surface junk suggestions in the UI.
+    """
+    if not isinstance(raw, list):
+        return []
+    events = []
+    for ev in raw:
+        if not isinstance(ev, dict):
+            continue
+        try:
+            confidence = float(ev.get("confidence") or 0)
+        except (TypeError, ValueError):
+            continue
+        if confidence < SUGGESTED_EVENT_MIN_CONFIDENCE:
+            continue
+        attendees = [str(a).strip() for a in (ev.get("attendees") or []) if str(a).strip()]
+        if not attendees:
+            continue
+        try:
+            duration = int(ev.get("proposed_duration_minutes") or 30)
+        except (TypeError, ValueError):
+            duration = 30
+        events.append({
+            "subject": str(ev.get("subject") or "").strip()[:120] or None,
+            "source_quote": str(ev.get("source_quote") or "").strip(),
+            "attendees": attendees,
+            "attendees_inferred": bool(ev.get("attendees_inferred", False)),
+            "proposed_datetime": ev.get("proposed_datetime") or None,
+            "proposed_duration_minutes": duration if 5 <= duration <= 480 else 30,
+            "confidence": round(confidence, 2),
+            "timezone": ev.get("timezone") or SUGGESTED_EVENT_DEFAULT_TZ,
+        })
+    events.sort(key=lambda e: e["confidence"], reverse=True)
+    return events[:SUGGESTED_EVENT_MAX]
+
+
 def free_gpu_memory():
     gc.collect()
     if torch.cuda.is_available():
@@ -372,6 +416,8 @@ def main():
     aws_region = os.environ.get("AWS_REGION", "us-east-1")
     bedrock_model_id = os.environ.get("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
     meeting_date = os.environ.get("MEETING_DATE", "")
+    # WI #8294: UTC ISO-8601 meeting start — anchor for relative dates in suggested_events
+    meeting_start_datetime = os.environ.get("MEETING_START_DATETIME", "")
     notetaker_name = os.environ.get("NOTETAKER_NAME", "Fortress Notetaker")
 
     org_wiki_json = os.environ.get("ORG_WIKI_JSON", "")
@@ -699,6 +745,7 @@ def main():
             summary_prompt = f"""Analyze this meeting transcript and provide a rich, structured summary.
 {org_context_block}{attendees_block}{active_speaker_block}
 Meeting date: {meeting_date if meeting_date else "unknown"}
+Meeting start (UTC): {meeting_start_datetime if meeting_start_datetime else "unknown"}
 
 IMPORTANT — Org Context Usage:
 1. TERMINOLOGY — MANDATORY LOOKUP: Before interpreting ANY acronym, abbreviation, or proper noun in the transcript, check it against the ORG WIKI above. The Org Wiki is the authoritative source — do NOT guess or use general knowledge if a term could match a wiki entry. Examples: "NBA" MUST be looked up before assuming it means the basketball association. "FAM", "FAIT", "FIRM", "FORMS", "FIP" are all defined in the wiki. If a term appears in the wiki, use the wiki definition. Period. Only fall back to general knowledge if the term has NO plausible wiki match.
@@ -723,7 +770,19 @@ Return ONLY a valid JSON object with exactly these fields. No commentary before 
   "keyDecisionsJson": ["decision 1", "decision 2"],
   "actionItemsJson": [{{"owner": "Name", "deadline": "YYYY-MM-DD or TBD", "description": "task"}}],
   "followUpsJson": ["follow-up 1", "follow-up 2"],
-  "openQuestionsJson": ["question 1", "question 2"]
+  "openQuestionsJson": ["question 1", "question 2"],
+  "suggested_events": [
+    {{
+      "subject": "short calendar subject, e.g. Pricing review with Acme",
+      "source_quote": "verbatim transcript snippet",
+      "attendees": ["name or email"],
+      "attendees_inferred": false,
+      "proposed_datetime": "YYYY-MM-DDTHH:MM:SS or null",
+      "proposed_duration_minutes": 30,
+      "confidence": 0.85,
+      "timezone": "Central Standard Time"
+    }}
+  ]
 }}
 
 For summaryText, produce rich markdown in this exact format:
@@ -793,7 +852,21 @@ Rules:
 - keyDecisionsJson: same decisions as the Decisions table, as plain strings
 - actionItemsJson: same as Action Items table, as objects with owner/deadline/description
 - followUpsJson: same as Open Questions, as plain strings
-- openQuestionsJson: unresolved questions only"""
+- openQuestionsJson: unresolved questions only
+
+SCHEDULING DETECTION (suggested_events):
+Identify NEW meetings the participants agreed or proposed to schedule during this conversation. Return an empty array if there are none.
+- Include ONLY new scheduling intent. Do NOT include references to meetings that already exist or are already on the calendar.
+- Each suggestion MUST have: clear intent to meet + at least one identifiable attendee + some timeframe (even "next week" counts).
+- DROP conditional intent ("if the deal closes, let's meet..."), recurring cadences ("every two weeks", "weekly sync"), and vague intent with no identifiable attendee.
+- subject: a short calendar-ready title for the new meeting (under 80 characters).
+- source_quote: the verbatim transcript snippet expressing the intent (escape any double quotes as \\").
+- attendees: use the people explicitly named first. If the speaker says "everyone", "the team", "all of us", etc., fall back to the meeting participants (MEETING ATTENDEES / Key People) and set attendees_inferred to true; otherwise attendees_inferred is false.
+- proposed_datetime: resolve relative dates ("tomorrow", "next Tuesday", "next week") against the MEETING START above — NOT against today's date or when this transcript was processed. Output local wall-clock time in the suggestion's timezone as YYYY-MM-DDTHH:MM:SS with no UTC offset. If only a day or week is known, pick a reasonable business-hours time (e.g. 10:00) on the earliest plausible day. Use null only if the timeframe is too vague to pick any date.
+- proposed_duration_minutes: as stated, otherwise 30.
+- timezone: a Windows time zone name (e.g. "Eastern Standard Time", "Pacific Standard Time") inferred from context; default "Central Standard Time".
+- confidence: 0.0-1.0 that this is a real, new meeting the participants intend to schedule. Include ONLY suggestions with confidence >= 0.65.
+- Return 0-3 suggestions maximum. Prefer quality over quantity."""
             print(f"[Transcriber] Summary prompt (first 2000 chars):\n{summary_prompt[:2000]}")
 
             response = bedrock.invoke_model(
@@ -848,7 +921,7 @@ Rules:
                 try:
                     repaired = repair_json(json_block)
                     repaired_data = json.loads(repaired)
-                    for key in ("keyDecisionsJson", "actionItemsJson", "followUpsJson", "openQuestionsJson"):
+                    for key in ("keyDecisionsJson", "actionItemsJson", "followUpsJson", "openQuestionsJson", "suggested_events"):
                         if key in repaired_data:
                             recovered_arrays[key] = repaired_data[key]
                     print(f"[Transcriber] json_repair recovered array fields: {list(recovered_arrays.keys())}")
@@ -864,6 +937,10 @@ Rules:
                         "summaryText": "# Summary Unavailable\n\nThe AI summary could not be generated in a readable format for this meeting. The transcript is still available in full under the Transcript tab.",
                         **recovered_arrays
                     }
+
+            suggested_events = normalize_suggested_events(summary_data.get("suggested_events"))
+            summary_data["suggested_events"] = suggested_events
+            print(f"[Transcriber] Scheduling detection: {len(suggested_events)} suggested event(s)")
 
             # Upload summary to S3
             summary_key = f"firm-transcripts/{meeting_id}/summary.json"
@@ -884,6 +961,8 @@ Rules:
                     "KeyDecisionsJson": json.dumps(summary_data.get("keyDecisionsJson", [])),
                     "ActionItemsJson": json.dumps(summary_data.get("actionItemsJson", [])),
                     "FollowUpsJson": json.dumps(summary_data.get("followUpsJson", [])),
+                    "OpenQuestionsJson": json.dumps(summary_data.get("openQuestionsJson", [])),
+                    "SuggestedEventsJson": json.dumps(suggested_events),
                     "ModelUsed": bedrock_model_id
                 }
             })
