@@ -558,13 +558,14 @@ public class MeetingService
         return await db.Users.FindAsync(userId);
     }
 
-    public async Task UpdateUserPreferencesAsync(Guid userId, bool autoAddCalendarMeetings, bool autoEmailSummary)
+    public async Task UpdateUserPreferencesAsync(Guid userId, bool autoAddCalendarMeetings, bool autoEmailSummary, bool autoCreateSuggestedEvents)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var user = await db.Users.FindAsync(userId);
         if (user == null) return;
         user.AutoAddCalendarMeetings = autoAddCalendarMeetings;
         user.AutoEmailSummary = autoEmailSummary;
+        user.AutoCreateSuggestedEvents = autoCreateSuggestedEvents;
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
     }
