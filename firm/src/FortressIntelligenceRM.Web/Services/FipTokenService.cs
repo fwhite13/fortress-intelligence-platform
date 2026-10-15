@@ -47,15 +47,13 @@ public class FipTokenService
                 ["client_secret"] = _clientSecret,
                 ["refresh_token"] = token.RefreshToken,
                 ["grant_type"] = "refresh_token",
-                ["scope"] = "https://graph.microsoft.com/Calendars.ReadWrite offline_access"
+                ["scope"] = "https://graph.microsoft.com/Calendars.Read offline_access"
             });
             var response = await http.PostAsync(tokenEndpoint, content);
             var body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogError("[FipTokenService] Refresh failed for OID {Oid}: {Status} {Body}", entraOid, response.StatusCode, body);
-                db.UserMicrosoftTokens.Remove(token);
-                await db.SaveChangesAsync();
                 return null;
             }
             var json = JsonSerializer.Deserialize<JsonElement>(body);
