@@ -14,10 +14,21 @@
         }
         else
         {
-            <MudSwitch @bind-Value="_autoAddCalendarMeetings" Label="Auto-Add Calendar Meetings"
-                       Color="Color.Warning" Class="mb-2" />
-            <MudSwitch @bind-Value="_autoEmailSummary" Label="Auto-Email Summary"
-                       Color="Color.Warning" />
+            <MudTabs Elevation="0" Rounded="true" PanelClass="pt-4" Color="Color.Transparent" SliderColor="Color.Warning">
+                <MudTabPanel Text="General">
+                    <MudSwitch @bind-Value="_autoAddCalendarMeetings" Label="Auto-Add Calendar Meetings"
+                               Color="Color.Warning" Class="mb-2" />
+                    <MudSwitch @bind-Value="_autoEmailSummary" Label="Auto-Email Summary"
+                               Color="Color.Warning" />
+                </MudTabPanel>
+                @if (!string.IsNullOrEmpty(_entraOid))
+                {
+                    @* WI #8298 — voice enrollment acts immediately; Save only covers the General tab. *@
+                    <MudTabPanel Text="Voice">
+                        <VoiceEnrollmentPanel EntraOid="@_entraOid" DisplayName="@_displayName" />
+                    </MudTabPanel>
+                }
+            </MudTabs>
         }
     </DialogContent>
     <DialogActions>
@@ -37,6 +48,8 @@
     private bool _loading = true;
     private bool _autoAddCalendarMeetings;
     private bool _autoEmailSummary;
+    private string _entraOid = "";
+    private string _displayName = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -45,6 +58,8 @@
         {
             _autoAddCalendarMeetings = user.AutoAddCalendarMeetings;
             _autoEmailSummary = user.AutoEmailSummary;
+            _entraOid = user.EntraOid;
+            _displayName = user.DisplayName;
         }
         _loading = false;
     }

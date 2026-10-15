@@ -539,7 +539,79 @@ def post_callback(url: str, secret: str, payload: dict):
     except Exception as e:
         print(f"[Callback] Failed: {e}", file=sys.stderr)
 
+def process_voice_sample():
+    """
+    ADO#8298: JOB_MODE=voice_sample — a user's enrollment recording (one speaker, Rainbow Passage).
+    Embeds the whole file (no diarization), stores the .npy under voiceprints/{tenant}/, inserts a
+    voice_sample row and deletes the user's previous voice_sample rows (re-record replaces).
+    """
+    sample_s3_key = os.environ["VOICE_SAMPLE_S3_KEY"]
+    entra_oid = os.environ["ENTRA_OID"]
+    tenant_id = os.environ["TENANT_ID"]
+    name = os.environ.get("FIRM_SPEAKER_EMBEDDING_NAME", "").strip() or entra_oid
+    s3_bucket = os.environ.get("S3_BUCKET", "firm-recordings-dev")
+    hf_token = os.environ.get("HF_TOKEN", "")
+    aws_region = os.environ.get("AWS_REGION", "us-east-1")
+
+    db_config = voiceprint_db_config()
+    if not tenant_id or not db_config:
+        print("[VoiceSample] TENANT_ID or FORTRESS_DB_HOST not set — cannot store voiceprint", file=sys.stderr)
+        sys.exit(1)
+
+    s3 = boto3.client("s3", region_name=aws_region)
+    suffix = os.path.splitext(sample_s3_key)[1] or ".webm"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        audio_path = f.name
+    try:
+        print(f"[VoiceSample] Downloading s3://{s3_bucket}/{sample_s3_key} for {entra_oid}")
+        s3.download_file(s3_bucket, sample_s3_key, audio_path)
+
+        waveform = whisperx.load_audio(audio_path)  # ffmpeg decode → 16 kHz mono float32
+        duration_s = len(waveform) / EMBEDDING_SAMPLE_RATE
+        print(f"[VoiceSample] Decoded {duration_s:.1f}s of audio")
+        inference = _get_embedding_inference(hf_token)
+        emb = _embed_window(inference, waveform, 0.0, duration_s)
+        if emb is None:
+            raise RuntimeError(f"voice sample too short or unusable ({duration_s:.1f}s)")
+        emb = F.normalize(emb, dim=0)
+
+        buf = io.BytesIO()
+        np.save(buf, emb.detach().cpu().numpy().astype(np.float32), allow_pickle=False)
+        voiceprint_key = f"voiceprints/{tenant_id}/{uuid.uuid4()}.npy"
+        s3.put_object(Bucket=s3_bucket, Key=voiceprint_key, Body=buf.getvalue(),
+                      ContentType="application/octet-stream")
+
+        conn = pymysql.connect(**db_config)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO firm_speaker_embeddings "
+                    "(tenant_id, name, entra_oid, s3_key, source, meeting_id, confidence, is_active, created_at, updated_at) "
+                    "VALUES (%s, %s, %s, %s, 'voice_sample', NULL, NULL, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+                    (tenant_id, name, entra_oid, voiceprint_key))
+                new_id = cur.lastrowid
+                cur.execute(
+                    "DELETE FROM firm_speaker_embeddings "
+                    "WHERE tenant_id = %s AND entra_oid = %s AND source = 'voice_sample' AND id <> %s",
+                    (tenant_id, entra_oid, new_id))
+                replaced = cur.rowcount
+            conn.commit()
+        finally:
+            conn.close()
+        print(f"[VoiceSample] Voiceprint {new_id} stored for {name} ({entra_oid}) → s3://{s3_bucket}/{voiceprint_key}; "
+              f"replaced {replaced} previous voice_sample row(s)")
+    finally:
+        release_embedding_model()
+        try:
+            os.unlink(audio_path)
+        except OSError:
+            pass
+
 def main():
+    if os.environ.get("JOB_MODE") == "voice_sample":
+        process_voice_sample()
+        return
+
     meeting_id = int(os.environ["MEETING_ID"])
     audio_s3_key = os.environ["AUDIO_S3_KEY"]
     s3_bucket = os.environ.get("S3_BUCKET", "firm-recordings-dev")
