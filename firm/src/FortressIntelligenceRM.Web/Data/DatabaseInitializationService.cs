@@ -305,7 +305,9 @@ public class DatabaseInitializationService : IHostedService
                 // WI #8294 — scheduling suggestions from the summarization pass (incl. per-item dismissal status)
                 "ALTER TABLE firm_meetings ADD COLUMN suggested_events JSON NULL",
                 // WI #8310 — per-user gate for Suggested Events create/edit (needs Calendars.ReadWrite consent)
-                "ALTER TABLE firm_users ADD COLUMN auto_create_suggested_events TINYINT(1) NOT NULL DEFAULT 0"
+                "ALTER TABLE firm_users ADD COLUMN auto_create_suggested_events TINYINT(1) NOT NULL DEFAULT 0",
+                // WI #8335 — post-transcription speaker corrections overlay (assign/override/merge)
+                "ALTER TABLE firm_meetings ADD COLUMN speaker_corrections JSON NULL"
             };
 
             foreach (var alterSql in alterStatements)

@@ -83,6 +83,16 @@ public class FirmMeeting
     /// so each organizer's Create/Not-an-event decisions are independent.</summary>
     [Column("suggested_events")]
     public string? SuggestedEvents { get; set; }
+    /// <summary>WI #8335 — user speaker-attribution corrections, stored as an overlay so the base transcript
+    /// is never mutated and a retranscribe can't destroy the user's work. Lives on the primary row (the
+    /// transcript is shared with subscribers). Stored as a JSON array, applied in order (later wins):
+    /// [{"type":"assign","speaker":"SPEAKER_07","resolved_name":"..."},
+    ///  {"type":"override","segment_index":42,"resolved_name":"..."},
+    ///  {"type":"merge","speakers":["SPEAKER_03","SPEAKER_07"],"resolved_name":"..."}].
+    /// Entries with "archived":true were made against a transcript since replaced by a retranscribe —
+    /// kept, but no longer applied.</summary>
+    [Column("speaker_corrections")]
+    public string? SpeakerCorrections { get; set; }
     /// <summary>WI #8289 — UI-only: true when at least one subscriber row points at this meeting via
     /// PrimaryMeetingId. Populated by MeetingService list/detail queries; not persisted.</summary>
     [NotMapped]
