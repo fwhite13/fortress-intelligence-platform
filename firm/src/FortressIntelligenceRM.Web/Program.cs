@@ -116,6 +116,7 @@ builder.Services.AddAWSService<IAmazonBatch>();
 builder.Services.AddScoped<IBatchTranscriptionService, BatchTranscriptionService>();
 builder.Services.AddScoped<IMindmapService, MindmapService>();
 builder.Services.AddScoped<ResummarizeService>();
+builder.Services.AddScoped<SuggestedEventService>();
 builder.Services.AddAWSService<Amazon.BedrockAgent.IAmazonBedrockAgent>();
 builder.Services.AddAWSService<Amazon.BedrockRuntime.IAmazonBedrockRuntime>();
 builder.Services.AddAWSService<IAmazonSimpleEmailServiceV2>();

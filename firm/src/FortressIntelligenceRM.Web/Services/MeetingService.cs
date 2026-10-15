@@ -217,6 +217,9 @@ public class MeetingService
             sub.TranscriptS3Key = primary.TranscriptS3Key;
             sub.RosterTimeline = primary.RosterTimeline;
             sub.SummaryVersion = primary.SummaryVersion;
+            // WI #8294: suggestions are per-row so each organizer's dismissals are independent —
+            // only seed a subscriber that has none yet, never clobber its Create/dismiss state.
+            if (sub.SuggestedEvents == null) sub.SuggestedEvents = primary.SuggestedEvents;
             sub.StartedAt = primary.StartedAt;
             sub.EndedAt = primary.EndedAt;
             sub.DurationSeconds = primary.DurationSeconds;
@@ -596,7 +599,8 @@ public class MeetingService
         var creatorEntraOid = meeting.CreatorEntraOid ?? meeting.CreatedByUser?.EntraOid;
         var rosterTimeline = meeting.RosterTimeline;
         var activeSpeakerTimeline = meeting.ActiveSpeakerTimeline;
-        var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate, creatorEntraOid, rosterTimeline, activeSpeakerTimeline);
+        var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate, creatorEntraOid, rosterTimeline, activeSpeakerTimeline,
+            meetingStartDatetime: meeting.StartDatetime ?? meeting.StartedAt);
         _logger.LogInformation("FIRM: SubmitTranscriptionJobAsync submitted Batch job {JobId} for meeting {MeetingId}", jobId, meetingId);
         return jobId;
     }
@@ -641,5 +645,59 @@ public class MeetingService
             _logger.LogError(ex, "FIRM: RetranscribeAsync failed for meeting {MeetingId}", meetingId);
             return (false, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// WI #8294: persists the transcriber's suggested_events for a meeting. Replaces any prior
+    /// suggestions (a retranscribe is a fresh analysis); every item starts as pending.
+    /// </summary>
+    public async Task StoreSuggestedEventsAsync(long meetingId, string suggestedEventsJson)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.FindAsync(meetingId);
+        if (meeting == null) return;
+
+        var events = SuggestedEvent.ParseList(suggestedEventsJson);
+        foreach (var e in events)
+        {
+            e.Status = SuggestedEvent.StatusPending;
+            e.CreatedEventId = null;
+        }
+        meeting.SuggestedEvents = SuggestedEvent.SerializeList(events);
+        meeting.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        _logger.LogInformation("FIRM: Stored {Count} suggested event(s) for meeting {MeetingId}", events.Count, meetingId);
+    }
+
+    /// <summary>WI #8294: suggestions for a meeting the user organizes (CreatedBy). Empty if not owner.</summary>
+    public async Task<List<SuggestedEvent>> GetSuggestedEventsAsync(long meetingId, Guid userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var json = await db.Meetings
+            .Where(m => m.Id == meetingId && m.CreatedBy == userId)
+            .Select(m => m.SuggestedEvents)
+            .FirstOrDefaultAsync();
+        return SuggestedEvent.ParseList(json);
+    }
+
+    /// <summary>
+    /// WI #8294: records the organizer's decision on one suggestion (by index). Only the meeting's
+    /// organizer may change it. Returns false if the meeting/suggestion isn't found.
+    /// </summary>
+    public async Task<bool> UpdateSuggestedEventStatusAsync(long meetingId, Guid userId, int index, string status, string? createdEventId = null)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.FirstOrDefaultAsync(m => m.Id == meetingId && m.CreatedBy == userId);
+        if (meeting == null) return false;
+
+        var events = SuggestedEvent.ParseList(meeting.SuggestedEvents);
+        if (index < 0 || index >= events.Count) return false;
+
+        events[index].Status = status;
+        if (createdEventId != null) events[index].CreatedEventId = createdEventId;
+        meeting.SuggestedEvents = SuggestedEvent.SerializeList(events);
+        meeting.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return true;
     }
 }

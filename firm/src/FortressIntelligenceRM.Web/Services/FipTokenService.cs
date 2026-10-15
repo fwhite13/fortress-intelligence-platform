@@ -47,7 +47,7 @@ public class FipTokenService
                 ["client_secret"] = _clientSecret,
                 ["refresh_token"] = token.RefreshToken,
                 ["grant_type"] = "refresh_token",
-                ["scope"] = "https://graph.microsoft.com/Calendars.Read offline_access"
+                ["scope"] = "https://graph.microsoft.com/Calendars.ReadWrite offline_access"
             });
             var response = await http.PostAsync(tokenEndpoint, content);
             var body = await response.Content.ReadAsStringAsync();

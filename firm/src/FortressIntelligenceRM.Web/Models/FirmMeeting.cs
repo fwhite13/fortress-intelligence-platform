@@ -76,6 +76,13 @@ public class FirmMeeting
     /// <summary>WI #7299 — incremented each time the summary is regenerated from a user speaker correction.
     /// v1 is the original transcriber summary (archived in S3 as summary-v1.json on first correction).</summary>
     public int SummaryVersion { get; set; } = 1;
+    /// <summary>WI #8294 — scheduling suggestions extracted by the transcriber's summarization pass.
+    /// Stored as JSON: [{"source_quote":"...","attendees":[...],"attendees_inferred":false,
+    /// "proposed_datetime":"...","proposed_duration_minutes":30,"confidence":0.85,"timezone":"...",
+    /// "status":"pending|created|dismissed","created_event_id":"..."}]. Per-row (copied to subscribers)
+    /// so each organizer's Create/Not-an-event decisions are independent.</summary>
+    [Column("suggested_events")]
+    public string? SuggestedEvents { get; set; }
     /// <summary>WI #8289 — UI-only: true when at least one subscriber row points at this meeting via
     /// PrimaryMeetingId. Populated by MeetingService list/detail queries; not persisted.</summary>
     [NotMapped]

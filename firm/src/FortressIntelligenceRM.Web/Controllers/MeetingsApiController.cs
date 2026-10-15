@@ -32,6 +32,7 @@ public class MeetingsApiController : ControllerBase
     private readonly PdfService _pdfService;
     private readonly IEmailService _emailService;
     private readonly ResummarizeService _resummarizeService;
+    private readonly SuggestedEventService _suggestedEventService;
 
     public MeetingsApiController(
         MeetingService meetingService,
@@ -49,7 +50,8 @@ public class MeetingsApiController : ControllerBase
         BrandingConfig branding,
         PdfService pdfService,
         IEmailService emailService,
-        ResummarizeService resummarizeService)
+        ResummarizeService resummarizeService,
+        SuggestedEventService suggestedEventService)
     {
         _meetingService = meetingService;
         _vpBotService = vpBotService;
@@ -67,6 +69,7 @@ public class MeetingsApiController : ControllerBase
         _pdfService = pdfService;
         _emailService = emailService;
         _resummarizeService = resummarizeService;
+        _suggestedEventService = suggestedEventService;
     }
 
 [HttpPost("/api/meetings/join")]
@@ -352,6 +355,20 @@ public class MeetingsApiController : ControllerBase
                 existingSummary.ModelUsed = payload.Summary.ModelUsed;
             }
             await db.SaveChangesAsync();
+
+            // WI #8294: scheduling suggestions ride along on the same summary callback.
+            // Null = older transcriber image that doesn't emit the field — leave existing value alone.
+            if (payload.Summary.SuggestedEventsJson != null)
+            {
+                try
+                {
+                    await _meetingService.StoreSuggestedEventsAsync(payload.MeetingId, payload.Summary.SuggestedEventsJson);
+                }
+                catch (Exception sugEx)
+                {
+                    _logger.LogWarning(sugEx, "FIRM: Failed to store suggested events for meeting {Id} (non-fatal)", payload.MeetingId);
+                }
+            }
 
             // ADO#4: Auto-email PDF summary to the meeting owner if they've opted in.
             // Non-fatal — email delivery failure must not fail the VP callback.
@@ -1465,6 +1482,79 @@ public class MeetingsApiController : ControllerBase
         return Ok(new { meetings, total, page, pageSize });
     }
 
+    /// <summary>WI #8294: scheduling suggestions for a meeting — organizer only (ResolveOwnedMeeting
+    /// scopes to CreatedBy). Each item carries its stable index and status (pending/created/dismissed).</summary>
+    [HttpGet("/api/meetings/{id}/suggested-events")]
+    [Authorize(Policy = "CookieOrBearer")]
+    public async Task<IActionResult> GetSuggestedEvents(long id)
+    {
+        var (meeting, error) = await ResolveOwnedMeeting(id);
+        if (error != null) return error;
+
+        var suggestions = SuggestedEvent.ParseList(meeting!.SuggestedEvents);
+        return Ok(new
+        {
+            meetingId = id,
+            suggested_events = suggestions.Select((s, i) => new
+            {
+                index = i,
+                subject = s.Subject,
+                source_quote = s.SourceQuote,
+                attendees = s.Attendees,
+                attendees_inferred = s.AttendeesInferred,
+                proposed_datetime = s.ProposedDatetime,
+                proposed_duration_minutes = s.ProposedDurationMinutes,
+                confidence = s.Confidence,
+                timezone = s.Timezone,
+                status = s.Status,
+                created_event_id = s.CreatedEventId
+            })
+        });
+    }
+
+    /// <summary>WI #8294: create a Graph calendar event from a suggestion. Body fields are optional
+    /// overrides (the Edit form); omitted fields fall back to the suggestion's defaults.</summary>
+    [HttpPost("/api/meetings/{id}/suggested-events/{index:int}/create")]
+    [Authorize(Policy = "CookieOrBearer")]
+    public async Task<IActionResult> CreateSuggestedEvent(long id, int index, [FromBody] CreateSuggestedEventRequest? request)
+    {
+        var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
+        if (error != null) return error;
+
+        var suggestions = SuggestedEvent.ParseList(meeting!.SuggestedEvents);
+        if (index < 0 || index >= suggestions.Count) return NotFound(new { error = "Suggestion not found" });
+
+        await using (var db = await _dbFactory.CreateDbContextAsync())
+            meeting.Participants = await db.Participants.Where(p => p.MeetingId == (meeting.PrimaryMeetingId ?? meeting.Id)).ToListAsync();
+
+        var draft = SuggestedEventService.BuildDraft(suggestions[index], meeting);
+        if (request != null)
+        {
+            if (!string.IsNullOrWhiteSpace(request.Subject)) draft.Subject = request.Subject;
+            if (request.Start != null) draft.Start = request.Start;
+            if (request.DurationMinutes is > 0) draft.DurationMinutes = request.DurationMinutes.Value;
+            if (!string.IsNullOrWhiteSpace(request.TimeZone)) draft.TimeZone = request.TimeZone;
+            if (request.Attendees != null) draft.Attendees = request.Attendees;
+        }
+
+        var (success, createError) = await _suggestedEventService.CreateEventAsync(meeting, user!, index, draft);
+        return success ? Ok(new { created = true }) : BadRequest(new { error = createError });
+    }
+
+    /// <summary>WI #8294: "Not an event" — persist the dismissal so the card stays hidden.</summary>
+    [HttpPost("/api/meetings/{id}/suggested-events/{index:int}/dismiss")]
+    [Authorize(Policy = "CookieOrBearer")]
+    public async Task<IActionResult> DismissSuggestedEvent(long id, int index)
+    {
+        var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
+        if (error != null) return error;
+
+        var ok = await _suggestedEventService.DismissAsync(meeting!.Id, user!.Id, index);
+        return ok ? Ok(new { dismissed = true }) : NotFound(new { error = "Suggestion not found" });
+    }
+
+    public record CreateSuggestedEventRequest(string? Subject, DateTime? Start, int? DurationMinutes, string? TimeZone, List<string>? Attendees);
+
     public record PushToKbRequest(string DocType, List<string> KbScopes);
 
     private async Task<(FirmMeeting? meeting, IActionResult? error)> ResolveOwnedMeeting(long id)
@@ -1561,6 +1651,7 @@ public class SummaryPayload
     public string? KeyDecisionsJson { get; set; }
     public string? FollowUpsJson { get; set; }
     public string? OpenQuestionsJson { get; set; }
+    public string? SuggestedEventsJson { get; set; }
     public string? ModelUsed { get; set; }
 }
 

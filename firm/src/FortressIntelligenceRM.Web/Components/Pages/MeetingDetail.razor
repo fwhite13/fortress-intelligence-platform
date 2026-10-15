@@ -12,6 +12,7 @@
 @inject BrandingConfig Branding
 @inject ResummarizeService ResummarizeService
 @inject IDialogService DialogService
+@inject SuggestedEventService SuggestedEventService
 @using FortressIntelligenceRM.Web.Models
 @using FortressIntelligenceRM.Web.Services
 @using System.Security.Claims
@@ -259,6 +260,79 @@
                             No summary available.
                         </MudText>
                     }
+
+                    @* WI #8294 — scheduling suggestions detected in the summarization pass; organizer only *@
+                    @if (IsOrganizer && _suggestedEvents.Any(s => s.Event.Status == SuggestedEvent.StatusPending))
+                    {
+                        <MudText Typo="Typo.h6" Style="color: var(--color-gold);" Class="mt-6 mb-2">Suggested Events</MudText>
+                        @foreach (var card in _suggestedEvents.Where(s => s.Event.Status == SuggestedEvent.StatusPending))
+                        {
+                            <MudPaper Elevation="0" Class="pa-4 mb-3"
+                                      Style="background: var(--color-bg-card); border: 1px solid var(--color-border, rgba(255,255,255,0.08));">
+                                @if (!string.IsNullOrWhiteSpace(card.Event.SourceQuote))
+                                {
+                                    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary); font-style: italic;" Class="mb-2">
+                                        &ldquo;@card.Event.SourceQuote&rdquo;
+                                    </MudText>
+                                }
+                                <MudText Typo="Typo.body1" Style="color: var(--color-text-primary); font-weight: 600;">@card.Draft.Subject</MudText>
+                                <MudText Typo="Typo.body2" Style="color: var(--color-text-primary);">
+                                    <MudIcon Icon="@Icons.Material.Filled.Event" Size="Size.Small" Class="mr-1" Style="vertical-align: middle;" />
+                                    @(card.Draft.Start?.ToString("ddd, MMM d, yyyy h:mm tt") ?? "Date/time to be decided")
+                                    (@card.Draft.DurationMinutes min, @card.Draft.TimeZone)
+                                </MudText>
+                                <MudText Typo="Typo.body2" Style="color: var(--color-text-primary);">
+                                    <MudIcon Icon="@Icons.Material.Filled.People" Size="Size.Small" Class="mr-1" Style="vertical-align: middle;" />
+                                    @string.Join(", ", card.Event.Attendees)
+                                </MudText>
+                                @if (card.Event.AttendeesInferred)
+                                {
+                                    <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+                                        (Attendees inferred from meeting participants)
+                                    </MudText>
+                                }
+
+                                @if (card.Editing)
+                                {
+                                    <MudStack Spacing="2" Class="mt-3">
+                                        <MudTextField @bind-Value="card.EditSubject" Label="Subject" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                        <MudStack Row Spacing="2">
+                                            <MudTextField @bind-Value="card.EditStart" Label="Start" InputType="InputType.DateTimeLocal"
+                                                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                            <MudNumericField @bind-Value="card.EditDuration" Label="Duration (min)" Min="5" Max="480"
+                                                             Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                            <MudTextField @bind-Value="card.EditTimeZone" Label="Time zone" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                        </MudStack>
+                                        <MudTextField @bind-Value="card.EditAttendees" Label="Attendee emails (comma-separated)"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </MudStack>
+                                }
+
+                                <MudStack Row Spacing="2" Class="mt-3">
+                                    <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Warning"
+                                               StartIcon="@Icons.Material.Filled.EventAvailable"
+                                               Disabled="card.Busy"
+                                               OnClick="@(() => CreateSuggestedEventAsync(card))">
+                                        @(card.Busy ? "Creating..." : "Create")
+                                    </MudButton>
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                               StartIcon="@(card.Editing ? Icons.Material.Filled.Close : Icons.Material.Filled.Edit)"
+                                               Style="color: var(--color-text-primary);"
+                                               Disabled="card.Busy"
+                                               OnClick="@(() => ToggleEditSuggestedEvent(card))">
+                                        @(card.Editing ? "Cancel edit" : "Edit")
+                                    </MudButton>
+                                    <MudButton Variant="Variant.Text" Size="Size.Small"
+                                               StartIcon="@Icons.Material.Filled.DoNotDisturb"
+                                               Style="color: var(--color-text-secondary);"
+                                               Disabled="card.Busy"
+                                               OnClick="@(() => DismissSuggestedEventAsync(card))">
+                                        Not an event
+                                    </MudButton>
+                                </MudStack>
+                            </MudPaper>
+                        }
+                    }
                 </MudPaper>
             </MudTabPanel>
 
@@ -351,6 +425,8 @@
     private bool _mindmapTabOpened = false;
     private FortressIntelligenceRM.Web.Models.FirmUser? _user;
     private bool _helpOpen = false;
+    private List<SuggestedEventCard> _suggestedEvents = new();
+    private bool IsOrganizer => _meeting != null && _user != null && _meeting.CreatedBy == _user.Id;
 
     // KB push status (loaded from /kb-status on init)
     private HashSet<string> _transcriptPushedTo = new();
@@ -401,6 +477,21 @@
                        || claimsUser.HasClaim("roles", "admin");
 
             _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
+
+            if (_meeting != null && IsOrganizer && _meeting.Status == MeetingStatus.Complete)
+            {
+                try
+                {
+                    var suggestions = await MeetingService.GetSuggestedEventsAsync(Id, user.Id);
+                    _suggestedEvents = suggestions
+                        .Select((s, i) => new SuggestedEventCard(i, s, SuggestedEventService.BuildDraft(s, _meeting)))
+                        .ToList();
+                }
+                catch (Exception sugEx)
+                {
+                    Logger.LogWarning(sugEx, "FIRM MeetingDetail: failed to load suggested events for meeting {MeetingId}", Id);
+                }
+            }
 
             // Load KB push status
             if (_meeting != null && _meeting.Status == MeetingStatus.Complete)
@@ -621,6 +712,120 @@
             Snackbar.Add($"Error pushing summary: {ex.Message}", Severity.Error);
         }
         finally { _pushingSummary = false; StateHasChanged(); }
+    }
+
+    // WI #8294 — Suggested Events
+    private class SuggestedEventCard
+    {
+        public SuggestedEventCard(int index, SuggestedEvent ev, SuggestedEventDraft draft)
+        {
+            Index = index;
+            Event = ev;
+            Draft = draft;
+        }
+        public int Index { get; }
+        public SuggestedEvent Event { get; }
+        public SuggestedEventDraft Draft { get; }
+        public bool Editing { get; set; }
+        public bool Busy { get; set; }
+        public string EditSubject { get; set; } = "";
+        public string? EditStart { get; set; }
+        public int EditDuration { get; set; }
+        public string EditTimeZone { get; set; } = "";
+        public string EditAttendees { get; set; } = "";
+    }
+
+    private void ToggleEditSuggestedEvent(SuggestedEventCard card)
+    {
+        card.Editing = !card.Editing;
+        if (!card.Editing) return;
+        card.EditSubject = card.Draft.Subject;
+        card.EditStart = card.Draft.Start?.ToString("yyyy-MM-ddTHH:mm");
+        card.EditDuration = card.Draft.DurationMinutes;
+        card.EditTimeZone = card.Draft.TimeZone;
+        card.EditAttendees = string.Join(", ", card.Draft.Attendees);
+    }
+
+    private async Task CreateSuggestedEventAsync(SuggestedEventCard card)
+    {
+        if (_meeting == null || _user == null) return;
+
+        var draft = card.Draft;
+        if (card.Editing)
+        {
+            DateTime? start = DateTime.TryParse(card.EditStart, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var parsed) ? parsed : null;
+            draft = new SuggestedEventDraft
+            {
+                Subject = card.EditSubject,
+                Start = start,
+                DurationMinutes = card.EditDuration,
+                TimeZone = card.EditTimeZone,
+                Attendees = card.EditAttendees
+                    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToList()
+            };
+        }
+
+        if (draft.Start == null)
+        {
+            if (!card.Editing) ToggleEditSuggestedEvent(card);
+            Snackbar.Add("Pick a date and time for this event, then click Create.", Severity.Warning);
+            return;
+        }
+        var unresolved = draft.Attendees.Where(a => !a.Contains('@')).ToList();
+        if (unresolved.Any() && !card.Editing)
+        {
+            ToggleEditSuggestedEvent(card);
+            Snackbar.Add($"Couldn't find email addresses for: {string.Join(", ", unresolved)}. Fix them below, then click Create.", Severity.Warning);
+            return;
+        }
+
+        card.Busy = true;
+        try
+        {
+            var (success, error) = await SuggestedEventService.CreateEventAsync(_meeting, _user, card.Index, draft);
+            if (success)
+            {
+                card.Event.Status = SuggestedEvent.StatusCreated;
+                Snackbar.Add($"Event \"{draft.Subject}\" added to your calendar.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add(error ?? "Could not create the event.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: create suggested event failed for meeting {MeetingId}", Id);
+            Snackbar.Add("Could not create the event. Please try again.", Severity.Error);
+        }
+        finally
+        {
+            card.Busy = false;
+        }
+    }
+
+    private async Task DismissSuggestedEventAsync(SuggestedEventCard card)
+    {
+        if (_user == null) return;
+        card.Busy = true;
+        try
+        {
+            if (await SuggestedEventService.DismissAsync(Id, _user.Id, card.Index))
+                card.Event.Status = SuggestedEvent.StatusDismissed;
+            else
+                Snackbar.Add("Suggestion not found.", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: dismiss suggested event failed for meeting {MeetingId}", Id);
+            Snackbar.Add("Could not dismiss the suggestion. Please try again.", Severity.Error);
+        }
+        finally
+        {
+            card.Busy = false;
+        }
     }
 
     private static string FormatDuration(int? seconds)

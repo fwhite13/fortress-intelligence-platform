@@ -301,7 +301,9 @@ public class DatabaseInitializationService : IHostedService
                 // MySQL 8 has no ADD COLUMN IF NOT EXISTS; re-runs hit 1060 and are skipped below.
                 "ALTER TABLE firm_meetings ADD COLUMN summary_version INT NOT NULL DEFAULT 1",
                 // WI #8199 — caption-derived active speaker timeline from Teams bot (ACTIVE_SPEAKER_JSON)
-                "ALTER TABLE firm_meetings ADD COLUMN active_speaker_timeline JSON NULL"
+                "ALTER TABLE firm_meetings ADD COLUMN active_speaker_timeline JSON NULL",
+                // WI #8294 — scheduling suggestions from the summarization pass (incl. per-item dismissal status)
+                "ALTER TABLE firm_meetings ADD COLUMN suggested_events JSON NULL"
             };
 
             foreach (var alterSql in alterStatements)

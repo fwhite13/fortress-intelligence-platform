@@ -85,6 +85,7 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.Source).HasColumnName("source").HasMaxLength(20).HasDefaultValue("teams");
             entity.Property(e => e.LastFailureReason).HasColumnName("last_failure_reason").HasMaxLength(64);
             entity.Property(e => e.SummaryVersion).HasColumnName("summary_version").HasDefaultValue(1);
+            entity.Property(e => e.SuggestedEvents).HasColumnName("suggested_events");
             entity.HasOne(e => e.Mindmap)
                 .WithOne(mm => mm.Meeting)
                 .HasForeignKey<FirmMeetingMindmap>(mm => mm.MeetingId)
