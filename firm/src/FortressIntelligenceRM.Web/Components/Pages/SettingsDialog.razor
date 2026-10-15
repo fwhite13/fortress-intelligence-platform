@@ -19,7 +19,14 @@
                     <MudSwitch @bind-Value="_autoAddCalendarMeetings" Label="Auto-Add Calendar Meetings"
                                Color="Color.Warning" Class="mb-2" />
                     <MudSwitch @bind-Value="_autoEmailSummary" Label="Auto-Email Summary"
-                               Color="Color.Warning" />
+                               Color="Color.Warning" Class="mb-2" />
+                    @* WI #8310 — disabled until the Calendars.ReadWrite incremental consent flow ships *@
+                    <MudStack Row AlignItems="AlignItems.Center" Spacing="2">
+                        <MudSwitch @bind-Value="_autoCreateSuggestedEvents" Label="Auto-Create Suggested Events"
+                                   Color="Color.Warning" Disabled="true" />
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">Coming Soon</MudChip>
+                    </MudStack>
+                    <MudText Typo="Typo.caption" Style="font-style: italic; color: var(--color-text-secondary);">Enabling this feature will require you to re-authenticate through Microsoft.</MudText>
                 </MudTabPanel>
                 @if (!string.IsNullOrEmpty(_entraOid))
                 {
@@ -48,6 +55,7 @@
     private bool _loading = true;
     private bool _autoAddCalendarMeetings;
     private bool _autoEmailSummary;
+    private bool _autoCreateSuggestedEvents;
     private string _entraOid = "";
     private string _displayName = "";
 
@@ -58,6 +66,7 @@
         {
             _autoAddCalendarMeetings = user.AutoAddCalendarMeetings;
             _autoEmailSummary = user.AutoEmailSummary;
+            _autoCreateSuggestedEvents = user.AutoCreateSuggestedEvents;
             _entraOid = user.EntraOid;
             _displayName = user.DisplayName;
         }
@@ -66,7 +75,7 @@
 
     private async Task Save()
     {
-        await MeetingService.UpdateUserPreferencesAsync(UserId, _autoAddCalendarMeetings, _autoEmailSummary);
+        await MeetingService.UpdateUserPreferencesAsync(UserId, _autoAddCalendarMeetings, _autoEmailSummary, _autoCreateSuggestedEvents);
         Snackbar.Add("Settings saved.", Severity.Success);
         MudDialog.Close(DialogResult.Ok(true));
     }

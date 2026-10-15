@@ -309,19 +309,23 @@
                                 }
 
                                 <MudStack Row Spacing="2" Class="mt-3">
-                                    <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Warning"
-                                               StartIcon="@Icons.Material.Filled.EventAvailable"
-                                               Disabled="card.Busy"
-                                               OnClick="@(() => CreateSuggestedEventAsync(card))">
-                                        @(card.Busy ? "Creating..." : "Create")
-                                    </MudButton>
-                                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                                               StartIcon="@(card.Editing ? Icons.Material.Filled.Close : Icons.Material.Filled.Edit)"
-                                               Style="color: var(--color-text-primary);"
-                                               Disabled="card.Busy"
-                                               OnClick="@(() => ToggleEditSuggestedEvent(card))">
-                                        @(card.Editing ? "Cancel edit" : "Edit")
-                                    </MudButton>
+                                    @* WI #8310 — Create/Edit need Calendars.ReadWrite consent; gated per user *@
+                                    @if (_user?.AutoCreateSuggestedEvents == true)
+                                    {
+                                        <MudButton Variant="Variant.Filled" Size="Size.Small" Color="Color.Warning"
+                                                   StartIcon="@Icons.Material.Filled.EventAvailable"
+                                                   Disabled="card.Busy"
+                                                   OnClick="@(() => CreateSuggestedEventAsync(card))">
+                                            @(card.Busy ? "Creating..." : "Create")
+                                        </MudButton>
+                                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                                   StartIcon="@(card.Editing ? Icons.Material.Filled.Close : Icons.Material.Filled.Edit)"
+                                                   Style="color: var(--color-text-primary);"
+                                                   Disabled="card.Busy"
+                                                   OnClick="@(() => ToggleEditSuggestedEvent(card))">
+                                            @(card.Editing ? "Cancel edit" : "Edit")
+                                        </MudButton>
+                                    }
                                     <MudButton Variant="Variant.Text" Size="Size.Small"
                                                StartIcon="@Icons.Material.Filled.DoNotDisturb"
                                                Style="color: var(--color-text-secondary);"
@@ -748,7 +752,7 @@
 
     private async Task CreateSuggestedEventAsync(SuggestedEventCard card)
     {
-        if (_meeting == null || _user == null) return;
+        if (_meeting == null || _user == null || !_user.AutoCreateSuggestedEvents) return;
 
         var draft = card.Draft;
         if (card.Editing)
