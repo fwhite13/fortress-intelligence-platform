@@ -215,6 +215,24 @@ public class DatabaseInitializationService : IHostedService
     refresh_token TEXT,
     expires_at DATETIME,
     connected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                // WI #8295 — cross-meeting voiceprint DB. Embeddings live in S3 as .npy (s3_key);
+                // the Batch transcriber loads active rows per tenant and auto-promotes new ones.
+                ("firm_speaker_embeddings", @"CREATE TABLE IF NOT EXISTS firm_speaker_embeddings (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tenant_id     VARCHAR(36)  NOT NULL,
+    name          VARCHAR(200) NOT NULL,
+    entra_oid     VARCHAR(36)  NULL,
+    s3_key        VARCHAR(500) NOT NULL,
+    source        ENUM('voice_sample','meeting_auto','meeting_confirmed') NOT NULL,
+    meeting_id    BIGINT       NULL,
+    confidence    FLOAT        NULL,
+    is_active     BOOLEAN      NOT NULL DEFAULT TRUE,
+    created_at    DATETIME     NOT NULL,
+    updated_at    DATETIME     NOT NULL,
+    INDEX idx_tenant_name (tenant_id, name(100)),
+    INDEX idx_tenant_oid  (tenant_id, entra_oid),
+    INDEX idx_meeting     (meeting_id)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 

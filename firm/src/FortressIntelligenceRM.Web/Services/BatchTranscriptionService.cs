@@ -86,6 +86,15 @@ public class BatchTranscriptionService : IBatchTranscriptionService
             new Amazon.Batch.Model.KeyValuePair { Name = "PYANNOTE_CACHE", Value = "/app/.cache/huggingface/hub" },
             new Amazon.Batch.Model.KeyValuePair { Name = "BEDROCK_MODEL_ID", Value = _config["Firm:BedrockModelId"] ?? "us.anthropic.claude-sonnet-4-6" },
             new Amazon.Batch.Model.KeyValuePair { Name = "NOTETAKER_NAME", Value = _branding.NotetakerName },
+            // ADO#8295: firm_meetings has no per-meeting tenant column — FIRM is single-tenant per
+            // deployment, so the configured Graph tenant scopes the voiceprint DB lookups.
+            new Amazon.Batch.Model.KeyValuePair { Name = "TENANT_ID", Value = tenantId },
+            // Voiceprint DB location (non-secret). FORTRESS_DB_PASS must come from the job definition's
+            // Secrets Manager mapping — never pass it as a container override (visible in DescribeJobs).
+            new Amazon.Batch.Model.KeyValuePair { Name = "FORTRESS_DB_HOST", Value = _config["FORTRESS_DB_HOST"] ?? "" },
+            new Amazon.Batch.Model.KeyValuePair { Name = "FORTRESS_DB_PORT", Value = _config["FORTRESS_DB_PORT"] ?? "3306" },
+            new Amazon.Batch.Model.KeyValuePair { Name = "FORTRESS_DB_USER", Value = _config["FORTRESS_DB_USER"] ?? "fortress_mysql" },
+            new Amazon.Batch.Model.KeyValuePair { Name = "FIRM_DB_NAME", Value = _config["FIRM_DB_NAME"] ?? "firm_dev" },
         };
 
         if (wikiJson != null)
