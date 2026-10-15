@@ -350,6 +350,28 @@
                     }
                     else
                     {
+                        @* WI #8335 — unsaved speaker corrections *@
+                        @if (_pendingCorrections.Count > 0)
+                        {
+                            <MudStack Row AlignItems="AlignItems.Center" Class="mb-3" Style="gap: 12px;">
+                                <MudButton Variant="Variant.Filled" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Save"
+                                           Style="background: #d4af37; color: #0f1923;"
+                                           Disabled="_savingCorrections"
+                                           OnClick="SaveSpeakerCorrectionsAsync">
+                                    @(_savingCorrections ? "Saving..." : $"Save corrections ({_pendingCorrections.Count})")
+                                </MudButton>
+                                <MudButton Variant="Variant.Text" Size="Size.Small"
+                                           Style="color: var(--color-text-secondary);"
+                                           Disabled="_savingCorrections"
+                                           OnClick="DiscardPendingCorrections">
+                                    Discard
+                                </MudButton>
+                                <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+                                    Saving re-summarizes the meeting with the corrected speakers.
+                                </MudText>
+                            </MudStack>
+                        }
                         <MudTable Items="_meeting.Transcripts" Style="background: transparent;" Elevation="0"
                                   FixedHeader Height="500px">
                             <HeaderContent>
@@ -362,7 +384,31 @@
                                     @FormatTimestamp(context.StartTimeMs)
                                 </MudTd>
                                 <MudTd Style="color: var(--color-gold); font-size: 13px; font-weight: 500;">
-                                    @(context.SpeakerName ?? context.SpeakerLabel ?? "Unknown")
+                                    @{ var segIndex = SegmentIndexOf(context); var segLabel = context.SpeakerLabel ?? context.SpeakerName; }
+                                    <div class="d-flex align-center" style="gap: 2px;">
+                                        <span>@(EffectiveSpeakerName(segIndex) ?? "Unknown")</span>
+                                        @if (CanCorrectSpeakers && segIndex >= 0)
+                                        {
+                                            <MudMenu Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Dense="true"
+                                                     Style="color: var(--color-text-secondary);" title="Correct speaker">
+                                                @if (segLabel != null)
+                                                {
+                                                    <MudMenuItem OnClick="@(() => OpenSpeakerCorrectionAsync(context, SpeakerCorrection.TypeAssign))">
+                                                        Rename all @segLabel
+                                                    </MudMenuItem>
+                                                }
+                                                <MudMenuItem OnClick="@(() => OpenSpeakerCorrectionAsync(context, SpeakerCorrection.TypeOverride))">
+                                                    Change this segment only
+                                                </MudMenuItem>
+                                                @if (segLabel != null && _speakerLabels.Any(l => l != segLabel))
+                                                {
+                                                    <MudMenuItem OnClick="@(() => OpenSpeakerCorrectionAsync(context, SpeakerCorrection.TypeMerge))">
+                                                        Merge with another speaker
+                                                    </MudMenuItem>
+                                                }
+                                            </MudMenu>
+                                        }
+                                    </div>
                                 </MudTd>
                                 <MudTd Style="color: var(--color-text-primary); font-size: 14px; line-height: 1.5;">
                                     @context.Text
@@ -432,6 +478,20 @@
     private List<SuggestedEventCard> _suggestedEvents = new();
     private bool IsOrganizer => _meeting != null && _user != null && _meeting.CreatedBy == _user.Id;
 
+    // WI #8335 — speaker corrections overlay. Saved corrections come from _meeting.SpeakerCorrections;
+    // pending ones are local until "Save corrections". The base transcript is never mutated — names
+    // shown are the overlay applied to it (SpeakerCorrection.Apply, mirrored by transcribe.py).
+    private List<SpeakerCorrection> _savedCorrections = new();
+    private List<SpeakerCorrection> _pendingCorrections = new();
+    private Dictionary<long, int> _segmentIndexById = new();
+    private string?[] _effectiveSpeakerNames = Array.Empty<string?>();
+    private List<string> _speakerLabels = new();
+    private bool _savingCorrections = false;
+    // GetMeetingAsync scopes to CreatedBy, so the page's user is this row's organizer or subscriber.
+    private bool CanCorrectSpeakers => IsOrganizer && _meeting!.Status == MeetingStatus.Complete
+        && !string.IsNullOrEmpty(_meeting.TranscriptS3Key);
+    private bool HasActiveSpeakerCorrections => _savedCorrections.Any(c => !c.Archived);
+
     // KB push status (loaded from /kb-status on init)
     private HashSet<string> _transcriptPushedTo = new();
     private HashSet<string> _summaryPushedTo = new();
@@ -481,6 +541,7 @@
                        || claimsUser.HasClaim("roles", "admin");
 
             _meeting = await MeetingService.GetMeetingAsync(Id, user.Id);
+            LoadSpeakerCorrections();
 
             if (_meeting != null && IsOrganizer && _meeting.Status == MeetingStatus.Complete)
             {
@@ -552,8 +613,21 @@
     {
         if (_meeting == null || _user == null || _retranscribing) return;
 
-        var confirmed = await JS.InvokeAsync<bool>("confirm",
-            $"Retranscribe meeting '{_meeting.Title}'? This will overwrite the existing transcript and summary.");
+        // WI #8335: warn before a retranscribe orphans the user's speaker corrections. They are archived
+        // (never deleted) when the new transcript lands, since labels/segment indexes won't line up.
+        bool confirmed;
+        if (HasActiveSpeakerCorrections || _pendingCorrections.Count > 0)
+        {
+            confirmed = await DialogService.ShowMessageBox(
+                "Speaker corrections",
+                "This meeting has manual speaker corrections. Retranscribing will reset the transcript — your corrections will be preserved but won't carry over automatically. Continue?",
+                yesText: "Continue", cancelText: "Cancel") == true;
+        }
+        else
+        {
+            confirmed = await JS.InvokeAsync<bool>("confirm",
+                $"Retranscribe meeting '{_meeting.Title}'? This will overwrite the existing transcript and summary.");
+        }
 
         if (!confirmed) return;
 
@@ -569,6 +643,8 @@
             {
                 // Reload meeting to get updated status
                 _meeting = await MeetingService.GetMeetingAsync(_meeting.Id, _user.Id) ?? _meeting;
+                _pendingCorrections.Clear();  // made against the transcript being replaced
+                LoadSpeakerCorrections();
                 Snackbar.Add("Retranscription started. Check back in a few minutes.", Severity.Success);
 
                 // Background poll — check every 10s for up to 10 minutes
@@ -584,6 +660,7 @@
                             await InvokeAsync(() =>
                             {
                                 _meeting = updated;
+                                LoadSpeakerCorrections();
                                 _retranscribing = false;
                                 StateHasChanged();
                             });
@@ -650,6 +727,146 @@
             _resummarizing = false;
             StateHasChanged();
         }
+    }
+
+    // ── WI #8335 — Speaker corrections ───────────────────────────────────────
+
+    private void LoadSpeakerCorrections()
+    {
+        _savedCorrections = SpeakerCorrection.ParseList(_meeting?.SpeakerCorrections);
+        var segments = _meeting?.Transcripts.ToList() ?? new();
+        _segmentIndexById = segments.Select((s, i) => (s.Id, i)).ToDictionary(x => x.Id, x => x.i);
+        _speakerLabels = segments.Select(s => s.SpeakerLabel ?? s.SpeakerName)
+            .Where(l => !string.IsNullOrEmpty(l)).Select(l => l!).Distinct().OrderBy(l => l).ToList();
+        RecomputeEffectiveSpeakers();
+    }
+
+    private void RecomputeEffectiveSpeakers()
+    {
+        var segments = _meeting?.Transcripts.ToList() ?? new();
+        _effectiveSpeakerNames = SpeakerCorrection.Apply(segments, _savedCorrections.Concat(_pendingCorrections));
+    }
+
+    private int SegmentIndexOf(FirmMeetingTranscript segment) =>
+        _segmentIndexById.TryGetValue(segment.Id, out var i) ? i : -1;
+
+    private string? EffectiveSpeakerName(int index) =>
+        index >= 0 && index < _effectiveSpeakerNames.Length ? _effectiveSpeakerNames[index] : null;
+
+    private static bool IsDiarizationLabel(string? name) =>
+        name != null && System.Text.RegularExpressions.Regex.IsMatch(name, @"^SPEAKER_\d+$");
+
+    private async Task OpenSpeakerCorrectionAsync(FirmMeetingTranscript segment, string mode)
+    {
+        if (_meeting == null || !CanCorrectSpeakers) return;
+        var index = SegmentIndexOf(segment);
+        if (index < 0) return;
+        var label = segment.SpeakerLabel ?? segment.SpeakerName ?? "";
+
+        // Name sources: roster participants, plus names already resolved in the (corrected) transcript.
+        var nameOptions = _meeting.Participants.Select(p => p.DisplayName)
+            .Concat(_effectiveSpeakerNames)
+            .Where(n => !string.IsNullOrWhiteSpace(n) && !IsDiarizationLabel(n))
+            .Select(n => n!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n)
+            .ToList();
+        var currentName = EffectiveSpeakerName(index);
+
+        var parameters = new DialogParameters<SpeakerCorrectionDialog>
+        {
+            { x => x.Mode, mode },
+            { x => x.Speaker, label },
+            { x => x.SegmentIndex, index },
+            { x => x.NameOptions, nameOptions },
+            { x => x.MergeCandidates, _speakerLabels.Where(l => l != label).ToList() },
+            { x => x.InitialName, IsDiarizationLabel(currentName) ? null : currentName },
+        };
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<SpeakerCorrectionDialog>("Correct speaker", parameters, options);
+        var result = await dialog.Result;
+        if (result == null || result.Canceled || result.Data is not SpeakerCorrection correction) return;
+
+        _pendingCorrections.Add(correction);
+        RecomputeEffectiveSpeakers();
+        StateHasChanged();
+    }
+
+    private void DiscardPendingCorrections()
+    {
+        _pendingCorrections.Clear();
+        RecomputeEffectiveSpeakers();
+    }
+
+    private async Task SaveSpeakerCorrectionsAsync()
+    {
+        if (_meeting == null || _user == null || _savingCorrections || _pendingCorrections.Count == 0) return;
+
+        _savingCorrections = true;
+        StateHasChanged();
+        try
+        {
+            // Same path as POST /api/meetings/{id}/speaker-corrections: the full active list replaces
+            // the saved one (archived corrections are kept server-side), then a summarize-only job runs.
+            var active = _savedCorrections.Where(c => !c.Archived).Concat(_pendingCorrections).ToList();
+            var previousSummary = _meeting.Summary?.SummaryText;
+            var resummarizing = await MeetingService.SaveSpeakerCorrectionsAsync(_meeting.Id, SpeakerCorrection.SerializeList(active));
+
+            _pendingCorrections.Clear();
+            _meeting = await MeetingService.GetMeetingAsync(_meeting.Id, _user.Id) ?? _meeting;
+            LoadSpeakerCorrections();
+
+            if (!resummarizing)
+            {
+                Snackbar.Add("Corrections saved, but re-summarization could not be started. Please try again later.", Severity.Warning);
+                return;
+            }
+            Snackbar.Add("Corrections saved. Re-summarizing...", Severity.Success);
+            PollForCorrectedSummary(previousSummary);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            Snackbar.Add($"Could not save corrections: {ex.Message}", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM MeetingDetail: saving speaker corrections failed for meeting {MeetingId}", _meeting?.Id);
+            Snackbar.Add("Could not save corrections. Please try again.", Severity.Error);
+        }
+        finally
+        {
+            _savingCorrections = false;
+            StateHasChanged();
+        }
+    }
+
+    // The summarize-only Batch job reports back via the summary_complete callback — poll every 10s
+    // for up to 10 minutes and swap in the new summary when it lands.
+    private void PollForCorrectedSummary(string? previousSummary)
+    {
+        var meetingId = _meeting!.Id;
+        var userId = _user!.Id;
+        _ = Task.Run(async () =>
+        {
+            for (int i = 0; i < 60; i++)
+            {
+                await Task.Delay(10_000);
+                var updated = await MeetingService.GetMeetingAsync(meetingId, userId);
+                if (updated == null) return;
+                if (updated.Summary?.SummaryText != previousSummary)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        if (_meeting?.Id != meetingId) return;
+                        _meeting = updated;
+                        LoadSpeakerCorrections();
+                        Snackbar.Add("Summary updated with your speaker corrections.", Severity.Success);
+                        StateHasChanged();
+                    });
+                    return;
+                }
+            }
+        });
     }
 
     private bool TranscriptHasSelection() =>

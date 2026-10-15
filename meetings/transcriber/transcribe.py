@@ -15,6 +15,9 @@ Environment variables (injected by Batch):
                          meeting platform's speaking indicator. Epoch ms or ms from recording start.
                          Preferred over ACTIVE_SPEAKER_JSON — Batch caps container overrides at 8192 bytes.
   ACTIVE_SPEAKER_JSON  - (optional, legacy) same array passed inline; used only if ACTIVE_SPEAKER_S3_KEY is absent.
+  SUMMARIZE_ONLY     - (optional) "true" skips audio/Whisper/diarization and re-summarizes the existing transcript
+  TRANSCRIPT_S3_KEY  - (summarize-only) S3 key of the existing transcript.json; defaults to firm-transcripts/{id}/transcript.json
+  SPEAKER_CORRECTIONS_S3_KEY - (summarize-only, optional) S3 key of the speaker-corrections overlay JSON array
 """
 
 import gc
@@ -127,6 +130,52 @@ def normalize_suggested_events(raw) -> list:
     return events[:SUGGESTED_EVENT_MAX]
 
 
+def apply_speaker_corrections(segments: list, corrections: list) -> list:
+    """
+    WI #8335: overlay the user's speaker corrections onto transcript segments, in list order
+    (later corrections win). Returns corrected copies — the input segments are not mutated.
+      assign:   {"type":"assign","speaker":"SPEAKER_07","resolved_name":"..."}        — every segment with that label
+      override: {"type":"override","segment_index":42,"resolved_name":"..."}          — one segment
+      merge:    {"type":"merge","speakers":["SPEAKER_03","SPEAKER_07"],"resolved_name":"..."} — every segment with any label
+    Segments match a label on speakerLabel (raw diarization label) or speakerName. Corrections
+    flagged "archived" (made against a previous transcript, before a retranscribe) are skipped.
+    segment_index is the position in startTimeMs order — the order firm-web renders the transcript in.
+    """
+    corrected = sorted((dict(s) for s in segments), key=lambda s: s.get("startTimeMs") or 0)
+
+    def matches(seg, labels):
+        return seg.get("speakerLabel") in labels or seg.get("speakerName") in labels
+
+    for c in corrections or []:
+        if not isinstance(c, dict) or c.get("archived"):
+            continue
+        ctype = c.get("type")
+        name = (c.get("resolved_name") or "").strip()
+        if not name:
+            continue
+        if ctype == "assign":
+            labels = {c.get("speaker")}
+        elif ctype == "merge":
+            labels = set(c.get("speakers") or [])
+        elif ctype == "override":
+            idx = c.get("segment_index")
+            if not isinstance(idx, int) or not (0 <= idx < len(corrected)):
+                print(f"[Transcriber] Skipped override correction: segment_index {idx} out of range")
+                continue
+            corrected[idx]["speakerName"] = name
+            print(f"[Transcriber] Applied correction: {ctype} → {name}")
+            continue
+        else:
+            print(f"[Transcriber] Skipped unknown correction type: {ctype}")
+            continue
+        labels.discard(None)
+        for seg in corrected:
+            if matches(seg, labels):
+                seg["speakerName"] = name
+        print(f"[Transcriber] Applied correction: {ctype} → {name}")
+    return corrected
+
+
 def free_gpu_memory():
     gc.collect()
     if torch.cuda.is_available():
@@ -219,20 +268,19 @@ EMBEDDING_MODEL_ID = "pyannote/embedding"
 EMBEDDING_SAMPLE_RATE = 16000  # whisperx.load_audio resamples to 16 kHz mono
 REFERENCE_PREFERRED_WINDOW_S = 10.0  # prefer reference windows at least this long
 REFERENCE_MIN_WINDOW_S = 2.0  # shortest window usable as a reference when no long one exists
-REFERENCE_MAX_WINDOW_S = 120.0  # ADO#8334: longer windows are trimmed — a 75-min log entry averaged into a garbage embedding
+REFERENCE_MAX_WINDOW_S = 120.0  # ADO#8334: cap individual windows — a 75-min log entry averaged into a garbage embedding
 REFERENCE_MAX_WINDOWS = 3  # averaged per person
 REFERENCE_MERGE_GAP_MS = 1000  # adjacent log entries for the same person closer than this are one window
 CLUSTER_MIN_SEGMENT_S = 1.0  # shorter diarization turns give unstable embeddings
 CLUSTER_MAX_SEGMENTS = 30  # longest turns per cluster, bounds GPU time on long meetings
 VOICE_MATCH_THRESHOLD = 0.80  # best similarity must exceed this to assign a name
-VOICE_MATCH_DOMINANCE = 1.2  # ADO#8334 (was 1.3): best similarity must be >= this multiple of the runner-up
-VOICE_MATCH_ABSOLUTE_MIN = 0.95  # ADO#8334: a best score this high is assigned regardless of ratio ...
-VOICE_MATCH_ABSOLUTE_MAX_RUNNER_UP = 0.90  # ... provided the runner-up stays below this
-VOICEPRINT_PROMOTE_MIN_CONFIDENCE = 0.95  # ADO#8334 (was 0.90): auto-promote only near-certain voice matches ...
-VOICEPRINT_PROMOTE_MAX_RUNNER_UP = 0.80  # ... with a clear gap to the runner-up — wrong voiceprints poison later meetings
+VOICE_MATCH_DOMINANCE = 1.2  # ADO#8334 (was 1.3): best must be >= this multiple of runner-up
+VOICE_MATCH_ABSOLUTE_MIN = 0.95  # ADO#8334: score this high assigned regardless of ratio ...
+VOICE_MATCH_ABSOLUTE_MAX_RUNNER_UP = 0.90  # ... provided runner-up stays below this
+VOICEPRINT_PROMOTE_MIN_CONFIDENCE = 0.95  # ADO#8334 (was 0.90): tighter — wrong voiceprints poison later meetings
+VOICEPRINT_PROMOTE_MAX_RUNNER_UP = 0.80  # ADO#8334: runner-up must be clearly separated
 VOICEPRINT_PROMOTE_MIN_DURATION_S = 300.0  # ... with at least 5 minutes of attributed audio
 VOICEPRINT_PROMOTE_COOLDOWN_DAYS = 7  # at most one meeting_auto voiceprint per person per week
-VOICEPRINT_SOURCE_PRIORITY = {"meeting_confirmed": 0, "voice_sample": 1, "meeting_auto": 2}  # ADO#8334: lower wins
 
 _embedding_cache = {}
 
@@ -306,7 +354,7 @@ def active_log_windows(active_speaker_log: list, recording_start_ms: int) -> dic
 def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recording_start_ms):
     """
     For each named attendee in active_speaker_log, find their longest clean speaking window(s)
-    (prefer >= 10s; each window is trimmed to its first 120s). Extract audio and run through pyannote/embedding model.
+    (prefer >= 10s). Extract audio and run through pyannote/embedding model.
     Skip possiblyMultiVoice=True entries and the notetaker bot (callers filter the notetaker out
     of active_speaker_log before calling). A clean window does not overlap anyone else's window.
     If a person has multiple windows, average the embeddings.
@@ -333,15 +381,15 @@ def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recor
                 continue
             if any(other != name and os_ < e and oe > s for other, os_, oe in all_windows):
                 continue
-            if e - s > REFERENCE_MAX_WINDOW_S:
-                print(f"[Transcriber] Reference window for {name} trimmed from {e - s:.1f}s to {REFERENCE_MAX_WINDOW_S:.0f}s")
-                e = s + REFERENCE_MAX_WINDOW_S
             clean.append((s, e))
         clean.sort(key=lambda w: w[1] - w[0], reverse=True)
         long_windows = [w for w in clean if w[1] - w[0] >= REFERENCE_PREFERRED_WINDOW_S]
         chosen = (long_windows or clean)[:REFERENCE_MAX_WINDOWS]
         embs, weights = [], []
         for s, e in chosen:
+            if e - s > REFERENCE_MAX_WINDOW_S:
+                print(f"[Transcriber] Reference window for {name} trimmed from {e - s:.1f}s to {REFERENCE_MAX_WINDOW_S:.0f}s")
+                e = s + REFERENCE_MAX_WINDOW_S
             emb = _embed_window(inference, waveform, s, e)
             if emb is not None:
                 embs.append(emb)
@@ -382,18 +430,16 @@ def extract_cluster_embeddings(turns, audio_path, hf_token):
             print(f"[Transcriber] Cluster embedding for {label}: {len(embs)} segment(s), {sum(weights):.1f}s")
     return clusters
 
-def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshold=VOICE_MATCH_THRESHOLD,
-                              dominance=VOICE_MATCH_DOMINANCE, confidences=None, runner_ups=None):
+def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshold=VOICE_MATCH_THRESHOLD, dominance=VOICE_MATCH_DOMINANCE, confidences=None, runner_ups=None):
     """
     For each cluster embedding, compute cosine similarity against every reference embedding.
     Assign the closest reference name IF:
-      - Best similarity > threshold (0.80), AND
-      - Best similarity >= dominance * second-best similarity (1.2x)
-    OR (absolute confidence override) best similarity >= 0.95 and second-best < 0.90.
+      - Best similarity > threshold (default 0.80), AND
+      - Best similarity >= dominance * second-best similarity (default 1.2x)
+    OR (absolute confidence override): best >= 0.95 and second < 0.90.
     Log full similarity scores for every assignment/non-assignment (needed for threshold tuning).
     Returns dict: { speaker_label -> name or None }
-    If confidences / runner_ups are dicts, they are filled with { speaker_label -> best / second-best similarity }
-    for assigned labels.
+    If confidences is a dict, it is filled with { speaker_label -> best similarity } for assigned labels.
     """
     name_map = {}
     for label, cluster_emb in sorted(cluster_embeddings.items()):
@@ -406,25 +452,21 @@ def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshol
         best_name, best = ranked[0]
         second = ranked[1][1] if len(ranked) > 1 else 0.0
         scores_str = ", ".join(f"{n}={v:.3f}" for n, v in ranked)
-        if best > threshold and best >= dominance * second:
+        if runner_ups is not None:
+            runner_ups[label] = second
+        if (best > threshold and best >= dominance * second) or \
+                (best >= VOICE_MATCH_ABSOLUTE_MIN and second < VOICE_MATCH_ABSOLUTE_MAX_RUNNER_UP):
+            source = 'voice_embedding_absolute' if not (best >= dominance * second) else 'voice_embedding'
             name_map[label] = best_name
-            print(f"[Transcriber] {label} → {best_name} via voice embedding (best {best:.3f}, runner-up {second:.3f}) "
+            if confidences is not None:
+                confidences[label] = best
+            print(f"[Transcriber] {label} → {best_name} via voice embedding (best {best:.3f}, runner-up {second:.3f}, source={source}) "
                   f"scores: {scores_str}")
-        # Absolute confidence override: very high score with clear gap — assign regardless of ratio
-        elif best >= VOICE_MATCH_ABSOLUTE_MIN and second < VOICE_MATCH_ABSOLUTE_MAX_RUNNER_UP:
-            name_map[label] = best_name
-            print(f"[Transcriber] {label} → {best_name} via absolute confidence override (best {best:.3f}, "
-                  f"runner-up {second:.3f}) scores: {scores_str}")
         else:
             name_map[label] = None
             reason = f"best {best:.3f} <= threshold {threshold}" if best <= threshold else \
-                f"best {best:.3f} < {dominance}x runner-up {second:.3f}"
+                f"best {best:.3f} < {dominance}x runner-up {second:.3f} (and {best:.3f} < absolute min {VOICE_MATCH_ABSOLUTE_MIN} or {second:.3f} >= {VOICE_MATCH_ABSOLUTE_MAX_RUNNER_UP})"
             print(f"[Transcriber] {label} unresolved by voice embedding ({reason}) scores: {scores_str}")
-            continue
-        if confidences is not None:
-            confidences[label] = best
-        if runner_ups is not None:
-            runner_ups[label] = second
     return name_map
 
 def voiceprint_db_config() -> dict | None:
@@ -445,9 +487,8 @@ def voiceprint_db_config() -> dict | None:
 def load_org_voiceprints(tenant_id, db_config, s3_client, bucket):
     """
     ADO#8295: load the tenant's active voiceprints from firm_speaker_embeddings.
-    Each row points at an .npy embedding in S3. ADO#8334: per name, only rows from the best available
-    source are used (meeting_confirmed > voice_sample > meeting_auto); multiple rows from that source are
-    averaged (uniform weights, L2-normalized first). Unreadable rows are skipped.
+    Each row points at an .npy embedding in S3; multiple rows for the same name are averaged
+    (uniform weights, L2-normalized first). Unreadable rows are skipped.
     Returns dict: { name -> embedding tensor }
     """
     if not tenant_id or not db_config:
@@ -455,23 +496,14 @@ def load_org_voiceprints(tenant_id, db_config, s3_client, bucket):
     conn = pymysql.connect(**db_config)
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT name, s3_key, source FROM firm_speaker_embeddings WHERE tenant_id = %s AND is_active = 1",
+            cur.execute("SELECT name, s3_key FROM firm_speaker_embeddings WHERE tenant_id = %s AND is_active = 1",
                         (tenant_id,))
             rows = cur.fetchall()
     finally:
         conn.close()
 
-    lowest_priority = max(VOICEPRINT_SOURCE_PRIORITY.values()) + 1
-    best_priority = {}
-    for name, _, source in rows:
-        priority = VOICEPRINT_SOURCE_PRIORITY.get(source, lowest_priority)
-        best_priority[name] = min(best_priority.get(name, priority), priority)
-
     by_name = {}
-    sources = {}
-    for name, s3_key, source in rows:
-        if VOICEPRINT_SOURCE_PRIORITY.get(source, lowest_priority) != best_priority[name]:
-            continue  # a higher-priority source exists for this name
+    for name, s3_key in rows:
         try:
             body = s3_client.get_object(Bucket=bucket, Key=s3_key)["Body"].read()
             emb = torch.from_numpy(np.load(io.BytesIO(body), allow_pickle=False)).float().flatten()
@@ -479,7 +511,6 @@ def load_org_voiceprints(tenant_id, db_config, s3_client, bucket):
                 print(f"[Transcriber] Voiceprint {s3_key} for {name} is empty/non-finite — skipped")
                 continue
             by_name.setdefault(name, []).append(emb)
-            sources[name] = source
         except Exception as e:
             print(f"[Transcriber] Failed to load voiceprint {s3_key} for {name} (skipped): {e}", file=sys.stderr)
 
@@ -489,7 +520,6 @@ def load_org_voiceprints(tenant_id, db_config, s3_client, bucket):
             print(f"[Transcriber] Voiceprints for {name} have mismatched dimensions — skipped")
             continue
         voiceprints[name] = _average_embeddings(embs, [1.0] * len(embs))
-        print(f"[Transcriber] Org voiceprint for {name}: {len(embs)} {sources[name]} row(s)")
     print(f"[Transcriber] Loaded {len(voiceprints)} org voiceprint(s) from {len(rows)} row(s) for tenant {tenant_id}")
     return voiceprints
 
@@ -500,13 +530,12 @@ def compute_cluster_durations(turns) -> dict:
         durations[label] = durations.get(label, 0.0) + max(0.0, float(end_s) - float(start_s))
     return durations
 
-def auto_promote_voiceprints(name_map, cluster_embeddings, cluster_durations, confidences, runner_ups,
+def auto_promote_voiceprints(name_map, cluster_embeddings, cluster_durations, confidences,
                              tenant_id, meeting_id, db_config, s3_client, bucket):
     """
     ADO#8295: persist high-confidence cluster embeddings as meeting_auto voiceprints so later meetings
-    can identify the speaker. A label is promoted when its voice match is >= 0.95 with the runner-up < 0.80
-    (ADO#8334), it has >= 5 minutes of diarized audio, and the person has no meeting_auto voiceprint from
-    the last 7 days.
+    can identify the speaker. A label is promoted when its voice match is > 0.90, it has >= 5 minutes of
+    diarized audio, and the person has no meeting_auto voiceprint from the last 7 days.
     Best-effort: logs and swallows every error — must never block transcript delivery.
     """
     try:
@@ -518,16 +547,13 @@ def auto_promote_voiceprints(name_map, cluster_embeddings, cluster_durations, co
             if not name or label not in cluster_embeddings:
                 continue
             confidence = confidences.get(label, 0.0)
-            runner_up = runner_ups.get(label, 1.0)
             duration = cluster_durations.get(label, 0.0)
-            if (confidence >= VOICEPRINT_PROMOTE_MIN_CONFIDENCE and runner_up < VOICEPRINT_PROMOTE_MAX_RUNNER_UP
-                    and duration >= VOICEPRINT_PROMOTE_MIN_DURATION_S):
+            runner_up = runner_ups.get(label, 0.0) if runner_ups else 0.0
+            if confidence > VOICEPRINT_PROMOTE_MIN_CONFIDENCE and runner_up < VOICEPRINT_PROMOTE_MAX_RUNNER_UP and duration >= VOICEPRINT_PROMOTE_MIN_DURATION_S:
                 candidates.append((label, name, confidence, duration))
             else:
-                print(f"[Transcriber] Voiceprint not promoted for {name} ({label}): confidence {confidence:.3f} "
-                      f"(need >= {VOICEPRINT_PROMOTE_MIN_CONFIDENCE}), runner-up {runner_up:.3f} "
-                      f"(need < {VOICEPRINT_PROMOTE_MAX_RUNNER_UP}), {duration:.0f}s attributed "
-                      f"(need >= {VOICEPRINT_PROMOTE_MIN_DURATION_S:.0f}s)")
+                print(f"[Transcriber] Voiceprint not promoted for {name} ({label}): confidence {confidence:.3f}, "
+                      f"{duration:.0f}s attributed")
         if not candidates:
             return
 
@@ -651,7 +677,14 @@ def main():
         return
 
     meeting_id = int(os.environ["MEETING_ID"])
-    audio_s3_key = os.environ["AUDIO_S3_KEY"]
+    # WI #8335: summarize-only re-runs just the summarization pass on the existing transcript
+    # (after a user saves speaker corrections) — no audio download, Whisper, or diarization.
+    summarize_only = os.environ.get("SUMMARIZE_ONLY", "").strip().lower() == "true"
+    transcript_s3_key = os.environ.get("TRANSCRIPT_S3_KEY", "")
+    speaker_corrections_s3_key = os.environ.get("SPEAKER_CORRECTIONS_S3_KEY", "")
+    if summarize_only and not transcript_s3_key:
+        transcript_s3_key = f"firm-transcripts/{meeting_id}/transcript.json"
+    audio_s3_key = os.environ.get("AUDIO_S3_KEY", "") if summarize_only else os.environ["AUDIO_S3_KEY"]
     s3_bucket = os.environ.get("S3_BUCKET", "firm-recordings-dev")
     callback_url = os.environ["FIRM_CALLBACK_URL"]
     bot_secret = os.environ.get("BOT_CALLBACK_SECRET", "")
@@ -708,7 +741,9 @@ def main():
     tenant_id = os.environ.get("TENANT_ID", "")
     db_config = voiceprint_db_config()
     org_voiceprints = {}
-    if tenant_id and db_config:
+    if summarize_only:
+        pass  # voiceprints only feed diarization, which summarize-only skips
+    elif tenant_id and db_config:
         try:
             org_voiceprints = load_org_voiceprints(tenant_id, db_config, s3, s3_bucket)
         except Exception as e:
@@ -740,242 +775,260 @@ def main():
         except Exception as e:
             print(f"[Transcriber] Failed to parse active speaker log from {active_speaker_source}: {e}")
 
-    print(f"[Transcriber] Starting job for meeting {meeting_id}, audio: {audio_s3_key}")
+    audio_path = None
+    has_speaker_corrections = False
+    if summarize_only:
+        print(f"[Transcriber] Starting summarize-only job for meeting {meeting_id}, transcript: {transcript_s3_key}")
+    else:
+        print(f"[Transcriber] Starting job for meeting {meeting_id}, audio: {audio_s3_key}")
 
-    # Download audio
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        audio_path = f.name
-    print(f"[Transcriber] Downloading audio to {audio_path}")
-    s3.download_file(s3_bucket, audio_s3_key, audio_path)
-    print(f"[Transcriber] Download complete")
+        # Download audio
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            audio_path = f.name
+        print(f"[Transcriber] Downloading audio to {audio_path}")
+        s3.download_file(s3_bucket, audio_s3_key, audio_path)
+        print(f"[Transcriber] Download complete")
 
     try:
-        # WhisperX transcription (GPU) — faster-whisper backend with batched inference
-        device = "cuda"
-        print(f"[Transcriber] Loading WhisperX model (large-v3-turbo, GPU)...")
-        initial_prompt = ", ".join([e.get("Term", "") or e.get("term", "") for e in org_wiki_entries if (e.get("Term", "") or e.get("term", ""))])
-        if initial_prompt:
-            print(f"[Transcriber] Whisper initial_prompt: {initial_prompt}")
-        model = whisperx.load_model(
-            "large-v3-turbo",
-            device,
-            compute_type="float16",
-            language="en",
-            asr_options={"initial_prompt": initial_prompt} if initial_prompt else None,
-        )
-        audio = whisperx.load_audio(audio_path)
-        print(f"[Transcriber] Running transcription...")
-        transcription = model.transcribe(audio, batch_size=16, language="en")
-        whisper_segments = transcription["segments"]
-        print(f"[Transcriber] Whisper complete: {len(whisper_segments)} segments, duration={len(audio) / whisperx.audio.SAMPLE_RATE:.1f}s")
-        del model
-        free_gpu_memory()
-
-        # Word-level alignment (wav2vec2) — prerequisite for word-level speaker assignment
-        try:
-            print(f"[Transcriber] Running word-level alignment...")
-            align_model, align_metadata = whisperx.load_align_model(language_code=transcription["language"], device=device)
-            aligned = whisperx.align(whisper_segments, align_model, align_metadata, audio, device, return_char_alignments=False)
-            whisper_segments = aligned["segments"]
-            print(f"[Transcriber] Alignment complete: {len(aligned['word_segments'])} words")
-            del align_model
-            free_gpu_memory()
-        except Exception as e:
-            print(f"[Transcriber] Alignment failed (non-fatal, falling back to segment-level speakers): {e}", file=sys.stderr)
-
-        # Pyannote diarization (GPU) via WhisperX, speakers assigned per word
-        speaker_name_map = {}  # SPEAKER_NN -> actual name (from roster timing overlap)
-        if hf_token:
-            try:
-                print(f"[Transcriber] Loading pyannote diarization pipeline...")
-                # Set offline mode only for pyannote — weights are pre-baked, Whisper downloads at runtime
-                os.environ["HF_HUB_OFFLINE"] = "1"
-                try:
-                    diarize_model = DiarizationPipeline(
-                        model_name="pyannote/speaker-diarization-community-1",
-                        token=hf_token,
-                        device=device,
-                    )
-                finally:
-                    del os.environ["HF_HUB_OFFLINE"]
-                print(f"[Transcriber] Running diarization...")
-                diarization_kwargs = {}
-                if roster_attendees:
-                    n = len(roster_attendees)
-                    multi_voice = sum(1 for e in roster_attendees if e.get("possiblyMultiVoice", False))
-                    if multi_voice == 0:
-                        diarization_kwargs["num_speakers"] = n
-                        print(f"[Transcriber] Pyannote num_speakers={n} (from roster, no multi-voice entries)")
-                    else:
-                        min_s = n
-                        max_s = n + (multi_voice * 2)
-                        diarization_kwargs["min_speakers"] = min_s
-                        diarization_kwargs["max_speakers"] = max_s
-                        print(f"[Transcriber] Pyannote min_speakers={min_s}, max_speakers={max_s} (roster has {multi_voice} multi-voice entries)")
-                else:
-                    print(f"[Transcriber] No roster data — pyannote in automatic speaker detection mode")
-                diarize_df = diarize_model(audio, **diarization_kwargs)
-                del diarize_model
-                free_gpu_memory()
-                turns = list(zip(diarize_df["start"], diarize_df["end"], diarize_df["speaker"]))
-                whisper_segments = whisperx.assign_word_speakers(diarize_df, {"segments": whisper_segments})["segments"]
-                print(f"[Transcriber] Diarization complete: {len(turns)} turns, {len(set(s for _,_,s in turns))} speakers")
-
-                # Build speaker label → name assignment: voice embeddings first, then roster timing overlap
-                if (roster_attendees or active_speaker_log or org_voiceprints) and turns:
-                    speaker_segments = {}  # speaker_label -> list of (start, end) tuples
-                    for (t_start, t_end, t_speaker) in turns:
-                        speaker_segments.setdefault(t_speaker, []).append((t_start, t_end))
-
-                    # ADO#8232: timestamp overlap can't tell apart people whose speaking/presence windows
-                    # coincide, so compare voices instead — reference embeddings from each person's clean
-                    # active-speaker windows vs. aggregate embeddings of each diarization cluster.
-                    # ADO#8295: org voiceprints from prior meetings join those references.
-                    speaker_log = []
-                    log_base_ms = None
-                    embedding_turns = list(turns)
-                    if active_speaker_log:
-                        multi_voice_roster = {e["name"] for e in roster_attendees if e.get("possiblyMultiVoice")}
-                        speaker_log = [dict(e, possiblyMultiVoice=bool(e.get("possiblyMultiVoice")) or (e.get("name") or "").strip() in multi_voice_roster)
-                                       for e in active_speaker_log if (e.get("name") or "").strip() != notetaker_name]
-                        log_starts = [e["startMs"] for e in speaker_log if e.get("startMs") is not None]
-                        if log_starts:
-                            # Same rebasing as build_active_speaker_block: epoch-ms logs use the roster's
-                            # approximate recording start (earliest join); relative logs are already 0-based
-                            if min(log_starts) > 1_000_000_000_000:
-                                log_base_ms = min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else min(log_starts)
-                            else:
-                                log_base_ms = 0
-
-                            # Diarization turns inside a possiblyMultiVoice attendee's speaking window may mix
-                            # several voices — keep them out of the cluster embeddings, and leave labels that
-                            # speak mostly inside those windows as SPEAKER_NN.
-                            multi_windows = [(s, e) for wins in active_log_windows(speaker_log, log_base_ms).values()
-                                             for s, e, m in wins if m]
-                            def in_multi_window(t_start, t_end):
-                                return any(s < t_end and e > t_start for s, e in multi_windows)
-                            for label, segs in speaker_segments.items():
-                                total = sum(e - s for s, e in segs)
-                                in_multi = sum(e - s for s, e in segs if in_multi_window(s, e))
-                                if multi_windows and total > 0 and in_multi >= 0.5 * total:
-                                    speaker_name_map[label] = label
-                                    print(f"[Transcriber] {label} left as-is ({in_multi:.1f}s of {total:.1f}s inside possiblyMultiVoice windows)")
-                            embedding_turns = [t for t in turns if t[2] not in speaker_name_map and not in_multi_window(t[0], t[1])]
-
-                    if log_base_ms is not None or org_voiceprints:
-                        try:
-                            meeting_refs = (extract_reference_embeddings(speaker_log, audio_path, hf_token, log_base_ms)
-                                            if log_base_ms is not None else {})
-                            # Org voiceprints take priority; this meeting's active-speaker references fill in the rest
-                            ref_embeddings = dict(org_voiceprints)
-                            ref_sources = {name: "voiceprint_db" for name in org_voiceprints}
-                            for name, emb in meeting_refs.items():
-                                if name not in ref_embeddings:
-                                    ref_embeddings[name] = emb
-                                    ref_sources[name] = "active_speaker_log"
-                            if ref_embeddings:
-                                cluster_embeddings = extract_cluster_embeddings(embedding_turns, audio_path, hf_token)
-                                dims = {e.numel() for e in cluster_embeddings.values()}
-                                for name in [n for n, e in ref_embeddings.items() if dims and e.numel() not in dims]:
-                                    print(f"[Transcriber] Reference for {name} ({ref_sources[name]}) has wrong embedding size — dropped")
-                                    del ref_embeddings[name]
-                                confidences, runner_ups = {}, {}
-                                name_map = assign_names_by_embedding(cluster_embeddings, ref_embeddings,
-                                                                     confidences=confidences, runner_ups=runner_ups)
-                                for label, name in sorted(name_map.items()):
-                                    if name:
-                                        print(f"[Transcriber] {label} → {name} source={ref_sources[name]}")
-                                speaker_name_map.update({label: name for label, name in name_map.items() if name})
-                                auto_promote_voiceprints(name_map, cluster_embeddings, compute_cluster_durations(turns),
-                                                         confidences, runner_ups, tenant_id, meeting_id, db_config, s3, s3_bucket)
-                            else:
-                                print(f"[Transcriber] No reference voice embeddings — falling back to roster timing")
-                        except Exception as e:
-                            print(f"[Transcriber] Voice embedding resolution failed (non-fatal, falling back to roster timing): {e}", file=sys.stderr)
-                        finally:
-                            release_embedding_model()
-
-                    # Roster timestamps are epoch ms; approximate recording start as earliest join
-                    recording_start_ms = min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else None
-
-                    for speaker_label, segs in speaker_segments.items():
-                        if speaker_label in speaker_name_map:
-                            continue  # resolved via voice embedding (or held as multi-voice)
-                        if not roster_attendees:
-                            speaker_name_map[speaker_label] = speaker_label
-                            print(f"[Transcriber] {speaker_label} left unresolved (no voice match, no roster)")
-                            continue
-                        best_name = None
-                        best_overlap = 0.0
-                        second_overlap = 0.0
-                        for attendee in roster_attendees:
-                            att_start = (attendee["joinedAtMs"] - recording_start_ms) / 1000.0
-                            att_end = (attendee["leftAtMs"] - recording_start_ms) / 1000.0
-                            total_overlap = sum(
-                                max(0, min(seg_end, att_end) - max(seg_start, att_start))
-                                for seg_start, seg_end in segs
-                            )
-                            if total_overlap > best_overlap:
-                                second_overlap = best_overlap
-                                best_overlap = total_overlap
-                                best_name = attendee["name"]
-                            elif total_overlap > second_overlap:
-                                second_overlap = total_overlap
-                        # Only attribute when one attendee clearly dominates — when presence windows
-                        # largely coincide, overlap can't distinguish people, and assigning the
-                        # earliest joiner to every label would be worse than leaving SPEAKER_NN
-                        # for the summary model to resolve via the attendee list.
-                        if best_name and best_overlap > 0 and second_overlap <= 0.5 * best_overlap:
-                            speaker_name_map[speaker_label] = best_name
-                            print(f"[Transcriber] {speaker_label} → {best_name} (overlap {best_overlap:.1f}s, runner-up {second_overlap:.1f}s)")
-                        else:
-                            speaker_name_map[speaker_label] = speaker_label  # ambiguous or no overlap — keep label
-                            print(f"[Transcriber] {speaker_label} left unresolved (best {best_name} {best_overlap:.1f}s, runner-up {second_overlap:.1f}s)")
-            except Exception as e:
-                print(f"[Transcriber] Diarization failed (non-fatal): {e}", file=sys.stderr)
+        if summarize_only:
+            # WI #8335: reuse the existing transcript (no Whisper/diarization), overlay the user's
+            # speaker corrections, and rerun only the summarization pass below. The corrected
+            # transcript is never written back — the base transcript stays untouched.
+            obj = s3.get_object(Bucket=s3_bucket, Key=transcript_s3_key)
+            result = json.loads(obj["Body"].read().decode("utf-8")) or []
+            print(f"[Transcriber] Loaded transcript from s3://{s3_bucket}/{transcript_s3_key}: {len(result)} segments")
+            if speaker_corrections_s3_key:
+                obj = s3.get_object(Bucket=s3_bucket, Key=speaker_corrections_s3_key)
+                corrections = json.loads(obj["Body"].read().decode("utf-8")) or []
+                print(f"[Transcriber] Loaded {len(corrections)} speaker correction(s) from s3://{s3_bucket}/{speaker_corrections_s3_key}")
+                result = apply_speaker_corrections(result, corrections)
+                has_speaker_corrections = any(isinstance(c, dict) and not c.get("archived") for c in corrections)
         else:
-            print(f"[Transcriber] WARNING: HF_TOKEN not set — skipping diarization and voice-embedding speaker resolution")
+            # WhisperX transcription (GPU) — faster-whisper backend with batched inference
+            device = "cuda"
+            print(f"[Transcriber] Loading WhisperX model (large-v3-turbo, GPU)...")
+            initial_prompt = ", ".join([e.get("Term", "") or e.get("term", "") for e in org_wiki_entries if (e.get("Term", "") or e.get("term", ""))])
+            if initial_prompt:
+                print(f"[Transcriber] Whisper initial_prompt: {initial_prompt}")
+            model = whisperx.load_model(
+                "large-v3-turbo",
+                device,
+                compute_type="float16",
+                language="en",
+                asr_options={"initial_prompt": initial_prompt} if initial_prompt else None,
+            )
+            audio = whisperx.load_audio(audio_path)
+            print(f"[Transcriber] Running transcription...")
+            transcription = model.transcribe(audio, batch_size=16, language="en")
+            whisper_segments = transcription["segments"]
+            print(f"[Transcriber] Whisper complete: {len(whisper_segments)} segments, duration={len(audio) / whisperx.audio.SAMPLE_RATE:.1f}s")
+            del model
+            free_gpu_memory()
 
-        # Build speaker name map from org wiki people entries
-        wiki_people = {}
-        for e in org_wiki_entries:
-            term = e.get('Term', '') or e.get('term', '')
-            if term and any(w[0].isupper() for w in term.split() if w):
-                wiki_people[term.lower()] = term
-        if wiki_people:
-            print(f"[Transcriber] Wiki people available for name resolution: {list(wiki_people.values())}")
+            # Word-level alignment (wav2vec2) — prerequisite for word-level speaker assignment
+            try:
+                print(f"[Transcriber] Running word-level alignment...")
+                align_model, align_metadata = whisperx.load_align_model(language_code=transcription["language"], device=device)
+                aligned = whisperx.align(whisper_segments, align_model, align_metadata, audio, device, return_char_alignments=False)
+                whisper_segments = aligned["segments"]
+                print(f"[Transcriber] Alignment complete: {len(aligned['word_segments'])} words")
+                del align_model
+                free_gpu_memory()
+            except Exception as e:
+                print(f"[Transcriber] Alignment failed (non-fatal, falling back to segment-level speakers): {e}", file=sys.stderr)
 
-        # Build transcript — segments are split at word-level speaker changes
-        result = []
-        for seg in split_segments_by_speaker(whisper_segments):
-            speaker_label = seg["speaker"]
-            speaker_name = speaker_name_map.get(speaker_label, speaker_label) if speaker_name_map else speaker_label
-            result.append({
-                "speakerLabel": speaker_label,
-                "speakerName": speaker_name,  # actual name if resolved, else SPEAKER_NN
-                "text": seg["text"],
-                "startTimeMs": int(seg["start"] * 1000),
-                "endTimeMs": int(seg["end"] * 1000)
+            # Pyannote diarization (GPU) via WhisperX, speakers assigned per word
+            speaker_name_map = {}  # SPEAKER_NN -> actual name (from roster timing overlap)
+            if hf_token:
+                try:
+                    print(f"[Transcriber] Loading pyannote diarization pipeline...")
+                    # Set offline mode only for pyannote — weights are pre-baked, Whisper downloads at runtime
+                    os.environ["HF_HUB_OFFLINE"] = "1"
+                    try:
+                        diarize_model = DiarizationPipeline(
+                            model_name="pyannote/speaker-diarization-community-1",
+                            token=hf_token,
+                            device=device,
+                        )
+                    finally:
+                        del os.environ["HF_HUB_OFFLINE"]
+                    print(f"[Transcriber] Running diarization...")
+                    diarization_kwargs = {}
+                    if roster_attendees:
+                        n = len(roster_attendees)
+                        multi_voice = sum(1 for e in roster_attendees if e.get("possiblyMultiVoice", False))
+                        if multi_voice == 0:
+                            diarization_kwargs["num_speakers"] = n
+                            print(f"[Transcriber] Pyannote num_speakers={n} (from roster, no multi-voice entries)")
+                        else:
+                            min_s = n
+                            max_s = n + (multi_voice * 2)
+                            diarization_kwargs["min_speakers"] = min_s
+                            diarization_kwargs["max_speakers"] = max_s
+                            print(f"[Transcriber] Pyannote min_speakers={min_s}, max_speakers={max_s} (roster has {multi_voice} multi-voice entries)")
+                    else:
+                        print(f"[Transcriber] No roster data — pyannote in automatic speaker detection mode")
+                    diarize_df = diarize_model(audio, **diarization_kwargs)
+                    del diarize_model
+                    free_gpu_memory()
+                    turns = list(zip(diarize_df["start"], diarize_df["end"], diarize_df["speaker"]))
+                    whisper_segments = whisperx.assign_word_speakers(diarize_df, {"segments": whisper_segments})["segments"]
+                    print(f"[Transcriber] Diarization complete: {len(turns)} turns, {len(set(s for _,_,s in turns))} speakers")
+
+                    # Build speaker label → name assignment: voice embeddings first, then roster timing overlap
+                    if (roster_attendees or active_speaker_log or org_voiceprints) and turns:
+                        speaker_segments = {}  # speaker_label -> list of (start, end) tuples
+                        for (t_start, t_end, t_speaker) in turns:
+                            speaker_segments.setdefault(t_speaker, []).append((t_start, t_end))
+
+                        # ADO#8232: timestamp overlap can't tell apart people whose speaking/presence windows
+                        # coincide, so compare voices instead — reference embeddings from each person's clean
+                        # active-speaker windows vs. aggregate embeddings of each diarization cluster.
+                        # ADO#8295: org voiceprints from prior meetings join those references.
+                        speaker_log = []
+                        log_base_ms = None
+                        embedding_turns = list(turns)
+                        if active_speaker_log:
+                            multi_voice_roster = {e["name"] for e in roster_attendees if e.get("possiblyMultiVoice")}
+                            speaker_log = [dict(e, possiblyMultiVoice=bool(e.get("possiblyMultiVoice")) or (e.get("name") or "").strip() in multi_voice_roster)
+                                           for e in active_speaker_log if (e.get("name") or "").strip() != notetaker_name]
+                            log_starts = [e["startMs"] for e in speaker_log if e.get("startMs") is not None]
+                            if log_starts:
+                                # Same rebasing as build_active_speaker_block: epoch-ms logs use the roster's
+                                # approximate recording start (earliest join); relative logs are already 0-based
+                                if min(log_starts) > 1_000_000_000_000:
+                                    log_base_ms = min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else min(log_starts)
+                                else:
+                                    log_base_ms = 0
+
+                                # Diarization turns inside a possiblyMultiVoice attendee's speaking window may mix
+                                # several voices — keep them out of the cluster embeddings, and leave labels that
+                                # speak mostly inside those windows as SPEAKER_NN.
+                                multi_windows = [(s, e) for wins in active_log_windows(speaker_log, log_base_ms).values()
+                                                 for s, e, m in wins if m]
+                                def in_multi_window(t_start, t_end):
+                                    return any(s < t_end and e > t_start for s, e in multi_windows)
+                                for label, segs in speaker_segments.items():
+                                    total = sum(e - s for s, e in segs)
+                                    in_multi = sum(e - s for s, e in segs if in_multi_window(s, e))
+                                    if multi_windows and total > 0 and in_multi >= 0.5 * total:
+                                        speaker_name_map[label] = label
+                                        print(f"[Transcriber] {label} left as-is ({in_multi:.1f}s of {total:.1f}s inside possiblyMultiVoice windows)")
+                                embedding_turns = [t for t in turns if t[2] not in speaker_name_map and not in_multi_window(t[0], t[1])]
+
+                        if log_base_ms is not None or org_voiceprints:
+                            try:
+                                meeting_refs = (extract_reference_embeddings(speaker_log, audio_path, hf_token, log_base_ms)
+                                                if log_base_ms is not None else {})
+                                # Org voiceprints take priority; this meeting's active-speaker references fill in the rest
+                                ref_embeddings = dict(org_voiceprints)
+                                ref_sources = {name: "voiceprint_db" for name in org_voiceprints}
+                                for name, emb in meeting_refs.items():
+                                    if name not in ref_embeddings:
+                                        ref_embeddings[name] = emb
+                                        ref_sources[name] = "active_speaker_log"
+                                if ref_embeddings:
+                                    cluster_embeddings = extract_cluster_embeddings(embedding_turns, audio_path, hf_token)
+                                    dims = {e.numel() for e in cluster_embeddings.values()}
+                                    for name in [n for n, e in ref_embeddings.items() if dims and e.numel() not in dims]:
+                                        print(f"[Transcriber] Reference for {name} ({ref_sources[name]}) has wrong embedding size — dropped")
+                                        del ref_embeddings[name]
+                                    confidences = {}
+                                    name_map = assign_names_by_embedding(cluster_embeddings, ref_embeddings, confidences=confidences)
+                                    for label, name in sorted(name_map.items()):
+                                        if name:
+                                            print(f"[Transcriber] {label} → {name} source={ref_sources[name]}")
+                                    speaker_name_map.update({label: name for label, name in name_map.items() if name})
+                                    auto_promote_voiceprints(name_map, cluster_embeddings, compute_cluster_durations(turns),
+                                                             confidences, tenant_id, meeting_id, db_config, s3, s3_bucket)
+                                else:
+                                    print(f"[Transcriber] No reference voice embeddings — falling back to roster timing")
+                            except Exception as e:
+                                print(f"[Transcriber] Voice embedding resolution failed (non-fatal, falling back to roster timing): {e}", file=sys.stderr)
+                            finally:
+                                release_embedding_model()
+
+                        # Roster timestamps are epoch ms; approximate recording start as earliest join
+                        recording_start_ms = min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else None
+
+                        for speaker_label, segs in speaker_segments.items():
+                            if speaker_label in speaker_name_map:
+                                continue  # resolved via voice embedding (or held as multi-voice)
+                            if not roster_attendees:
+                                speaker_name_map[speaker_label] = speaker_label
+                                print(f"[Transcriber] {speaker_label} left unresolved (no voice match, no roster)")
+                                continue
+                            best_name = None
+                            best_overlap = 0.0
+                            second_overlap = 0.0
+                            for attendee in roster_attendees:
+                                att_start = (attendee["joinedAtMs"] - recording_start_ms) / 1000.0
+                                att_end = (attendee["leftAtMs"] - recording_start_ms) / 1000.0
+                                total_overlap = sum(
+                                    max(0, min(seg_end, att_end) - max(seg_start, att_start))
+                                    for seg_start, seg_end in segs
+                                )
+                                if total_overlap > best_overlap:
+                                    second_overlap = best_overlap
+                                    best_overlap = total_overlap
+                                    best_name = attendee["name"]
+                                elif total_overlap > second_overlap:
+                                    second_overlap = total_overlap
+                            # Only attribute when one attendee clearly dominates — when presence windows
+                            # largely coincide, overlap can't distinguish people, and assigning the
+                            # earliest joiner to every label would be worse than leaving SPEAKER_NN
+                            # for the summary model to resolve via the attendee list.
+                            if best_name and best_overlap > 0 and second_overlap <= 0.5 * best_overlap:
+                                speaker_name_map[speaker_label] = best_name
+                                print(f"[Transcriber] {speaker_label} → {best_name} (overlap {best_overlap:.1f}s, runner-up {second_overlap:.1f}s)")
+                            else:
+                                speaker_name_map[speaker_label] = speaker_label  # ambiguous or no overlap — keep label
+                                print(f"[Transcriber] {speaker_label} left unresolved (best {best_name} {best_overlap:.1f}s, runner-up {second_overlap:.1f}s)")
+                except Exception as e:
+                    print(f"[Transcriber] Diarization failed (non-fatal): {e}", file=sys.stderr)
+            else:
+                print(f"[Transcriber] WARNING: HF_TOKEN not set — skipping diarization and voice-embedding speaker resolution")
+
+            # Build speaker name map from org wiki people entries
+            wiki_people = {}
+            for e in org_wiki_entries:
+                term = e.get('Term', '') or e.get('term', '')
+                if term and any(w[0].isupper() for w in term.split() if w):
+                    wiki_people[term.lower()] = term
+            if wiki_people:
+                print(f"[Transcriber] Wiki people available for name resolution: {list(wiki_people.values())}")
+
+            # Build transcript — segments are split at word-level speaker changes
+            result = []
+            for seg in split_segments_by_speaker(whisper_segments):
+                speaker_label = seg["speaker"]
+                speaker_name = speaker_name_map.get(speaker_label, speaker_label) if speaker_name_map else speaker_label
+                result.append({
+                    "speakerLabel": speaker_label,
+                    "speakerName": speaker_name,  # actual name if resolved, else SPEAKER_NN
+                    "text": seg["text"],
+                    "startTimeMs": int(seg["start"] * 1000),
+                    "endTimeMs": int(seg["end"] * 1000)
+                })
+
+            # Upload transcript to S3
+            transcript_key = f"firm-transcripts/{meeting_id}/transcript.json"
+            transcript_json = json.dumps(result)
+            s3.put_object(
+                Bucket=s3_bucket,
+                Key=transcript_key,
+                Body=transcript_json,
+                ContentType="application/json"
+            )
+            print(f"[Transcriber] Transcript uploaded to s3://{s3_bucket}/{transcript_key}")
+
+            # Post transcription_complete callback with transcript S3 key and segments
+            post_callback(callback_url, bot_secret, {
+                "meetingId": meeting_id,
+                "status": "transcription_complete",
+                "transcriptS3Key": transcript_key,
+                "segments": result
             })
-
-        # Upload transcript to S3
-        transcript_key = f"firm-transcripts/{meeting_id}/transcript.json"
-        transcript_json = json.dumps(result)
-        s3.put_object(
-            Bucket=s3_bucket,
-            Key=transcript_key,
-            Body=transcript_json,
-            ContentType="application/json"
-        )
-        print(f"[Transcriber] Transcript uploaded to s3://{s3_bucket}/{transcript_key}")
-
-        # Post transcription_complete callback with transcript S3 key and segments
-        post_callback(callback_url, bot_secret, {
-            "meetingId": meeting_id,
-            "status": "transcription_complete",
-            "transcriptS3Key": transcript_key,
-            "segments": result
-        })
 
         # Guard: skip summarization if no speech was detected
         if not result:
@@ -1022,8 +1075,11 @@ def main():
             if active_speaker_log:
                 roster_start_ms = min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else None
                 active_speaker_block = build_active_speaker_block(active_speaker_log, roster_start_ms, notetaker_name)
+            corrections_block = ""
+            if has_speaker_corrections:
+                corrections_block = "\n[SPEAKER CORRECTIONS — the meeting organizer manually corrected speaker attribution in this transcript. Treat the speaker names shown as authoritative; do not reassign lines to a different person.]\n\n"
             summary_prompt = f"""Analyze this meeting transcript and provide a rich, structured summary.
-{org_context_block}{attendees_block}{active_speaker_block}
+{org_context_block}{attendees_block}{active_speaker_block}{corrections_block}
 Meeting date: {meeting_date if meeting_date else "unknown"}
 Meeting start (UTC): {meeting_start_datetime if meeting_start_datetime else "unknown"}
 
@@ -1242,7 +1298,10 @@ Identify NEW meetings the participants agreed or proposed to schedule during thi
                     "ActionItemsJson": json.dumps(summary_data.get("actionItemsJson", [])),
                     "FollowUpsJson": json.dumps(summary_data.get("followUpsJson", [])),
                     "OpenQuestionsJson": json.dumps(summary_data.get("openQuestionsJson", [])),
-                    "SuggestedEventsJson": json.dumps(suggested_events),
+                    # WI #8335: summarize-only omits this (null = leave stored value alone) so a
+                    # correction re-summarize can't reset suggestions the organizer already
+                    # created/dismissed back to pending.
+                    "SuggestedEventsJson": None if summarize_only else json.dumps(suggested_events),
                     "ModelUsed": bedrock_model_id
                 }
             })
@@ -1253,15 +1312,19 @@ Identify NEW meetings the participants agreed or proposed to schedule during thi
 
     except Exception as e:
         print(f"[Transcriber] FATAL: {e}", file=sys.stderr)
-        post_callback(callback_url, bot_secret, {
-            "meetingId": meeting_id,
-            "status": "failed",
-            "error": str(e)
-        })
+        # WI #8335: a summarize-only failure leaves the existing transcript + summary intact —
+        # don't flip a Complete meeting to Failed.
+        if not summarize_only:
+            post_callback(callback_url, bot_secret, {
+                "meetingId": meeting_id,
+                "status": "failed",
+                "error": str(e)
+            })
         sys.exit(1)
     finally:
         try:
-            os.unlink(audio_path)
+            if audio_path:
+                os.unlink(audio_path)
         except:
             pass
 

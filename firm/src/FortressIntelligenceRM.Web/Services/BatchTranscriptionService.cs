@@ -9,7 +9,7 @@ namespace FortressIntelligenceRM.Web.Services;
 
 public interface IBatchTranscriptionService
 {
-    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, string? rosterTimeline = null, string? activeSpeakerTimeline = null, CancellationToken ct = default, DateTime? meetingStartDatetime = null);
+    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, string? rosterTimeline = null, string? activeSpeakerTimeline = null, CancellationToken ct = default, DateTime? meetingStartDatetime = null, bool summarizeOnly = false, string? transcriptS3Key = null, string? speakerCorrections = null);
 }
 
 public class BatchTranscriptionService : IBatchTranscriptionService
@@ -36,7 +36,7 @@ public class BatchTranscriptionService : IBatchTranscriptionService
         _logger = logger;
     }
 
-    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, string? rosterTimeline = null, string? activeSpeakerTimeline = null, CancellationToken ct = default, DateTime? meetingStartDatetime = null)
+    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, string? rosterTimeline = null, string? activeSpeakerTimeline = null, CancellationToken ct = default, DateTime? meetingStartDatetime = null, bool summarizeOnly = false, string? transcriptS3Key = null, string? speakerCorrections = null)
     {
         var callbackSecret = _config["Firm:BotCallbackSecret"] ?? "";
         if (string.IsNullOrEmpty(callbackSecret))
@@ -121,9 +121,33 @@ public class BatchTranscriptionService : IBatchTranscriptionService
             envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "ACTIVE_SPEAKER_S3_KEY", Value = activeSpeakerKey });
         }
 
+        // WI #8335: summarize-only reruns just the summarization pass on the existing transcript with
+        // the user's speaker corrections overlaid — no Whisper/diarization. The overlay is staged in S3
+        // (same 8192-byte override cap as the active speaker timeline above).
+        if (summarizeOnly)
+        {
+            if (string.IsNullOrEmpty(transcriptS3Key))
+                throw new InvalidOperationException($"Meeting {meetingId} has no TranscriptS3Key — cannot submit summarize-only job");
+            envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "SUMMARIZE_ONLY", Value = "true" });
+            envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "TRANSCRIPT_S3_KEY", Value = transcriptS3Key });
+            if (!string.IsNullOrEmpty(speakerCorrections))
+            {
+                var correctionsKey = $"firm-transcripts/{meetingId}/speaker_corrections.json";
+                await _s3.PutObjectAsync(new PutObjectRequest
+                {
+                    BucketName = S3Bucket,
+                    Key = correctionsKey,
+                    ContentBody = speakerCorrections,
+                    ContentType = "application/json"
+                }, ct);
+                _logger.LogInformation("FIRM: Uploaded speaker corrections for meeting {MeetingId} to s3://{Bucket}/{Key}", meetingId, S3Bucket, correctionsKey);
+                envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "SPEAKER_CORRECTIONS_S3_KEY", Value = correctionsKey });
+            }
+        }
+
         var request = new SubmitJobRequest
         {
-            JobName = $"retranscribe-meeting-{meetingId}-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}",
+            JobName = $"{(summarizeOnly ? "resummarize" : "retranscribe")}-meeting-{meetingId}-{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}",
             JobQueue = JobQueue,
             JobDefinition = JobDefinition,
             ContainerOverrides = new ContainerOverrides
@@ -133,7 +157,7 @@ public class BatchTranscriptionService : IBatchTranscriptionService
         };
 
         var response = await _batch.SubmitJobAsync(request, ct);
-        _logger.LogInformation("FIRM: Batch retranscribe job {JobId} submitted for meeting {MeetingId}", response.JobId, meetingId);
+        _logger.LogInformation("FIRM: Batch {Mode} job {JobId} submitted for meeting {MeetingId}", summarizeOnly ? "summarize-only" : "retranscribe", response.JobId, meetingId);
         return response.JobId;
     }
 }

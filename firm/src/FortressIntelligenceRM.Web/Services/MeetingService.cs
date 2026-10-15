@@ -77,7 +77,9 @@ public class MeetingService
         // relational artifacts here so a subscriber's detail page renders the shared content.
         var artifactMeetingId = meeting.PrimaryMeetingId ?? meeting.Id;
         meeting.Participants = await db.Participants.Where(p => p.MeetingId == artifactMeetingId).ToListAsync();
-        meeting.Transcripts = await db.Transcripts.Where(t => t.MeetingId == artifactMeetingId).OrderBy(t => t.StartTimeMs).ToListAsync();
+        // WI #8335: ThenBy(Id) makes the order deterministic — speaker-correction segment_index is a
+        // position in this list, and transcribe.py reproduces it with a stable sort on startTimeMs.
+        meeting.Transcripts = await db.Transcripts.Where(t => t.MeetingId == artifactMeetingId).OrderBy(t => t.StartTimeMs).ThenBy(t => t.Id).ToListAsync();
         meeting.Summary = await db.Summaries.FirstOrDefaultAsync(s => s.MeetingId == artifactMeetingId);
         if (meeting.PrimaryMeetingId != null)
         {
@@ -86,6 +88,11 @@ public class MeetingService
                 .Select(m => (int?)m.SummaryVersion)
                 .FirstOrDefaultAsync();
             if (primaryVersion != null) meeting.SummaryVersion = primaryVersion.Value;
+            // WI #8335: corrections overlay the shared transcript, so they live on the primary row too.
+            meeting.SpeakerCorrections = await db.Meetings
+                .Where(m => m.Id == artifactMeetingId)
+                .Select(m => m.SpeakerCorrections)
+                .FirstOrDefaultAsync();
         }
 
         return meeting;
@@ -585,23 +592,25 @@ public class MeetingService
     /// Fetches the meeting record to get AudioS3Key and StartedAt, then submits the Batch job.
     /// Returns the Batch job ID. Throws if AudioS3Key is null/empty.
     /// </summary>
-    public async Task<string> SubmitTranscriptionJobAsync(long meetingId)
+    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, bool summarizeOnly = false)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = await db.Meetings.Include(m => m.CreatedByUser).FirstOrDefaultAsync(m => m.Id == meetingId);
         if (meeting == null)
             throw new InvalidOperationException($"Meeting {meetingId} not found");
 
-        if (string.IsNullOrEmpty(meeting.AudioS3Key))
+        // WI #8335: summarize-only reuses the existing transcript, so audio isn't required.
+        if (string.IsNullOrEmpty(meeting.AudioS3Key) && !summarizeOnly)
             throw new InvalidOperationException($"Meeting {meetingId} has no AudioS3Key — cannot submit transcription job");
 
-        var audioS3Key = meeting.AudioS3Key;
+        var audioS3Key = meeting.AudioS3Key ?? "";
         var meetingDate = meeting.StartedAt ?? meeting.ScheduledAt;
         var creatorEntraOid = meeting.CreatorEntraOid ?? meeting.CreatedByUser?.EntraOid;
         var rosterTimeline = meeting.RosterTimeline;
         var activeSpeakerTimeline = meeting.ActiveSpeakerTimeline;
         var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate, creatorEntraOid, rosterTimeline, activeSpeakerTimeline,
-            meetingStartDatetime: meeting.StartDatetime ?? meeting.StartedAt);
+            meetingStartDatetime: meeting.StartDatetime ?? meeting.StartedAt,
+            summarizeOnly: summarizeOnly, transcriptS3Key: meeting.TranscriptS3Key, speakerCorrections: meeting.SpeakerCorrections);
         _logger.LogInformation("FIRM: SubmitTranscriptionJobAsync submitted Batch job {JobId} for meeting {MeetingId}", jobId, meetingId);
         return jobId;
     }
@@ -700,5 +709,102 @@ public class MeetingService
         meeting.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return true;
+    }
+
+    /// <summary>WI #8335: the speaker-corrections overlay JSON for a meeting (resolved from the primary
+    /// for subscribers — the transcript it overlays is shared). Null when there are none.</summary>
+    public async Task<string?> GetSpeakerCorrectionsAsync(long meetingId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var artifactMeetingId = await ResolveArtifactMeetingIdAsync(db, meetingId);
+        return await db.Meetings
+            .Where(m => m.Id == artifactMeetingId)
+            .Select(m => m.SpeakerCorrections)
+            .FirstOrDefaultAsync();
+    }
+
+    /// <summary>
+    /// WI #8335: replaces the meeting's active speaker corrections with <paramref name="correctionsJson"/>
+    /// (a JSON array), then submits a summarize-only Batch job so the summary reflects them. Archived
+    /// corrections (made against a transcript a retranscribe has since replaced) are always kept — user
+    /// corrections are never deleted. Callers must have already checked the user owns the meeting row.
+    /// Throws ArgumentException for an invalid overlay, InvalidOperationException if the meeting can't
+    /// be re-summarized right now. Corrections are committed before the job is submitted, so a Batch
+    /// failure never loses the user's work — it's logged and reported by returning false.
+    /// </summary>
+    public async Task<bool> SaveSpeakerCorrectionsAsync(long meetingId, string correctionsJson)
+    {
+        List<SpeakerCorrection>? incoming;
+        try { incoming = System.Text.Json.JsonSerializer.Deserialize<List<SpeakerCorrection>>(correctionsJson); }
+        catch (System.Text.Json.JsonException ex) { throw new ArgumentException($"Corrections are not valid JSON: {ex.Message}"); }
+        if (incoming == null) throw new ArgumentException("Corrections must be a JSON array");
+
+        var active = incoming.Where(c => !c.Archived).ToList();
+        foreach (var c in active)
+        {
+            var error = c.Validate();
+            if (error != null) throw new ArgumentException(error);
+            c.ResolvedName = c.ResolvedName.Trim();
+        }
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var artifactMeetingId = await ResolveArtifactMeetingIdAsync(db, meetingId);
+        var meeting = await db.Meetings.FindAsync(artifactMeetingId)
+            ?? throw new InvalidOperationException($"Meeting {meetingId} not found");
+        if (meeting.Status != MeetingStatus.Complete)
+            throw new InvalidOperationException("Speaker corrections can only be saved once the meeting is complete");
+        if (string.IsNullOrEmpty(meeting.TranscriptS3Key))
+            throw new InvalidOperationException("This meeting has no stored transcript to re-summarize");
+
+        var merged = SpeakerCorrection.ParseList(meeting.SpeakerCorrections).Where(c => c.Archived).Concat(active).ToList();
+        if (merged.Count > SpeakerCorrection.MaxCorrections)
+            throw new ArgumentException($"A meeting can have at most {SpeakerCorrection.MaxCorrections} speaker corrections");
+
+        meeting.SpeakerCorrections = merged.Count > 0 ? SpeakerCorrection.SerializeList(merged) : null;
+        meeting.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        _logger.LogInformation("FIRM: Saved {Count} active speaker correction(s) for meeting {MeetingId} (requested via {RequestedId})",
+            active.Count, artifactMeetingId, meetingId);
+
+        try
+        {
+            var jobId = await SubmitTranscriptionJobAsync(artifactMeetingId, summarizeOnly: true);
+            _logger.LogInformation("FIRM: Speaker corrections re-summarize Batch job {JobId} submitted for meeting {MeetingId}", jobId, artifactMeetingId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Speaker corrections saved for meeting {MeetingId} but re-summarize submission failed", artifactMeetingId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// WI #8335: a retranscribe replaced the transcript the corrections were made against — segment
+    /// indexes and SPEAKER_XX labels no longer line up, so mark every correction archived (kept, but no
+    /// longer applied). Called when transcription_complete rewrites the transcript rows.
+    /// </summary>
+    public async Task ArchiveSpeakerCorrectionsAsync(long meetingId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var meeting = await db.Meetings.FindAsync(meetingId);
+        if (meeting == null || string.IsNullOrEmpty(meeting.SpeakerCorrections)) return;
+
+        var corrections = SpeakerCorrection.ParseList(meeting.SpeakerCorrections);
+        if (corrections.All(c => c.Archived)) return;
+        foreach (var c in corrections) c.Archived = true;
+        meeting.SpeakerCorrections = SpeakerCorrection.SerializeList(corrections);
+        meeting.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        _logger.LogInformation("FIRM: Archived {Count} speaker correction(s) for meeting {MeetingId} — transcript was replaced", corrections.Count, meetingId);
+    }
+
+    private static async Task<long> ResolveArtifactMeetingIdAsync(FirmDbContext db, long meetingId)
+    {
+        var primaryId = await db.Meetings
+            .Where(m => m.Id == meetingId)
+            .Select(m => m.PrimaryMeetingId)
+            .FirstOrDefaultAsync();
+        return primaryId ?? meetingId;
     }
 }

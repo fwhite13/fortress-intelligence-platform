@@ -325,6 +325,17 @@ public class MeetingsApiController : ControllerBase
                 });
             }
             await db.SaveChangesAsync();
+
+            // WI #8335: the transcript the user's speaker corrections were made against is gone —
+            // keep them (never deleted) but stop applying them to the new transcript.
+            try
+            {
+                await _meetingService.ArchiveSpeakerCorrectionsAsync(payload.MeetingId);
+            }
+            catch (Exception archiveEx)
+            {
+                _logger.LogWarning(archiveEx, "FIRM: Failed to archive speaker corrections for meeting {Id} (non-fatal)", payload.MeetingId);
+            }
         }
 
         // Write summary on summary_complete
@@ -1510,6 +1521,56 @@ public class MeetingsApiController : ControllerBase
                 created_event_id = s.CreatedEventId
             })
         });
+    }
+
+    /// <summary>WI #8335: the meeting's speaker-corrections overlay (assign/override/merge), in apply
+    /// order. Organizer or subscriber — each owns their own meeting row (ResolveOwnedMeeting).</summary>
+    [HttpGet("/api/meetings/{id}/speaker-corrections")]
+    [Authorize(Policy = "CookieOrBearer")]
+    public async Task<IActionResult> GetSpeakerCorrections(long id)
+    {
+        var (_, error) = await ResolveOwnedMeeting(id);
+        if (error != null) return error;
+
+        var json = await _meetingService.GetSpeakerCorrectionsAsync(id);
+        return Ok(new { meetingId = id, corrections = SpeakerCorrection.ParseList(json) });
+    }
+
+    /// <summary>WI #8335: replaces the meeting's active speaker corrections and re-summarizes with them
+    /// applied (summarize-only Batch job). Archived corrections are always preserved server-side.</summary>
+    [HttpPost("/api/meetings/{id}/speaker-corrections")]
+    [Authorize(Policy = "CookieOrBearer")]
+    public async Task<IActionResult> SaveSpeakerCorrections(long id, [FromBody] SpeakerCorrectionsRequest? request)
+    {
+        var (_, error) = await ResolveOwnedMeeting(id);
+        if (error != null) return error;
+        if (request?.Corrections == null) return BadRequest(new { error = "corrections array is required" });
+
+        bool resummarizeStarted;
+        try
+        {
+            resummarizeStarted = await _meetingService.SaveSpeakerCorrectionsAsync(id, JsonSerializer.Serialize(request.Corrections));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+
+        // Corrections are committed before the Batch job is submitted — only re-summarization failed.
+        if (!resummarizeStarted)
+            return StatusCode(500, new { error = "Corrections saved, but re-summarization could not be started" });
+
+        return Ok(new { meetingId = id, status = "resummarize_triggered" });
+    }
+
+    public class SpeakerCorrectionsRequest
+    {
+        [JsonPropertyName("corrections")]
+        public List<SpeakerCorrection>? Corrections { get; set; }
     }
 
     /// <summary>WI #8294: create a Graph calendar event from a suggestion. Body fields are optional

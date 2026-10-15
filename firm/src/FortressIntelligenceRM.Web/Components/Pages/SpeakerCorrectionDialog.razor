@@ -1,0 +1,93 @@
+@using MudBlazor
+@using FortressIntelligenceRM.Web.Models
+
+@* WI #8335 — collects the name (and, for merge, the second label) for one speaker correction.
+   Returns a SpeakerCorrection; the caller adds it to its pending list. *@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="color: var(--color-text-primary);">@Title</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="color: var(--color-text-secondary);">@Description</MudText>
+        @if (Mode == SpeakerCorrection.TypeMerge)
+        {
+            <MudSelect T="string" @bind-Value="_mergeWith" Label="Same person as" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Class="mb-3">
+                @foreach (var label in MergeCandidates)
+                {
+                    <MudSelectItem Value="@label">@label</MudSelectItem>
+                }
+            </MudSelect>
+        }
+        <MudAutocomplete T="string" @bind-Value="_name" Label="Speaker name" Variant="Variant.Outlined"
+                         Margin="Margin.Dense" SearchFunc="SearchNames" CoerceValue="true" Immediate="true"
+                         ResetValueOnEmptyText="true" MaxItems="null" MaxLength="SpeakerCorrection.MaxNameLength"
+                         HelperText="Pick a participant or type any name" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Style="color: var(--color-text-secondary);">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                   OnClick="Submit" Disabled="@(!CanSubmit)">
+            Apply
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string Mode { get; set; } = SpeakerCorrection.TypeAssign;
+    /// <summary>The clicked segment's diarization label (assign/merge source).</summary>
+    [Parameter] public string Speaker { get; set; } = "";
+    [Parameter] public int SegmentIndex { get; set; }
+    /// <summary>Roster participants + names already resolved in the transcript.</summary>
+    [Parameter] public List<string> NameOptions { get; set; } = new();
+    /// <summary>Other diarization labels in the transcript (merge only).</summary>
+    [Parameter] public List<string> MergeCandidates { get; set; } = new();
+    [Parameter] public string? InitialName { get; set; }
+
+    private string? _name;
+    private string? _mergeWith;
+
+    protected override void OnInitialized() => _name = InitialName;
+
+    private string Title => Mode switch
+    {
+        SpeakerCorrection.TypeOverride => "Change this segment's speaker",
+        SpeakerCorrection.TypeMerge => $"Merge {Speaker} with another speaker",
+        _ => $"Rename all {Speaker}"
+    };
+
+    private string Description => Mode switch
+    {
+        SpeakerCorrection.TypeOverride => "Only this transcript segment is reassigned.",
+        SpeakerCorrection.TypeMerge => $"Use this when diarization split one person into two labels. Every segment from {Speaker} and the label you pick is attributed to one name.",
+        _ => $"Every segment attributed to {Speaker} is attributed to this name."
+    };
+
+    private bool CanSubmit => !string.IsNullOrWhiteSpace(_name)
+        && (Mode != SpeakerCorrection.TypeMerge || !string.IsNullOrEmpty(_mergeWith));
+
+    private Task<IEnumerable<string>> SearchNames(string? value, CancellationToken ct)
+    {
+        var matches = string.IsNullOrWhiteSpace(value)
+            ? NameOptions
+            : NameOptions.Where(n => n.Contains(value.Trim(), StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(matches);
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit()
+    {
+        if (!CanSubmit) return;
+        var name = _name!.Trim();
+        var correction = Mode switch
+        {
+            SpeakerCorrection.TypeOverride => new SpeakerCorrection { Type = Mode, SegmentIndex = SegmentIndex, ResolvedName = name },
+            SpeakerCorrection.TypeMerge => new SpeakerCorrection { Type = Mode, Speakers = new() { Speaker, _mergeWith! }, ResolvedName = name },
+            _ => new SpeakerCorrection { Type = SpeakerCorrection.TypeAssign, Speaker = Speaker, ResolvedName = name }
+        };
+        MudDialog.Close(DialogResult.Ok(correction));
+    }
+}
