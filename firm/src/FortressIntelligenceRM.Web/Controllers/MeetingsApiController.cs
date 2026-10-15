@@ -1521,6 +1521,11 @@ public class MeetingsApiController : ControllerBase
         var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
         if (error != null) return error;
 
+        // WI #8310 — gated until Calendars.ReadWrite incremental consent ships. Explicit 403 rather than
+        // Forbid(): the cookie scheme's Forbid() redirects to /access-denied instead of returning 403.
+        if (user == null || !user.AutoCreateSuggestedEvents)
+            return StatusCode(StatusCodes.Status403Forbidden, new { error = "Suggested event creation is not enabled for this user" });
+
         var suggestions = SuggestedEvent.ParseList(meeting!.SuggestedEvents);
         if (index < 0 || index >= suggestions.Count) return NotFound(new { error = "Suggestion not found" });
 

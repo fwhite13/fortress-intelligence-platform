@@ -21,5 +21,7 @@ public class FirmUser
     public string? ExpoPushToken { get; set; }
     public bool AutoAddCalendarMeetings { get; set; }
     public bool AutoEmailSummary { get; set; }
+    // WI #8310 — gates Suggested Events create/edit (Graph Calendars.ReadWrite); always false until incremental consent ships
+    public bool AutoCreateSuggestedEvents { get; set; }
     public ICollection<FirmMeeting> Meetings { get; set; } = new List<FirmMeeting>();
 }
