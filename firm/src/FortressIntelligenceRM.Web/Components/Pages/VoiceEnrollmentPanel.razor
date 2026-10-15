@@ -1,0 +1,330 @@
+@using MudBlazor
+@using FortressIntelligenceRM.Web.Services
+@implements IAsyncDisposable
+@inject SpeakerEmbeddingService SpeakerEmbeddingService
+@inject VoiceSampleProcessingService VoiceSampleProcessingService
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject ILogger<VoiceEnrollmentPanel> Logger
+
+@* WI #8298 — self-service voice enrollment (Settings → Voice). *@
+@if (_status == null)
+{
+    <MudProgressLinear Color="Color.Warning" Indeterminate />
+}
+else
+{
+    <MudSwitch T="bool" Value="_optedIn" ValueChanged="OnOptInChanged"
+               Label="Improve speaker identification by enrolling your voice"
+               Color="Color.Warning" Disabled="@(_busy || _phase == Phase.Recording)" />
+    <MudText Typo="Typo.body2" Class="mb-3" Style="color: var(--color-text-secondary);">
+        Your voice data is stored securely and used only to label your speech in meetings you attend. You can delete it at any time.
+    </MudText>
+
+    <MudText Typo="Typo.subtitle2" Class="mb-3">Status: @StatusText</MudText>
+
+    @if (_optedIn)
+    {
+        @if (_phase == Phase.Idle)
+        {
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Mic"
+                       OnClick="OpenEnrollment">
+                @(_status.IsEnrolled ? "Re-record" : "Record your voice")
+            </MudButton>
+        }
+        else if (_phase == Phase.Processing)
+        {
+            <div class="d-flex align-center gap-2">
+                <MudProgressCircular Size="Size.Small" Color="Color.Warning" Indeterminate />
+                <MudText Typo="Typo.body2">Processing your voice sample...</MudText>
+            </div>
+        }
+        else
+        {
+            <MudPaper Outlined Class="pa-3">
+                <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--color-text-secondary);">
+                    Please read the text aloud in a quiet environment, at your normal speaking pace.
+                </MudText>
+                <MudText Typo="Typo.body1" Class="mb-3" Style="font-style: italic;">
+                    "@RainbowPassage"
+                </MudText>
+
+                @if (_phase == Phase.Ready)
+                {
+                    <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                               StartIcon="@Icons.Material.Filled.FiberManualRecord" OnClick="StartRecording">
+                        Start Recording
+                    </MudButton>
+                    <MudButton Variant="Variant.Text" OnClick="CancelEnrollment" Style="color: var(--color-text-secondary);">Cancel</MudButton>
+                }
+                else if (_phase == Phase.Recording)
+                {
+                    <div class="d-flex align-center gap-3">
+                        <MudIcon Icon="@Icons.Material.Filled.FiberManualRecord" Color="Color.Error" />
+                        <MudText Typo="Typo.body1">Recording… @FormatElapsed(_elapsedSeconds) <span style="color: var(--color-text-secondary);">(aim for 20–30s)</span></MudText>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop" OnClick="StopRecording">
+                            Stop
+                        </MudButton>
+                    </div>
+                    <MudProgressLinear Color="Color.Warning" Value="@(_elapsedSeconds * 100.0 / MaxRecordingSeconds)" Class="mt-2" />
+                }
+                else if (_phase == Phase.Recorded)
+                {
+                    <div class="d-flex align-center gap-2 flex-wrap">
+                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="PlayRecording">
+                            Does this sound like you?
+                        </MudButton>
+                        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                                   OnClick="Submit" Disabled="@_busy">
+                            Submit
+                        </MudButton>
+                        <MudLink OnClick="ReRecord" Disabled="@_busy">Re-record</MudLink>
+                    </div>
+                    @if (_recordedSeconds < MinRecordingSeconds)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="mt-1">
+                            That was a short sample — a 20–30 second recording gives the best results.
+                        </MudText>
+                    }
+                }
+            </MudPaper>
+        }
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public string EntraOid { get; set; } = "";
+    [Parameter] public string DisplayName { get; set; } = "";
+
+    private const string RainbowPassage = "When the sunlight strikes raindrops in the air, they act as a prism and form a rainbow. The rainbow is a division of white light into many beautiful colors. These take the shape of a long round arch, with its path high above, and its two ends apparently beyond the horizon.";
+    private const int MinRecordingSeconds = 20;
+    private const int MaxRecordingSeconds = 45;
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ProcessingTimeout = TimeSpan.FromMinutes(15);
+
+    private enum Phase { Idle, Ready, Recording, Recorded, Processing }
+
+    private VoiceEnrollmentStatus? _status;
+    private bool _optedIn;
+    private bool _busy;
+    private Phase _phase = Phase.Idle;
+    private int _elapsedSeconds;
+    private int _recordedSeconds;
+    private byte[]? _recording;
+    private DotNetObjectReference<VoiceEnrollmentPanel>? _dotnetRef;
+    private CancellationTokenSource? _recordingCts;
+    private readonly CancellationTokenSource _disposeCts = new();
+
+    private string StatusText => _status switch
+    {
+        { IsEnrolled: true } s => $"Enrolled (recorded {s.VoiceSampleRecordedAt!.Value.ToLocalTime():MMM d, yyyy})",
+        { AutoMeetingCount: > 0 } s => $"Auto-identified from {s.AutoMeetingCount} meeting(s)",
+        _ => "Not enrolled"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _status = await SpeakerEmbeddingService.GetEnrollmentStatusAsync(EntraOid, DisplayName);
+        _optedIn = _status.IsEnrolled;
+    }
+
+    private async Task OnOptInChanged(bool value)
+    {
+        _optedIn = value;
+        if (value || _status is not { IsEnrolled: true })
+        {
+            if (!value) _phase = Phase.Idle;
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await SpeakerEmbeddingService.DeactivateVoiceSamplesAsync(EntraOid);
+            _status = await SpeakerEmbeddingService.GetEnrollmentStatusAsync(EntraOid, DisplayName);
+            _phase = Phase.Idle;
+            Snackbar.Add("Your voice sample has been deleted.", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM: Failed to delete voice samples for {EntraOid}", EntraOid);
+            _optedIn = true;
+            Snackbar.Add("Could not delete your voice sample. Please try again.", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void OpenEnrollment() => _phase = Phase.Ready;
+
+    private async Task CancelEnrollment()
+    {
+        _recording = null;
+        _phase = Phase.Idle;
+        await JS.InvokeVoidAsync("voiceRecorder.reset");
+    }
+
+    private async Task StartRecording()
+    {
+        _dotnetRef ??= DotNetObjectReference.Create(this);
+        _recording = null;
+        try
+        {
+            await JS.InvokeVoidAsync("voiceRecorder.start", _dotnetRef);
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "FIRM: Microphone access failed for {EntraOid}", EntraOid);
+            Snackbar.Add("Could not access your microphone. Check your browser permissions and try again.", Severity.Error);
+            return;
+        }
+
+        _phase = Phase.Recording;
+        _elapsedSeconds = 0;
+        _recordingCts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
+        _ = RunRecordingTimerAsync(_recordingCts.Token);
+    }
+
+    // Elapsed-time display + auto-stop at MaxRecordingSeconds.
+    private async Task RunRecordingTimerAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                _elapsedSeconds++;
+                if (_elapsedSeconds >= MaxRecordingSeconds)
+                {
+                    await InvokeAsync(StopRecording);
+                    return;
+                }
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task StopRecording()
+    {
+        _recordingCts?.Cancel();
+        _recordedSeconds = _elapsedSeconds;
+        await JS.InvokeVoidAsync("voiceRecorder.stop");
+    }
+
+    [JSInvokable]
+    public async Task OnRecordingComplete(IJSStreamReference audio)
+    {
+        try
+        {
+            await using var stream = await audio.OpenReadStreamAsync(VoiceSampleProcessingService.MaxSampleBytes, _disposeCts.Token);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, _disposeCts.Token);
+            _recording = buffer.ToArray();
+            _phase = Phase.Recorded;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(ex, "FIRM: Failed to receive voice recording for {EntraOid}", EntraOid);
+            Snackbar.Add("Recording failed. Please try again.", Severity.Error);
+            _phase = Phase.Ready;
+        }
+        finally
+        {
+            await audio.DisposeAsync();
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task PlayRecording() => await JS.InvokeVoidAsync("voiceRecorder.play");
+
+    private async Task ReRecord()
+    {
+        _recording = null;
+        await JS.InvokeVoidAsync("voiceRecorder.reset");
+        _phase = Phase.Ready;
+    }
+
+    private async Task Submit()
+    {
+        if (_recording is not { Length: > 0 })
+            return;
+
+        _busy = true;
+        var previousSampleId = _status?.VoiceSampleId;
+        try
+        {
+            await VoiceSampleProcessingService.SubmitAsync(EntraOid, DisplayName, _recording, _disposeCts.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(ex, "FIRM: Voice sample submission failed for {EntraOid}", EntraOid);
+            Snackbar.Add("Could not upload your voice sample. Please try again.", Severity.Error);
+            return;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        _recording = null;
+        await JS.InvokeVoidAsync("voiceRecorder.reset");
+        _phase = Phase.Processing;
+        _ = PollForEnrollmentAsync(previousSampleId, _disposeCts.Token);
+    }
+
+    // Poll until the Batch job has written a voice_sample row newer than the one we started with.
+    private async Task PollForEnrollmentAsync(long? previousSampleId, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + ProcessingTimeout;
+        try
+        {
+            while (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(PollInterval, ct);
+                var status = await SpeakerEmbeddingService.GetEnrollmentStatusAsync(EntraOid, DisplayName);
+                if (status.VoiceSampleId is { } id && id != previousSampleId)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        _status = status;
+                        _phase = Phase.Idle;
+                        Snackbar.Add("Voice enrollment complete.", Severity.Success);
+                        StateHasChanged();
+                    });
+                    return;
+                }
+            }
+            await InvokeAsync(() =>
+            {
+                _phase = Phase.Idle;
+                Snackbar.Add("Voice sample processing is taking longer than expected. Check back later.", Severity.Warning);
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "FIRM: Voice enrollment status polling failed for {EntraOid}", EntraOid);
+        }
+    }
+
+    private static string FormatElapsed(int seconds) => $"{seconds / 60}:{seconds % 60:00}";
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposeCts.Cancel();
+        _recordingCts?.Cancel();
+        try
+        {
+            if (_phase == Phase.Recording)
+                await JS.InvokeVoidAsync("voiceRecorder.stop");
+            await JS.InvokeVoidAsync("voiceRecorder.reset");
+        }
+        catch (JSDisconnectedException) { }
+        _dotnetRef?.Dispose();
+        _disposeCts.Dispose();
+    }
+}
