@@ -23,7 +23,11 @@ import re
 import sys
 import json
 import tempfile
+import uuid
+import io
 import boto3
+import numpy as np
+import pymysql
 from botocore.config import Config
 import requests
 import torch
@@ -175,6 +179,9 @@ REFERENCE_MAX_WINDOWS = 3  # averaged per person
 REFERENCE_MERGE_GAP_MS = 1000  # adjacent log entries for the same person closer than this are one window
 CLUSTER_MIN_SEGMENT_S = 1.0  # shorter diarization turns give unstable embeddings
 CLUSTER_MAX_SEGMENTS = 30  # longest turns per cluster, bounds GPU time on long meetings
+VOICEPRINT_PROMOTE_MIN_CONFIDENCE = 0.90  # ADO#8295: auto-promote only near-certain voice matches
+VOICEPRINT_PROMOTE_MIN_DURATION_S = 300.0  # ... with at least 5 minutes of attributed audio
+VOICEPRINT_PROMOTE_COOLDOWN_DAYS = 7  # at most one meeting_auto voiceprint per person per week
 
 _embedding_cache = {}
 
@@ -321,7 +328,7 @@ def extract_cluster_embeddings(turns, audio_path, hf_token):
             print(f"[Transcriber] Cluster embedding for {label}: {len(embs)} segment(s), {sum(weights):.1f}s")
     return clusters
 
-def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshold=0.80, dominance=1.3):
+def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshold=0.80, dominance=1.3, confidences=None):
     """
     For each cluster embedding, compute cosine similarity against every reference embedding.
     Assign the closest reference name IF:
@@ -329,6 +336,7 @@ def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshol
       - Best similarity >= dominance * second-best similarity (1.3x)
     Log full similarity scores for every assignment/non-assignment (needed for threshold tuning).
     Returns dict: { speaker_label -> name or None }
+    If confidences is a dict, it is filled with { speaker_label -> best similarity } for assigned labels.
     """
     name_map = {}
     for label, cluster_emb in sorted(cluster_embeddings.items()):
@@ -343,6 +351,8 @@ def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshol
         scores_str = ", ".join(f"{n}={v:.3f}" for n, v in ranked)
         if best > threshold and best >= dominance * second:
             name_map[label] = best_name
+            if confidences is not None:
+                confidences[label] = best
             print(f"[Transcriber] {label} → {best_name} via voice embedding (best {best:.3f}, runner-up {second:.3f}) "
                   f"scores: {scores_str}")
         else:
@@ -351,6 +361,129 @@ def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshol
                 f"best {best:.3f} < {dominance}x runner-up {second:.3f}"
             print(f"[Transcriber] {label} unresolved by voice embedding ({reason}) scores: {scores_str}")
     return name_map
+
+def voiceprint_db_config() -> dict | None:
+    """MySQL connection settings for firm_speaker_embeddings (same env vars as firm-web), or None if unset."""
+    host = os.environ.get("FORTRESS_DB_HOST", "")
+    if not host:
+        return None
+    return {
+        "host": host,
+        "port": int(os.environ.get("FORTRESS_DB_PORT", "3306")),
+        "user": os.environ.get("FORTRESS_DB_USER", "fortress_mysql"),
+        "password": os.environ.get("FORTRESS_DB_PASS", ""),
+        "database": os.environ.get("FIRM_DB_NAME", "firm_dev"),
+        "connect_timeout": 10,
+        "charset": "utf8mb4",
+    }
+
+def load_org_voiceprints(tenant_id, db_config, s3_client, bucket):
+    """
+    ADO#8295: load the tenant's active voiceprints from firm_speaker_embeddings.
+    Each row points at an .npy embedding in S3; multiple rows for the same name are averaged
+    (uniform weights, L2-normalized first). Unreadable rows are skipped.
+    Returns dict: { name -> embedding tensor }
+    """
+    if not tenant_id or not db_config:
+        return {}
+    conn = pymysql.connect(**db_config)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT name, s3_key FROM firm_speaker_embeddings WHERE tenant_id = %s AND is_active = 1",
+                        (tenant_id,))
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    by_name = {}
+    for name, s3_key in rows:
+        try:
+            body = s3_client.get_object(Bucket=bucket, Key=s3_key)["Body"].read()
+            emb = torch.from_numpy(np.load(io.BytesIO(body), allow_pickle=False)).float().flatten()
+            if emb.numel() == 0 or not torch.isfinite(emb).all():
+                print(f"[Transcriber] Voiceprint {s3_key} for {name} is empty/non-finite — skipped")
+                continue
+            by_name.setdefault(name, []).append(emb)
+        except Exception as e:
+            print(f"[Transcriber] Failed to load voiceprint {s3_key} for {name} (skipped): {e}", file=sys.stderr)
+
+    voiceprints = {}
+    for name, embs in by_name.items():
+        if len({e.numel() for e in embs}) > 1:
+            print(f"[Transcriber] Voiceprints for {name} have mismatched dimensions — skipped")
+            continue
+        voiceprints[name] = _average_embeddings(embs, [1.0] * len(embs))
+    print(f"[Transcriber] Loaded {len(voiceprints)} org voiceprint(s) from {len(rows)} row(s) for tenant {tenant_id}")
+    return voiceprints
+
+def compute_cluster_durations(turns) -> dict:
+    """Total diarized seconds per speaker label: { speaker_label -> total_seconds }."""
+    durations = {}
+    for start_s, end_s, label in turns:
+        durations[label] = durations.get(label, 0.0) + max(0.0, float(end_s) - float(start_s))
+    return durations
+
+def auto_promote_voiceprints(name_map, cluster_embeddings, cluster_durations, confidences,
+                             tenant_id, meeting_id, db_config, s3_client, bucket):
+    """
+    ADO#8295: persist high-confidence cluster embeddings as meeting_auto voiceprints so later meetings
+    can identify the speaker. A label is promoted when its voice match is > 0.90, it has >= 5 minutes of
+    diarized audio, and the person has no meeting_auto voiceprint from the last 7 days.
+    Best-effort: logs and swallows every error — must never block transcript delivery.
+    """
+    try:
+        if not tenant_id or not db_config:
+            print("[Transcriber] Voiceprint auto-promotion skipped (no TENANT_ID or DB config)")
+            return
+        candidates = []
+        for label, name in sorted(name_map.items()):
+            if not name or label not in cluster_embeddings:
+                continue
+            confidence = confidences.get(label, 0.0)
+            duration = cluster_durations.get(label, 0.0)
+            if confidence > VOICEPRINT_PROMOTE_MIN_CONFIDENCE and duration >= VOICEPRINT_PROMOTE_MIN_DURATION_S:
+                candidates.append((label, name, confidence, duration))
+            else:
+                print(f"[Transcriber] Voiceprint not promoted for {name} ({label}): confidence {confidence:.3f}, "
+                      f"{duration:.0f}s attributed")
+        if not candidates:
+            return
+
+        conn = pymysql.connect(**db_config)
+        try:
+            for label, name, confidence, duration in candidates:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT 1 FROM firm_speaker_embeddings WHERE tenant_id = %s AND name = %s "
+                            "AND source = 'meeting_auto' AND created_at > UTC_TIMESTAMP() - INTERVAL %s DAY LIMIT 1",
+                            (tenant_id, name, VOICEPRINT_PROMOTE_COOLDOWN_DAYS))
+                        if cur.fetchone():
+                            print(f"[Transcriber] Voiceprint not promoted for {name}: meeting_auto voiceprint exists "
+                                  f"within {VOICEPRINT_PROMOTE_COOLDOWN_DAYS} days")
+                            continue
+
+                    buf = io.BytesIO()
+                    np.save(buf, cluster_embeddings[label].detach().cpu().numpy().astype(np.float32), allow_pickle=False)
+                    s3_key = f"voiceprints/{tenant_id}/{uuid.uuid4()}.npy"
+                    s3_client.put_object(Bucket=bucket, Key=s3_key, Body=buf.getvalue(),
+                                         ContentType="application/octet-stream")
+
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO firm_speaker_embeddings "
+                            "(tenant_id, name, s3_key, source, meeting_id, confidence, is_active, created_at, updated_at) "
+                            "VALUES (%s, %s, %s, 'meeting_auto', %s, %s, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+                            (tenant_id, name, s3_key, meeting_id, float(confidence)))
+                    conn.commit()
+                    print(f"[Transcriber] Voiceprint auto-promoted for {name} ({label}): confidence {confidence:.3f}, "
+                          f"{duration:.0f}s attributed → s3://{bucket}/{s3_key}")
+                except Exception as e:
+                    print(f"[Transcriber] Voiceprint auto-promotion failed for {name} (non-fatal): {e}", file=sys.stderr)
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[Transcriber] Voiceprint auto-promotion failed (non-fatal): {e}", file=sys.stderr)
 
 def post_callback(url: str, secret: str, payload: dict):
     try:
@@ -414,6 +547,19 @@ def main():
             print(f"[Transcriber] Failed to parse ROSTER_TIMELINE_JSON: {e}")
 
     s3 =boto3.client("s3", region_name=aws_region)
+
+    # ADO#8295: org voiceprints from prior meetings — best-effort, transcription proceeds without them
+    tenant_id = os.environ.get("TENANT_ID", "")
+    db_config = voiceprint_db_config()
+    org_voiceprints = {}
+    if tenant_id and db_config:
+        try:
+            org_voiceprints = load_org_voiceprints(tenant_id, db_config, s3, s3_bucket)
+        except Exception as e:
+            print(f"[Transcriber] Failed to load org voiceprints (non-fatal): {e}", file=sys.stderr)
+    else:
+        print(f"[Transcriber] Org voiceprints disabled (TENANT_ID {'set' if tenant_id else 'unset'}, "
+              f"FORTRESS_DB_HOST {'set' if db_config else 'unset'})")
 
     # ADO#8230: prefer the S3-staged timeline (avoids Batch's 8192-byte override limit);
     # fall back to the legacy inline env var for jobs submitted by older firm-web builds.
@@ -520,7 +666,7 @@ def main():
                 print(f"[Transcriber] Diarization complete: {len(turns)} turns, {len(set(s for _,_,s in turns))} speakers")
 
                 # Build speaker label → name assignment: voice embeddings first, then roster timing overlap
-                if (roster_attendees or active_speaker_log) and turns:
+                if (roster_attendees or active_speaker_log or org_voiceprints) and turns:
                     speaker_segments = {}  # speaker_label -> list of (start, end) tuples
                     for (t_start, t_end, t_speaker) in turns:
                         speaker_segments.setdefault(t_speaker, []).append((t_start, t_end))
@@ -528,6 +674,10 @@ def main():
                     # ADO#8232: timestamp overlap can't tell apart people whose speaking/presence windows
                     # coincide, so compare voices instead — reference embeddings from each person's clean
                     # active-speaker windows vs. aggregate embeddings of each diarization cluster.
+                    # ADO#8295: org voiceprints from prior meetings join those references.
+                    speaker_log = []
+                    log_base_ms = None
+                    embedding_turns = list(turns)
                     if active_speaker_log:
                         multi_voice_roster = {e["name"] for e in roster_attendees if e.get("possiblyMultiVoice")}
                         speaker_log = [dict(e, possiblyMultiVoice=bool(e.get("possiblyMultiVoice")) or (e.get("name") or "").strip() in multi_voice_roster)
@@ -556,18 +706,37 @@ def main():
                                     print(f"[Transcriber] {label} left as-is ({in_multi:.1f}s of {total:.1f}s inside possiblyMultiVoice windows)")
                             embedding_turns = [t for t in turns if t[2] not in speaker_name_map and not in_multi_window(t[0], t[1])]
 
-                            try:
-                                ref_embeddings = extract_reference_embeddings(speaker_log, audio_path, hf_token, log_base_ms)
-                                if ref_embeddings:
-                                    cluster_embeddings = extract_cluster_embeddings(embedding_turns, audio_path, hf_token)
-                                    name_map = assign_names_by_embedding(cluster_embeddings, ref_embeddings)
-                                    speaker_name_map.update({label: name for label, name in name_map.items() if name})
-                                else:
-                                    print(f"[Transcriber] No reference voice embeddings — falling back to roster timing")
-                            except Exception as e:
-                                print(f"[Transcriber] Voice embedding resolution failed (non-fatal, falling back to roster timing): {e}", file=sys.stderr)
-                            finally:
-                                release_embedding_model()
+                    if log_base_ms is not None or org_voiceprints:
+                        try:
+                            meeting_refs = (extract_reference_embeddings(speaker_log, audio_path, hf_token, log_base_ms)
+                                            if log_base_ms is not None else {})
+                            # Org voiceprints take priority; this meeting's active-speaker references fill in the rest
+                            ref_embeddings = dict(org_voiceprints)
+                            ref_sources = {name: "voiceprint_db" for name in org_voiceprints}
+                            for name, emb in meeting_refs.items():
+                                if name not in ref_embeddings:
+                                    ref_embeddings[name] = emb
+                                    ref_sources[name] = "active_speaker_log"
+                            if ref_embeddings:
+                                cluster_embeddings = extract_cluster_embeddings(embedding_turns, audio_path, hf_token)
+                                dims = {e.numel() for e in cluster_embeddings.values()}
+                                for name in [n for n, e in ref_embeddings.items() if dims and e.numel() not in dims]:
+                                    print(f"[Transcriber] Reference for {name} ({ref_sources[name]}) has wrong embedding size — dropped")
+                                    del ref_embeddings[name]
+                                confidences = {}
+                                name_map = assign_names_by_embedding(cluster_embeddings, ref_embeddings, confidences=confidences)
+                                for label, name in sorted(name_map.items()):
+                                    if name:
+                                        print(f"[Transcriber] {label} → {name} source={ref_sources[name]}")
+                                speaker_name_map.update({label: name for label, name in name_map.items() if name})
+                                auto_promote_voiceprints(name_map, cluster_embeddings, compute_cluster_durations(turns),
+                                                         confidences, tenant_id, meeting_id, db_config, s3, s3_bucket)
+                            else:
+                                print(f"[Transcriber] No reference voice embeddings — falling back to roster timing")
+                        except Exception as e:
+                            print(f"[Transcriber] Voice embedding resolution failed (non-fatal, falling back to roster timing): {e}", file=sys.stderr)
+                        finally:
+                            release_embedding_model()
 
                     # Roster timestamps are epoch ms; approximate recording start as earliest join
                     recording_start_ms = min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else None

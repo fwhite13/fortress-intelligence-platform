@@ -22,6 +22,7 @@ public class FirmDbContext : DbContext
     public DbSet<FirmMeetingCorrection> MeetingCorrections => Set<FirmMeetingCorrection>();
     public DbSet<FirmSystemConfig> SystemConfig => Set<FirmSystemConfig>();
     public DbSet<FirmZoomBotAccount> ZoomBotAccount => Set<FirmZoomBotAccount>();
+    public DbSet<FirmSpeakerEmbedding> SpeakerEmbeddings => Set<FirmSpeakerEmbedding>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -305,6 +306,24 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.RefreshToken).HasColumnName("refresh_token");
             entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
             entity.Property(e => e.ConnectedAt).HasColumnName("connected_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+        });
+
+        // WI #8295 — cross-meeting voiceprints (embeddings stored in S3).
+        modelBuilder.Entity<FirmSpeakerEmbedding>(entity =>
+        {
+            entity.ToTable("firm_speaker_embeddings");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.TenantId).HasColumnName("tenant_id").HasMaxLength(36);
+            entity.Property(e => e.Name).HasColumnName("name").HasMaxLength(200);
+            entity.Property(e => e.EntraOid).HasColumnName("entra_oid").HasMaxLength(36);
+            entity.Property(e => e.S3Key).HasColumnName("s3_key").HasMaxLength(500);
+            entity.Property(e => e.Source).HasColumnName("source");
+            entity.Property(e => e.MeetingId).HasColumnName("meeting_id");
+            entity.Property(e => e.Confidence).HasColumnName("confidence");
+            entity.Property(e => e.IsActive).HasColumnName("is_active");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
         });
 
     }

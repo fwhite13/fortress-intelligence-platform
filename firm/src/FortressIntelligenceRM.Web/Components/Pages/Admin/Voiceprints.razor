@@ -1,0 +1,112 @@
+@page "/admin/voiceprints"
+@layout AdminLayout
+@attribute [Authorize]
+@inject SpeakerEmbeddingService SpeakerEmbeddingService
+@inject AdminAccessService AdminAccess
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject BrandingConfig Branding
+
+<PageTitle>Voiceprints — @Branding.ModuleName</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
+    <MudText Typo="Typo.h5" Class="mb-2 org-context-title">Voiceprints</MudText>
+    <MudText Typo="Typo.body2" Class="mb-4 org-context-subtitle">
+        Speaker voice embeddings used to identify people across meetings. New voiceprints are added
+        automatically when a speaker is matched with high confidence over at least five minutes of audio.
+        Deleting a voiceprint stops it from being used in future transcriptions.
+    </MudText>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Class="mb-4" />
+    }
+    else if (_voiceprints.Count == 0)
+    {
+        <MudPaper Class="pa-4 org-context-card" Elevation="0">
+            <MudText Typo="Typo.body2">No voiceprints yet.</MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <MudTable Items="_voiceprints" Dense="true" Hover="true" Elevation="0" Class="org-context-card">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh>Source</MudTh>
+                <MudTh>Confidence</MudTh>
+                <MudTh>Date</MudTh>
+                <MudTh>Meeting</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Name">@context.Name</MudTd>
+                <MudTd DataLabel="Source">@SourceLabel(context.Source)</MudTd>
+                <MudTd DataLabel="Confidence">@(context.Confidence.HasValue ? context.Confidence.Value.ToString("0.000") : "—")</MudTd>
+                <MudTd DataLabel="Date">@context.CreatedAt.ToString("MMM d, yyyy") UTC</MudTd>
+                <MudTd DataLabel="Meeting">
+                    @if (context.MeetingId.HasValue)
+                    {
+                        <MudLink Href="@($"/meetings/{context.MeetingId}")">#@context.MeetingId</MudLink>
+                    }
+                    else
+                    {
+                        <span>—</span>
+                    }
+                </MudTd>
+                <MudTd Style="text-align: right">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                   aria-label="Delete voiceprint" OnClick="@(() => DeleteAsync(context))" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudContainer>
+
+@code {
+    private bool _loading = true;
+    private List<FirmSpeakerEmbedding> _voiceprints = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _voiceprints = await SpeakerEmbeddingService.GetActiveAsync();
+        _loading = false;
+    }
+
+    private static string SourceLabel(string source) => source switch
+    {
+        "voice_sample" => "Voice sample",
+        "meeting_auto" => "Meeting (auto)",
+        "meeting_confirmed" => "Meeting (confirmed)",
+        _ => source
+    };
+
+    private async Task DeleteAsync(FirmSpeakerEmbedding voiceprint)
+    {
+        // AdminLayout gates rendering; re-check before mutating in case the circuit outlived admin rights.
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!await AdminAccess.IsAdminAsync(authState.User))
+            return;
+
+        var parameters = new DialogParameters
+        {
+            { "ContentText", $"Delete this voiceprint for {voiceprint.Name}? It will no longer be used to identify speakers." },
+            { "ButtonText", "Delete" },
+            { "Color", Color.Error }
+        };
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Delete Voiceprint", parameters, options);
+        var result = await dialog.Result;
+        if (result == null || result.Canceled) return;
+
+        if (await SpeakerEmbeddingService.DeactivateAsync(voiceprint.Id))
+        {
+            _voiceprints.Remove(voiceprint);
+            Snackbar.Add($"Voiceprint for {voiceprint.Name} deleted.", Severity.Success);
+        }
+        else
+        {
+            Snackbar.Add("Voiceprint not found.", Severity.Warning);
+        }
+    }
+}
