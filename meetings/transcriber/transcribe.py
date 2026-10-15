@@ -219,13 +219,20 @@ EMBEDDING_MODEL_ID = "pyannote/embedding"
 EMBEDDING_SAMPLE_RATE = 16000  # whisperx.load_audio resamples to 16 kHz mono
 REFERENCE_PREFERRED_WINDOW_S = 10.0  # prefer reference windows at least this long
 REFERENCE_MIN_WINDOW_S = 2.0  # shortest window usable as a reference when no long one exists
+REFERENCE_MAX_WINDOW_S = 120.0  # ADO#8334: longer windows are trimmed — a 75-min log entry averaged into a garbage embedding
 REFERENCE_MAX_WINDOWS = 3  # averaged per person
 REFERENCE_MERGE_GAP_MS = 1000  # adjacent log entries for the same person closer than this are one window
 CLUSTER_MIN_SEGMENT_S = 1.0  # shorter diarization turns give unstable embeddings
 CLUSTER_MAX_SEGMENTS = 30  # longest turns per cluster, bounds GPU time on long meetings
-VOICEPRINT_PROMOTE_MIN_CONFIDENCE = 0.90  # ADO#8295: auto-promote only near-certain voice matches
+VOICE_MATCH_THRESHOLD = 0.80  # best similarity must exceed this to assign a name
+VOICE_MATCH_DOMINANCE = 1.2  # ADO#8334 (was 1.3): best similarity must be >= this multiple of the runner-up
+VOICE_MATCH_ABSOLUTE_MIN = 0.95  # ADO#8334: a best score this high is assigned regardless of ratio ...
+VOICE_MATCH_ABSOLUTE_MAX_RUNNER_UP = 0.90  # ... provided the runner-up stays below this
+VOICEPRINT_PROMOTE_MIN_CONFIDENCE = 0.95  # ADO#8334 (was 0.90): auto-promote only near-certain voice matches ...
+VOICEPRINT_PROMOTE_MAX_RUNNER_UP = 0.80  # ... with a clear gap to the runner-up — wrong voiceprints poison later meetings
 VOICEPRINT_PROMOTE_MIN_DURATION_S = 300.0  # ... with at least 5 minutes of attributed audio
 VOICEPRINT_PROMOTE_COOLDOWN_DAYS = 7  # at most one meeting_auto voiceprint per person per week
+VOICEPRINT_SOURCE_PRIORITY = {"meeting_confirmed": 0, "voice_sample": 1, "meeting_auto": 2}  # ADO#8334: lower wins
 
 _embedding_cache = {}
 
@@ -299,7 +306,7 @@ def active_log_windows(active_speaker_log: list, recording_start_ms: int) -> dic
 def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recording_start_ms):
     """
     For each named attendee in active_speaker_log, find their longest clean speaking window(s)
-    (prefer >= 10s). Extract audio and run through pyannote/embedding model.
+    (prefer >= 10s; each window is trimmed to its first 120s). Extract audio and run through pyannote/embedding model.
     Skip possiblyMultiVoice=True entries and the notetaker bot (callers filter the notetaker out
     of active_speaker_log before calling). A clean window does not overlap anyone else's window.
     If a person has multiple windows, average the embeddings.
@@ -326,6 +333,9 @@ def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recor
                 continue
             if any(other != name and os_ < e and oe > s for other, os_, oe in all_windows):
                 continue
+            if e - s > REFERENCE_MAX_WINDOW_S:
+                print(f"[Transcriber] Reference window for {name} trimmed from {e - s:.1f}s to {REFERENCE_MAX_WINDOW_S:.0f}s")
+                e = s + REFERENCE_MAX_WINDOW_S
             clean.append((s, e))
         clean.sort(key=lambda w: w[1] - w[0], reverse=True)
         long_windows = [w for w in clean if w[1] - w[0] >= REFERENCE_PREFERRED_WINDOW_S]
@@ -372,15 +382,18 @@ def extract_cluster_embeddings(turns, audio_path, hf_token):
             print(f"[Transcriber] Cluster embedding for {label}: {len(embs)} segment(s), {sum(weights):.1f}s")
     return clusters
 
-def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshold=0.80, dominance=1.3, confidences=None):
+def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshold=VOICE_MATCH_THRESHOLD,
+                              dominance=VOICE_MATCH_DOMINANCE, confidences=None, runner_ups=None):
     """
     For each cluster embedding, compute cosine similarity against every reference embedding.
     Assign the closest reference name IF:
-      - Best similarity > threshold (0.80)
-      - Best similarity >= dominance * second-best similarity (1.3x)
+      - Best similarity > threshold (0.80), AND
+      - Best similarity >= dominance * second-best similarity (1.2x)
+    OR (absolute confidence override) best similarity >= 0.95 and second-best < 0.90.
     Log full similarity scores for every assignment/non-assignment (needed for threshold tuning).
     Returns dict: { speaker_label -> name or None }
-    If confidences is a dict, it is filled with { speaker_label -> best similarity } for assigned labels.
+    If confidences / runner_ups are dicts, they are filled with { speaker_label -> best / second-best similarity }
+    for assigned labels.
     """
     name_map = {}
     for label, cluster_emb in sorted(cluster_embeddings.items()):
@@ -395,15 +408,23 @@ def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshol
         scores_str = ", ".join(f"{n}={v:.3f}" for n, v in ranked)
         if best > threshold and best >= dominance * second:
             name_map[label] = best_name
-            if confidences is not None:
-                confidences[label] = best
             print(f"[Transcriber] {label} → {best_name} via voice embedding (best {best:.3f}, runner-up {second:.3f}) "
                   f"scores: {scores_str}")
+        # Absolute confidence override: very high score with clear gap — assign regardless of ratio
+        elif best >= VOICE_MATCH_ABSOLUTE_MIN and second < VOICE_MATCH_ABSOLUTE_MAX_RUNNER_UP:
+            name_map[label] = best_name
+            print(f"[Transcriber] {label} → {best_name} via absolute confidence override (best {best:.3f}, "
+                  f"runner-up {second:.3f}) scores: {scores_str}")
         else:
             name_map[label] = None
             reason = f"best {best:.3f} <= threshold {threshold}" if best <= threshold else \
                 f"best {best:.3f} < {dominance}x runner-up {second:.3f}"
             print(f"[Transcriber] {label} unresolved by voice embedding ({reason}) scores: {scores_str}")
+            continue
+        if confidences is not None:
+            confidences[label] = best
+        if runner_ups is not None:
+            runner_ups[label] = second
     return name_map
 
 def voiceprint_db_config() -> dict | None:
@@ -424,8 +445,9 @@ def voiceprint_db_config() -> dict | None:
 def load_org_voiceprints(tenant_id, db_config, s3_client, bucket):
     """
     ADO#8295: load the tenant's active voiceprints from firm_speaker_embeddings.
-    Each row points at an .npy embedding in S3; multiple rows for the same name are averaged
-    (uniform weights, L2-normalized first). Unreadable rows are skipped.
+    Each row points at an .npy embedding in S3. ADO#8334: per name, only rows from the best available
+    source are used (meeting_confirmed > voice_sample > meeting_auto); multiple rows from that source are
+    averaged (uniform weights, L2-normalized first). Unreadable rows are skipped.
     Returns dict: { name -> embedding tensor }
     """
     if not tenant_id or not db_config:
@@ -433,14 +455,23 @@ def load_org_voiceprints(tenant_id, db_config, s3_client, bucket):
     conn = pymysql.connect(**db_config)
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT name, s3_key FROM firm_speaker_embeddings WHERE tenant_id = %s AND is_active = 1",
+            cur.execute("SELECT name, s3_key, source FROM firm_speaker_embeddings WHERE tenant_id = %s AND is_active = 1",
                         (tenant_id,))
             rows = cur.fetchall()
     finally:
         conn.close()
 
+    lowest_priority = max(VOICEPRINT_SOURCE_PRIORITY.values()) + 1
+    best_priority = {}
+    for name, _, source in rows:
+        priority = VOICEPRINT_SOURCE_PRIORITY.get(source, lowest_priority)
+        best_priority[name] = min(best_priority.get(name, priority), priority)
+
     by_name = {}
-    for name, s3_key in rows:
+    sources = {}
+    for name, s3_key, source in rows:
+        if VOICEPRINT_SOURCE_PRIORITY.get(source, lowest_priority) != best_priority[name]:
+            continue  # a higher-priority source exists for this name
         try:
             body = s3_client.get_object(Bucket=bucket, Key=s3_key)["Body"].read()
             emb = torch.from_numpy(np.load(io.BytesIO(body), allow_pickle=False)).float().flatten()
@@ -448,6 +479,7 @@ def load_org_voiceprints(tenant_id, db_config, s3_client, bucket):
                 print(f"[Transcriber] Voiceprint {s3_key} for {name} is empty/non-finite — skipped")
                 continue
             by_name.setdefault(name, []).append(emb)
+            sources[name] = source
         except Exception as e:
             print(f"[Transcriber] Failed to load voiceprint {s3_key} for {name} (skipped): {e}", file=sys.stderr)
 
@@ -457,6 +489,7 @@ def load_org_voiceprints(tenant_id, db_config, s3_client, bucket):
             print(f"[Transcriber] Voiceprints for {name} have mismatched dimensions — skipped")
             continue
         voiceprints[name] = _average_embeddings(embs, [1.0] * len(embs))
+        print(f"[Transcriber] Org voiceprint for {name}: {len(embs)} {sources[name]} row(s)")
     print(f"[Transcriber] Loaded {len(voiceprints)} org voiceprint(s) from {len(rows)} row(s) for tenant {tenant_id}")
     return voiceprints
 
@@ -467,12 +500,13 @@ def compute_cluster_durations(turns) -> dict:
         durations[label] = durations.get(label, 0.0) + max(0.0, float(end_s) - float(start_s))
     return durations
 
-def auto_promote_voiceprints(name_map, cluster_embeddings, cluster_durations, confidences,
+def auto_promote_voiceprints(name_map, cluster_embeddings, cluster_durations, confidences, runner_ups,
                              tenant_id, meeting_id, db_config, s3_client, bucket):
     """
     ADO#8295: persist high-confidence cluster embeddings as meeting_auto voiceprints so later meetings
-    can identify the speaker. A label is promoted when its voice match is > 0.90, it has >= 5 minutes of
-    diarized audio, and the person has no meeting_auto voiceprint from the last 7 days.
+    can identify the speaker. A label is promoted when its voice match is >= 0.95 with the runner-up < 0.80
+    (ADO#8334), it has >= 5 minutes of diarized audio, and the person has no meeting_auto voiceprint from
+    the last 7 days.
     Best-effort: logs and swallows every error — must never block transcript delivery.
     """
     try:
@@ -484,12 +518,16 @@ def auto_promote_voiceprints(name_map, cluster_embeddings, cluster_durations, co
             if not name or label not in cluster_embeddings:
                 continue
             confidence = confidences.get(label, 0.0)
+            runner_up = runner_ups.get(label, 1.0)
             duration = cluster_durations.get(label, 0.0)
-            if confidence > VOICEPRINT_PROMOTE_MIN_CONFIDENCE and duration >= VOICEPRINT_PROMOTE_MIN_DURATION_S:
+            if (confidence >= VOICEPRINT_PROMOTE_MIN_CONFIDENCE and runner_up < VOICEPRINT_PROMOTE_MAX_RUNNER_UP
+                    and duration >= VOICEPRINT_PROMOTE_MIN_DURATION_S):
                 candidates.append((label, name, confidence, duration))
             else:
-                print(f"[Transcriber] Voiceprint not promoted for {name} ({label}): confidence {confidence:.3f}, "
-                      f"{duration:.0f}s attributed")
+                print(f"[Transcriber] Voiceprint not promoted for {name} ({label}): confidence {confidence:.3f} "
+                      f"(need >= {VOICEPRINT_PROMOTE_MIN_CONFIDENCE}), runner-up {runner_up:.3f} "
+                      f"(need < {VOICEPRINT_PROMOTE_MAX_RUNNER_UP}), {duration:.0f}s attributed "
+                      f"(need >= {VOICEPRINT_PROMOTE_MIN_DURATION_S:.0f}s)")
         if not candidates:
             return
 
@@ -841,14 +879,15 @@ def main():
                                 for name in [n for n, e in ref_embeddings.items() if dims and e.numel() not in dims]:
                                     print(f"[Transcriber] Reference for {name} ({ref_sources[name]}) has wrong embedding size — dropped")
                                     del ref_embeddings[name]
-                                confidences = {}
-                                name_map = assign_names_by_embedding(cluster_embeddings, ref_embeddings, confidences=confidences)
+                                confidences, runner_ups = {}, {}
+                                name_map = assign_names_by_embedding(cluster_embeddings, ref_embeddings,
+                                                                     confidences=confidences, runner_ups=runner_ups)
                                 for label, name in sorted(name_map.items()):
                                     if name:
                                         print(f"[Transcriber] {label} → {name} source={ref_sources[name]}")
                                 speaker_name_map.update({label: name for label, name in name_map.items() if name})
                                 auto_promote_voiceprints(name_map, cluster_embeddings, compute_cluster_durations(turns),
-                                                         confidences, tenant_id, meeting_id, db_config, s3, s3_bucket)
+                                                         confidences, runner_ups, tenant_id, meeting_id, db_config, s3, s3_bucket)
                             else:
                                 print(f"[Transcriber] No reference voice embeddings — falling back to roster timing")
                         except Exception as e:
