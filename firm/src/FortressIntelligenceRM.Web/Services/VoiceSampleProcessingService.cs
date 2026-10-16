@@ -27,7 +27,7 @@ public class VoiceSampleProcessingService
         _logger = logger;
     }
 
-    // Returns the Batch job id. Extraction runs in the background — callers poll the enrollment status.
+    // Returns the Batch job id. Extraction runs in the background — the enrollment status updates once the job writes the row.
     public async Task<string> SubmitAsync(string entraOid, string displayName, byte[] audio, CancellationToken ct = default)
     {
         if (audio.Length == 0)
@@ -61,12 +61,26 @@ public class VoiceSampleProcessingService
             new Amazon.Batch.Model.KeyValuePair { Name = "FIRM_SPEAKER_EMBEDDING_NAME", Value = displayName },
             new Amazon.Batch.Model.KeyValuePair { Name = "S3_BUCKET", Value = S3Bucket },
             new Amazon.Batch.Model.KeyValuePair { Name = "PYANNOTE_CACHE", Value = "/app/.cache/huggingface/hub" },
-            // FORTRESS_DB_PASS comes from the job definition's Secrets Manager mapping (see BatchTranscriptionService).
             new Amazon.Batch.Model.KeyValuePair { Name = "FORTRESS_DB_HOST", Value = _config["FORTRESS_DB_HOST"] ?? "" },
             new Amazon.Batch.Model.KeyValuePair { Name = "FORTRESS_DB_PORT", Value = _config["FORTRESS_DB_PORT"] ?? "3306" },
             new Amazon.Batch.Model.KeyValuePair { Name = "FORTRESS_DB_USER", Value = _config["FORTRESS_DB_USER"] ?? "fortress_mysql" },
             new Amazon.Batch.Model.KeyValuePair { Name = "FIRM_DB_NAME", Value = _config["FIRM_DB_NAME"] ?? "firm_dev" },
         };
+
+        // WI #8305 — the voice_sample job needs the HF token (pyannote embedding model) and the DB password
+        // (firm_speaker_embeddings write). Only override when configured, so an empty value never clobbers
+        // one supplied by the job definition's Secrets Manager mapping.
+        var hfToken = _config["HuggingFace:Token"] ?? _config["HF_TOKEN"];
+        if (!string.IsNullOrEmpty(hfToken))
+            envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "HF_TOKEN", Value = hfToken });
+        else
+            _logger.LogWarning("FIRM: HF_TOKEN is not configured — voice sample job relies on the job definition for it");
+
+        var dbPass = _config["FORTRESS_DB_PASS"];
+        if (!string.IsNullOrEmpty(dbPass))
+            envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "FORTRESS_DB_PASS", Value = dbPass });
+        else
+            _logger.LogWarning("FIRM: FORTRESS_DB_PASS is not configured — voice sample job relies on the job definition for it");
 
         var response = await _batch.SubmitJobAsync(new SubmitJobRequest
         {
