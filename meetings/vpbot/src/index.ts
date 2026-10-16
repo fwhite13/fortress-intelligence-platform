@@ -57,6 +57,7 @@ const FIRM_ZOOM_SDK_KEY = process.env.FIRM_ZOOM_SDK_KEY || '';
 const FIRM_ZOOM_SDK_SECRET = process.env.FIRM_ZOOM_SDK_SECRET || '';
 console.log(`[Config] FIRM_ZOOM_SDK_KEY present: ${!!FIRM_ZOOM_SDK_KEY}`);
 console.log(`[Config] FIRM_ZOOM_SDK_SECRET present: ${!!FIRM_ZOOM_SDK_SECRET}`);
+console.log(`[Config] ZOOM_OBF_TOKEN present: ${!!process.env.ZOOM_OBF_TOKEN}`);
 
 // Ensure recordings directory exists
 if (!fs.existsSync(RECORDINGS_DIR)) {

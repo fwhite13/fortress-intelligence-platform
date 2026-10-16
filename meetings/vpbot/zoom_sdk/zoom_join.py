@@ -59,6 +59,10 @@ SUPPORTED_SAMPLE_RATES = {
 }
 DEFAULT_SAMPLE_RATE = 32000
 
+# WI #8369: how long to wait after a pre-join DISCONNECTING for the SDK to follow up
+# (RECONNECTING / INMEETING / FAILED) before giving up.
+PREJOIN_DISCONNECT_GRACE_SECONDS = 30
+
 
 def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
@@ -115,6 +119,7 @@ class ZoomJoinBot:
         self.audio_started = False
         self.chat_sent = False
         self.reached_in_meeting = False
+        self.prejoin_disconnect_timer = None
         self.exiting = False
         self.exit_code = 0
 
@@ -202,7 +207,7 @@ class ZoomJoinBot:
         self.join_meeting()
 
     def join_meeting(self) -> None:
-        log(f"[ZoomSDK] Joining meeting {self.args.meeting_id}")
+        log(f"[ZoomSDK] Joining meeting {self.args.meeting_id} (obf_token={'yes' if self.args.obf_token else 'no'})")
 
         join_param = zoom.JoinParam()
         join_param.userType = zoom.SDKUserType.SDK_UT_WITHOUT_LOGIN
@@ -235,16 +240,42 @@ class ZoomJoinBot:
     def on_meeting_status_changed(self, status, result) -> None:
         log(f"[ZoomSDK] Meeting status changed: {status} (result={result})")
 
+        # IDLE after a pre-join disconnect is not progress — let the grace timer fail the join.
+        if status not in (zoom.MEETING_STATUS_DISCONNECTING, zoom.MEETING_STATUS_IDLE):
+            self._cancel_prejoin_disconnect_timer()
+
         if status == zoom.MEETING_STATUS_INMEETING:
             self.reached_in_meeting = True
             log("[ZoomSDK] In meeting")
             self.on_join()
         elif status == zoom.MEETING_STATUS_FAILED:
-            log(f"[ZoomSDK] Join failed (code={result})")
+            log(f"[ZoomSDK] Join failed (code={result}, obf_token={'yes' if self.args.obf_token else 'no'})")
             self.request_exit(1)
+        elif status == zoom.MEETING_STATUS_DISCONNECTING and not self.reached_in_meeting:
+            # WI #8369: before we're in the meeting, DISCONNECTING is not the end — the SDK
+            # emits it while redirecting to the host's server (followed by RECONNECTING), and
+            # ahead of MEETING_STATUS_FAILED carrying the real fail code. Exiting here aborted
+            # external-org joins and hid the reason. Wait for the follow-up status instead.
+            log("[ZoomSDK] Disconnecting before join — waiting for reconnect or fail code")
+            if self.prejoin_disconnect_timer is None:
+                self.prejoin_disconnect_timer = GLib.timeout_add_seconds(
+                    PREJOIN_DISCONNECT_GRACE_SECONDS, self._on_prejoin_disconnect_timeout
+                )
         elif status in (zoom.MEETING_STATUS_ENDED, zoom.MEETING_STATUS_DISCONNECTING):
             log("[ZoomSDK] Meeting ended — exiting")
             self.request_exit(0)
+
+    def _cancel_prejoin_disconnect_timer(self) -> None:
+        if self.prejoin_disconnect_timer is not None:
+            GLib.source_remove(self.prejoin_disconnect_timer)
+            self.prejoin_disconnect_timer = None
+
+    def _on_prejoin_disconnect_timeout(self) -> bool:
+        self.prejoin_disconnect_timer = None
+        log(f"[ZoomSDK] Join failed — disconnected before join and no follow-up status within "
+            f"{PREJOIN_DISCONNECT_GRACE_SECONDS}s (obf_token={'yes' if self.args.obf_token else 'no'})")
+        self.request_exit(1)
+        return False
 
     def on_join(self) -> None:
         # Workaround for a known SDK regression: raw audio input silently
