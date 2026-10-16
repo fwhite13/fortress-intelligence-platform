@@ -151,24 +151,11 @@
                     }
                     else if (!string.IsNullOrEmpty(_meeting.Summary.SummaryText))
                     {
-                        <div class="firm-summary-markdown">
-                            @RenderMarkdown(_meeting.Summary.SummaryText)
-                        </div>
                         @if (_meeting.Status == MeetingStatus.Complete)
                         {
                             @* WI #7299 — feedback-driven re-summarization with speaker correction *@
-                            <div class="d-flex align-center flex-wrap mt-4" style="gap: 12px;">
-                                <MudButton Variant="Variant.Text" Size="Size.Small"
-                                           StartIcon="@Icons.Material.Filled.RecordVoiceOver"
-                                           Style="color: var(--color-text-secondary); text-transform: none;"
-                                           Disabled="_resummarizing"
-                                           OnClick="OpenCorrectSpeakerDialogAsync">
-                                    @(_resummarizing ? "Re-summarizing..." : "Correct speaker attribution")
-                                </MudButton>
-                                @if (_resummarizing)
-                                {
-                                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Style="color: var(--color-gold);" />
-                                }
+                            @* WI #8348 — pinned top-right so it's visible without scrolling *@
+                            <div class="d-flex justify-end align-center flex-wrap mb-2" style="gap: 12px;">
                                 @if (_meeting.SummaryVersion > 1)
                                 {
                                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
@@ -176,8 +163,22 @@
                                         Summary updated (v@(_meeting.SummaryVersion))
                                     </MudChip>
                                 }
+                                @if (_resummarizing)
+                                {
+                                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Style="color: var(--color-gold);" />
+                                }
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.RecordVoiceOver"
+                                           Style="border-color: var(--color-gold); color: var(--color-gold); text-transform: none;"
+                                           Disabled="_resummarizing"
+                                           OnClick="OpenCorrectSpeakerDialogAsync">
+                                    @(_resummarizing ? "Re-summarizing..." : "Correct speaker attribution")
+                                </MudButton>
                             </div>
                         }
+                        <div class="firm-summary-markdown">
+                            @RenderMarkdown(_meeting.Summary.SummaryText)
+                        </div>
                     }
                     else if (!string.IsNullOrEmpty(_meeting.Summary.KeyDecisionsJson) ||
                              !string.IsNullOrEmpty(_meeting.Summary.ActionItemsJson))
