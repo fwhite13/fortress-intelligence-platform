@@ -5,9 +5,12 @@
 @inject VoiceSampleProcessingService VoiceSampleProcessingService
 @inject IJSRuntime JS
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 @inject ILogger<VoiceEnrollmentPanel> Logger
 
 @* WI #8298 — self-service voice enrollment (Settings → Voice). *@
+@* WI #8306: min-height keeps the dialog from collapsing/flickering a scrollbar as phases swap content. *@
+<div style="min-height: 160px;">
 @if (_status == null)
 {
     <MudProgressLinear Color="Color.Warning" Indeterminate />
@@ -18,7 +21,7 @@ else
                Label="Improve speaker identification by enrolling your voice"
                Color="Color.Warning" Disabled="@(_busy || _phase == Phase.Recording)" />
     <MudText Typo="Typo.body2" Class="mb-3" Style="color: var(--color-text-secondary);">
-        Your voice data is stored securely and used only to label your speech in meetings you attend. You can delete it at any time.
+        Your voice data is stored securely and used only to label your speech in meetings you attend. You can delete it at any time by unenrolling below.
     </MudText>
 
     <MudText Typo="Typo.subtitle2" Class="mb-3">Status: @StatusText</MudText>
@@ -31,13 +34,6 @@ else
                        OnClick="OpenEnrollment">
                 @(_status.IsEnrolled ? "Re-record" : "Record your voice")
             </MudButton>
-        }
-        else if (_phase == Phase.Processing)
-        {
-            <div class="d-flex align-center gap-2">
-                <MudProgressCircular Size="Size.Small" Color="Color.Warning" Indeterminate />
-                <MudText Typo="Typo.body2">Processing your voice sample...</MudText>
-            </div>
         }
         else
         {
@@ -91,6 +87,7 @@ else
         }
     }
 }
+</div>
 
 @code {
     [Parameter, EditorRequired] public string EntraOid { get; set; } = "";
@@ -99,10 +96,8 @@ else
     private const string RainbowPassage = "When the sunlight strikes raindrops in the air, they act as a prism and form a rainbow. The rainbow is a division of white light into many beautiful colors. These take the shape of a long round arch, with its path high above, and its two ends apparently beyond the horizon.";
     private const int MinRecordingSeconds = 20;
     private const int MaxRecordingSeconds = 45;
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan ProcessingTimeout = TimeSpan.FromMinutes(15);
 
-    private enum Phase { Idle, Ready, Recording, Recorded, Processing }
+    private enum Phase { Idle, Ready, Recording, Recorded }
 
     private VoiceEnrollmentStatus? _status;
     private bool _optedIn;
@@ -130,13 +125,23 @@ else
 
     private async Task OnOptInChanged(bool value)
     {
-        _optedIn = value;
         if (value || _status is not { IsEnrolled: true })
         {
+            _optedIn = value;
             if (!value) _phase = Phase.Idle;
             return;
         }
 
+        // WI #8307: unenrolling permanently deletes the recording — confirm first; cancel leaves everything as-is.
+        var confirmed = await DialogService.ShowMessageBox(
+            "Remove voice enrollment?",
+            "This will permanently delete your voice recording. To re-enroll, you'll need to record a new voice sample.",
+            yesText: "Remove enrollment",
+            cancelText: "Cancel");
+        if (confirmed != true)
+            return;
+
+        _optedIn = false;
         _busy = true;
         try
         {
@@ -253,7 +258,6 @@ else
             return;
 
         _busy = true;
-        var previousSampleId = _status?.VoiceSampleId;
         try
         {
             await VoiceSampleProcessingService.SubmitAsync(EntraOid, DisplayName, _recording, _disposeCts.Token);
@@ -271,44 +275,19 @@ else
 
         _recording = null;
         await JS.InvokeVoidAsync("voiceRecorder.reset");
-        _phase = Phase.Processing;
-        _ = PollForEnrollmentAsync(previousSampleId, _disposeCts.Token);
-    }
 
-    // Poll until the Batch job has written a voice_sample row newer than the one we started with.
-    private async Task PollForEnrollmentAsync(long? previousSampleId, CancellationToken ct)
-    {
-        var deadline = DateTime.UtcNow + ProcessingTimeout;
+        // WI #8306: fire-and-forget — the Batch job takes a few minutes, so return to idle instead of polling.
+        _phase = Phase.Idle;
         try
         {
-            while (DateTime.UtcNow < deadline)
-            {
-                await Task.Delay(PollInterval, ct);
-                var status = await SpeakerEmbeddingService.GetEnrollmentStatusAsync(EntraOid, DisplayName);
-                if (status.VoiceSampleId is { } id && id != previousSampleId)
-                {
-                    await InvokeAsync(() =>
-                    {
-                        _status = status;
-                        _phase = Phase.Idle;
-                        Snackbar.Add("Voice enrollment complete.", Severity.Success);
-                        StateHasChanged();
-                    });
-                    return;
-                }
-            }
-            await InvokeAsync(() =>
-            {
-                _phase = Phase.Idle;
-                Snackbar.Add("Voice sample processing is taking longer than expected. Check back later.", Severity.Warning);
-                StateHasChanged();
-            });
+            _status = await SpeakerEmbeddingService.GetEnrollmentStatusAsync(EntraOid, DisplayName);
         }
-        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "FIRM: Voice enrollment status polling failed for {EntraOid}", EntraOid);
+            Logger.LogWarning(ex, "FIRM: Failed to refresh voice enrollment status for {EntraOid}", EntraOid);
         }
+        StateHasChanged();
+        Snackbar.Add("Your voice sample has been submitted for processing. This takes a few minutes — your enrollment status will update the next time you open this dialog.", Severity.Info);
     }
 
     private static string FormatElapsed(int seconds) => $"{seconds / 60}:{seconds % 60:00}";
