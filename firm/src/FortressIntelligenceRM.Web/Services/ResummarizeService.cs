@@ -249,7 +249,10 @@ Return JSON only, no prose or code fences: {{ ""summary"": ""..."", ""speakerMap
                 return (null, null);
             }
 
-            var result = JsonNode.Parse(text[start..(end + 1)]) as JsonObject;
+            // WI #8346 — Bedrock sometimes emits literal newlines/tabs or unescaped quotes inside
+            // JSON string values (invalid JSON). Sanitize before strict parsing.
+            var extracted = SanitizeLlmJson(text[start..(end + 1)]);
+            var result = JsonNode.Parse(extracted) as JsonObject;
             var summary = result?["summary"] is JsonValue sv && sv.TryGetValue<string>(out var str) ? str : null;
             var mappings = result?["speakerMappings"] as JsonObject;
             result?.Remove("speakerMappings"); // detach so it can be re-parented into summary.json
@@ -260,6 +263,65 @@ Return JSON only, no prose or code fences: {{ ""summary"": ""..."", ""speakerMap
             _logger.LogError(ex, "FIRM: Re-summarize — Bedrock call failed for meeting {MeetingId}", meetingId);
             return (null, null);
         }
+    }
+
+    /// <summary>
+    /// Repairs common LLM JSON defects inside string literals only, leaving structural
+    /// whitespace untouched: escapes raw control chars (\n, \r, \t, ...) and escapes interior
+    /// quotes that are not followed by a structural char (, : } ]).
+    /// </summary>
+    internal static string SanitizeLlmJson(string json)
+    {
+        var sb = new StringBuilder(json.Length + 16);
+        var inString = false;
+        for (var i = 0; i < json.Length; i++)
+        {
+            var c = json[i];
+            if (!inString)
+            {
+                if (c == '"') inString = true;
+                sb.Append(c);
+                continue;
+            }
+
+            switch (c)
+            {
+                case '\\':
+                    sb.Append(c);
+                    if (i + 1 < json.Length) sb.Append(json[++i]);
+                    break;
+                case '"':
+                    var j = i + 1;
+                    while (j < json.Length && char.IsWhiteSpace(json[j])) j++;
+                    if (j >= json.Length || json[j] is ',' or ':' or '}' or ']')
+                    {
+                        inString = false;
+                        sb.Append(c);
+                    }
+                    else
+                    {
+                        sb.Append("\\\"");
+                    }
+                    break;
+                case '\r':
+                    sb.Append("\\n");
+                    if (i + 1 < json.Length && json[i + 1] == '\n') i++;
+                    break;
+                case '\n':
+                    sb.Append("\\n");
+                    break;
+                case '\t':
+                    sb.Append("\\t");
+                    break;
+                case < ' ':
+                    sb.Append($"\\u{(int)c:x4}");
+                    break;
+                default:
+                    sb.Append(c);
+                    break;
+            }
+        }
+        return sb.ToString();
     }
 
     private async Task<string?> TryGetObjectAsync(string key, CancellationToken ct)
