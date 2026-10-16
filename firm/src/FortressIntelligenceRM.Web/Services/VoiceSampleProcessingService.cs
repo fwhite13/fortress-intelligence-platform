@@ -2,6 +2,8 @@ using Amazon.Batch;
 using Amazon.Batch.Model;
 using Amazon.S3;
 using Amazon.S3.Model;
+using FortressIntelligenceRM.Web.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace FortressIntelligenceRM.Web.Services;
 
@@ -13,16 +15,18 @@ public class VoiceSampleProcessingService
 
     private readonly IAmazonBatch _batch;
     private readonly IAmazonS3 _s3;
+    private readonly IDbContextFactory<FirmDbContext> _dbFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<VoiceSampleProcessingService> _logger;
     private string JobQueue => _config["Firm:BatchJobQueue"] ?? "firm-transcription-queue";
     private string JobDefinition => _config["Firm:BatchJobDefinition"] ?? "firm-transcription-job";
     private string S3Bucket => _config["Firm:S3Bucket"] ?? "firm-recordings-dev";
 
-    public VoiceSampleProcessingService(IAmazonBatch batch, IAmazonS3 s3, IConfiguration config, ILogger<VoiceSampleProcessingService> logger)
+    public VoiceSampleProcessingService(IAmazonBatch batch, IAmazonS3 s3, IDbContextFactory<FirmDbContext> dbFactory, IConfiguration config, ILogger<VoiceSampleProcessingService> logger)
     {
         _batch = batch;
         _s3 = s3;
+        _dbFactory = dbFactory;
         _config = config;
         _logger = logger;
     }
@@ -90,6 +94,25 @@ public class VoiceSampleProcessingService
             ContainerOverrides = new ContainerOverrides { Environment = envVars }
         }, ct);
         _logger.LogInformation("FIRM: Voice sample Batch job {JobId} submitted for {EntraOid}", response.JobId, entraOid);
+
+        // WI #8349 — mark the user pending so the panel shows progress and blocks a re-submit. Cleared by
+        // SpeakerEmbeddingService.GetEnrollmentStatusAsync once the job's voice_sample row appears.
+        // The job is already running, so a failure here must not surface as a failed submission.
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(CancellationToken.None);
+            var pendingSince = DateTime.UtcNow;
+            var updated = await db.Users
+                .Where(u => u.EntraOid == entraOid)
+                .ExecuteUpdateAsync(s => s.SetProperty(u => u.VoiceEnrollmentPendingSince, pendingSince), CancellationToken.None);
+            if (updated == 0)
+                _logger.LogWarning("FIRM: No firm_users row for {EntraOid} — voice enrollment pending state not recorded", entraOid);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FIRM: Failed to record voice enrollment pending state for {EntraOid}", entraOid);
+        }
+
         return response.JobId;
     }
 }
