@@ -19,10 +19,10 @@
                 }
             </MudSelect>
         }
-        <MudAutocomplete T="string" @bind-Value="_name" Label="Speaker name" Variant="Variant.Outlined"
+        <MudAutocomplete T="string" @ref="_nameAutocomplete" Value="_name" ValueChanged="OnNameChanged"
+                         Label="Speaker name" Variant="Variant.Outlined"
                          Margin="Margin.Dense" SearchFunc="SearchNames" CoerceValue="true" Immediate="true"
-                         ResetValueOnEmptyText="true" MaxItems="null" MaxLength="SpeakerCorrection.MaxNameLength"
-                         HelperText="Pick a participant or type any name" />
+                         ResetValueOnEmptyText="true" MaxItems="null" MaxLength="@SpeakerCorrection.MaxNameLength" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" Style="color: var(--color-text-secondary);">Cancel</MudButton>
@@ -46,6 +46,10 @@
     [Parameter] public List<string> MergeCandidates { get; set; } = new();
     [Parameter] public string? InitialName { get; set; }
 
+    // WI #8347 — sentinel appended to the dropdown so free-text entry is discoverable.
+    private const string AddAttendeeOption = "Add attendee...";
+    private MudAutocomplete<string>? _nameAutocomplete;
+
     private string? _name;
     private string? _mergeWith;
 
@@ -66,14 +70,31 @@
     };
 
     private bool CanSubmit => !string.IsNullOrWhiteSpace(_name)
+        && _name.Trim() != AddAttendeeOption
         && (Mode != SpeakerCorrection.TypeMerge || !string.IsNullOrEmpty(_mergeWith));
 
     private Task<IEnumerable<string>> SearchNames(string? value, CancellationToken ct)
     {
         var matches = string.IsNullOrWhiteSpace(value)
-            ? NameOptions
+            ? NameOptions.AsEnumerable()
             : NameOptions.Where(n => n.Contains(value.Trim(), StringComparison.OrdinalIgnoreCase));
-        return Task.FromResult(matches);
+        return Task.FromResult(matches.Append(AddAttendeeOption));
+    }
+
+    private async Task OnNameChanged(string? value)
+    {
+        if (value == AddAttendeeOption)
+        {
+            _name = string.Empty;
+            StateHasChanged();
+            await Task.Yield();
+            if (_nameAutocomplete != null)
+                await _nameAutocomplete.FocusAsync();
+        }
+        else
+        {
+            _name = value;
+        }
     }
 
     private void Cancel() => MudDialog.Cancel();
