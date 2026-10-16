@@ -19,7 +19,7 @@ else
 {
     <MudSwitch T="bool" Value="_optedIn" ValueChanged="OnOptInChanged"
                Label="Improve speaker identification by enrolling your voice"
-               Color="Color.Warning" Disabled="@(_busy || _phase == Phase.Recording)" />
+               Color="Color.Warning" Disabled="@(_busy || _phase == Phase.Recording || _status.IsPending)" />
     <MudText Typo="Typo.body2" Class="mb-3" Style="color: var(--color-text-secondary);">
         Your voice data is stored securely and used only to label your speech in meetings you attend. You can delete it at any time by unenrolling below.
     </MudText>
@@ -28,10 +28,18 @@ else
 
     @if (_optedIn)
     {
+        @* WI #8349: the Batch job runs for a few minutes after Submit — show that it's underway. *@
+        @if (_status.IsPending)
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-3">
+                Enrollment submitted — processing. This typically takes a few minutes.
+            </MudAlert>
+        }
+
         @if (_phase == Phase.Idle)
         {
             <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Mic"
-                       OnClick="OpenEnrollment">
+                       OnClick="OpenEnrollment" Disabled="@(_busy || _phase == Phase.Recording || _status.IsPending)">
                 @(_status.IsEnrolled ? "Re-record" : "Record your voice")
             </MudButton>
         }
@@ -120,7 +128,8 @@ else
     protected override async Task OnInitializedAsync()
     {
         _status = await SpeakerEmbeddingService.GetEnrollmentStatusAsync(EntraOid, DisplayName);
-        _optedIn = _status.IsEnrolled;
+        // WI #8349: a submitted-but-unprocessed sample still counts as opted in.
+        _optedIn = _status.IsEnrolled || _status.IsPending;
     }
 
     private async Task OnOptInChanged(bool value)
@@ -285,6 +294,8 @@ else
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "FIRM: Failed to refresh voice enrollment status for {EntraOid}", EntraOid);
+            // WI #8349: the job was submitted either way — still show it as pending.
+            _status = _status! with { IsPending = true };
         }
         StateHasChanged();
         Snackbar.Add("Your voice sample has been submitted for processing. This takes a few minutes — your enrollment status will update the next time you open this dialog.", Severity.Info);

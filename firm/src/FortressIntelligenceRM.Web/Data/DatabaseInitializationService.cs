@@ -307,7 +307,9 @@ public class DatabaseInitializationService : IHostedService
                 // WI #8310 — per-user gate for Suggested Events create/edit (needs Calendars.ReadWrite consent)
                 "ALTER TABLE firm_users ADD COLUMN auto_create_suggested_events TINYINT(1) NOT NULL DEFAULT 0",
                 // WI #8335 — post-transcription speaker corrections overlay (assign/override/merge)
-                "ALTER TABLE firm_meetings ADD COLUMN speaker_corrections JSON NULL"
+                "ALTER TABLE firm_meetings ADD COLUMN speaker_corrections JSON NULL",
+                // WI #8349 — voice enrollment pending marker (Batch job submitted, voice_sample row not yet written)
+                "ALTER TABLE firm_users ADD COLUMN voice_enrollment_pending_since DATETIME NULL"
             };
 
             foreach (var alterSql in alterStatements)

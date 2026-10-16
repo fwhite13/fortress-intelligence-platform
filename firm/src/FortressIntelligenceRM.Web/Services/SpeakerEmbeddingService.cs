@@ -21,6 +21,9 @@ public class SpeakerEmbeddingService
 
     private string TenantId => _config["Firm:GraphTenantId"] ?? "";
 
+    // WI #8349 — a voice_sample job that hasn't written its row by now has failed; stop showing it as pending.
+    private static readonly TimeSpan EnrollmentPendingTimeout = TimeSpan.FromMinutes(30);
+
     public async Task<List<FirmSpeakerEmbedding>> GetActiveAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -53,13 +56,43 @@ public class SpeakerEmbeddingService
             .Where(e => e.TenantId == TenantId && e.IsActive && e.Source == "voice_sample" && e.EntraOid == entraOid)
             .OrderByDescending(e => e.Id)
             .FirstOrDefaultAsync();
+
+        // WI #8349 — the voice_sample job (transcriber, JOB_MODE=voice_sample) writes its row directly with no
+        // callback into FIRM, so pending is resolved here: cleared once a row newer than the submission exists,
+        // or once the job is old enough to have failed.
+        var pendingSince = await db.Users.AsNoTracking()
+            .Where(u => u.EntraOid == entraOid)
+            .Select(u => u.VoiceEnrollmentPendingSince)
+            .FirstOrDefaultAsync();
+        var isPending = pendingSince.HasValue;
+        if (pendingSince is { } since
+            && (voiceSample?.CreatedAt >= since || DateTime.UtcNow - since > EnrollmentPendingTimeout))
+        {
+            isPending = false;
+            await ClearEnrollmentPendingAsync(db, entraOid, since);
+        }
         var autoMeetingCount = await db.SpeakerEmbeddings.AsNoTracking()
             .Where(e => e.TenantId == TenantId && e.IsActive && e.Source == "meeting_auto"
                         && (e.EntraOid == entraOid || (displayName != "" && e.Name == displayName)))
             .Select(e => e.MeetingId)
             .Distinct()
             .CountAsync();
-        return new VoiceEnrollmentStatus(voiceSample?.Id, voiceSample?.CreatedAt, autoMeetingCount);
+        return new VoiceEnrollmentStatus(voiceSample?.Id, voiceSample?.CreatedAt, autoMeetingCount, isPending);
+    }
+
+    // Conditional on the observed value so a re-submit that landed in between keeps its newer pending marker.
+    private async Task ClearEnrollmentPendingAsync(FirmDbContext db, string entraOid, DateTime observedSince)
+    {
+        try
+        {
+            await db.Users
+                .Where(u => u.EntraOid == entraOid && u.VoiceEnrollmentPendingSince == observedSince)
+                .ExecuteUpdateAsync(s => s.SetProperty(u => u.VoiceEnrollmentPendingSince, (DateTime?)null));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: Failed to clear voice enrollment pending state for {EntraOid}", entraOid);
+        }
     }
 
     // WI #8298 — opt-out: soft-delete every voice_sample row for this user.
@@ -80,7 +113,7 @@ public class SpeakerEmbeddingService
     }
 }
 
-public record VoiceEnrollmentStatus(long? VoiceSampleId, DateTime? VoiceSampleRecordedAt, int AutoMeetingCount)
+public record VoiceEnrollmentStatus(long? VoiceSampleId, DateTime? VoiceSampleRecordedAt, int AutoMeetingCount, bool IsPending = false)
 {
     public bool IsEnrolled => VoiceSampleId.HasValue;
 }

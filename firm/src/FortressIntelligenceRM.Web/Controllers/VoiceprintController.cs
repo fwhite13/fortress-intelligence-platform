@@ -32,6 +32,7 @@ public class VoiceprintController : ControllerBase
         return Ok(new
         {
             enrolled = status.IsEnrolled,
+            pending = status.IsPending,
             recordedAt = status.VoiceSampleRecordedAt,
             autoMeetingCount = status.AutoMeetingCount
         });

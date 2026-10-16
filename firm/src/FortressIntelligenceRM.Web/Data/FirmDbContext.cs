@@ -48,6 +48,7 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.AutoAddCalendarMeetings).HasColumnName("auto_add_calendar_meetings").HasDefaultValue(false);
             entity.Property(e => e.AutoEmailSummary).HasColumnName("auto_email_summary").HasDefaultValue(false);
             entity.Property(e => e.AutoCreateSuggestedEvents).HasColumnName("auto_create_suggested_events").HasDefaultValue(false);
+            entity.Property(e => e.VoiceEnrollmentPendingSince).HasColumnName("voice_enrollment_pending_since");
         });
 
         modelBuilder.Entity<FirmMeeting>(entity =>
