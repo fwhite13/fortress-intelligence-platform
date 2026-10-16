@@ -30,7 +30,12 @@ public class PdfService
             {
                 page.Size(PageSizes.A4);
                 page.Margin(40);
-                page.DefaultTextStyle(x => x.FontSize(11).FontFamily(Fonts.Arial));
+                // Liberation Sans (Arial-metric, installed via fonts-liberation) — Arial is absent on Linux.
+                // Ligatures disabled: Outlook's PDF preview cannot map ligature glyphs (e.g. "ti") back to text.
+                page.DefaultTextStyle(x => x
+                    .FontSize(11)
+                    .FontFamily("Liberation Sans")
+                    .DisableFontFeature(FontFeatures.StandardLigatures));
 
                 page.Header().PaddingBottom(8).BorderBottom(1).BorderColor(Colors.Grey.Lighten2).Column(col =>
                 {

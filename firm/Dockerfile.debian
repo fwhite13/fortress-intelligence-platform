@@ -52,6 +52,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libicu72 \
     libssl3 \
     tzdata \
+    fontconfig \
+    fonts-liberation \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
 # Install .NET 8 ASP.NET Core Runtime via dotnet-install.sh
