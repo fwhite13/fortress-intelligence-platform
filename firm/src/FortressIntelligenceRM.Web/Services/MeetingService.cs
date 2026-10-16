@@ -2,6 +2,7 @@ using FortressIntelligenceRM.Web.Data;
 using FortressIntelligenceRM.Web.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace FortressIntelligenceRM.Web.Services;
 
@@ -77,6 +78,27 @@ public class MeetingService
         // relational artifacts here so a subscriber's detail page renders the shared content.
         var artifactMeetingId = meeting.PrimaryMeetingId ?? meeting.Id;
         meeting.Participants = await db.Participants.Where(p => p.MeetingId == artifactMeetingId).ToListAsync();
+        // #8345: firm_meeting_participants is not yet populated by the vpbot callback;
+        // fall back to roster_timeline JSON (the existing attendee store) when the table is empty.
+        if (!meeting.Participants.Any() && !string.IsNullOrWhiteSpace(meeting.RosterTimeline))
+        {
+            try
+            {
+                var entries = JsonSerializer.Deserialize<List<JsonElement>>(meeting.RosterTimeline) ?? new();
+                meeting.Participants = entries
+                    .Select(e => e.ValueKind == JsonValueKind.Object && e.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String
+                        ? n.GetString()?.Trim() : null)
+                    .Where(name => !string.IsNullOrWhiteSpace(name) && !IsRosterBotName(name!))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(name => new FirmMeetingParticipant { MeetingId = artifactMeetingId, DisplayName = name! })
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal — correction dialog will just have fewer name suggestions
+                _logger.LogWarning(ex, "FIRM: Failed to parse roster_timeline for meeting {MeetingId}", meeting.Id);
+            }
+        }
         // WI #8335: ThenBy(Id) makes the order deterministic — speaker-correction segment_index is a
         // position in this list, and transcribe.py reproduces it with a stable sort on startTimeMs.
         meeting.Transcripts = await db.Transcripts.Where(t => t.MeetingId == artifactMeetingId).OrderBy(t => t.StartTimeMs).ThenBy(t => t.Id).ToListAsync();
@@ -97,6 +119,18 @@ public class MeetingService
 
         return meeting;
     }
+
+    /// <summary>
+    /// WI #8345: conservative bot filter for roster_timeline names — exact matches for the short
+    /// notetaker names ("RN", "FIRM") so human names containing those letters aren't dropped,
+    /// plus clear notetaker/bot markers ("Fireflies.ai Notetaker Jamal", "Fortress Notetaker", "... Bot").
+    /// </summary>
+    private static bool IsRosterBotName(string name) =>
+        name.Equals("RN", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("FIRM", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("notetaker", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("fireflies", StringComparison.OrdinalIgnoreCase)
+        || System.Text.RegularExpressions.Regex.IsMatch(name, @"\bbot\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? platform = null)
     {
