@@ -1,6 +1,7 @@
 @using MudBlazor
 @using FortressIntelligenceRM.Web.Services
 @inject MeetingService MeetingService
+@inject IZoomOAuthService ZoomOAuthService
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -27,6 +28,28 @@
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">Coming Soon</MudChip>
                     </MudStack>
                     <MudText Typo="Typo.caption" Style="font-style: italic; color: var(--color-text-secondary);">Enabling this feature will require you to re-authenticate through Microsoft.</MudText>
+                </MudTabPanel>
+                @* WI #8372 — per-user Zoom link; its OBF token lets the bot join Zoom meetings you attend. *@
+                <MudTabPanel Text="Zoom">
+                    @if (!string.IsNullOrEmpty(_zoomEmail))
+                    {
+                        <MudText Typo="Typo.body2" Class="mb-2">✓ Connected as @_zoomEmail</MudText>
+                        <form method="post" action="/oauth/zoom/disconnect">
+                            <MudButton Variant="Variant.Outlined" Color="Color.Error" ButtonType="ButtonType.Submit">
+                                Disconnect
+                            </MudButton>
+                        </form>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--color-text-secondary);">
+                            Connect your Zoom account so the notetaker can join Zoom meetings you attend.
+                        </MudText>
+                        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                                   Href="/oauth/zoom/authorize">
+                            Connect Zoom Account
+                        </MudButton>
+                    }
                 </MudTabPanel>
                 @if (!string.IsNullOrEmpty(_entraOid))
                 {
@@ -58,6 +81,7 @@
     private bool _autoCreateSuggestedEvents;
     private string _entraOid = "";
     private string _displayName = "";
+    private string? _zoomEmail;
 
     protected override async Task OnInitializedAsync()
     {
@@ -70,6 +94,7 @@
             _entraOid = user.EntraOid;
             _displayName = user.DisplayName;
         }
+        _zoomEmail = await ZoomOAuthService.GetLinkedEmailAsync(UserId);
         _loading = false;
     }
 

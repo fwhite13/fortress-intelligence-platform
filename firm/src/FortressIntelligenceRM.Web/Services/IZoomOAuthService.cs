@@ -9,7 +9,6 @@ public interface IZoomOAuthService
 
     /// <summary>
     /// Exchanges an auth code for tokens and fetches the Zoom profile, without storing anything.
-    /// Used directly by the shared bot account flow (WI #8043), which persists to its own table.
     /// </summary>
     Task<ZoomTokenExchangeResult> ExchangeCodeAsync(string code);
 
@@ -27,8 +26,7 @@ public interface IZoomOAuthService
 
     /// <summary>
     /// Gets an OBF (on-behalf-of) token for a specific meeting. Returns null if the user has no
-    /// linked Zoom account, or if the token could not be obtained — a missing OBF token is
-    /// non-fatal, the bot falls back to a JWT-only join.
+    /// linked Zoom account, or if the token could not be obtained (the user must be in the meeting).
     /// </summary>
     Task<string?> GetObfTokenAsync(Guid userId, long meetingId);
 

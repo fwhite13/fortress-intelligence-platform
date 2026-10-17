@@ -15,7 +15,7 @@ public class VpBotService
     private readonly MeetingService _meetingService;
     private readonly BrandingConfig _branding;
     private readonly IDbContextFactory<FirmDbContext> _dbFactory;
-    private readonly IZoomBotAccountService _zoomBotAccountService;
+    private readonly IZoomOAuthService _zoomOAuthService;
 
     // NOTE: inject the concrete BrandingConfig singleton (registered in Program.cs via
     // builder.Services.AddSingleton(branding) after binding config section "Branding"),
@@ -24,7 +24,7 @@ public class VpBotService
     // to bare class defaults (OrgName="Fortress") regardless of any env var/config —
     // this previously made every bot join as "Fortress Notetaker" on every deployment,
     // including RN, no matter what Branding__* env vars were set.
-    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, BrandingConfig branding, IDbContextFactory<FirmDbContext> dbFactory, IZoomBotAccountService zoomBotAccountService)
+    public VpBotService(IAmazonECS ecs, IConfiguration config, ILogger<VpBotService> logger, MeetingService meetingService, BrandingConfig branding, IDbContextFactory<FirmDbContext> dbFactory, IZoomOAuthService zoomOAuthService)
     {
         _ecs = ecs;
         _config = config;
@@ -32,7 +32,7 @@ public class VpBotService
         _meetingService = meetingService;
         _branding = branding;
         _dbFactory = dbFactory;
-        _zoomBotAccountService = zoomBotAccountService;
+        _zoomOAuthService = zoomOAuthService;
     }
 
     public async Task<string?> TriggerBotAsync(long meetingId, string meetingUrl, string platform = "teams")
@@ -104,8 +104,9 @@ public class VpBotService
             // For Zoom meetings: an OBF token is mandatory (WI #7833). The old JWT-only fallback
             // only ever worked for the Zoom app owner's own account, so without a token the bot is
             // never launched and the meeting is failed instead of being left stuck at Pending/Joining.
-            // WI #8043: the token comes solely from the shared bot account set in /admin/zoom
-            // (firm_zoom_bot_account) — users no longer link personal Zoom accounts.
+            // WI #8372: the token comes from the requesting user's own Zoom OAuth link
+            // (firm_zoom_oauth). Zoom only issues OBF tokens for meetings the authorizing user is
+            // actually attending, so the shared bot account from WI #8043 could never work.
             if (platform == "zoom")
             {
                 // Zoom's OBF endpoint needs the real Zoom meeting number, not the FIRM DB id.
@@ -116,10 +117,20 @@ public class VpBotService
                     return null;
                 }
 
-                var obfToken = await _zoomBotAccountService.GetObfTokenAsync(zoomMeetingNumber.Value);
+                var requestingUserId = await GetMeetingOwnerIdAsync(meetingId);
+                if (!requestingUserId.HasValue || await _zoomOAuthService.GetConnectionAsync(requestingUserId.Value) == null)
+                {
+                    _logger.LogWarning("FIRM: Skipping Zoom bot join for meeting {Id} — requesting user {UserId} has not connected a Zoom account", meetingId, requestingUserId);
+                    await _meetingService.UpdateStatusAsync(meetingId, MeetingStatus.Failed,
+                        "Could not join the Zoom meeting: your Zoom account is not connected. Connect it in Settings, then try again.",
+                        lastFailureReason: "zoom_not_connected");
+                    return null;
+                }
+
+                var obfToken = await _zoomOAuthService.GetObfTokenAsync(requestingUserId.Value, zoomMeetingNumber.Value);
                 if (string.IsNullOrEmpty(obfToken))
                 {
-                    await FailZoomLaunchAsync(meetingId, $"no OBF token from Zoom bot account for Zoom meeting {zoomMeetingNumber.Value} (bot account not connected in /admin/zoom, or token refresh/OBF request failed)");
+                    await FailZoomLaunchAsync(meetingId, $"no OBF token for user {requestingUserId.Value} for Zoom meeting {zoomMeetingNumber.Value} (token refresh or OBF request failed — the user must be in the meeting)");
                     return null;
                 }
 
@@ -185,6 +196,29 @@ public class VpBotService
         await _meetingService.UpdateStatusAsync(meetingId, MeetingStatus.Failed,
             "Could not join the Zoom meeting: Zoom authorization unavailable. Make sure your Zoom account is connected in Settings, then try again.",
             lastFailureReason: "zoom_obf_unavailable");
+    }
+
+    /// <summary>
+    /// WI #8372: the user who requested the recording (the meeting's creator), whose own Zoom
+    /// OAuth link is used for the OBF token. Returns null if the meeting can't be found.
+    /// </summary>
+    private async Task<Guid?> GetMeetingOwnerIdAsync(long meetingId)
+    {
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var createdBy = await db.Meetings
+                .Where(m => m.Id == meetingId)
+                .Select(m => m.CreatedBy)
+                .FirstOrDefaultAsync();
+
+            return createdBy == Guid.Empty ? null : createdBy;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: Failed to resolve requesting user for meeting {Id}", meetingId);
+            return null;
+        }
     }
 
     /// <summary>
