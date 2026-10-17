@@ -1,0 +1,15 @@
+@* WI #8371 — which Zoom account to link, and the join-as-linked-account requirement. OrgName is
+   "Fortress" for FIRM and "Refuge" for RN (Branding__OrgName). *@
+@inject BrandingConfig Branding
+
+<MudStack Spacing="1">
+    <MudText Typo="Typo.body2" Style="color: var(--color-text-primary);">
+        Connect a personal Zoom account or the Zoom account tied to your @Branding.OrgName work email.
+    </MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);">
+        Corporate accounts managed by your IT department (e.g. Higginbotham) cannot be used.
+    </MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--color-text-primary); font-weight: 600;">
+        You must join each Zoom meeting using this linked account for the notetaker to record.
+    </MudText>
+</MudStack>
