@@ -29,27 +29,43 @@
                     </MudStack>
                     <MudText Typo="Typo.caption" Style="font-style: italic; color: var(--color-text-secondary);">Enabling this feature will require you to re-authenticate through Microsoft.</MudText>
                 </MudTabPanel>
-                @* WI #8372 — per-user Zoom link; its OBF token lets the bot join Zoom meetings you attend. *@
+                @* WI #8371 — per-user Zoom account link. Connect/Disconnect act immediately; Save only covers the General tab. *@
                 <MudTabPanel Text="Zoom">
-                    @if (!string.IsNullOrEmpty(_zoomEmail))
+                    @if (_zoomConnection != null)
                     {
-                        <MudText Typo="Typo.body2" Class="mb-2">✓ Connected as @_zoomEmail</MudText>
-                        <form method="post" action="/oauth/zoom/disconnect">
-                            <MudButton Variant="Variant.Outlined" Color="Color.Error" ButtonType="ButtonType.Submit">
-                                Disconnect
-                            </MudButton>
-                        </form>
+                        <MudAlert Severity="Severity.Success" Dense="true" Class="mb-3">
+                            Connected as <strong>@(_zoomConnection.ZoomEmail ?? _zoomConnection.ZoomUserId)</strong>
+                        </MudAlert>
                     }
                     else
                     {
-                        <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--color-text-secondary);">
-                            Connect your Zoom account so the notetaker can join Zoom meetings you attend.
-                        </MudText>
-                        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
-                                   Href="/oauth/zoom/authorize">
-                            Connect Zoom Account
-                        </MudButton>
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                            No Zoom account connected. Connect your Zoom account to enable recording of Zoom meetings.
+                        </MudAlert>
                     }
+                    <ZoomAccountGuidance />
+                    <div class="d-flex gap-2 mt-4">
+                        @if (_zoomConnection != null)
+                        {
+                            <MudButton Variant="Variant.Outlined" Style="border-color: #d4af37; color: #d4af37;"
+                                       Href="/oauth/zoom/authorize" StartIcon="@Icons.Material.Filled.Sync">
+                                Switch Account
+                            </MudButton>
+                            <form method="post" action="/oauth/zoom/disconnect">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Error" ButtonType="ButtonType.Submit"
+                                           StartIcon="@Icons.Material.Filled.LinkOff">
+                                    Disconnect
+                                </MudButton>
+                            </form>
+                        }
+                        else
+                        {
+                            <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                                       Href="/oauth/zoom/authorize" StartIcon="@Icons.Material.Filled.VideoCall">
+                                Connect Zoom Account
+                            </MudButton>
+                        }
+                    </div>
                 </MudTabPanel>
                 @if (!string.IsNullOrEmpty(_entraOid))
                 {
@@ -81,7 +97,7 @@
     private bool _autoCreateSuggestedEvents;
     private string _entraOid = "";
     private string _displayName = "";
-    private string? _zoomEmail;
+    private FirmZoomOAuth? _zoomConnection;
 
     protected override async Task OnInitializedAsync()
     {
@@ -94,7 +110,7 @@
             _entraOid = user.EntraOid;
             _displayName = user.DisplayName;
         }
-        _zoomEmail = await ZoomOAuthService.GetLinkedEmailAsync(UserId);
+        _zoomConnection = await ZoomOAuthService.GetConnectionAsync(UserId);
         _loading = false;
     }
 
