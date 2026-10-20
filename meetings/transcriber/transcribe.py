@@ -1029,6 +1029,10 @@ def main():
                         print(f"[Transcriber] Speaker conflict at {midpoint_ms:.0f}ms: cluster assigned '{speaker_name}', "
                               f"active speaker log says '{log_name}' — using log name")
                         speaker_name = log_name
+                # ADO#8517: once a segment's name is resolved, label it by that name so a raw cluster label
+                # never maps to several people (the #8479 override splits clusters per segment).
+                if not re.fullmatch(r"SPEAKER_\d+", speaker_name):
+                    speaker_label = speaker_name
                 result.append({
                     "speakerLabel": speaker_label,
                     "speakerName": speaker_name,  # actual name if resolved, else SPEAKER_NN
