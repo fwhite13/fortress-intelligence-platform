@@ -351,6 +351,21 @@ def active_log_windows(active_speaker_log: list, recording_start_ms: int) -> dic
     return {name: [((s - recording_start_ms) / 1000.0, (e - recording_start_ms) / 1000.0, m) for s, e, m in wins]
             for name, wins in windows.items()}
 
+def active_speakers_at(active_speaker_log: list, recording_start_ms: int, at_ms: float) -> set:
+    """
+    Names the active speaker log shows speaking at at_ms (ms from recording start).
+    possiblyMultiVoice entries are skipped — a shared room device doesn't say which voice is talking.
+    """
+    names = set()
+    for e in active_speaker_log:
+        name = (e.get("name") or "").strip()
+        start_ms = e.get("startMs")
+        if not name or start_ms is None or e.get("possiblyMultiVoice"):
+            continue
+        if start_ms - recording_start_ms <= at_ms < (e.get("endMs") or start_ms) - recording_start_ms:
+            names.add(name)
+    return names
+
 def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recording_start_ms):
     """
     For each named attendee in active_speaker_log, find their longest clean speaking window(s)
@@ -839,6 +854,8 @@ def main():
 
             # Pyannote diarization (GPU) via WhisperX, speakers assigned per word
             speaker_name_map = {}  # SPEAKER_NN -> actual name (from roster timing overlap)
+            speaker_log = []  # active speaker log minus the notetaker, possiblyMultiVoice flagged
+            log_base_ms = None  # recording start in the log's timebase; None when there's no usable log
             if hf_token:
                 try:
                     print(f"[Transcriber] Loading pyannote diarization pipeline...")
@@ -885,8 +902,6 @@ def main():
                         # coincide, so compare voices instead — reference embeddings from each person's clean
                         # active-speaker windows vs. aggregate embeddings of each diarization cluster.
                         # ADO#8295: org voiceprints from prior meetings join those references.
-                        speaker_log = []
-                        log_base_ms = None
                         embedding_turns = list(turns)
                         if active_speaker_log:
                             multi_voice_roster = {e["name"] for e in roster_attendees if e.get("possiblyMultiVoice")}
@@ -1003,6 +1018,17 @@ def main():
             for seg in split_segments_by_speaker(whisper_segments):
                 speaker_label = seg["speaker"]
                 speaker_name = speaker_name_map.get(speaker_label, speaker_label) if speaker_name_map else speaker_label
+                # ADO#8479: names are assigned per cluster, but pyannote can fold another person's speech into a
+                # matched cluster. The active speaker log is the better per-moment signal, so on conflict it wins.
+                # Unresolved SPEAKER_NN labels are left alone, as are moments where several people are logged.
+                if log_base_ms is not None and speaker_name != speaker_label:
+                    midpoint_ms = (seg["start"] + seg["end"]) * 500
+                    log_names = active_speakers_at(speaker_log, log_base_ms, midpoint_ms)
+                    if len(log_names) == 1 and speaker_name.casefold() not in {n.casefold() for n in log_names}:
+                        log_name = next(iter(log_names))
+                        print(f"[Transcriber] Speaker conflict at {midpoint_ms:.0f}ms: cluster assigned '{speaker_name}', "
+                              f"active speaker log says '{log_name}' — using log name")
+                        speaker_name = log_name
                 result.append({
                     "speakerLabel": speaker_label,
                     "speakerName": speaker_name,  # actual name if resolved, else SPEAKER_NN
