@@ -6,7 +6,7 @@ public class FirmMeetingTranscript
 {
     public long Id { get; set; }
     public long MeetingId { get; set; }
-    [MaxLength(20)]
+    [MaxLength(255)]
     public string? SpeakerLabel { get; set; }
     [MaxLength(255)]
     public string? SpeakerName { get; set; }

@@ -146,7 +146,7 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.MeetingId).HasColumnName("meeting_id");
             entity.Property(e => e.DisplayName).HasColumnName("display_name").HasMaxLength(255).IsRequired();
-            entity.Property(e => e.SpeakerLabel).HasColumnName("speaker_label").HasMaxLength(20);
+            entity.Property(e => e.SpeakerLabel).HasColumnName("speaker_label").HasMaxLength(255);
             entity.Property(e => e.Email).HasColumnName("email").HasMaxLength(255);
             entity.Property(e => e.JoinedAt).HasColumnName("joined_at");
             entity.HasOne(e => e.Meeting)
@@ -163,7 +163,7 @@ public class FirmDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
             entity.Property(e => e.MeetingId).HasColumnName("meeting_id");
-            entity.Property(e => e.SpeakerLabel).HasColumnName("speaker_label").HasMaxLength(20);
+            entity.Property(e => e.SpeakerLabel).HasColumnName("speaker_label").HasMaxLength(255);
             entity.Property(e => e.SpeakerName).HasColumnName("speaker_name").HasMaxLength(255);
             entity.Property(e => e.Text).HasColumnName("text").IsRequired();
             entity.Property(e => e.StartTimeMs).HasColumnName("start_time_ms");
