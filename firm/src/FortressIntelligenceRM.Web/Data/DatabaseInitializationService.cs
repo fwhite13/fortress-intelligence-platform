@@ -77,7 +77,7 @@ public class DatabaseInitializationService : IHostedService
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                     meeting_id BIGINT NOT NULL,
                     display_name VARCHAR(255) NOT NULL,
-                    speaker_label VARCHAR(20) NULL,
+                    speaker_label VARCHAR(255) NULL,
                     email VARCHAR(255) NULL,
                     joined_at DATETIME NULL,
                     INDEX idx_fmp_meeting (meeting_id)
@@ -85,7 +85,7 @@ public class DatabaseInitializationService : IHostedService
                 ("firm_meeting_transcripts", @"CREATE TABLE IF NOT EXISTS firm_meeting_transcripts (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                     meeting_id BIGINT NOT NULL,
-                    speaker_label VARCHAR(20) NULL,
+                    speaker_label VARCHAR(255) NULL,
                     speaker_name VARCHAR(255) NULL,
                     text TEXT NOT NULL,
                     start_time_ms BIGINT NULL,
@@ -309,7 +309,10 @@ public class DatabaseInitializationService : IHostedService
                 // WI #8335 — post-transcription speaker corrections overlay (assign/override/merge)
                 "ALTER TABLE firm_meetings ADD COLUMN speaker_corrections JSON NULL",
                 // WI #8349 — voice enrollment pending marker (Batch job submitted, voice_sample row not yet written)
-                "ALTER TABLE firm_users ADD COLUMN voice_enrollment_pending_since DATETIME NULL"
+                "ALTER TABLE firm_users ADD COLUMN voice_enrollment_pending_since DATETIME NULL",
+                // WI #8517 — speaker_label widened to 255 to hold resolved human names (was 20, sized for SPEAKER_NN only)
+                "ALTER TABLE firm_meeting_transcripts MODIFY COLUMN speaker_label VARCHAR(255) NULL",
+                "ALTER TABLE firm_meeting_participants MODIFY COLUMN speaker_label VARCHAR(255) NULL"
             };
 
             foreach (var alterSql in alterStatements)

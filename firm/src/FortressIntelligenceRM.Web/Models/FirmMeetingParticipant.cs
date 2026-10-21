@@ -8,7 +8,7 @@ public class FirmMeetingParticipant
     public long MeetingId { get; set; }
     [MaxLength(255)]
     public string DisplayName { get; set; } = "";
-    [MaxLength(20)]
+    [MaxLength(255)]
     public string? SpeakerLabel { get; set; }
     [MaxLength(255)]
     public string? Email { get; set; }
