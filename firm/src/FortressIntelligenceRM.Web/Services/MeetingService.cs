@@ -132,14 +132,32 @@ public class MeetingService
         || name.Contains("fireflies", StringComparison.OrdinalIgnoreCase)
         || System.Text.RegularExpressions.Regex.IsMatch(name, @"\bbot\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
-    public async Task<FirmMeeting> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? platform = null)
+    public const string InvalidMeetingUrlError = "That doesn't look like a meeting link — paste the full https:// join URL.";
+
+    /// <summary>
+    /// Manual (UI/API) meeting add. WI #8575: the raw input is cleaned (leading "Join: "-style text
+    /// stripped) and normalized like the AutoSync path, so NormalizedMeetingUrl is populated and the
+    /// WI #7033 cross-user dedup applies — if another user already owns the primary for this meeting
+    /// the new row is created as a Waiting subscriber (MeetingUrl/PrimaryMeeting set, no bot slot).
+    /// Returns (null, error) without creating a row when the input isn't a recognizable URL.
+    /// </summary>
+    public async Task<(FirmMeeting? meeting, string? error)> CreateMeetingAsync(Guid userId, string meetingUrl, string? title, DateTime? startDatetime = null, string? calendarEventId = null, string? platform = null)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
+        var cleanedUrl = CalendarService.ExtractMeetingUrl(meetingUrl);
+        if (cleanedUrl == null)
+        {
+            _logger.LogInformation("FIRM: Rejected manual meeting add for user {UserId} — unrecognizable URL input", userId);
+            return (null, InvalidMeetingUrlError);
+        }
+        var normalizedUrl = CalendarService.NormalizeMeetingUrl(cleanedUrl);
+        if (string.IsNullOrEmpty(normalizedUrl))
+            return (null, InvalidMeetingUrlError);
+
         var meeting = new FirmMeeting
         {
             Title = title ?? $"Meeting — {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
-            MeetingUrl = meetingUrl,
-            Platform = platform ?? DerivePlatformFromUrl(meetingUrl),
+            MeetingUrl = cleanedUrl,
+            Platform = platform ?? DerivePlatformFromUrl(cleanedUrl),
             Status = MeetingStatus.Joining,
             CreatedBy = userId,
             CreatedAt = DateTime.UtcNow,
@@ -147,9 +165,71 @@ public class MeetingService
             StartDatetime = startDatetime,
             CalendarEventId = calendarEventId,
         };
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var existingPrimary = await FindPrimaryForManualAddAsync(db, normalizedUrl, startDatetime);
+        if (existingPrimary != null)
+            return (await InsertSubscriberAsync(db, meeting, existingPrimary), null);
+
+        meeting.IsPrimaryRecorder = true;
+        meeting.NormalizedMeetingUrl = normalizedUrl;
+        try
+        {
+            db.Meetings.Add(meeting);
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException dbEx) when (CalendarAutoSyncService.IsDuplicateKeyException(dbEx))
+        {
+            // Race on uk_fm_normalized_url_start: another user won the primary slot between our
+            // lookup and INSERT. Retry as a subscriber on a fresh context (same as AutoSync).
+            await using var raceDb = await _dbFactory.CreateDbContextAsync();
+            var racedPrimary = await FindPrimaryForManualAddAsync(raceDb, normalizedUrl, startDatetime);
+            if (racedPrimary == null)
+            {
+                _logger.LogWarning("FIRM: Manual add for {Url} @ {Start} hit a duplicate key with no active primary to subscribe to", normalizedUrl, startDatetime);
+                return (null, "This meeting has already been added.");
+            }
+            meeting.Id = 0;
+            meeting.NormalizedMeetingUrl = null;
+            return (await InsertSubscriberAsync(raceDb, meeting, racedPrimary), null);
+        }
+        _logger.LogInformation("FIRM: Created meeting {Id} for user {UserId}", meeting.Id, userId);
+        return (meeting, null);
+    }
+
+    /// <summary>
+    /// WI #8575: the AutoSync dedup lookup (normalized URL + start ±15 min). A Join Now has no
+    /// start time, so it is matched against "now" and, failing that, against any primary whose
+    /// bot is already in this meeting regardless of its start time.
+    /// </summary>
+    private static async Task<FirmMeeting?> FindPrimaryForManualAddAsync(FirmDbContext db, string normalizedUrl, DateTime? startDatetime)
+    {
+        var primary = await CalendarAutoSyncService.FindExistingPrimaryAsync(db, normalizedUrl, startDatetime ?? DateTime.UtcNow, CancellationToken.None);
+        if (primary != null || startDatetime != null) return primary;
+
+        return await db.Meetings.FirstOrDefaultAsync(m =>
+            m.IsPrimaryRecorder
+            && m.NormalizedMeetingUrl == normalizedUrl
+            && (m.Status == MeetingStatus.Pending || m.Status == MeetingStatus.Joining || m.Status == MeetingStatus.Recording));
+    }
+
+    private async Task<FirmMeeting> InsertSubscriberAsync(FirmDbContext db, FirmMeeting meeting, FirmMeeting primary)
+    {
+        meeting.IsPrimaryRecorder = false;
+        meeting.PrimaryMeetingId = primary.Id;
+        meeting.Status = MeetingStatus.Waiting;
         db.Meetings.Add(meeting);
         await db.SaveChangesAsync();
-        _logger.LogInformation("FIRM: Created meeting {Id} for user {UserId}", meeting.Id, userId);
+        meeting.PrimaryMeeting = primary;
+        _logger.LogInformation("FIRM: Created meeting {Id} for user {UserId} as SUBSCRIBER of primary {PrimaryId}",
+            meeting.Id, meeting.CreatedBy, primary.Id);
+
+        // WI #8278: a primary that already finished won't fan out again on its own.
+        if (primary.Status == MeetingStatus.Complete)
+        {
+            try { await FanOutToSubscribersAsync(primary.Id); }
+            catch (Exception ex) { _logger.LogError(ex, "FIRM: Fan-out to late subscriber of completed primary {PrimaryId} failed", primary.Id); }
+        }
         return meeting;
     }
 

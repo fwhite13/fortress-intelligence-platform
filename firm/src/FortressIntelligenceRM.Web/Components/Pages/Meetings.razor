@@ -693,14 +693,35 @@
             Logger.LogError("FIRM: JoinMeetingDirectAsync called with null _userId — identity not resolved at load");
             return;
         }
-        var meeting = await MeetingService.CreateMeetingAsync(Guid.Parse(_userId), meetingUrl, title, startDatetime, calendarEventId, platform);
+        var (meeting, error) = await MeetingService.CreateMeetingAsync(Guid.Parse(_userId), meetingUrl, title, startDatetime, calendarEventId, platform);
+        if (meeting == null)
+        {
+            Snackbar.Add(error ?? "Could not add meeting.", Severity.Warning);
+            return;
+        }
+        // WI #8575: the service strips prefix text ("Join: ...") — use the saved URL from here on.
+        meetingUrl = meeting.MeetingUrl ?? meetingUrl;
         if (!string.IsNullOrEmpty(mode))
             await MeetingService.UpdateModeAsync(meeting.Id, mode);
 
-        if (startDatetime.HasValue && startDatetime.Value.ToUniversalTime() > DateTime.UtcNow.AddMinutes(5))
+        var isFutureSchedule = startDatetime.HasValue && startDatetime.Value.ToUniversalTime() > DateTime.UtcNow.AddMinutes(5);
+        if (!meeting.IsPrimaryRecorder)
+        {
+            // WI #7033/#8575: another user already owns the bot slot for this meeting. For a Join Now
+            // against a primary that hasn't launched yet, launch its bot now rather than a second one.
+            var primary = meeting.PrimaryMeeting;
+            if (!isFutureSchedule && primary is { Status: MeetingStatus.Scheduled })
+            {
+                var primaryArn = await VpBotService.TriggerBotAsync(primary.Id, primary.MeetingUrl ?? meetingUrl, primary.Platform);
+                if (primaryArn != null)
+                    await MeetingService.UpdateStatusAsync(primary.Id, MeetingStatus.Pending);
+            }
+            Snackbar.Add("This meeting is already being recorded for another user — you'll receive the same recording.", Severity.Info);
+        }
+        else if (isFutureSchedule)
         {
             await MeetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
-            await AutoJoinScheduler.CreateScheduleAsync(meeting.Id, meetingUrl, startDatetime.Value.ToUniversalTime());
+            await AutoJoinScheduler.CreateScheduleAsync(meeting.Id, meetingUrl, startDatetime!.Value.ToUniversalTime());
             Snackbar.Add("Meeting scheduled!", Severity.Success);
         }
         else

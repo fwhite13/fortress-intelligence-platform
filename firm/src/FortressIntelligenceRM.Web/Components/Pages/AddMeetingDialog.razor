@@ -151,6 +151,13 @@
             _validationError = "Meeting URL is required.";
             return;
         }
+        // WI #8575: strip pasted prefix text ("Join: https://...") and reject non-URLs inline.
+        var cleanedUrl = CalendarService.ExtractMeetingUrl(MeetingUrl);
+        if (cleanedUrl == null)
+        {
+            _validationError = MeetingService.InvalidMeetingUrlError;
+            return;
+        }
         var dt = GetScheduledDatetime();
         if (dt == null)
         {
@@ -164,7 +171,7 @@
         }
         var mode = GetDetectedMode();
         var isHost = _isHostValue == "yes";
-        MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle, dt.Value, isHost, mode)));
+        MudDialog.Close(DialogResult.Ok((cleanedUrl, MeetingTitle, dt.Value, isHost, mode)));
     }
 
     private void Cancel() => MudDialog.Cancel();

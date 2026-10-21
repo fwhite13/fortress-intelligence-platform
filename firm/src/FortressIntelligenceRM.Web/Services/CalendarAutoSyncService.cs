@@ -350,7 +350,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
             await _autoJoinScheduler.DeleteScheduleAsync(matched.Id);
     }
 
-    private static async Task<FirmMeeting?> FindExistingPrimaryAsync(FirmDbContext db, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
+    internal static async Task<FirmMeeting?> FindExistingPrimaryAsync(FirmDbContext db, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(normalizedUrl)) return null;
 
@@ -383,6 +383,6 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
     /// <summary>MySQL error 1062 (duplicate entry) surfaced through EF Core as a DbUpdateException —
     /// used to detect the uk_fm_normalized_url_start race described in FindExistingPrimaryAsync's caller.</summary>
-    private static bool IsDuplicateKeyException(DbUpdateException ex) =>
+    internal static bool IsDuplicateKeyException(DbUpdateException ex) =>
         ex.InnerException is MySqlException { Number: 1062 };
 }
