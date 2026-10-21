@@ -11,15 +11,18 @@ namespace FortressIntelligenceRM.Web.Services;
 /// WI #7691: recovers meetings stuck in Pending/Joining because the vpbot ECS task died before
 /// it could post a status callback. Every 5 minutes, any Pending/Joining meeting untouched for
 /// 10+ minutes has its bot task checked; if the task is STOPPED or no longer known to ECS, the
-/// meeting is reverted to Scheduled with LastFailureReason = "bot_launch_failed".
+/// meeting is marked Failed with LastFailureReason = "bot_launch_failed" (WI #8576: was reverted
+/// to Scheduled, which left error fields on a non-terminal row) and its subscribers are promoted.
 /// Tasks still provisioning/running are left alone (legitimate slow start or lobby wait).
 /// WI #8278: the same cycle also re-runs the completion fan-out for any Waiting subscriber whose
 /// primary is already Complete — a safety net for subscribers missed by the inline fan-out
 /// (including rows stranded before the fix shipped).
+/// WI #8576: each cycle also runs the T+10 cascade (MeetingService.FailSubscribersWithNoPrimaryJoinedAsync),
+/// so the cycle runs every minute; the stuck-task check stays gated on the 10-minute StaleAfter cutoff.
 /// </summary>
 public class StuckMeetingRecoveryService : BackgroundService
 {
-    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(10);
     private const string FailureReason = "bot_launch_failed";
 
@@ -68,6 +71,15 @@ public class StuckMeetingRecoveryService : BackgroundService
                 catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
                 {
                     _logger.LogError(ex, "FIRM: StuckMeetingRecoveryService subscriber fan-out sweep failed");
+                }
+
+                try
+                {
+                    await FailSubscribersWithNoPrimaryJoinedAsync(stoppingToken);
+                }
+                catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+                {
+                    _logger.LogError(ex, "FIRM: StuckMeetingRecoveryService T+10 cascade sweep failed");
                 }
             }
             while (await timer.WaitForNextTickAsync(stoppingToken));
@@ -139,16 +151,32 @@ public class StuckMeetingRecoveryService : BackgroundService
                 || meeting.BotTaskArn != m.BotTaskArn)
                 continue;
 
-            meeting.Status = MeetingStatus.Scheduled;
+            // Status and error fields in one save (WI #8576).
+            meeting.Status = MeetingStatus.Failed;
             meeting.LastFailureReason = FailureReason;
-            meeting.BotTaskArn = null;
+            meeting.ErrorMessage = "The recording bot stopped before it could join the meeting.";
+            meeting.EndedAt ??= DateTime.UtcNow;
             meeting.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
 
             _logger.LogWarning(
-                "FIRM: StuckMeetingRecovery — meeting {Id} reverted {OldStatus} → Scheduled (bot task {Arn}: {TaskStatus}), LastFailureReason={Reason}",
+                "FIRM: StuckMeetingRecovery — meeting {Id} {OldStatus} → Failed (bot task {Arn}: {TaskStatus}), LastFailureReason={Reason}",
                 m.Id, m.Status, m.BotTaskArn ?? "(none)", lastStatus ?? "not found", FailureReason);
+
+            if (meeting.IsPrimaryRecorder)
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var meetingService = scope.ServiceProvider.GetRequiredService<MeetingService>();
+                await meetingService.PromoteOrFailSubscribersAsync(meeting.Id);
+            }
         }
+    }
+
+    private async Task FailSubscribersWithNoPrimaryJoinedAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var meetingService = scope.ServiceProvider.GetRequiredService<MeetingService>();
+        await meetingService.FailSubscribersWithNoPrimaryJoinedAsync(ct);
     }
 
     private async Task RecoverOrphanedSubscribersAsync(CancellationToken ct)

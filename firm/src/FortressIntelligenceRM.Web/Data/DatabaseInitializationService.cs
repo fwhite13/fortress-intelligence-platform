@@ -312,7 +312,12 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_users ADD COLUMN voice_enrollment_pending_since DATETIME NULL",
                 // WI #8517 — speaker_label widened to 255 to hold resolved human names (was 20, sized for SPEAKER_NN only)
                 "ALTER TABLE firm_meeting_transcripts MODIFY COLUMN speaker_label VARCHAR(255) NULL",
-                "ALTER TABLE firm_meeting_participants MODIFY COLUMN speaker_label VARCHAR(255) NULL"
+                "ALTER TABLE firm_meeting_participants MODIFY COLUMN speaker_label VARCHAR(255) NULL",
+                // WI #8576 — failures (lobby_timeout / bot_launch_failed) used to be reverted to Scheduled
+                // with the error fields set; move those past-start rows to Failed. Idempotent data fix.
+                "UPDATE firm_meetings SET status = 'Failed', ended_at = COALESCE(ended_at, UTC_TIMESTAMP()) " +
+                    "WHERE status = 'Scheduled' AND last_failure_reason IS NOT NULL " +
+                    "AND (start_datetime IS NULL OR start_datetime < UTC_TIMESTAMP())"
             };
 
             foreach (var alterSql in alterStatements)

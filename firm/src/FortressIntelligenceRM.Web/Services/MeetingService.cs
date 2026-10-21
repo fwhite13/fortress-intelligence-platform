@@ -166,6 +166,14 @@ public class MeetingService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = await db.Meetings.FindAsync(id);
         if (meeting == null) return;
+        // WI #8576: error fields are only ever written together with a Failed transition, in the
+        // same save — a row must never carry a failure reason while sitting at Scheduled/Pending.
+        if ((errorMessage != null || lastFailureReason != null) && status != MeetingStatus.Failed)
+        {
+            _logger.LogWarning("FIRM: Meeting {Id} status update to {Status} carried error fields (reason={Reason}) — transitioning to Failed instead",
+                id, status, lastFailureReason);
+            status = MeetingStatus.Failed;
+        }
         _logger.LogInformation("FIRM: Meeting {Id} status transition: {OldStatus} → {NewStatus}",
             id, meeting.Status, status);
         meeting.Status = status;
@@ -275,10 +283,20 @@ public class MeetingService
         return subscribers.Select(s => s.Id).ToList();
     }
 
+    /// <summary>WI #8576: how long after a meeting's start (ScheduledAt ?? StartDatetime) a bot has to
+    /// reach Recording before no further subscribers are promoted and the remaining ones are failed.</summary>
+    public static readonly TimeSpan PrimaryJoinGracePeriod = TimeSpan.FromMinutes(10);
+    public const string NoPrimaryJoinedReason = "no_primary_joined";
+    private const string NoPrimaryJoinedMessage = "No recording bot was able to join this meeting.";
+
     /// <summary>
-    /// WI #7035 Part B: when a primary meeting fails, promotes the earliest-created Waiting
-    /// subscriber to primary (re-triggering the join) if still within the join window
-    /// (start_datetime + 30 min), otherwise fails all remaining subscribers with a reason.
+    /// WI #7035 Part B / WI #8576: when a primary meeting fails (any reason), promotes the
+    /// earliest-created Waiting subscriber to primary and dispatches its bot, re-pointing the
+    /// remaining subscribers at it. Each promoted bot that fails re-enters here via
+    /// UpdateStatusAsync, so subscribers are tried in created_at order until one records.
+    /// No promotion once the join window has passed: start + 10 min if no bot ever reached
+    /// Recording (remaining subscribers fail with no_primary_joined), or start + 30 min if the
+    /// primary recorded and then failed (primary_failed_window_passed).
     /// </summary>
     public async Task PromoteOrFailSubscribersAsync(long primaryMeetingId)
     {
@@ -287,26 +305,35 @@ public class MeetingService
         if (primary == null || !primary.IsPrimaryRecorder) return;
 
         var subscribers = await db.Meetings
-            .Where(m => m.PrimaryMeetingId == primaryMeetingId && m.Status != MeetingStatus.Failed)
+            .Where(m => m.PrimaryMeetingId == primaryMeetingId
+                     && !m.IsPrimaryRecorder
+                     && m.Status != MeetingStatus.Failed
+                     && m.Status != MeetingStatus.Complete)
             .OrderBy(m => m.CreatedAt)
+            .ThenBy(m => m.Id)
             .ToListAsync();
         if (subscribers.Count == 0) return;
 
-        var withinJoinWindow = primary.StartDatetime.HasValue
-            && primary.StartDatetime.Value.AddMinutes(30) > DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        var start = primary.ScheduledAt ?? primary.StartDatetime
+            ?? subscribers.Select(m => m.ScheduledAt ?? m.StartDatetime).FirstOrDefault(d => d != null);
+        var primaryRecorded = primary.StartedAt != null;
+        var joinDeadline = start?.Add(primaryRecorded ? TimeSpan.FromMinutes(30) : PrimaryJoinGracePeriod);
 
-        if (!withinJoinWindow)
+        if (joinDeadline.HasValue && joinDeadline.Value <= now)
         {
+            var reason = primaryRecorded ? "primary_failed_window_passed" : NoPrimaryJoinedReason;
+            var message = primaryRecorded ? "Primary recorder failed and meeting window has passed." : NoPrimaryJoinedMessage;
             foreach (var sub in subscribers)
             {
                 sub.Status = MeetingStatus.Failed;
-                sub.ErrorMessage = "Primary recorder failed and meeting window has passed.";
-                sub.LastFailureReason = "primary_failed_window_passed";
-                sub.EndedAt ??= DateTime.UtcNow;
-                sub.UpdatedAt = DateTime.UtcNow;
+                sub.ErrorMessage = message;
+                sub.LastFailureReason = reason;
+                sub.EndedAt ??= now;
+                sub.UpdatedAt = now;
             }
             await db.SaveChangesAsync();
-            _logger.LogInformation("FIRM: Primary {Id} failed past join window — {Count} subscriber(s) set to Failed", primaryMeetingId, subscribers.Count);
+            _logger.LogInformation("FIRM: Primary {Id} failed past join window — {Count} subscriber(s) set to Failed ({Reason})", primaryMeetingId, subscribers.Count, reason);
             return;
         }
 
@@ -317,30 +344,88 @@ public class MeetingService
             return;
         }
 
-        candidate.IsPrimaryRecorder = true;
-        candidate.PrimaryMeetingId = null;
-        candidate.NormalizedMeetingUrl = primary.NormalizedMeetingUrl;
-        candidate.Status = MeetingStatus.Scheduled;
-        candidate.UpdatedAt = DateTime.UtcNow;
-
-        foreach (var other in subscribers.Where(m => m.Id != candidate.Id))
+        // Retrying execution strategy (EnableRetryOnFailure) requires user transactions to run inside it.
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            other.PrimaryMeetingId = candidate.Id;
-            other.UpdatedAt = DateTime.UtcNow;
-        }
+            await using var tx = await db.Database.BeginTransactionAsync();
 
-        await db.SaveChangesAsync();
-        _logger.LogInformation("FIRM: Promoted subscriber {CandidateId} to primary after primary {PrimaryId} failed within join window ({Count} subscriber(s) re-pointed)",
-            candidate.Id, primaryMeetingId, subscribers.Count - 1);
+            // Release the failed primary's dedup anchor first so the promoted row can take it
+            // without colliding on uk_fm_normalized_url_start (same as PrepareJoinNowAsync).
+            var normalizedUrl = primary.NormalizedMeetingUrl;
+            primary.NormalizedMeetingUrl = null;
+            primary.UpdatedAt = now;
+            await db.SaveChangesAsync();
+
+            candidate.IsPrimaryRecorder = true;
+            candidate.PrimaryMeetingId = null;
+            candidate.NormalizedMeetingUrl = normalizedUrl;
+            candidate.Status = MeetingStatus.Scheduled;
+            candidate.UpdatedAt = now;
+
+            foreach (var other in subscribers.Where(m => m.Id != candidate.Id))
+            {
+                other.PrimaryMeetingId = candidate.Id;
+                other.UpdatedAt = now;
+            }
+
+            await db.SaveChangesAsync();
+            await tx.CommitAsync();
+        });
+        _logger.LogInformation("FIRM: Promoted subscriber {CandidateId} to primary after primary {PrimaryId} failed (reason={Reason}); {Count} subscriber(s) re-pointed",
+            candidate.Id, primaryMeetingId, primary.LastFailureReason, subscribers.Count - 1);
 
         try
         {
-            await _autoJoinScheduler.CreateScheduleAsync(candidate.Id, candidate.MeetingUrl ?? primary.MeetingUrl ?? "", candidate.StartDatetime ?? primary.StartDatetime ?? DateTime.UtcNow);
+            // Same EventBridge → autojoin Lambda → AutoJoinTrigger path as the original dispatch,
+            // fired immediately when the normal T-5 slot has already passed.
+            await _autoJoinScheduler.DispatchPromotedAsync(candidate.Id, candidate.MeetingUrl ?? primary.MeetingUrl ?? "", start ?? now);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "FIRM: Failed to create AutoJoin schedule for promoted meeting {Id}", candidate.Id);
+            _logger.LogError(ex, "FIRM: Failed to dispatch AutoJoin for promoted meeting {Id}", candidate.Id);
         }
+    }
+
+    /// <summary>
+    /// WI #8576 T+10 cascade: fails every still-Waiting subscriber whose meeting started more than
+    /// PrimaryJoinGracePeriod ago without any bot reaching Recording (the current primary has no
+    /// StartedAt and isn't past Recording). Run periodically by StuckMeetingRecoveryService; the
+    /// in-band equivalent on primary failure lives in PromoteOrFailSubscribersAsync.
+    /// </summary>
+    public async Task<int> FailSubscribersWithNoPrimaryJoinedAsync(CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        var cutoff = now - PrimaryJoinGracePeriod;
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var stranded = await db.Meetings
+            .Where(m => !m.IsPrimaryRecorder
+                     && m.PrimaryMeetingId != null
+                     && (m.Status == MeetingStatus.Waiting || m.Status == MeetingStatus.Scheduled)
+                     && (m.ScheduledAt ?? m.StartDatetime ?? m.PrimaryMeeting!.ScheduledAt ?? m.PrimaryMeeting!.StartDatetime) < cutoff
+                     && m.PrimaryMeeting!.StartedAt == null
+                     && m.PrimaryMeeting!.Status != MeetingStatus.Recording
+                     && m.PrimaryMeeting!.Status != MeetingStatus.WaitingTranscript
+                     && m.PrimaryMeeting!.Status != MeetingStatus.Transcribing
+                     && m.PrimaryMeeting!.Status != MeetingStatus.Summarizing
+                     && m.PrimaryMeeting!.Status != MeetingStatus.Complete)
+            .ToListAsync(ct);
+        if (stranded.Count == 0) return 0;
+
+        foreach (var sub in stranded)
+        {
+            sub.Status = MeetingStatus.Failed;
+            sub.ErrorMessage = NoPrimaryJoinedMessage;
+            sub.LastFailureReason = NoPrimaryJoinedReason;
+            sub.EndedAt ??= now;
+            sub.UpdatedAt = now;
+        }
+        await db.SaveChangesAsync(ct);
+
+        _logger.LogWarning("FIRM: T+10 cascade — {Count} subscriber(s) set to Failed ({Reason}): {Ids}",
+            stranded.Count, NoPrimaryJoinedReason, string.Join(",", stranded.Select(m => m.Id)));
+        return stranded.Count;
     }
 
     /// <summary>
