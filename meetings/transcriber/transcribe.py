@@ -468,11 +468,18 @@ def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshol
       - Best similarity > threshold (default 0.80), AND
       - Best similarity >= dominance * second-best similarity (default 1.2x)
     OR (absolute confidence override): best >= 0.95 and second < 0.90.
+    Single-reference mode (ADO#8672): when only one speaker is enrolled there is no runner-up,
+    so the dominance check is vacuous (second-best is 0.0). The threshold is raised to at least
+    0.90 to avoid attributing ambiguous clusters to the sole enrolled voice.
     Log full similarity scores for every assignment/non-assignment (needed for threshold tuning).
     Returns dict: { speaker_label -> name or None }
     If confidences is a dict, it is filled with { speaker_label -> best similarity } for assigned labels.
     """
     name_map = {}
+    effective_threshold = threshold
+    if len(reference_embeddings) == 1:
+        effective_threshold = max(threshold, 0.90)
+        print(f"[Transcriber] Single-reference mode: stricter threshold {effective_threshold:.2f} (only 1 enrolled speaker)")
     for label, cluster_emb in sorted(cluster_embeddings.items()):
         if not reference_embeddings:
             name_map[label] = None
@@ -485,7 +492,7 @@ def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshol
         scores_str = ", ".join(f"{n}={v:.3f}" for n, v in ranked)
         if runner_ups is not None:
             runner_ups[label] = second
-        if (best > threshold and best >= dominance * second) or \
+        if (best > effective_threshold and best >= dominance * second) or \
                 (best >= VOICE_MATCH_ABSOLUTE_MIN and second < VOICE_MATCH_ABSOLUTE_MAX_RUNNER_UP):
             source = 'voice_embedding_absolute' if not (best >= dominance * second) else 'voice_embedding'
             name_map[label] = best_name
@@ -495,7 +502,7 @@ def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshol
                   f"scores: {scores_str}")
         else:
             name_map[label] = None
-            reason = f"best {best:.3f} <= threshold {threshold}" if best <= threshold else \
+            reason = f"best {best:.3f} <= threshold {effective_threshold}" if best <= effective_threshold else \
                 f"best {best:.3f} < {dominance}x runner-up {second:.3f} (and {best:.3f} < absolute min {VOICE_MATCH_ABSOLUTE_MIN} or {second:.3f} >= {VOICE_MATCH_ABSOLUTE_MAX_RUNNER_UP})"
             print(f"[Transcriber] {label} unresolved by voice embedding ({reason}) scores: {scores_str}")
     return name_map
@@ -879,7 +886,7 @@ def main():
                     os.environ["HF_HUB_OFFLINE"] = "1"
                     try:
                         diarize_model = DiarizationPipeline(
-                            model_name="pyannote/speaker-diarization-community-1",
+                            model_name="pyannote/speaker-diarization-3.1",
                             token=hf_token,
                             device=device,
                         )
