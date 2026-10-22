@@ -39,9 +39,19 @@ import { S3Service } from '../transcribe/s3.js';
 import { refreshTeamsSession } from './teams-auth.js';
 import { ActiveSpeakerEntry } from '../types.js';
 
+// WI #8576: how long the bot waits in the Teams lobby to be admitted before giving up and
+// reporting status=failed / reason=lobby_timeout. Override with FIRM_LOBBY_TIMEOUT_SECONDS.
+const DEFAULT_LOBBY_TIMEOUT_SECONDS = 300;
+const LOBBY_POLL_INTERVAL_MS = 10_000;
+
+export function getLobbyTimeoutSeconds(): number {
+  const parsed = parseInt(process.env.FIRM_LOBBY_TIMEOUT_SECONDS || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_LOBBY_TIMEOUT_SECONDS;
+}
+
 export class LobbyTimeoutError extends Error {
-  constructor() {
-    super('Bot was not admitted to the Teams meeting lobby within 20 minutes');
+  constructor(timeoutSeconds: number = getLobbyTimeoutSeconds()) {
+    super(`Bot was not admitted to the Teams meeting lobby within ${timeoutSeconds} seconds`);
     this.name = 'LobbyTimeoutError';
   }
 }
@@ -995,12 +1005,15 @@ export class TeamsHandler {
     const inWaitingRoom = waitingRoomPhrases.some(t => bodyText.toLowerCase().includes(t.toLowerCase()));
     
     if (inWaitingRoom) {
-      console.log('[Teams] In waiting room / lobby, waiting to be admitted (up to 20 min)...');
+      const lobbyTimeoutSeconds = getLobbyTimeoutSeconds();
+      const lobbyDeadline = Date.now() + lobbyTimeoutSeconds * 1000;
+      const lobbyStartedAt = Date.now();
+      console.log(`[Teams] In waiting room / lobby, waiting to be admitted (up to ${lobbyTimeoutSeconds}s)...`);
       await TeamsHandler.screenshot(page, '04b-waiting-room', s3, meetingId);
       let admitted = false;
-      // Poll 120×10s = 20 minutes
-      for (let i = 0; i < 120; i++) {
-        await page.waitForTimeout(10000);
+      // Poll every 10s until admitted or the lobby deadline passes (WI #8576)
+      while (Date.now() < lobbyDeadline) {
+        await page.waitForTimeout(Math.min(LOBBY_POLL_INTERVAL_MS, Math.max(lobbyDeadline - Date.now(), 0)));
 
         // Check for Leave button (means we were admitted)
         try {
@@ -1022,7 +1035,7 @@ export class TeamsHandler {
           console.log('[Teams] No longer in waiting room — uncertain state');
           break;
         }
-        console.log(`[Teams] Still in waiting room... (${(i + 1) * 10}s elapsed)`);
+        console.log(`[Teams] Still in waiting room... (${Math.round((Date.now() - lobbyStartedAt) / 1000)}s / ${lobbyTimeoutSeconds}s elapsed)`);
       }
 
       if (!admitted) {
@@ -1037,9 +1050,9 @@ export class TeamsHandler {
         } catch {
           // not admitted
         }
-        console.log('[Teams] ❌ Not admitted to lobby within 20 minutes — throwing LobbyTimeoutError');
+        console.log(`[Teams] ❌ Not admitted to lobby within ${lobbyTimeoutSeconds}s — throwing LobbyTimeoutError`);
         await TeamsHandler.screenshot(page, '05-lobby-timeout', s3, meetingId);
-        throw new LobbyTimeoutError();
+        throw new LobbyTimeoutError(lobbyTimeoutSeconds);
       }
     }
 

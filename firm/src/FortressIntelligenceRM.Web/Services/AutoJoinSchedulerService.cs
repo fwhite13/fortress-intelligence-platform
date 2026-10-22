@@ -40,17 +40,7 @@ public class AutoJoinSchedulerService
 
     public async Task CreateScheduleAsync(long meetingId, string meetingUrl, DateTime startDatetimeUtc)
     {
-        if (!Enabled)
-        {
-            _logger.LogDebug("FIRM: AutoJoin disabled — skipping schedule creation for meeting {Id}", meetingId);
-            return;
-        }
-
-        if (string.IsNullOrEmpty(LambdaArn) || string.IsNullOrEmpty(SchedulerRoleArn))
-        {
-            _logger.LogWarning("FIRM: AutoJoin enabled but Firm:AutoJoinLambdaArn or Firm:AutoJoinSchedulerRoleArn not configured — skipping");
-            return;
-        }
+        if (!CanSchedule(meetingId)) return;
 
         // WI #7792: fire 5 min early — Fargate cold start + Teams pre-join render take ~3 min.
         // The bot waits at the pre-join screen (Join not yet clicked) until just before the
@@ -62,6 +52,45 @@ public class AutoJoinSchedulerService
             return;
         }
 
+        await UpsertScheduleAsync(meetingId, meetingUrl, startDatetimeUtc, fireAt);
+    }
+
+    /// <summary>
+    /// WI #8576: dispatch for a subscriber just promoted to primary after the previous primary's
+    /// bot failed. Uses the normal T-5 slot when it's still ahead; otherwise (the usual case — the
+    /// meeting is already under way) a one-shot schedule ~1 minute out, so the promoted bot goes
+    /// through the same EventBridge → autojoin Lambda → AutoJoinTrigger path as any other.
+    /// </summary>
+    public async Task DispatchPromotedAsync(long meetingId, string meetingUrl, DateTime startDatetimeUtc)
+    {
+        if (!CanSchedule(meetingId)) return;
+
+        var earliest = DateTime.UtcNow.AddMinutes(1);
+        var fireAt = startDatetimeUtc.AddMinutes(-5);
+        if (fireAt < earliest) fireAt = earliest;
+
+        await UpsertScheduleAsync(meetingId, meetingUrl, startDatetimeUtc, fireAt);
+    }
+
+    private bool CanSchedule(long meetingId)
+    {
+        if (!Enabled)
+        {
+            _logger.LogDebug("FIRM: AutoJoin disabled — skipping schedule creation for meeting {Id}", meetingId);
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(LambdaArn) || string.IsNullOrEmpty(SchedulerRoleArn))
+        {
+            _logger.LogWarning("FIRM: AutoJoin enabled but Firm:AutoJoinLambdaArn or Firm:AutoJoinSchedulerRoleArn not configured — skipping");
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task UpsertScheduleAsync(long meetingId, string meetingUrl, DateTime startDatetimeUtc, DateTime fireAt)
+    {
         var payload = JsonSerializer.Serialize(new
         {
             meetingId,

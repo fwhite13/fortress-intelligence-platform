@@ -166,23 +166,23 @@ public class MeetingsApiController : ControllerBase
             return Ok();
         }
 
-        // Special case: lobby_timeout is a retriable condition — revert to Scheduled
-        // so Fred sees a clear "not admitted" state and can retry, rather than Failed
+        // WI #8576: a failed callback (lobby_timeout included) transitions straight to Failed, with
+        // the error fields written in the same UpdateStatusAsync save — never left at Scheduled.
+        // A primary going Failed promotes the next subscriber (see MeetingService.UpdateStatusAsync).
+        var isFailure = meetingStatus == MeetingStatus.Failed;
+        var failureReason = isFailure && !string.IsNullOrWhiteSpace(payload.Reason)
+            ? payload.Reason.Trim().ToLowerInvariant()
+            : null;
+        if (failureReason is { Length: > 64 }) failureReason = failureReason[..64];
+        var errorMessage = failureReason == "lobby_timeout"
+            ? "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot."
+            : payload.Error;
+        if (failureReason == "lobby_timeout")
+            _logger.LogWarning("FIRM: Meeting {Id} bot not admitted from lobby — marking Failed (lobby_timeout)", payload.MeetingId);
+
         try
         {
-            if (meetingStatus == MeetingStatus.Failed &&
-                string.Equals(payload.Reason, "lobby_timeout", StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning("FIRM: Meeting {Id} bot stuck in lobby — reverting to Scheduled (lobby_timeout)",
-                    payload.MeetingId);
-                await _meetingService.UpdateStatusAsync(payload.MeetingId, MeetingStatus.Scheduled,
-                    "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot.",
-                    lastFailureReason: "lobby_timeout");
-            }
-            else
-            {
-                await _meetingService.UpdateStatusAsync(payload.MeetingId, meetingStatus, payload.Error);
-            }
+            await _meetingService.UpdateStatusAsync(payload.MeetingId, meetingStatus, errorMessage, failureReason);
         }
         catch (Exception updateEx)
         {
@@ -190,17 +190,7 @@ public class MeetingsApiController : ControllerBase
             await Task.Delay(500);
             try
             {
-                if (meetingStatus == MeetingStatus.Failed &&
-                    string.Equals(payload.Reason, "lobby_timeout", StringComparison.OrdinalIgnoreCase))
-                {
-                    await _meetingService.UpdateStatusAsync(payload.MeetingId, MeetingStatus.Scheduled,
-                        "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot.",
-                        lastFailureReason: "lobby_timeout");
-                }
-                else
-                {
-                    await _meetingService.UpdateStatusAsync(payload.MeetingId, meetingStatus, payload.Error);
-                }
+                await _meetingService.UpdateStatusAsync(payload.MeetingId, meetingStatus, errorMessage, failureReason);
             }
             catch (Exception retryEx)
             {

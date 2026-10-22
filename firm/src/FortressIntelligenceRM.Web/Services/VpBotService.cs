@@ -101,6 +101,11 @@ public class VpBotService
             if (scheduledStartUtc.HasValue)
                 envVars.Add(new() { Name = "SCHEDULED_START_TIME", Value = scheduledStartUtc.Value.ToString("O") });
 
+            // WI #8576: lobby admission wait. Optional — the bot defaults to 300s when absent.
+            var lobbyTimeoutSeconds = _config.GetValue<int?>("Firm:LobbyTimeoutSeconds");
+            if (lobbyTimeoutSeconds is > 0)
+                envVars.Add(new() { Name = "FIRM_LOBBY_TIMEOUT_SECONDS", Value = lobbyTimeoutSeconds.Value.ToString() });
+
             // For Zoom meetings: an OBF token is mandatory (WI #7833). The old JWT-only fallback
             // only ever worked for the Zoom app owner's own account, so without a token the bot is
             // never launched and the meeting is failed instead of being left stuck at Pending/Joining.

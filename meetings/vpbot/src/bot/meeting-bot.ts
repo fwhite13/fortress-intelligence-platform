@@ -333,7 +333,7 @@ export class MeetingBot extends EventEmitter {
       } catch (err) {
         if (err instanceof LobbyTimeoutError) {
           console.log('[Bot] Lobby timeout — sending failed callback with reason=lobby_timeout');
-          await reportStatus(this.meeting.id, 'failed', { reason: 'lobby_timeout' });
+          await reportStatus(this.meeting.id, 'failed', { reason: 'lobby_timeout', error: err.message });
           await this.cleanup();
           return; // Do NOT start FFmpeg, do NOT send recording callback
         }

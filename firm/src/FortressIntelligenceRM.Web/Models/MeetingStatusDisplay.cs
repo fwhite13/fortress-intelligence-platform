@@ -33,4 +33,23 @@ public static class MeetingStatusDisplay
             _ => ("#607d8b", meeting.Status.ToString())
         };
     }
+
+    /// <summary>WI #8576: human-readable LastFailureReason for the Failed badge tooltip. Unknown codes
+    /// fall back to the raw value; no code at all falls back to ErrorMessage (null if neither is set).</summary>
+    public static string? GetFailureReasonText(this FirmMeeting meeting)
+    {
+        if (string.IsNullOrWhiteSpace(meeting.LastFailureReason))
+            return string.IsNullOrWhiteSpace(meeting.ErrorMessage) ? null : meeting.ErrorMessage;
+
+        return meeting.LastFailureReason switch
+        {
+            "lobby_timeout" => "Bot was not admitted to the meeting lobby",
+            "no_primary_joined" => "No recording bot was able to join this meeting",
+            "primary_failed_window_passed" => "The recording bot failed and the meeting's join window has passed",
+            "bot_launch_failed" => "The recording bot stopped before it could join the meeting",
+            "zoom_not_connected" => "Your Zoom account is not connected",
+            "zoom_obf_unavailable" => "Zoom authorization was unavailable for this meeting",
+            var raw => raw
+        };
+    }
 }
