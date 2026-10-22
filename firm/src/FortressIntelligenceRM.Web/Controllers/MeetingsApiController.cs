@@ -93,12 +93,30 @@ public class MeetingsApiController : ControllerBase
         var firmUser = await _meetingService.GetOrCreateUserAsync(entraOid, email, displayName);
         if (firmUser == null) return StatusCode(500, new { error = "Failed to resolve user" });
 
-        var meeting = await _meetingService.CreateMeetingAsync(
+        var (meeting, error) = await _meetingService.CreateMeetingAsync(
             firmUser.Id, request.MeetingUrl, request.Title,
             request.StartDatetime, request.CalendarEventId);
+        if (meeting == null)
+            return BadRequest(new { error });
+
+        var isFutureSchedule = request.StartDatetime.HasValue && request.StartDatetime.Value.ToUniversalTime() > DateTime.UtcNow.AddMinutes(5);
+
+        // WI #7033/#8575: another user already owns the bot slot — never launch a second bot. For an
+        // immediate join against a primary that hasn't launched yet, launch the primary's bot now.
+        if (!meeting.IsPrimaryRecorder)
+        {
+            var primary = meeting.PrimaryMeeting;
+            if (!isFutureSchedule && primary is { Status: MeetingStatus.Scheduled })
+            {
+                var primaryArn = await _vpBotService.TriggerBotAsync(primary.Id, primary.MeetingUrl ?? meeting.MeetingUrl ?? "", primary.Platform);
+                if (primaryArn != null)
+                    await _meetingService.UpdateStatusAsync(primary.Id, MeetingStatus.Pending);
+            }
+            return Ok(new { meetingId = meeting.Id, status = "subscriber", primaryMeetingId = meeting.PrimaryMeetingId });
+        }
 
         // Scheduling branch: if start is > 5 min in the future, don't dispatch bot
-        if (request.StartDatetime.HasValue && request.StartDatetime.Value.ToUniversalTime() > DateTime.UtcNow.AddMinutes(5))
+        if (isFutureSchedule)
         {
             await _meetingService.UpdateStatusAsync(meeting.Id, MeetingStatus.Scheduled);
             return Ok(new { meetingId = meeting.Id, status = "scheduled" });
@@ -108,7 +126,7 @@ public class MeetingsApiController : ControllerBase
         // TODO (Mode A): When TeamsGraphService is implemented, detect platform here and route to
         // Mode A (native Teams transcript fetch) vs Mode B (VP bot). Mode A completion must call
         // FAIT /api/firm/meeting-complete the same way as Mode B does in VpCallback. See ADO#1232.
-        _ = _vpBotService.TriggerBotAsync(meeting.Id, request.MeetingUrl, meeting.Platform);
+        _ = _vpBotService.TriggerBotAsync(meeting.Id, meeting.MeetingUrl ?? "", meeting.Platform);
 
         return Ok(new { meetingId = meeting.Id });
     }

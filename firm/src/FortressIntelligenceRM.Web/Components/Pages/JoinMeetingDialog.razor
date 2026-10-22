@@ -44,6 +44,13 @@
         <MudTextField @bind-Value="MeetingTitle" Label="Meeting Title (optional)"
                       Style="color: var(--color-text-primary);" Variant="Variant.Outlined" />
 
+        @if (_validationError != null)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                @_validationError
+            </MudAlert>
+        }
+
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Cancel" Style="color: var(--color-text-secondary);">Cancel</MudButton>
@@ -61,6 +68,8 @@
     [Parameter] public string MeetingUrl { get; set; } = "";
     [Parameter] public string? MeetingTitle { get; set; }
     [Parameter] public string? PrefilledUrl { get; set; }
+
+    private string? _validationError;
 
     protected override void OnParametersSet()
     {
@@ -81,11 +90,19 @@
 
     private void Submit()
     {
-        var platform = DetectPlatform(MeetingUrl);
+        // WI #8575: strip pasted prefix text ("Join: https://...") and reject non-URLs inline.
+        _validationError = null;
+        var cleanedUrl = CalendarService.ExtractMeetingUrl(MeetingUrl);
+        if (cleanedUrl == null)
+        {
+            _validationError = MeetingService.InvalidMeetingUrlError;
+            return;
+        }
+        var platform = DetectPlatform(cleanedUrl);
         // Mode B always — Mode A is mothballed
         string? effectiveMode = platform == "unknown" ? null : "B";
 
-        MudDialog.Close(DialogResult.Ok((MeetingUrl, MeetingTitle, platform, effectiveMode)));
+        MudDialog.Close(DialogResult.Ok((cleanedUrl, MeetingTitle, platform, effectiveMode)));
     }
 
     private void Cancel() => MudDialog.Cancel();

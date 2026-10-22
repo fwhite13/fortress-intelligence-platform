@@ -241,6 +241,29 @@ public class CalendarService
         return url.ToLowerInvariant().Split('?')[0].TrimEnd('/');
     }
 
+    /// <summary>
+    /// WI #8575: cleans a user-typed/pasted meeting link before it is saved or handed to the bot.
+    /// Strips any leading non-URL text (e.g. "Join: https://...") by taking everything from the
+    /// first "http", drops anything after the first whitespace, and requires a well-formed absolute
+    /// http(s) URL. Returns null when the input isn't a recognizable meeting link.
+    /// </summary>
+    public static string? ExtractMeetingUrl(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+        var s = input.Trim();
+        var idx = s.IndexOf("http", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return null;
+        s = s[idx..];
+        var ws = s.IndexOfAny(new[] { ' ', '\t', '\r', '\n' });
+        if (ws >= 0) s = s[..ws];
+
+        if (!Uri.TryCreate(s, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrEmpty(uri.Host))
+            return null;
+        return s;
+    }
+
     /// <summary>Kept for backward compat — prefer BrandingConfig.IsHomeTenant() for new code.</summary>
     public bool IsHomeTenant(string? tenantId) => _branding.IsHomeTenant(tenantId);
 
