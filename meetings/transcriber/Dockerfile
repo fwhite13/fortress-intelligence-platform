@@ -20,14 +20,14 @@ ENV LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/nvidia/cudnn/lib:/us
 
 # Pre-bake ALL pyannote model weights into image
 # Pipeline.from_pretrained only downloads config; weights need explicit snapshot_download
-# HF terms accepted by Fred on 2026-04-17 for segmentation-3.0; speaker-diarization-community-1 is a separately gated repo
-# (bundles its own segmentation/embedding/plda weights) — its terms must be accepted for the HF_TOKEN account
+# HF terms accepted by Fred on 2026-04-17 for segmentation-3.0; HF terms also accepted for speaker-diarization-3.1
+# (upgraded from speaker-diarization-community-1 — same segmentation-3.0 backbone, pure PyTorch, no onnxruntime)
 ARG HF_TOKEN
 RUN HF_HOME=/app/.cache/huggingface python3 -c "\
 from huggingface_hub import snapshot_download; \
 token = '${HF_TOKEN}'; \
-print('Downloading pyannote/speaker-diarization-community-1...'); \
-snapshot_download('pyannote/speaker-diarization-community-1', token=token, local_dir=None); \
+print('Downloading pyannote/speaker-diarization-3.1...'); \
+snapshot_download('pyannote/speaker-diarization-3.1', token=token, local_dir=None); \
 print('Downloading pyannote/segmentation-3.0...'); \
 snapshot_download('pyannote/segmentation-3.0', token=token, local_dir=None); \
 print('pyannote model weights cached successfully'); \
