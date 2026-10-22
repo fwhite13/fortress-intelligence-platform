@@ -172,7 +172,19 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                         continue;
                     }
 
-                    // All three per-user anchors missed — genuinely new meeting for this user.
+                    // WI #8577: same-user dedup, checked before the cross-user lookup below. The
+                    // anchors above only match rows that carry this event's identifiers at the exact
+                    // calendar start; a meeting the user added manually (no calendar_event_id, null or
+                    // join-time start) slips past them, and AutoSync would add a second record.
+                    if (await HasActiveSameUserMeetingAsync(db, user.Id, dto, normalizedDtoUrl, startDatetime, ct))
+                    {
+                        _logger.LogDebug(
+                            "[AutoSync] Skipping CalendarAutoSync record creation for user {UserId}, calendar event {CalendarEventId} — existing non-failed record found",
+                            user.Id, dto.CalendarEventId);
+                        continue;
+                    }
+
+                    // All per-user anchors missed — genuinely new meeting for this user.
                     // WI #7033: before creating it, check whether ANY user already owns the bot
                     // slot for this same real-world meeting (same normalized URL, overlapping
                     // start time window). If so, this becomes a subscriber instead of a primary.
@@ -350,7 +362,41 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
             await _autoJoinScheduler.DeleteScheduleAsync(matched.Id);
     }
 
-    internal static async Task<FirmMeeting?> FindExistingPrimaryAsync(FirmDbContext db, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
+    /// <summary>
+    /// WI #8577: does this user already have a non-Failed firm_meetings record for this calendar
+    /// event? Matched on calendar_event_id first, then on normalized meeting URL for rows whose
+    /// start (or created_at, for manually-added rows with no start) falls between 15 minutes before
+    /// the event and its end. The time bound keeps a recurring meeting's earlier occurrences (same
+    /// join URL) from blocking later ones. Failed rows are ignored so they never block a fresh attempt.
+    /// </summary>
+    private static async Task<bool> HasActiveSameUserMeetingAsync(FirmDbContext db, Guid userId, CalendarMeetingDto dto, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
+    {
+        if (!string.IsNullOrEmpty(dto.CalendarEventId)
+            && await db.Meetings.AnyAsync(m => m.CreatedBy == userId
+                                            && m.CalendarEventId == dto.CalendarEventId
+                                            && m.Status != MeetingStatus.Failed, ct))
+            return true;
+
+        if (string.IsNullOrEmpty(normalizedUrl)) return false;
+
+        var windowStart = startDatetime.AddMinutes(-15);
+        var windowEnd = DateTime.TryParse(dto.EndDateTime, out var end) && end > startDatetime.AddMinutes(15)
+            ? end
+            : startDatetime.AddMinutes(15);
+
+        // NormalizeMeetingUrl doesn't translate to SQL, so narrow by user/status/time first and
+        // normalize in memory (same approach as the Step 3 match).
+        var candidates = await db.Meetings
+            .Where(m => m.CreatedBy == userId
+                     && m.Status != MeetingStatus.Failed
+                     && (m.StartDatetime ?? m.CreatedAt) >= windowStart
+                     && (m.StartDatetime ?? m.CreatedAt) <= windowEnd)
+            .ToListAsync(ct);
+
+        return candidates.Any(m => CalendarService.NormalizeMeetingUrl(m.MeetingUrl) == normalizedUrl);
+    }
+
+    private static async Task<FirmMeeting?> FindExistingPrimaryAsync(FirmDbContext db, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(normalizedUrl)) return null;
 
