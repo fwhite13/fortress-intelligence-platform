@@ -396,7 +396,7 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
         return candidates.Any(m => CalendarService.NormalizeMeetingUrl(m.MeetingUrl) == normalizedUrl);
     }
 
-    private static async Task<FirmMeeting?> FindExistingPrimaryAsync(FirmDbContext db, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
+    internal static async Task<FirmMeeting?> FindExistingPrimaryAsync(FirmDbContext db, string normalizedUrl, DateTime startDatetime, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(normalizedUrl)) return null;
 
