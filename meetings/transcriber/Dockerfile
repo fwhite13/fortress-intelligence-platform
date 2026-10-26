@@ -22,6 +22,8 @@ ENV LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/nvidia/cudnn/lib:/us
 # Pipeline.from_pretrained only downloads config; weights need explicit snapshot_download
 # HF terms accepted by Fred on 2026-04-17 for segmentation-3.0; HF terms also accepted for speaker-diarization-3.1
 # (upgraded from speaker-diarization-community-1 — same segmentation-3.0 backbone, pure PyTorch, no onnxruntime)
+# ADO#8822: speaker-diarization-3.1 loads its PLDA component (xvec_transform.npz) from
+# speaker-diarization-community-1, so community-1 is also pre-baked — HF_HUB_OFFLINE=1 blocks runtime download
 ARG HF_TOKEN
 RUN HF_HOME=/app/.cache/huggingface python3 -c "\
 from huggingface_hub import snapshot_download; \
@@ -30,6 +32,8 @@ print('Downloading pyannote/speaker-diarization-3.1...'); \
 snapshot_download('pyannote/speaker-diarization-3.1', token=token, local_dir=None); \
 print('Downloading pyannote/segmentation-3.0...'); \
 snapshot_download('pyannote/segmentation-3.0', token=token, local_dir=None); \
+print('Downloading pyannote/speaker-diarization-community-1...'); \
+snapshot_download('pyannote/speaker-diarization-community-1', token=token, local_dir=None); \
 print('pyannote model weights cached successfully'); \
 "
 
