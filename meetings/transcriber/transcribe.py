@@ -569,7 +569,7 @@ def compute_cluster_durations(turns) -> dict:
     return durations
 
 def auto_promote_voiceprints(name_map, cluster_embeddings, cluster_durations, confidences,
-                             tenant_id, meeting_id, db_config, s3_client, bucket):
+                             runner_ups, tenant_id, meeting_id, db_config, s3_client, bucket):
     """
     ADO#8295: persist high-confidence cluster embeddings as meeting_auto voiceprints so later meetings
     can identify the speaker. A label is promoted when its voice match is > 0.90, it has >= 5 minutes of
@@ -972,13 +972,14 @@ def main():
                                         print(f"[Transcriber] Reference for {name} ({ref_sources[name]}) has wrong embedding size — dropped")
                                         del ref_embeddings[name]
                                     confidences = {}
-                                    name_map = assign_names_by_embedding(cluster_embeddings, ref_embeddings, confidences=confidences)
+                                    runner_ups = {}
+                                    name_map = assign_names_by_embedding(cluster_embeddings, ref_embeddings, confidences=confidences, runner_ups=runner_ups)
                                     for label, name in sorted(name_map.items()):
                                         if name:
                                             print(f"[Transcriber] {label} → {name} source={ref_sources[name]}")
                                     speaker_name_map.update({label: name for label, name in name_map.items() if name})
                                     auto_promote_voiceprints(name_map, cluster_embeddings, compute_cluster_durations(turns),
-                                                             confidences, tenant_id, meeting_id, db_config, s3, s3_bucket)
+                                                             confidences, runner_ups, tenant_id, meeting_id, db_config, s3, s3_bucket)
                                 else:
                                     print(f"[Transcriber] No reference voice embeddings — falling back to roster timing")
                             except Exception as e:
