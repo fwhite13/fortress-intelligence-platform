@@ -1,14 +1,16 @@
+@using System.Globalization
 @using MudBlazor
 @using FortressIntelligenceRM.Web.Services
-@implements IAsyncDisposable
+@implements IDisposable
 @inject SpeakerEmbeddingService SpeakerEmbeddingService
 @inject VoiceSampleProcessingService VoiceSampleProcessingService
-@inject IJSRuntime JS
 @inject ISnackbar Snackbar
 @inject IDialogService DialogService
 @inject ILogger<VoiceEnrollmentPanel> Logger
 
 @* WI #8298 — self-service voice enrollment (Settings → Voice). *@
+@* WI #8828 — enrollment now comes from the user's own meeting audio (channel-matched with Teams); the
+   browser-mic recording flow was removed here — POST /api/voiceprint/upload still accepts recordings. *@
 @* WI #8306: min-height keeps the dialog from collapsing/flickering a scrollbar as phases swap content. *@
 <div style="min-height: 160px;">
 @if (_status == null)
@@ -19,7 +21,7 @@ else
 {
     <MudSwitch T="bool" Value="_optedIn" ValueChanged="OnOptInChanged"
                Label="Improve speaker identification by enrolling your voice"
-               Color="Color.Warning" Disabled="@(_busy || _phase == Phase.Recording || _status.IsPending)" />
+               Color="Color.Warning" Disabled="@(_busy || _status.IsPending)" />
     <MudText Typo="Typo.body2" Class="mb-3" Style="color: var(--color-text-secondary);">
         Your voice data is stored securely and used only to label your speech in meetings you attend. You can delete it at any time by unenrolling below.
     </MudText>
@@ -35,61 +37,71 @@ else
                 Enrollment submitted — processing. This typically takes a few minutes.
             </MudAlert>
         }
-
-        @if (_phase == Phase.Idle)
+        else if (!_selecting)
         {
-            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Mic"
-                       OnClick="OpenEnrollment" Disabled="@(_busy || _phase == Phase.Recording || _status.IsPending)">
-                @(_status.IsEnrolled ? "Re-record" : "Record your voice")
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.RecordVoiceOver"
+                       OnClick="StartSelection" Disabled="@_busy">
+                @(_status.IsEnrolled ? "Re-enroll from a meeting" : "Enroll from a meeting")
             </MudButton>
         }
-        else
+        else if (_candidates == null)
+        {
+            <MudProgressLinear Color="Color.Warning" Indeterminate />
+        }
+        else if (_candidates.Count == 0)
+        {
+            <MudText Typo="Typo.body2">No meetings found with enough attributed audio. Attend a meeting first.</MudText>
+        }
+        else if (_selected != null)
         {
             <MudPaper Outlined Class="pa-3">
                 <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--color-text-secondary);">
-                    Please read the text aloud in a quiet environment, at your normal speaking pace.
+                    We'll learn your voice from a meeting you spoke in. Listen to the clip and confirm it's you.
                 </MudText>
-                <MudText Typo="Typo.body1" Class="mb-3" Style="font-style: italic;">
-                    "@RainbowPassage"
+                <MudText Typo="Typo.subtitle2">Preview clip from @_selected.Title</MudText>
+                <MudText Typo="Typo.caption" Class="mb-2" Style="color: var(--color-text-secondary);">
+                    @_selected.Date.ToString("MMM d, yyyy") · @FormatSeconds(_selected.AttributedSeconds) of your speech
                 </MudText>
 
-                @if (_phase == Phase.Ready)
+                @if (_clipLoading)
                 {
+                    <MudProgressLinear Color="Color.Warning" Indeterminate Class="mb-3" />
+                }
+                else if (_clip != null)
+                {
+                    @* Media fragment seeks to the preview segment and stops at its end; it never reaches S3. *@
+                    <audio @key="_selected.MeetingId" controls preload="metadata" style="width: 100%;" class="mb-3"
+                           src="@ClipSource(_clip)"></audio>
+                }
+                else
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Warning" Class="mb-3">The preview couldn't be loaded.</MudText>
+                }
+
+                <div class="d-flex align-center gap-2 flex-wrap">
                     <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
-                               StartIcon="@Icons.Material.Filled.FiberManualRecord" OnClick="StartRecording">
-                        Start Recording
+                               OnClick="Submit" Disabled="@_busy">
+                        Use this meeting
                     </MudButton>
-                    <MudButton Variant="Variant.Text" OnClick="CancelEnrollment" Style="color: var(--color-text-secondary);">Cancel</MudButton>
-                }
-                else if (_phase == Phase.Recording)
-                {
-                    <div class="d-flex align-center gap-3">
-                        <MudIcon Icon="@Icons.Material.Filled.FiberManualRecord" Color="Color.Error" />
-                        <MudText Typo="Typo.body1">Recording… @FormatElapsed(_elapsedSeconds) <span style="color: var(--color-text-secondary);">(aim for 20–30s)</span></MudText>
-                        <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop" OnClick="StopRecording">
-                            Stop
-                        </MudButton>
-                    </div>
-                    <MudProgressLinear Color="Color.Warning" Value="@(_elapsedSeconds * 100.0 / MaxRecordingSeconds)" Class="mt-2" />
-                }
-                else if (_phase == Phase.Recorded)
-                {
-                    <div class="d-flex align-center gap-2 flex-wrap">
-                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.PlayArrow" OnClick="PlayRecording">
-                            Does this sound like you?
-                        </MudButton>
-                        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
-                                   OnClick="Submit" Disabled="@_busy">
-                            Submit
-                        </MudButton>
-                        <MudLink OnClick="ReRecord" Disabled="@_busy">Re-record</MudLink>
-                    </div>
-                    @if (_recordedSeconds < MinRecordingSeconds)
+                    @if (_candidates.Count > 1)
                     {
-                        <MudText Typo="Typo.caption" Color="Color.Warning" Class="mt-1">
-                            That was a short sample — a 20–30 second recording gives the best results.
-                        </MudText>
+                        <MudLink OnClick="() => _showList = !_showList" Disabled="@_busy">Choose different meeting</MudLink>
                     }
+                    <MudButton Variant="Variant.Text" OnClick="CancelSelection" Disabled="@_busy" Style="color: var(--color-text-secondary);">Cancel</MudButton>
+                </div>
+
+                @if (_showList)
+                {
+                    <MudList T="long" Dense Class="mt-2">
+                        @foreach (var candidate in _candidates)
+                        {
+                            var c = candidate;
+                            <MudListItem T="long" OnClick="() => SelectCandidate(c)" Disabled="@_busy"
+                                         Icon="@(c.MeetingId == _selected.MeetingId ? Icons.Material.Filled.RadioButtonChecked : Icons.Material.Filled.RadioButtonUnchecked)">
+                                @c.Title — @c.Date.ToString("MMM d, yyyy") · @FormatSeconds(c.AttributedSeconds)
+                            </MudListItem>
+                        }
+                    </MudList>
                 }
             </MudPaper>
         }
@@ -101,21 +113,15 @@ else
     [Parameter, EditorRequired] public string EntraOid { get; set; } = "";
     [Parameter] public string DisplayName { get; set; } = "";
 
-    private const string RainbowPassage = "When the sunlight strikes raindrops in the air, they act as a prism and form a rainbow. The rainbow is a division of white light into many beautiful colors. These take the shape of a long round arch, with its path high above, and its two ends apparently beyond the horizon.";
-    private const int MinRecordingSeconds = 20;
-    private const int MaxRecordingSeconds = 45;
-
-    private enum Phase { Idle, Ready, Recording, Recorded }
-
     private VoiceEnrollmentStatus? _status;
     private bool _optedIn;
     private bool _busy;
-    private Phase _phase = Phase.Idle;
-    private int _elapsedSeconds;
-    private int _recordedSeconds;
-    private byte[]? _recording;
-    private DotNetObjectReference<VoiceEnrollmentPanel>? _dotnetRef;
-    private CancellationTokenSource? _recordingCts;
+    private bool _selecting;
+    private bool _showList;
+    private bool _clipLoading;
+    private List<EnrollmentCandidate>? _candidates;
+    private EnrollmentCandidate? _selected;
+    private EnrollmentClip? _clip;
     private readonly CancellationTokenSource _disposeCts = new();
 
     private string StatusText => _status switch
@@ -130,6 +136,8 @@ else
         _status = await SpeakerEmbeddingService.GetEnrollmentStatusAsync(EntraOid, DisplayName);
         // WI #8349: a submitted-but-unprocessed sample still counts as opted in.
         _optedIn = _status.IsEnrolled || _status.IsPending;
+        if (_optedIn && !_status.IsEnrolled && !_status.IsPending)
+            await StartSelection();
     }
 
     private async Task OnOptInChanged(bool value)
@@ -137,14 +145,17 @@ else
         if (value || _status is not { IsEnrolled: true })
         {
             _optedIn = value;
-            if (!value) _phase = Phase.Idle;
+            if (value && _status is { IsPending: false })
+                await StartSelection();
+            else
+                CancelSelection();
             return;
         }
 
-        // WI #8307: unenrolling permanently deletes the recording — confirm first; cancel leaves everything as-is.
+        // WI #8307: unenrolling permanently deletes the voiceprint — confirm first; cancel leaves everything as-is.
         var confirmed = await DialogService.ShowMessageBox(
             "Remove voice enrollment?",
-            "This will permanently delete your voice recording. To re-enroll, you'll need to record a new voice sample.",
+            "This will permanently delete your voice enrollment. To re-enroll, you'll need to choose a meeting again.",
             yesText: "Remove enrollment",
             cancelText: "Cancel");
         if (confirmed != true)
@@ -156,7 +167,7 @@ else
         {
             await SpeakerEmbeddingService.DeactivateVoiceSamplesAsync(EntraOid);
             _status = await SpeakerEmbeddingService.GetEnrollmentStatusAsync(EntraOid, DisplayName);
-            _phase = Phase.Idle;
+            CancelSelection();
             Snackbar.Add("Your voice sample has been deleted.", Severity.Info);
         }
         catch (Exception ex)
@@ -171,110 +182,77 @@ else
         }
     }
 
-    private void OpenEnrollment() => _phase = Phase.Ready;
-
-    private async Task CancelEnrollment()
+    // WI #8828: load the ranked candidates and preview the best one.
+    private async Task StartSelection()
     {
-        _recording = null;
-        _phase = Phase.Idle;
-        await JS.InvokeVoidAsync("voiceRecorder.reset");
-    }
-
-    private async Task StartRecording()
-    {
-        _dotnetRef ??= DotNetObjectReference.Create(this);
-        _recording = null;
+        _selecting = true;
+        _showList = false;
+        _candidates = null;
+        StateHasChanged();
         try
         {
-            await JS.InvokeVoidAsync("voiceRecorder.start", _dotnetRef);
-        }
-        catch (JSException ex)
-        {
-            Logger.LogWarning(ex, "FIRM: Microphone access failed for {EntraOid}", EntraOid);
-            Snackbar.Add("Could not access your microphone. Check your browser permissions and try again.", Severity.Error);
-            return;
-        }
-
-        _phase = Phase.Recording;
-        _elapsedSeconds = 0;
-        _recordingCts = CancellationTokenSource.CreateLinkedTokenSource(_disposeCts.Token);
-        _ = RunRecordingTimerAsync(_recordingCts.Token);
-    }
-
-    // Elapsed-time display + auto-stop at MaxRecordingSeconds.
-    private async Task RunRecordingTimerAsync(CancellationToken ct)
-    {
-        try
-        {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-            while (await timer.WaitForNextTickAsync(ct))
-            {
-                _elapsedSeconds++;
-                if (_elapsedSeconds >= MaxRecordingSeconds)
-                {
-                    await InvokeAsync(StopRecording);
-                    return;
-                }
-                await InvokeAsync(StateHasChanged);
-            }
-        }
-        catch (OperationCanceledException) { }
-    }
-
-    private async Task StopRecording()
-    {
-        _recordingCts?.Cancel();
-        _recordedSeconds = _elapsedSeconds;
-        await JS.InvokeVoidAsync("voiceRecorder.stop");
-    }
-
-    [JSInvokable]
-    public async Task OnRecordingComplete(IJSStreamReference audio)
-    {
-        try
-        {
-            await using var stream = await audio.OpenReadStreamAsync(VoiceSampleProcessingService.MaxSampleBytes, _disposeCts.Token);
-            using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer, _disposeCts.Token);
-            _recording = buffer.ToArray();
-            _phase = Phase.Recorded;
+            _candidates = await VoiceSampleProcessingService.GetEnrollmentCandidatesAsync(DisplayName, _disposeCts.Token);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogError(ex, "FIRM: Failed to receive voice recording for {EntraOid}", EntraOid);
-            Snackbar.Add("Recording failed. Please try again.", Severity.Error);
-            _phase = Phase.Ready;
+            Logger.LogError(ex, "FIRM: Failed to load voice enrollment candidates for {EntraOid}", EntraOid);
+            Snackbar.Add("Could not load your meetings. Please try again.", Severity.Error);
+            _selecting = false;
+            return;
+        }
+        if (_candidates.Count > 0)
+            await SelectCandidate(_candidates[0]);
+    }
+
+    private async Task SelectCandidate(EnrollmentCandidate candidate)
+    {
+        _selected = candidate;
+        _showList = false;
+        _clip = null;
+        _clipLoading = true;
+        StateHasChanged();
+        try
+        {
+            _clip = await VoiceSampleProcessingService.GetEnrollmentClipAsync(DisplayName, candidate.MeetingId, _disposeCts.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "FIRM: Failed to load enrollment preview for meeting {MeetingId}", candidate.MeetingId);
         }
         finally
         {
-            await audio.DisposeAsync();
+            _clipLoading = false;
         }
-        await InvokeAsync(StateHasChanged);
     }
 
-    private async Task PlayRecording() => await JS.InvokeVoidAsync("voiceRecorder.play");
-
-    private async Task ReRecord()
+    private void CancelSelection()
     {
-        _recording = null;
-        await JS.InvokeVoidAsync("voiceRecorder.reset");
-        _phase = Phase.Ready;
+        _selecting = false;
+        _showList = false;
+        _candidates = null;
+        _selected = null;
+        _clip = null;
     }
 
     private async Task Submit()
     {
-        if (_recording is not { Length: > 0 })
+        if (_selected == null)
             return;
 
         _busy = true;
         try
         {
-            await VoiceSampleProcessingService.SubmitAsync(EntraOid, DisplayName, _recording, _disposeCts.Token);
+            var jobId = await VoiceSampleProcessingService.SubmitFromMeetingAsync(EntraOid, DisplayName, _selected.MeetingId, _disposeCts.Token);
+            if (jobId == null)
+            {
+                Snackbar.Add("That meeting can no longer be used for enrollment. Please choose another.", Severity.Warning);
+                return;
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Logger.LogError(ex, "FIRM: Voice sample submission failed for {EntraOid}", EntraOid);
-            Snackbar.Add("Could not upload your voice sample. Please try again.", Severity.Error);
+            Logger.LogError(ex, "FIRM: Meeting-based voice enrollment failed for {EntraOid}", EntraOid);
+            Snackbar.Add("Could not start enrollment. Please try again.", Severity.Error);
             return;
         }
         finally
@@ -282,11 +260,8 @@ else
             _busy = false;
         }
 
-        _recording = null;
-        await JS.InvokeVoidAsync("voiceRecorder.reset");
-
         // WI #8306: fire-and-forget — the Batch job takes a few minutes, so return to idle instead of polling.
-        _phase = Phase.Idle;
+        CancelSelection();
         try
         {
             _status = await SpeakerEmbeddingService.GetEnrollmentStatusAsync(EntraOid, DisplayName);
@@ -298,23 +273,17 @@ else
             _status = _status! with { IsPending = true };
         }
         StateHasChanged();
-        Snackbar.Add("Your voice sample has been submitted for processing. This takes a few minutes — your enrollment status will update the next time you open this dialog.", Severity.Info);
+        Snackbar.Add("Your voice enrollment is processing. This takes a few minutes — your enrollment status will update the next time you open this dialog.", Severity.Info);
     }
 
-    private static string FormatElapsed(int seconds) => $"{seconds / 60}:{seconds % 60:00}";
+    private static string ClipSource(EnrollmentClip clip) =>
+        string.Create(CultureInfo.InvariantCulture, $"{clip.PresignedUrl}#t={clip.PreviewStartSec:0.#},{clip.PreviewEndSec:0.#}");
 
-    public async ValueTask DisposeAsync()
+    private static string FormatSeconds(double seconds) => $"{(int)seconds / 60}:{(int)seconds % 60:00}";
+
+    public void Dispose()
     {
         _disposeCts.Cancel();
-        _recordingCts?.Cancel();
-        try
-        {
-            if (_phase == Phase.Recording)
-                await JS.InvokeVoidAsync("voiceRecorder.stop");
-            await JS.InvokeVoidAsync("voiceRecorder.reset");
-        }
-        catch (JSDisconnectedException) { }
-        _dotnetRef?.Dispose();
         _disposeCts.Dispose();
     }
 }

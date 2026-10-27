@@ -709,9 +709,102 @@ def process_voice_sample():
         except OSError:
             pass
 
+def process_voice_sample_from_meeting():
+    """
+    ADO#8828: JOB_MODE=voice_sample_from_meeting — extract voiceprint from meeting audio
+    using active speaker log windows for the named speaker. Channel-matched enrollment.
+    Windows are chosen exactly as in a meeting job (extract_reference_embeddings over the whole log, so
+    overlap with other speakers is still excluded); the result replaces the user's voice_sample rows.
+    """
+    audio_s3_key = os.environ["MEETING_AUDIO_S3_KEY"]
+    active_speaker_s3_key = os.environ["ACTIVE_SPEAKER_S3_KEY"]
+    entra_oid = os.environ["ENTRA_OID"]
+    name = os.environ["FIRM_SPEAKER_EMBEDDING_NAME"].strip()
+    tenant_id = os.environ["TENANT_ID"]
+    s3_bucket = os.environ.get("S3_BUCKET", "firm-recordings-dev")
+    hf_token = os.environ.get("HF_TOKEN", "")
+    aws_region = os.environ.get("AWS_REGION", "us-east-1")
+    notetaker_name = os.environ.get("NOTETAKER_NAME", "Fortress Notetaker")
+    meeting_id = os.environ.get("MEETING_ID", "").strip()
+    recording_start_env = os.environ.get("RECORDING_START_MS", "").strip()
+
+    db_config = voiceprint_db_config()
+    if not tenant_id or not db_config or not name:
+        print("[VoiceSampleMeeting] TENANT_ID, FORTRESS_DB_HOST or FIRM_SPEAKER_EMBEDDING_NAME not set — cannot store voiceprint",
+              file=sys.stderr)
+        sys.exit(1)
+
+    s3 = boto3.client("s3", region_name=aws_region)
+    obj = s3.get_object(Bucket=s3_bucket, Key=active_speaker_s3_key)
+    parsed = json.loads(obj["Body"].read().decode("utf-8")) or []
+    speaker_log = [e for e in parsed if isinstance(e, dict) and (e.get("name") or "").strip() != notetaker_name] \
+        if isinstance(parsed, list) else []
+    log_starts = [e["startMs"] for e in speaker_log if e.get("startMs") is not None]
+    # firm-web matches the display name case-insensitively; use the log's spelling for the window lookup
+    log_name = next((n for n in ((e.get("name") or "").strip() for e in speaker_log) if n.casefold() == name.casefold()), None)
+    if not log_starts or log_name is None:
+        raise RuntimeError(f"no active speaker windows for {name} in s3://{s3_bucket}/{active_speaker_s3_key}")
+    print(f"[VoiceSampleMeeting] Active speaker log: {len(speaker_log)} entries, "
+          f"{sum(1 for e in speaker_log if (e.get('name') or '').strip() == log_name)} for {log_name}")
+
+    # Same rebasing as main(): epoch-ms logs are offset by the recording start (firm-web passes the roster's
+    # earliest join, as a meeting job would use); relative logs are already 0-based.
+    if min(log_starts) > 1_000_000_000_000:
+        recording_start_ms = int(recording_start_env) if recording_start_env else min(log_starts)
+    else:
+        recording_start_ms = 0
+
+    suffix = os.path.splitext(audio_s3_key)[1] or ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        audio_path = f.name
+    try:
+        print(f"[VoiceSampleMeeting] Downloading s3://{s3_bucket}/{audio_s3_key} for {entra_oid}")
+        s3.download_file(s3_bucket, audio_s3_key, audio_path)
+
+        references = extract_reference_embeddings(speaker_log, audio_path, hf_token, recording_start_ms)
+        emb = references.get(log_name)
+        if emb is None:
+            raise RuntimeError(f"no usable reference embedding for {log_name} (no clean window or possiblyMultiVoice)")
+        emb = F.normalize(emb, dim=0)
+
+        buf = io.BytesIO()
+        np.save(buf, emb.detach().cpu().numpy().astype(np.float32), allow_pickle=False)
+        voiceprint_key = f"voiceprints/{tenant_id}/{uuid.uuid4()}.npy"
+        s3.put_object(Bucket=s3_bucket, Key=voiceprint_key, Body=buf.getvalue(),
+                      ContentType="application/octet-stream")
+
+        conn = pymysql.connect(**db_config)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO firm_speaker_embeddings "
+                    "(tenant_id, name, entra_oid, s3_key, source, meeting_id, confidence, is_active, created_at, updated_at) "
+                    "VALUES (%s, %s, %s, %s, 'voice_sample', %s, NULL, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+                    (tenant_id, name, entra_oid, voiceprint_key, int(meeting_id) if meeting_id else None))
+                new_id = cur.lastrowid
+                cur.execute(
+                    "DELETE FROM firm_speaker_embeddings "
+                    "WHERE tenant_id = %s AND entra_oid = %s AND source = 'voice_sample' AND id <> %s",
+                    (tenant_id, entra_oid, new_id))
+                replaced = cur.rowcount
+            conn.commit()
+        finally:
+            conn.close()
+        print(f"[VoiceSampleMeeting] Voiceprint {new_id} stored for {name} ({entra_oid}) from meeting {meeting_id or '?'} "
+              f"→ s3://{s3_bucket}/{voiceprint_key}; replaced {replaced} previous voice_sample row(s)")
+    finally:
+        release_embedding_model()
+        try:
+            os.unlink(audio_path)
+        except OSError:
+            pass
+
 def main():
     if os.environ.get("JOB_MODE") == "voice_sample":
         process_voice_sample()
+        return
+    elif os.environ.get("JOB_MODE") == "voice_sample_from_meeting":
+        process_voice_sample_from_meeting()
         return
 
     meeting_id = int(os.environ["MEETING_ID"])
