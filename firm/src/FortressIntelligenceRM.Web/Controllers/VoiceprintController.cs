@@ -61,6 +61,50 @@ public class VoiceprintController : ControllerBase
         }
     }
 
+    // WI #8828 — meetings this user spoke in with enough clean attributed audio to enroll from, best first.
+    [HttpGet("enrollment-candidates")]
+    public async Task<IActionResult> EnrollmentCandidates(CancellationToken ct)
+    {
+        var entraOid = GetEntraOid();
+        if (string.IsNullOrEmpty(entraOid)) return BadRequest(new { error = "User identity not available" });
+
+        var candidates = await _voiceSamples.GetEnrollmentCandidatesAsync(GetDisplayName(), ct);
+        return Ok(candidates.Select(c => new
+        {
+            meetingId = c.MeetingId,
+            title = c.Title,
+            date = c.Date.ToString("yyyy-MM-dd"),
+            attributedSeconds = c.AttributedSeconds,
+            windowCount = c.WindowCount,
+            audioS3Key = c.AudioS3Key,
+            activeSpeakerS3Key = c.ActiveSpeakerS3Key
+        }));
+    }
+
+    // WI #8828 — presigned recording URL plus the preview segment (the user's longest clean window, up to 15s).
+    [HttpGet("enrollment-clip")]
+    public async Task<IActionResult> EnrollmentClip([FromQuery] long meetingId, CancellationToken ct)
+    {
+        var entraOid = GetEntraOid();
+        if (string.IsNullOrEmpty(entraOid)) return BadRequest(new { error = "User identity not available" });
+
+        var clip = await _voiceSamples.GetEnrollmentClipAsync(GetDisplayName(), meetingId, ct);
+        if (clip == null) return NotFound(new { error = "Meeting is not an enrollment candidate for this user" });
+        return Ok(new { presignedUrl = clip.PresignedUrl, previewStartSec = clip.PreviewStartSec, previewEndSec = clip.PreviewEndSec });
+    }
+
+    // WI #8828 — channel-matched enrollment from a meeting recording. Returns immediately; extraction runs in Batch.
+    [HttpPost("enroll-from-meeting")]
+    public async Task<IActionResult> EnrollFromMeeting([FromBody] EnrollFromMeetingRequest request, CancellationToken ct)
+    {
+        var entraOid = GetEntraOid();
+        if (string.IsNullOrEmpty(entraOid)) return BadRequest(new { error = "User identity not available" });
+
+        var jobId = await _voiceSamples.SubmitFromMeetingAsync(entraOid, GetDisplayName(), request.MeetingId, ct);
+        if (jobId == null) return NotFound(new { error = "Meeting is not an enrollment candidate for this user" });
+        return Accepted(new { jobId });
+    }
+
     [HttpDelete]
     public async Task<IActionResult> Delete()
     {
@@ -77,3 +121,5 @@ public class VoiceprintController : ControllerBase
 
     private string GetDisplayName() => User.FindFirst("name")?.Value ?? User.Identity?.Name ?? "";
 }
+
+public record EnrollFromMeetingRequest(long MeetingId);
