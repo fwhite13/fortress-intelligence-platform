@@ -639,6 +639,12 @@ export class MeetingBot extends EventEmitter {
           const countText = (await countEl.textContent()) || '';
           count = parseInt(countText.match(/\d+/)?.[0] || '0', 10);
           countSource = `DOM(text="${countText.trim().slice(0, 40)}")`;
+          // WI #8866: DOM count includes AI notetaker bots — subtract those seen in call-state
+          const notetakerCount = this._teamsHandler?.getActiveParticipantInfo().notetakerCount ?? 0;
+          if (notetakerCount > 0) {
+            count = Math.max(0, count - notetakerCount);
+            countSource += ` -${notetakerCount} notetaker`;
+          }
         } else if (this._teamsHandler) {
           const info = this._teamsHandler.getActiveParticipantInfo();
           if (info.hasHadParticipants && !this._hasHadOtherParticipants) {
@@ -646,7 +652,7 @@ export class MeetingBot extends EventEmitter {
             console.log('[Bot] First participant joined (call-state) — meeting is live');
           }
           count = info.count + 1;
-          countSource = 'call-state';
+          countSource = info.notetakerCount > 0 ? `call-state(excl ${info.notetakerCount} notetaker)` : 'call-state';
         }
         console.log(`[Bot] End-poll count=${count} source=${countSource} hasHadOthers=${this._hasHadOtherParticipants} participantOneCount=${participantOneCount} pastMinDuration=${pastMinDuration}`);
         if (count !== null) {
