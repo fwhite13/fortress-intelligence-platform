@@ -769,11 +769,36 @@ public class MeetingService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var user = await db.Users.FindAsync(userId);
         if (user == null) return;
+        var autoJoinTurnedOff = user.AutoAddCalendarMeetings && !autoAddCalendarMeetings;
         user.AutoAddCalendarMeetings = autoAddCalendarMeetings;
         user.AutoEmailSummary = autoEmailSummary;
         user.AutoCreateSuggestedEvents = autoCreateSuggestedEvents;
         user.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        // WI #8864: turning auto-join off must cancel the EventBridge schedules already created for
+        // upcoming meetings, otherwise they still fire and dispatch the bot. Saved first so the
+        // calendar sync stops creating new schedules. Meeting rows stay Scheduled — the user can
+        // still join manually.
+        if (!autoJoinTurnedOff) return;
+        var now = DateTime.UtcNow;
+        var scheduledIds = await db.Meetings
+            .Where(m => m.CreatedBy == userId && m.Status == MeetingStatus.Scheduled && m.StartDatetime > now)
+            .Select(m => m.Id)
+            .ToListAsync();
+        foreach (var meetingId in scheduledIds)
+        {
+            try
+            {
+                await _autoJoinScheduler.DeleteScheduleAsync(meetingId);
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal — the preference save has already succeeded.
+                _logger.LogWarning(ex, "FIRM: Failed to delete AutoJoin schedule for meeting {Id} after user {UserId} disabled auto-join", meetingId, userId);
+            }
+        }
+        _logger.LogInformation("FIRM: User {UserId} disabled auto-join — cleared {Count} AutoJoin schedule(s)", userId, scheduledIds.Count);
     }
 
     // NOTE (ADO#17 diagnostic, 2026-09-09): UpsertFromCalendarAsync used to live here as a second,
