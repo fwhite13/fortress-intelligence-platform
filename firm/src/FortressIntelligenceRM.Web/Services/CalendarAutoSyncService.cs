@@ -15,6 +15,14 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
     private readonly IConfiguration _config;
     private Timer? _timer;
 
+    // WI #8863: how far apart a row's start and a calendar occurrence's start may be and still be
+    // matched on iCalUId (which recurring-series occurrences can share).
+    private static readonly TimeSpan IcalUidMatchTolerance = TimeSpan.FromHours(2);
+
+    // WI #8863: rows the calendar must never re-anchor or reschedule onto another occurrence.
+    private static bool IsTerminal(FirmMeeting m) =>
+        m.Status is MeetingStatus.Complete or MeetingStatus.Failed;
+
     public CalendarAutoSyncService(
         IDbContextFactory<FirmDbContext> dbFactory,
         CalendarService calendarService,
@@ -102,10 +110,26 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
                     // Step 1 — iCalUId match: the most stable Graph identifier, doesn't drift across
                     // polls the way the Graph `id` (CalendarEventId) can (Issue 5b).
+                    // WI #8863: every occurrence of an externally-organized (cross-tenant/iMIP) recurring
+                    // series shares one iCalUId, so the match is bounded to rows starting within
+                    // IcalUidMatchTolerance of this occurrence — otherwise a sibling occurrence's row is
+                    // hijacked (its start overwritten) and this occurrence never gets its own row. A
+                    // genuine single-meeting reschedule beyond the tolerance still matches in Step 2.
                     if (!string.IsNullOrEmpty(dto.ICalUId))
                     {
-                        matched = await db.Meetings.FirstOrDefaultAsync(
-                            m => m.GraphMeetingId == dto.ICalUId && m.CreatedBy == user.Id, ct);
+                        var icalCandidates = await db.Meetings
+                            .Where(m => m.GraphMeetingId == dto.ICalUId && m.CreatedBy == user.Id)
+                            .ToListAsync(ct);
+                        matched = icalCandidates
+                            .Where(m => m.StartDatetime == null
+                                     || (m.StartDatetime.Value - startDatetime).Duration() < IcalUidMatchTolerance)
+                            .OrderBy(m => m.StartDatetime == null ? TimeSpan.MaxValue : (m.StartDatetime.Value - startDatetime).Duration())
+                            .FirstOrDefault();
+                        if (matched != null && IsTerminal(matched))
+                        {
+                            if (matched.StartDatetime == startDatetime) continue;
+                            matched = null;
+                        }
                         if (matched != null)
                         {
                             var changed = false;
@@ -126,6 +150,16 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                     // Step 2 — exact CalendarEventId match (fast path when the Graph ID is stable).
                     matched = await db.Meetings.FirstOrDefaultAsync(
                         m => m.CalendarEventId == dto.CalendarEventId && m.CreatedBy == user.Id, ct);
+                    if (matched != null && IsTerminal(matched))
+                    {
+                        // WI #8863: a finished row is only ever "this occurrence" at its own start —
+                        // never re-anchor or reschedule it onto a different one.
+                        if (matched.StartDatetime == startDatetime) continue;
+                        _logger.LogWarning(
+                            "[AutoSync] Terminal meeting {Id} ({Status}) holds calendar event {CalendarEventId} but starts {Old}, not {New} — not reconciling",
+                            matched.Id, matched.Status, dto.CalendarEventId, matched.StartDatetime, startDatetime);
+                        matched = null;
+                    }
                     if (matched != null)
                     {
                         var changed = false;
@@ -149,6 +183,8 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
                         .ToListAsync(ct);
                     matched = startCandidates.FirstOrDefault(
                         m => CalendarService.NormalizeMeetingUrl(m.MeetingUrl) == normalizedDtoUrl);
+                    // WI #8863: same start, so a terminal match is this occurrence — leave its anchors alone.
+                    if (matched != null && IsTerminal(matched)) continue;
                     if (matched != null)
                     {
                         var changed = false;
@@ -364,7 +400,8 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
     /// <summary>
     /// WI #8577: does this user already have a non-Failed firm_meetings record for this calendar
-    /// event? Matched on calendar_event_id first, then on normalized meeting URL for rows whose
+    /// event? Matched on calendar_event_id first (WI #8863: ignoring Complete rows too, which may
+    /// hold a stolen calendar_event_id from a later occurrence), then on normalized meeting URL for rows whose
     /// start (or created_at, for manually-added rows with no start) falls between 15 minutes before
     /// the event and its end. The time bound keeps a recurring meeting's earlier occurrences (same
     /// join URL) from blocking later ones. Failed rows are ignored so they never block a fresh attempt.
@@ -374,7 +411,8 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
         if (!string.IsNullOrEmpty(dto.CalendarEventId)
             && await db.Meetings.AnyAsync(m => m.CreatedBy == userId
                                             && m.CalendarEventId == dto.CalendarEventId
-                                            && m.Status != MeetingStatus.Failed, ct))
+                                            && m.Status != MeetingStatus.Failed
+                                            && m.Status != MeetingStatus.Complete, ct))
             return true;
 
         if (string.IsNullOrEmpty(normalizedUrl)) return false;

@@ -1,4 +1,5 @@
 using FortressIntelligenceRM.Web.Data;
+using FortressIntelligenceRM.Web.Models;
 using Microsoft.EntityFrameworkCore;
 using MySqlConnector;
 
@@ -345,6 +346,8 @@ public class DatabaseInitializationService : IHostedService
                 }
             }
 
+            await RepairHijackedTerminalMeetingsAsync(db, cancellationToken);
+
             // Ensure DataProtectionKeys table exists in the shared keyring DB
             try
             {
@@ -385,6 +388,59 @@ public class DatabaseInitializationService : IHostedService
         catch (Exception ex)
         {
             _logger.LogError(ex, "FIRM: Database initialization failed — app will continue");
+        }
+    }
+
+    /// <summary>
+    /// WI #8863 data repair: CalendarAutoSync's unbounded iCalUId match used to re-point a finished
+    /// recurring-meeting row at the series' next occurrence — overwriting start_datetime and stealing
+    /// that occurrence's calendar_event_id, so the occurrence never got its own row (or bot). Restore
+    /// the row's start to when it actually ran and drop its calendar anchors so the next poll inserts
+    /// the upcoming occurrence normally. Idempotent: repaired rows no longer satisfy the filter.
+    /// </summary>
+    private async Task RepairHijackedTerminalMeetingsAsync(FirmDbContext db, CancellationToken ct)
+    {
+        try
+        {
+            var now = DateTime.UtcNow;
+            var hijacked = await db.Meetings
+                .Where(m => (m.Status == MeetingStatus.Complete || m.Status == MeetingStatus.Failed)
+                         && (m.CalendarEventId != null || m.GraphMeetingId != null)
+                         && m.StartDatetime != null
+                         && m.StartDatetime > now
+                         && (m.StartedAt != null
+                                ? m.StartDatetime > m.StartedAt.Value.AddDays(1)
+                                : m.StartDatetime > m.CreatedAt.AddDays(1)))
+                .ToListAsync(ct);
+
+            foreach (var m in hijacked)
+            {
+                var restored = m.StartedAt ?? m.CreatedAt;
+                _logger.LogWarning(
+                    "FIRM: WI #8863 repair — meeting {Id} ({Status}) had start_datetime {Bad}; restoring to {Restored} and clearing calendar_event_id {CalendarEventId} / graph_meeting_id {GraphMeetingId}",
+                    m.Id, m.Status, m.StartDatetime, restored, m.CalendarEventId, m.GraphMeetingId);
+                m.StartDatetime = restored;
+                m.CalendarEventId = null;
+                m.GraphMeetingId = null;
+                m.UpdatedAt = DateTime.UtcNow;
+                try
+                {
+                    await db.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateException ex)
+                {
+                    // e.g. uk_fm_normalized_url_start collision on the restored start — skip this row.
+                    _logger.LogWarning(ex, "FIRM: WI #8863 repair — could not repair meeting {Id}; manual cleanup required", m.Id);
+                    db.Entry(m).State = EntityState.Detached;
+                }
+            }
+
+            if (hijacked.Count > 0)
+                _logger.LogWarning("FIRM: WI #8863 repair — processed {Count} terminal meeting(s) with hijacked calendar anchors", hijacked.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FIRM: WI #8863 repair of hijacked terminal meetings failed (non-fatal)");
         }
     }
 
