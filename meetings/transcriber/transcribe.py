@@ -281,7 +281,6 @@ VOICEPRINT_PROMOTE_MIN_CONFIDENCE = 0.95  # ADO#8334 (was 0.90): tighter — wro
 VOICEPRINT_PROMOTE_MAX_RUNNER_UP = 0.80  # ADO#8334: runner-up must be clearly separated
 VOICEPRINT_PROMOTE_MIN_DURATION_S = 300.0  # ... with at least 5 minutes of attributed audio
 VOICEPRINT_PROMOTE_COOLDOWN_DAYS = 7  # at most one meeting_auto voiceprint per person per week
-ACTIVE_SPEAKER_OVERRIDE_MAX_WINDOW_S = 30.0  # ADO#8673: only a per-turn log window this short may override a voice match
 
 _embedding_cache = {}
 
@@ -1136,28 +1135,11 @@ def main():
             for seg in split_segments_by_speaker(whisper_segments):
                 speaker_label = seg["speaker"]
                 speaker_name = speaker_name_map.get(speaker_label, speaker_label) if speaker_name_map else speaker_label
-                # ADO#8479: names are assigned per cluster, but pyannote can fold another person's speech into a
-                # matched cluster. The active speaker log is the better per-moment signal, so on conflict it wins
-                # — but only when its window is short enough to be a per-turn signal (ADO#8673).
-                # Unresolved SPEAKER_NN labels are left alone, as are moments where several people are logged.
-                if log_base_ms is not None and speaker_name != speaker_label:
-                    midpoint_ms = (seg["start"] + seg["end"]) * 500
-                    log_names = active_speakers_at(speaker_log, log_base_ms, midpoint_ms)
-                    if len(log_names) == 1 and speaker_name.casefold() not in {n.casefold() for n in log_names}:
-                        log_name = next(iter(log_names))
-                        # ADO#8673: a long log window is a presence signal spanning back-and-forth, not a per-turn
-                        # one — it can't attribute individual segments inside it, so the voice match stands.
-                        window_s = _active_window_duration_s(speaker_log, log_base_ms, midpoint_ms, log_name)
-                        if window_s <= ACTIVE_SPEAKER_OVERRIDE_MAX_WINDOW_S:
-                            print(f"[Transcriber] Speaker conflict at {midpoint_ms:.0f}ms: cluster assigned '{speaker_name}', "
-                                  f"active speaker log says '{log_name}' ({window_s:.1f}s window) — using log name")
-                            speaker_name = log_name
-                        else:
-                            print(f"[Transcriber] Speaker conflict at {midpoint_ms:.0f}ms: cluster assigned '{speaker_name}', "
-                                  f"active speaker log says '{log_name}' ({window_s:.1f}s window > "
-                                  f"{ACTIVE_SPEAKER_OVERRIDE_MAX_WINDOW_S:.0f}s) — keeping cluster name")
+                # ADO#8844: names are assigned per cluster only (voiceprint match or active-speaker-log majority
+                # vote above). The ADO#8479/#8673 per-turn log override was removed — it gave one cluster
+                # different names in different turns.
                 # ADO#8517: once a segment's name is resolved, label it by that name so a raw cluster label
-                # never maps to several people (the #8479 override splits clusters per segment).
+                # never maps to several people.
                 if not re.fullmatch(r"SPEAKER_\d+", speaker_name):
                     speaker_label = speaker_name
                 result.append({
