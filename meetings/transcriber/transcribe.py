@@ -275,7 +275,7 @@ CLUSTER_MIN_SEGMENT_S = 1.0  # shorter diarization turns give unstable embedding
 CLUSTER_MAX_SEGMENTS = 30  # longest turns per cluster, bounds GPU time on long meetings
 VOICE_MATCH_THRESHOLD = 0.80  # best similarity must exceed this to assign a name
 VOICE_MATCH_DOMINANCE = 1.2  # ADO#8334 (was 1.3): best must be >= this multiple of runner-up
-VOICE_MATCH_ABSOLUTE_MIN = 0.95  # ADO#8334: score this high assigned regardless of ratio ...
+VOICE_MATCH_ABSOLUTE_MIN = 0.90  # ADO#8843 (was 0.95): best this high assigned regardless of ratio ...
 VOICE_MATCH_ABSOLUTE_MAX_RUNNER_UP = 0.90  # ... provided runner-up stays below this
 VOICEPRINT_PROMOTE_MIN_CONFIDENCE = 0.95  # ADO#8334 (was 0.90): tighter — wrong voiceprints poison later meetings
 VOICEPRINT_PROMOTE_MAX_RUNNER_UP = 0.80  # ADO#8334: runner-up must be clearly separated
@@ -467,7 +467,8 @@ def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshol
     Assign the closest reference name IF:
       - Best similarity > threshold (default 0.80), AND
       - Best similarity >= dominance * second-best similarity (default 1.2x)
-    OR (absolute confidence override): best >= 0.95 and second < 0.90.
+    OR (absolute confidence override, ADO#8843): best >= 0.90 and no other score >= 0.90
+      (i.e. second < 0.90) — the sole reference at/above 0.90 wins.
     Single-reference mode (ADO#8672): when only one speaker is enrolled there is no runner-up,
     so the dominance check is vacuous (second-best is 0.0). The threshold is raised to at least
     0.90 to avoid attributing ambiguous clusters to the sole enrolled voice.
