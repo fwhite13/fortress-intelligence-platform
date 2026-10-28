@@ -38,6 +38,7 @@ import * as path from 'path';
 import { S3Service } from '../transcribe/s3.js';
 import { refreshTeamsSession } from './teams-auth.js';
 import { ActiveSpeakerEntry } from '../types.js';
+import { isNotetakerBot } from './notetaker-bots.js';
 
 // WI #8576: how long the bot waits in the Teams lobby to be admitted before giving up and
 // reporting status=failed / reason=lobby_timeout. Override with FIRM_LOBBY_TIMEOUT_SECONDS.
@@ -1700,7 +1701,12 @@ export class TeamsHandler {
       }
 
       console.log(`[Teams][Roster] ${names.length} participants via ${source}: ${names.join(', ')}`);
-      this._onRosterCount?.(names.length);
+      // WI #8866: AI notetaker bots don't count toward "is anyone here?"
+      const notetakers = names.filter(n => isNotetakerBot(n));
+      if (notetakers.length > 0) {
+        console.log(`[Teams][Roster] Excluding ${notetakers.length} AI notetaker bot(s) from empty-meeting count: ${notetakers.join(', ')}`);
+      }
+      this._onRosterCount?.(names.length - notetakers.length);
     } catch (e) {
       console.log(`[Teams][Roster] Poll error: ${e}`);
     }
@@ -1932,11 +1938,15 @@ export class TeamsHandler {
    * DOM roster button is unavailable (e.g. in the Fargate container).
    * `count` is participants currently present (bot excluded); `hasHadParticipants`
    * is true once anyone has ever appeared in the roster.
+   * WI #8866: AI notetaker bots are excluded from both and reported separately as
+   * `notetakerCount` (currently present) so DOM-based counts can subtract them.
    */
-  getActiveParticipantInfo(): { count: number; hasHadParticipants: boolean } {
+  getActiveParticipantInfo(): { count: number; hasHadParticipants: boolean; notetakerCount: number } {
+    const humans = this.rosterEntries.filter(e => !isNotetakerBot(e.name));
     return {
-      count: this.rosterEntries.filter(e => !e.leftAtMs).length,
-      hasHadParticipants: this.rosterEntries.length > 0,
+      count: humans.filter(e => !e.leftAtMs).length,
+      hasHadParticipants: humans.length > 0,
+      notetakerCount: this.rosterEntries.filter(e => !e.leftAtMs && isNotetakerBot(e.name)).length,
     };
   }
 
