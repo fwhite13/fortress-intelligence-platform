@@ -7,9 +7,42 @@ using Microsoft.Extensions.Logging;
 
 namespace FortressIntelligenceRM.Web.Services;
 
+/// <summary>
+/// WI #8875: per-run pyannote diarization overrides from the Advanced Retranscribe modal. A null field
+/// is not injected, so the transcriber falls back to its task-definition/env defaults (WI #8874).
+/// </summary>
+public record DiarizationOverrides(float? ClusteringThreshold = null, float? MinDurationOff = null, int? MinClusterSize = null)
+{
+    public const float MinThreshold = 0f, MaxThreshold = 1f;
+    public const float MinDurationOffFloor = 0f, MinDurationOffCeiling = 2f;
+    public const int MinClusterSizeFloor = 1, MinClusterSizeCeiling = 30;
+    public const float DefaultClusteringThreshold = 0.60f;
+    public const float DefaultMinDurationOff = 0.5f;
+
+    public bool IsEmpty => ClusteringThreshold == null && MinDurationOff == null && MinClusterSize == null;
+
+    /// <summary>Mirrors transcribe.py's computed min_cluster_size: max(4, round(duration_minutes / num_speakers)).</summary>
+    public static int? ComputeMinClusterSize(int? durationSeconds, int speakerCount) =>
+        durationSeconds is int d && d > 0 && speakerCount > 0
+            ? Math.Max(4, (int)Math.Round(d / 60.0 / speakerCount, MidpointRounding.ToEven))
+            : null;
+
+    /// <summary>Returns an error message if any provided value is out of range, else null.</summary>
+    public string? Validate()
+    {
+        if (ClusteringThreshold is float t && (float.IsNaN(t) || t < MinThreshold || t > MaxThreshold))
+            return $"Clustering threshold must be between {MinThreshold} and {MaxThreshold}";
+        if (MinDurationOff is float o && (float.IsNaN(o) || o < MinDurationOffFloor || o > MinDurationOffCeiling))
+            return $"Min duration off must be between {MinDurationOffFloor} and {MinDurationOffCeiling} seconds";
+        if (MinClusterSize is int c && (c < MinClusterSizeFloor || c > MinClusterSizeCeiling))
+            return $"Min cluster size must be between {MinClusterSizeFloor} and {MinClusterSizeCeiling}";
+        return null;
+    }
+}
+
 public interface IBatchTranscriptionService
 {
-    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, string? rosterTimeline = null, string? activeSpeakerTimeline = null, CancellationToken ct = default, DateTime? meetingStartDatetime = null, bool summarizeOnly = false, string? transcriptS3Key = null, string? speakerCorrections = null);
+    Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, string? rosterTimeline = null, string? activeSpeakerTimeline = null, CancellationToken ct = default, DateTime? meetingStartDatetime = null, bool summarizeOnly = false, string? transcriptS3Key = null, string? speakerCorrections = null, DiarizationOverrides? diarization = null);
 }
 
 public class BatchTranscriptionService : IBatchTranscriptionService
@@ -36,7 +69,7 @@ public class BatchTranscriptionService : IBatchTranscriptionService
         _logger = logger;
     }
 
-    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, string? rosterTimeline = null, string? activeSpeakerTimeline = null, CancellationToken ct = default, DateTime? meetingStartDatetime = null, bool summarizeOnly = false, string? transcriptS3Key = null, string? speakerCorrections = null)
+    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, string audioS3Key, DateTime? meetingDate = null, string? creatorEntraOid = null, string? rosterTimeline = null, string? activeSpeakerTimeline = null, CancellationToken ct = default, DateTime? meetingStartDatetime = null, bool summarizeOnly = false, string? transcriptS3Key = null, string? speakerCorrections = null, DiarizationOverrides? diarization = null)
     {
         var callbackSecret = _config["Firm:BotCallbackSecret"] ?? "";
         if (string.IsNullOrEmpty(callbackSecret))
@@ -143,6 +176,21 @@ public class BatchTranscriptionService : IBatchTranscriptionService
                 _logger.LogInformation("FIRM: Uploaded speaker corrections for meeting {MeetingId} to s3://{Bucket}/{Key}", meetingId, S3Bucket, correctionsKey);
                 envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "SPEAKER_CORRECTIONS_S3_KEY", Value = correctionsKey });
             }
+        }
+
+        // WI #8875: per-run diarization overrides — only the fields the user changed are injected.
+        if (diarization != null && !summarizeOnly)
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            if (diarization.ClusteringThreshold is float threshold)
+                envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "DIARIZE_CLUSTERING_THRESHOLD", Value = threshold.ToString(inv) });
+            if (diarization.MinDurationOff is float minDurationOff)
+                envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "DIARIZE_MIN_DURATION_OFF", Value = minDurationOff.ToString(inv) });
+            if (diarization.MinClusterSize is int minClusterSize)
+                envVars.Add(new Amazon.Batch.Model.KeyValuePair { Name = "DIARIZE_MIN_CLUSTER_SIZE_OVERRIDE", Value = minClusterSize.ToString(inv) });
+            if (!diarization.IsEmpty)
+                _logger.LogInformation("FIRM: Diarization overrides for meeting {MeetingId}: threshold={Threshold} min_duration_off={MinDurationOff} min_cluster_size={MinClusterSize}",
+                    meetingId, diarization.ClusteringThreshold, diarization.MinDurationOff, diarization.MinClusterSize);
         }
 
         var request = new SubmitJobRequest

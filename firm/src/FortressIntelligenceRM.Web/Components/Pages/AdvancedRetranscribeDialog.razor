@@ -1,0 +1,78 @@
+@using MudBlazor
+@using FortressIntelligenceRM.Web.Services
+
+@* WI #8875: per-run diarization overrides. Pre-populated with the values the transcriber would use
+   anyway; only fields the user actually changes are returned as overrides. *@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6" Style="color: var(--color-text-primary);">Advanced Retranscribe</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudStack Spacing="3">
+            <MudNumericField T="float" @bind-Value="_clusteringThreshold" Label="Clustering Threshold"
+                             Min="DiarizationOverrides.MinThreshold" Max="DiarizationOverrides.MaxThreshold" Step="0.05f"
+                             Format="0.00" Variant="Variant.Outlined" Immediate="true"
+                             HelperText="@($"Default {DefaultClusteringThreshold:0.00}. Lower splits voices into more speakers; higher merges them.")" />
+            <MudNumericField T="float" @bind-Value="_minDurationOff" Label="Min Duration Off (seconds)"
+                             Min="DiarizationOverrides.MinDurationOffFloor" Max="DiarizationOverrides.MinDurationOffCeiling" Step="0.1f"
+                             Format="0.0" Variant="Variant.Outlined" Immediate="true"
+                             HelperText="@($"Default {DefaultMinDurationOff:0.0}s. Shortest pause that ends a speaker turn.")" />
+            <MudNumericField T="int" @bind-Value="_minClusterSize" Label="Min Cluster Size"
+                             Min="DiarizationOverrides.MinClusterSizeFloor" Max="DiarizationOverrides.MinClusterSizeCeiling" Step="1"
+                             Variant="Variant.Outlined" Immediate="true"
+                             HelperText="@MinClusterSizeHelp" />
+        </MudStack>
+        <MudText Typo="Typo.body2" Class="mt-4" Style="color: var(--color-text-secondary);">
+            These settings apply to this run only and do not change system defaults.
+        </MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Style="color: var(--color-text-secondary);">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;" OnClick="Submit">
+            Retranscribe
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public float DefaultClusteringThreshold { get; set; } = DiarizationOverrides.DefaultClusteringThreshold;
+    [Parameter] public float DefaultMinDurationOff { get; set; } = DiarizationOverrides.DefaultMinDurationOff;
+    /// <summary>Computed max(4, round(duration_minutes / attendees)); null when duration or attendees are unknown.</summary>
+    [Parameter] public int? DefaultMinClusterSize { get; set; }
+    [Parameter] public int? DurationMinutes { get; set; }
+    [Parameter] public int AttendeeCount { get; set; }
+
+    // Shown when no computed default exists; leaving it untouched still means "no override".
+    private const int FallbackMinClusterSize = 4;
+
+    private float _clusteringThreshold;
+    private float _minDurationOff;
+    private int _minClusterSize;
+
+    private string MinClusterSizeHelp => DefaultMinClusterSize.HasValue
+        ? $"Default {DefaultMinClusterSize} = max(4, round({DurationMinutes} min / {AttendeeCount} attendees))."
+        : "No computed default (duration or attendee count unknown) — leave unchanged to use the pipeline default.";
+
+    protected override void OnInitialized()
+    {
+        _clusteringThreshold = DefaultClusteringThreshold;
+        _minDurationOff = DefaultMinDurationOff;
+        _minClusterSize = DefaultMinClusterSize ?? FallbackMinClusterSize;
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit()
+    {
+        // Values left at their pre-populated default are not sent, so an untouched form is identical to Standard.
+        var overrides = new DiarizationOverrides(
+            ClusteringThreshold: Changed(_clusteringThreshold, DefaultClusteringThreshold) ? _clusteringThreshold : null,
+            MinDurationOff: Changed(_minDurationOff, DefaultMinDurationOff) ? _minDurationOff : null,
+            MinClusterSize: _minClusterSize != (DefaultMinClusterSize ?? FallbackMinClusterSize) ? _minClusterSize : null);
+        MudDialog.Close(DialogResult.Ok(overrides));
+    }
+
+    private static bool Changed(float value, float baseline) => Math.Abs(value - baseline) > 0.0001f;
+}
