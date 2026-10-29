@@ -18,8 +18,13 @@ Environment variables (injected by Batch):
   SUMMARIZE_ONLY     - (optional) "true" skips audio/Whisper/diarization and re-summarizes the existing transcript
   TRANSCRIPT_S3_KEY  - (summarize-only) S3 key of the existing transcript.json; defaults to firm-transcripts/{id}/transcript.json
   SPEAKER_CORRECTIONS_S3_KEY - (summarize-only, optional) S3 key of the speaker-corrections overlay JSON array
+  MULTI_PERSON_THRESHOLD - (optional, default 0.15) mean pairwise embedding cosine distance at/above which an
+                         attendee slot is treated as multi-person and gets targeted diarization (ADO#8878)
 """
 
+import bisect
+import copy
+import difflib
 import gc
 import os
 import re
@@ -554,6 +559,389 @@ def apply_diarization_params(diarize_model, duration_s: float, num_speakers: int
     except Exception as e:
         print(f"[Transcriber] WARNING: could not apply diarization params, using pipeline defaults: {e}", file=sys.stderr)
 
+def load_diarization_pipeline(hf_token: str, device: str):
+    print(f"[Transcriber] Loading pyannote diarization pipeline...")
+    # Set offline mode only for pyannote — weights are pre-baked, Whisper downloads at runtime
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    try:
+        return DiarizationPipeline(
+            model_name="pyannote/speaker-diarization-3.1",
+            token=hf_token,
+            device=device,
+        )
+    finally:
+        del os.environ["HF_HUB_OFFLINE"]
+
+# ADO#8878: attendee-slot pipeline. Teams live captions (active_speaker_log, utterance-level since #8877) already
+# segment the audio by authenticated attendee slot, so they replace whole-meeting pyannote as the primary speaker
+# segmentation; diarization runs only inside slots that carry more than one voice (conference rooms, shared devices).
+SLOT_MIN_LOG_ENTRIES = 5  # fewer log entries can't segment a meeting — whole-meeting pyannote fallback
+MULTI_PERSON_THRESHOLD = 0.15  # default mean pairwise cosine distance at/above which a slot is multi-person
+SLOT_MAX_EMBED_SEGMENTS = 30  # longest segments embedded per slot, bounds GPU time
+SLOT_VOICEPRINT_THRESHOLD = 0.88  # single-person slot takes an enrolled name only above this ...
+MULTI_SLOT_VOICEPRINT_THRESHOLD = 0.93  # ... sub-clusters of a multi-person slot need more — err toward SPEAKER_XX
+SLOT_ROSTER_NEAR_MATCH = 0.85  # difflib ratio for a slot name to count as a roster near-match
+TARGETED_DIARIZE_MERGE_GAP_S = 0.5  # slot segments closer than this are extracted as one window
+TARGETED_DIARIZE_SILENCE_S = 1.0  # silence inserted between extracted windows
+TARGETED_DIARIZE_MIN_AUDIO_S = 5.0  # less slot audio than this isn't worth diarizing
+
+def active_log_base_ms(speaker_log: list, roster_attendees: list) -> int | None:
+    """Recording start in the log's timebase, same rebasing as build_active_speaker_block: epoch-ms logs use the
+    roster's approximate recording start (earliest join); relative logs are already 0-based. None without entries."""
+    starts = [e["startMs"] for e in speaker_log if e.get("startMs") is not None]
+    if not starts:
+        return None
+    if min(starts) > 1_000_000_000_000:
+        return min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else min(starts)
+    return 0
+
+class _SlotLookup:
+    """Active speaker log entries as (start_ms, end_ms, name) from recording start, queried by time."""
+
+    def __init__(self, active_speaker_log: list, recording_start_ms: int):
+        entries = []
+        for e in active_speaker_log:
+            name = (e.get("name") or "").strip()
+            start_ms = e.get("startMs")
+            if not name or start_ms is None:
+                continue
+            end_ms = max(start_ms, e.get("endMs") or start_ms)
+            entries.append((start_ms - recording_start_ms, end_ms - recording_start_ms, name))
+        entries.sort()
+        self.entries = entries
+        self.starts = [s for s, _, _ in entries]
+        self.max_end_idx = []  # index of the latest-ending entry among entries[0..i]
+        for i, (_, end, _) in enumerate(entries):
+            prev = self.max_end_idx[-1] if self.max_end_idx else None
+            self.max_end_idx.append(i if prev is None or end > entries[prev][1] else prev)
+
+    def at(self, ms: float) -> str | None:
+        """Slot speaking at ms: the latest-starting entry covering it, else the nearest entry by time distance."""
+        if not self.entries:
+            return None
+        i = bisect.bisect_right(self.starts, ms) - 1
+        j = i
+        while j >= 0 and self.entries[self.max_end_idx[j]][1] >= ms:  # some entry in [0..j] still covers ms
+            if self.entries[j][1] >= ms:
+                return self.entries[j][2]
+            j -= 1
+        candidates = []
+        if i >= 0:
+            prev = self.entries[self.max_end_idx[i]]
+            candidates.append((ms - prev[1], prev[2]))
+        if i + 1 < len(self.entries):
+            candidates.append((self.entries[i + 1][0] - ms, self.entries[i + 1][2]))
+        return min(candidates)[1]
+
+def assign_attendee_slots(whisper_segments, active_speaker_log, recording_start_ms):
+    """
+    For each Whisper segment, the active_speaker_log entry covering its midpoint ((start + end) / 2), or the
+    nearest entry by time distance when the midpoint falls in a gap. All None when the log is empty (Zoom, no
+    captions) — callers take the whole-meeting fallback then.
+    Returns dict: { segment_index -> slot_name }
+    """
+    lookup = _SlotLookup(active_speaker_log, recording_start_ms)
+    return {i: lookup.at((seg["start"] + seg["end"]) * 500.0) for i, seg in enumerate(whisper_segments)}
+
+def _tag_word_slots(segments: list, active_speaker_log: list, recording_start_ms: int) -> None:
+    """Tag each segment with its midpoint slot and each timestamped word with its own midpoint slot, so a Whisper
+    segment spanning a caption handoff is split there (untimed words inherit, as in split_segments_by_speaker)."""
+    seg_slots = assign_attendee_slots(segments, active_speaker_log, recording_start_ms)
+    lookup = _SlotLookup(active_speaker_log, recording_start_ms)
+    for i, seg in enumerate(segments):
+        seg["slot"] = seg_slots[i]
+        for w in seg.get("words") or []:
+            if "start" in w and "end" in w:
+                w["slot"] = lookup.at((w["start"] + w["end"]) * 500.0)
+
+def _split_by_key(segments: list, word_key, seg_key) -> list:
+    """split_segments_by_speaker with the speaker of each slot-tagged word / segment set by the key functions."""
+    for seg in segments:
+        seg["speaker"] = seg_key(seg)
+        for w in seg.get("words") or []:
+            if "slot" in w:
+                w["speaker"] = word_key(w)
+            else:
+                w.pop("speaker", None)
+    return split_segments_by_speaker(segments)
+
+def classify_slot(slot_name, slot_segments, audio_path, embedding_model, threshold=MULTI_PERSON_THRESHOLD):
+    """
+    Extract embeddings for the slot's segments (longest SLOT_MAX_EMBED_SEGMENTS of >= CLUSTER_MIN_SEGMENT_S) and
+    compute their mean pairwise cosine distance: below threshold → single-person, at/above → multi-person.
+    embedding_model is the pyannote/embedding Inference.
+    Returns (slot_type, mean_dist or None, duration-weighted slot embedding or None). With fewer than two usable
+    embeddings the spread can't be measured: "single" with mean_dist None.
+    """
+    waveform = _get_waveform(audio_path)
+    windows = sorted(((s["start"], s["end"]) for s in slot_segments if s["end"] - s["start"] >= CLUSTER_MIN_SEGMENT_S),
+                     key=lambda w: w[1] - w[0], reverse=True)[:SLOT_MAX_EMBED_SEGMENTS]
+    embs, weights = [], []
+    for s, e in windows:
+        emb = _embed_window(embedding_model, waveform, s, e)
+        if emb is not None:
+            embs.append(emb)
+            weights.append(e - s)
+    slot_embedding = _average_embeddings(embs, weights) if embs else None
+    if len(embs) < 2:
+        print(f"[Transcriber] Slot '{slot_name}': {len(slot_segments)} segments, {len(embs)} usable embedding(s) "
+              f"→ single-person (spread not measurable)")
+        return "single", None, slot_embedding
+    normed = F.normalize(torch.stack(embs), dim=1)
+    iu = torch.triu_indices(len(embs), len(embs), offset=1)
+    mean_dist = (1.0 - (normed @ normed.T)[iu[0], iu[1]]).mean().item()
+    slot_type = "multi" if mean_dist >= threshold else "single"
+    print(f"[Transcriber] Slot '{slot_name}': {len(slot_segments)} segments, mean_dist={mean_dist:.3f} → {slot_type}-person")
+    return slot_type, mean_dist, slot_embedding
+
+def _match_voiceprint(embedding, voiceprints: dict, threshold: float):
+    """
+    Best enrolled voiceprint for embedding: accepted if best > threshold and best >= VOICE_MATCH_DOMINANCE x runner-up.
+    Returns (accepted name or None, best name, best, runner-up, scores string).
+    """
+    scores = {n: F.cosine_similarity(embedding, v, dim=0).item() for n, v in voiceprints.items() if v.numel() == embedding.numel()}
+    if not scores:
+        return None, None, 0.0, 0.0, ""
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    best_name, best = ranked[0]
+    second = ranked[1][1] if len(ranked) > 1 else 0.0
+    scores_str = ", ".join(f"{n}={v:.3f}" for n, v in ranked)
+    accepted = best > threshold and best >= VOICE_MATCH_DOMINANCE * second
+    return (best_name if accepted else None), best_name, best, second, scores_str
+
+def _normalize_person_name(name: str) -> list:
+    """Sorted lowercase name tokens, minus a trailing '(Guest)'-style tag — 'White, Fred (Guest)' == 'Fred White'."""
+    return sorted(re.findall(r"\w+", re.sub(r"\s*\([^)]*\)\s*$", "", name).casefold()))
+
+def match_roster_name(slot_name: str, roster_names: list) -> str | None:
+    """Roster attendee matching the Teams slot name exactly, by name tokens, or by a close spelling."""
+    for n in roster_names:
+        if n.casefold() == slot_name.casefold():
+            return n
+    tokens = _normalize_person_name(slot_name)
+    for n in roster_names:
+        if tokens and _normalize_person_name(n) == tokens:
+            return n
+    ratios = [(difflib.SequenceMatcher(None, " ".join(tokens), " ".join(_normalize_person_name(n))).ratio(), n) for n in roster_names]
+    ratio, best = max(ratios, default=(0.0, None))
+    return best if ratio >= SLOT_ROSTER_NEAR_MATCH else None
+
+def name_single_slot(slot_name, slot_embedding, voiceprints, roster_names, other_slot_names) -> str:
+    """
+    Name a single-person slot: enrolled voiceprint (> SLOT_VOICEPRINT_THRESHOLD, separated from runner-up), else
+    the matching roster name, else the Teams slot name as-is. A voiceprint naming someone who has their own slot in
+    this meeting is ignored — Teams already attributes that person's device to them.
+    """
+    if slot_embedding is not None and voiceprints:
+        name, best_name, best, second, scores_str = _match_voiceprint(slot_embedding, voiceprints, SLOT_VOICEPRINT_THRESHOLD)
+        if name and name != slot_name and name in other_slot_names:
+            print(f"[Transcriber] Slot '{slot_name}' voiceprint match {name} ({best:.3f}) ignored — {name} has their own slot")
+        elif name:
+            print(f"[Transcriber] Slot '{slot_name}' → {name} (single-person, source=voiceprint {best:.3f}, runner-up {second:.3f}) "
+                  f"scores: {scores_str}")
+            return name
+        else:
+            print(f"[Transcriber] Slot '{slot_name}' no voiceprint match (best {best_name} {best:.3f}, runner-up {second:.3f}) "
+                  f"scores: {scores_str}")
+    roster_name = match_roster_name(slot_name, roster_names)
+    if roster_name:
+        print(f"[Transcriber] Slot '{slot_name}' → {roster_name} (single-person, source=roster)")
+        return roster_name
+    print(f"[Transcriber] Slot '{slot_name}' → {slot_name} (single-person, source=teams_name)")
+    return slot_name
+
+def diarize_slot(slot_name, slot_segments, waveform, diarize_model) -> list:
+    """
+    Targeted diarization of one multi-person slot: its segments (merged across short gaps) are cut from the waveform
+    and concatenated with silence between them, pyannote runs on just that audio (speaker count auto-detected, #8874
+    VoIP params), and the turns are mapped back onto the recording timeline.
+    Returns list of (start_s, end_s, cluster_label) in recording time; [] when the slot has too little audio.
+    """
+    windows = []
+    for s, e in sorted((seg["start"], seg["end"]) for seg in slot_segments):
+        if windows and s - windows[-1][1] <= TARGETED_DIARIZE_MERGE_GAP_S:
+            windows[-1][1] = max(windows[-1][1], e)
+        else:
+            windows.append([s, e])
+    sr = EMBEDDING_SAMPLE_RATE
+    silence = np.zeros(int(TARGETED_DIARIZE_SILENCE_S * sr), dtype=np.float32)
+    pieces, offsets, cursor = [], [], 0  # offsets: (extracted_start_sample, recording_start_sample, length_samples)
+    for s, e in windows:
+        lo, hi = max(0, int(s * sr)), min(len(waveform), int(e * sr))
+        if hi <= lo:
+            continue
+        if pieces:
+            pieces.append(silence)
+            cursor += len(silence)
+        pieces.append(waveform[lo:hi])
+        offsets.append((cursor, lo, hi - lo))
+        cursor += hi - lo
+    speech_s = sum(n for _, _, n in offsets) / sr
+    if speech_s < TARGETED_DIARIZE_MIN_AUDIO_S:
+        print(f"[Transcriber] Slot '{slot_name}' has only {speech_s:.1f}s of audio — targeted diarization skipped")
+        return []
+    print(f"[Transcriber] Slot '{slot_name}': diarizing {speech_s:.1f}s extracted from {len(offsets)} window(s)")
+    apply_diarization_params(diarize_model, cursor / sr, None)
+    diarize_df = diarize_model(np.concatenate(pieces).astype(np.float32), num_speakers=None)
+    turns = []
+    for t_start, t_end, label in zip(diarize_df["start"], diarize_df["end"], diarize_df["speaker"]):
+        for ex_start, rec_start, length in offsets:
+            lo, hi = max(t_start * sr, ex_start), min(t_end * sr, ex_start + length)
+            if hi > lo:
+                turns.append(((rec_start + lo - ex_start) / sr, (rec_start + hi - ex_start) / sr, label))
+    return turns
+
+def _turn_at(turns: list, start_s: float, end_s: float):
+    """Cluster label of the turn overlapping [start_s, end_s] most, else of the nearest turn."""
+    best, best_overlap = None, 0.0
+    for t_start, t_end, label in turns:
+        overlap = min(end_s, t_end) - max(start_s, t_start)
+        if overlap > best_overlap:
+            best, best_overlap = label, overlap
+    if best is not None:
+        return best
+    return min(turns, key=lambda t: max(t[0] - end_s, start_s - t[1], 0.0))[2]
+
+def run_slot_pipeline(whisper_segments, speaker_log, recording_start_ms, roster_attendees, voiceprints,
+                      audio_path, hf_token, device) -> list:
+    """
+    ADO#8878: speaker resolution by attendee slot. Words are assigned to the Teams-attributed slot speaking at
+    their midpoint; each slot is classified single/multi-person by voice-embedding spread; single-person slots are
+    named directly (voiceprint, roster, Teams name) and only multi-person slots get pyannote, on their own audio.
+    speaker_log must exclude the notetaker. Returns transcript segments in the output format.
+    """
+    segments = copy.deepcopy(whisper_segments)  # the fallback path must still see untouched segments if this fails
+    _tag_word_slots(segments, speaker_log, recording_start_ms)
+    slot_chunks = _split_by_key(segments, lambda w: w["slot"], lambda seg: seg["slot"])
+    by_slot = {}
+    for chunk in slot_chunks:
+        by_slot.setdefault(chunk["speaker"], []).append(chunk)
+    print(f"[Transcriber] Attendee slots: {len(by_slot)} slot(s) over {len(slot_chunks)} segment(s): {list(by_slot)}")
+
+    multi_voice_hint = {(e.get("name") or "").strip() for e in list(roster_attendees) + list(speaker_log) if e.get("possiblyMultiVoice")}
+    threshold = _env_float("MULTI_PERSON_THRESHOLD", MULTI_PERSON_THRESHOLD)
+    print(f"[Transcriber] MULTI_PERSON_THRESHOLD={threshold}")
+    roster_names = [e["name"] for e in roster_attendees]
+    slot_types, slot_names = {}, {}
+    sub_turns, sub_names = {}, {}  # multi-person slot -> diarization turns / { cluster_label -> name or None }
+    try:
+        inference = _get_embedding_inference(hf_token) if hf_token else None
+        if inference is None:
+            print("[Transcriber] WARNING: HF_TOKEN not set — slots named from captions only (no voice classification or diarization)")
+        for slot, chunks in by_slot.items():
+            slot_type, mean_dist, slot_embedding = "single", None, None
+            if inference is not None:
+                try:
+                    slot_type, mean_dist, slot_embedding = classify_slot(slot, chunks, audio_path, inference, threshold)
+                except Exception as e:
+                    print(f"[Transcriber] Slot '{slot}' classification failed (treated as single-person): {e}", file=sys.stderr)
+            if mean_dist is None and slot in multi_voice_hint:
+                slot_type = "multi"
+                print(f"[Transcriber] Slot '{slot}' → multi-person (possiblyMultiVoice, spread not measurable)")
+            slot_types[slot] = slot_type
+            if slot_type == "single":
+                slot_names[slot] = name_single_slot(slot, slot_embedding, voiceprints, roster_names, set(by_slot) - {slot})
+
+        multi_slots = [s for s in by_slot if slot_types[s] == "multi"]
+        if multi_slots and hf_token:
+            diarize_model = load_diarization_pipeline(hf_token, device)
+            try:
+                for slot in multi_slots:
+                    try:
+                        turns = diarize_slot(slot, by_slot[slot], _get_waveform(audio_path), diarize_model)
+                    except Exception as e:
+                        print(f"[Transcriber] Targeted diarization failed for slot '{slot}' (kept as one speaker): {e}", file=sys.stderr)
+                        turns = []
+                    if not turns:
+                        print(f"[Transcriber] Slot '{slot}' → multi-person, not separated (labelled '{slot}')")
+                        continue
+                    clusters = sorted({label for _, _, label in turns})
+                    print(f"[Transcriber] Slot '{slot}' → multi-person, running targeted diarization ({len(clusters)} sub-clusters)")
+                    cluster_embeddings = extract_cluster_embeddings(turns, audio_path, hf_token) if voiceprints else {}
+                    names = {}
+                    for label in clusters:
+                        names[label] = None
+                        if label not in cluster_embeddings:
+                            continue
+                        name, best_name, best, second, scores_str = _match_voiceprint(
+                            cluster_embeddings[label], voiceprints, MULTI_SLOT_VOICEPRINT_THRESHOLD)
+                        names[label] = name
+                        outcome = f"→ {name} (source=voiceprint {best:.3f})" if name else "unresolved"
+                        print(f"[Transcriber] Slot '{slot}' {label} {outcome} (best {best_name} {best:.3f}, runner-up {second:.3f}) "
+                              f"scores: {scores_str}")
+                    sub_turns[slot], sub_names[slot] = turns, names
+            finally:
+                del diarize_model
+                free_gpu_memory()
+    finally:
+        release_embedding_model()
+
+    def key_at(slot, start_s, end_s):
+        return (slot, _turn_at(sub_turns[slot], start_s, end_s) if slot in sub_turns else None)
+    final = _split_by_key(segments, lambda w: key_at(w["slot"], w["start"], w["end"]),
+                          lambda seg: key_at(seg["slot"], seg["start"], seg["end"]))
+
+    # Unresolved sub-clusters are numbered across the whole transcript, so SPEAKER_XX is unique across slots
+    speaker_ids = {}
+    result = []
+    for chunk in final:
+        slot, cluster = chunk["speaker"]
+        if cluster is None:
+            label = slot_names.get(slot, slot)  # multi-person slot that couldn't be diarized keeps the slot name
+        elif sub_names[slot].get(cluster):
+            label = sub_names[slot][cluster]
+        else:
+            if (slot, cluster) not in speaker_ids:
+                speaker_ids[(slot, cluster)] = f"SPEAKER_{len(speaker_ids):02d}"
+                print(f"[Transcriber] Slot '{slot}' {cluster} → {speaker_ids[(slot, cluster)]}")
+            label = speaker_ids[(slot, cluster)]
+        result.append({
+            "speakerLabel": label,
+            "speakerName": label,
+            "attendeeSlot": slot,
+            "slotType": slot_types.get(slot, "single"),
+            "text": chunk["text"],
+            "startTimeMs": int(chunk["start"] * 1000),
+            "endTimeMs": int(chunk["end"] * 1000)
+        })
+    return result
+
+def build_attendee_slot_block(segments: list) -> str:
+    """Prompt block summarizing attendee slots from transcript segments (empty for fallback-path transcripts)."""
+    single, multi = [], {}
+    for s in segments:
+        slot = s.get("attendeeSlot")
+        if not slot:
+            continue
+        name = s.get("speakerName") or s.get("speakerLabel") or slot
+        if s.get("slotType") == "multi":
+            people = multi.setdefault(slot, [])
+            if name not in people:
+                people.append(name)
+        else:
+            entry = name if name == slot else f"{name} (slot '{slot}')"
+            if entry not in single:
+                single.append(entry)
+    if not single and not multi:
+        return ""
+    lines = [f"Single-person: {', '.join(single) if single else 'none'}"]
+    unknown_labels = []
+    multi_desc = []
+    for slot, people in multi.items():
+        if people == [slot]:
+            multi_desc.append(f"{slot} (multiple voices, not separated)")
+            continue
+        unknown = [p for p in people if re.fullmatch(r"SPEAKER_\d+", p)]
+        unknown_labels.extend(f"{p} → {slot}" for p in unknown)
+        listed = [p for p in people if p not in unknown] + ["[unknown]"] * len(unknown)
+        multi_desc.append(f"{slot} ({len(people)} participants: {', '.join(listed)})")
+    if multi_desc:
+        lines.append(f"Multi-person: {'; '.join(multi_desc)}")
+    if unknown_labels:
+        lines.append(f"Note: SPEAKER_XX entries in the transcript belong to the multi-person slot named above ({', '.join(unknown_labels)}).")
+    return ("\n[Attendee Slots — speaker attribution from the meeting platform's per-device captions. Single-person slot names "
+            "are high-confidence; a multi-person slot is one device shared by several people]\n" + "\n".join(lines) + "\n[END ATTENDEE SLOTS]\n\n")
+
 def voiceprint_db_config() -> dict | None:
     """MySQL connection settings for firm_speaker_embeddings (same env vars as firm-web), or None if unset."""
     host = os.environ.get("FORTRESS_DB_HOST", "")
@@ -1015,23 +1403,27 @@ def main():
             except Exception as e:
                 print(f"[Transcriber] Alignment failed (non-fatal, falling back to segment-level speakers): {e}", file=sys.stderr)
 
+            # ADO#8878: a dense caption log drives the attendee-slot pipeline; the whole-meeting pyannote
+            # pipeline below runs only when the log is sparse/empty (Zoom, captions off) or the slot pipeline fails
+            slot_result = None
+            slot_log = [e for e in active_speaker_log if e.get("startMs") is not None
+                        and (e.get("name") or "").strip() not in ("", notetaker_name)]
+            if len(slot_log) >= SLOT_MIN_LOG_ENTRIES:
+                try:
+                    slot_result = run_slot_pipeline(whisper_segments, slot_log, active_log_base_ms(slot_log, roster_attendees),
+                                                    roster_attendees, org_voiceprints, audio_path, hf_token, device)
+                except Exception as e:
+                    print(f"[Transcriber] Attendee-slot pipeline failed — falling back to whole-meeting pyannote pipeline: {e}", file=sys.stderr)
+            else:
+                print(f"[Transcriber] Active speaker log insufficient ({len(slot_log)} entries) — falling back to whole-meeting pyannote pipeline")
+
             # Pyannote diarization (GPU) via WhisperX, speakers assigned per word
             speaker_name_map = {}  # SPEAKER_NN -> actual name (from roster timing overlap)
             speaker_log = []  # active speaker log minus the notetaker, possiblyMultiVoice flagged
             log_base_ms = None  # recording start in the log's timebase; None when there's no usable log
-            if hf_token:
+            if slot_result is None and hf_token:
                 try:
-                    print(f"[Transcriber] Loading pyannote diarization pipeline...")
-                    # Set offline mode only for pyannote — weights are pre-baked, Whisper downloads at runtime
-                    os.environ["HF_HUB_OFFLINE"] = "1"
-                    try:
-                        diarize_model = DiarizationPipeline(
-                            model_name="pyannote/speaker-diarization-3.1",
-                            token=hf_token,
-                            device=device,
-                        )
-                    finally:
-                        del os.environ["HF_HUB_OFFLINE"]
+                    diarize_model = load_diarization_pipeline(hf_token, device)
                     print(f"[Transcriber] Running diarization...")
                     diarization_kwargs = {}
                     if roster_attendees:
@@ -1167,7 +1559,7 @@ def main():
                                 print(f"[Transcriber] {speaker_label} left unresolved (best {best_name} {best_overlap:.1f}s, runner-up {second_overlap:.1f}s)")
                 except Exception as e:
                     print(f"[Transcriber] Diarization failed (non-fatal): {e}", file=sys.stderr)
-            else:
+            elif slot_result is None:
                 print(f"[Transcriber] WARNING: HF_TOKEN not set — skipping diarization and voice-embedding speaker resolution")
 
             # Build speaker name map from org wiki people entries
@@ -1180,24 +1572,29 @@ def main():
                 print(f"[Transcriber] Wiki people available for name resolution: {list(wiki_people.values())}")
 
             # Build transcript — segments are split at word-level speaker changes
-            result = []
-            for seg in split_segments_by_speaker(whisper_segments):
-                speaker_label = seg["speaker"]
-                speaker_name = speaker_name_map.get(speaker_label, speaker_label) if speaker_name_map else speaker_label
-                # ADO#8844: names are assigned per cluster only (voiceprint match or active-speaker-log majority
-                # vote above). The ADO#8479/#8673 per-turn log override was removed — it gave one cluster
-                # different names in different turns.
-                # ADO#8517: once a segment's name is resolved, label it by that name so a raw cluster label
-                # never maps to several people.
-                if not re.fullmatch(r"SPEAKER_\d+", speaker_name):
-                    speaker_label = speaker_name
-                result.append({
-                    "speakerLabel": speaker_label,
-                    "speakerName": speaker_name,  # actual name if resolved, else SPEAKER_NN
-                    "text": seg["text"],
-                    "startTimeMs": int(seg["start"] * 1000),
-                    "endTimeMs": int(seg["end"] * 1000)
-                })
+            if slot_result is not None:
+                result = slot_result
+            else:
+                result = []
+                for seg in split_segments_by_speaker(whisper_segments):
+                    speaker_label = seg["speaker"]
+                    speaker_name = speaker_name_map.get(speaker_label, speaker_label) if speaker_name_map else speaker_label
+                    # ADO#8844: names are assigned per cluster only (voiceprint match or active-speaker-log majority
+                    # vote above). The ADO#8479/#8673 per-turn log override was removed — it gave one cluster
+                    # different names in different turns.
+                    # ADO#8517: once a segment's name is resolved, label it by that name so a raw cluster label
+                    # never maps to several people.
+                    if not re.fullmatch(r"SPEAKER_\d+", speaker_name):
+                        speaker_label = speaker_name
+                    result.append({
+                        "speakerLabel": speaker_label,
+                        "speakerName": speaker_name,  # actual name if resolved, else SPEAKER_NN
+                        "attendeeSlot": None,  # ADO#8878: whole-meeting fallback has no caption slots
+                        "slotType": None,
+                        "text": seg["text"],
+                        "startTimeMs": int(seg["start"] * 1000),
+                        "endTimeMs": int(seg["end"] * 1000)
+                    })
 
             # Upload transcript to S3
             transcript_key = f"firm-transcripts/{meeting_id}/transcript.json"
@@ -1263,11 +1660,12 @@ def main():
             if active_speaker_log:
                 roster_start_ms = min(e["joinedAtMs"] for e in roster_attendees) if roster_attendees else None
                 active_speaker_block = build_active_speaker_block(active_speaker_log, roster_start_ms, notetaker_name)
+            attendee_slot_block = build_attendee_slot_block(result)  # ADO#8878
             corrections_block = ""
             if has_speaker_corrections:
                 corrections_block = "\n[SPEAKER CORRECTIONS — the meeting organizer manually corrected speaker attribution in this transcript. Treat the speaker names shown as authoritative; do not reassign lines to a different person.]\n\n"
             summary_prompt = f"""Analyze this meeting transcript and provide a rich, structured summary.
-{org_context_block}{attendees_block}{active_speaker_block}{corrections_block}
+{org_context_block}{attendees_block}{active_speaker_block}{attendee_slot_block}{corrections_block}
 Meeting date: {meeting_date if meeting_date else "unknown"}
 Meeting start (UTC): {meeting_start_datetime if meeting_start_datetime else "unknown"}
 
@@ -1283,6 +1681,7 @@ IMPORTANT — Org Context Usage:
    - If MEETING ATTENDEES are listed above, they are the people actually in the meeting — prefer mapping speaker labels to those names. Some labels may already be replaced with attendee names based on join/leave timing
    - Speaker labels that appear as real names (e.g. 'Fred White:') in the transcript were identified via acoustic voice matching and are high-confidence — treat them as ground truth. Apply contextual resolution only to remaining SPEAKER_XX labels.
    - If an ACTIVE SPEAKER TIMELINE is given above, use it to break ties: a speaker label whose lines fall inside a person's speaking window is likely that person
+   - If ATTENDEE SLOTS are given above, names were attributed per device by the meeting platform — treat single-person slot names as ground truth. SPEAKER_XX labels are distinct unidentified voices inside the multi-person slot they are listed under; resolve them only to people plausibly sharing that device, and keep different SPEAKER_XX labels as different people unless context clearly shows otherwise
 
 Transcript:
 {full_text[:50000]}
