@@ -507,6 +507,53 @@ def assign_names_by_embedding(cluster_embeddings, reference_embeddings, threshol
             print(f"[Transcriber] {label} unresolved by voice embedding ({reason}) scores: {scores_str}")
     return name_map
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        print(f"[Transcriber] WARNING: invalid {name}={raw!r}, using default {default}", file=sys.stderr)
+        return default
+
+def apply_diarization_params(diarize_model, duration_s: float, num_speakers: int | None) -> None:
+    """ADO#8874: tune pyannote for Teams/VoIP audio, whose defaults over-segment (one speaker split
+    across 4-5 clusters, 1-3s turns). Lower clustering threshold, bridge short silences, and scale
+    min_cluster_size to meeting length per speaker. Never fatal — on any failure, diarize at defaults."""
+    clustering_threshold = _env_float("DIARIZE_CLUSTERING_THRESHOLD", 0.60)
+    min_duration_off = _env_float("DIARIZE_MIN_DURATION_OFF", 0.5)
+    override = os.environ.get("DIARIZE_MIN_CLUSTER_SIZE_OVERRIDE", "").strip()
+    min_cluster_size, size_source = None, "pipeline default, no roster speaker count"
+    if override:
+        try:
+            min_cluster_size, size_source = int(override), "override"
+        except ValueError:
+            print(f"[Transcriber] WARNING: invalid DIARIZE_MIN_CLUSTER_SIZE_OVERRIDE={override!r}, ignoring", file=sys.stderr)
+    if min_cluster_size is None and num_speakers:
+        min_cluster_size, size_source = max(4, round((duration_s / 60.0) / num_speakers)), "computed"
+    print(f"[Transcriber] Diarization params: clustering_threshold={clustering_threshold} min_duration_off={min_duration_off} "
+          f"min_cluster_size={min_cluster_size if min_cluster_size is not None else 'default'} ({size_source})")
+    try:
+        pipeline = diarize_model.model  # whisperx DiarizationPipeline wraps pyannote's Pipeline here
+        # Merge into the current params rather than instantiating a partial dict, and only set keys the
+        # loaded clustering actually has (3.1 = agglomerative; VBx has no min_cluster_size).
+        params = pipeline.parameters(instantiated=True)
+        wanted = {"segmentation": {"min_duration_off": min_duration_off},
+                  "clustering": {"threshold": clustering_threshold}}
+        if min_cluster_size is not None:
+            wanted["clustering"]["min_cluster_size"] = min_cluster_size
+        for group, values in wanted.items():
+            for key, value in values.items():
+                if key in params.get(group, {}):
+                    params[group][key] = value
+                else:
+                    print(f"[Transcriber] WARNING: pyannote pipeline has no {group}.{key} parameter — leaving unset", file=sys.stderr)
+        pipeline.instantiate(params)
+        print(f"[Transcriber] Pyannote pipeline instantiated with {params}")
+    except Exception as e:
+        print(f"[Transcriber] WARNING: could not apply diarization params, using pipeline defaults: {e}", file=sys.stderr)
+
 def voiceprint_db_config() -> dict | None:
     """MySQL connection settings for firm_speaker_embeddings (same env vars as firm-web), or None if unset."""
     host = os.environ.get("FORTRESS_DB_HOST", "")
@@ -1001,6 +1048,8 @@ def main():
                             print(f"[Transcriber] Pyannote min_speakers={min_s}, max_speakers={max_s} (roster has {multi_voice} multi-voice entries)")
                     else:
                         print(f"[Transcriber] No roster data — pyannote in automatic speaker detection mode")
+                    apply_diarization_params(diarize_model, len(audio) / whisperx.audio.SAMPLE_RATE,
+                                             len(roster_attendees) if roster_attendees else None)
                     diarize_df = diarize_model(audio, **diarization_kwargs)
                     del diarize_model
                     free_gpu_memory()
