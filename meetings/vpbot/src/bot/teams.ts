@@ -84,6 +84,19 @@ async function waitVisible(locator: Locator, timeout: number): Promise<boolean> 
 
 /** Live captions list container (WI #8154 — confirmed via DevTools 2026-10-12) */
 const CAPTIONS_CONTAINER_SELECTOR = '[data-tid="closed-caption-v2-virtual-list-content"]';
+/** Page binding the caption MutationObserver reports finalized utterances through (WI #8877) */
+const CAPTION_BINDING_NAME = '__firmOnCaptionUtterance';
+/** A caption element unchanged for this long is treated as a finalized utterance */
+const CAPTION_SETTLE_MS = 300;
+
+/** One finalized caption utterance; times are absolute epoch ms from the page clock */
+interface CaptionUtterance {
+  name: string;
+  startMs: number;
+  endMs: number;
+  /** Already-reported element whose text changed again */
+  revision: boolean;
+}
 
 export class TeamsHandler {
   private rosterEntries: RosterEntry[] = [];
@@ -95,9 +108,9 @@ export class TeamsHandler {
   private _activeSpeakerLog: ActiveSpeakerEntry[] = [];
   private _currentSpeaker: string | null = null;
   private _currentSpeakerEntry: ActiveSpeakerEntry | null = null;
-  private _speakerPollInterval: NodeJS.Timeout | null = null;
+  private _speakerPage: Page | null = null;
+  private _speakerCaptureActive = false;
   private _speakerPollCount = 0;
-  private _lastCaptionKey: string | null = null;
   private _recordingStartMs: number = 0;
 
   /**
@@ -1954,78 +1967,201 @@ export class TeamsHandler {
    * Build a timestamped active speaker log (ms relative to recordingStartMs)
    * that firm-transcriber matches against diarized segments.
    *
-   * WI #8154: source is the live captions DOM (enableLiveCaptions must run
-   * first). Every 3s, read author/caption text node pairs from the caption
-   * container; the most recent pair's author is the current speaker. When the
-   * speaker changes, the previous interval is closed and a new one opened.
-   * Dedup is by the last-seen caption (author + text) — unchanged means no
-   * new speech since the previous poll.
+   * WI #8154: source is the live captions DOM (enableLiveCaptions must run first).
+   * WI #8877: a MutationObserver injected into the page watches the caption
+   * container. Each `closed-caption-text` element is one utterance that grows as
+   * Teams appends words; it is finalized once it has been stable for
+   * CAPTION_SETTLE_MS or a newer caption element appears. Every finalized
+   * utterance is reported back with its speaker and start/end times (caption
+   * text never leaves the page), and consecutive same-speaker utterances are
+   * merged into one log entry.
    */
   startActiveSpeakerPolling(page: Page, recordingStartMs: number): void {
     this._recordingStartMs = recordingStartMs;
     this._speakerPollCount = 0;
-    this._lastCaptionKey = null;
-    console.log('[Teams][ActiveSpeaker] Caption polling started');
+    this._speakerPage = page;
+    this._speakerCaptureActive = true;
+    this.attachCaptionObserver(page).catch(err =>
+      console.log(`[Teams][ActiveSpeaker] Caption observer setup failed (non-fatal): ${err}`)
+    );
+  }
 
-    this._speakerPollInterval = setInterval(async () => {
-      try {
-        this._speakerPollCount++;
-        const captions = await page.evaluate((containerSelector) => {
-          // Caption text lives in raw text nodes, so walk text nodes rather than querySelector
-          const container = document.querySelector(containerSelector);
-          if (!container) return null;
-          const results: Array<{ name: string; text: string }> = [];
-          const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
-          let currentName: string | null = null;
-          let node: Text | null;
-          while ((node = walker.nextNode() as Text | null)) {
-            const text = node.textContent?.trim() || '';
-            if (!text) continue;
-            const parentDataTid = node.parentElement?.getAttribute('data-tid');
-            if (parentDataTid === 'author') {
-              currentName = text;
-            } else if (parentDataTid === 'closed-caption-text' && currentName) {
-              results.push({ name: currentName, text });
-              currentName = null;
-            }
+  private async attachCaptionObserver(page: Page): Promise<void> {
+    try {
+      // Bindings survive navigation and cannot be registered twice on one page
+      await page.exposeFunction(CAPTION_BINDING_NAME, (u: CaptionUtterance) => this.handleCaptionUtterance(u));
+    } catch (err) {
+      if (!String(err).includes('has been already registered')) throw err;
+    }
+
+    const found = await page.waitForSelector(CAPTIONS_CONTAINER_SELECTOR, { state: 'attached', timeout: 30000 })
+      .then(() => true).catch(() => false);
+    if (!found) {
+      console.log('[Teams][ActiveSpeaker] Caption container not found — active speaker log will be empty');
+      return;
+    }
+    if (!this._speakerCaptureActive) return;
+
+    await page.evaluate(({ containerSelector, bindingName, settleMs }) => {
+      const w = window as any;
+      w.__firmCaptionObserver?.stop();
+
+      const CAPTION_SELECTOR = '[data-tid="closed-caption-text"]';
+      const AUTHOR_SELECTOR = '[data-tid="author"]';
+      type State = { name: string; text: string; startMs: number; endMs: number; finalized: boolean; timer: number | null };
+      const states = new Map<Element, State>();
+      // Virtual-list re-renders can recreate old caption nodes; skip ones already reported
+      const reportedKeys: string[] = [];
+      let lastName = '';
+      let container: Element | null = null;
+
+      const authorFor = (el: Element): string => {
+        let node: Element | null = el;
+        for (let depth = 0; node && depth < 6; depth++, node = node.parentElement) {
+          const author = node.querySelector(AUTHOR_SELECTOR);
+          const name = author?.textContent?.trim();
+          if (name) return name;
+        }
+        return lastName;
+      };
+
+      const finalize = (el: Element, collect?: unknown[]) => {
+        const s = states.get(el);
+        if (!s || s.timer === null) return;
+        clearTimeout(s.timer);
+        s.timer = null;
+        if (!s.name || !s.text) return;
+        const revision = s.finalized;
+        if (!revision) {
+          const key = `${s.name}\u0000${s.text}`;
+          if (reportedKeys.includes(key)) return;
+          reportedKeys.push(key);
+          if (reportedKeys.length > 200) reportedKeys.shift();
+        }
+        s.finalized = true;
+        const utterance = { name: s.name, startMs: s.startMs, endMs: s.endMs, revision };
+        if (collect) collect.push(utterance);
+        else w[bindingName](utterance);
+      };
+
+      const touch = (el: Element) => {
+        const text = el.textContent?.trim() || '';
+        const now = Date.now();
+        let s = states.get(el);
+        if (!s) {
+          // A new utterance started: anything still pending is complete
+          for (const other of states.keys()) finalize(other);
+          const name = authorFor(el);
+          if (name) lastName = name;
+          s = { name, text: '', startMs: now, endMs: now, finalized: false, timer: null };
+          states.set(el, s);
+        }
+        if (text === s.text) return;
+        s.text = text;
+        s.endMs = now;
+        if (s.timer !== null) clearTimeout(s.timer);
+        s.timer = window.setTimeout(() => finalize(el), settleMs);
+      };
+
+      const observer = new MutationObserver(mutations => {
+        const touched = new Set<Element>();
+        for (const m of mutations) {
+          const target = m.target instanceof Element ? m.target : m.target.parentElement;
+          const caption = target?.closest(CAPTION_SELECTOR);
+          if (caption) touched.add(caption);
+          m.addedNodes.forEach(n => {
+            if (!(n instanceof Element)) return;
+            if (n.matches(CAPTION_SELECTOR)) touched.add(n);
+            n.querySelectorAll(CAPTION_SELECTOR).forEach(c => touched.add(c));
+          });
+        }
+        touched.forEach(touch);
+        // Drop detached elements that are done (virtual list scrolls them away)
+        for (const [el, s] of states) {
+          if (!el.isConnected && s.timer === null) states.delete(el);
+        }
+      });
+
+      const attach = () => {
+        const next = document.querySelector(containerSelector);
+        if (!next || next === container) return;
+        observer.disconnect();
+        container = next;
+        // Captions already on screen predate the observer — don't report them with wrong timing
+        container.querySelectorAll(CAPTION_SELECTOR).forEach(el => {
+          if (!states.has(el)) {
+            states.set(el, { name: authorFor(el), text: el.textContent?.trim() || '', startMs: 0, endMs: 0, finalized: true, timer: null });
           }
-          return results;
-        }, CAPTIONS_CONTAINER_SELECTOR);
+        });
+        observer.observe(container, { childList: true, subtree: true, characterData: true });
+      };
+      attach();
+      // Teams may replace the container (e.g. captions toggled); re-attach when it does
+      const reattach = window.setInterval(() => { if (!container?.isConnected) attach(); }, 2000);
 
-        // Status in CloudWatch: first poll, then ~every 60s
-        if (this._speakerPollCount === 1 || this._speakerPollCount % 20 === 0) {
-          console.log(`[Teams][ActiveSpeaker] Caption poll #${this._speakerPollCount}: ` +
-            (captions === null ? 'caption container not found' : `${captions.length} caption entries`));
-        }
-        if (!captions || captions.length === 0) return;
+      w.__firmCaptionObserver = {
+        stop: () => {
+          observer.disconnect();
+          clearInterval(reattach);
+          const pending: unknown[] = [];
+          for (const el of states.keys()) finalize(el, pending);
+          states.clear();
+          delete w.__firmCaptionObserver;
+          return pending;
+        },
+      };
+    }, { containerSelector: CAPTIONS_CONTAINER_SELECTOR, bindingName: CAPTION_BINDING_NAME, settleMs: CAPTION_SETTLE_MS });
+    console.log('[Teams][ActiveSpeaker] Caption MutationObserver attached');
+  }
 
-        const latest = captions[captions.length - 1];
-        const key = `${latest.name}\u0000${latest.text}`;
-        if (key === this._lastCaptionKey) return;
-        this._lastCaptionKey = key;
+  /** Fold one finalized caption utterance (absolute epoch ms) into the speaker log */
+  private handleCaptionUtterance(u: CaptionUtterance): void {
+    if (!this._speakerCaptureActive || !u?.name) return;
+    const startMs = u.startMs - this._recordingStartMs;
+    const endMs = u.endMs - this._recordingStartMs;
+    const current = this._currentSpeakerEntry;
 
-        if (latest.name !== this._currentSpeaker) {
-          const nowMs = Date.now() - this._recordingStartMs;
-          if (this._currentSpeakerEntry) this._currentSpeakerEntry.endMs = nowMs;
-          this._currentSpeakerEntry = { name: latest.name, startMs: nowMs };
-          this._activeSpeakerLog.push(this._currentSpeakerEntry);
-          this._currentSpeaker = latest.name;
-          console.log(`[Teams][ActiveSpeaker] ${latest.name} at ${nowMs}ms (via captions)`);
-        }
-      } catch (err) {
-        console.log(`[Teams][ActiveSpeaker] Caption poll failed (non-fatal): ${err}`);
-      }
-    }, 3000);
+    // A late text revision only extends its own speaker's open turn
+    if (u.revision) {
+      if (current && u.name === this._currentSpeaker) current.endMs = Math.max(current.endMs ?? endMs, endMs);
+      return;
+    }
+
+    this._speakerPollCount++;
+    if (this._speakerPollCount === 1 || this._speakerPollCount % 50 === 0) {
+      console.log(`[Teams][ActiveSpeaker] Caption entry #${this._speakerPollCount}: ${u.name} at ${startMs}ms`);
+    }
+
+    if (current && u.name === this._currentSpeaker) {
+      current.endMs = Math.max(current.endMs ?? endMs, endMs);
+      return;
+    }
+    // Keep turns non-overlapping: the previous turn ends no later than this one starts
+    if (current) current.endMs = Math.max(current.startMs, Math.min(current.endMs ?? startMs, startMs));
+    this._currentSpeakerEntry = { name: u.name, startMs, endMs };
+    this._activeSpeakerLog.push(this._currentSpeakerEntry);
+    this._currentSpeaker = u.name;
   }
 
   /**
-   * Stop active speaker polling and close the open entry
+   * Stop caption capture, flush any in-progress utterances and close the open entry
    */
   async stopActiveSpeakerPolling(): Promise<ActiveSpeakerEntry[]> {
-    if (this._speakerPollInterval) {
-      clearInterval(this._speakerPollInterval);
-      this._speakerPollInterval = null;
+    const page = this._speakerPage;
+    this._speakerPage = null;
+    if (page && !page.isClosed()) {
+      try {
+        const pending = await Promise.race([
+          page.evaluate(() => (window as any).__firmCaptionObserver?.stop() ?? []) as Promise<CaptionUtterance[]>,
+          new Promise<CaptionUtterance[]>(resolve => setTimeout(() => resolve([]), 3000)),
+        ]);
+        for (const u of pending) this.handleCaptionUtterance(u);
+      } catch (err) {
+        console.log(`[Teams][ActiveSpeaker] Caption observer stop failed (non-fatal): ${err}`);
+      }
     }
+    this._speakerCaptureActive = false;
+
     const nowMs = Date.now() - this._recordingStartMs;
     if (this._currentSpeakerEntry && this._currentSpeakerEntry.endMs === undefined) {
       this._currentSpeakerEntry.endMs = nowMs;
@@ -2033,7 +2169,7 @@ export class TeamsHandler {
     this._currentSpeakerEntry = null;
     this._currentSpeaker = null;
     this._activeSpeakerLog.sort((a, b) => a.startMs - b.startMs);
-    console.log(`[Teams][ActiveSpeaker] Polling stopped (${this._activeSpeakerLog.length} entries, source: captions)`);
+    console.log(`[Teams][ActiveSpeaker] Capture stopped (${this._speakerPollCount} utterances, ${this._activeSpeakerLog.length} entries, source: captions)`);
     return this._activeSpeakerLog;
   }
 
