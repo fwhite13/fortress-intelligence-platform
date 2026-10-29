@@ -1206,15 +1206,21 @@ public class MeetingsApiController : ControllerBase
     /// <summary>
     /// POST /api/meetings/{id}/retranscribe
     /// Triggers the transcription pipeline for a meeting via MeetingService.
+    /// WI #8875: optional body carries per-run diarization overrides; omitted fields use system defaults.
     /// </summary>
     [HttpPost("{id}/retranscribe")]
     [Authorize]
-    public async Task<IActionResult> Retranscribe(long id)
+    public async Task<IActionResult> Retranscribe(long id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] RetranscribeRequest? request = null)
     {
         var (meeting, user, error) = await ResolveOwnedMeetingWithUser(id);
         if (error != null) return error;
 
-        var (success, serviceError) = await _meetingService.RetranscribeAsync(id, user!.Id);
+        var diarization = new DiarizationOverrides(request?.DiarizeClusteringThreshold, request?.DiarizeMinDurationOff, request?.DiarizeMinClusterSize);
+        var validationError = diarization.Validate();
+        if (validationError != null) return BadRequest(new { error = validationError });
+
+        var (success, serviceError) = await _meetingService.RetranscribeAsync(id, user!.Id, diarization.IsEmpty ? null : diarization);
         if (!success)
             return serviceError switch
             {
@@ -1660,6 +1666,14 @@ public class MeetingsApiController : ControllerBase
         bool Force = false,
         DateTime? StartDatetime = null,
         string? CalendarEventId = null);
+}
+
+/// <summary>WI #8875: optional per-run diarization overrides for POST /api/meetings/{id}/retranscribe.</summary>
+public class RetranscribeRequest
+{
+    public float? DiarizeClusteringThreshold { get; set; }
+    public float? DiarizeMinDurationOff { get; set; }
+    public int? DiarizeMinClusterSize { get; set; }
 }
 
 public class ChannelPostRequest
