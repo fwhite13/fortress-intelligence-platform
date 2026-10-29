@@ -113,13 +113,21 @@
                     }
                     @if (_isAdmin && !string.IsNullOrEmpty(_meeting.AudioS3Key))
                     {
-                        <MudButton Variant="Variant.Outlined"
-                                   StartIcon="@Icons.Material.Filled.Refresh"
-                                   Color="Color.Warning"
-                                   Disabled="_retranscribing"
-                                   OnClick="RetranscribeAsync">
-                            @(_retranscribing ? "Retranscribing..." : "Retranscribe")
-                        </MudButton>
+                        @* WI #8875: hover reveals Standard (as before) and Advanced (per-run diarization overrides) *@
+                        <MudMenu Label="@(_retranscribing ? "Retranscribing..." : "Retranscribe")"
+                                 StartIcon="@Icons.Material.Filled.Refresh"
+                                 EndIcon="@Icons.Material.Filled.KeyboardArrowDown"
+                                 Variant="Variant.Outlined"
+                                 Color="Color.Warning"
+                                 ActivationEvent="@MouseEvent.MouseOver"
+                                 Disabled="_retranscribing">
+                            <MudMenuItem OnClick="@(() => RetranscribeAsync())">
+                                <MudIcon Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" Class="mr-2" />Standard
+                            </MudMenuItem>
+                            <MudMenuItem OnClick="AdvancedRetranscribeAsync">
+                                <MudIcon Icon="@Icons.Material.Filled.Tune" Size="Size.Small" Class="mr-2" />Advanced...
+                            </MudMenuItem>
+                        </MudMenu>
                     }
                 </MudStack>
                 @if (_retranscribeError != null)
@@ -610,7 +618,29 @@
         Navigation.NavigateTo($"/api/meetings/{_meeting.Id}/audio", forceLoad: true);
     }
 
-    private async Task RetranscribeAsync()
+    private async Task AdvancedRetranscribeAsync()
+    {
+        if (_meeting == null || _user == null || _retranscribing) return;
+
+        // WI #8875: pre-populate with what the transcriber would compute on its own (WI #8874 formula).
+        var attendeeCount = _meeting.Participants.Count;
+        var parameters = new DialogParameters<AdvancedRetranscribeDialog>
+        {
+            { x => x.DefaultMinClusterSize, DiarizationOverrides.ComputeMinClusterSize(_meeting.DurationSeconds, attendeeCount) },
+            { x => x.DurationMinutes, _meeting.DurationSeconds.HasValue ? (int)Math.Round(_meeting.DurationSeconds.Value / 60.0) : null },
+            { x => x.AttendeeCount, attendeeCount }
+        };
+        var options = new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = await DialogService.ShowAsync<AdvancedRetranscribeDialog>("Advanced Retranscribe", parameters, options);
+        var result = await dialog.Result;
+        if (result == null || result.Canceled || result.Data is not DiarizationOverrides overrides)
+            return;
+
+        // The modal itself is the confirmation; only the speaker-corrections warning still applies.
+        await RetranscribeAsync(overrides.IsEmpty ? null : overrides, confirmedByModal: true);
+    }
+
+    private async Task RetranscribeAsync(DiarizationOverrides? diarization = null, bool confirmedByModal = false)
     {
         if (_meeting == null || _user == null || _retranscribing) return;
 
@@ -623,6 +653,10 @@
                 "Speaker corrections",
                 "This meeting has manual speaker corrections. Retranscribing will reset the transcript — your corrections will be preserved but won't carry over automatically. Continue?",
                 yesText: "Continue", cancelText: "Cancel") == true;
+        }
+        else if (confirmedByModal)
+        {
+            confirmed = true;
         }
         else
         {
@@ -638,7 +672,7 @@
 
         try
         {
-            var (success, error) = await MeetingService.RetranscribeAsync(_meeting.Id, _user.Id);
+            var (success, error) = await MeetingService.RetranscribeAsync(_meeting.Id, _user.Id, diarization);
 
             if (success)
             {

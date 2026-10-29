@@ -816,7 +816,7 @@ public class MeetingService
     /// Fetches the meeting record to get AudioS3Key and StartedAt, then submits the Batch job.
     /// Returns the Batch job ID. Throws if AudioS3Key is null/empty.
     /// </summary>
-    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, bool summarizeOnly = false)
+    public async Task<string> SubmitTranscriptionJobAsync(long meetingId, bool summarizeOnly = false, DiarizationOverrides? diarization = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = await db.Meetings.Include(m => m.CreatedByUser).FirstOrDefaultAsync(m => m.Id == meetingId);
@@ -834,7 +834,8 @@ public class MeetingService
         var activeSpeakerTimeline = meeting.ActiveSpeakerTimeline;
         var jobId = await _batchService.SubmitTranscriptionJobAsync(meetingId, audioS3Key, meetingDate, creatorEntraOid, rosterTimeline, activeSpeakerTimeline,
             meetingStartDatetime: meeting.StartDatetime ?? meeting.StartedAt,
-            summarizeOnly: summarizeOnly, transcriptS3Key: meeting.TranscriptS3Key, speakerCorrections: meeting.SpeakerCorrections);
+            summarizeOnly: summarizeOnly, transcriptS3Key: meeting.TranscriptS3Key, speakerCorrections: meeting.SpeakerCorrections,
+            diarization: diarization);
         _logger.LogInformation("FIRM: SubmitTranscriptionJobAsync submitted Batch job {JobId} for meeting {MeetingId}", jobId, meetingId);
         return jobId;
     }
@@ -843,8 +844,9 @@ public class MeetingService
     /// Submits an AWS Batch transcription job for the meeting's audio (ADO#1844).
     /// Replaces the previous vpbot HTTP call — firm-web now submits Batch directly.
     /// Returns (true, null) on success, (false, errorMessage) on failure.
+    /// WI #8875: <paramref name="diarization"/> carries optional per-run diarization overrides.
     /// </summary>
-    public async Task<(bool success, string? error)> RetranscribeAsync(long meetingId, Guid userId)
+    public async Task<(bool success, string? error)> RetranscribeAsync(long meetingId, Guid userId, DiarizationOverrides? diarization = null)
     {
         var meeting = await GetMeetingAsync(meetingId, userId);
         if (meeting == null)
@@ -860,7 +862,7 @@ public class MeetingService
 
         try
         {
-            var jobId = await SubmitTranscriptionJobAsync(targetMeetingId);
+            var jobId = await SubmitTranscriptionJobAsync(targetMeetingId, diarization: diarization);
 
             // Reset meeting status to Transcribing
             await using var db = await _dbFactory.CreateDbContextAsync();
