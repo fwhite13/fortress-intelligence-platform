@@ -132,7 +132,10 @@ public class FirmDbContext : DbContext
             // DB-level race guard (see NormalizedMeetingUrl doc comment on FirmMeeting): only primaries
             // ever populate NormalizedMeetingUrl, so this unique index only ever constrains primaries.
             // NOTE: FIRM does not use EF migrations (see class-level comment) — the actual DB-level
-            // index is created by the idempotent raw SQL in DatabaseInitializationService.
+            // index is created by the idempotent raw SQL in DatabaseInitializationService. In the database it is
+            // on (normalized_meeting_url_hash, start_datetime) — a generated SHA-256 column, because the raw URL
+            // exceeds InnoDB's key length limit. The hash column is intentionally not mapped here (EF must not
+            // write a generated column); this model entry is documentation only.
             entity.HasIndex(e => new { e.NormalizedMeetingUrl, e.StartDatetime })
                 .IsUnique()
                 .HasDatabaseName("uk_fm_normalized_url_start")

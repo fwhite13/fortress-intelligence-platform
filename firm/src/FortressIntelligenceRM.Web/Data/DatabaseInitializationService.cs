@@ -295,7 +295,14 @@ public class DatabaseInitializationService : IHostedService
                 // Only primary rows ever populate normalized_meeting_url (see FirmMeeting.NormalizedMeetingUrl
                 // doc comment) — MySQL unique indexes allow unlimited NULLs, so this only ever constrains
                 // primaries, the same technique uk_fm_created_by_calendar_event_id already relies on.
-                "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_normalized_url_start (normalized_meeting_url, start_datetime)",
+                // 2026-11-10: the original (normalized_meeting_url, start_datetime) index could never be created —
+                // VARCHAR(2000) utf8mb4 is up to 8000 bytes, over InnoDB's 3072-byte key limit ("Specified key was
+                // too long"), so prod and RN ran without the race guard. Index a stored SHA-256 of the URL instead:
+                // exact (no prefix collisions), fixed 64 chars, and NULL for non-primary rows (SHA2(NULL) is NULL, so
+                // unique still permits unlimited NULLs). The index keeps the original name; the app detects the race
+                // by MySQL error 1062, not by index name.
+                "ALTER TABLE firm_meetings ADD COLUMN normalized_meeting_url_hash CHAR(64) GENERATED ALWAYS AS (SHA2(normalized_meeting_url, 256)) STORED NULL",
+                "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_normalized_url_start (normalized_meeting_url_hash, start_datetime)",
                 // WI #7297 — roster timeline for Teams meetings (soft LLM guidance for transcription)
                 "ALTER TABLE firm_meetings ADD COLUMN roster_timeline JSON NULL",
                 // WI #7299 — summary version, bumped on each speaker-correction re-summarization.
