@@ -802,6 +802,13 @@ def _turn_at(turns: list, start_s: float, end_s: float):
         return best
     return min(turns, key=lambda t: max(t[0] - end_s, start_s - t[1], 0.0))[2]
 
+def slot_voice_name(slot: str, n: int) -> str:
+    """Display name for the n-th (1-based) voice in a multi-person slot that voiceprints could not name."""
+    return f"{slot} (voice {n})"
+
+def is_slot_voice_name(name: str, slot: str) -> bool:
+    return re.fullmatch(re.escape(slot) + r" \(voice \d+\)", name or "") is not None
+
 def run_slot_pipeline(whisper_segments, speaker_log, recording_start_ms, roster_attendees, voiceprints,
                       audio_path, hf_token, device) -> list:
     """
@@ -881,23 +888,29 @@ def run_slot_pipeline(whisper_segments, speaker_log, recording_start_ms, roster_
     final = _split_by_key(segments, lambda w: key_at(w["slot"], w["start"], w["end"]),
                           lambda seg: key_at(seg["slot"], seg["start"], seg["end"]))
 
-    # Unresolved sub-clusters are numbered across the whole transcript, so SPEAKER_XX is unique across slots
-    speaker_ids = {}
+    # Unresolved sub-clusters are numbered across the whole transcript, so the SPEAKER_XX label (the stable
+    # anchor speaker corrections attach to) is unique across slots. The displayed name is the slot's own name plus a
+    # per-slot voice number ("Fred White (voice 2)"): the caption slot already says whose device it is, so an
+    # unmatched voice is never shown as an anonymous SPEAKER_XX.
+    speaker_ids, voice_names = {}, {}
+    voices_per_slot = {}
     result = []
     for chunk in final:
         slot, cluster = chunk["speaker"]
         if cluster is None:
-            label = slot_names.get(slot, slot)  # multi-person slot that couldn't be diarized keeps the slot name
+            label = name = slot_names.get(slot, slot)  # multi-person slot that couldn't be diarized keeps the slot name
         elif sub_names[slot].get(cluster):
-            label = sub_names[slot][cluster]
+            label = name = sub_names[slot][cluster]
         else:
             if (slot, cluster) not in speaker_ids:
                 speaker_ids[(slot, cluster)] = f"SPEAKER_{len(speaker_ids):02d}"
-                print(f"[Transcriber] Slot '{slot}' {cluster} → {speaker_ids[(slot, cluster)]}")
-            label = speaker_ids[(slot, cluster)]
+                voices_per_slot[slot] = voices_per_slot.get(slot, 0) + 1
+                voice_names[(slot, cluster)] = slot_voice_name(slot, voices_per_slot[slot])
+                print(f"[Transcriber] Slot '{slot}' {cluster} → {speaker_ids[(slot, cluster)]} ({voice_names[(slot, cluster)]})")
+            label, name = speaker_ids[(slot, cluster)], voice_names[(slot, cluster)]
         result.append({
             "speakerLabel": label,
-            "speakerName": label,
+            "speakerName": name,
             "attendeeSlot": slot,
             "slotType": slot_types.get(slot, "single"),
             "text": chunk["text"],
@@ -931,14 +944,14 @@ def build_attendee_slot_block(segments: list) -> str:
         if people == [slot]:
             multi_desc.append(f"{slot} (multiple voices, not separated)")
             continue
-        unknown = [p for p in people if re.fullmatch(r"SPEAKER_\d+", p)]
+        unknown = [p for p in people if re.fullmatch(r"SPEAKER_\d+", p) or is_slot_voice_name(p, slot)]
         unknown_labels.extend(f"{p} → {slot}" for p in unknown)
         listed = [p for p in people if p not in unknown] + ["[unknown]"] * len(unknown)
         multi_desc.append(f"{slot} ({len(people)} participants: {', '.join(listed)})")
     if multi_desc:
         lines.append(f"Multi-person: {'; '.join(multi_desc)}")
     if unknown_labels:
-        lines.append(f"Note: SPEAKER_XX entries in the transcript belong to the multi-person slot named above ({', '.join(unknown_labels)}).")
+        lines.append(f"Note: SPEAKER_XX and '<slot> (voice N)' entries in the transcript are unidentified voices on the multi-person slot (device) named above ({', '.join(unknown_labels)}).")
     return ("\n[Attendee Slots — speaker attribution from the meeting platform's per-device captions. Single-person slot names "
             "are high-confidence; a multi-person slot is one device shared by several people]\n" + "\n".join(lines) + "\n[END ATTENDEE SLOTS]\n\n")
 
@@ -1681,7 +1694,7 @@ IMPORTANT — Org Context Usage:
    - If MEETING ATTENDEES are listed above, they are the people actually in the meeting — prefer mapping speaker labels to those names. Some labels may already be replaced with attendee names based on join/leave timing
    - Speaker labels that appear as real names (e.g. 'Fred White:') in the transcript were identified via acoustic voice matching and are high-confidence — treat them as ground truth. Apply contextual resolution only to remaining SPEAKER_XX labels.
    - If an ACTIVE SPEAKER TIMELINE is given above, use it to break ties: a speaker label whose lines fall inside a person's speaking window is likely that person
-   - If ATTENDEE SLOTS are given above, names were attributed per device by the meeting platform — treat single-person slot names as ground truth. SPEAKER_XX labels are distinct unidentified voices inside the multi-person slot they are listed under; resolve them only to people plausibly sharing that device, and keep different SPEAKER_XX labels as different people unless context clearly shows otherwise
+   - If ATTENDEE SLOTS are given above, names were attributed per device by the meeting platform — treat single-person slot names as ground truth. SPEAKER_XX labels and '<slot name> (voice N)' labels are distinct unidentified voices inside the multi-person slot they are listed under (a '(voice N)' label is not a person's name, only a voice on that device); resolve them only to people plausibly sharing that device, and keep different SPEAKER_XX / (voice N) labels as different people unless context clearly shows otherwise
 
 Transcript:
 {full_text[:50000]}

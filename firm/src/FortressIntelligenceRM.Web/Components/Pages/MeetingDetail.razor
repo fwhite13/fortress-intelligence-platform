@@ -789,7 +789,7 @@
         index >= 0 && index < _effectiveSpeakerNames.Length ? _effectiveSpeakerNames[index] : null;
 
     private static bool IsDiarizationLabel(string? name) =>
-        name != null && System.Text.RegularExpressions.Regex.IsMatch(name, @"^SPEAKER_\d+$");
+        name != null && System.Text.RegularExpressions.Regex.IsMatch(name, @"^SPEAKER_\d+$|\(voice \d+\)$");
 
     private async Task OpenSpeakerCorrectionAsync(FirmMeetingTranscript segment, string mode)
     {
