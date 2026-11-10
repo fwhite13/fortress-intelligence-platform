@@ -9,7 +9,7 @@
 import { chromium } from 'playwright-extra';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { EventEmitter } from 'events';
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, spawn, execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -215,6 +215,8 @@ export class MeetingBot extends EventEmitter {
         args: [
           ...baseArgs,
           ...(isTeams ? teamsArgs : otherArgs),
+          // Diagnostics/experiments: space-separated extra Chrome flags (e.g. --disable-dev-shm-usage)
+          ...((process.env.FIRM_CHROME_EXTRA_ARGS || '').split(/\s+/).filter(Boolean)),
         ],
         ignoreDefaultArgs: ['--mute-audio'],
       });
@@ -235,6 +237,7 @@ export class MeetingBot extends EventEmitter {
       });
 
       this.page = await this.context.newPage();
+      this.attachCrashDiagnostics(this.page);
 
       // Navigate to meeting URL
       // For Teams, process the URL (add query hints, keep original URL — no /_#/ rewriting)
@@ -365,6 +368,38 @@ export class MeetingBot extends EventEmitter {
       this.emit('error', error as Error);
       throw error;
     }
+  }
+
+  /**
+   * Crash diagnostics (2026-11-10, vpbot page crashes in mtgs 167/169/179): log renderer crash,
+   * page errors, browser disconnect, and container memory / /dev/shm / process RSS every 3s so a
+   * crash can be attributed to OOM vs shared memory vs a renderer fault.
+   */
+  private attachCrashDiagnostics(page: Page): void {
+    page.on('crash', () => console.log('[Diag] PAGE CRASH event (renderer process died)'));
+    page.on('pageerror', (err) => console.log(`[Diag] pageerror: ${String(err).slice(0, 300)}`));
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') console.log(`[Diag] console.error: ${msg.text().slice(0, 300)}`);
+    });
+    page.on('framedetached', (f) => console.log(`[Diag] framedetached: ${f.url().slice(0, 120)}`));
+    this.browser?.on('disconnected', () => console.log('[Diag] BROWSER disconnected'));
+
+    const read = (f: string): string => { try { return fs.readFileSync(f, 'utf8').trim(); } catch { return 'n/a'; } };
+    const started = Date.now();
+    const timer = setInterval(() => {
+      try {
+        const sh = execSync("df -k /dev/shm | tail -1 | awk '{print $3\"/\"$2\"KB\"}'", { timeout: 2000 }).toString().trim();
+        const top = execSync("ps -eo rss,comm --sort=-rss | head -5 | awk '{printf \"%s:%dMB \", $2, $1/1024}'", { timeout: 2000 }).toString().trim();
+        const mem = Math.round(Number(read('/sys/fs/cgroup/memory.current')) / 1048576);
+        const max = read('/sys/fs/cgroup/memory.max');
+        const events = read('/sys/fs/cgroup/memory.events').replace(/\n/g, ' ');
+        const cpu = read('/proc/loadavg').split(' ').slice(0, 3).join(' ');
+        console.log(`[Diag] t+${Math.round((Date.now() - started) / 1000)}s mem=${mem}MB/${max} shm=${sh} load=${cpu} top=[${top}] events=[${events}]`);
+      } catch (e) {
+        console.log(`[Diag] sampler error: ${e}`);
+      }
+    }, 3000);
+    timer.unref();
   }
 
   /**
