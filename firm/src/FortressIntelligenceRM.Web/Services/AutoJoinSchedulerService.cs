@@ -72,6 +72,15 @@ public class AutoJoinSchedulerService
         await UpsertScheduleAsync(meetingId, meetingUrl, startDatetimeUtc, fireAt);
     }
 
+    /// <summary>
+    /// True when this instance can actually create EventBridge auto-join schedules
+    /// (Firm:AutoJoinEnabled plus Lambda/role ARNs configured). Callers that insert
+    /// meetings expecting an auto-join (e.g. calendar auto-sync) must only run where this
+    /// is true — otherwise a meeting is saved as Scheduled with no schedule and never joins.
+    /// </summary>
+    public bool IsSchedulingAvailable =>
+        Enabled && !string.IsNullOrEmpty(LambdaArn) && !string.IsNullOrEmpty(SchedulerRoleArn);
+
     private bool CanSchedule(long meetingId)
     {
         if (!Enabled)

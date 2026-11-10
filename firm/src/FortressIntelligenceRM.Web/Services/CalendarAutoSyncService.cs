@@ -41,6 +41,17 @@ public class CalendarAutoSyncService : IHostedService, IDisposable
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        // Dev and prod web share one database. If an instance that cannot create EventBridge
+        // schedules (AutoJoinEnabled=false, e.g. dev) polled calendars, it would insert meetings
+        // as Scheduled with no auto-join schedule, and those meetings never join (only a later
+        // prod restart's startup backfill would repair them). Only run the sync where scheduling
+        // is available.
+        if (!_autoJoinScheduler.IsSchedulingAvailable)
+        {
+            _logger.LogWarning("[AutoSync] Calendar auto-sync NOT started: AutoJoin scheduling is unavailable on this instance (Firm:AutoJoinEnabled=false or Lambda/scheduler role ARN not configured). Meetings are only auto-added by an instance that can schedule their auto-join.");
+            return Task.CompletedTask;
+        }
+
         var intervalMinutes = _config.GetValue<int>("Firm:CalendarSyncIntervalMinutes", 15);
         _logger.LogInformation("[AutoSync] Service started. Poll interval: {Minutes}m", intervalMinutes);
         _timer = new Timer(PollAsync, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(intervalMinutes));
