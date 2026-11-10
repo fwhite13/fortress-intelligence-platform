@@ -59,9 +59,13 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Google Chrome stable for Teams authenticated join
+# Install Google Chrome for Teams authenticated join — PINNED version.
+# Floating "current" shipped Chrome 156.0.8078.73 / 157.x in Nov 2026 and the browser page
+# crashed ("Target crashed") ~30-70s into larger meetings (FIRM mtgs 167, 169). 156.0.8078.47
+# ran clean for weeks. Bump deliberately, and test a multi-person meeting before promoting.
+ARG CHROME_VERSION=156.0.8078.47-1
 RUN apt-get update && apt-get install -y xdg-utils \
-    && wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && wget -q -O /tmp/google-chrome.deb "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${CHROME_VERSION}_amd64.deb" \
     && apt-get install -y /tmp/google-chrome.deb \
     && rm /tmp/google-chrome.deb \
     && rm -rf /var/lib/apt/lists/*
