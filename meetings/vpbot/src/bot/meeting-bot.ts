@@ -386,15 +386,63 @@ export class MeetingBot extends EventEmitter {
 
     const read = (f: string): string => { try { return fs.readFileSync(f, 'utf8').trim(); } catch { return 'n/a'; } };
     const started = Date.now();
-    const timer = setInterval(() => {
+    let teamsBuildLogged = false;
+    const timer = setInterval(async () => {
       try {
         const sh = execSync("df -k /dev/shm | tail -1 | awk '{print $3\"/\"$2\"KB\"}'", { timeout: 2000 }).toString().trim();
-        const top = execSync("ps -eo rss,comm --sort=-rss | head -5 | awk '{printf \"%s:%dMB \", $2, $1/1024}'", { timeout: 2000 }).toString().trim();
-        const mem = Math.round(Number(read('/sys/fs/cgroup/memory.current')) / 1048576);
-        const max = read('/sys/fs/cgroup/memory.max');
-        const events = read('/sys/fs/cgroup/memory.events').replace(/\n/g, ' ');
-        const cpu = read('/proc/loadavg').split(' ').slice(0, 3).join(' ');
-        console.log(`[Diag] t+${Math.round((Date.now() - started) / 1000)}s mem=${mem}MB/${max} shm=${sh} load=${cpu} top=[${top}] events=[${events}]`);
+        // cgroup v2 first, then v1
+        let memBytes = Number(read('/sys/fs/cgroup/memory.current'));
+        let memMax = read('/sys/fs/cgroup/memory.max');
+        let events = read('/sys/fs/cgroup/memory.events').replace(/\n/g, ' ');
+        if (!Number.isFinite(memBytes)) {
+          memBytes = Number(read('/sys/fs/cgroup/memory/memory.usage_in_bytes'));
+          memMax = read('/sys/fs/cgroup/memory/memory.limit_in_bytes');
+          events = read('/sys/fs/cgroup/memory/memory.oom_control').replace(/\n/g, ' ');
+        }
+        const mem = Number.isFinite(memBytes) ? Math.round(memBytes / 1048576) : -1;
+        // Per-process RSS grouped by Chrome process type
+        const ps = execSync('ps -eo rss=,args= --sort=-rss', { timeout: 2000 }).toString().split('\n').filter(Boolean);
+        const byType: Record<string, number> = {};
+        let total = 0;
+        let biggest = '';
+        ps.forEach((line, i) => {
+          const m = line.trim().match(/^(\d+)\s+(.*)$/);
+          if (!m) return;
+          const mb = Number(m[1]) / 1024;
+          total += mb;
+          const t = /--type=([a-z-]+)/.exec(m[2])?.[1] ?? (/chrome/.test(m[2]) ? 'chrome-browser' : (m[2].split(' ')[0].split('/').pop() || 'other'));
+          byType[t] = (byType[t] || 0) + mb;
+          if (i === 0) biggest = `${t}:${Math.round(mb)}MB`;
+        });
+        const types = Object.entries(byType).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${k}=${Math.round(v)}`).join(',');
+        const load = read('/proc/loadavg').split(' ').slice(0, 3).join(' ');
+        let jsHeap = 'n/a';
+        try {
+          jsHeap = await Promise.race([
+            page.evaluate(() => { const m = (performance as any).memory; return m ? `${Math.round(m.usedJSHeapSize / 1048576)}/${Math.round(m.totalJSHeapSize / 1048576)}/${Math.round(m.jsHeapSizeLimit / 1048576)}MB` : 'n/a'; }),
+            new Promise<string>((r) => setTimeout(() => r('timeout'), 1500)),
+          ]);
+        } catch { jsHeap = 'err'; }
+        console.log(`[Diag] t+${Math.round((Date.now() - started) / 1000)}s cgroup=${mem}MB/${memMax} sumRSS=${Math.round(total)}MB biggest=${biggest} byType=[${types}] shm=${sh} load=${load} jsHeap(used/total/limit)=${jsHeap} cg=[${events}]`);
+
+        if (!teamsBuildLogged && page.url().includes('teams')) {
+          teamsBuildLogged = true;
+          try {
+            const info = await Promise.race([
+              page.evaluate(() => {
+                const res = performance.getEntriesByType('resource').map((r) => r.name);
+                const hosts = new Set<string>();
+                const vers = new Set<string>();
+                res.forEach((n) => {
+                  try { const u = new URL(n); hosts.add(u.host); const mm = u.pathname.match(/(\d{2,}[._-]\d+[._-]\d+[._-]?\d*|\b2\d{7}\.\d+\b|v\d+\.\d+(\.\d+)?)/); if (mm) vers.add(`${u.host}${u.pathname.split('/').slice(0, 3).join('/')}:${mm[1]}`); } catch { /* ignore */ }
+                });
+                return JSON.stringify({ ua: navigator.userAgent, nResources: res.length, hosts: Array.from(hosts).slice(0, 12), versions: Array.from(vers).slice(0, 15), cores: navigator.hardwareConcurrency, mem: (navigator as any).deviceMemory });
+              }),
+              new Promise<string>((r) => setTimeout(() => r('timeout'), 3000)),
+            ]);
+            console.log(`[Diag] Teams client info: ${info}`);
+          } catch (e) { console.log(`[Diag] teams info error: ${e}`); }
+        }
       } catch (e) {
         console.log(`[Diag] sampler error: ${e}`);
       }
