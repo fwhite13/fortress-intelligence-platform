@@ -575,7 +575,7 @@ def load_diarization_pipeline(hf_token: str, device: str):
 # ADO#8878: attendee-slot pipeline. Teams live captions (active_speaker_log, utterance-level since #8877) already
 # segment the audio by authenticated attendee slot, so they replace whole-meeting pyannote as the primary speaker
 # segmentation; diarization runs only inside slots that carry more than one voice (conference rooms, shared devices).
-SLOT_MIN_LOG_ENTRIES = 5  # fewer log entries can't segment a meeting — whole-meeting pyannote fallback
+SLOT_MIN_LOG_ENTRIES = 2  # fewer log entries can't segment a meeting — whole-meeting pyannote fallback (was 5; mtg 184 had 3 clean turns covering the whole meeting and was discarded)
 MULTI_PERSON_THRESHOLD = 0.15  # default mean pairwise cosine distance at/above which a slot is multi-person
 SLOT_MAX_EMBED_SEGMENTS = 30  # longest segments embedded per slot, bounds GPU time
 SLOT_VOICEPRINT_THRESHOLD = 0.88  # single-person slot takes an enrolled name only above this ...
