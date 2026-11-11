@@ -195,6 +195,8 @@ public class VoiceSampleProcessingService
             .Where(m => m.IsPrimaryRecorder && m.AudioS3Key != null && m.AudioS3Key != "" && m.ActiveSpeakerTimeline != null);
         var minRecordingUtc = EnrollmentMinRecordingUtc;
         query = query.Where(m => (m.StartedAt ?? m.StartDatetime ?? m.CreatedAt) >= minRecordingUtc);
+        // Recordings the bot itself rated degraded/bad (dropouts) are never enrollment sources either.
+        query = query.Where(m => m.AudioQuality == null || m.AudioQuality == "ok");
         if (meetingId is { } id)
             query = query.Where(m => m.Id == id);
         // The log is stored by System.Text.Json, which escapes non-ASCII and quote characters — only pre-filter

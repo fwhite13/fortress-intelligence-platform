@@ -218,6 +218,13 @@ public class MeetingsApiController : ControllerBase
                 meeting.ActiveSpeakerTimeline = JsonSerializer.Serialize(payload.ActiveSpeakerLog);
                 _logger.LogInformation("FIRM: Active speaker timeline saved for meeting {Id}: {Count} entries", payload.MeetingId, payload.ActiveSpeakerLog.Count);
             }
+            if (payload.AudioDropoutsPerMin is { } dpm && !double.IsNaN(dpm))
+            {
+                meeting.AudioDropoutsPerMin = Math.Round(dpm, 1);
+                var q = payload.AudioQuality?.Trim().ToLowerInvariant();
+                meeting.AudioQuality = q is "ok" or "degraded" or "bad" ? q : null;
+                _logger.LogInformation("FIRM: Recording quality for meeting {Id}: {Rate}/min ({Quality})", payload.MeetingId, meeting.AudioDropoutsPerMin, meeting.AudioQuality);
+            }
             meeting.UpdatedAt = DateTime.UtcNow;
             try
             {
@@ -1713,6 +1720,9 @@ public class VpCallbackPayload
     public SummaryPayload? Summary { get; set; }
     public List<RosterTimelineEntry>? RosterTimeline { get; set; }
     public List<ActiveSpeakerEntry>? ActiveSpeakerLog { get; set; }
+    /// <summary>Recording dropout rate (holes/min) and rating reported by the vpbot at recording_complete.</summary>
+    public double? AudioDropoutsPerMin { get; set; }
+    public string? AudioQuality { get; set; }
 }
 
 public class ParticipantPayload

@@ -73,6 +73,13 @@ public class FirmMeeting
     /// Stored as JSON: [{"name":"...", "startMs":..., "endMs":...}, ...]</summary>
     [Column("active_speaker_timeline")]
     public string? ActiveSpeakerTimeline { get; set; }
+    /// <summary>2026-11-11 — recording dropout rate (short holes per minute) measured by the vpbot when the recording stops.
+    /// Clean recordings are ~0-5; CPU-starved captures before the 2 vCPU bot were ~370. Null = not measured.</summary>
+    [Column("audio_dropouts_per_min")]
+    public double? AudioDropoutsPerMin { get; set; }
+    /// <summary>"ok" | "degraded" | "bad" (see DropoutsPerMin) as rated by the vpbot; null = not measured. Enrollment skips degraded/bad.</summary>
+    [Column("audio_quality")]
+    public string? AudioQuality { get; set; }
     /// <summary>WI #7299 — incremented each time the summary is regenerated from a user speaker correction.
     /// v1 is the original transcriber summary (archived in S3 as summary-v1.json on first correction).</summary>
     public int SummaryVersion { get; set; } = 1;

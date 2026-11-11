@@ -318,6 +318,9 @@ public class DatabaseInitializationService : IHostedService
                 "ALTER TABLE firm_meetings ADD COLUMN speaker_corrections JSON NULL",
                 // WI #8349 — voice enrollment pending marker (Batch job submitted, voice_sample row not yet written)
                 "ALTER TABLE firm_users ADD COLUMN voice_enrollment_pending_since DATETIME NULL",
+                // 2026-11-11 — recording dropout rate + rating reported by the vpbot (CPU-starved captures sound choppy)
+                "ALTER TABLE firm_meetings ADD COLUMN audio_dropouts_per_min DOUBLE NULL",
+                "ALTER TABLE firm_meetings ADD COLUMN audio_quality VARCHAR(16) NULL",
                 // WI #8517 — speaker_label widened to 255 to hold resolved human names (was 20, sized for SPEAKER_NN only)
                 "ALTER TABLE firm_meeting_transcripts MODIFY COLUMN speaker_label VARCHAR(255) NULL",
                 "ALTER TABLE firm_meeting_participants MODIFY COLUMN speaker_label VARCHAR(255) NULL",

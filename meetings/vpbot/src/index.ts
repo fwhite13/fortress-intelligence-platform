@@ -664,7 +664,11 @@ async function processRecording(meeting: Meeting, bot?: MeetingBot): Promise<voi
   const activeSpeakerLog = bot?.getActiveSpeakerLog?.() ?? [];
 
   // Step 4: Post recording_complete callback — firm-web will submit Batch job (ADO#2179)
-  await postCallback('recording_complete', { audioS3Key: audioKey, rosterTimeline, activeSpeakerLog });
+  const audioQuality = bot?.getAudioQuality?.() ?? null;
+  await postCallback('recording_complete', {
+    audioS3Key: audioKey, rosterTimeline, activeSpeakerLog,
+    ...(audioQuality ? { audioDropoutsPerMin: Math.round(audioQuality.dropoutsPerMin * 10) / 10, audioQuality: audioQuality.level } : {}),
+  });
   console.log(`[Pipeline] Meeting ${meeting.id} recording_complete posted (roster: ${rosterTimeline.length} entries, active speaker: ${activeSpeakerLog.length} entries) — Batch submission delegated to firm-web`);
 }
 

@@ -11,7 +11,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import { EventEmitter } from 'events';
 import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
-import { analyzeRecordingQuality, logAudioQuality } from '../utils/audio-quality.js';
+import { analyzeRecordingQuality, logAudioQuality, AudioQuality } from '../utils/audio-quality.js';
 import * as path from 'path';
 import * as os from 'os';
 import { Meeting, MeetingPlatform, MeetingStatus } from '../types.js';
@@ -90,6 +90,7 @@ export class MeetingBot extends EventEmitter {
   private isRecording = false;
   private ffmpegProcess: ChildProcess | null = null;
   private audioPath: string = '';
+  private _audioQuality: AudioQuality | null = null;
   private _hardTimeout: ReturnType<typeof setTimeout> | null = null;
   private _endPollInterval: ReturnType<typeof setInterval> | null = null;
   private _monitorInterval: ReturnType<typeof setInterval> | null = null;
@@ -916,7 +917,8 @@ export class MeetingBot extends EventEmitter {
       }
       // Flag choppy captures immediately (CPU-starved audio capture leaves 20-40 ms holes); log-only, never blocks upload.
       try {
-        logAudioQuality(await analyzeRecordingQuality(this.audioPath));
+        this._audioQuality = await analyzeRecordingQuality(this.audioPath);
+        logAudioQuality(this._audioQuality);
       } catch { /* non-fatal */ }
     } else {
       console.error(`[Bot] Recording file not found: ${this.audioPath}`);
@@ -988,5 +990,10 @@ export class MeetingBot extends EventEmitter {
    */
   getActiveSpeakerLog() {
     return this._teamsHandler?.getActiveSpeakerLog() ?? [];
+  }
+
+  /** Dropout rating measured when the recording stopped (null if not assessed). */
+  getAudioQuality(): AudioQuality | null {
+    return this._audioQuality && this._audioQuality.level !== 'unknown' ? this._audioQuality : null;
   }
 }

@@ -167,7 +167,27 @@ public class MeetingService
         };
 
         await using var db = await _dbFactory.CreateDbContextAsync();
+
+        // Idempotent add: if this user already has a row for the same calendar event (a stale card, a double click, or
+        // AutoSync got there first) hand that back instead of inserting a duplicate. Without this the lookup below finds
+        // the user's own earlier row as the "primary" and tries to subscribe them to themselves, which
+        // uk_fm_created_by_calendar_event_id rejects (seen 2026-11-11 13:51: three failed adds, "Something went wrong").
+        if (!string.IsNullOrEmpty(calendarEventId))
+        {
+            var mine = await db.Meetings.FirstOrDefaultAsync(m => m.CreatedBy == userId && m.CalendarEventId == calendarEventId);
+            if (mine != null)
+            {
+                _logger.LogInformation("FIRM: Manual add for user {UserId} matched existing meeting {Id} by calendar event — returning it", userId, mine.Id);
+                return (mine, null);
+            }
+        }
+
         var existingPrimary = await FindPrimaryForManualAddAsync(db, normalizedUrl, startDatetime);
+        if (existingPrimary != null && existingPrimary.CreatedBy == userId)
+        {
+            _logger.LogInformation("FIRM: Manual add for user {UserId} matched their own existing meeting {Id} — returning it", userId, existingPrimary.Id);
+            return (existingPrimary, null);
+        }
         if (existingPrimary != null)
             return (await InsertSubscriberAsync(db, meeting, existingPrimary), null);
 
