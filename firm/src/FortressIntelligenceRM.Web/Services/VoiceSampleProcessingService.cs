@@ -20,6 +20,7 @@ public class VoiceSampleProcessingService
     private const double PreviewMaxSeconds = 15.0;
     private const double ReferenceMinWindowSeconds = 2.0;  // REFERENCE_MIN_WINDOW_S
     private const long ReferenceMergeGapMs = 1000;         // REFERENCE_MERGE_GAP_MS
+    private const long EnrollOverlapPadMs = 500;             // ENROLL_OVERLAP_PAD_S
     private const long EnrollTailTrimMs = 1800;            // ENROLL_TAIL_TRIM_S — caption windows end late (run into the next speaker)
     private const int CandidateMeetingScanLimit = 200;
     // Recordings made before the vpbot moved to 2 vCPU / 4 GB (firm-vpbot:91, registered 2026-11-10 16:16 EST) are
@@ -276,13 +277,36 @@ public class VoiceSampleProcessingService
             });
         var others = merged.Where(kv => kv.Key != logName).SelectMany(kv => kv.Value).ToList();
 
+        // Enrollment: cut each window around any other speaker's entry (padded) rather than discarding the whole
+        // window - one zero-length blip from someone else must not throw away a long monologue (meeting 170, 161 s).
         return merged[logName]
             .Where(w => (w.End - w.Start) / 1000.0 >= ReferenceMinWindowSeconds)
-            .Where(w => !others.Any(o => o.Start < w.End && o.End > w.Start))
+            .SelectMany(w => SplitAroundOthers(w, others.Where(o => o.Start < w.End && o.End > w.Start).ToList()))
+            .Where(w => (w.End - w.Start) / 1000.0 >= ReferenceMinWindowSeconds)
             .Select(w => (w.Start, End: w.End - EnrollTailTrimMs))
             .Where(w => (w.End - w.Start) / 1000.0 >= ReferenceMinWindowSeconds)
             .Select(w => new SpeechWindow(Math.Max(0, (w.Start - baseMs) / 1000.0), (w.End - baseMs) / 1000.0))
             .ToList();
+    }
+
+    // Mirrors _split_around_others in transcribe.py.
+    private static List<(long Start, long End)> SplitAroundOthers((long Start, long End) window, List<(long Start, long End)> others)
+    {
+        var pieces = new List<(long Start, long End)> { window };
+        foreach (var o in others)
+        {
+            var os = o.Start - EnrollOverlapPadMs;
+            var oe = o.End + EnrollOverlapPadMs;
+            var next = new List<(long Start, long End)>();
+            foreach (var p in pieces)
+            {
+                if (oe <= p.Start || os >= p.End) { next.Add(p); continue; }
+                if (os > p.Start) next.Add((p.Start, os));
+                if (oe < p.End) next.Add((oe, p.End));
+            }
+            pieces = next;
+        }
+        return pieces;
     }
 
     // extract_reference_embeddings skips anyone flagged possiblyMultiVoice in the log or the roster (shared room device).

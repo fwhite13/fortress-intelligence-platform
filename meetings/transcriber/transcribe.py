@@ -275,6 +275,7 @@ REFERENCE_PREFERRED_WINDOW_S = 10.0  # prefer reference windows at least this lo
 REFERENCE_MIN_WINDOW_S = 2.0  # shortest window usable as a reference when no long one exists
 REFERENCE_MAX_WINDOW_S = 120.0  # ADO#8334: cap individual windows — a 75-min log entry averaged into a garbage embedding
 REFERENCE_MAX_WINDOWS = 3  # averaged per person
+ENROLL_OVERLAP_PAD_S = 0.5  # enrollment only: margin cut around another speaker's entry when splitting a window
 ENROLL_TAIL_TRIM_S = 1.8  # enrollment only: windows are trimmed this much at the end (caption lead 1.5s + margin); env ENROLL_TAIL_TRIM_S
 REFERENCE_MERGE_GAP_MS = 1000  # adjacent log entries for the same person closer than this are one window
 CLUSTER_MIN_SEGMENT_S = 1.0  # shorter diarization turns give unstable embeddings
@@ -387,13 +388,34 @@ def _active_window_duration_s(active_speaker_log: list, recording_start_ms: int,
             durations.append((end_ms - start_ms) / 1000.0)
     return max(durations, default=float("inf"))
 
-def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recording_start_ms, tail_trim_s=0.0):
+def _split_around_others(start_s, end_s, others, pad_s):
+    """Cut [start_s, end_s] around every other-speaker window (each widened by pad_s); returns the surviving pieces."""
+    pieces = [(start_s, end_s)]
+    for os_, oe in others:
+        os_, oe = os_ - pad_s, oe + pad_s
+        nxt = []
+        for ps, pe in pieces:
+            if oe <= ps or os_ >= pe:
+                nxt.append((ps, pe))
+                continue
+            if os_ > ps:
+                nxt.append((ps, os_))
+            if oe < pe:
+                nxt.append((oe, pe))
+        pieces = nxt
+    return pieces
+
+def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recording_start_ms, tail_trim_s=0.0,
+                                 split_overlaps=False):
     """
     For each named attendee in active_speaker_log, find their longest clean speaking window(s)
     (prefer >= 10s). Extract audio and run through pyannote/embedding model.
     Skip possiblyMultiVoice=True entries and the notetaker bot (callers filter the notetaker out
     of active_speaker_log before calling). A clean window does not overlap anyone else's window.
     If a person has multiple windows, average the embeddings.
+    split_overlaps: enrollment only - instead of discarding a whole window because another speaker's entry touches
+    it, cut the window around that entry (padded by ENROLL_OVERLAP_PAD_S) and keep the pieces that are still long
+    enough. A 161 s monologue of Fred's in meeting 170 was thrown away because Rob had a zero-length blip inside it.
     tail_trim_s: shave this much off the end of each window after the overlap check (enrollment only). Caption
     windows end late — they run into the next speaker's first words — so a window's tail is the least trustworthy
     part (2026-11-11: a voiceprint preview ended with "Ok, sounds good" from someone else).
@@ -418,12 +440,17 @@ def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recor
             s, e = max(0.0, s), min(audio_end_s, e)
             if e - s < REFERENCE_MIN_WINDOW_S:
                 continue
-            if any(other != name and os_ < e and oe > s for other, os_, oe in all_windows):
+            touching = [(os_, oe) for other, os_, oe in all_windows if other != name and os_ < e and oe > s]
+            if touching and not split_overlaps:
                 continue
-            e -= tail_trim_s
-            if e - s < REFERENCE_MIN_WINDOW_S:
-                continue
-            clean.append((s, e))
+            pieces = _split_around_others(s, e, touching, ENROLL_OVERLAP_PAD_S) if touching else [(s, e)]
+            for ps, pe in pieces:
+                if pe - ps < REFERENCE_MIN_WINDOW_S:
+                    continue
+                pe -= tail_trim_s
+                if pe - ps < REFERENCE_MIN_WINDOW_S:
+                    continue
+                clean.append((ps, pe))
         clean.sort(key=lambda w: w[1] - w[0], reverse=True)
         long_windows = [w for w in clean if w[1] - w[0] >= REFERENCE_PREFERRED_WINDOW_S]
         chosen = (long_windows or clean)[:REFERENCE_MAX_WINDOWS]
@@ -1330,7 +1357,8 @@ def process_voice_sample_from_meeting():
         s3.download_file(s3_bucket, audio_s3_key, audio_path)
 
         tail_trim_s = _env_float("ENROLL_TAIL_TRIM_S", ENROLL_TAIL_TRIM_S)
-        references = extract_reference_embeddings(speaker_log, audio_path, hf_token, recording_start_ms, tail_trim_s)
+        references = extract_reference_embeddings(speaker_log, audio_path, hf_token, recording_start_ms, tail_trim_s,
+                                                  split_overlaps=True)
         emb = references.get(log_name)
         if emb is None:
             raise RuntimeError(f"no usable reference embedding for {log_name} (no clean window or possiblyMultiVoice)")
