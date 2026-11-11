@@ -20,6 +20,7 @@ public class VoiceSampleProcessingService
     private const double PreviewMaxSeconds = 15.0;
     private const double ReferenceMinWindowSeconds = 2.0;  // REFERENCE_MIN_WINDOW_S
     private const long ReferenceMergeGapMs = 1000;         // REFERENCE_MERGE_GAP_MS
+    private const long EnrollTailTrimMs = 1800;            // ENROLL_TAIL_TRIM_S — caption windows end late (run into the next speaker)
     private const int CandidateMeetingScanLimit = 200;
     private static readonly TimeSpan PreviewUrlExpiry = TimeSpan.FromMinutes(15);
 
@@ -268,6 +269,8 @@ public class VoiceSampleProcessingService
         return merged[logName]
             .Where(w => (w.End - w.Start) / 1000.0 >= ReferenceMinWindowSeconds)
             .Where(w => !others.Any(o => o.Start < w.End && o.End > w.Start))
+            .Select(w => (w.Start, End: w.End - EnrollTailTrimMs))
+            .Where(w => (w.End - w.Start) / 1000.0 >= ReferenceMinWindowSeconds)
             .Select(w => new SpeechWindow(Math.Max(0, (w.Start - baseMs) / 1000.0), (w.End - baseMs) / 1000.0))
             .ToList();
     }

@@ -275,6 +275,7 @@ REFERENCE_PREFERRED_WINDOW_S = 10.0  # prefer reference windows at least this lo
 REFERENCE_MIN_WINDOW_S = 2.0  # shortest window usable as a reference when no long one exists
 REFERENCE_MAX_WINDOW_S = 120.0  # ADO#8334: cap individual windows — a 75-min log entry averaged into a garbage embedding
 REFERENCE_MAX_WINDOWS = 3  # averaged per person
+ENROLL_TAIL_TRIM_S = 1.8  # enrollment only: windows are trimmed this much at the end (caption lead 1.5s + margin); env ENROLL_TAIL_TRIM_S
 REFERENCE_MERGE_GAP_MS = 1000  # adjacent log entries for the same person closer than this are one window
 CLUSTER_MIN_SEGMENT_S = 1.0  # shorter diarization turns give unstable embeddings
 CLUSTER_MAX_SEGMENTS = 30  # longest turns per cluster, bounds GPU time on long meetings
@@ -386,13 +387,16 @@ def _active_window_duration_s(active_speaker_log: list, recording_start_ms: int,
             durations.append((end_ms - start_ms) / 1000.0)
     return max(durations, default=float("inf"))
 
-def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recording_start_ms):
+def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recording_start_ms, tail_trim_s=0.0):
     """
     For each named attendee in active_speaker_log, find their longest clean speaking window(s)
     (prefer >= 10s). Extract audio and run through pyannote/embedding model.
     Skip possiblyMultiVoice=True entries and the notetaker bot (callers filter the notetaker out
     of active_speaker_log before calling). A clean window does not overlap anyone else's window.
     If a person has multiple windows, average the embeddings.
+    tail_trim_s: shave this much off the end of each window after the overlap check (enrollment only). Caption
+    windows end late — they run into the next speaker's first words — so a window's tail is the least trustworthy
+    part (2026-11-11: a voiceprint preview ended with "Ok, sounds good" from someone else).
     Returns dict: { name -> embedding tensor }
     """
     windows = active_log_windows(active_speaker_log, recording_start_ms)
@@ -415,6 +419,9 @@ def extract_reference_embeddings(active_speaker_log, audio_path, hf_token, recor
             if e - s < REFERENCE_MIN_WINDOW_S:
                 continue
             if any(other != name and os_ < e and oe > s for other, os_, oe in all_windows):
+                continue
+            e -= tail_trim_s
+            if e - s < REFERENCE_MIN_WINDOW_S:
                 continue
             clean.append((s, e))
         clean.sort(key=lambda w: w[1] - w[0], reverse=True)
@@ -1322,7 +1329,8 @@ def process_voice_sample_from_meeting():
         print(f"[VoiceSampleMeeting] Downloading s3://{s3_bucket}/{audio_s3_key} for {entra_oid}")
         s3.download_file(s3_bucket, audio_s3_key, audio_path)
 
-        references = extract_reference_embeddings(speaker_log, audio_path, hf_token, recording_start_ms)
+        tail_trim_s = _env_float("ENROLL_TAIL_TRIM_S", ENROLL_TAIL_TRIM_S)
+        references = extract_reference_embeddings(speaker_log, audio_path, hf_token, recording_start_ms, tail_trim_s)
         emb = references.get(log_name)
         if emb is None:
             raise RuntimeError(f"no usable reference embedding for {log_name} (no clean window or possiblyMultiVoice)")
