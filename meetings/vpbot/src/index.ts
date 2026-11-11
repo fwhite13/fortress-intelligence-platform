@@ -191,14 +191,23 @@ async function runOneShotMeeting(meetingUrl: string, meetingId: string, botName:
   // MeetingBot constructor: (meeting: Meeting, recordingsDir: string)
   const bot = new MeetingBot(meeting, '/tmp/recordings');
 
+  // True once the recording has stopped and the stop/upload pipeline is under way. A SIGTERM in this window
+  // (e.g. someone presses Stop Recording just as the bot is ending the meeting itself) must NOT exit: doing so
+  // kills the process mid-upload and loses the recording (meeting 176, 2026-11-11).
+  let stopPipelineStarted = false;
+
   // Register SIGTERM handler for graceful stop (e.g. from ECS task stop or Stop Recording button)
   process.once('SIGTERM', () => {
     console.log('[Bot] SIGTERM received — stopping recording gracefully');
     if (bot && bot.isCurrentlyRecording()) {
+      armSigtermGraceCap();
       bot.stop('sigterm-graceful-stop').catch((err) => {
         console.error('[Bot] Error stopping on SIGTERM:', err);
         process.exit(1);
       });
+    } else if (stopPipelineStarted) {
+      console.log('[Bot] SIGTERM received while the recording is already stopping/uploading — letting the pipeline finish');
+      armSigtermGraceCap();
     } else {
       console.log('[Bot] SIGTERM received but not recording — exiting');
       process.exit(0);
@@ -208,6 +217,7 @@ async function runOneShotMeeting(meetingUrl: string, meetingId: string, botName:
   // Listen for status changes to emit recording callback
   bot.on('status-change', (status: MeetingStatus) => {
     meeting.status = status;
+    if (status === 'processing') stopPipelineStarted = true;
     if (status === 'recording') {
       meeting.startedAt = new Date();
       postCallback('recording', { participants: [] }).catch(console.error);
@@ -250,6 +260,18 @@ async function runOneShotMeeting(meetingUrl: string, meetingId: string, botName:
   });
 }
 
+/**
+ * ECS StopTask sends SIGTERM and SIGKILLs after the task definition's stopTimeout (set to 120s). Cap how long we
+ * wait for an in-flight stop/upload so the container still exits cleanly just before that SIGKILL.
+ */
+const SIGTERM_GRACE_CAP_MS = 110_000;
+function armSigtermGraceCap(): void {
+  setTimeout(() => {
+    console.error(`[Bot] SIGTERM grace period (${SIGTERM_GRACE_CAP_MS / 1000}s) exhausted before the pipeline finished — exiting`);
+    process.exit(1);
+  }, SIGTERM_GRACE_CAP_MS).unref();
+}
+
 // ---------------------------------------------------------------------------
 // One-shot Zoom SDK runner (WI #7024) — replaces the browser-based Zoom path,
 // which Cloudflare blocks at the zoom.us pre-join page for headless Chrome.
@@ -258,13 +280,19 @@ async function runOneShotMeeting(meetingUrl: string, meetingId: string, botName:
 async function runOneShotZoomSDK(meeting: Meeting, meetingId: string): Promise<void> {
   const bot = new ZoomSDKBot(meeting, '/tmp/recordings');
 
+  let stopPipelineStarted = false;  // see the Teams runner: never exit on SIGTERM mid-upload
+
   process.once('SIGTERM', () => {
     console.log('[ZoomSDKBot] SIGTERM received — stopping recording gracefully');
     if (bot.isRecording) {
+      armSigtermGraceCap();
       bot.stop().catch((err) => {
         console.error('[ZoomSDKBot] Error stopping on SIGTERM:', err);
         process.exit(1);
       });
+    } else if (stopPipelineStarted) {
+      console.log('[ZoomSDKBot] SIGTERM received while the recording is already uploading — letting the pipeline finish');
+      armSigtermGraceCap();
     } else {
       console.log('[ZoomSDKBot] SIGTERM received but not recording — exiting');
       process.exit(0);
@@ -284,6 +312,7 @@ async function runOneShotZoomSDK(meeting: Meeting, meetingId: string): Promise<v
 
     bot.on('recording-stopped', async (wavPath: string) => {
       try {
+        stopPipelineStarted = true;
         meeting.audioPath = wavPath;
         meeting.endedAt = new Date();
         // ZoomSDKBot doesn't support roster polling (no browser-based roster access)
