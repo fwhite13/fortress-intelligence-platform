@@ -577,6 +577,8 @@ def load_diarization_pipeline(hf_token: str, device: str):
 # segmentation; diarization runs only inside slots that carry more than one voice (conference rooms, shared devices).
 SLOT_MIN_LOG_ENTRIES = 2  # fewer log entries can't segment a meeting — whole-meeting pyannote fallback (was 5; mtg 184 had 3 clean turns covering the whole meeting and was discarded)
 MULTI_PERSON_THRESHOLD = 0.15  # default mean pairwise cosine distance at/above which a slot is multi-person
+SUBCLUSTER_MIN_S = 30.0  # a sub-cluster of a "multi-person" slot must carry at least this much speech ...
+SUBCLUSTER_MIN_FRAC = 0.2  # ... and this fraction of the slot's diarized speech, else it is noise folded into the main voice
 CAPTION_LEAD_MS = 1500.0  # Teams captions lag the speech; caption windows are shifted this much earlier (env CAPTION_LEAD_MS)
 CAPTION_MIN_ENTRY_MS = 400.0  # caption entries shorter than this are ignored (env CAPTION_MIN_ENTRY_MS)
 SLOT_MAX_EMBED_SEGMENTS = 30  # longest segments embedded per slot, bounds GPU time
@@ -819,6 +821,23 @@ def _turn_at(turns: list, start_s: float, end_s: float):
         return best
     return min(turns, key=lambda t: max(t[0] - end_s, start_s - t[1], 0.0))[2]
 
+def prune_slot_turns(turns: list, min_s: float, min_frac: float) -> tuple:
+    """
+    The embedding-spread test flags nearly every slot "multi-person" (meeting 170: all single-account slots measured
+    0.34-0.83 against a 0.15 cutoff), so diarization output inside a slot is only believed when each voice is substantial.
+    turns: (start_s, end_s, label). Sub-clusters under min_s seconds or min_frac of the slot's diarized speech are folded
+    into the largest one. Returns (turns, n_voices_kept).
+    """
+    dur = {}
+    for st, en, label in turns:
+        dur[label] = dur.get(label, 0.0) + max(0.0, en - st)
+    total = sum(dur.values())
+    if not dur or total <= 0:
+        return turns, len(dur)
+    main = max(dur, key=dur.get)
+    keep = {l for l, d in dur.items() if d >= min_s and d >= min_frac * total} | {main}
+    return [(st, en, label if label in keep else main) for st, en, label in turns], len(keep)
+
 def slot_voice_name(slot: str, n: int) -> str:
     """Display name for the n-th (1-based) voice in a multi-person slot that voiceprints could not name."""
     return f"{slot} (voice {n})"
@@ -846,7 +865,7 @@ def run_slot_pipeline(whisper_segments, speaker_log, recording_start_ms, roster_
     threshold = _env_float("MULTI_PERSON_THRESHOLD", MULTI_PERSON_THRESHOLD)
     print(f"[Transcriber] MULTI_PERSON_THRESHOLD={threshold}")
     roster_names = [e["name"] for e in roster_attendees]
-    slot_types, slot_names = {}, {}
+    slot_types, slot_names, slot_embeddings = {}, {}, {}
     sub_turns, sub_names = {}, {}  # multi-person slot -> diarization turns / { cluster_label -> name or None }
     try:
         inference = _get_embedding_inference(hf_token) if hf_token else None
@@ -863,6 +882,7 @@ def run_slot_pipeline(whisper_segments, speaker_log, recording_start_ms, roster_
                 slot_type = "multi"
                 print(f"[Transcriber] Slot '{slot}' → multi-person (possiblyMultiVoice, spread not measurable)")
             slot_types[slot] = slot_type
+            slot_embeddings[slot] = slot_embedding
             if slot_type == "single":
                 slot_names[slot] = name_single_slot(slot, slot_embedding, voiceprints, roster_names, set(by_slot) - {slot})
 
@@ -879,6 +899,19 @@ def run_slot_pipeline(whisper_segments, speaker_log, recording_start_ms, roster_
                     if not turns:
                         print(f"[Transcriber] Slot '{slot}' → multi-person, not separated (labelled '{slot}')")
                         continue
+                    n_raw = len({label for _, _, label in turns})
+                    if slot not in multi_voice_hint:  # an explicit multi-voice hint (shared device) skips the noise filter
+                        turns, n_kept = prune_slot_turns(turns, _env_float("SUBCLUSTER_MIN_S", SUBCLUSTER_MIN_S),
+                                                         _env_float("SUBCLUSTER_MIN_FRAC", SUBCLUSTER_MIN_FRAC))
+                        if n_kept < n_raw:
+                            print(f"[Transcriber] Slot '{slot}': {n_raw} diarized sub-clusters → {n_kept} after folding clusters "
+                                  f"under {SUBCLUSTER_MIN_S:.0f}s / {SUBCLUSTER_MIN_FRAC:.0%} of the slot's speech into the main voice")
+                        if n_kept == 1:
+                            slot_types[slot] = "single"
+                            slot_names[slot] = name_single_slot(slot, slot_embeddings.get(slot), voiceprints, roster_names,
+                                                                set(by_slot) - {slot})
+                            print(f"[Transcriber] Slot '{slot}' → single-person after sub-cluster filtering")
+                            continue
                     clusters = sorted({label for _, _, label in turns})
                     print(f"[Transcriber] Slot '{slot}' → multi-person, running targeted diarization ({len(clusters)} sub-clusters)")
                     cluster_embeddings = extract_cluster_embeddings(turns, audio_path, hf_token) if voiceprints else {}
