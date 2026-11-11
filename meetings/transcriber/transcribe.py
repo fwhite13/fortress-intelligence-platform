@@ -577,6 +577,8 @@ def load_diarization_pipeline(hf_token: str, device: str):
 # segmentation; diarization runs only inside slots that carry more than one voice (conference rooms, shared devices).
 SLOT_MIN_LOG_ENTRIES = 2  # fewer log entries can't segment a meeting — whole-meeting pyannote fallback (was 5; mtg 184 had 3 clean turns covering the whole meeting and was discarded)
 MULTI_PERSON_THRESHOLD = 0.15  # default mean pairwise cosine distance at/above which a slot is multi-person
+CAPTION_LEAD_MS = 1500.0  # Teams captions lag the speech; caption windows are shifted this much earlier (env CAPTION_LEAD_MS)
+CAPTION_MIN_ENTRY_MS = 400.0  # caption entries shorter than this are ignored (env CAPTION_MIN_ENTRY_MS)
 SLOT_MAX_EMBED_SEGMENTS = 30  # longest segments embedded per slot, bounds GPU time
 SLOT_VOICEPRINT_THRESHOLD = 0.88  # single-person slot takes an enrolled name only above this ...
 MULTI_SLOT_VOICEPRINT_THRESHOLD = 0.93  # ... sub-clusters of a multi-person slot need more — err toward SPEAKER_XX
@@ -599,6 +601,12 @@ class _SlotLookup:
     """Active speaker log entries as (start_ms, end_ms, name) from recording start, queried by time."""
 
     def __init__(self, active_speaker_log: list, recording_start_ms: int):
+        # Teams live captions appear in the DOM after the person has started speaking, so every caption window sits
+        # late against the audio. Shift the windows earlier by CAPTION_LEAD_MS (ADO: 2026-11-11, meeting 170 lagged
+        # at every speaker change). Entries shorter than CAPTION_MIN_ENTRY_MS (a caption that flashed and vanished,
+        # e.g. a 0 ms "Julie Austin" entry) are dropped: they claimed neighbouring speech via the nearest-entry rule.
+        lead_ms = _env_float("CAPTION_LEAD_MS", CAPTION_LEAD_MS)
+        min_ms = _env_float("CAPTION_MIN_ENTRY_MS", CAPTION_MIN_ENTRY_MS)
         entries = []
         for e in active_speaker_log:
             name = (e.get("name") or "").strip()
@@ -606,7 +614,16 @@ class _SlotLookup:
             if not name or start_ms is None:
                 continue
             end_ms = max(start_ms, e.get("endMs") or start_ms)
-            entries.append((start_ms - recording_start_ms, end_ms - recording_start_ms, name))
+            if end_ms - start_ms < min_ms:
+                continue
+            entries.append((start_ms - lead_ms - recording_start_ms, end_ms - lead_ms - recording_start_ms, name))
+        if not entries:  # every entry was filtered out: fall back to the unfiltered log rather than losing all slots
+            for e in active_speaker_log:
+                name = (e.get("name") or "").strip()
+                start_ms = e.get("startMs")
+                if name and start_ms is not None:
+                    end_ms = max(start_ms, e.get("endMs") or start_ms)
+                    entries.append((start_ms - lead_ms - recording_start_ms, end_ms - lead_ms - recording_start_ms, name))
         entries.sort()
         self.entries = entries
         self.starts = [s for s, _, _ in entries]
