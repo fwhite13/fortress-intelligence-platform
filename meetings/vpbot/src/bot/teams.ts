@@ -39,6 +39,7 @@ import { S3Service } from '../transcribe/s3.js';
 import { refreshTeamsSession } from './teams-auth.js';
 import { ActiveSpeakerEntry } from '../types.js';
 import { isNotetakerBot } from './notetaker-bots.js';
+import { isLeaveCommand } from './chat-commands.js';
 
 // WI #8576: how long the bot waits in the Teams lobby to be admitted before giving up and
 // reporting status=failed / reason=lobby_timeout. Override with FIRM_LOBBY_TIMEOUT_SECONDS.
@@ -105,6 +106,10 @@ export class TeamsHandler {
   private _onRosterCount: ((count: number) => void) | null = null;
   // WI #8211: chat and People panels share one slot — roster waits for chat to resolve
   private _chatNotificationDone = false;
+  // Chat commands ("Notetaker, leave"): poll the meeting chat for a command addressed to the bot
+  private _chatWatchInterval?: NodeJS.Timeout;
+  private _chatWatchBusy = false;
+  private _chatCommandFired = false;
   private _activeSpeakerLog: ActiveSpeakerEntry[] = [];
   private _currentSpeaker: string | null = null;
   private _currentSpeakerEntry: ActiveSpeakerEntry | null = null;
@@ -1430,6 +1435,169 @@ export class TeamsHandler {
     } finally {
       resolvePanel();
     }
+  }
+
+  /**
+   * Watch the meeting chat for a leave command addressed to the bot ("Notetaker, leave"). Every few seconds it makes
+   * sure the chat pane is open (the People panel can take the slot), reads the visible messages and, on the first
+   * message that is entirely a leave command, posts a short acknowledgement and calls onLeave(requester).
+   * Non-fatal throughout: a chat the bot cannot read (host policy, UI change) never affects the recording.
+   */
+  startChatCommandWatcher(page: Page, onLeave: (requester: string | null) => void): void {
+    if (this._chatWatchInterval) return;
+    const botName = process.env.BOT_NAME || 'Fortress Notetaker';
+    const INTERVAL_MS = 4000;
+    const debug = process.env.CHAT_WATCH_DEBUG === '1';
+    let polls = 0;
+    let loggedStructure = false;
+    let lastNoPaneLog = 0;
+
+    console.log(`[Teams][ChatCmd] Watching meeting chat for "leave" commands addressed to "${botName}" (every ${INTERVAL_MS / 1000}s)`);
+    this._chatWatchInterval = setInterval(async () => {
+      if (this._chatWatchBusy || this._chatCommandFired) return;
+      this._chatWatchBusy = true;
+      try {
+        polls++;
+        if (!(await TeamsHandler.ensureChatPaneOpen(page))) {
+          if (Date.now() - lastNoPaneLog > 60000) {
+            lastNoPaneLog = Date.now();
+            console.log('[Teams][ChatCmd] Chat pane not available — will keep trying');
+          }
+          return;
+        }
+        const read = await TeamsHandler.readChatMessages(page);
+        if (!loggedStructure || (debug && polls % 5 === 0)) {
+          loggedStructure = true;
+          console.log(`[Teams][ChatCmd] Read ${read.messages.length} chat message(s) via ${read.source}; structure: ${read.structure}`);
+        }
+        for (const m of read.messages) {
+          if (!isLeaveCommand(m.text, botName)) continue;
+          if (m.author && m.author.toLowerCase().includes(botName.toLowerCase())) continue; // never obey ourselves
+          this._chatCommandFired = true;
+          const who = m.author || null;
+          console.log(`[Teams][ChatCmd] Leave command received${who ? ` from ${who}` : ''} — acknowledging and leaving`);
+          await TeamsHandler.sendChatMessage(page,
+            `${botName} is leaving this meeting${who ? ` at ${who}'s request` : ' at a participant\'s request'} and has stopped recording.`)
+            .catch(err => console.warn('[Teams][ChatCmd] Acknowledgement failed (non-fatal):', err?.message ?? err));
+          onLeave(who);
+          return;
+        }
+      } catch (err: any) {
+        console.warn('[Teams][ChatCmd] Chat poll error (non-fatal):', err?.message ?? err);
+      } finally {
+        this._chatWatchBusy = false;
+      }
+    }, INTERVAL_MS);
+  }
+
+  stopChatCommandWatcher(): void {
+    if (this._chatWatchInterval) {
+      clearInterval(this._chatWatchInterval);
+      this._chatWatchInterval = undefined;
+    }
+  }
+
+  private static readonly COMPOSE_SELECTOR = [
+    '[aria-label^="Type a message"]',
+    '[placeholder^="Type a message"]',
+    '[id^="new-message-"][contenteditable="true"]',
+  ].join(', ');
+
+  /** True if the chat pane is open; opens it via the toolbar toggle when another side panel has taken the slot. */
+  private static async ensureChatPaneOpen(page: Page): Promise<boolean> {
+    if (await page.locator(TeamsHandler.COMPOSE_SELECTOR).first().isVisible().catch(() => false)) return true;
+    for (const selector of ['#chat-button', 'button[aria-label*="Show conversation" i]']) {
+      const btn = page.locator(selector).first();
+      if ((await btn.count().catch(() => 0)) === 0) continue;
+      try {
+        const state = await btn.evaluate((el: HTMLElement) => ({
+          pressed: el.getAttribute('aria-pressed'),
+          outcome: el.getAttribute('data-track-action-outcome'),
+        }), undefined, { timeout: 3000 });
+        const alreadyOpen = state.pressed === 'true' || state.outcome?.toLowerCase() === 'hide';
+        if (!alreadyOpen) {
+          await btn.evaluate((el: HTMLElement) => el.click(), undefined, { timeout: 3000 });
+          console.log(`[Teams][ChatCmd] Re-opened chat pane via ${selector}`);
+        }
+        return await page.locator(TeamsHandler.COMPOSE_SELECTOR).first()
+          .waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+      } catch {
+        continue;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Read the visible chat messages. Tries message elements first (with author when the DOM exposes it) and falls
+   * back to the lines of the pane that holds the compose box. Returns a structure summary (tag/data-tid counts,
+   * never message text) for diagnosing selector drift; set CHAT_WATCH_DEBUG=1 to also log message text.
+   */
+  private static async readChatMessages(page: Page): Promise<{
+    messages: { author: string | null; text: string }[]; source: string; structure: string;
+  }> {
+    return await page.evaluate((composeSel) => {
+      const MESSAGE_SELECTORS = [
+        '[data-tid="chat-pane-message"]',
+        '[data-tid="chat-message"]',
+        '[data-tid="message-body"]',
+        '[id^="message-body-"]',
+        '[data-tid*="message-content"]',
+      ];
+      const AUTHOR_SELECTORS = ['[data-tid="message-author-name"]', '[id^="author-"]', '[data-tid*="author"]'];
+      const compose = document.querySelector(composeSel);
+      const pane = compose?.closest('[data-tid*="pane"], [role="complementary"], aside, [id*="pane"], section') || null;
+      const root: ParentNode = pane || document;
+      const dataTids = new Map<string, number>();
+      root.querySelectorAll('[data-tid]').forEach((el) => {
+        const t = el.getAttribute('data-tid') || '';
+        if (/chat|message|author|pane/i.test(t)) dataTids.set(t, (dataTids.get(t) || 0) + 1);
+      });
+      const structure = `pane=${pane ? (pane.getAttribute('data-tid') || pane.tagName.toLowerCase()) : 'none'}; ` +
+        [...dataTids.entries()].slice(0, 14).map(([k, v]) => `${k}x${v}`).join(',');
+
+      for (const sel of MESSAGE_SELECTORS) {
+        const els = [...root.querySelectorAll(sel)];
+        if (els.length === 0) continue;
+        const messages = els.map((el) => {
+          let author: string | null = null;
+          let node: Element | null = el;
+          for (let depth = 0; depth < 6 && node && !author; depth++, node = node.parentElement) {
+            for (const a of AUTHOR_SELECTORS) {
+              const hit = node.querySelector(a);
+              const t = (hit?.textContent || '').trim();
+              if (t) { author = t; break; }
+            }
+          }
+          return { author, text: ((el as HTMLElement).innerText || el.textContent || '').trim() };
+        }).filter((m) => m.text);
+        return { messages, source: sel, structure };
+      }
+      // Fallback: the lines of the pane itself (no author)
+      const lines = ((pane as HTMLElement | null)?.innerText || '').split('\n').map((l) => l.trim()).filter(Boolean);
+      return { messages: lines.slice(-60).map((text) => ({ author: null, text })), source: 'pane-lines', structure };
+    }, TeamsHandler.COMPOSE_SELECTOR);
+  }
+
+  /** Post a short message to the meeting chat (chat pane must be openable). */
+  private static async sendChatMessage(page: Page, text: string): Promise<void> {
+    if (!(await TeamsHandler.ensureChatPaneOpen(page))) throw new Error('chat pane not available');
+    const input = page.locator(TeamsHandler.COMPOSE_SELECTOR).first();
+    await input.click();
+    await input.fill(text);
+    const actual = ((await input.textContent()) || '').replace(/\s+/g, ' ').trim();
+    if (!actual.includes(text.replace(/\s+/g, ' ').trim().slice(0, 20))) {
+      await input.evaluate((el, msg) => {
+        el.innerHTML = '';
+        const p = document.createElement('p');
+        p.textContent = msg;
+        el.appendChild(p);
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      }, text);
+      await input.focus();
+    }
+    await page.keyboard.press('Enter');
+    console.log('[Teams][ChatCmd] Acknowledgement posted to chat');
   }
 
   /** Unblock the People panel once the chat panel attempt has resolved (WI #8211). */

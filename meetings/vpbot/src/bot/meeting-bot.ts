@@ -348,9 +348,19 @@ export class MeetingBot extends EventEmitter {
         // Fire-and-forget so captions and roster/active speaker polling start on
         // schedule instead of waiting up to ~40s for chat (WI #8211)
         const teamsHandler = this._teamsHandler;
-        TeamsHandler.postAdmissionChatNotification(this.page, () => teamsHandler.markChatNotificationDone()).catch(err =>
-          console.warn('[Teams] Chat notification error (non-fatal):', err?.message ?? err)
-        );
+        TeamsHandler.postAdmissionChatNotification(this.page, () => teamsHandler.markChatNotificationDone())
+          .catch(err => console.warn('[Teams] Chat notification error (non-fatal):', err?.message ?? err))
+          .finally(() => {
+            // Start listening for "Notetaker, leave" once the join notice has had its turn at the chat pane.
+            if (this.page && this.isRecording && process.env.CHAT_LEAVE_COMMAND !== '0') {  // =0 is the kill switch
+              teamsHandler.startChatCommandWatcher(this.page, (requester) => {
+                console.log(`[Bot] Leaving at a chat request${requester ? ` from ${requester}` : ''}`);
+                this.stop('chat-leave-request').catch(err =>
+                  console.error('[Bot] Error stopping after chat leave request:', err)
+                );
+              });
+            }
+          });
         // Live captions are the active speaker source (WI #8154); failure is non-fatal.
         // Before roster polling so the People panel can't take keyboard focus from the shortcut.
         await TeamsHandler.enableLiveCaptions(this.page);
@@ -912,6 +922,7 @@ export class MeetingBot extends EventEmitter {
     // Stop roster + active speaker polling if Teams meeting
     if (this._teamsHandler) {
       this._teamsHandler.stopRosterPolling();
+      this._teamsHandler.stopChatCommandWatcher();
       await this._teamsHandler.stopActiveSpeakerPolling();
     }
     if (this._zoomHandler) {
