@@ -22,6 +22,14 @@ public class VoiceSampleProcessingService
     private const long ReferenceMergeGapMs = 1000;         // REFERENCE_MERGE_GAP_MS
     private const long EnrollTailTrimMs = 1800;            // ENROLL_TAIL_TRIM_S — caption windows end late (run into the next speaker)
     private const int CandidateMeetingScanLimit = 200;
+    // Recordings made before the vpbot moved to 2 vCPU / 4 GB (firm-vpbot:91, registered 2026-11-10 16:16 EST) are
+    // choppy - 20-40 ms holes every ~150 ms (measured 2026-11-11, vs ~2/min after). Never offer them as enrollment
+    // sources: a voiceprint built from them is poor. Override with Firm:EnrollmentMinRecordingUtc (ISO-8601 UTC).
+    private static readonly DateTime DefaultEnrollmentMinRecordingUtc = new(2026, 11, 10, 21, 30, 0, DateTimeKind.Utc);
+    private DateTime EnrollmentMinRecordingUtc =>
+        DateTime.TryParse(_config["Firm:EnrollmentMinRecordingUtc"], System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var d)
+            ? d : DefaultEnrollmentMinRecordingUtc;
     private static readonly TimeSpan PreviewUrlExpiry = TimeSpan.FromMinutes(15);
 
     private readonly IAmazonBatch _batch;
@@ -184,6 +192,8 @@ public class VoiceSampleProcessingService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.Meetings.AsNoTracking()
             .Where(m => m.IsPrimaryRecorder && m.AudioS3Key != null && m.AudioS3Key != "" && m.ActiveSpeakerTimeline != null);
+        var minRecordingUtc = EnrollmentMinRecordingUtc;
+        query = query.Where(m => (m.StartedAt ?? m.StartDatetime ?? m.CreatedAt) >= minRecordingUtc);
         if (meetingId is { } id)
             query = query.Where(m => m.Id == id);
         // The log is stored by System.Text.Json, which escapes non-ASCII and quote characters — only pre-filter

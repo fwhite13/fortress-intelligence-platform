@@ -11,6 +11,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import { EventEmitter } from 'events';
 import { ChildProcess, spawn } from 'child_process';
 import * as fs from 'fs';
+import { analyzeRecordingQuality, logAudioQuality } from '../utils/audio-quality.js';
 import * as path from 'path';
 import * as os from 'os';
 import { Meeting, MeetingPlatform, MeetingStatus } from '../types.js';
@@ -913,6 +914,10 @@ export class MeetingBot extends EventEmitter {
       if (stats.size < 100) {
         console.warn('[Bot] WARNING: Recording file is very small — audio may not have been captured');
       }
+      // Flag choppy captures immediately (CPU-starved audio capture leaves 20-40 ms holes); log-only, never blocks upload.
+      try {
+        logAudioQuality(await analyzeRecordingQuality(this.audioPath));
+      } catch { /* non-fatal */ }
     } else {
       console.error(`[Bot] Recording file not found: ${this.audioPath}`);
       // Create empty file so downstream doesn't crash
