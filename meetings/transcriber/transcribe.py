@@ -579,6 +579,9 @@ SLOT_MIN_LOG_ENTRIES = 2  # fewer log entries can't segment a meeting — whole-
 MULTI_PERSON_THRESHOLD = 0.15  # default mean pairwise cosine distance at/above which a slot is multi-person
 SUBCLUSTER_MIN_S = 30.0  # a sub-cluster of a "multi-person" slot must carry at least this much speech ...
 SUBCLUSTER_MIN_FRAC = 0.2  # ... and this fraction of the slot's diarized speech, else it is noise folded into the main voice
+SNAP_WINDOW_S = 1.5  # a caption handoff may move to a pause within this many seconds of it (0 disables); env SNAP_WINDOW_S
+SNAP_MAX_WORDS = 6  # a handoff moves by at most this many words
+SNAP_MIN_GAP_S = 0.25  # ... only into a pause at least this long (and clearly longer than the gap at the original handoff)
 CAPTION_LEAD_MS = 1500.0  # Teams captions lag the speech; caption windows are shifted this much earlier (env CAPTION_LEAD_MS)
 CAPTION_MIN_ENTRY_MS = 400.0  # caption entries shorter than this are ignored (env CAPTION_MIN_ENTRY_MS)
 SLOT_MAX_EMBED_SEGMENTS = 30  # longest segments embedded per slot, bounds GPU time
@@ -662,6 +665,65 @@ def assign_attendee_slots(whisper_segments, active_speaker_log, recording_start_
     lookup = _SlotLookup(active_speaker_log, recording_start_ms)
     return {i: lookup.at((seg["start"] + seg["end"]) * 500.0) for i, seg in enumerate(whisper_segments)}
 
+def _snap_slot_boundaries(segments: list) -> None:
+    """
+    Speakers hand over at pauses, but caption windows are late and coarse, so a handoff lands a little before or
+    after the real one (a short "Okay" stays glued to the previous speaker's turn). For each handoff between word runs
+    of two slots, consider moving it to a nearby silence between consecutive words: within SNAP_WINDOW_S of the
+    current handoff and at most SNAP_MAX_WORDS words away, scoring each candidate as its pause length (capped at 1.5 s)
+    minus 0.2 per second of distance. It moves only to a pause of at least SNAP_MIN_GAP_S that beats the current
+    handoff's own score by 0.1. Each side of a handoff keeps at least one word.
+    """
+    window = _env_float("SNAP_WINDOW_S", SNAP_WINDOW_S)
+    min_gap = _env_float("SNAP_MIN_GAP_S", SNAP_MIN_GAP_S)
+    if window <= 0:
+        return
+    flat = [w for seg in segments for w in (seg.get("words") or []) if "start" in w and "end" in w and w.get("slot")]
+    n = len(flat)
+    if n < 3:
+        return
+
+    def gap(k):
+        return flat[k]["start"] - flat[k - 1]["end"]
+
+    moved = 0
+    i = 1
+    while i < n:
+        if flat[i]["slot"] == flat[i - 1]["slot"]:
+            i += 1
+            continue
+        a_slot, b_slot = flat[i - 1]["slot"], flat[i]["slot"]
+        a_start = i - 1
+        while a_start > 0 and flat[a_start - 1]["slot"] == a_slot:
+            a_start -= 1
+        b_end = i  # exclusive end of the B run
+        while b_end < n and flat[b_end]["slot"] == b_slot:
+            b_end += 1
+        t0 = flat[i - 1]["end"]
+        stay = min(gap(i), 1.5)
+        best, best_score = i, stay + 0.1
+        candidates = list(range(i - 1, max(a_start, i - 1 - SNAP_MAX_WORDS), -1)) + list(range(i + 1, min(b_end, i + 1 + SNAP_MAX_WORDS)))
+        for k in candidates:  # k < i: words k..i-1 become B; k > i: words i..k-1 become A
+            if gap(k) < min_gap:
+                continue
+            dist = abs(flat[k - 1]["end"] - t0)
+            if dist > window:
+                continue
+            score = min(gap(k), 1.5) - 0.2 * dist
+            if score > best_score:
+                best, best_score = k, score
+        if best != i:
+            if best < i:
+                for w in flat[best:i]:
+                    w["slot"] = b_slot
+            else:
+                for w in flat[i:best]:
+                    w["slot"] = a_slot
+            moved += abs(best - i)
+        i = max(i, best) + 1
+    if moved:
+        print(f"[Transcriber] Pause snapping moved {moved} word(s) across caption handoffs")
+
 def _tag_word_slots(segments: list, active_speaker_log: list, recording_start_ms: int) -> None:
     """Tag each segment with its midpoint slot and each timestamped word with its own midpoint slot, so a Whisper
     segment spanning a caption handoff is split there (untimed words inherit, as in split_segments_by_speaker)."""
@@ -672,6 +734,7 @@ def _tag_word_slots(segments: list, active_speaker_log: list, recording_start_ms
         for w in seg.get("words") or []:
             if "start" in w and "end" in w:
                 w["slot"] = lookup.at((w["start"] + w["end"]) * 500.0)
+    _snap_slot_boundaries(segments)
 
 def _split_by_key(segments: list, word_key, seg_key) -> list:
     """split_segments_by_speaker with the speaker of each slot-tagged word / segment set by the key functions."""
@@ -1702,6 +1765,9 @@ def main():
                 region_name=aws_region,
                 config=Config(read_timeout=300, retries={"max_attempts": 2})
             )
+            if os.environ.get("DUMP_TRANSCRIPT"):  # diagnostic/replay runs: read the result back from CloudWatch
+                for s in result:
+                    print(f"[Dump] {s['startTimeMs']}|{s['endTimeMs']}|{s['speakerName']}|{s['text']}")
             full_text = "\n".join([f"{s['speakerName']}: {s['text']}" for s in result])
             org_context_block = ""
             if org_wiki_entries:
