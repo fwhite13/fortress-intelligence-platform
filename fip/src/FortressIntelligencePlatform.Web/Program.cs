@@ -76,7 +76,7 @@ builder.Services.AddAuthentication(options =>
     options.ClientId = builder.Configuration["AzureAd:ClientId"];
     options.ClientSecret = builder.Configuration["AzureAd:ClientSecret"];
     options.ResponseType = "code";
-    options.SaveTokens = true;
+    options.SaveTokens = false; // ADO#9077: tokens are persisted from ctx.TokenEndpointResponse, not read from the cookie
     options.GetClaimsFromUserInfoEndpoint = true;
     options.Scope.Add("openid");
     options.Scope.Add("profile");
