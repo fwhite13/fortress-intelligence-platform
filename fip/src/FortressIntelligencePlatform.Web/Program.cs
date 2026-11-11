@@ -99,7 +99,7 @@ builder.Services.AddAuthentication(options =>
     options.Events.OnTokenValidated = async ctx =>
     {
         // Existing role mapping
-        var roles = ctx.Principal?.FindAll("roles").Select(c => c.Value) ?? [];
+        var roles = ctx.Principal?.FindAll("roles").Select(c => c.Value).ToList() ?? []; // 2026-07-09 hotfix (ADO fip-portal 7bb9573): materialize before AddClaim mutates the collection
         var identity = ctx.Principal?.Identity as System.Security.Claims.ClaimsIdentity;
         if (identity != null)
             foreach (var role in roles)

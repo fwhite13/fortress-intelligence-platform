@@ -6,9 +6,9 @@
     <RootNamespace>FortressIntelligencePlatform.Web</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.*" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="8.0.*" />
-    <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="8.0.*" />
-    <PackageReference Include="MySqlConnector" Version="2.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.28" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="8.0.28" />
+    <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="8.0.3" />
+    <PackageReference Include="MySqlConnector" Version="2.6.1" />
   </ItemGroup>
 </Project>
