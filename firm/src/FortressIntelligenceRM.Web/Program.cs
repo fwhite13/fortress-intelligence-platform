@@ -93,6 +93,11 @@ builder.Services.AddSingleton<IOrgContextService, OrgContextService>();
 builder.Services.AddSingleton<IUserWikiService, UserWikiService>();
 builder.Services.AddScoped<FipTokenService>();
 builder.Services.AddScoped<IZoomOAuthService, ZoomOAuthService>();
+// WI #9133 — Plaud account linking. Gated by Firm:Plaud:Enabled (environment config only, spec §9.2).
+builder.Services.Configure<FortressIntelligenceRM.Web.Services.Plaud.PlaudOptions>(
+    builder.Configuration.GetSection(FortressIntelligenceRM.Web.Services.Plaud.PlaudOptions.Section));
+builder.Services.AddScoped<FortressIntelligenceRM.Web.Services.Plaud.PlaudMcpClient>();
+builder.Services.AddScoped<FortressIntelligenceRM.Web.Services.Plaud.IPlaudOAuthService, FortressIntelligenceRM.Web.Services.Plaud.PlaudOAuthService>();
 builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
 builder.Services.AddScoped<AdminAccessService>();
 builder.Services.AddScoped<SpeakerEmbeddingService>();
@@ -103,6 +108,14 @@ builder.Services.AddTransient<IBot, FirmBot>();
 builder.Services.AddSingleton<IFirmBotService, FirmBotService>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient("FaitV2Client");
+// WI #9133 — Plaud clients with the IHttpClientFactory logging handlers removed (spec §9.3): the
+// default handler logs the full request URI at Information, which for PlaudAudio would be a presigned
+// URL with its signature. PlaudMcp carries OAuth discovery/registration/token calls and MCP calls.
+builder.Services.AddHttpClient(FortressIntelligenceRM.Web.Services.Plaud.PlaudMcpClient.HttpClientName,
+        client => client.Timeout = TimeSpan.FromSeconds(30))
+    .RemoveAllLoggers();
+builder.Services.AddHttpClient("PlaudAudio", client => client.Timeout = TimeSpan.FromMinutes(30))
+    .RemoveAllLoggers();
 builder.Services.AddScoped<IFaitV2IntegrationService, FaitV2IntegrationService>();
 // Named client for same-container (self) API calls — bypasses Cloudflare
 builder.Services.AddHttpClient("local", client =>

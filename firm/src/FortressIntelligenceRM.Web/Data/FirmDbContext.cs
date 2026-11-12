@@ -23,6 +23,8 @@ public class FirmDbContext : DbContext
     public DbSet<FirmSystemConfig> SystemConfig => Set<FirmSystemConfig>();
     public DbSet<FirmZoomBotAccount> ZoomBotAccount => Set<FirmZoomBotAccount>();
     public DbSet<FirmSpeakerEmbedding> SpeakerEmbeddings => Set<FirmSpeakerEmbedding>();
+    public DbSet<FirmPlaudAccount> PlaudAccounts => Set<FirmPlaudAccount>();
+    public DbSet<FirmOAuthClient> OAuthClients => Set<FirmOAuthClient>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -307,6 +309,42 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.ConfigKey).HasColumnName("config_key").HasMaxLength(100);
             entity.Property(e => e.ConfigValue).HasColumnName("config_value");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+        });
+
+        // WI #9133 — linked Plaud accounts; token columns hold TokenProtector ciphertext (spec §9.2).
+        modelBuilder.Entity<FirmPlaudAccount>(entity =>
+        {
+            entity.ToTable("firm_plaud_accounts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+            entity.HasIndex(e => e.UserId).IsUnique().HasDatabaseName("uk_fpa_user");
+            entity.Property(e => e.PlaudUserId).HasColumnName("plaud_user_id").HasMaxLength(128);
+            entity.Property(e => e.PlaudEmail).HasColumnName("plaud_email").HasMaxLength(256);
+            entity.Property(e => e.AccessTokenEnc).HasColumnName("access_token_enc").IsRequired();
+            entity.Property(e => e.RefreshTokenEnc).HasColumnName("refresh_token_enc").IsRequired();
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at").IsRequired();
+            entity.Property(e => e.ClientId).HasColumnName("client_id").HasMaxLength(255).IsRequired();
+            entity.Property(e => e.OAuthEnv).HasColumnName("oauth_env").HasMaxLength(255).IsRequired();
+            entity.Property(e => e.NeedsReconnect).HasColumnName("needs_reconnect");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.HasOne<FirmUser>()
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_fpa_user");
+        });
+
+        // WI #9133 — dynamically registered OAuth clients, one per (provider, redirect_uri).
+        modelBuilder.Entity<FirmOAuthClient>(entity =>
+        {
+            entity.ToTable("firm_oauth_clients");
+            entity.HasKey(e => new { e.Provider, e.RedirectUri });
+            entity.Property(e => e.Provider).HasColumnName("provider").HasMaxLength(20);
+            entity.Property(e => e.RedirectUri).HasColumnName("redirect_uri").HasMaxLength(500);
+            entity.Property(e => e.ClientId).HasColumnName("client_id").HasMaxLength(255).IsRequired();
+            entity.Property(e => e.RegisteredAt).HasColumnName("registered_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
         });
 
         // WI #8043 — shared Zoom bot account tokens; single row, no user association.

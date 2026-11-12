@@ -234,6 +234,33 @@ public class DatabaseInitializationService : IHostedService
     INDEX idx_tenant_name (tenant_id, name(100)),
     INDEX idx_tenant_oid  (tenant_id, entra_oid),
     INDEX idx_meeting     (meeting_id)
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                // WI #9133 — linked Plaud accounts (spec §9.2). Tokens are DataProtection ciphertext
+                // (purpose Firm.PlaudTokens.v1); client_id/oauth_env record the issuing environment,
+                // because dev and prod share this database but not a key ring or DCR client.
+                ("firm_plaud_accounts", @"CREATE TABLE IF NOT EXISTS firm_plaud_accounts (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+    plaud_user_id VARCHAR(128) NULL,
+    plaud_email VARCHAR(256) NULL,
+    access_token_enc TEXT NOT NULL,
+    refresh_token_enc TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    client_id VARCHAR(255) NOT NULL,
+    oauth_env VARCHAR(255) NOT NULL,
+    needs_reconnect TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_fpa_user (user_id),
+    CONSTRAINT fk_fpa_user FOREIGN KEY (user_id) REFERENCES firm_users(id) ON DELETE CASCADE
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                // WI #9133 — one dynamically registered OAuth client per provider and redirect URI (spec §9.2).
+                ("firm_oauth_clients", @"CREATE TABLE IF NOT EXISTS firm_oauth_clients (
+    provider VARCHAR(20) NOT NULL,
+    redirect_uri VARCHAR(500) NOT NULL,
+    client_id VARCHAR(255) NOT NULL,
+    registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (provider, redirect_uri)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 
