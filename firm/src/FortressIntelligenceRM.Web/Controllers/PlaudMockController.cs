@@ -53,13 +53,57 @@ public class PlaudMockController : Controller
 
     private string Base => $"{Request.Scheme}://{Request.Host}{Request.PathBase}/dev/plaud-mock";
 
+    /// <summary>
+    /// WI #9138-b — Firm:PlaudMock:PublicBaseUrl (env Firm__PlaudMock__PublicBaseUrl, e.g. https://firm.dev.fortressam.ai).
+    /// Cloudflare challenges non-browser clients, so on dev the server reaches the mock over its own loopback
+    /// (Firm__Plaud__McpUrl=http://localhost:8080/dev/plaud-mock/mcp) and every server-to-server URL stays
+    /// request-derived. Only what a browser opens (the authorize page, its form action) uses this public base.
+    /// Empty (the default) or not an absolute http(s) URL without query/fragment: behaviour is exactly as before.
+    /// </summary>
+    public const string PublicBaseUrlKey = "Firm:PlaudMock:PublicBaseUrl";
+
+    /// <summary>The configured public base without a trailing slash, or null when unset or invalid.</summary>
+    private string? PublicBaseUrl
+    {
+        get
+        {
+            var raw = _config[PublicBaseUrlKey]?.Trim();
+            if (string.IsNullOrEmpty(raw)
+                || !Uri.TryCreate(raw, UriKind.Absolute, out var u)
+                || (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp)
+                || u.Query.Length > 0 || u.Fragment.Length > 0)
+                return null;
+            return raw.TrimEnd('/');
+        }
+    }
+
+    /// <summary>Base for URLs a browser follows: the public base when configured, else the request base.</summary>
+    private string BrowserBase => PublicBaseUrl is { } pub ? pub + "/dev/plaud-mock" : Base;
+
+    /// <summary>True when this request was addressed to localhost / a loopback IP (the server calling itself).</summary>
+    private bool IsLoopbackRequest =>
+        string.Equals(Request.Host.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+        || (IPAddress.TryParse(Request.Host.Host.Trim('[', ']'), out var ip) && IPAddress.IsLoopback(ip));
+
+    /// <summary>
+    /// With a public base configured, a loopback redirect_uri is never redirected to or linked: no URL the
+    /// browser follows from the mock may point at localhost. Without one, any registered redirect_uri is used, as before.
+    /// </summary>
+    private bool RedirectUriAllowedForBrowser(string redirectUri) =>
+        PublicBaseUrl == null
+        || (Uri.TryCreate(redirectUri, UriKind.Absolute, out var u)
+            && !u.IsLoopback
+            && !string.Equals(u.Host, "localhost", StringComparison.OrdinalIgnoreCase));
+
     // ── Discovery ────────────────────────────────────────────────────────
 
     [HttpGet(".well-known/oauth-authorization-server")]
     public IActionResult AuthorizationServerMetadata() => new JsonResult(new Dictionary<string, object>
     {
+        // Only authorization_endpoint is opened by a browser; issuer/token/registration stay request-derived
+        // (loopback when the server calls itself).
         ["issuer"] = Base + "/",
-        ["authorization_endpoint"] = Base + "/authorize",
+        ["authorization_endpoint"] = BrowserBase + "/authorize",
         ["token_endpoint"] = Base + "/token",
         ["registration_endpoint"] = Base + "/register",
         ["response_types_supported"] = new[] { "code" },
@@ -134,10 +178,16 @@ public class PlaudMockController : Controller
         [FromQuery(Name = "code_challenge")] string? codeChallenge,
         [FromQuery(Name = "code_challenge_method")] string? codeChallengeMethod)
     {
+        // RFC 8707 `resource` is deliberately not bound or checked here or at /token: the real client sends
+        // resource=<Firm:Plaud:McpUrl>, which is the request-derived {Base}/mcp over loopback
+        // (http://localhost:8080/dev/plaud-mock/mcp) or the public one; every value is accepted, never rejected.
+
         // An unknown client or unregistered redirect_uri must never be redirected to (RFC 6749 §4.1.2.1).
         var client = _state.FindClient(clientId);
         if (client == null || redirectUri == null || !client.RedirectUris.Contains(redirectUri))
             return ConsentHtml("Mock Plaud: unknown client or redirect_uri", "<p>The client_id or redirect_uri is not registered with this mock.</p>", 400);
+        if (!RedirectUriAllowedForBrowser(redirectUri))
+            return ConsentHtml("Mock Plaud: loopback redirect_uri", "<p>Firm:PlaudMock:PublicBaseUrl is set, so this mock will not send a browser to a localhost redirect_uri. Configure Firm:Plaud:RedirectUri with the public URL.</p>", 400);
 
         if (responseType != "code")
             return RedirectWithError(redirectUri, "unsupported_response_type", state);
@@ -155,7 +205,7 @@ public class PlaudMockController : Controller
             <p><b>{enc.Encode(client.ClientName.Length > 0 ? client.ClientName : "An application")}</b> wants read-only access to the
             recordings of <b>{enc.Encode(PlaudMockState.FakeUserEmail)}</b>.</p>
             <p style="color:#a00">DEV-ONLY mock. No real Plaud account is involved.</p>
-            <form method="post" action="{enc.Encode(Base + "/authorize")}">
+            <form method="post" action="{enc.Encode(BrowserBase + "/authorize")}">
               <input type="hidden" name="client_id" value="{enc.Encode(client.ClientId)}">
               <input type="hidden" name="redirect_uri" value="{enc.Encode(redirectUri)}">
               <input type="hidden" name="state" value="{enc.Encode(state ?? "")}">
@@ -177,6 +227,8 @@ public class PlaudMockController : Controller
         var client = _state.FindClient(clientId);
         if (client == null || redirectUri == null || !client.RedirectUris.Contains(redirectUri))
             return ConsentHtml("Mock Plaud: unknown client or redirect_uri", "<p>The client_id or redirect_uri is not registered with this mock.</p>", 400);
+        if (!RedirectUriAllowedForBrowser(redirectUri))
+            return ConsentHtml("Mock Plaud: loopback redirect_uri", "<p>Firm:PlaudMock:PublicBaseUrl is set, so this mock will not send a browser to a localhost redirect_uri. Configure Firm:Plaud:RedirectUri with the public URL.</p>", 400);
         if (string.IsNullOrEmpty(codeChallenge))
             return RedirectWithError(redirectUri, "invalid_request", state);
 
@@ -572,6 +624,8 @@ public class PlaudMockController : Controller
         var utterances = clip?.Utterances.Count ?? 0;
         var file = FileSummary(r);
         // Looks like a real presigned URL (signature-style query) so log hygiene is exercised; /audio ignores it.
+        // Request-derived on purpose (never PublicBaseUrl): the server downloads it, over loopback on dev, and
+        // PlaudMcpClient.ReadPresignedUrl accepts http only for localhost/127.0.0.1 while the mock is enabled.
         var expires = DateTimeOffset.UtcNow.AddHours(24).ToUnixTimeSeconds();
         file["presigned_url"] = $"{Base}/audio/{Uri.EscapeDataString(r.Id)}?X-Mock-Expires={expires}&X-Mock-Signature={PlaudMockState.RandomToken(24)}";
         file["presigned_url_expires_in"] = 86400;
@@ -786,8 +840,11 @@ public class PlaudMockController : Controller
         if (User.Identity?.IsAuthenticated != true)
             return Challenge();
         var b = HtmlEncoder.Default.Encode(Base);
+        var pub = HtmlEncoder.Default.Encode(PublicBaseUrl ?? "(unset: browser URLs use the request base)");
+        var loopback = IsLoopbackRequest ? "yes" : "no";
         var body = $$"""
             <p style="color:#a00">DEV-ONLY. Point Firm__Plaud__McpUrl at {{b}}/mcp.</p>
+            <p>Effective PublicBaseUrl: <code>{{pub}}</code> &middot; this request was loopback: <b>{{loopback}}</b></p>
             <p>
               <button onclick="s({expiresIn:60})">expiresIn 60</button>
               <button onclick="s({expiresIn:3600})">expiresIn 3600</button>

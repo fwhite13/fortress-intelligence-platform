@@ -21,6 +21,21 @@ public class PlaudMockState
     private const int MaxEntries = 2000;
     private static readonly TimeSpan CodeLifetime = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// WI #9138-b — the app configuration, captured when DI first builds this singleton (the first mock request).
+    /// Read live by <see cref="IsMockEnabled"/>; null (so false) in a process where the mock was never resolved.
+    /// </summary>
+    private static volatile IConfiguration? s_config;
+
+    public PlaudMockState(IConfiguration config) => s_config = config;
+
+    /// <summary>
+    /// True only while Firm:PlaudMock:Enabled is exactly true in this process's configuration. Gates
+    /// <see cref="PlaudMcpClient.ReadPresignedUrl"/> accepting the mock's http://localhost audio link.
+    /// </summary>
+    public static bool IsMockEnabled =>
+        s_config is { } c && c.GetValue<bool>("Firm:PlaudMock:Enabled");
+
     private readonly object _lock = new();
     private readonly Dictionary<string, MockClient> _clients = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MockCode> _codes = new(StringComparer.Ordinal);
