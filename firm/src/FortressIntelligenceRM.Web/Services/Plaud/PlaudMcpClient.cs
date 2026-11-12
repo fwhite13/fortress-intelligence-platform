@@ -11,6 +11,9 @@ namespace FortressIntelligenceRM.Web.Services.Plaud;
 /// <summary>Plaud identity from the get_current_user tool.</summary>
 public record PlaudCurrentUser(string? Id, string? Email);
 
+/// <summary>WI #9134 — one list_files entry. Name is never logged. Holds no audio URL.</summary>
+public record PlaudFileInfo(string Id, string? Name, DateTime? StartAt, DateTime? CreatedAt, long? DurationMs);
+
 /// <summary>A non-2xx answer from the MCP endpoint. Carries only the status, never the body.</summary>
 public class PlaudMcpException : Exception
 {
@@ -77,6 +80,181 @@ public class PlaudMcpClient
         var email = FindString(payload, "email");
         var id = FindString(payload, "id") ?? FindString(payload, "user_id") ?? FindString(payload, "uid");
         return new PlaudCurrentUser(id, email);
+    }
+
+    // ── WI #9134: import tools ────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// list_files for a date window (YYYY-MM-DD, server-side filter; timezone unverified, so callers
+    /// overlap the window). Returns one page; <c>PageWasFull</c> tells the caller whether to ask for the next.
+    /// Field names are read tolerantly (id/file_id, start_at/startAt, duration in ms).
+    /// </summary>
+    public async Task<(IReadOnlyList<PlaudFileInfo> Files, bool PageWasFull)> ListFilesAsync(Session session,
+        DateOnly dateFrom, DateOnly dateTo, int page, int pageSize, CancellationToken ct = default)
+    {
+        var args = new JsonObject
+        {
+            ["date_from"] = dateFrom.ToString("yyyy-MM-dd"),
+            ["date_to"] = dateTo.ToString("yyyy-MM-dd"),
+            ["page"] = page,
+            ["page_size"] = Math.Max(10, pageSize),
+        };
+        var payload = ExtractToolPayload(await CallToolAsync(session, "list_files", args, ct));
+        var items = FindFileArray(payload);
+        var files = new List<PlaudFileInfo>();
+        foreach (var item in items)
+        {
+            if (ParseFileInfo(item) is { } f)
+                files.Add(f);
+        }
+        return (files, items.Count >= Math.Max(10, pageSize));
+    }
+
+    /// <summary>
+    /// get_file. Returns the raw payload so the caller can read the 24 h presigned audio URL into a
+    /// local variable (<see cref="ReadPresignedUrl"/>) without it ever passing through a typed field.
+    /// </summary>
+    public async Task<JsonNode?> GetFilePayloadAsync(Session session, string fileId, CancellationToken ct = default)
+        => ExtractToolPayload(await CallToolAsync(session, "get_file", new JsonObject { ["file_id"] = fileId }, ct));
+
+    /// <summary>The presigned audio URL in a get_file payload, or null when the device has not synced audio yet.</summary>
+    public static string? ReadPresignedUrl(JsonNode? getFilePayload)
+    {
+        foreach (var name in new[] { "presigned_url", "presignedUrl", "audio_url", "audioUrl", "download_url" })
+        {
+            var v = FindString(getFilePayload, name);
+            if (v != null && v.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                return v;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// get_transcript, one page (D17 archive only; never shown, pushed or logged). Returns the raw text
+    /// content of the tool result and the next cursor, if any.
+    /// </summary>
+    public async Task<(string? Text, string? NextCursor)> GetTranscriptPageAsync(Session session, string fileId,
+        string? cursor, int limit, CancellationToken ct = default)
+    {
+        var args = new JsonObject
+        {
+            ["file_id"] = fileId,
+            ["block"] = "transaction",
+            ["limit"] = Math.Clamp(limit, 1, 500),
+        };
+        if (!string.IsNullOrEmpty(cursor))
+            args["cursor"] = cursor;
+        var result = await CallToolAsync(session, "get_transcript", args, ct);
+        var text = ExtractToolText(result);
+        string? next = null;
+        try
+        {
+            var payload = ExtractToolPayload(result);
+            next = (payload as JsonObject)?["next_cursor"]?.ToString()
+                   ?? (payload as JsonObject)?["nextCursor"]?.ToString()
+                   ?? FindString(payload, "next_cursor");
+        }
+        catch (PlaudMcpException) { throw; }
+        catch (Exception) { /* no cursor → last page */ }
+        return (text, string.IsNullOrWhiteSpace(next) ? null : next);
+    }
+
+    /// <summary>get_note (D17 archive only; never shown, pushed or logged). Raw text content of the tool result.</summary>
+    public async Task<string?> GetNoteTextAsync(Session session, string fileId, CancellationToken ct = default)
+        => ExtractToolText(await CallToolAsync(session, "get_note", new JsonObject { ["file_id"] = fileId }, ct));
+
+    /// <summary>All text content items of a tools/call result, joined; null when there are none.</summary>
+    public static string? ExtractToolText(JsonNode? result)
+    {
+        if (result == null)
+            return null;
+        if (result["isError"]?.GetValue<bool>() == true)
+            throw new PlaudMcpException("MCP tool returned isError");
+        if (result["content"] is not JsonArray content)
+            return result["structuredContent"]?.ToJsonString();
+        var sb = new StringBuilder();
+        foreach (var item in content)
+        {
+            if (item?["type"]?.GetValue<string>() != "text")
+                continue;
+            if (sb.Length > 0) sb.Append("\n\n");
+            sb.Append(item["text"]?.GetValue<string>());
+        }
+        return sb.Length > 0 ? sb.ToString() : null;
+    }
+
+    /// <summary>The list of file objects in a list_files payload: the payload itself if it is an array,
+    /// else the first array under files/items/data/list/records/results, else any array of objects with an id.</summary>
+    private static List<JsonNode> FindFileArray(JsonNode? payload)
+    {
+        if (payload is JsonArray direct)
+            return direct.Where(n => n != null).Select(n => n!).ToList();
+        if (payload is not JsonObject obj)
+            return new List<JsonNode>();
+        foreach (var key in new[] { "files", "items", "data", "list", "records", "results" })
+        {
+            if (obj[key] is JsonArray arr)
+                return arr.Where(n => n != null).Select(n => n!).ToList();
+            if (obj[key] is JsonObject inner && FindFileArray(inner) is { Count: > 0 } nested)
+                return nested;
+        }
+        foreach (var (_, value) in obj)
+        {
+            if (value is JsonArray arr && arr.FirstOrDefault() is JsonObject first
+                && (first.ContainsKey("id") || first.ContainsKey("file_id")))
+                return arr.Where(n => n != null).Select(n => n!).ToList();
+        }
+        return new List<JsonNode>();
+    }
+
+    private static PlaudFileInfo? ParseFileInfo(JsonNode? node)
+    {
+        if (node is not JsonObject obj)
+            return null;
+        var id = TopString(obj, "id", "file_id", "fileId");
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 128)
+            return null;
+        return new PlaudFileInfo(
+            id,
+            TopString(obj, "name", "title", "filename"),
+            ParseTimestamp(obj["start_at"] ?? obj["startAt"] ?? obj["start_time"]),
+            ParseTimestamp(obj["created_at"] ?? obj["createdAt"] ?? obj["create_time"]),
+            ParseLong(obj["duration"] ?? obj["duration_ms"]));
+    }
+
+    private static string? TopString(JsonObject obj, params string[] names)
+    {
+        foreach (var n in names)
+            if (obj[n] is JsonValue v && v.ToString() is { Length: > 0 } s)
+                return s;
+        return null;
+    }
+
+    private static long? ParseLong(JsonNode? node)
+    {
+        if (node is not JsonValue v) return null;
+        if (v.TryGetValue<long>(out var l)) return l;
+        if (v.TryGetValue<double>(out var d)) return (long)d;
+        return long.TryParse(v.ToString(), System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var p) ? p : null;
+    }
+
+    /// <summary>Epoch ms, epoch s, or ISO 8601 (format unverified, spec §4.1) → UTC.</summary>
+    public static DateTime? ParseTimestamp(JsonNode? node)
+    {
+        if (node is not JsonValue v) return null;
+        if (ParseLong(node) is long n && v.ToString().All(c => char.IsDigit(c) || c == '.'))
+        {
+            if (n <= 0) return null;
+            // > 1e11 cannot be seconds before year 5138: treat as milliseconds.
+            return n > 100_000_000_000L
+                ? DateTimeOffset.FromUnixTimeMilliseconds(n).UtcDateTime
+                : DateTimeOffset.FromUnixTimeSeconds(n).UtcDateTime;
+        }
+        return DateTimeOffset.TryParse(v.ToString(), System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal, out var dto)
+            ? dto.UtcDateTime
+            : null;
     }
 
     /// <summary>tools/call; re-initializes once if the server forgot the session (404).</summary>
