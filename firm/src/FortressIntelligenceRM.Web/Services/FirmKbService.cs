@@ -435,6 +435,7 @@ public class FirmKbService
         {
             case "plaud": return "Plaud";
             case "mobile": return "FIRM Mobile";
+            case "upload": return "Uploaded recording"; // WI #9139
         }
         var p = platform?.Trim().ToLowerInvariant();
         return p switch
@@ -444,6 +445,7 @@ public class FirmKbService
             "meet" => "Google Meet",
             "plaud" => "Plaud",
             "mobile" => "FIRM Mobile",
+            "upload" => "Uploaded recording",
             _ => char.ToUpperInvariant(p[0]) + p[1..]
         };
     }

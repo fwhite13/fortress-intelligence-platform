@@ -1,0 +1,289 @@
+@page "/upload"
+@attribute [Authorize]
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject BrandingConfig Branding
+@inject RecordingUploadService Uploads
+
+@* WI #9139 — upload a recording from any recorder (Voice Memos, a call-recorder export, a Plaud file export...).
+   Mobile-first; "Add to Home Screen" opens this page (manifest start_url). The file is read and sent in 8 MB
+   parts by wwwroot/js/upload-recording.js; it never travels over the Blazor circuit. *@
+
+<PageTitle>Upload recording — @Branding.ModuleName</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="px-3 py-4">
+    <MudText Typo="Typo.h5" Style="color: var(--color-text-primary); font-weight: 600;" Class="mb-1">Upload a recording</MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);" Class="mb-4">
+        Pick an audio file from any recorder. @Branding.ModuleName transcribes and summarises it like any other meeting.
+    </MudText>
+
+    @if (_doneMeetingId.HasValue)
+    {
+        <MudAlert Severity="Severity.Success" Variant="Variant.Filled" Class="mb-4" Dense="false">
+            <MudText Typo="Typo.subtitle1" Style="font-weight: 600;">Done</MudText>
+            <MudText Typo="Typo.body2">The recording is uploaded and being transcribed.</MudText>
+            <MudButton Href="@($"/meetings/{_doneMeetingId}")" Variant="Variant.Outlined" Size="Size.Small"
+                       Class="mt-2" Style="color: inherit; border-color: currentColor;">
+                Open the meeting
+            </MudButton>
+        </MudAlert>
+    }
+
+    <MudPaper Elevation="1" Class="pa-4" Style="border-radius: 12px;">
+        <MudStack Spacing="3">
+            <div>
+                <label for="@InputId" class="firm-upload-pick" style="@(Busy ? "pointer-events:none;opacity:.6;" : "")">
+                    <MudIcon Icon="@Icons.Material.Filled.AudioFile" Style="color: var(--fortress-gold);" />
+                    <span>@(_fileSelected ? "Choose a different file" : "Choose an audio file")</span>
+                </label>
+                @* Plain file input: JS reads it directly. On iOS the picker also offers Files and Voice Memos. *@
+                <input id="@InputId" type="file" class="firm-upload-input" disabled="@Busy"
+                       accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.opus,.flac,.caf,.mp4,.m4b" />
+                @if (_fileSelected)
+                {
+                    <MudText Typo="Typo.body2" Class="mt-2" Style="color: var(--color-text-secondary);">
+                        @_fileExt.TrimStart('.').ToUpperInvariant() file, @FormatSize(_fileSize)
+                    </MudText>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(_fileError))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@_fileError</MudAlert>
+            }
+
+            <MudTextField @bind-Value="_title" Label="Title" Variant="Variant.Outlined" Disabled="@Busy"
+                          MaxLength="500" Immediate="true" />
+
+            <MudTextField @bind-Value="_recordedAtLocal" Label="Recorded at" Variant="Variant.Outlined"
+                          InputType="InputType.DateTimeLocal" Disabled="@Busy" Immediate="true"
+                          HelperText="Defaults to the file's date. Change it if the recording was made at another time." />
+
+            @if (_phase != Phase.Idle)
+            {
+                <div>
+                    <MudProgressLinear Color="Color.Primary" Value="@_percent" Size="Size.Large" Rounded="true"
+                                       Indeterminate="@(_phase == Phase.Finishing)" Style="height: 10px;" />
+                    <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+                        @StatusText
+                    </MudText>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_uploadError))
+            {
+                <MudAlert Severity="@(_phase == Phase.Paused ? Severity.Warning : Severity.Error)" Dense="true">@_uploadError</MudAlert>
+            }
+
+            <MudStack Row Spacing="2" Justify="Justify.FlexEnd" Wrap="Wrap.Wrap">
+                @if (_phase == Phase.Paused)
+                {
+                    <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;" OnClick="ResumeAsync">Resume</MudButton>
+                }
+                @if (_phase is Phase.Uploading or Phase.Paused)
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="CancelAsync">Cancel</MudButton>
+                }
+                @if (_phase == Phase.Idle)
+                {
+                    <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923; min-width: 140px;"
+                               StartIcon="@Icons.Material.Filled.CloudUpload"
+                               Disabled="@(!_fileSelected || !string.IsNullOrEmpty(_fileError) || _starting)"
+                               OnClick="StartAsync">Upload</MudButton>
+                }
+            </MudStack>
+
+            @* Shown by the script only if the live connection to the page was lost while uploading. *@
+            <div id="firm-upload-fallback" hidden style="font-size: 14px;"></div>
+        </MudStack>
+    </MudPaper>
+
+    <MudText Typo="Typo.caption" Class="mt-3 d-block" Style="color: var(--color-text-secondary);">
+        One file at a time, up to @(Uploads.MaxAudioBytes / (1024 * 1024)) MB. Keep this page open until it says Done.
+        On iPhone, Share → Add to Home Screen puts this page on your Home Screen.
+    </MudText>
+</MudContainer>
+
+<style>
+    .firm-upload-pick {
+        display: flex; align-items: center; justify-content: center; gap: 10px;
+        min-height: 64px; padding: 12px; cursor: pointer;
+        border: 2px dashed var(--color-border, #cbd5e1); border-radius: 10px;
+        font-size: 16px; font-weight: 500; color: var(--color-text-primary);
+        background: var(--color-surface-sunken, #f3f4f6);
+    }
+    .firm-upload-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+    /* iOS zooms into inputs below 16px. */
+    input, textarea { font-size: 16px !important; }
+</style>
+
+@code {
+    private const string InputId = "firm-upload-file";
+
+    private enum Phase { Idle, Uploading, Paused, Finishing }
+
+    private DotNetObjectReference<UploadRecording>? _ref;
+    private Phase _phase = Phase.Idle;
+    private bool _starting;
+    private bool _fileSelected;
+    private string _fileExt = "";
+    private long _fileSize;
+    private string? _fileError;
+    private string? _uploadError;
+    private string _title = "";
+    private string _recordedAtLocal = "";
+    private long _sent;
+    private long _total;
+    private long? _doneMeetingId;
+
+    private bool Busy => _phase != Phase.Idle || _starting;
+    private double _percent => _total > 0 ? Math.Round(100.0 * _sent / _total, 1) : 0;
+
+    private string StatusText => _phase switch
+    {
+        Phase.Finishing => "Finishing…",
+        Phase.Paused => $"Paused at {FormatSize(_sent)} of {FormatSize(_total)}",
+        _ => $"{FormatSize(_sent)} of {FormatSize(_total)} ({_percent:0}%)"
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _ref = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("firmUpload.register", InputId, _ref);
+    }
+
+    [JSInvokable]
+    public Task OnFileSelected(string stem, string ext, long size, string contentType, string lastModifiedLocal)
+    {
+        _doneMeetingId = null;
+        _uploadError = null;
+        _fileSelected = true;
+        _fileExt = ext ?? "";
+        _fileSize = size;
+        _title = stem ?? "";
+        _recordedAtLocal = lastModifiedLocal ?? "";
+        // Same allow-list and size cap as the server (which checks again).
+        _fileError = Uploads.Validate("f" + _fileExt, contentType, size);
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnFileCleared()
+    {
+        _fileSelected = false;
+        _fileError = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnProgress(long sent, long total)
+    {
+        _sent = sent;
+        _total = total;
+        if (_phase == Phase.Idle) _phase = Phase.Uploading;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnResumed()
+    {
+        _uploadError = null;
+        _phase = Phase.Uploading;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnPaused(string message)
+    {
+        _phase = Phase.Paused;
+        _uploadError = message;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnFinishing()
+    {
+        _phase = Phase.Finishing;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnDone(long meetingId, string? url)
+    {
+        _doneMeetingId = meetingId;
+        ResetForm();
+        await JS.InvokeVoidAsync("firmUpload.reset", InputId);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnFailed(string message)
+    {
+        _phase = Phase.Idle;
+        _uploadError = message;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task StartAsync()
+    {
+        if (Busy || !_fileSelected || _fileError != null) return;
+        _starting = true;
+        _uploadError = null;
+        _doneMeetingId = null;
+        try
+        {
+            var error = await JS.InvokeAsync<string?>("firmUpload.start", InputId,
+                new { title = _title?.Trim() ?? "", recordedAtLocal = _recordedAtLocal });
+            if (error != null)
+            {
+                _uploadError = error;
+                _phase = Phase.Idle;
+            }
+        }
+        finally
+        {
+            _starting = false;
+        }
+    }
+
+    private async Task ResumeAsync() => await JS.InvokeVoidAsync("firmUpload.resume");
+
+    private async Task CancelAsync()
+    {
+        await JS.InvokeVoidAsync("firmUpload.cancel");
+        _phase = Phase.Idle;
+        _sent = 0;
+        _uploadError = "Upload cancelled.";
+    }
+
+    private void ResetForm()
+    {
+        _phase = Phase.Idle;
+        _fileSelected = false;
+        _fileExt = "";
+        _fileSize = 0;
+        _fileError = null;
+        _uploadError = null;
+        _title = "";
+        _recordedAtLocal = "";
+        _sent = 0;
+        _total = 0;
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        >= 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024 * 1024):0.0} GB",
+        >= 1024L * 1024 => $"{bytes / (1024.0 * 1024):0.0} MB",
+        >= 1024 => $"{bytes / 1024.0:0} KB",
+        _ => $"{bytes} bytes"
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("firmUpload.unregister"); }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
+        _ref?.Dispose();
+    }
+}
