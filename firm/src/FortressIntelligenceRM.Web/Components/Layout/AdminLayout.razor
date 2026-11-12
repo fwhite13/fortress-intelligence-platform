@@ -4,7 +4,7 @@
 @inject AdminAccessService AdminAccess
 @inject NavigationManager Navigation
 
-@* WI #8034: /admin/* pages use this layout. Non-admins are silently redirected home. *@
+@* WI #8034: /admin/* pages use this layout. Non-admins are silently redirected home (/meetings, WI #9178). *@
 
 @if (_isAdmin)
 {
@@ -40,6 +40,6 @@ else
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         _isAdmin = await AdminAccess.IsAdminAsync(authState.User);
         if (!_isAdmin)
-            Navigation.NavigateTo("/", replace: true);
+            Navigation.NavigateTo("/meetings", replace: true);
     }
 }
