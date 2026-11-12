@@ -2,6 +2,7 @@
 @inject NavigationManager NavManager
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AdminAccessService AdminAccess
+@inject FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncService PlaudSync
 
 <MudNavMenu>
     <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
@@ -13,6 +14,13 @@
     <MudNavLink Href="/upload" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.UploadFile">
         Upload recording
     </MudNavLink>
+    @* WI #9156 — only when Firm:Plaud:Enabled and the signed-in user has a firm_plaud_accounts row (DB check, no Plaud call). *@
+    @if (_hasPlaud)
+    {
+        <MudNavLink Href="/plaud" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Mic">
+            Plaud
+        </MudNavLink>
+    }
 
     <MudNavLink Href="/my-wiki" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.MenuBook">
         My Wiki
@@ -35,10 +43,22 @@
 
 @code {
     private bool _isAdmin;
+    private bool _hasPlaud;
 
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         _isAdmin = await AdminAccess.IsAdminAsync(authState.User);
+        try
+        {
+            var oid = authState.User.FindFirst("oid")?.Value
+                      ?? authState.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+            _hasPlaud = oid != null && await PlaudSync.HasAccountAsync(oid);
+        }
+        catch (Exception)
+        {
+            // Nav decoration only; never break the layout on a DB hiccup.
+            _hasPlaud = false;
+        }
     }
 }

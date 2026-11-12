@@ -1,0 +1,685 @@
+@page "/plaud"
+@attribute [Authorize]
+@implements IDisposable
+@using FortressIntelligenceRM.Web.Services.Plaud
+@inject AuthenticationStateProvider AuthStateProvider
+@inject MeetingService MeetingService
+@inject IPlaudOAuthService PlaudOAuth
+@inject PlaudSyncService PlaudSync
+@inject Microsoft.Extensions.Options.IOptions<PlaudOptions> PlaudOptions
+@inject BrandingConfig Branding
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+@* WI #9156 — the user's Plaud recordings, listed live through the Plaud MCP (list_files), to pick which ones to
+   import, plus the auto-sync switch. Setup (Connect / Disconnect) stays in Settings. Mobile-first.
+   Privacy: titles are shown to the signed-in user only and never logged; the user id always comes from the
+   authenticated principal, and the listing this component loaded stays on the server (Blazor Server). *@
+
+<PageTitle>Plaud — @Branding.ModuleName</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="px-3 py-4">
+    <MudText Typo="Typo.h5" Style="color: var(--color-text-primary); font-weight: 600;" Class="mb-3">Plaud recordings</MudText>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Color="Color.Warning" Indeterminate />
+    }
+    else if (!PlaudOAuth.IsEnabled)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true">Plaud is not available here.</MudAlert>
+    }
+    else if (_userId == null)
+    {
+        <MudAlert Severity="Severity.Error" Dense="true">Could not identify your account. Sign in again and retry.</MudAlert>
+    }
+    else if (_account is not { Connected: true })
+    {
+        <MudAlert Severity="Severity.Info" Dense="true">
+            No Plaud account connected. Connect one in Settings (your name, top right) on the Plaud tab.
+        </MudAlert>
+    }
+    else if (_account.NeedsReconnect || _account.OtherEnvironment || _needsReconnect)
+    {
+        <MudPaper Elevation="0" Outlined="true" Class="pa-4">
+            <MudText Typo="Typo.body1" Style="color: var(--color-text-primary);" Class="mb-3">
+                @(_account.OtherEnvironment
+                    ? "Your Plaud account is connected on another FIRM environment. Reconnect here to see your recordings."
+                    : "Plaud needs to be reconnected before your recordings can be listed.")
+            </MudText>
+            <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                       Href="/oauth/plaud/authorize" StartIcon="@Icons.Material.Filled.Refresh">
+                Reconnect Plaud
+            </MudButton>
+        </MudPaper>
+    }
+    else
+    {
+        @* Top: account, auto-sync switch, "Check every", last checked, one-line state. *@
+        <MudPaper Elevation="0" Outlined="true" Class="pa-3 mb-3">
+            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);" Class="mb-1">
+                Connected as <strong style="color: var(--color-text-primary);">@(_account.Email ?? "your Plaud account")</strong>
+            </MudText>
+            <div class="d-flex flex-wrap align-center gap-3">
+                <MudSwitch T="bool" Value="@_autoSync" ValueChanged="OnAutoSyncChanged" Disabled="@_savingAutoSync"
+                           Label="Automatically import new recordings" Color="Color.Warning" />
+                <MudSelect T="int" Label="Check every" Dense="true" Style="max-width: 160px;"
+                           Value="@_interval" ValueChanged="OnIntervalChanged" Disabled="@(!_autoSync)">
+                    @foreach (var m in PlaudSyncService.IntervalChoices)
+                    {
+                        <MudSelectItem T="int" Value="@m">@(m >= 60 ? $"{m / 60} h" : $"{m} min")</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); display: block;" Class="mt-1">
+                @(_status?.LastCheckedAt is { } checkedAt ? $"Last checked {FormatLocal(checkedAt)}" : "Not checked yet")
+                · @StateLine()
+            </MudText>
+        </MudPaper>
+
+        @* List header: select all + Import selected. *@
+        <MudPaper Elevation="0" Outlined="true" Class="pa-2 mb-2">
+            <div class="d-flex flex-wrap align-center justify-space-between gap-2">
+                <MudCheckBox T="bool" Value="@AllAvailableSelected" ValueChanged="OnSelectAllChanged"
+                             Disabled="@(AvailableCount == 0 || _queueing)" Color="Color.Warning"
+                             Label="@($"Select all ({AvailableCount})")" />
+                <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                           Disabled="@(SelectedCount == 0 || _queueing)" OnClick="ImportSelected"
+                           StartIcon="@Icons.Material.Filled.CloudDownload">
+                    @(_queueing ? "Importing…" : SelectedCount == 1 ? "Import 1 recording" : $"Import {SelectedCount} recordings")
+                </MudButton>
+            </div>
+            @if (SelectedCount > PlaudSyncService.QueueSelectedPerClick)
+            {
+                <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); display: block;" Class="px-2">
+                    Up to @PlaudSyncService.QueueSelectedPerClick per click: the oldest @PlaudSyncService.QueueSelectedPerClick are imported now and
+                    @(SelectedCount - PlaudSyncService.QueueSelectedPerClick) stay selected for the next click.
+                </MudText>
+            }
+            @if (_queueing)
+            {
+                <MudProgressLinear Color="Color.Warning" Indeterminate Class="mt-1" />
+            }
+        </MudPaper>
+
+        @if (_listError != null && _files.Count == 0)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                <div class="d-flex flex-wrap align-center gap-2">
+                    <span>@ErrorText(_listError)</span>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="RetryList" Disabled="@_listing">Retry</MudButton>
+                </div>
+            </MudAlert>
+        }
+        else if (_files.Count == 0 && !_listing)
+        {
+            <MudText Typo="Typo.body2" Style="color: var(--color-text-secondary);" Class="pa-3">
+                No Plaud recordings in the last @DaysShown days.
+            </MudText>
+        }
+
+        @foreach (var f in _files)
+        {
+            var state = StateOf(f);
+            var ledger = _ledger.GetValueOrDefault(f.Id);
+            <MudPaper Elevation="0" Outlined="true" Class="pa-2 mb-1" @key="f.Id">
+                <div class="d-flex align-center gap-2" style="min-width: 0;">
+                    <MudCheckBox T="bool" Value="@_selected.Contains(f.Id)" Color="Color.Warning" Dense="true"
+                                 Disabled="@(state != RowState.Available || _queueing)"
+                                 ValueChanged="@(v => OnRowChecked(f.Id, v))" />
+                    <div style="flex: 1 1 auto; min-width: 0;">
+                        <MudText Typo="Typo.body1" Style="color: var(--color-text-primary); overflow-wrap: anywhere;">
+                            @(string.IsNullOrWhiteSpace(f.Name) ? "Untitled recording" : f.Name)
+                        </MudText>
+                        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+                            @((f.StartAt ?? f.CreatedAt) is { } at ? FormatLocal(at) : "Date unknown")
+                            @if (f.DurationMs is long ms)
+                            {
+                                <span> · @FormatLength(ms)</span>
+                            }
+                        </MudText>
+                    </div>
+                    <div style="flex: 0 0 auto; text-align: right;">
+                        @switch (state)
+                        {
+                            case RowState.Available:
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Available</MudChip>
+                                break;
+                            case RowState.Importing:
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined"
+                                         Icon="@Icons.Material.Filled.HourglassTop">Importing</MudChip>
+                                break;
+                            case RowState.Imported:
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Href="@($"/meetings/{ledger!.MeetingId}")"
+                                           EndIcon="@Icons.Material.Filled.OpenInNew" Style="color: #d4af37;">Imported</MudButton>
+                                break;
+                            case RowState.ImportedDeleted:
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Imported (deleted)</MudChip>
+                                break;
+                            case RowState.TooLong:
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">
+                                    Too long (over @MaxLengthText)
+                                </MudChip>
+                                break;
+                            case RowState.NoAudio:
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">No audio in Plaud</MudChip>
+                                break;
+                            case RowState.Failed:
+                                <div class="d-flex align-center gap-1 justify-end">
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined">Failed</MudChip>
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="@_queueing"
+                                               OnClick="@(() => RetryRow(f.Id))">Retry</MudButton>
+                                </div>
+                                break;
+                        }
+                    </div>
+                </div>
+            </MudPaper>
+        }
+
+        @if (_listing)
+        {
+            <MudProgressLinear Color="Color.Warning" Indeterminate Class="my-2" />
+        }
+        @if (_listError != null && _files.Count > 0)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="my-2">
+                <div class="d-flex flex-wrap align-center gap-2">
+                    <span>@ErrorText(_listError)</span>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="RetryList" Disabled="@_listing">Retry</MudButton>
+                </div>
+            </MudAlert>
+        }
+        @if (_maybeMore)
+        {
+            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); display: block;" Class="my-1">
+                Plaud returned more recordings than fit in one range; some may not be listed.
+            </MudText>
+        }
+        @if (CanLoadOlder)
+        {
+            <div class="d-flex justify-center my-3">
+                <MudButton Variant="Variant.Outlined" Style="border-color: #d4af37; color: #d4af37;"
+                           OnClick="LoadOlder" Disabled="@_listing" StartIcon="@Icons.Material.Filled.History">
+                    Load older
+                </MudButton>
+            </div>
+        }
+        else if (!_listing && _listError == null)
+        {
+            <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary); display: block; text-align: center;" Class="my-3">
+                Showing the last @DaysShown days (the limit).
+            </MudText>
+        }
+    }
+</MudContainer>
+
+@code {
+    private enum RowState { Available, Importing, Imported, ImportedDeleted, TooLong, NoAudio, Failed }
+
+    private static readonly TimeSpan RefreshEvery = TimeSpan.FromSeconds(5);
+
+    private bool _loading = true;
+    private Guid? _userId;
+    private PlaudAccountStatus? _account;
+    private bool _needsReconnect;
+    private PlaudSyncStatus? _status;
+    private bool _autoSync;
+    private bool _savingAutoSync;
+    private int _interval = PlaudSyncService.DefaultIntervalMinutes;
+
+    // The listing this component loaded (server-side state). QueueSelectedAsync only accepts ids from here.
+    private readonly List<PlaudFileInfo> _files = new();
+    private readonly HashSet<string> _fileIds = new(StringComparer.Ordinal);
+    private Dictionary<string, PlaudLedgerState> _ledger = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _selected = new(StringComparer.Ordinal);
+    private DateTime _windowEnd;    // UTC "now" at first load
+    private DateTime _loadedFrom;   // UTC start of the loaded range
+    private (DateTime From, DateTime To)? _failedWindow;
+    private bool _listing;
+    private string? _listError;
+    private bool _maybeMore;
+    private bool _queueing;
+
+    private System.Threading.Timer? _timer;
+    private bool _refreshing;
+    private bool _disposed;
+    private TimeZoneInfo? _tz;
+    private int? _tzOffsetMinutes;
+
+    private long MaxMs => (long)PlaudOptions.Value.MaxDurationMinutes * 60_000L;
+    private string MaxLengthText => PlaudOptions.Value.MaxDurationMinutes % 60 == 0
+        ? $"{PlaudOptions.Value.MaxDurationMinutes / 60} h"
+        : $"{PlaudOptions.Value.MaxDurationMinutes} min";
+    private DateTime EarliestFrom => _windowEnd.AddDays(-PlaudSyncService.ImportOlderMaxDaysBack);
+    private bool CanLoadOlder => _loadedFrom > EarliestFrom && _failedWindow == null;
+    private int DaysShown => (int)Math.Round((_windowEnd - _loadedFrom).TotalDays);
+    private int AvailableCount => _files.Count(f => StateOf(f) == RowState.Available);
+    private int SelectedCount => _files.Count(f => _selected.Contains(f.Id) && StateOf(f) == RowState.Available);
+    private bool AllAvailableSelected => AvailableCount > 0 && SelectedCount == AvailableCount;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Interactive only: prerendering never calls Plaud.
+        if (!firstRender) return;
+        await LoadTimeZoneAsync();
+        try
+        {
+            if (PlaudOAuth.IsEnabled)
+            {
+                _userId = await ResolveUserIdAsync();
+                if (_userId is { } userId)
+                {
+                    _account = await PlaudOAuth.GetStatusAsync(userId);
+                    if (_account is { Connected: true, NeedsReconnect: false, OtherEnvironment: false })
+                    {
+                        await LoadStatusAsync();
+                        _windowEnd = DateTime.UtcNow;
+                        _loadedFrom = _windowEnd;
+                        _loading = false;
+                        StateHasChanged();
+                        await LoadWindowAsync(_windowEnd.AddDays(-PlaudSyncService.ListWindowDays), _windowEnd);
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Never break the page on a status lookup; the list area shows the Plaud-unavailable state.
+            _listError ??= "plaud_error";
+        }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    /// <summary>The FIRM user from the authenticated principal only (same resolution as the Meetings page).</summary>
+    private async Task<Guid?> ResolveUserIdAsync()
+    {
+        var principal = (await AuthStateProvider.GetAuthenticationStateAsync()).User;
+        var oid = principal.FindFirst("oid")?.Value
+                  ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        if (string.IsNullOrEmpty(oid))
+            return null;
+        var email = principal.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                    ?? principal.FindFirst("email")?.Value ?? "";
+        if (string.IsNullOrEmpty(email))
+        {
+            var preferred = principal.FindFirst("preferred_username")?.Value ?? "";
+            if (preferred.Contains('@'))
+                email = preferred;
+        }
+        var name = principal.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+                   ?? principal.FindFirst("name")?.Value ?? email;
+        var user = await MeetingService.GetOrCreateUserAsync(oid, email, name);
+        return user?.Id;
+    }
+
+    private async Task LoadTimeZoneAsync()
+    {
+        try
+        {
+            var id = await JS.InvokeAsync<string>("eval", "Intl.DateTimeFormat().resolvedOptions().timeZone");
+            if (!string.IsNullOrEmpty(id) && TimeZoneInfo.TryFindSystemTimeZoneById(id, out var tz))
+                _tz = tz;
+        }
+        catch (Exception)
+        {
+            // Fall back to the browser's current offset below.
+        }
+        if (_tz == null)
+        {
+            try
+            {
+                _tzOffsetMinutes = await JS.InvokeAsync<int>("firmUtils.getTimezoneOffset");
+            }
+            catch (Exception)
+            {
+                _tzOffsetMinutes = null;
+            }
+        }
+    }
+
+    private string FormatLocal(DateTime utc)
+    {
+        utc = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        DateTime local;
+        string suffix = "";
+        if (_tz != null)
+            local = TimeZoneInfo.ConvertTimeFromUtc(utc, _tz);
+        else if (_tzOffsetMinutes is { } offset)
+            local = utc.AddMinutes(-offset);
+        else
+        {
+            local = utc;
+            suffix = " UTC";
+        }
+        return local.ToString("ddd d MMM yyyy, h:mm tt") + suffix;
+    }
+
+    private static string FormatLength(long ms)
+    {
+        var t = TimeSpan.FromMilliseconds(ms);
+        if (t.TotalHours >= 1)
+            return $"{(int)t.TotalHours} h {t.Minutes} min";
+        if (t.TotalMinutes >= 1)
+            return $"{(int)t.TotalMinutes} min";
+        return $"{Math.Max(1, t.Seconds)} s";
+    }
+
+    private RowState StateOf(PlaudFileInfo f)
+    {
+        if (_ledger.TryGetValue(f.Id, out var s))
+        {
+            if (s.DeletedAt != null || s.Status == PlaudImportStatus.DeletedByUser)
+                return RowState.ImportedDeleted;
+            return s.Status switch
+            {
+                PlaudImportStatus.Imported => s.MeetingId != null ? RowState.Imported : RowState.ImportedDeleted,
+                PlaudImportStatus.Queued or PlaudImportStatus.Importing or PlaudImportStatus.PendingAudio
+                    or PlaudImportStatus.SubmitFailed => RowState.Importing,
+                PlaudImportStatus.TooLong => RowState.TooLong,
+                PlaudImportStatus.NoAudio => RowState.NoAudio,
+                _ => RowState.Failed,
+            };
+        }
+        return f.DurationMs is long ms && ms > MaxMs ? RowState.TooLong : RowState.Available;
+    }
+
+    // ── Listing ──────────────────────────────────────────────────────────────────────────────────
+
+    private async Task LoadWindowAsync(DateTime from, DateTime to)
+    {
+        if (_userId is not { } userId || _listing) return;
+        _listing = true;
+        _listError = null;
+        StateHasChanged();
+        try
+        {
+            var result = await PlaudSync.ListRecordingsAsync(userId, from, to);
+            if (result.ErrorCode is "reconnect_needed")
+            {
+                _needsReconnect = true;
+                return;
+            }
+            if (result.ErrorCode is "not_connected" or "other_environment")
+            {
+                _account = await PlaudOAuth.GetStatusAsync(userId);
+                return;
+            }
+            if (result.ErrorCode != null && result.Files.Count == 0)
+            {
+                _listError = result.ErrorCode;
+                _failedWindow = (from, to);
+                return;
+            }
+            foreach (var f in result.Files)
+            {
+                if (_fileIds.Add(f.Id))
+                    _files.Add(f);
+            }
+            _files.Sort((a, b) => Nullable.Compare(b.StartAt ?? b.CreatedAt, a.StartAt ?? a.CreatedAt));
+            _maybeMore |= result.MaybeMore;
+            if (result.ErrorCode != null)
+            {
+                // Part of the range came back before the error: show it, offer Retry for the whole range.
+                _listError = result.ErrorCode;
+                _failedWindow = (from, to);
+            }
+            else
+            {
+                _failedWindow = null;
+                if (from < _loadedFrom)
+                    _loadedFrom = from;
+            }
+            await RefreshLedgerAsync();
+        }
+        catch (Exception)
+        {
+            _listError = "plaud_error";
+            _failedWindow = (from, to);
+        }
+        finally
+        {
+            _listing = false;
+        }
+        EnsureTimer();
+        StateHasChanged();
+    }
+
+    private Task LoadOlder()
+    {
+        var to = _loadedFrom;
+        var from = to.AddDays(-PlaudSyncService.ListWindowDays);
+        if (from < EarliestFrom)
+            from = EarliestFrom;
+        return LoadWindowAsync(from, to);
+    }
+
+    private Task RetryList()
+    {
+        var w = _failedWindow ?? (_windowEnd.AddDays(-PlaudSyncService.ListWindowDays), _windowEnd);
+        return LoadWindowAsync(w.From, w.To);
+    }
+
+    private async Task RefreshLedgerAsync()
+    {
+        if (_userId is not { } userId) return;
+        _ledger = await PlaudSync.GetLedgerStatesAsync(userId, _fileIds);
+        _selected.RemoveWhere(id => !_fileIds.Contains(id)
+                                    || StateOf(_files.First(f => f.Id == id)) != RowState.Available);
+    }
+
+    // ── Selection and import ─────────────────────────────────────────────────────────────────────
+
+    private void OnRowChecked(string fileId, bool value)
+    {
+        if (value) _selected.Add(fileId);
+        else _selected.Remove(fileId);
+    }
+
+    private void OnSelectAllChanged(bool value)
+    {
+        if (value)
+        {
+            foreach (var f in _files)
+                if (StateOf(f) == RowState.Available)
+                    _selected.Add(f.Id);
+        }
+        else
+        {
+            _selected.Clear();
+        }
+    }
+
+    private async Task ImportSelected()
+    {
+        var ids = _files.Where(f => _selected.Contains(f.Id) && StateOf(f) == RowState.Available)
+            .Select(f => f.Id).ToList();
+        await QueueAsync(ids, retry: false);
+    }
+
+    private Task RetryRow(string fileId) => QueueAsync(new List<string> { fileId }, retry: true);
+
+    private async Task QueueAsync(List<string> ids, bool retry)
+    {
+        if (_userId is not { } userId || ids.Count == 0 || _queueing) return;
+        _queueing = true;
+        StartTimer(); // rows show Importing as soon as their ledger rows exist, while the run below is still going
+        StateHasChanged();
+        try
+        {
+            // Not tied to this component's lifetime: an import that has started finishes even if the page closes.
+            var result = await PlaudSync.QueueSelectedAsync(userId, ids, _files.ToList(), CancellationToken.None);
+            var started = result.Queued + result.Requeued;
+            if (started == 0)
+                Snackbar.Add(retry ? "That recording can not be retried." : "Nothing to import: those recordings are already in FIRM or can not be imported.", Severity.Info);
+            else
+            {
+                var msg = retry ? "Retrying the import."
+                    : started == 1 ? "Importing 1 recording." : $"Importing {started} recordings.";
+                if (result.Remaining > 0)
+                    msg += $" {result.Remaining} more selected are not imported yet ({PlaudSyncService.QueueSelectedPerClick} per click); select Import again to continue.";
+                if (result.AlreadyRunning)
+                    msg += " Another Plaud import is running; these start shortly.";
+                else if (result.ErrorCode is "rate_limited")
+                    msg += " Plaud is busy; FIRM retries automatically.";
+                else if (result.ErrorCode != null)
+                    msg += " Plaud had a problem; FIRM retries automatically.";
+                Snackbar.Add(msg, Severity.Success);
+            }
+        }
+        catch (Exception)
+        {
+            Snackbar.Add("Could not start the import. Try again in a minute.", Severity.Error);
+        }
+        finally
+        {
+            _queueing = false;
+        }
+        try
+        {
+            await RefreshLedgerAsync();
+            await LoadStatusAsync();
+        }
+        catch (Exception)
+        {
+            // Display only; the 5-second refresh catches up.
+        }
+        EnsureTimer();
+        StateHasChanged();
+    }
+
+    // ── Auto-sync ────────────────────────────────────────────────────────────────────────────────
+
+    private async Task LoadStatusAsync()
+    {
+        if (_userId is not { } userId) return;
+        try
+        {
+            _status = await PlaudSync.GetStatusAsync(userId);
+            _autoSync = _status.AutoSync;
+            _interval = PlaudSyncService.ClampInterval(_status.IntervalMinutes);
+        }
+        catch (Exception)
+        {
+            _status = null;
+        }
+    }
+
+    private async Task OnAutoSyncChanged(bool enabled)
+    {
+        if (_userId is not { } userId) return;
+        _autoSync = enabled;
+        _savingAutoSync = true;
+        try
+        {
+            await PlaudSync.SetAutoSyncAsync(userId, enabled);
+            Snackbar.Add(enabled
+                ? "Auto-sync is on. Recordings you make from now on are imported automatically."
+                : "Auto-sync is off. Pick recordings here to import them.", Severity.Success);
+        }
+        catch (Exception)
+        {
+            Snackbar.Add("Could not save the auto-sync setting.", Severity.Error);
+        }
+        finally
+        {
+            _savingAutoSync = false;
+        }
+        await LoadStatusAsync();
+    }
+
+    private async Task OnIntervalChanged(int minutes)
+    {
+        if (_userId is not { } userId) return;
+        _interval = PlaudSyncService.ClampInterval(minutes);
+        try
+        {
+            _interval = await PlaudSync.SetIntervalAsync(userId, _interval);
+        }
+        catch (Exception)
+        {
+            Snackbar.Add("Could not save the check interval.", Severity.Error);
+        }
+        await LoadStatusAsync();
+    }
+
+    private string StateLine()
+    {
+        if (_status == null)
+            return _autoSync ? "Auto-sync is on." : "Auto-sync is off.";
+        var at = _status.NextSyncAt is { } next ? FormatLocal(next) : null;
+        return _status.State switch
+        {
+            PlaudSyncService.StateRateLimited when at != null => $"Plaud is rate-limiting; retrying at {at}.",
+            PlaudSyncService.StateBackoff when at != null => $"Plaud didn't respond; retrying at {at}.",
+            _ when !string.IsNullOrEmpty(_status.LastErrorCode) && _status.State != PlaudSyncService.StateOk
+                => ErrorText(_status.LastErrorCode!),
+            _ when _status.AutoSync && at != null => $"Auto-sync is on; next check {at}.",
+            _ when _status.AutoSync => "Auto-sync is on.",
+            _ => "Auto-sync is off; pick recordings below to import them.",
+        };
+    }
+
+    private static string ErrorText(string code) => code switch
+    {
+        "rate_limited" => "Plaud is rate-limiting; try again in a few minutes.",
+        "unauthorized" or "reconnect_needed" => "Plaud needs to be reconnected.",
+        "not_connected" => "No Plaud account connected.",
+        "other_environment" => "Connected on another FIRM environment.",
+        "plaud_unreachable" or "plaud_timeout" or "token_unavailable" => "Plaud didn't respond; try again later.",
+        _ => "Plaud is unavailable right now; try again later.",
+    };
+
+    // ── Live status: every 5 s while any row is Importing ────────────────────────────────────────
+
+    private bool AnyImporting => _queueing || _files.Any(f => StateOf(f) == RowState.Importing);
+
+    private void EnsureTimer()
+    {
+        if (AnyImporting) StartTimer();
+        else StopTimer();
+    }
+
+    private void StartTimer()
+    {
+        if (_disposed || _timer != null) return;
+        _timer = new System.Threading.Timer(_ => _ = InvokeAsync(OnTickAsync), null, RefreshEvery, RefreshEvery);
+    }
+
+    private void StopTimer()
+    {
+        _timer?.Dispose();
+        _timer = null;
+    }
+
+    private async Task OnTickAsync()
+    {
+        if (_disposed || _refreshing) return;
+        _refreshing = true;
+        try
+        {
+            await RefreshLedgerAsync();
+            if (!AnyImporting)
+            {
+                StopTimer();
+                await LoadStatusAsync();
+            }
+            StateHasChanged();
+        }
+        catch (Exception)
+        {
+            // Try again on the next tick.
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        StopTimer();
+    }
+}
