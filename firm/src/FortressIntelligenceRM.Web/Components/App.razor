@@ -6,6 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@Branding.ModuleName — @Branding.ModuleFullName</title>
     <base href="/" />
+    @* WI #9139 — installable on iPhone ("Add to Home Screen" opens /upload full-screen). No service worker. *@
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#1a2332" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="@Branding.ModuleName" />
+    <link rel="apple-touch-icon" href="icons/firm-180.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/firm-192.png" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <link href="css/firm.css" rel="stylesheet" />
     <link href="css/fip-tokens.css" rel="stylesheet" />
@@ -21,5 +30,6 @@
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
     <script src="js/firm-utils.js"></script>
     <script src="js/voiceRecorder.js"></script>
+    <script src="js/upload-recording.js"></script>
 </body>
 </html>
