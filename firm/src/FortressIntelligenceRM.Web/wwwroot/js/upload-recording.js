@@ -106,7 +106,9 @@ window.firmUpload = (function () {
                 call('OnProgress', c.sent, c.file.size);
             }
             call('OnFinishing');
-            let res, attempt = 0;
+            // Complete is idempotent on the server. 5xx / network errors: RETRIES with backoff. 409 means an
+            // earlier attempt (whose response was lost) is still finishing: poll for up to ~2 minutes.
+            let res, attempt = 0, busyPolls = 0;
             while (true) {
                 try {
                     res = await fetch(`/api/uploads/recording/${c.uploadId}/complete`, {
@@ -116,7 +118,12 @@ window.firmUpload = (function () {
                         body: JSON.stringify(c.meta),
                         signal: c.abort.signal
                     });
-                    if (res.ok || (res.status !== 409 && res.status < 500) || attempt >= RETRIES) break;
+                    if (res.status === 409) {
+                        if (++busyPolls > 40) break;
+                        await sleep(3000);
+                        continue;
+                    }
+                    if (res.ok || res.status < 500 || attempt >= RETRIES) break;
                 } catch (e) {
                     if (e.name === 'AbortError' || attempt >= RETRIES) throw e;
                 }

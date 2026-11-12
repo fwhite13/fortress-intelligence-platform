@@ -177,26 +177,6 @@ public class S3Service
         return response.ETag;
     }
 
-    /// <summary>Lists every uploaded part (follows pagination). Throws AmazonS3Exception NoSuchUpload when the
-    /// multipart upload no longer exists (completed or aborted).</summary>
-    public async Task<List<(int PartNumber, string ETag, long Size)>> ListPartsAsync(string s3Key, string s3UploadId,
-        CancellationToken cancellationToken = default)
-    {
-        var parts = new List<(int, string, long)>();
-        string? marker = null;
-        while (true)
-        {
-            var request = new ListPartsRequest { BucketName = Bucket, Key = s3Key, UploadId = s3UploadId, MaxParts = 1000 };
-            if (marker != null) request.PartNumberMarker = marker;
-            var response = await _s3.ListPartsAsync(request, cancellationToken);
-            foreach (var p in response.Parts ?? new List<PartDetail>())
-                parts.Add(((int)p.PartNumber!, p.ETag, (long)p.Size!));
-            if (response.IsTruncated != true) break;
-            marker = response.NextPartNumberMarker.ToString();
-        }
-        return parts;
-    }
-
     /// <summary>Completes a multipart upload from the given parts.</summary>
     public async Task CompleteMultipartUploadAsync(string s3Key, string s3UploadId,
         IEnumerable<(int PartNumber, string ETag)> parts, CancellationToken cancellationToken = default)
@@ -250,11 +230,16 @@ public class S3Service
             var meta = await _s3.GetObjectMetadataAsync(Bucket, s3Key, cancellationToken);
             return meta.ContentLength;
         }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        catch (AmazonS3Exception ex) when (IsMissing(ex))
         {
             return null;
         }
     }
+
+    /// <summary>A missing key. Without s3:ListBucket (the FIRM task role is documented with object-level actions
+    /// only), S3 answers GET/HEAD on a missing key with 403 AccessDenied instead of 404, so both mean "absent".</summary>
+    private static bool IsMissing(AmazonS3Exception ex) =>
+        ex.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Forbidden;
 
     /// <summary>Deletes an object (S3 delete is idempotent).</summary>
     public async Task DeleteObjectAsync(string s3Key, CancellationToken cancellationToken = default)
@@ -274,7 +259,7 @@ public class S3Service
             var lastModified = response.LastModified is DateTime lm ? lm.ToUniversalTime() : DateTime.UtcNow;
             return (body, response.ETag, lastModified);
         }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        catch (AmazonS3Exception ex) when (IsMissing(ex))
         {
             return null;
         }

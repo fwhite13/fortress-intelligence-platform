@@ -13,7 +13,9 @@ namespace FortressIntelligenceRM.Web.Services;
 /// State lives in S3 only (several web tasks may serve one upload): <c>firm-uploads/{userId}/{uploadId}/state.json</c>.
 /// Every lookup is built from the <b>signed-in</b> user's id, so another user's uploadId simply does not resolve
 /// (404). Completion is claimed atomically with a conditional PUT of <c>.../complete.claim</c> (If-None-Match: *),
-/// so a retried or doubled "complete" cannot create two meetings.
+/// so a retried or doubled "complete" cannot create two meetings. Each part's ETag is recorded at
+/// <c>.../parts/{n}.json</c>, so completion needs no S3 ListParts / ListBucket permission: only object-level
+/// Get/Put/Delete on the bucket (plus s3:AbortMultipartUpload for an explicit cancel, which is best-effort).
 ///
 /// Abandoned uploads: the page calls the abort endpoint when the user cancels or a part finally fails; anything
 /// else (closed tab, lost phone) needs an S3 lifecycle rule on the <c>firm-uploads/</c> prefix
@@ -159,9 +161,14 @@ public class RecordingUploadService
 
     // ── Parts ───────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>Uploads one part, then records its ETag at .../parts/{n}.json. Completion reads these records
+    /// instead of S3 ListParts, which needs s3:ListMultipartUploadParts (not in the documented task role).
+    /// A retried part overwrites both the S3 part and its record.</summary>
     public async Task UploadPartAsync(UploadState state, int partNumber, Stream content, CancellationToken ct)
     {
-        await _s3.UploadPartAsync(state.Key, state.S3UploadId, partNumber, content, ct);
+        var etag = await _s3.UploadPartAsync(state.Key, state.S3UploadId, partNumber, content, ct);
+        await _s3.PutSmallObjectAsync(PartKey(state.UserId, state.UploadId, partNumber),
+            JsonSerializer.Serialize(new PartRecord(partNumber, etag, content.Length), JsonOpts), cancellationToken: ct);
         _logger.LogInformation("FIRM: Upload {UploadId} part {Part}/{Parts} stored ({Bytes} bytes)",
             state.UploadId, partNumber, state.PartCount, content.Length);
     }
@@ -207,43 +214,42 @@ public class RecordingUploadService
         var ingestStarted = false;
         try
         {
-            // 2. Finish the S3 multipart upload. If a previous attempt already completed it, the object exists.
-            var size = await _s3.GetObjectSizeAsync(state.Key, ct);
-            if (size == null)
+            // 2. Finish the S3 multipart upload from the part ETags recorded by the part endpoint.
+            if (!state.MultipartCompleted)
             {
-                List<(int PartNumber, string ETag, long Size)> parts;
-                try
-                {
-                    parts = await _s3.ListPartsAsync(state.Key, state.S3UploadId, ct);
-                }
-                catch (AmazonS3Exception ex) when (ex.ErrorCode == "NoSuchUpload")
-                {
-                    await ReleaseClaimAsync(claimKey);
-                    _logger.LogWarning("FIRM: Upload {UploadId} complete failed: multipart upload no longer exists", state.UploadId);
-                    return new CompleteOutcome(410, "This upload expired or was cancelled. Please upload the file again.", null);
-                }
-
-                var missing = Enumerable.Range(1, state.PartCount).Except(parts.Select(p => p.PartNumber)).ToList();
-                var received = parts.Where(p => p.PartNumber <= state.PartCount).Sum(p => p.Size);
-                if (missing.Count > 0 || received != state.SizeBytes)
+                var records = await ReadPartRecordsAsync(state, CancellationToken.None);
+                var missing = records.Count(r => r == null);
+                var received = records.Where(r => r != null).Sum(r => r!.Size);
+                if (missing > 0 || received != state.SizeBytes)
                 {
                     await ReleaseClaimAsync(claimKey);
                     _logger.LogWarning("FIRM: Upload {UploadId} complete refused: {Missing} parts missing, {Received}/{Expected} bytes",
-                        state.UploadId, missing.Count, received, state.SizeBytes);
+                        state.UploadId, missing, received, state.SizeBytes);
                     return new CompleteOutcome(400, "Some parts of the file have not arrived yet. Retry the upload.", null);
                 }
 
-                await _s3.CompleteMultipartUploadAsync(state.Key, state.S3UploadId,
-                    parts.Where(p => p.PartNumber <= state.PartCount).Select(p => (p.PartNumber, p.ETag)), ct);
-                size = await _s3.GetObjectSizeAsync(state.Key, ct);
+                try
+                {
+                    await _s3.CompleteMultipartUploadAsync(state.Key, state.S3UploadId,
+                        records.Select(r => (r!.PartNumber, r.ETag)), CancellationToken.None);
+                }
+                catch (AmazonS3Exception ex) when (ex.ErrorCode == "NoSuchUpload")
+                {
+                    // Either an earlier attempt completed it (its state save was lost), or it was aborted/expired.
+                    // The object check below tells which.
+                    _logger.LogWarning("FIRM: Upload {UploadId} multipart no longer open; checking for the assembled object", state.UploadId);
+                }
+                state.MultipartCompleted = true;
+                await SaveStateAsync(state);
             }
 
+            // The assembled object must exist with the declared size before any meeting row is written.
+            var size = await _s3.GetObjectSizeAsync(state.Key, CancellationToken.None);
             if (size != state.SizeBytes)
             {
-                await ReleaseClaimAsync(claimKey);
                 _logger.LogError("FIRM: Upload {UploadId} assembled object is {Bytes} bytes, expected {Expected}",
                     state.UploadId, size ?? -1, state.SizeBytes);
-                return new CompleteOutcome(500, "The uploaded file could not be assembled. Please upload it again.", null);
+                return new CompleteOutcome(410, "This upload expired, was cancelled or could not be assembled. Please upload the file again.", null);
             }
 
             // 3. The object exists: only now insert the meeting row, move the audio and submit the Batch job.
@@ -283,11 +289,14 @@ public class RecordingUploadService
             state.MeetingId = result.MeetingId;
             state.CompletedAtUtc = DateTime.UtcNow;
             await SaveStateAsync(state);
+            // state.json and the claim stay (so a repeated "complete" returns this meeting); part records go.
+            await DeleteBestEffortAsync(state.UploadId,
+                Enumerable.Range(1, state.PartCount).Select(n => PartKey(state.UserId, state.UploadId, n)));
             _logger.LogInformation("FIRM: Upload {UploadId} completed as meeting {MeetingId}: {Bytes} bytes, submitted={Submitted}",
                 state.UploadId, result.MeetingId, state.SizeBytes, result.Submitted);
             return new CompleteOutcome(200, null, result.MeetingId, result.Submitted);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) // CancellationToken.None after the claim, so a dropped request cannot strand it
         {
             _logger.LogError("FIRM: Upload {UploadId} complete failed (ingest started: {IngestStarted}): {Error}",
                 state.UploadId, ingestStarted, ex.GetType().Name);
@@ -307,14 +316,65 @@ public class RecordingUploadService
     public async Task<bool> AbortAsync(UploadState state, CancellationToken ct)
     {
         if (state.MeetingId.HasValue) return false; // finished uploads are not abortable
-        await _s3.AbortMultipartUploadAsync(state.Key, state.S3UploadId, ct);
-        await _s3.DeleteObjectAsync(state.Key, ct);
-        await _s3.DeleteObjectAsync(StateKey(state.UserId, state.UploadId), ct);
+        try
+        {
+            await _s3.AbortMultipartUploadAsync(state.Key, state.S3UploadId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // e.g. the task role lacks s3:AbortMultipartUpload: the lifecycle rule on firm-uploads/ removes the parts.
+            _logger.LogWarning("FIRM: Upload {UploadId} S3 abort failed: {Error}", state.UploadId, ex.GetType().Name);
+        }
+        var keys = new List<string> { state.Key, StateKey(state.UserId, state.UploadId), ClaimKey(state.UserId, state.UploadId) };
+        keys.AddRange(Enumerable.Range(1, state.PartCount).Select(n => PartKey(state.UserId, state.UploadId, n)));
+        await DeleteBestEffortAsync(state.UploadId, keys);
         _logger.LogInformation("FIRM: Upload {UploadId} aborted", state.UploadId);
         return true;
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────────────────────────
+
+    private sealed record PartRecord(int PartNumber, string ETag, long Size);
+
+    /// <summary>One entry per expected part (1..PartCount), null where no valid record exists.</summary>
+    private async Task<List<PartRecord?>> ReadPartRecordsAsync(UploadState state, CancellationToken ct)
+    {
+        var result = new PartRecord?[state.PartCount];
+        using var gate = new SemaphoreSlim(8);
+        await Task.WhenAll(Enumerable.Range(1, state.PartCount).Select(async n =>
+        {
+            await gate.WaitAsync(ct);
+            try
+            {
+                var obj = await _s3.GetSmallObjectAsync(PartKey(state.UserId, state.UploadId, n), ct);
+                if (obj == null) return;
+                var rec = JsonSerializer.Deserialize<PartRecord>(obj.Value.Json, JsonOpts);
+                if (rec != null && rec.PartNumber == n && !string.IsNullOrEmpty(rec.ETag)
+                    && rec.Size == ExpectedPartSize(state, n))
+                    result[n - 1] = rec;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }));
+        return result.ToList();
+    }
+
+    private async Task DeleteBestEffortAsync(string uploadId, IEnumerable<string> keys)
+    {
+        var failures = 0;
+        using var gate = new SemaphoreSlim(8);
+        await Task.WhenAll(keys.Select(async k =>
+        {
+            await gate.WaitAsync();
+            try { await _s3.DeleteObjectAsync(k, CancellationToken.None); }
+            catch (Exception) { Interlocked.Increment(ref failures); }
+            finally { gate.Release(); }
+        }));
+        if (failures > 0)
+            _logger.LogWarning("FIRM: Upload {UploadId} cleanup left {Count} objects for the lifecycle rule", uploadId, failures);
+    }
 
     private async Task SaveStateAsync(UploadState state)
     {
@@ -338,6 +398,7 @@ public class RecordingUploadService
     private static string UserPrefix(Guid userId) => $"{KeyPrefix}/{userId:D}/";
     private static string StateKey(Guid userId, string uploadId) => $"{UserPrefix(userId)}{uploadId}/state.json";
     private static string ClaimKey(Guid userId, string uploadId) => $"{UserPrefix(userId)}{uploadId}/complete.claim";
+    private static string PartKey(Guid userId, string uploadId, int partNumber) => $"{UserPrefix(userId)}{uploadId}/parts/{partNumber:D5}.json";
 
     /// <summary>File name reduced to [a-z0-9._-], at most 80 chars, with the validated extension.</summary>
     private static string SafeName(string fileName, string ext)
@@ -367,5 +428,6 @@ public sealed class UploadState
     public DateTime CreatedAtUtc { get; set; }
     public long? MeetingId { get; set; }
     public bool StorageFailed { get; set; }
+    public bool MultipartCompleted { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
 }
