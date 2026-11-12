@@ -845,6 +845,12 @@ public class MeetingService
             return (false, "Cannot remove a meeting that is currently in progress");
 
         await using var db = await _dbFactory.CreateDbContextAsync();
+        // WI #9134 — tombstone the Plaud import ledger row BEFORE the delete (spec §4.5): once the meeting
+        // is gone, fk_fpi_meeting's ON DELETE SET NULL would lose the link. A deleted_by_user row is never
+        // re-imported (D23). No-op for meetings that did not come from Plaud.
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE firm_plaud_imports SET status = 'deleted_by_user', deleted_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() " +
+            "WHERE meeting_id = {0} AND user_id = {1}", id, userId.ToString());
         await db.Database.ExecuteSqlRawAsync("DELETE FROM firm_meetings WHERE id = {0}", id);
         return (true, null);
     }

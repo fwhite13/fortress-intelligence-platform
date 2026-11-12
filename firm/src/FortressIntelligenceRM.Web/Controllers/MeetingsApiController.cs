@@ -406,7 +406,13 @@ public class MeetingsApiController : ControllerBase
                 try
                 {
                     var owner = await db.Users.FindAsync(meeting.CreatedBy);
-                    if (owner != null && owner.AutoEmailSummary && !string.IsNullOrEmpty(owner.Email))
+                    // WI #9134 / ruling D14: no auto-email for Plaud backfills or recordings > 24 h old at import.
+                    if (owner != null && owner.AutoEmailSummary && !string.IsNullOrEmpty(owner.Email)
+                        && await FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncService.SuppressUserNotificationsAsync(db, meeting))
+                    {
+                        _logger.LogInformation("FIRM: Auto-email suppressed for old/backfilled Plaud import {Id} (D14)", payload.MeetingId);
+                    }
+                    else if (owner != null && owner.AutoEmailSummary && !string.IsNullOrEmpty(owner.Email))
                     {
                         var meetingTitle = meeting.Title ?? $"Meeting {payload.MeetingId}";
                         var pdfBytes = _pdfService.BuildPdf(payload.Summary.SummaryText ?? "", meetingTitle, _branding.PrimaryColor);
@@ -572,6 +578,13 @@ public class MeetingsApiController : ControllerBase
                     .FirstOrDefaultAsync(m => m.Id == meetingId);
                 var pushToken = pushMeeting?.CreatedByUser?.ExpoPushToken;
                 if (string.IsNullOrEmpty(pushToken)) return;
+                // WI #9134 / ruling D14: no phone push for Plaud backfills or recordings > 24 h old at import.
+                // The FAIT KB push above is deliberately unaffected.
+                if (await FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncService.SuppressUserNotificationsAsync(pushDb, pushMeeting!))
+                {
+                    _logger.LogInformation("FIRM: Expo push suppressed for old/backfilled Plaud import {MeetingId} (D14)", meetingId);
+                    return;
+                }
 
                 var pushTitle = pushMeeting?.Title ?? "Recording complete";
                 var pushBody = new

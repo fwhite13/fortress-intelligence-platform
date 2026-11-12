@@ -20,6 +20,29 @@ public class PlaudOptions
 
     /// <summary>Optional override of the dynamically registered client id (spec §9.2).</summary>
     public string? ClientId { get; set; }
+
+    // WI #9134 — import caps (spec §4.6, §8.2). All enforced before get_file is called.
+
+    /// <summary>New imports (get_file + download + ingest) per user per sync run.</summary>
+    public int MaxImportsPerRun { get; set; } = 3;
+
+    /// <summary>The user's Plaud meetings in Transcribing/Summarizing; at most 1 during an explicit backfill.</summary>
+    public int MaxInFlightPerUser { get; set; } = 2;
+
+    /// <summary>Plaud meetings in Transcribing/Summarizing across all users of this database.</summary>
+    public int MaxInFlightGlobal { get; set; } = 2;
+
+    /// <summary>Longer recordings (list_files duration) become too_long without a download (D16: 240).</summary>
+    public int MaxDurationMinutes { get; set; } = 240;
+
+    /// <summary>Download byte cap, enforced while streaming (500 MB).</summary>
+    public long MaxAudioBytes { get; set; } = 500L * 1024 * 1024;
+
+    /// <summary>list_files pages per run (page size 20).</summary>
+    public int MaxListPages { get; set; } = 5;
+
+    /// <summary>Base for failed-row backoff: next_attempt_at = now + base × 2^attempts.</summary>
+    public int RetryBaseMinutes { get; set; } = 15;
 }
 
 /// <summary>What the Settings tab and the Meetings page show.</summary>

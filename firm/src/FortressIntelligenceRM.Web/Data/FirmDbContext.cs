@@ -25,6 +25,8 @@ public class FirmDbContext : DbContext
     public DbSet<FirmSpeakerEmbedding> SpeakerEmbeddings => Set<FirmSpeakerEmbedding>();
     public DbSet<FirmPlaudAccount> PlaudAccounts => Set<FirmPlaudAccount>();
     public DbSet<FirmOAuthClient> OAuthClients => Set<FirmOAuthClient>();
+    public DbSet<FirmPlaudImport> PlaudImports => Set<FirmPlaudImport>();
+    public DbSet<FirmPlaudSync> PlaudSyncs => Set<FirmPlaudSync>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -345,6 +347,64 @@ public class FirmDbContext : DbContext
             entity.Property(e => e.RedirectUri).HasColumnName("redirect_uri").HasMaxLength(500);
             entity.Property(e => e.ClientId).HasColumnName("client_id").HasMaxLength(255).IsRequired();
             entity.Property(e => e.RegisteredAt).HasColumnName("registered_at").HasDefaultValueSql("CURRENT_TIMESTAMP");
+        });
+
+        // WI #9134 — Plaud import ledger (spec §4.4). Never holds a presigned URL.
+        modelBuilder.Entity<FirmPlaudImport>(entity =>
+        {
+            entity.ToTable("firm_plaud_imports");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedOnAdd();
+            entity.Property(e => e.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(e => e.PlaudFileId).HasColumnName("plaud_file_id").HasMaxLength(128).IsRequired();
+            entity.HasIndex(e => new { e.UserId, e.PlaudFileId }).IsUnique().HasDatabaseName("uk_fpi_user_file");
+            entity.HasIndex(e => new { e.UserId, e.Status }).HasDatabaseName("idx_fpi_user_status");
+            entity.HasIndex(e => e.MeetingId).HasDatabaseName("idx_fpi_meeting");
+            entity.Property(e => e.Title).HasColumnName("title").HasMaxLength(500);
+            entity.Property(e => e.RecordedAt).HasColumnName("recorded_at");
+            entity.Property(e => e.DurationMs).HasColumnName("duration_ms");
+            entity.Property(e => e.Status).HasColumnName("status").HasMaxLength(24).IsRequired();
+            entity.Property(e => e.MeetingId).HasColumnName("meeting_id");
+            entity.Property(e => e.TriggerKind).HasColumnName("trigger_kind").HasMaxLength(12).IsRequired();
+            entity.Property(e => e.Attempts).HasColumnName("attempts");
+            entity.Property(e => e.ErrorCode).HasColumnName("error_code").HasMaxLength(64);
+            entity.Property(e => e.NextAttemptAt).HasColumnName("next_attempt_at");
+            entity.Property(e => e.ClaimedAt).HasColumnName("claimed_at");
+            entity.Property(e => e.FirstSeenAt).HasColumnName("first_seen_at");
+            entity.Property(e => e.ImportedAt).HasColumnName("imported_at");
+            entity.Property(e => e.DeletedAt).HasColumnName("deleted_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(e => e.PlaudArchiveStatus).HasColumnName("plaud_archive_status").HasMaxLength(16);
+            entity.HasOne<FirmUser>().WithMany().HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade).HasConstraintName("fk_fpi_user");
+            entity.HasOne<FirmMeeting>().WithMany().HasForeignKey(e => e.MeetingId)
+                .OnDelete(DeleteBehavior.SetNull).HasConstraintName("fk_fpi_meeting");
+        });
+
+        // WI #9134 — per-user Plaud sync settings, claim and status (spec §5.5).
+        modelBuilder.Entity<FirmPlaudSync>(entity =>
+        {
+            entity.ToTable("firm_plaud_sync");
+            entity.HasKey(e => e.UserId);
+            entity.Property(e => e.UserId).HasColumnName("user_id").ValueGeneratedNever();
+            entity.Property(e => e.AutoSync).HasColumnName("auto_sync");
+            entity.Property(e => e.IntervalMinutes).HasColumnName("interval_minutes");
+            entity.Property(e => e.BackfillDays).HasColumnName("backfill_days");
+            entity.Property(e => e.SyncFrom).HasColumnName("sync_from");
+            entity.Property(e => e.NextSyncAt).HasColumnName("next_sync_at");
+            entity.Property(e => e.ClaimedBy).HasColumnName("claimed_by").HasMaxLength(64);
+            entity.Property(e => e.ClaimedAt).HasColumnName("claimed_at");
+            entity.Property(e => e.State).HasColumnName("state").HasMaxLength(24).IsRequired();
+            entity.Property(e => e.ConsecutiveFailures).HasColumnName("consecutive_failures");
+            entity.Property(e => e.LastErrorCode).HasColumnName("last_error_code").HasMaxLength(64);
+            entity.Property(e => e.LastCheckedAt).HasColumnName("last_checked_at");
+            entity.Property(e => e.LastSuccessAt).HasColumnName("last_success_at");
+            entity.Property(e => e.LastImportAt).HasColumnName("last_import_at");
+            entity.Property(e => e.LastImportedCount).HasColumnName("last_imported_count");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.HasIndex(e => new { e.AutoSync, e.NextSyncAt }).HasDatabaseName("idx_fps_due");
+            entity.HasOne<FirmUser>().WithMany().HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade).HasConstraintName("fk_fps_user");
         });
 
         // WI #8043 — shared Zoom bot account tokens; single row, no user association.

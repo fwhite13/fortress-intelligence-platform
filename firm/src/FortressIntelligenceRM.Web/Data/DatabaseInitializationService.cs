@@ -261,6 +261,54 @@ public class DatabaseInitializationService : IHostedService
     client_id VARCHAR(255) NOT NULL,
     registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (provider, redirect_uri)
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                // WI #9134 — Plaud import ledger (spec §4.4, statuses §4.5). A file id with a row is never
+                // re-imported outside the retryable states; deleted_by_user is the tombstone.
+                ("firm_plaud_imports", @"CREATE TABLE IF NOT EXISTS firm_plaud_imports (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL,
+    plaud_file_id VARCHAR(128) NOT NULL,
+    title VARCHAR(500) NULL,
+    recorded_at DATETIME NULL,
+    duration_ms BIGINT NULL,
+    status VARCHAR(24) NOT NULL,
+    meeting_id BIGINT NULL,
+    trigger_kind VARCHAR(12) NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    error_code VARCHAR(64) NULL,
+    next_attempt_at DATETIME NULL,
+    claimed_at DATETIME NULL,
+    first_seen_at DATETIME NOT NULL,
+    imported_at DATETIME NULL,
+    deleted_at DATETIME NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY uk_fpi_user_file (user_id, plaud_file_id),
+    INDEX idx_fpi_user_status (user_id, status),
+    INDEX idx_fpi_meeting (meeting_id),
+    CONSTRAINT fk_fpi_user FOREIGN KEY (user_id) REFERENCES firm_users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_fpi_meeting FOREIGN KEY (meeting_id) REFERENCES firm_meetings(id) ON DELETE SET NULL
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"),
+                // WI #9134 — per-user Plaud sync settings, claim and status (spec §5.5). backfill_days
+                // defaults to 3, not §5.5's 7: ruling D13 (spec §13) sets the first window to 3 days.
+                ("firm_plaud_sync", @"CREATE TABLE IF NOT EXISTS firm_plaud_sync (
+    user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_general_ci NOT NULL PRIMARY KEY,
+    auto_sync TINYINT(1) NOT NULL DEFAULT 0,
+    interval_minutes INT NOT NULL DEFAULT 30,
+    backfill_days INT NOT NULL DEFAULT 3,
+    sync_from DATETIME NULL,
+    next_sync_at DATETIME NULL,
+    claimed_by VARCHAR(64) NULL,
+    claimed_at DATETIME NULL,
+    state VARCHAR(24) NOT NULL DEFAULT 'idle',
+    consecutive_failures INT NOT NULL DEFAULT 0,
+    last_error_code VARCHAR(64) NULL,
+    last_checked_at DATETIME NULL,
+    last_success_at DATETIME NULL,
+    last_import_at DATETIME NULL,
+    last_imported_count INT NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL,
+    INDEX idx_fps_due (auto_sync, next_sync_at),
+    CONSTRAINT fk_fps_user FOREIGN KEY (user_id) REFERENCES firm_users(id) ON DELETE CASCADE
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             };
 
@@ -354,6 +402,8 @@ public class DatabaseInitializationService : IHostedService
                 // (MySQL unique indexes allow unlimited NULLs, as uk_fm_created_by_calendar_event_id does).
                 "ALTER TABLE firm_meetings ADD COLUMN external_id VARCHAR(128) NULL",
                 "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_created_by_external_id (created_by, external_id)",
+                // WI #9134 — D17/P3 ledger flag for the best-effort Plaud transcript/note archive (ok|partial|failed).
+                "ALTER TABLE firm_plaud_imports ADD COLUMN plaud_archive_status VARCHAR(16) NULL",
                 // WI #8517 — speaker_label widened to 255 to hold resolved human names (was 20, sized for SPEAKER_NN only)
                 "ALTER TABLE firm_meeting_transcripts MODIFY COLUMN speaker_label VARCHAR(255) NULL",
                 "ALTER TABLE firm_meeting_participants MODIFY COLUMN speaker_label VARCHAR(255) NULL",
