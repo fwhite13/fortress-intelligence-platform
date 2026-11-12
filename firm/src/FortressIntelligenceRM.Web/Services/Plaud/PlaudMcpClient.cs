@@ -157,13 +157,26 @@ public class PlaudMcpClient
     public async Task<JsonNode?> GetFilePayloadAsync(Session session, string fileId, CancellationToken ct = default)
         => ExtractToolPayload(await CallToolAsync(session, "get_file", new JsonObject { ["file_id"] = fileId }, ct));
 
-    /// <summary>The presigned audio URL in a get_file payload, or null when the device has not synced audio yet.</summary>
+    /// <summary>
+    /// The presigned audio URL in a get_file payload, or null when the device has not synced audio yet.
+    /// Only https is accepted, with one dev-only exception (WI #9138-b): http whose host is exactly
+    /// localhost or 127.0.0.1 while Firm:PlaudMock:Enabled is true — the mock's audio link when the server
+    /// calls itself over loopback. Every other non-https URL is rejected. The URL is never logged.
+    /// </summary>
     public static string? ReadPresignedUrl(JsonNode? getFilePayload)
     {
         foreach (var name in new[] { "presigned_url", "presignedUrl", "audio_url", "audioUrl", "download_url" })
         {
             var v = FindString(getFilePayload, name);
-            if (v != null && v.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            if (v == null)
+                continue;
+            if (v.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                return v;
+            if (v.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                && Uri.TryCreate(v, UriKind.Absolute, out var u)
+                && u.Scheme == Uri.UriSchemeHttp
+                && (string.Equals(u.Host, "localhost", StringComparison.OrdinalIgnoreCase) || u.Host == "127.0.0.1")
+                && PlaudMockState.IsMockEnabled)
                 return v;
         }
         return null;
