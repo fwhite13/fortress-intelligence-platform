@@ -44,6 +44,7 @@ public static class MeetingStatusDisplay
         return meeting.LastFailureReason switch
         {
             "lobby_timeout" => "Bot was not admitted to the meeting lobby",
+            "join_denied" => "Teams denied the bot access to the meeting", // WI #9180
             "no_primary_joined" => "No recording bot was able to join this meeting",
             "primary_failed_window_passed" => "The recording bot failed and the meeting's join window has passed",
             "bot_launch_failed" => "The recording bot stopped before it could join the meeting",

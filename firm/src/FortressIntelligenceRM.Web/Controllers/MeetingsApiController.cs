@@ -177,11 +177,17 @@ public class MeetingsApiController : ControllerBase
             ? payload.Reason.Trim().ToLowerInvariant()
             : null;
         if (failureReason is { Length: > 64 }) failureReason = failureReason[..64];
-        var errorMessage = failureReason == "lobby_timeout"
-            ? "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot."
-            : payload.Error;
+        var errorMessage = failureReason switch
+        {
+            "lobby_timeout" => "Bot was not admitted to the meeting lobby. Check the Teams meeting lobby settings and ensure 'Lobby bypass' is set to allow the bot.",
+            // WI #9180: someone (or a meeting policy) refused the bot — not a lobby timeout
+            "join_denied" => "Teams denied the bot access to the meeting. Someone in the meeting declined the request, or the meeting's settings do not allow the bot. Ask the organizer to admit it or adjust who can join.",
+            _ => payload.Error
+        };
         if (failureReason == "lobby_timeout")
             _logger.LogWarning("FIRM: Meeting {Id} bot not admitted from lobby — marking Failed (lobby_timeout)", payload.MeetingId);
+        else if (failureReason == "join_denied")
+            _logger.LogWarning("FIRM: Meeting {Id} bot join request denied by Teams — marking Failed (join_denied)", payload.MeetingId);
 
         try
         {
