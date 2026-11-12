@@ -291,7 +291,8 @@ public class PlaudOAuthService : IPlaudOAuthService
                 return _cachedMetadata;
 
             var mcp = new Uri(_options.McpUrl);
-            var url = $"{mcp.Scheme}://{mcp.Authority}/.well-known/oauth-authorization-server";
+            // WI #9138: metadata lives beside the MCP path ("/mcp" -> host root for Plaud; "/dev/plaud-mock/mcp" -> the mock).
+            var url = $"{mcp.Scheme}://{mcp.Authority}{System.Text.RegularExpressions.Regex.Replace(mcp.AbsolutePath, "/?mcp/?$", "").TrimEnd('/')}/.well-known/oauth-authorization-server";
             var sw = Stopwatch.StartNew();
             using var res = await Http().GetAsync(url, ct);
             _logger.LogInformation("[PlaudOAuth] discovery status={Status} ms={Ms}", (int)res.StatusCode, sw.ElapsedMilliseconds);

@@ -101,6 +101,7 @@ builder.Services.AddScoped<FortressIntelligenceRM.Web.Services.Plaud.IPlaudOAuth
 builder.Services.AddScoped<FortressIntelligenceRM.Web.Services.Plaud.PlaudSyncService>(); // WI #9134 — Plaud import (Sync now)
 // WI #9135 — per-instance Plaud pacing: 30 MCP requests/min token bucket + 3×429-in-5-min instance pause (spec §5.4).
 builder.Services.AddSingleton<FortressIntelligenceRM.Web.Services.Plaud.PlaudRateLimiter>();
+builder.Services.AddSingleton<FortressIntelligenceRM.Web.Services.Plaud.PlaudMockState>(); // WI #9138 — DEV-ONLY Plaud mock; routes 404 unless Firm:PlaudMock:Enabled
 builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
 builder.Services.AddScoped<AdminAccessService>();
 builder.Services.AddScoped<SpeakerEmbeddingService>();
