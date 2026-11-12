@@ -58,6 +58,32 @@ export class LobbyTimeoutError extends Error {
   }
 }
 
+// WI #9180: Teams shows "Sorry, but you were denied access to the meeting." when someone in the
+// meeting (or a meeting policy) refuses the bot's join request. That is a denial, not a lobby
+// timeout, and is reported as status=failed / reason=join_denied. Lower-case phrases; extend here
+// if Teams rewords or localises the message.
+const JOIN_DENIED_PHRASES = [
+  'denied access to the meeting',
+  'you were denied access',
+  'denied you access',
+];
+
+/** True when the page text shows Teams' "denied access to the meeting" screen (case-insensitive). */
+export function isJoinDeniedText(text: string): boolean {
+  const lower = (text || '').toLowerCase();
+  return JOIN_DENIED_PHRASES.some(p => lower.includes(p));
+}
+
+export class JoinDeniedError extends Error {
+  constructor() {
+    super(
+      'Teams denied the bot access to the meeting. Someone in the meeting declined the request, ' +
+      "or the meeting's settings do not allow the bot. Ask the organizer to admit it or adjust who can join."
+    );
+    this.name = 'JoinDeniedError';
+  }
+}
+
 export interface RosterEntry {
   name: string;
   joinedAtMs: number;
@@ -1021,7 +1047,9 @@ export class TeamsHandler {
       'the host will let you in',
       'waiting in the lobby',
     ];
-    const inWaitingRoom = waitingRoomPhrases.some(t => bodyText.toLowerCase().includes(t.toLowerCase()));
+    // WI #9180: a denial screen is not a lobby — skip the wait and let the final check report it.
+    const inWaitingRoom = !isJoinDeniedText(bodyText)
+      && waitingRoomPhrases.some(t => bodyText.toLowerCase().includes(t.toLowerCase()));
     
     if (inWaitingRoom) {
       const lobbyTimeoutSeconds = getLobbyTimeoutSeconds();
@@ -1049,6 +1077,12 @@ export class TeamsHandler {
 
         // Check if still in waiting room
         const currentText = await page.evaluate(() => document.body?.innerText?.toLowerCase() || '');
+        // WI #9180: denied while waiting — report at once instead of after the full lobby timeout
+        if (isJoinDeniedText(currentText)) {
+          console.log(`[Teams] ❌ Join request denied while in the lobby (${Math.round((Date.now() - lobbyStartedAt) / 1000)}s elapsed) — throwing JoinDeniedError`);
+          await TeamsHandler.screenshot(page, '05-join-denied', s3, meetingId);
+          throw new JoinDeniedError();
+        }
         const stillWaiting = waitingRoomPhrases.some(t => currentText.includes(t.toLowerCase()));
         if (!stillWaiting) {
           console.log('[Teams] No longer in waiting room — uncertain state');
@@ -1076,7 +1110,7 @@ export class TeamsHandler {
     }
 
     // Final state check
-    const joinedCheck = await page.evaluate(() => {
+    const { pageText: finalPageText, ...joinedFlags } = await page.evaluate(() => {
       const text = document.body?.innerText || '';
       const hasLeave = text.includes('Leave');
       const hasHangup = document.querySelector('[data-tid="hangup-button"]') !== null;
@@ -1085,12 +1119,15 @@ export class TeamsHandler {
       // Check for error states
       const hasError = text.includes('error') || text.includes('Error') || text.includes('no longer available');
       const hasEOA = window.location.href.includes('/error/eoa');
-      return { 
+      return {
         hasLeave, hasHangup, hasMeetingUI, hasRoster, hasError, hasEOA,
-        url: window.location.href, 
-        textSnippet: text.substring(0, 300) 
+        host: window.location.hostname,
+        pageText: text,
       };
     });
+    // WI #9180: denial screen check (phrase list in JOIN_DENIED_PHRASES). Page text and the full
+    // URL are not logged (they can carry meeting links and participant names) — flags and host only.
+    const joinedCheck = { ...joinedFlags, hasDenied: isJoinDeniedText(finalPageText) };
 
     console.log('[Teams] Final join check:', JSON.stringify(joinedCheck));
 
@@ -1098,6 +1135,10 @@ export class TeamsHandler {
       console.log('[Teams] ❌ ERROR: Hit Classic Teams EOA page! Treating as lobby timeout.');
       await TeamsHandler.screenshot(page, '05-eoa-error', s3, meetingId);
       throw new LobbyTimeoutError();
+    } else if (joinedCheck.hasDenied && !joinedCheck.hasHangup && !joinedCheck.hasMeetingUI && !joinedCheck.hasRoster) {
+      console.log('[Teams] ❌ Teams denied the join request ("denied access to the meeting") — throwing JoinDeniedError');
+      await TeamsHandler.screenshot(page, '05-join-denied', s3, meetingId);
+      throw new JoinDeniedError();
     } else if (joinedCheck.hasLeave || joinedCheck.hasHangup || joinedCheck.hasMeetingUI || joinedCheck.hasRoster) {
       console.log('[Teams] ✅ Successfully joined meeting');
       TeamsHandler.screenshot(page, '05-in-meeting', s3, meetingId).catch(() => {}); // fire-and-forget (WI #8182)

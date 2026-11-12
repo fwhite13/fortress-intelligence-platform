@@ -15,7 +15,7 @@ import { analyzeRecordingQuality, logAudioQuality, AudioQuality } from '../utils
 import * as path from 'path';
 import * as os from 'os';
 import { Meeting, MeetingPlatform, MeetingStatus } from '../types.js';
-import { TeamsHandler, LobbyTimeoutError } from './teams.js';
+import { TeamsHandler, LobbyTimeoutError, JoinDeniedError } from './teams.js';
 import { ZoomHandler } from './zoom.js';
 import { GoogleMeetHandler } from './google-meet.js';
 import { signInToMicrosoft, warmTeamsSession, dumpAuthState, screenshot } from './teams-auth.js';
@@ -336,6 +336,13 @@ export class MeetingBot extends EventEmitter {
         if (err instanceof LobbyTimeoutError) {
           console.log('[Bot] Lobby timeout — sending failed callback with reason=lobby_timeout');
           await reportStatus(this.meeting.id, 'failed', { reason: 'lobby_timeout', error: err.message });
+          await this.cleanup();
+          return; // Do NOT start FFmpeg, do NOT send recording callback
+        }
+        if (err instanceof JoinDeniedError) {
+          // WI #9180: Teams refused the join request — not a lobby timeout
+          console.log('[Bot] Join denied — sending failed callback with reason=join_denied');
+          await reportStatus(this.meeting.id, 'failed', { reason: 'join_denied', error: err.message });
           await this.cleanup();
           return; // Do NOT start FFmpeg, do NOT send recording callback
         }
