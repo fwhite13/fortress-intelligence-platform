@@ -261,11 +261,22 @@ public class MeetingService
         return "teams";
     }
 
-    public async Task UpdateStatusAsync(long id, MeetingStatus status, string? errorMessage = null, string? lastFailureReason = null)
+    /// <summary>
+    /// Moves a meeting to <paramref name="status"/>, applying the error-field rules (WI #8576) and,
+    /// for a primary going Complete/Failed, the subscriber fan-out/promotion (WI #7035).
+    /// WI #9132: when <paramref name="onlyIfStatusIn"/> and/or <paramref name="onlyIfUpdatedBefore"/>
+    /// are given the transition is conditional: it is applied as a single guarded UPDATE
+    /// (WHERE id = @id AND status IN (...) AND updated_at &lt; @cutoff), so when several firm-web
+    /// instances race on the same row exactly one wins and the others see 0 affected rows.
+    /// Conditional mode supports only a Failed transition. Returns false when the meeting does not
+    /// exist or the condition no longer holds (nothing was written); true otherwise.
+    /// </summary>
+    public async Task<bool> UpdateStatusAsync(long id, MeetingStatus status, string? errorMessage = null, string? lastFailureReason = null,
+        IReadOnlyCollection<MeetingStatus>? onlyIfStatusIn = null, DateTime? onlyIfUpdatedBefore = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var meeting = await db.Meetings.FindAsync(id);
-        if (meeting == null) return;
+        if (meeting == null) return false;
         // WI #8576: error fields are only ever written together with a Failed transition, in the
         // same save — a row must never carry a failure reason while sitting at Scheduled/Pending.
         if ((errorMessage != null || lastFailureReason != null) && status != MeetingStatus.Failed)
@@ -274,6 +285,46 @@ public class MeetingService
                 id, status, lastFailureReason);
             status = MeetingStatus.Failed;
         }
+
+        if (onlyIfStatusIn != null || onlyIfUpdatedBefore != null)
+        {
+            if (status != MeetingStatus.Failed)
+                throw new ArgumentException("A conditional status transition only supports MeetingStatus.Failed", nameof(status));
+            if (onlyIfStatusIn is { Count: 0 })
+                throw new ArgumentException("onlyIfStatusIn must not be empty", nameof(onlyIfStatusIn));
+
+            // Same field rules as the unconditional Failed path below, written atomically.
+            var now = DateTime.UtcNow;
+            var query = db.Meetings.Where(m => m.Id == id);
+            if (onlyIfStatusIn != null)
+                query = query.Where(StatusIn(onlyIfStatusIn));
+            if (onlyIfUpdatedBefore is DateTime cutoff)
+                query = query.Where(m => m.UpdatedAt < cutoff);
+            var affected = await query.ExecuteUpdateAsync(s => s
+                .SetProperty(m => m.Status, MeetingStatus.Failed)
+                .SetProperty(m => m.UpdatedAt, now)
+                .SetProperty(m => m.ErrorMessage, m => errorMessage ?? m.ErrorMessage)
+                .SetProperty(m => m.LastFailureReason, m => lastFailureReason ?? m.LastFailureReason)
+                .SetProperty(m => m.EndedAt, m => m.EndedAt ?? now));
+            if (affected == 0)
+            {
+                _logger.LogInformation("FIRM: Meeting {Id} conditional transition to {NewStatus} skipped — condition no longer holds (already moved on or claimed by another instance)",
+                    id, status);
+                return false;
+            }
+            _logger.LogInformation("FIRM: Meeting {Id} status transition (conditional): {OldStatus} → {NewStatus}",
+                id, meeting.Status, status);
+            if (meeting.IsPrimaryRecorder)
+            {
+                try { await PromoteOrFailSubscribersAsync(meeting.Id); }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "FIRM: Subscriber promotion failed for primary {Id} (status={Status}) — primary status transition itself still succeeded", id, status);
+                }
+            }
+            return true;
+        }
+
         _logger.LogInformation("FIRM: Meeting {Id} status transition: {OldStatus} → {NewStatus}",
             id, meeting.Status, status);
         meeting.Status = status;
@@ -323,6 +374,26 @@ public class MeetingService
         {
             _logger.LogError(ex, "FIRM: Subscriber fan-out/promotion failed for primary {Id} (status={Status}) — primary status transition itself still succeeded", id, status);
         }
+        return true;
+    }
+
+    /// <summary>
+    /// WI #9132: m => m.Status == s1 || m.Status == s2 || ... built as an expression so it
+    /// translates to a plain OR of string comparisons (Status is stored via a string converter),
+    /// with no dependency on primitive-collection translation of a local list.
+    /// </summary>
+    private static System.Linq.Expressions.Expression<Func<FirmMeeting, bool>> StatusIn(IEnumerable<MeetingStatus> statuses)
+    {
+        var p = System.Linq.Expressions.Expression.Parameter(typeof(FirmMeeting), "m");
+        var statusProp = System.Linq.Expressions.Expression.Property(p, nameof(FirmMeeting.Status));
+        System.Linq.Expressions.Expression? body = null;
+        foreach (var s in statuses.Distinct())
+        {
+            var eq = System.Linq.Expressions.Expression.Equal(statusProp, System.Linq.Expressions.Expression.Constant(s));
+            body = body == null ? eq : System.Linq.Expressions.Expression.OrElse(body, eq);
+        }
+        return System.Linq.Expressions.Expression.Lambda<Func<FirmMeeting, bool>>(
+            body ?? System.Linq.Expressions.Expression.Constant(false), p);
     }
 
     /// <summary>WI #7035: subscriber ids currently pointing at this primary (any non-Failed status).</summary>
