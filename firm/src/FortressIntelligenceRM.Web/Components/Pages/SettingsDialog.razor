@@ -4,6 +4,8 @@
 @inject IZoomOAuthService ZoomOAuthService
 @inject FortressIntelligenceRM.Web.Services.Plaud.IPlaudOAuthService PlaudOAuthService
 @using FortressIntelligenceRM.Web.Services.Plaud
+@inject PlaudSyncService PlaudSyncService
+@inject Microsoft.Extensions.Options.IOptions<PlaudOptions> PlaudOptions
 @inject ISnackbar Snackbar
 
 <MudDialog>
@@ -98,6 +100,43 @@
                             </MudAlert>
                         }
                         <PlaudAccountGuidance />
+                        @* WI #9134 — manual import: Sync now, first-sync window, basic status. Acts immediately. *@
+                        @if (_plaudStatus is { Connected: true, NeedsReconnect: false, OtherEnvironment: false })
+                        {
+                            <MudPaper Elevation="0" Outlined="true" Class="pa-3 mt-3">
+                                <div class="d-flex flex-wrap align-center gap-3">
+                                    <MudSelect T="int" Label="On first sync, import the last" Dense="true" Style="max-width: 240px;"
+                                               Value="@_plaudBackfillDays" ValueChanged="OnPlaudBackfillDaysChanged"
+                                               Disabled="@(_plaudSync?.WindowLocked ?? false)">
+                                        @foreach (var d in FortressIntelligenceRM.Web.Models.FirmPlaudSync.BackfillDayChoices)
+                                        {
+                                            <MudSelectItem T="int" Value="@d">@(d == 1 ? "1 day" : $"{d} days")</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                    <MudButton Variant="Variant.Filled" Style="background: #d4af37; color: #0f1923;"
+                                               OnClick="PlaudSyncNow" Disabled="@_plaudSyncing" StartIcon="@Icons.Material.Filled.CloudDownload">
+                                        @(_plaudSyncing ? "Syncing…" : "Sync now")
+                                    </MudButton>
+                                </div>
+                                @if (_plaudSyncing)
+                                {
+                                    <MudProgressLinear Color="Color.Warning" Indeterminate Class="mt-2" />
+                                }
+                                @if (_plaudSync != null)
+                                {
+                                    <MudText Typo="Typo.body2" Class="mt-2" Style="color: var(--color-text-secondary);">
+                                        @(_plaudSync.LastCheckedAt.HasValue ? $"Last checked {_plaudSync.LastCheckedAt.Value.ToLocalTime():g}" : "Not synced yet")
+                                        · imported @_plaudSync.Imported · @_plaudSync.Waiting waiting · @_plaudSync.Skipped skipped (over @(_plaudMaxHours) h or no audio)
+                                    </MudText>
+                                    @if (!string.IsNullOrEmpty(_plaudSync.LastErrorCode))
+                                    {
+                                        <MudText Typo="Typo.caption" Style="color: var(--color-text-secondary);">
+                                            Last sync: @PlaudErrorText(_plaudSync.LastErrorCode)
+                                        </MudText>
+                                    }
+                                }
+                            </MudPaper>
+                        }
                         <div class="d-flex flex-wrap gap-2 mt-4">
                             @if (_plaudStatus is { Connected: true })
                             {
@@ -188,6 +227,75 @@
     private FirmZoomOAuth? _zoomConnection;
     private PlaudAccountStatus? _plaudStatus;
     private bool _plaudConfirmDisconnect;
+    private PlaudSyncStatus? _plaudSync;
+    private int _plaudBackfillDays = FortressIntelligenceRM.Web.Models.FirmPlaudSync.DefaultBackfillDays;
+    private bool _plaudSyncing;
+    private int _plaudMaxHours => Math.Max(1, PlaudOptions.Value.MaxDurationMinutes / 60);
+
+    private async Task LoadPlaudSyncStatusAsync()
+    {
+        try
+        {
+            _plaudSync = await PlaudSyncService.GetStatusAsync(UserId);
+            _plaudBackfillDays = _plaudSync.BackfillDays;
+        }
+        catch (Exception)
+        {
+            // Status display only (e.g. tables not created yet); never block the dialog.
+            _plaudSync = null;
+        }
+    }
+
+    private async Task OnPlaudBackfillDaysChanged(int days)
+    {
+        _plaudBackfillDays = days;
+        try
+        {
+            if (!await PlaudSyncService.SetBackfillDaysAsync(UserId, days))
+                Snackbar.Add("The first-sync window is already set.", Severity.Info);
+        }
+        catch (Exception)
+        {
+            Snackbar.Add("Could not save the first-sync window.", Severity.Error);
+        }
+        await LoadPlaudSyncStatusAsync();
+    }
+
+    private async Task PlaudSyncNow()
+    {
+        if (_plaudSyncing) return;
+        _plaudSyncing = true;
+        StateHasChanged();
+        try
+        {
+            var result = await PlaudSyncService.SyncNowAsync(UserId, FortressIntelligenceRM.Web.Models.PlaudSyncTrigger.Manual);
+            if (result.AlreadyRunning)
+                Snackbar.Add("A Plaud sync is already running. Try again in a few minutes.", Severity.Info);
+            else if (result.ErrorCode != null && result.Imported == 0 && result.Found == 0)
+                Snackbar.Add($"Plaud sync: {PlaudErrorText(result.ErrorCode)}", Severity.Warning);
+            else
+                Snackbar.Add($"Found {result.Found} new; importing {result.Imported}; {result.Waiting} waiting.", Severity.Success);
+        }
+        catch (Exception)
+        {
+            Snackbar.Add("Plaud sync failed. Try again later.", Severity.Error);
+        }
+        finally
+        {
+            _plaudSyncing = false;
+        }
+        await LoadPlaudSyncStatusAsync();
+    }
+
+    private static string PlaudErrorText(string code) => code switch
+    {
+        "rate_limited" => "Plaud is rate-limiting; try again later.",
+        "unauthorized" or "reconnect_needed" => "Plaud needs to be reconnected.",
+        "not_connected" => "No Plaud account connected.",
+        "other_environment" => "Connected on another FIRM environment.",
+        "plaud_unreachable" or "plaud_timeout" or "token_unavailable" => "Plaud didn't respond; try again later.",
+        _ => "Plaud returned an error; try again later.",
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -213,6 +321,8 @@
                     if (token == null)
                         _plaudStatus = await PlaudOAuthService.GetStatusAsync(UserId);
                 }
+                if (_plaudStatus is { Connected: true, NeedsReconnect: false, OtherEnvironment: false })
+                    await LoadPlaudSyncStatusAsync();
             }
             catch (Exception)
             {
