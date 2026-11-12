@@ -137,7 +137,19 @@
             </HeaderContent>
             <RowTemplate>
                 <MudTd DataLabel="Title">
-                    <MudText Style="color: var(--color-text-primary);">@(context.Title ?? $"Meeting — {context.CreatedAt:yyyy-MM-dd}")</MudText>
+                    @* WI #9136: source chip only for non-bot sources (plaud, mobile); bot and calendar rows unchanged. *@
+                    @if (SourceChip(context.Source) is { } chip)
+                    {
+                        <div class="d-flex align-center gap-2">
+                            <MudText Style="color: var(--color-text-primary);">@(context.Title ?? $"Meeting — {context.CreatedAt:yyyy-MM-dd}")</MudText>
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@chip.Icon"
+                                     Style="color: var(--color-text-secondary); border-color: var(--color-border);">@chip.Label</MudChip>
+                        </div>
+                    }
+                    else
+                    {
+                        <MudText Style="color: var(--color-text-primary);">@(context.Title ?? $"Meeting — {context.CreatedAt:yyyy-MM-dd}")</MudText>
+                    }
                 </MudTd>
                 <MudTd DataLabel="Date">
                     <MudText Style="color: var(--color-text-secondary);">@(context.StartDatetime != null
@@ -259,6 +271,16 @@
     /// normalized URL + start time as a row that DOES have activity) hidden — those are leftovers
     /// from earlier Graph ID drift, not meetings the user needs to see or manually clean up.</summary>
     private List<FirmMeeting> VisibleMeetings => _meetings.Where(m => !_pastPhantomMeetingIds.Contains(m.Id)).ToList();
+
+    /// <summary>WI #9136 (spec §6.2): list chip for recordings that did not come from the meeting bot.
+    /// Returns null for every other source (teams/vpbot/legacy), so those rows render exactly as before.</summary>
+    private static (string Icon, string Label)? SourceChip(string? source) =>
+        source?.Trim().ToLowerInvariant() switch
+        {
+            "plaud" => (Icons.Material.Filled.Mic, "Plaud"),
+            "mobile" => (Icons.Material.Filled.PhoneIphone, "FIRM Mobile"),
+            _ => null
+        };
 
 
     protected override async Task OnInitializedAsync()

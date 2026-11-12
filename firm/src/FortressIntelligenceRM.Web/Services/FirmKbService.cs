@@ -330,7 +330,7 @@ public class FirmKbService
                 : "00:00:00";
             sb.AppendLine($"[{ts}] {speaker}: {seg.Text}");
         }
-        return (sb.ToString(), "text/plain", "txt");
+        return (await PrependKbHeaderAsync(db, meetingId, sb.ToString()), "text/plain", "txt");
     }
 
     private async Task<(string content, string contentType, string extension)> BuildSummaryContentAsync(FirmDbContext db, long meetingId)
@@ -374,8 +374,82 @@ public class FirmKbService
                 followUps.ForEach(f => sb.AppendLine($"- {f}"));
             }
         }
-        return (sb.ToString(), "text/markdown", "md");
+        return (await PrependKbHeaderAsync(db, meetingId, sb.ToString()), "text/markdown", "md");
     }
+
+    /// <summary>
+    /// WI #9136 (ruling D15): prepends the KB document header to a non-empty body. Empty bodies stay
+    /// empty so PushDocumentAsync's "no content" skip is unchanged (never push a header-only doc).
+    /// </summary>
+    private static async Task<string> PrependKbHeaderAsync(FirmDbContext db, long meetingId, string body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return body;
+        var meeting = await db.Meetings
+            .AsNoTracking()
+            .Include(m => m.Participants)
+            .FirstOrDefaultAsync(m => m.Id == meetingId);
+        return meeting == null ? body : BuildKbHeader(meeting) + body;
+    }
+
+    /// <summary>
+    /// WI #9136 (ruling D15): the header every FIRM-to-FAIT KB document starts with — the manual push
+    /// (this service) and the FAIT auto push (MeetingsApiController.FireCompletionNotifications), all
+    /// sources alike:
+    /// <code>
+    /// # &lt;title&gt;
+    /// Recorded: yyyy-MM-dd HH:mm UTC
+    /// Source: &lt;label&gt;
+    /// Participants: a, b      (only when the meeting has participants)
+    /// </code>
+    /// followed by a blank line. Display only: source, platform and participants are read here solely to
+    /// label the document and never decide whether or where a document is pushed (spec §6.3 parity).
+    /// Pass a meeting loaded with <see cref="FirmMeeting.Participants"/> included.
+    /// </summary>
+    public static string BuildKbHeader(FirmMeeting meeting)
+    {
+        var title = string.IsNullOrWhiteSpace(meeting.Title)
+            ? $"Meeting — {meeting.CreatedAt:yyyy-MM-dd}"
+            : OneLine(meeting.Title);
+        var recordedAt = meeting.StartedAt ?? meeting.StartDatetime ?? meeting.CreatedAt;
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"# {title}");
+        sb.AppendLine($"Recorded: {recordedAt.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)} UTC");
+        sb.AppendLine($"Source: {KbSourceLabel(meeting.Source, meeting.Platform)}");
+        var names = meeting.Participants
+            .Select(p => OneLine(p.DisplayName))
+            .Where(n => n.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (names.Count > 0)
+            sb.AppendLine($"Participants: {string.Join(", ", names)}");
+        sb.AppendLine();
+        return sb.ToString();
+    }
+
+    /// <summary>Human label for the header's Source line. Non-bot sources by source; bot meetings by
+    /// platform, matching MeetingDetail.FormatPlatform.</summary>
+    private static string KbSourceLabel(string? source, string? platform)
+    {
+        switch (source?.Trim().ToLowerInvariant())
+        {
+            case "plaud": return "Plaud";
+            case "mobile": return "FIRM Mobile";
+        }
+        var p = platform?.Trim().ToLowerInvariant();
+        return p switch
+        {
+            null or "" or "teams" => "Teams",
+            "zoom" => "Zoom",
+            "meet" => "Google Meet",
+            "plaud" => "Plaud",
+            "mobile" => "FIRM Mobile",
+            _ => char.ToUpperInvariant(p[0]) + p[1..]
+        };
+    }
+
+    private static string OneLine(string? s) =>
+        string.Join(' ', (s ?? "").Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)).Trim();
 
     private async Task StartIngestionAsync(string kbId, string dsId)
     {

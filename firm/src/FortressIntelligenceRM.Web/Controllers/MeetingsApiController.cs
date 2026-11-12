@@ -512,6 +512,7 @@ public class MeetingsApiController : ControllerBase
                 await using var notifyDb = await _dbFactory.CreateDbContextAsync();
                 var completedMeeting = await notifyDb.Meetings
                     .Include(m => m.CreatedByUser)
+                    .Include(m => m.Participants) // WI #9136: KB header only, never a push condition
                     .FirstOrDefaultAsync(m => m.Id == meetingId);
                 if (completedMeeting?.CreatedByUser == null) return;
 
@@ -537,11 +538,20 @@ public class MeetingsApiController : ControllerBase
                 var summaryRecord = await notifyDb.Summaries.FirstOrDefaultAsync(s => s.MeetingId == artifactMeetingId);
                 var summaryText = summaryRecord?.SummaryText ?? "";
 
+                // WI #9136 (ruling D15): both KB texts start with the same title / recorded / source
+                // (/ participants) header as the manual push (FirmKbService.BuildKbHeader), for every
+                // source. The notified row supplies the header, so a subscriber's doc carries its own
+                // title. Empty texts stay empty so FAIT still skips them.
+                var kbHeader = FirmKbService.BuildKbHeader(completedMeeting);
+                var transcriptText = transcriptSb.ToString();
+                if (!string.IsNullOrWhiteSpace(transcriptText)) transcriptText = kbHeader + transcriptText;
+                if (!string.IsNullOrWhiteSpace(summaryText)) summaryText = kbHeader + summaryText;
+
                 var notifyBody = JsonSerializer.Serialize(new
                 {
                     entraOid = completedMeeting.CreatedByUser.EntraOid,
                     meetingId,
-                    transcriptText = transcriptSb.ToString(),
+                    transcriptText = transcriptText,
                     summaryText = summaryText
                 });
 
