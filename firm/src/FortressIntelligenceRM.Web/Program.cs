@@ -82,6 +82,7 @@ builder.Services.AddSingleton(branding);
 
 // Application services
 builder.Services.AddScoped<MeetingService>();
+builder.Services.AddScoped<MeetingIngestService>(); // WI #9131 — shared recording ingest (mobile upload, Plaud)
 builder.Services.AddScoped<VpBotService>();
 builder.Services.AddScoped<AutoJoinSchedulerService>();
 builder.Services.AddAWSService<IAmazonScheduler>();

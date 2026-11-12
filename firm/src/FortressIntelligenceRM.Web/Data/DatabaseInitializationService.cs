@@ -321,6 +321,12 @@ public class DatabaseInitializationService : IHostedService
                 // 2026-11-11 — recording dropout rate + rating reported by the vpbot (CPU-starved captures sound choppy)
                 "ALTER TABLE firm_meetings ADD COLUMN audio_dropouts_per_min DOUBLE NULL",
                 "ALTER TABLE firm_meetings ADD COLUMN audio_quality VARCHAR(16) NULL",
+                // WI #9131 — external source id for imported recordings (e.g. "plaud:<file_id>"). The unique
+                // index is the DB-level dedupe guard: a re-import of the same recording hits 1062 and
+                // MeetingIngestService returns the existing meeting. NULL for bot/calendar/mobile rows
+                // (MySQL unique indexes allow unlimited NULLs, as uk_fm_created_by_calendar_event_id does).
+                "ALTER TABLE firm_meetings ADD COLUMN external_id VARCHAR(128) NULL",
+                "ALTER TABLE firm_meetings ADD UNIQUE INDEX uk_fm_created_by_external_id (created_by, external_id)",
                 // WI #8517 — speaker_label widened to 255 to hold resolved human names (was 20, sized for SPEAKER_NN only)
                 "ALTER TABLE firm_meeting_transcripts MODIFY COLUMN speaker_label VARCHAR(255) NULL",
                 "ALTER TABLE firm_meeting_participants MODIFY COLUMN speaker_label VARCHAR(255) NULL",

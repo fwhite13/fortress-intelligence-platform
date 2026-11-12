@@ -80,6 +80,10 @@ public class FirmMeeting
     /// <summary>"ok" | "degraded" | "bad" (see DropoutsPerMin) as rated by the vpbot; null = not measured. Enrollment skips degraded/bad.</summary>
     [Column("audio_quality")]
     public string? AudioQuality { get; set; }
+    /// <summary>WI #9131 — id of the recording in its external source, e.g. "plaud:&lt;file_id&gt;". Unique per
+    /// (CreatedBy, ExternalId) via uk_fm_created_by_external_id; null for bot, calendar and mobile rows.</summary>
+    [MaxLength(128)]
+    public string? ExternalId { get; set; }
     /// <summary>WI #7299 — incremented each time the summary is regenerated from a user speaker correction.
     /// v1 is the original transcriber summary (archived in S3 as summary-v1.json on first correction).</summary>
     public int SummaryVersion { get; set; } = 1;
