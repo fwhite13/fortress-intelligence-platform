@@ -137,6 +137,10 @@ public sealed class PlaudRateLimiter
 ///      external_id = plaud:&lt;file_id&gt;) → imported or submit_failed. The temp file is deleted in finally.
 ///   4. archives Plaud's transcript and note next to the audio (D17), best-effort, after the row is imported.
 ///
+/// WI #9135 adds the auto-sync side: the due-user query and claim used by <see cref="PlaudSyncBackgroundService"/>,
+/// the schedule (interval clamp, jitter, backlog recheck, backoff, Retry-After) in <see cref="ComputeNextSyncAt"/>,
+/// "Import older…" (<see cref="ImportOlderAsync"/>), and the per-instance pacing in <see cref="PlaudRateLimiter"/>.
+///
 /// A file id that has a ledger row is never imported again unless the row is in
 /// <see cref="PlaudImportStatus.Retryable"/>. Logs carry user id, file id, meeting id, bytes, duration,
 /// status and codes only: never a title, a presigned URL, a token or a Plaud body.

@@ -24,17 +24,20 @@ public class PlaudOAuthController : Controller
 
     private readonly IPlaudOAuthService _plaud;
     private readonly MeetingService _meetingService;
+    private readonly PlaudSyncService _sync;
     private readonly OAuthStateProtector _stateProtector;
     private readonly ILogger<PlaudOAuthController> _logger;
 
     public PlaudOAuthController(
         IPlaudOAuthService plaud,
         MeetingService meetingService,
+        PlaudSyncService sync,
         IDataProtectionProvider dataProtectionProvider,
         ILogger<PlaudOAuthController> logger)
     {
         _plaud = plaud;
         _meetingService = meetingService;
+        _sync = sync;
         _stateProtector = new OAuthStateProtector(dataProtectionProvider, StatePurpose, StateLifetime);
         _logger = logger;
     }
@@ -89,6 +92,17 @@ public class PlaudOAuthController : Controller
         try
         {
             await _plaud.HandleCallbackAsync(parsed.UserId, code, parsed.Verifier, ct);
+            // WI #9135 — D13 auto-sync on by default on first connect; a reconnect resumes polling.
+            // Best effort: the account is linked either way.
+            try
+            {
+                await _sync.OnAccountConnectedAsync(parsed.UserId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[PlaudOAuth] sync settings after connect failed for user {UserId}: {ErrorType}",
+                    parsed.UserId, ex.GetType().Name);
+            }
             return Redirect("/meetings?plaudConnected=1");
         }
         catch (Exception ex)
@@ -109,6 +123,16 @@ public class PlaudOAuthController : Controller
             return Unauthorized();
 
         await _plaud.DisconnectAsync(firmUser.Id, ct);
+        // WI #9135 — state = disconnected (polling already stops: the due query joins the account row).
+        try
+        {
+            await _sync.OnAccountDisconnectedAsync(firmUser.Id, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("[PlaudOAuth] sync state after disconnect failed for user {UserId}: {ErrorType}",
+                firmUser.Id, ex.GetType().Name);
+        }
         return Redirect("/meetings?plaudDisconnected=1");
     }
 
